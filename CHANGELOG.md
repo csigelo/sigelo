@@ -106,7 +106,9 @@ history, which is not public. This public history starts at the import of 2026-1
   (`194fd86`); on Windows the systemd-unit and POSIX-mode checks SKIP with their reason and the Go
   cross-check gets its `.exe` (the keeper is a Linux systemd service; Windows is a verifier and agent
   platform); the ts pty tests use util-linux `script`/`setsid`, else a python pty helper, else SKIP,
-  and every suite's FAIL lines become annotations on every OS (`a71fb06`). macOS is still unproven.
+  and every suite's FAIL lines become annotations on every OS (`a71fb06`). Third run (`b70cc24`,
+  2026-10-02): **every job green on ubuntu, macOS and Windows, Node 22 and 24**, except the identity
+  gate, which waits for the repository secret.
 - **sigelo.io is live** (`site/deploy/`, deployed 2026-10-01 from the export): one Let's Encrypt
   certificate for `sigelo.io`, `www`, `sigelo.net` and its `www` (the `.net` names 301 to the apex),
   nginx with the security headers, no client IPs in logs, HSTS at five minutes for the first week;

@@ -84,6 +84,25 @@ causes below were read from them and from the code (macOS and Windows cannot be 
 | `portability` Windows Node 22, 24: spend | **706 passed, 7 failed** | the Go cross-check spawned `sigelo-verify` without `.exe`; the rest are systemd-unit content and POSIX-mode checks (backslash paths escaped in `ExecStart`, no 0600 on NTFS) | `.exe` on win32. Unit and mode checks SKIP on win32 with "the keeper runs as a systemd unit; Windows is a verifier/agent platform, not a keeper host" (or "Windows has no POSIX modes"); the policy, the gate, receipts, the licence and the fake wallet still run there. **Unproven until the next run** |
 | `portability` macOS Node 22, 24: ts `node dist/test.js` | **failed, no annotation** | not yet known from the run. Most likely (from the code): the M4 `--human` pty test only checked that a `script` exists, and macOS's BSD `script` has no `-c`, so its output files were never written and the suite crashed reading them (a crash prints no `FAIL`) | the pty checks use util-linux `script`/`setsid` where present, else a python3 helper (`os.forkpty`, `os.setsid`; exercised here with `SIGELO_TEST_PTY=python`), else SKIP with the reason; a missing output file is a FAIL, not a crash. The ts step now annotates `FAIL` lines, the first `Error` lines and the last lines on every OS. **Cause pending the next run's annotations** |
 
+## GitHub Actions, 2026-10-02 (run 36926235160, public commit b70cc24, the third run) — green
+
+Read from the public jobs API. Every job and every matrix cell passed except `identity-strings`, which
+fails by design until the repository secret `DEVICE_STRINGS` is set.
+
+| Job | Result |
+|---|---|
+| `identity-strings` | **failed as designed**: the `DEVICE_STRINGS` secret is not set (Owner action) |
+| `ts` (ubuntu, Node 22): ts, moadim, spend, mcp, schemas, `--impl` | **passed** |
+| `go` | **passed** |
+| `release-build` (build.sh twice, identical SHA256SUMS, pack-test 20 checks) | **passed** |
+| `portability`: ubuntu Node 22, 24, current | **passed** |
+| `portability`: macOS arm64 Node 22, 24 | **passed** — the first macOS run of every suite (the pty tests took the python helper or SKIP path; the annotations show which) |
+| `portability`: Windows Node 22, 24 | **passed** — spend's systemd-unit and POSIX-mode checks SKIP with their reason; the Go cross-check runs with `.exe` |
+| `wallet-rpc canary` | not run (schedule / manual only) |
+
+macOS and Windows are therefore proven for the verifiers, the agent adapter, the MCP server and the
+keeper's own test suite; the keeper as a service remains Linux (systemd) by design.
+
 ## Platforms
 
 `ts/` (library, `sigelo-offline`), `go/`, `adapters/moadim/` and `integrations/mcp/` are
@@ -129,7 +148,7 @@ by the sweep for files it did not own, landed after it).
 | 27 | `npx tsc` needs devDependencies | ts/, spend/, adapters/moadim | ok: `typescript` 5.9.3 is a pinned devDependency and `npm ci` installs it |
 | 28 | Locale / TZ / umask | all suites | ok: proven identical above |
 | 29 | Go: static, cross-built, vetted | go/ | ok: proven above. windows/arm64 builds but is not in `release/build.sh`'s five targets (adding it changes the release set: Owner's call) |
-| 30 | CI ran on ubuntu only | .github/workflows/conformance.yml | **fixed, ran twice, red**: `portability` job, ubuntu/macos/windows × Node 22/24 + current on ubuntu, `shell: bash`, every `uses:` pinned to a 40-hex SHA (v7 of checkout, setup-node, setup-go, upload-artifact since 2026-10-01: v4/v5 ran on the deprecated Node 20). The first run ("GitHub Actions" above) stopped every cell at the line-ending check (#1), before any suite. The second (run 36923176793) ran every suite: Linux spend 720/1, Windows spend 706/7, macOS ts failed; fixed as that section says, **unproven until the next run**. `shell: bash` is now set on the `ts` job too |
+| 30 | CI ran on ubuntu only | .github/workflows/conformance.yml | **fixed, green on the third run (36926235160)**: `portability` job, ubuntu/macos/windows × Node 22/24 + current on ubuntu, `shell: bash`, every `uses:` pinned to a 40-hex SHA (v7 of checkout, setup-node, setup-go, upload-artifact since 2026-10-01: v4/v5 ran on the deprecated Node 20). The first run ("GitHub Actions" above) stopped every cell at the line-ending check (#1), before any suite. The second (run 36923176793) ran every suite: Linux spend 720/1, Windows spend 706/7, macOS ts failed; fixed as that section says, **unproven until the next run**. `shell: bash` is now set on the `ts` job too |
 
 ## Not proven
 
