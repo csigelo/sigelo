@@ -88,6 +88,23 @@ history, which is not public. This public history starts at the import of 2026-1
   SimpleX on public relays, security reports to `/security`; no form by design), the SimpleX address as
   one constant feeding the page, `security.txt`, `index.json` and the JSON-LD `ContactPoint`, omitted
   everywhere until it is set so no placeholder ships; both mailboxes exist and are read. site 272 checks.
+- **Public since 2026-10-01.** First push: `https://github.com/csigelo/sigelo`, main `bca5b16` (the export of
+  `13e3b12`). `release/publish.sh` now has an **update mode** (`8a024b3`): against the pushed clone it
+  builds, gates and tests the export in a temp tree and commits one `sync:` commit on top of `main`;
+  fresh mode is refused on a clone with a remote. The first GitHub run failed in three places, all
+  fixed from a clone of the public repository (`1bcb01f`, `0fbd592`, `1cde665`, `268111d`): two
+  crosscheck result files had no final newline, which the portability line-ending check read as "no
+  line ending" on every OS (the check now fails only on CRLF or mixed endings, in index or checkout);
+  `pack-test.sh` honoured a runner's `XDG_CONFIG_HOME` and so looked for the identity outside its test
+  home; the actions were pinned to Node 20 versions (now v7, by sha). The `DEVICE_STRINGS` identity
+  gate fails loudly when the secret is missing in this repository and reports hits as file and count
+  only; it is its own job so it never hides the other results. The `spend` step of the `ts` job failed
+  on the runner and passes here under the same node, npm and shell; it now annotates its FAIL lines
+  so the next run names the check. macOS and Windows are still unproven at runtime.
+- **sigelo.io is live** (`site/deploy/`, deployed 2026-10-01 from the export): one Let's Encrypt
+  certificate for `sigelo.io`, `www`, `sigelo.net` and its `www` (the `.net` names 301 to the apex),
+  nginx with the security headers, no client IPs in logs, HSTS at five minutes for the first week;
+  the server is key-only SSH with root login off, fail2ban, a firewall and unattended upgrades.
 - **Deploy tooling (`site/deploy/`, `ca39b0e`).** `server-setup.sh` once as root (nginx + certbot, the
   `sigelo` user, TLS 1.2+, HSTS starting at 5 minutes, CSP `default-src 'self'`, `www` → apex, no client
   IPs in logs, 7-day rotation), `deploy.sh user@host` (builds, runs the 272 checks, uploads with rsync or

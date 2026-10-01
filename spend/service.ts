@@ -90,7 +90,7 @@ export const CLOCK_SKEW = 300;
  * The keeper's waits on wallet-rpc (MONERO.md §4.1 "Timeouts"). A build — `transfer` or
  * `sweep_all` with `do_not_relay` — fetches decoys for every input from the daemon, and over a
  * slow daemon link that takes minutes (soak finding, 2026-10-01 tick 5: 152 s for one input over
- * NAT64, where 10 s is usual). A build that runs out the wait is `wallet_slow`, a TRY LATER:
+ * a slow link, where 10 s is usual). A build that runs out the wait is `wallet_slow`, a TRY LATER:
  * it was asked not to relay, so whatever wallet-rpc finishes after we stopped listening is
  * discarded and can never be sent, and the same command later builds afresh. Every other call,
  * `relay_tx` included, waits `WALLET_TIMEOUT_MS`; a `relay_tx` that runs out it is UNCERTAIN

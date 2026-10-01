@@ -396,7 +396,7 @@ past its wait is `502 wallet_slow`, a TRY LATER: wallet-rpc may still finish it,
 asked not to relay, its metadata never reached the keeper and nothing was written, so nothing
 can ever send it, and the same command later builds afresh and pays once (soak finding
 2026-10-01 tick 5: a 60 s wait answered `wallet` while wallet-rpc spent 152 s fetching decoys
-for one input over a NAT64 link, and the next tick paid normally). A `relay_tx` past its wait
+for one input over a slow link, and the next tick paid normally). A `relay_tx` past its wait
 is (f): `relay_failed`, UNCERTAIN, never retried — the daemon may have the transaction — and a
 repeat of the command is answered from the log, never rebuilt.
 

@@ -52,6 +52,25 @@ linux/386, freebsd/amd64 — all build. `go vet ./...` is clean for GOOS=linux, 
 `release/build.sh` run twice on a fixed-commit clone, the second with an empty `GOCACHE`:
 identical `SHA256SUMS`, every output's mtime = the commit time.
 
+## GitHub Actions, 2026-10-01 (run 36910629162, public commit bca5b16, the first push)
+
+The job logs need a signed-in reader; the step outcomes and annotations are public
+(`api.github.com/repos/csigelo/sigelo/actions/runs/36910629162/jobs`). Each failure below was
+reproduced on the test host from a fresh `git clone` of the public repository, run with the
+workflow's own `run:` lines (bash `-eo pipefail`), Node 22.23 and npm 10.9 (a musl build;
+the host's own is 24), GNU coreutils/tar/grep/findutils, dash, `TZ=UTC`, a scratch `HOME`,
+`XDG_CONFIG_HOME` set as on a runner, and the suites that could reach a wallet inside a
+loopback-only network namespace.
+
+| Job / cell | Result | Cause | Now |
+|---|---|---|---|
+| `go` (ubuntu) | **passed** | — | — |
+| `portability`: ubuntu Node 22, 24, current; macOS arm64 Node 22, 24; Windows Node 22, 24 | **failed, all 7**, at the line-ending check: no suite ran | #1 (two results files with no final newline) | fixed; the check passes on the fixed tree. The suites in these cells are **unrun** on GitHub: on macOS and Windows nothing is proven yet |
+| `release-build` (ubuntu) | build twice: **passed**, identical `SHA256SUMS`; `pack-test.sh`: **failed** | the runner exports `XDG_CONFIG_HOME`; pack-test moved `HOME` but not it, so `sigelo-agent init` wrote the identity outside the temporary home and check 2a found none | fixed: pack-test unsets the XDG base directories. Reproduced (FAIL at 2a with `XDG_CONFIG_HOME` set) and passing after (20 checks), from a shallow detached clone as `actions/checkout` makes: no `fetch-depth` change needed |
+| `ts` (ubuntu): device strings, ts build, vectors, ts suite, `--impl`, moadim | **passed** (the device-strings step only because it skipped: the secret is not set) | — | a missing `DEVICE_STRINGS` now FAILS that step in this repository; it still skips for a fork or a fork's pull request |
+| `ts` (ubuntu): spend `npm ci --ignore-scripts && npm test` | **failed** after 36 s | **not reproduced**: 721 passed, 0 failed, 3 SKIP here under every variant above, Node 22 and 24. Not `--ignore-scripts` (`npm test` runs `tsc` itself) and not the live wallet or `monero-wallet-rpc` (they SKIP) | the step (and the matrix's) now writes each `FAIL` line and the last output lines as annotations, which are public: the next run names the failing check. **Open** until then |
+| `wallet-rpc canary` | not run (schedule / manual only) | — | unrun on GitHub |
+
 ## Matrix
 
 Status: **fixed** (changed in this sweep), **ok** (checked, nothing to do), **doc** (a limit,
@@ -60,7 +79,7 @@ by the sweep for files it did not own, landed after it).
 
 | # | Assumption | Where | Status |
 |---|---|---|---|
-| 1 | CRLF checkout on Windows (Git's `core.autocrlf=true`) would break the byte-for-byte vector diff, the docs-test snapshot hashes, CI's `openapi.yaml` regex (`\n`) and `#!/bin/sh` scripts | whole tree | **fixed**: `.gitattributes` `* text=auto eol=lf`; every tracked file is `i/lf w/lf`; CI checks `git ls-files --eol` on every runner |
+| 1 | CRLF checkout on Windows (Git's `core.autocrlf=true`) would break the byte-for-byte vector diff, the docs-test snapshot hashes, CI's `openapi.yaml` regex (`\n`) and `#!/bin/sh` scripts | whole tree | **fixed**: `.gitattributes` `* text=auto eol=lf`; every tracked file is `i/lf w/lf`; CI checks `git ls-files --eol` on every runner. The first GitHub run (2026-10-01) failed that check on all 7 cells: `crosscheck/results/divergences.json` and `oracle-splits.json` were `[]` with no final newline (`i/none w/none`), not CRLF. **Fixed**: the files end with LF, `crosscheck/run.sh` appends it to every results file it writes, and the check now fails on exactly what it protects against, `crlf`/`mixed` in the index or the checkout (the old form could not see a CRLF committed to the index) |
 | 2 | `node file.ts` needs type stripping: Node ≥ 22.18 or ≥ 23.6 | adapters/moadim/package.json (`test`, `bin: cli.ts`), integrations/mcp/server.mjs:10-11 | **fixed**: `engines` in every package.json (ts, spend, sim `>=22`; moadim, mcp `>=22.18`); moadim `pretest` stops an older node with a plain message naming the fix |
 | 3 | No JS entry for older runtimes, and Node refuses to strip types under `node_modules` (a packed install of the adapter could not run) | adapters/moadim | **fixed**: `npm run build` (`tsconfig.build.json`, `rewriteRelativeImportExtensions`) emits `dist/cli.js`; smoke-tested (`init`, `whoami`), older Node **unrun**. `files` also lacked `sigelo-agent-monero.ts`, which `cli.ts` imports: **fixed** (`npm pack --dry-run`). Since 20fd24e the packed `bin`/`main` are `dist/` (built by `prepack`) and no packed manifest has a `file:` dependency; `release/pack-test.sh` installs all four tarballs in an empty directory and runs every bin, the MCP server and the Go build (ALL PASS on the aarch64 musl host) |
 | 4 | `touch -d @N` is GNU/busybox-only; on macOS it failed silently (`\|\| true`), so mtimes were not pinned | release/build.sh:47,54 | **fixed**: `TZ=UTC0 touch -t` (POSIX) from git's own commit-time formatting. `sha256sum` vs `shasum -a 256` was already handled |
@@ -89,11 +108,13 @@ by the sweep for files it did not own, landed after it).
 | 27 | `npx tsc` needs devDependencies | ts/, spend/, adapters/moadim | ok: `typescript` 5.9.3 is a pinned devDependency and `npm ci` installs it |
 | 28 | Locale / TZ / umask | all suites | ok: proven identical above |
 | 29 | Go: static, cross-built, vetted | go/ | ok: proven above. windows/arm64 builds but is not in `release/build.sh`'s five targets (adding it changes the release set: Owner's call) |
-| 30 | CI ran on ubuntu only | .github/workflows/conformance.yml | **fixed, unrun**: `portability` job, ubuntu/macos/windows × Node 22/24 + current on ubuntu, `shell: bash`, pinned SHAs. YAML parsed with PyYAML; every `uses:` is pinned to a 40-hex SHA. #10–#13 have landed, but no push has run the macOS or Windows jobs yet: their result is **unrun**, not known green |
+| 30 | CI ran on ubuntu only | .github/workflows/conformance.yml | **fixed, ran once, red**: `portability` job, ubuntu/macos/windows × Node 22/24 + current on ubuntu, `shell: bash`, every `uses:` pinned to a 40-hex SHA (v7 of checkout, setup-node, setup-go, upload-artifact since 2026-10-01: v4/v5 ran on the deprecated Node 20). The first run (below, "GitHub Actions") stopped every cell at the line-ending check (#1), before any suite: macOS and Windows are still **unrun**, not known green |
 
 ## Not proven
 
-- **macOS, Windows, glibc Linux, x86_64, Node 22 and Node current**: not run here. The CI
+- **macOS, Windows, glibc Linux, x86_64, Node current**: not run here (Node 22 ran here since
+  2026-10-01, a musl build), and not yet on GitHub either: the first run stopped
+  every matrix cell before its suites (see "GitHub Actions"). The CI
   matrix covers macOS arm64, Windows x86_64, ubuntu x86_64 on Node 22/24 (+ current); nothing
   covers Linux arm64 glibc or Windows arm64 (runner labels `ubuntu-24.04-arm` /
   `windows-11-arm` could be added once their availability for this repository is confirmed).

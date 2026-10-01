@@ -56,6 +56,12 @@ case $c in "$root"/*) fail "the consumer directory $c is inside the repository" 
 mkdir -p "$c" "$work/home"
 export HOME=$work/home npm_config_cache=$work/npm-cache npm_config_update_notifier=false
 unset SIGELO_IDENTITY SIGELO_WALLET_URL SIGELO_WALLET_TOKEN SIGELO_WALLET_CONFIG 2>/dev/null || true
+# The XDG base directories win over HOME (sigelo-agent keeps its identity in
+# $XDG_CONFIG_HOME/moadim, sigelo-spend its registry in $XDG_CONFIG_HOME/sigelo-spend), so a
+# caller's would send them outside the temporary HOME: into the builder's own config, and on a
+# GitHub runner, which exports XDG_CONFIG_HOME, 2a failed "no identity at $HOME/.config"
+# (2026-10-01). XDG_RUNTIME_DIR goes too: nothing here may reach the caller's systemd --user.
+unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR 2>/dev/null || true
 cd "$c"
 printf '{ "name": "consumer", "private": true, "type": "module" }\n' > package.json
 retry npm install --no-audit --no-fund --silent \

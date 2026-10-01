@@ -83,4 +83,12 @@ case "${1:-}" in
   *) echo "usage: $0 [--quick|--self-test]" >&2; exit 2 ;;
 esac
 echo "sigelo HEAD $(git -C "$ROOT" rev-parse --short HEAD); running crosscheck.py"
-exec "$W/venv/bin/python" "$HERE/crosscheck.py"
+status=0
+"$W/venv/bin/python" "$HERE/crosscheck.py" || status=$?
+# json.dump ends a file without a newline, so an empty list was `[]` with no line ending at all,
+# and once copied into results/ git saw it as `i/none` (CI's checkout check failed on every
+# runner, 2026-10-01). Every results file ends with one LF.
+for f in "$HERE"/results/latest/*.json; do
+  if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then printf '\n' >> "$f"; fi
+done
+exit "$status"
