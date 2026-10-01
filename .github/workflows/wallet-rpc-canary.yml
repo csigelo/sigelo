@@ -1,0 +1,127 @@
+# The weekly wallet-rpc canary (ROADMAP §5.5 "wallet-rpc canary", §6 step 4).
+#
+# spend/canary.ts pins the monero-wallet-rpc interface the keeper depends on: method names, the
+# parameters it sends, the result fields it reads, and an RPC version range (RPC_RANGE: 1.30, the
+# v0.18.5.0 it ran against, to 1.33, the FCMP++ stressnet beta; a version outside it fails). Inside
+# spend's `npm test` its live half SKIPs, because no CI job has a wallet. Here a real
+# monero-wallet-rpc runs, twice: the PINNED release (sha256 below; it must pass) and the LATEST
+# release (hash taken from getmonero.org's hashes.txt after its signature checks against
+# binaryFate's key; a failure here is the signal: FCMP++/Carrot or any other upstream change
+# reached the RPC the keeper parses). A scheduled failure opens an issue.
+#
+# The wallet is a fresh stagenet wallet on a public stagenet daemon (the first of STAGENET_DAEMONS
+# that answers get_info; the same nodes as the soak's SIGELO_DAEMONS). A daemon is needed:
+# get_transfers with pool:true, as /history asks, answers {"error":{"code":0}} under --offline
+# (seen on v0.18.5.0). Nothing is funded and nothing is sent. The mutating methods are pinned
+# against the mock in `npm test`, not here: they need funds. With the binary on PATH, ts/ and
+# spend/ also run their monero-wallet-rpc --offline interop sections, which SKIP in the
+# conformance workflow.
+#
+# UNRUN on GitHub: written on a host that cannot run Actions. The steps' shell was run there
+# (monero-wallet-rpc v0.18.5.0 from the distribution, not the download; node standing in for
+# curl): canary ALL PASS with the live half running against node.monerodevs.org:38089, and the
+# hashes.txt signature check on v0.18.5.1, and ts/'s interop section ran (12 lines, no SKIP).
+# spend/'s suite was not run there: its live section would reach that host's own soak wallet on
+# 38083. Not done: replaying ts/test/monero-vectors.json's
+# wallet_rpc_oracle against the latest release.
+name: wallet-rpc canary
+on:
+  schedule:
+    - cron: '17 5 * * 1' # Mondays 05:17 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  canary:
+    strategy:
+      fail-fast: false
+      matrix:
+        release: [pinned, latest]
+    runs-on: ubuntu-latest
+    env:
+      # v0.18.5.0, linux-x64: the same hash in the GitHub release notes and in monero-site's
+      # downloads/hashes.txt at 5e8d74229b (2026-05-11)
+      PINNED_VERSION: v0.18.5.0
+      PINNED_SHA256: 166ad93036f95f5abeba24c8670061be022c9238dba2e6a7587611a1d759e294
+      # binaryFate, who signs hashes.txt (monero utils/gpg_keys/binaryfate.asc)
+      SIGNER_FPR: 81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92
+      RPC_PORT: '38093'
+      STAGENET_DAEMONS: node.monerodevs.org:38089 node2.monerodevs.org:38089 stagenet.xmr-tw.org:38081 xmr-lux.boldsuck.org:38081
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (tag v4)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 (tag v4)
+        with: { node-version: '22' }
+      - name: monero-wallet-rpc (${{ matrix.release }})
+        env: { GH_TOKEN: '${{ github.token }}', RELEASE: '${{ matrix.release }}' }
+        run: |
+          set -eu
+          if [ "$RELEASE" = pinned ]; then
+            v=$PINNED_VERSION; sum=$PINNED_SHA256
+          else
+            v=$(gh release view --repo monero-project/monero --json tagName -q .tagName)
+            export GNUPGHOME="$RUNNER_TEMP/gnupg"; mkdir -p -m 700 "$GNUPGHOME"
+            curl -fsSL "https://raw.githubusercontent.com/monero-project/monero/$v/utils/gpg_keys/binaryfate.asc" | gpg -q --import
+            curl -fsSL https://www.getmonero.org/downloads/hashes.txt -o "$RUNNER_TEMP/hashes.txt"
+            gpg --status-fd 1 --verify "$RUNNER_TEMP/hashes.txt" 2>/dev/null | grep -q "^\[GNUPG:\] VALIDSIG $SIGNER_FPR " \
+              || { echo "hashes.txt is not signed by $SIGNER_FPR"; exit 1; }
+            gpg -q --decrypt "$RUNNER_TEMP/hashes.txt" 2>/dev/null > "$RUNNER_TEMP/hashes.verified"
+            sum=$(awk -v f="monero-linux-x64-$v.tar.bz2" '$2 == f { print $1 }' "$RUNNER_TEMP/hashes.verified")
+            [ -n "$sum" ] || { echo "no signed hash for monero-linux-x64-$v.tar.bz2"; exit 1; }
+          fi
+          f="monero-linux-x64-$v.tar.bz2"
+          curl -fsSL "https://downloads.getmonero.org/cli/$f" -o "$RUNNER_TEMP/$f"
+          echo "$sum  $RUNNER_TEMP/$f" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/monero"
+          tar -xjf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/monero" --strip-components=1
+          echo "$RUNNER_TEMP/monero" >> "$GITHUB_PATH"
+          echo "MONERO_VERSION=$v" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/monero/monero-wallet-rpc" --version
+      - run: npm ci --ignore-scripts && npx tsc
+        working-directory: ts
+      - run: npm ci --ignore-scripts && npx tsc
+        working-directory: spend
+      # a fresh stagenet wallet on a port no test uses (spend's live section looks at 38083, ts's
+      # interop at 38084, spend's at 38085)
+      - name: wallet-rpc up, fresh wallet
+        run: |
+          set -eu
+          node=''
+          for n in $STAGENET_DAEMONS; do
+            if curl -fsS --max-time 10 "http://$n/get_info" | grep -q '"nettype": *"stagenet"'; then node=$n; break; fi
+          done
+          [ -n "$node" ] || { echo "no stagenet daemon answered: $STAGENET_DAEMONS"; exit 1; }
+          echo "stagenet daemon: $node"
+          d="$RUNNER_TEMP/wallets"; mkdir -p "$d"
+          monero-wallet-rpc --stagenet --daemon-address "$node" --untrusted-daemon --wallet-dir "$d" --rpc-bind-ip 127.0.0.1 --rpc-bind-port "$RPC_PORT" \
+            --disable-rpc-login --log-file "$d/rpc.log" > /dev/null 2>&1 &
+          rpc() { curl -fsS --max-time 30 "http://127.0.0.1:$RPC_PORT/json_rpc" -H 'Content-Type: application/json' \
+            -d "{\"jsonrpc\":\"2.0\",\"id\":\"0\",\"method\":\"$1\",\"params\":$2}"; }
+          for i in $(seq 60); do rpc get_version '{}' > /dev/null 2>&1 && break; sleep 1; done
+          rpc get_version '{}'
+          rpc create_wallet '{"filename":"canary","password":"","language":"English"}' | tee /dev/stderr | grep -q '"result"'
+      - name: canary (live half against the real wallet-rpc)
+        working-directory: spend
+        run: |
+          SIGELO_CANARY_RPC="http://127.0.0.1:$RPC_PORT/json_rpc" node dist/canary.js 2>&1 | tee "$RUNNER_TEMP/canary-out"
+          grep -q '^ALL PASS$' "$RUNNER_TEMP/canary-out"
+          if grep -q '^SKIP canary live' "$RUNNER_TEMP/canary-out"; then echo 'the live half did not run'; exit 1; fi
+      # the offline interop sections, which SKIP without the binary: they must run here
+      - name: ts/ monero-wallet-rpc interop
+        working-directory: ts
+        run: |
+          node dist/test.js | tee "$RUNNER_TEMP/ts-out"
+          grep -q '^ALL PASS$' "$RUNNER_TEMP/ts-out"
+          if grep -q '^SKIP monero-wallet-rpc interop' "$RUNNER_TEMP/ts-out"; then echo 'interop skipped'; exit 1; fi
+      - name: spend/ monero-wallet-rpc interop
+        working-directory: spend
+        run: |
+          node dist/test.js | tee "$RUNNER_TEMP/spend-out"
+          grep -q '^ALL PASS$' "$RUNNER_TEMP/spend-out"
+          if grep -q '^SKIP monero-wallet-rpc --offline interop' "$RUNNER_TEMP/spend-out"; then echo 'interop skipped'; exit 1; fi
+      - name: open an issue
+        if: failure() && github.event_name == 'schedule'
+        env: { GH_TOKEN: '${{ github.token }}', GH_REPO: '${{ github.repository }}', RELEASE: '${{ matrix.release }}' }
+        run: |
+          gh issue create --title "wallet-rpc canary failed: $RELEASE release ${MONERO_VERSION:-unknown}" \
+            --body "The weekly wallet-rpc canary failed for the $RELEASE monero-wallet-rpc (${MONERO_VERSION:-download failed}): ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. A failure of the latest release while the pinned one passes means upstream changed an RPC the keeper parses (spend/canary.ts): re-run the oracle and the whole spend/ suite against it, then move the ceiling (RPC_RANGE in spend/canary.ts)."

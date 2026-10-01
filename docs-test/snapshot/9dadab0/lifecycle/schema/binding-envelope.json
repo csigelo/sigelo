@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/binding-envelope.json",
+  "title": "sigelo/0 binding envelope",
+  "description": "A binding as it travels (SPEC §3, §6): body and sig_id are required, sig_addr optional (absent = unproven, §6.1). sig_addr's format is the method's business: for monero a SigV2 string, for ed25519-test a multibase signature; the verifiers accept any JCS value there for a method they have no routine for (parity vector binding_unknown_method_sig_addr_number is reported unsupported), so it is typed only as a JCS value. No other key: SPEC §3.1, an envelope is exactly its defined members (vector binding_envelope_extra_key).",
+  "type": "object",
+  "required": ["body", "sig_id"],
+  "properties": {
+    "body": { "$ref": "binding.json" },
+    "sig_id": { "$ref": "common.json#/$defs/signature" },
+    "sig_addr": { "$ref": "common.json#/$defs/jcsValue" }
+  },
+  "propertyNames": { "$ref": "common.json#/$defs/key" },
+  "additionalProperties": false
+}

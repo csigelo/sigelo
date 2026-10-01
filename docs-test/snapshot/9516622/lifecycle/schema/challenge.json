@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/challenge.json",
+  "title": "sigelo/0 challenge",
+  "description": "The §5.2 proof-of-control challenge: exactly these five fields; an agent library MUST refuse any other key. The world chooses nonce and ctx (opaque to the agent). Never in a bundle; signed with a detached sig like any body.",
+  "type": "object",
+  "required": ["v", "typ", "did", "ctx", "nonce"],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "$ref": "common.json#/$defs/version" },
+    "typ": { "const": "challenge" },
+    "did": { "$ref": "common.json#/$defs/did" },
+    "ctx": { "$ref": "common.json#/$defs/string" },
+    "nonce": { "$ref": "common.json#/$defs/string" }
+  }
+}

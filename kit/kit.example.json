@@ -1,0 +1,38 @@
+{
+  "v": "sigelo-kit/1",
+  "installation": "acme-agents-prod",
+  "net": "mainnet",
+  "people": {
+    "owner": "the Owner (holds the age identity, writes the 25 words)",
+    "witness": "a second person who signs the record and never looks at the screen while the words are shown",
+    "facilitator": "none"
+  },
+  "supervisor": "systemd-user",
+  "keeper": {
+    "index": 0,
+    "host": "keeper-1",
+    "policy_dir": "/home/agents/.local/share/sigelo/keeper",
+    "env_file": "/home/agents/.local/share/sigelo/env.sh",
+    "unit": "sigelo-keeper.service",
+    "url": "http://127.0.0.1:38200",
+    "wallet_rpc_unit": "monero-wallet-rpc.service",
+    "wallet_rpc_port": 18083,
+    "agent_units": "agents.timer"
+  },
+  "clean_host": {
+    "name": "the offline/clean laptop, never a keeper host",
+    "daemon": "node.example.org:18089",
+    "rpc_port": 18084,
+    "tmpfs": "/tmp/sigelo-clean"
+  },
+  "backup": {
+    "paper_location": "bank safe deposit box (vault)",
+    "medium_a_location": "office safe",
+    "medium_b_location": "second site, another city",
+    "age_identity_location": "Owner's home safe, never with medium A or B"
+  },
+  "evidence_dir": "/media/evidence-stick",
+  "drills_dir": "/home/agents/sigelo-drills",
+  "worlds": ["each world that attested your agents (name and how you reach it)"],
+  "ceremony_out": "/media/root-stick/sigelo-root"
+}

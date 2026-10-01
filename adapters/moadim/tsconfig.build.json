@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": true,
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": ["cli.ts", "sigelo-agent.ts", "sigelo-agent-adopt.ts", "sigelo-agent-monero.ts"]
+}

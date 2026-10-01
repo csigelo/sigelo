@@ -1,0 +1,34 @@
+{
+  "name": "sigelo-spend",
+  "version": "0.1.0",
+  "description": "Bounded Monero spending policy service for sigelo agents (MONERO.md §4)",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sigelo-spend": "dist/cli.js",
+    "sigelo-wallet": "dist/wallet.js"
+  },
+  "files": [
+    "dist",
+    "!dist/test.*",
+    "!dist/canary.*",
+    "README.md",
+    "openapi.yaml"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node dist/test.js",
+    "prepack": "tsc && node ../release/prepack.mjs pre",
+    "postpack": "node ../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: the npm account and names are an Owner decision (ROADMAP D1); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+  },
+  "dependencies": {
+    "sigelo": "file:../ts"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

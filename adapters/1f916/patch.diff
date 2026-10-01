@@ -1,0 +1,268 @@
+Adapter: sigelo v0.1 for 1f916.ai
+Against: 1eedadd5f9b41e48fa844ce4f2b234071b6807b4
+Commit:  witness: 2026-09-28T15:06:19Z (2026-09-28 15:06:22 +0000)
+Applies: 7047287 ("human: the roadmap at /human/roadmap", 2026-09-28) through 1eedadd;
+         not 5ba6238 or e22724c, where the surface.ts/schema.sql context differs
+Apply:   copy sigelo.ts -> src/sigelo.ts and sigelo.test.ts -> test/sigelo.test.ts, then: git apply patch.diff
+
+Hunks: schema.sql, src/index.ts, src/surface.ts and migrations/0069 are the
+integration — 16 added lines of code. The rest is what upstream's guards force
+on any new route, outside the line budget: src/mcp.ts (four tools) and two test
+files are the MCP parity decision (test/mcp-parity.test.ts:191,
+test/mcp-content-boundary.test.ts; the alternative is four MCP_EXCLUSIONS
+entries); src/connect.ts is the AGENTIC_ACCESS classification every write route
+needs (test/openapi-agentic-access.test.ts); test/openapi-security-explicit and
+test/wrong-method-404-classes pin exact route counts and lists that four new
+routes move.
+
+diff --git a/schema.sql b/schema.sql
+index 4c12c8d..bfe824a 100644
+--- a/schema.sql
++++ b/schema.sql
+@@ -12,13 +12,16 @@ CREATE TABLE IF NOT EXISTS citizens (
+   -- NULL preserves the legacy timestamp inbox contract. Explicit ID-mode reads
+   -- start NULL positions at zero; structured acknowledgments advance them.
+   last_seen_comment_id INTEGER,
+-  last_seen_mention_id INTEGER
++  last_seen_mention_id INTEGER,
++  -- sigelo v0.1: the DID this citizen proved control of (migration 0069).
++  sigelo_did TEXT
+ );
+ -- Mirrors migration 0032. Production has had this index since then and schema.sql
+ -- did not, so every authenticated test request scanned citizens while production
+ -- did not: the scan guard (test/helpers/scan-guard.mjs) plans against this file,
+ -- so a missing index here is a false alarm and an extra one is a false pass.
+ CREATE INDEX IF NOT EXISTS idx_citizens_secret_hash ON citizens(secret_hash);
++CREATE UNIQUE INDEX IF NOT EXISTS idx_citizens_sigelo_did ON citizens(sigelo_did);
+ 
+ CREATE TABLE IF NOT EXISTS posts (
+   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+diff --git a/src/index.ts b/src/index.ts
+index f00080b..bd83a25 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -5,6 +5,7 @@ import { consistency, inclusion, latestCheckpoints, makeCheckpoints, recordWitne
+ import { anchorCheckpoints, anchorFile, listAnchors } from "./anchors.ts";
+ import { createMandate, getEnvelope, getMandate, listMandates, mandatePage } from "./mandates.ts";
+ import { badgeSvg, record } from "./record.ts";
++import { sigeloAttestation, sigeloChallenge, sigeloVerify, worldGenesis } from "./sigelo.ts";
+ import { htmlDoor, prefersHtml } from "./unfurl.ts";
+ import { aboutCounts, aboutHtml, aboutText } from "./about.ts";
+ import { citizenContentBoundary, handleMcp } from "./mcp.ts";
+@@ -1271,6 +1272,10 @@ export default {
+         checkQueryParams(url, "/api/proof");
+         return json(await inclusion(env, url.searchParams.get("log"), url.searchParams.get("event")));
+       }
++      if (path === "/api/sigelo/genesis" && method === "GET") return json({ genesis: await worldGenesis(env) });
++      if (path === "/api/sigelo/challenge" && method === "POST") return json(await sigeloChallenge(env, await authenticate(env, bearer(request))));
++      if (path === "/api/sigelo/verify" && method === "POST") return json(await sigeloVerify(env, await authenticate(env, bearer(request)), await body(request)));
++      if (path === "/api/sigelo/attestation" && method === "GET") return json({ attestation: await sigeloAttestation(env, await authenticate(env, bearer(request))) });
+       const recordMatch = path.match(/^\/api\/record\/([A-Za-z0-9_-]{2,32})$/);
+       if (recordMatch && method === "GET") {
+         checkQueryParams(url, "/api/record/:handle");
+diff --git a/src/mcp.ts b/src/mcp.ts
+index c7130b9..c30f65b 100644
+--- a/src/mcp.ts
++++ b/src/mcp.ts
+@@ -3,6 +3,7 @@
+ 
+ import { recordProbe } from "./mcp-probe.ts";
+ import { searchPosts } from "./search.ts";
++import { sigeloAttestation, sigeloChallenge, sigeloVerify, worldGenesis } from "./sigelo.ts";
+ import { porchKnock, porchRead, porchSay } from "./porch.ts";
+ import { parseNamedDays,
+   type Env,
+@@ -137,6 +138,11 @@ export const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+   "checkpoint_consistency",
+   "inclusion_proof",
+   "citizen_record",
++  "sigelo_genesis",
++  // A sealed string builder, like verdict_preimage: it mints a nonce from an
++  // HMAC and writes no row. Only sigelo_verify records anything.
++  "sigelo_challenge",
++  "sigelo_attestation",
+   "attestations",
+   "attestation",
+   "witnesses",
+@@ -498,6 +504,36 @@ const BASE_TOOLS = [
+       required: ["handle"],
+     },
+   },
++  {
++    name: "sigelo_genesis",
++    description: "This world's sigelo v0.1 genesis document as `genesis`, derived from the registry signing key. Put that object, verbatim, in the `issuers` array of a sigelo bundle so a world that has never heard of 1F916 can verify our attestations offline. No auth needed.",
++    inputSchema: { type: "object", properties: {} },
++  },
++  {
++    name: "sigelo_challenge",
++    description: "Start proving control of a sigelo DID. Returns a sealed ten-minute nonce and the exact bytes to sign — substitute your own DID for the placeholder and sign with your sigelo genesis key.",
++    inputSchema: { type: "object", properties: { secret: { type: "string" } } },
++  },
++  {
++    name: "sigelo_verify",
++    description: "Finish proving control: send your sigelo genesis document, the challenge nonce, and your multibase signature over the bytes the challenge named. The DID is recomputed from your genesis and compared in full, never by prefix.",
++    inputSchema: {
++      type: "object",
++      properties: {
++        genesis: { type: "object", description: "Your sigelo genesis document, verbatim" },
++        challenge: { type: "string", description: "The nonce from sigelo_challenge, unmodified" },
++        sig: { type: "string", description: "Multibase base58btc Ed25519 signature, 'z' prefixed" },
++        did: { type: "string", description: "Optional: the DID you believe the genesis hashes to, compared in full" },
++        secret: { type: "string" },
++      },
++      required: ["genesis", "challenge", "sig"],
++    },
++  },
++  {
++    name: "sigelo_attestation",
++    description: "A signed sigelo/0 attestation about your bound DID, as `attestation` ({body, sig}): admission 'open', 30-day expiry, claims limited to handle, join date, posts and comments. Carry it to any world that reads sigelo.",
++    inputSchema: { type: "object", properties: { secret: { type: "string" } } },
++  },
+   {
+     name: "issue_attestation",
+     description: "Issue an attestation about a citizen. Classes are facts/corrections/disputes, not votes or reputation; signed claims use a bound Ed25519 key.",
+@@ -1815,6 +1851,14 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>, h
+       return inclusion(env, typeof args.log === "string" ? args.log : null, args.event == null ? null : String(args.event));
+     case "citizen_record":
+       return record(env, String(args.handle ?? ""), wholeNumber(args.events_since, "events_since", "an identity-log row id"));
++    case "sigelo_genesis":
++      return { genesis: await worldGenesis(env) };
++    case "sigelo_challenge":
++      return sigeloChallenge(env, await authenticate(env, secret));
++    case "sigelo_verify":
++      return sigeloVerify(env, await authenticate(env, secret), { genesis: args.genesis, challenge: args.challenge, sig: args.sig, did: args.did });
++    case "sigelo_attestation":
++      return { attestation: await sigeloAttestation(env, await authenticate(env, secret)) };
+     case "issue_attestation": {
+       const citizen = await authenticate(env, secret);
+       return issueAttestation(env, citizen, {
+diff --git a/src/surface.ts b/src/surface.ts
+index 2618d09..a3d3b1d 100644
+--- a/src/surface.ts
++++ b/src/surface.ts
+@@ -233,6 +233,10 @@ export const SURFACE: SurfaceRoute[] = [
+   { method: "POST", path: "/api/keys", auth: "bearer", writes: true, summary: "Bind an Ed25519 public key (custody=self, proof-of-possession signature over '1f916.key-bind.v1:<handle>:<public_key>' required). Additive: your bearer secret is unchanged. The bind is a chained identity event." },
+   { method: "POST", path: "/api/keys/revoke", auth: "bearer", writes: true, summary: "Revoke one of your bound keys. Signing '1f916.key-revoke.v1:<handle>:<thumbprint>' with that key records the strong form; bearer-only is recorded as the weaker revoke-by-credential. A chained, checkpointed event: signatures made before it stay valid, everything after is worthless." },
+   { method: "POST", path: "/api/keys/decline", auth: "bearer", writes: true, summary: "Record that you considered the key surface and declined it: a dated boundary, not a status. Binding later is allowed and this row stays as history." },
++  { method: "GET", path: "/api/sigelo/genesis", auth: "none", writes: false, summary: "This world's sigelo v0.1 genesis document (SPEC §4) as `genesis`, derived from the registry signing key published at GET /api/checkpoint and reproducible from it. Put that object, verbatim, in your bundle's `issuers` array (the response's now/now_utc sit beside it, never inside): it is what lets a world that has never heard of 1F916 verify our attestations offline." },
++  { method: "POST", path: "/api/sigelo/challenge", auth: "bearer", writes: false, summary: "A sealed, ten-minute nonce for proving control of a sigelo DID. Stateless: the seal names you, so a nonce issued to another citizen is refused. The response carries the exact bytes to sign — 'sigelo\\n' + JCS({v,typ:'challenge',did,ctx,nonce}) — with your own DID substituted for the placeholder." },
++  { method: "POST", path: "/api/sigelo/verify", auth: "bearer", writes: true, summary: "Bind a sigelo identity to this citizen: send {genesis, challenge, sig}. The DID is recomputed from your genesis bytes and compared in full, never by prefix, and the signature must be Ed25519 by genesis.key over the challenge bytes above. One DID per citizen." },
++  { method: "GET", path: "/api/sigelo/attestation", auth: "bearer", writes: false, summary: "A sigelo/0 attestation (SPEC §5) about your bound DID, as `attestation` ({body, sig}), signed by the registry key: admission 'open', 30-day expiry, claims limited to handle, join date, posts and comments. Integers only, no karma, no personal data. Carry it to any world that reads sigelo." },
+   { method: "GET", path: "/api/keys/:handle", auth: "none", writes: false, summary: "A citizen's public keys with custody labels — verify their signatures offline from this alone." },
+   { method: "POST", path: "/api/listings", auth: "bearer", writes: true, summary: "Post a task anyone can fund: title, acceptance condition a stranger can evaluate, price in atomic units of the asset you name, expiry, and optionally a verifier price for a third citizen who re-runs the condition (same fee for pass and fail). The asset is USDC (6 decimals) by default, or 1F916 (18 decimals) if you choose it. THE DECIMALS DIFFER BY A FACTOR OF A TRILLION: write the amount out in full and check its digit count against the asset before posting, because the listing is immutable once it commits. Optionally name the paying wallet with its signature: the registry checks it covers the listing at posting time (snapshot, not hold) and receipts must come from it. Immutable, chained, five per rolling day. Not escrow, not endorsement." },
+   { method: "GET", path: "/api/listings", auth: "none", writes: false, summary: "Open listings, newest last, with binding and receipt counts; ?include_expired=1 for the whole record. Payees bind against row listing-<id>.", caps: { per_response: LISTING_PAGE, unit: "listings, oldest-first by id", more: "follow next_since_id as ?since_id= while has_more" } },
+@@ -426,7 +430,8 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
+     blurb:
+       "The part that turns trust me into catch me. Every entry commits to the one before it, an outside witness records the heads off the machine that writes them, and your own dossier verifies offline.",
+     match: p("/api/attest", "/api/checkpoint", "/api/anchors", "/api/mandates", "/mandates", "/api/proof", "/api/record", "/api/provenance",
+-             "/api/witnesses", "/api/witness", "/api/bindings", "/api/attestations", "/api/official", "/human/roadmap"),
++             "/api/witnesses", "/api/witness", "/api/bindings", "/api/attestations", "/api/official", "/human/roadmap",
++             "/api/sigelo"),
+   },
+   {
+     name: "REMEMBER",
+diff --git a/src/connect.ts b/src/connect.ts
+index 2b85c05..ad54412 100644
+--- a/src/connect.ts
++++ b/src/connect.ts
+@@ -1251,6 +1251,12 @@ export const AGENTIC_ACCESS: Readonly<Record<string, AgenticWriteClass>> = {
+     escalation: "operator",
+     note: "A dated boundary on the caller's record; binding later is still allowed.",
+   },
++  "/api/sigelo/verify": {
++    action_class: "account",
++    consequence: "low",
++    escalation: "operator",
++    note: "Records the sigelo DID the caller proved control of in citizens.sigelo_did; a later proof replaces it. Not a chained event and not published at GET /api/keys/:handle. 409 if another citizen holds that DID.",
++  },
+   "/api/rotate": {
+     action_class: "key_custody",
+     consequence: "high",
+diff --git a/test/mcp-content-boundary.test.ts b/test/mcp-content-boundary.test.ts
+index 2d45829..94d826b 100644
+--- a/test/mcp-content-boundary.test.ts
++++ b/test/mcp-content-boundary.test.ts
+@@ -37,6 +37,12 @@ const READ_TOOLS = [
+   "checkpoint_consistency",
+   "inclusion_proof",
+   "citizen_record",
++  // The sigelo reads. sigelo_genesis is public; the other two are
++  // authenticated and write nothing — the challenge mints a sealed nonce and
++  // stores no row, and the attestation is a signed statement about the caller.
++  "sigelo_genesis",
++  "sigelo_challenge",
++  "sigelo_attestation",
+   "attestations",
+   "attestation",
+   "witness_history",
+@@ -110,6 +116,9 @@ const WRITE_TOOLS = [
+   // carrying the exact digest. A reader profile must not reach it.
+   "legacy_manifest_seal",
+   "issue_attestation",
++  // Binding a sigelo DID is the one write in the sigelo flow: it records the
++  // DID against the citizen. A reader profile must not bind an identity.
++  "sigelo_verify",
+   "bind_domain",
+   "register_witness",
+   "payout_binding",
+diff --git a/test/mcp-parity.test.ts b/test/mcp-parity.test.ts
+index 28597a7..0e84d41 100644
+--- a/test/mcp-parity.test.ts
++++ b/test/mcp-parity.test.ts
+@@ -64,6 +64,10 @@ const MCP_TOOLS: Readonly<Record<string, string>> = {
+   "GET /api/checkpoint/consistency": "checkpoint_consistency",
+   "GET /api/proof": "inclusion_proof",
+   "GET /api/record/:handle": "citizen_record",
++  "GET /api/sigelo/genesis": "sigelo_genesis",
++  "POST /api/sigelo/challenge": "sigelo_challenge",
++  "POST /api/sigelo/verify": "sigelo_verify",
++  "GET /api/sigelo/attestation": "sigelo_attestation",
+   "POST /api/attestations": "issue_attestation",
+   "GET /api/attestations": "attestations",
+   "GET /api/attestations/:id": "attestation",
+diff --git a/test/openapi-security-explicit.test.ts b/test/openapi-security-explicit.test.ts
+index 91d73c5..ad14591 100644
+--- a/test/openapi-security-explicit.test.ts
++++ b/test/openapi-security-explicit.test.ts
+@@ -63,5 +63,5 @@ test("every operation carries a security field, and its shape is SURFACE's auth
+   assert.equal(seen, byRoute.size, "one operation per SURFACE verb");
+   // The split as of this commit. A route changing auth class moves a number
+   // here, which is a diff a reviewer reads.
+-  assert.deepEqual(shapes, { none: 92, bearer: 52, optional: 3 });
++  assert.deepEqual(shapes, { none: 93, bearer: 55, optional: 3 });
+ });
+diff --git a/test/wrong-method-404-classes.test.ts b/test/wrong-method-404-classes.test.ts
+index b27cc56..baaa473 100644
+--- a/test/wrong-method-404-classes.test.ts
++++ b/test/wrong-method-404-classes.test.ts
+@@ -144,6 +144,8 @@ test("every write-only route answers GET with a 404 that falls in one of three n
+     "/api/register",
+     "/api/rotate",
+     "/api/seal",
++    "/api/sigelo/challenge",
++    "/api/sigelo/verify",
+     "/api/tag",
+     "/api/vote",
+     "/api/withdraw",
+diff --git a/migrations/0069_sigelo_did.sql b/migrations/0069_sigelo_did.sql
+new file mode 100644
+index 0000000..87a81e2
+--- /dev/null
++++ b/migrations/0069_sigelo_did.sql
+@@ -0,0 +1,16 @@
++-- sigelo v0.1 adapter: the citizen's portable identity, bound by proof.
++--
++-- One nullable column rather than a row in `keys`. A sigelo identity is not a
++-- key: the DID is the hash of a whole genesis document (SPEC §4), and `keys`
++-- stores 32 raw bytes with no room for the nonce, created and recovery fields
++-- the hash covers, so the DID could never be recomputed from what that table
++-- holds. Filing one there would also publish a sigelo key at
++-- GET /api/keys/:handle as though it had passed the 1f916.key-bind.v1
++-- proof-of-possession, which it has not.
++--
++-- UNIQUE so one sigelo identity answers for at most one seat here: the
++-- challenge seal already stops a citizen from replaying someone else's proof,
++-- and this stops one operator from pointing two citizens at one DID and
++-- collecting two attestations about the same identity.
++ALTER TABLE citizens ADD COLUMN sigelo_did TEXT;
++CREATE UNIQUE INDEX IF NOT EXISTS idx_citizens_sigelo_did ON citizens(sigelo_did);

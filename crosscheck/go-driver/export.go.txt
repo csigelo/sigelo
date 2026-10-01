@@ -1,0 +1,8 @@
+// Overlaid into package sigelo at build time by crosscheck/run.sh (go build -overlay); never
+// written into go/. It exposes three unexported primitives so the cross-check can feed them
+// raw third-party vectors whose messages are not a sigelo signing input.
+package sigelo
+
+func CrosscheckEd25519Strict(pub, msg, sig []byte) bool { return ed25519Strict(pub, msg, sig) }
+func CrosscheckB58Encode(b []byte) string              { return b58encode(b) }
+func CrosscheckUnmb(s string, max int) ([]byte, error) { return unmb(s, max) }

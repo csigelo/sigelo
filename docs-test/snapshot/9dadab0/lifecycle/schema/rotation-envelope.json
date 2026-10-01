@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/rotation-envelope.json",
+  "title": "sigelo/0 rotation envelope",
+  "description": "A rotation as it travels in a bundle (SPEC §3, §7, §8): body, sig and next_genesis are all required; a missing one is fatal to the bundle (SPEC §7.4). No other key: SPEC §3.1, an envelope is exactly its defined members, and a rotation envelope carrying another is fatal like a missing one (vector fatal_rotation_envelope_extra_key).",
+  "type": "object",
+  "required": ["body", "sig", "next_genesis"],
+  "properties": {
+    "body": { "$ref": "rotation.json" },
+    "sig": { "$ref": "common.json#/$defs/signature" },
+    "next_genesis": { "$ref": "genesis.json" }
+  },
+  "propertyNames": { "$ref": "common.json#/$defs/key" },
+  "additionalProperties": false
+}

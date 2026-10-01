@@ -1,0 +1,10 @@
+[Unit]
+Description=sigelo soak health check every hour, at :15 (between agent ticks)
+
+[Timer]
+OnCalendar=*-*-* *:15:00
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

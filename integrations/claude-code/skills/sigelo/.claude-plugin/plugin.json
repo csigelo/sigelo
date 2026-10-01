@@ -1,0 +1,8 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "sigelo",
+  "version": "0.1.0",
+  "description": "Portable, offline-verifiable agent identity (sigelo) and a keeper-held Monero wallet: the sigelo skill plus the sigelo MCP server.",
+  "license": "MIT",
+  "skills": ["./"]
+}

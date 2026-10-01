@@ -1,0 +1,36 @@
+{
+  "name": "sigelo-agent",
+  "version": "0.1.0",
+  "description": "sigelo v0.1 agent-side sidecar for moadim: a persistent agent identity, challenge signing, attestation collection and SPEC §8 bundles",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/sigelo-agent.js",
+  "types": "dist/sigelo-agent.d.ts",
+  "bin": {
+    "sigelo-agent": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "INTEGRATION.md"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "build": "tsc -p tsconfig.build.json",
+    "pretest": "node -e \"const [a,b]=process.versions.node.split('.').map(Number);if(a<22||(a===22&&b<18)||(a===23&&b<6)){console.error('sigelo-agent: node '+process.version+' cannot run .ts files; it needs node >= 22.18 (or >= 23.6). On an older node: npm run build, then node dist/cli.js');process.exit(1)}\"",
+    "test": "node test.ts",
+    "prepack": "tsc -p tsconfig.build.json && node ../../release/prepack.mjs pre",
+    "postpack": "node ../../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: the npm account and names are an Owner decision (ROADMAP D1); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+  },
+  "dependencies": {
+    "sigelo": "file:../../ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.5",
+    "typescript": "5.9.3"
+  }
+}

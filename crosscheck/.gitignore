@@ -1,0 +1,4 @@
+.work/
+# a run's output; results/*.json is the recorded run, updated by hand (README)
+results/latest/
+__pycache__/

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/rotation.json",
+  "title": "sigelo/0 rotation body",
+  "description": "A signed rotation body (SPEC §7, §3.1). recovery_key is required iff reason is recovery and forbidden otherwise. next MUST differ from id (not expressible in JSON Schema; SPEC §7).",
+  "type": "object",
+  "required": ["v", "typ", "id", "next", "iat", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "$ref": "common.json#/$defs/version" },
+    "typ": { "const": "rotation" },
+    "id": { "$ref": "common.json#/$defs/did" },
+    "next": { "$ref": "common.json#/$defs/did" },
+    "iat": { "$ref": "common.json#/$defs/unixSeconds" },
+    "reason": { "enum": ["voluntary", "recovery"] },
+    "recovery_key": { "$ref": "common.json#/$defs/publicKey" }
+  },
+  "if": { "properties": { "reason": { "const": "recovery" } } },
+  "then": { "required": ["recovery_key"] },
+  "else": { "not": { "required": ["recovery_key"] } }
+}

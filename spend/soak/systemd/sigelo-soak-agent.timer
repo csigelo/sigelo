@@ -1,0 +1,10 @@
+[Unit]
+Description=sigelo soak agent tick every 30 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00,30:00
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

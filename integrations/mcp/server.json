@@ -1,0 +1,48 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.csigelo/sigelo",
+  "title": "sigelo",
+  "description": "Portable, offline-verifiable identity for AI agents: DID, challenges, attestations, bundles.",
+  "version": "0.1.0",
+  "websiteUrl": "https://sigelo.io/integrations.html",
+  "repository": {
+    "url": "https://github.com/csigelo/sigelo",
+    "source": "github",
+    "subfolder": "integrations/mcp"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "sigelo-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SIGELO_IDENTITY",
+          "description": "Identity file; default ~/.config/moadim/sigelo.local.json",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SIGELO_WALLET_URL",
+          "description": "Keeper URL from the operator; with the token, the four wallet tools appear",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SIGELO_WALLET_TOKEN",
+          "description": "This agent's keeper bearer token, from the operator",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

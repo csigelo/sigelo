@@ -1,0 +1,24 @@
+node_modules/
+dist/
+*.tgz
+.DS_Store
+*.local.json
+go/sigelo-verify
+# Secrets the walkthroughs write into the checkout: QUICKSTART tier 2's recovery.key, the
+# tier-1 ceremony's output (backup.age, keeper-*.json with spend keys), an age identity, a
+# keeper's spend.key. Never commit any of them.
+*.key
+/ceremony/
+# QUICKSTART's bin/sigelo-agent wrapper (it holds the checkout's absolute path)
+/bin/
+# What QUICKSTART's steps write into the checkout root (the agent's genesis, the mock world's
+# challenge and attestation, the signed answer, bundles; the world's own state is *.local.json
+# above), and examples/world.mjs's lock, left behind if a run is killed.
+/agent-genesis.json
+/answer.json
+/bundle*.json
+/challenge*.json
+/issued*.json
+/recovery.pub
+/signed*.json
+world.lock

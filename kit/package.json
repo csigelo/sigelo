@@ -1,0 +1,48 @@
+{
+  "name": "sigelo-recovery-kit",
+  "version": "0.1.0",
+  "description": "sigelo recovery kit: air-gapped root ceremony script, printed procedures, drill scheduler and self-grading timeline, runbook bound to your installation. Software you run; the vendor never holds keys.",
+  "license": "MIT",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "sigelo-kit-ceremony": "ceremony/run.sh",
+    "sigelo-kit-bind": "bind.mjs",
+    "sigelo-kit-print": "procedure/print.sh",
+    "sigelo-kit-drill": "drill/schedule.mjs",
+    "sigelo-kit-grade": "drill/grade.mjs"
+  },
+  "files": [
+    "README.md",
+    "CONTACT.md",
+    "kit.example.json",
+    "bind.mjs",
+    "ceremony/run.sh",
+    "ceremony/record.mjs",
+    "procedure/CEREMONY.md",
+    "procedure/DRILL.md",
+    "procedure/RUNBOOK.md",
+    "procedure/md.mjs",
+    "procedure/print.mjs",
+    "procedure/print.sh",
+    "drill/TIMELINE.template.md",
+    "drill/schedule.mjs",
+    "drill/grade.mjs",
+    "test/run.sh",
+    "test/ceremony.test.mjs",
+    "test/kit.test.mjs",
+    "test/fixtures/completed-TIMELINE.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "sh test/run.sh",
+    "prepack": "node ../release/prepack.mjs pre",
+    "postpack": "node ../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: the npm account and names are an Owner decision (ROADMAP D1); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+  },
+  "dependencies": {
+    "sigelo": "file:../ts"
+  }
+}

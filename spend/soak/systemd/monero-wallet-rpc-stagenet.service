@@ -1,0 +1,17 @@
+[Unit]
+Description=monero-wallet-rpc, stagenet allowance wallet (sigelo soak)
+# Install with `enable` only while a hand-started (nohup) wallet-rpc holds port 38083:
+# starting this one then fails to bind and retries every 30 s. It takes over at the next boot.
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/monero/wallets
+ExecStart=/usr/bin/monero-wallet-rpc --stagenet --wallet-file allowance-stagenet --password stagenet --daemon-address node.monerodevs.org:38089 --rpc-bind-ip 127.0.0.1 --rpc-bind-port 38083 --disable-rpc-login --log-file rpc.log
+Restart=on-failure
+RestartSec=30
+# To keep it down (an incident): spend/soak/freeze.sh (stop + a drop-in Restart=no); not `mask --runtime`, see the keeper unit.
+# wallet-rpc saves the wallet on SIGTERM; give it time.
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

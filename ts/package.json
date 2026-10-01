@@ -1,0 +1,36 @@
+{
+  "name": "sigelo",
+  "version": "0.1.0",
+  "description": "Reference TypeScript implementation of the sigelo protocol (wire sigelo/0)",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/sigelo.js",
+  "types": "dist/sigelo.d.ts",
+  "bin": {
+    "sigelo-offline": "dist/offline.js"
+  },
+  "files": [
+    "dist",
+    "!dist/test.*",
+    "!dist/gen_vectors.*",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node dist/test.js",
+    "gen": "tsc && node dist/gen_vectors.js ../test-vectors.json",
+    "prepack": "tsc && node ../release/prepack.mjs pre",
+    "postpack": "node ../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: the npm account and names are an Owner decision (ROADMAP D1); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+  },
+  "dependencies": {
+    "@noble/ed25519": "3.2.0",
+    "@noble/hashes": "2.4.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,166 @@
+name: conformance
+on: [push, pull_request]
+jobs:
+  ts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (tag v4)
+      # No tracked file may name the maintainer's device, accounts or time zone (ROADMAP §5.1).
+      # Every pattern comes from the DEVICE_STRINGS secret, one extended regex per line, and
+      # none is written here: even a "generic" pattern inline (a home path, a mail-address
+      # prefix, a UTC offset) publishes what this check protects (AUDIT A5). A fork's PR has no
+      # secrets, so there the step says it was skipped; the maintainer's pushes run it.
+      - name: no device or identity strings
+        env: { DEVICE_STRINGS: '${{ secrets.DEVICE_STRINGS }}' }
+        run: |
+          printf '%s\n' "$DEVICE_STRINGS" | grep -v '^[[:space:]]*$' > /tmp/device-patterns || true
+          if [ ! -s /tmp/device-patterns ]; then echo 'DEVICE_STRINGS is empty (a fork?): identity-string check skipped'; exit 0; fi
+          if git grep -nIiE -f /tmp/device-patterns -- .; then
+            echo 'device or identity strings in tracked files (above): reword them, do not weaken this check'; exit 1
+          fi
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 (tag v4)
+        with: { node-version: '22' }
+      # Go too: the moadim adapter's test cross-checks its bundle with go/cmd/sigelo-verify,
+      # and SKIPs that cross-check without `go` — here it must run, not skip.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0 (tag v5)
+        with: { go-version: '1.27', cache-dependency-path: go/go.sum }
+      - run: npm ci --ignore-scripts
+        working-directory: ts
+      - run: npx tsc
+        working-directory: ts
+      # vectors must be reproducible byte-for-byte from the documented seeds: the TypeScript
+      # generator must reproduce the committed file exactly
+      - run: node dist/gen_vectors.js > /tmp/ts-vectors.json && diff -u ../test-vectors.json /tmp/ts-vectors.json
+        working-directory: ts
+      # every vector, or nothing
+      - run: node dist/test.js | tee /tmp/ts-out && grep -q '^ALL PASS$' /tmp/ts-out
+        working-directory: ts
+      # `sigelo-verify --conformance --impl` (ROADMAP T7): the Go binary and ts/ (through its
+      # wrapper) as candidates must both score ALL PASS, a deliberately broken wrapper must FAIL,
+      # and docs-test/grade-verifier.mjs must print the same case lines as the binary
+      - run: |
+          (cd go && go build -o /tmp/sv ./cmd/sigelo-verify)
+          /tmp/sv --conformance test-vectors.json --impl /tmp/sv > /tmp/impl-go; tail -3 /tmp/impl-go; grep -q '^ALL PASS$' /tmp/impl-go
+          /tmp/sv --conformance test-vectors.json --impl /tmp/sv --impl-stdin | grep -q '^ALL PASS$'
+          /tmp/sv --conformance test-vectors.json --impl 'node go/cmd/sigelo-verify/testdata/ts-candidate.mjs' > /tmp/impl-ts; tail -3 /tmp/impl-ts; grep -q '^ALL PASS$' /tmp/impl-ts
+          if /tmp/sv --conformance test-vectors.json --impl 'node go/cmd/sigelo-verify/testdata/ts-candidate.mjs --break' > /tmp/impl-broken; then echo 'broken candidate passed'; exit 1; fi
+          grep '^FAIL ' /tmp/impl-broken
+          node docs-test/grade-verifier.mjs -- /tmp/sv > /tmp/grade-go
+          diff <(grep -E '^(PASS|FAIL) ' /tmp/grade-go) <(grep -E '^(PASS|FAIL) ' /tmp/impl-go)
+      # the moadim sidecar's full flow, against the freshly built library, re-verified by the
+      # Go reference; the grep proves the cross-check ran rather than skipped
+      - run: >-
+          npm ci --ignore-scripts && npm test | tee /tmp/moadim-out && grep -q '^ALL PASS' /tmp/moadim-out && grep -q '^ok   go: same current DID$' /tmp/moadim-out
+        working-directory: adapters/moadim
+      # the bounded-spending service (MONERO.md §4). Same job, after `npx tsc` above: it
+      # depends on `sigelo` as `file:../ts`, so it links dist/ and there must be a dist/ to link.
+      # Its live-wallet section SKIPs on a runner with no monero-wallet-rpc on 127.0.0.1:38083.
+      - run: npm ci --ignore-scripts && npm test
+        working-directory: spend
+
+  # The same suites on every system the Owner targets (docs-test/PORTABILITY.md): Linux, macOS
+  # (arm64) and Windows, Node 22 LTS and 24, plus current Node on Linux. bash on every runner
+  # (Git Bash on Windows), and $RUNNER_TEMP instead of /tmp, because a Windows node does not see
+  # Git Bash's /tmp. Nothing here needs a wallet: spend's live section and the monero-wallet-rpc
+  # interop SKIP, as in the ts job.
+  portability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['22', '24']
+        include:
+          - { os: ubuntu-latest, node: 'current' }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (tag v4)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 (tag v4)
+        with: { node-version: '${{ matrix.node }}' }
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0 (tag v5)
+        with: { go-version: '1.27', cache-dependency-path: go/go.sum }
+      # .gitattributes keeps every checkout LF; this proves it where it matters (Windows)
+      - run: "! git ls-files --eol | grep -v 'w/lf' | grep -v 'w/-text' | grep ."
+      - run: npm ci --ignore-scripts && npx tsc
+        working-directory: ts
+      - run: node dist/gen_vectors.js > "$RUNNER_TEMP/ts-vectors.json" && diff -u ../test-vectors.json "$RUNNER_TEMP/ts-vectors.json"
+        working-directory: ts
+      - run: node dist/test.js | tee "$RUNNER_TEMP/ts-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/ts-out"
+        working-directory: ts
+      - run: >-
+          npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
+        working-directory: adapters/moadim
+      - run: npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/spend-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/spend-out"
+        working-directory: spend
+      - run: npm test
+        working-directory: integrations/mcp
+      - run: node schema/check.mjs | tee "$RUNNER_TEMP/schema-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/schema-out"
+      - run: go vet ./... && go test ./... -v | tee "$RUNNER_TEMP/go-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/go-out"
+        working-directory: go
+
+  # The reference verifier.
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (tag v4)
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0 (tag v5)
+        with: { go-version: '1.27', cache-dependency-path: go/go.sum }
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+        working-directory: go
+      - run: go vet ./...
+        working-directory: go
+      # every vector, the monero vectors and the 1f916 adapter's emitted bundle
+      # (adapters/1f916/sample-bundle.json must be ACCEPTED): same conformance target as ts/
+      - run: go test ./... -v | tee /tmp/go-out && grep -q '^ALL PASS$' /tmp/go-out
+        working-directory: go
+      - run: CGO_ENABLED=0 go build ./cmd/sigelo-verify
+        working-directory: go
+      # the static binary, as a user runs it, must reproduce the `bundle` vector's §9.1 result
+      - run: |
+          node -e 'const v = require("../test-vectors.json").vectors.bundle; require("fs").writeFileSync("/tmp/go-bundle.json", JSON.stringify(v.bundle)); console.log(v.now)' > /tmp/go-now
+          ./sigelo-verify /tmp/go-bundle.json --now "$(cat /tmp/go-now)" > /tmp/go-result.json
+          node -e 'const a = require("/tmp/go-result.json"), e = require("../test-vectors.json").vectors.bundle.expect; require("assert").deepStrictEqual(a, e)'
+        working-directory: go
+      # `sigelo-verify --conformance`: the vectors run from the binary, the same lines as
+      # `go test` (both call go/conformance.go), and the Monero section must run, not SKIP
+      - run: |
+          ./sigelo-verify --conformance ../test-vectors.json | tee /tmp/conf-out
+          grep -q '^ALL PASS$' /tmp/conf-out && ! grep -q '^SKIP' /tmp/conf-out
+          ./sigelo-verify --version
+        working-directory: go
+      # schema/*.json (JSON Schema 2020-12) against the vectors: positives validate, structural
+      # negatives do not, parity bundles split fatal/per-item as the verifiers do
+      - run: node schema/check.mjs | tee /tmp/schema-out && grep -q '^ALL PASS$' /tmp/schema-out
+      # spend/openapi.yaml names exactly the routes spend/service.ts serves
+      - run: |
+          node -e '
+            const fs = require("fs");
+            const code = [...fs.readFileSync("spend/service.ts", "utf8").matchAll(/["\x27](GET|POST) (\/[a-z]+)["\x27]/g)].map((m) => `${m[1]} ${m[2]}`);
+            const api = [...fs.readFileSync("spend/openapi.yaml", "utf8").matchAll(/^  (\/[a-z]+):\n    (get|post):/gm)].map((m) => `${m[2].toUpperCase()} ${m[1]}`);
+            const a = [...new Set(code)].sort(), b = [...new Set(api)].sort();
+            console.log(`service.ts ${a.length} routes, openapi.yaml ${b.length}`);
+            require("assert").deepStrictEqual(b, a);
+          '
+
+  # Reproducible release (ROADMAP §5.5, T4): five sigelo-verify targets, the source archive and
+  # the four npm tarballs, built twice, the second time with an empty Go build cache and npm
+  # cache, and the two SHA256SUMS must be identical; then release/pack-test.sh installs the
+  # tarballs in an empty directory and runs them. Uploaded as an artifact for a second builder
+  # to compare against; nothing is published.
+  release-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (tag v4)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 (tag v4)
+        with: { node-version: '22' }
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0 (tag v5)
+        with: { go-version: '1.27', cache-dependency-path: go/go.sum }
+      - run: release/build.sh /tmp/rel1
+      - run: GOCACHE=/tmp/gocache2 npm_config_cache=/tmp/npmcache2 release/build.sh /tmp/rel2 && diff /tmp/rel1/SHA256SUMS /tmp/rel2/SHA256SUMS
+      - run: release/pack-test.sh /tmp/rel1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2 (tag v4)
+        with:
+          name: sigelo-verify-SHA256SUMS
+          path: /tmp/rel1/SHA256SUMS

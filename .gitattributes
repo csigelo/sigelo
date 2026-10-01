@@ -1,0 +1,6 @@
+# Every text file is LF in the repository AND in every checkout, Windows included.
+# test-vectors.json is compared byte for byte with what ts/src/gen_vectors.ts prints (LF), the
+# docs-test snapshots are hashed, spend/openapi.yaml is matched by a regex with \n, and the
+# shell scripts must not carry \r. Without this, Git for Windows' default core.autocrlf=true
+# checks them out as CRLF and the vector diff, the snapshot hashes and those checks fail.
+* text=auto eol=lf

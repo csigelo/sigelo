@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/verify-result.json",
+  "title": "sigelo/0 verification result",
+  "description": "The §9.1 result of verify(bundle, now). The six fields are the conformance surface and compared by value; key order is informative only. Implementations MAY attach per-item reasons alongside, so other top-level keys are allowed.",
+  "type": "object",
+  "required": ["did", "chain", "recovery", "attestations", "bindings", "rejected"],
+  "properties": {
+    "did": { "$ref": "common.json#/$defs/did", "description": "The current DID: the last entry of chain." },
+    "chain": {
+      "description": "Ordered DIDs from the original genesis to the current one.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "common.json#/$defs/did" }
+    },
+    "recovery": {
+      "description": "The governing recovery commitment (SPEC §7.2), or null if the identity has none.",
+      "anyOf": [{ "$ref": "common.json#/$defs/commitment" }, { "type": "null" }]
+    },
+    "attestations": {
+      "description": "Accepted attestation bodies, verbatim, grouped by iss, in bundle order within each issuer.",
+      "type": "object",
+      "propertyNames": { "$ref": "common.json#/$defs/did" },
+      "additionalProperties": { "type": "array", "minItems": 1, "items": { "$ref": "attestation.json" } }
+    },
+    "bindings": {
+      "description": "Accepted binding bodies with their §6.1 proof status, in bundle order.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["body", "proof"],
+        "additionalProperties": false,
+        "properties": {
+          "body": { "$ref": "binding.json" },
+          "proof": { "enum": ["proven", "unproven", "unsupported"] }
+        }
+      }
+    },
+    "rejected": {
+      "description": "What §9 steps 2, 5 and 6 discarded.",
+      "type": "object",
+      "required": ["attestations", "bindings"],
+      "additionalProperties": false,
+      "properties": {
+        "attestations": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "bindings": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    }
+  }
+}

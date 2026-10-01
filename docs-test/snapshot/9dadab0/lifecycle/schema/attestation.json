@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/attestation.json",
+  "title": "sigelo/0 attestation body",
+  "description": "One world's signed statement about one identity (SPEC §5, §3.1). claims is world-defined and free-form, but every number in it is an integer in range and no key is __proto__ (SPEC §3). exp > iat is required too (not expressible here).",
+  "type": "object",
+  "required": ["v", "typ", "iss", "sub", "iat", "exp", "ctx", "admission", "claims"],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "$ref": "common.json#/$defs/version" },
+    "typ": { "const": "attestation" },
+    "iss": { "$ref": "common.json#/$defs/did" },
+    "sub": { "$ref": "common.json#/$defs/did" },
+    "iat": { "$ref": "common.json#/$defs/unixSeconds" },
+    "exp": { "$ref": "common.json#/$defs/unixSeconds" },
+    "ctx": { "$ref": "common.json#/$defs/string" },
+    "admission": { "enum": ["open", "captcha", "invite", "payment", "human", "stake"] },
+    "admission_by": { "$ref": "common.json#/$defs/string", "description": "Informational; names the voucher for admission: invite. Verifiers need not resolve it." },
+    "admission_cost": { "$ref": "common.json#/$defs/string" },
+    "claims": { "$ref": "common.json#/$defs/jcsValue" }
+  }
+}

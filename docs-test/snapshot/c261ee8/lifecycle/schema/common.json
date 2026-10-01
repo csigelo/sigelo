@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/common.json",
+  "title": "sigelo/0 shared definitions",
+  "description": "Building blocks for the sigelo/0 object schemas (SPEC §2, §3, §3.1). The host in $id is a placeholder (.invalid) until the project domain is chosen. Patterns are ECMA-262 regular expressions evaluated with Unicode semantics (the 'u' flag): #/$defs/string relies on it to refuse a lone surrogate while accepting a surrogate PAIR as one character. What JSON Schema cannot express, and a verifier must still check: duplicate keys (a parse-time rule, SPEC §3), exp > iat, a rotation's next != id, every signature, DID-hash and chain rule, and each payment method's own address and sig_addr checks.",
+  "$defs": {
+    "string": {
+      "description": "A JSON string of Unicode scalar values: no lone surrogate (SPEC §3.1).",
+      "type": "string",
+      "pattern": "^[^\\uD800-\\uDFFF]*$"
+    },
+    "key": {
+      "description": "An object key: no lone surrogate, never __proto__ (SPEC §3.1).",
+      "$ref": "#/$defs/string",
+      "not": { "const": "__proto__" }
+    },
+    "int": {
+      "description": "An integer in ±(2^53−1) (SPEC §3). Floats, exponents and larger integers are malformed.",
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "jcsValue": {
+      "description": "Anything JCS can serialize under SPEC §3: null, booleans, integers in range, strings without lone surrogates, and arrays and objects of the same, at any depth.",
+      "anyOf": [
+        { "type": ["null", "boolean"] },
+        { "$ref": "#/$defs/int" },
+        { "$ref": "#/$defs/string" },
+        { "type": "array", "items": { "$ref": "#/$defs/jcsValue" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/key" },
+          "additionalProperties": { "$ref": "#/$defs/jcsValue" }
+        }
+      ]
+    },
+    "version": { "description": "The wire version (SPEC §3.1).", "const": "sigelo/0" },
+    "unixSeconds": {
+      "description": "iat / exp: Unix seconds, an integer in [0, 2^53−1] (SPEC §3.1). exp > iat is required too but is not expressible here.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "multibase": {
+      "description": "Multibase base58btc: 'z' then the Bitcoin base58 alphabet (SPEC §2).",
+      "type": "string",
+      "pattern": "^z[1-9A-HJ-NP-Za-km-z]+$"
+    },
+    "publicKey": {
+      "description": "An Ed25519 public key: multibase of multicodec 0xed01 plus 32 raw bytes, which always spells z6Mk plus 44 characters (SPEC §2).",
+      "type": "string",
+      "pattern": "^z6Mk[1-9A-HJ-NP-Za-km-z]{44}$"
+    },
+    "signature": {
+      "description": "An Ed25519 signature on the wire: multibase of the 64 raw bytes, no multicodec prefix (SPEC §2).",
+      "type": "string",
+      "pattern": "^z[1-9A-HJ-NP-Za-km-z]{1,88}$"
+    },
+    "did": {
+      "description": "did:sigelo: + multibase of the raw 32-byte SHA-256 of the JCS genesis (SPEC §2, §4).",
+      "type": "string",
+      "pattern": "^did:sigelo:z[1-9A-HJ-NP-Za-km-z]{1,44}$"
+    },
+    "commitment": {
+      "description": "A recovery commitment: sha256: + lowercase hex SHA-256 of the raw 32-byte recovery public key (SPEC §4).",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "created": {
+      "description": "RFC 3339 UTC with Z, second precision (SPEC §4). Informational; the verifiers check only that it is a string.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)Z$"
+    },
+    "atomicUnits": {
+      "description": "A non-negative decimal integer as a string, no sign, no fraction, no leading zeros (SPEC §6.3).",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "envelopeExtra": {
+      "description": "Envelope keys outside body and the signature slots are unsigned and tolerated, but SPEC §3's rules apply to the whole envelope: a float or a lone surrogate in one makes the item malformed.",
+      "$ref": "#/$defs/jcsValue"
+    }
+  }
+}

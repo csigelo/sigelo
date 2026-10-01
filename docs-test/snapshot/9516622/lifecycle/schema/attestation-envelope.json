@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/attestation-envelope.json",
+  "title": "sigelo/0 attestation envelope",
+  "description": "An attestation as it travels (SPEC §3.1, §8): exactly body and sig. Nothing outside body is signed, so any other key makes the item malformed (vectors attestation_envelope_extra_key_int, attestation_good_and_envelope_extra_keys). A malformed attestation is discarded and counted, never fatal to the bundle.",
+  "type": "object",
+  "required": ["body", "sig"],
+  "properties": {
+    "body": { "$ref": "attestation.json" },
+    "sig": { "$ref": "common.json#/$defs/signature" }
+  },
+  "propertyNames": { "$ref": "common.json#/$defs/key" },
+  "additionalProperties": false
+}

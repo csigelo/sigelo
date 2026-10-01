@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/bundle.json",
+  "title": "sigelo/0 bundle",
+  "description": "What an identity presents (SPEC §8). Unsigned; every element carries its own signature. genesis is the ORIGINAL genesis; all four arrays are required and may be empty. This schema is the part whose malformation is fatal (SPEC §9 step 2): the bundle's own shape, genesis, every rotation envelope and every issuers entry. attestations and bindings need only be arrays here: a verifier checks each item against attestation-envelope.json or binding-envelope.json and discards (and counts) one that fails, while the rest still verify — so a bundle carrying a junk item is still a valid bundle (the bundle vector carries two). The SPEC §3 number and string rules still apply to every item: a float or a lone surrogate in one discards that item.",
+  "type": "object",
+  "required": [
+    "v",
+    "typ",
+    "genesis",
+    "rotations",
+    "bindings",
+    "attestations",
+    "issuers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "$ref": "common.json#/$defs/version"
+    },
+    "typ": {
+      "const": "bundle"
+    },
+    "genesis": {
+      "$ref": "genesis.json"
+    },
+    "rotations": {
+      "type": "array",
+      "items": {
+        "$ref": "rotation-envelope.json"
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "description": "Items: binding-envelope.json, checked per item (a failing item is discarded, not fatal)."
+    },
+    "attestations": {
+      "type": "array",
+      "description": "Items: attestation-envelope.json, checked per item (a failing item is discarded, not fatal)."
+    },
+    "issuers": {
+      "type": "array",
+      "items": {
+        "$ref": "genesis.json"
+      }
+    }
+  }
+}

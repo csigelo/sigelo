@@ -1,0 +1,760 @@
+{
+ "note": "Oracle: monero-ts 0.11.15 (monero core in WASM). Wallet restored from private spend key; view key = H_s(spend). Messages are sigelo signing inputs.",
+ "private_spend_key": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b01",
+ "networks": {
+  "stagenet": {
+   "primary_address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+   "private_view_key": "d6e37b8d06f9de58a17a0075a68cf2355223b53e8dfc939b023f4171600f5202",
+   "public_view_key": "143e848725803bb70d2c3ce4e5558090cf83fcab58104dfcb86d8dd6ffcd321e",
+   "public_spend_key": "42f96abbbbaa75b3b59c0fcb5252ef08aa89463054efd8ab559cdb4a431bba45",
+   "subaddresses": {
+    "0/1": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+    "0/2": "78KqE6MWAJacoZkYGJ63PSCPSfF4USN8UG3tYJGjKwPDJzoQqAYDM1m1TC7dPh6xNgMGF9PgsUa56iU2JwTPqJktGbYyQx9",
+    "1/0": "7AkZ8BZh5E6TgtJyhxWmfd7zrQzvDEcSuShUzbcUbEbhJXUBY3X3RCaFiNRb9MRTeXZM3Y3VFmtWtfv2kL45yBV8L2NUQb2",
+    "1/1": "77ZqRUBNypoHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQcBpgxA",
+    "2/7": "7AU37qBVuiL98HzUAiJvPqbQ9QqqB7nhiiKJKefCXeSqZgtGgfikACLJ1Do4ptJDRH3HZezRfQArkUvEAKdPocwK8azLFbp"
+   },
+   "signatures": [
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+     "signature": "SigV2hPPFBhbKNGqLeWFZRNJRHm8umpjBRXgfLeJVjuSRNuUmE2RxL7RJJUT2NX5upwFfP9S7eJyKsxfCq6bfNDSuWkAJ",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+     "signature": "SigV2ZeQ6o28HTPoibvEeWfk7Q8JBd8rGQzwHNSj9rbfaQLNkeupQD6Ku7X4Y8u9xxareDDaj4njfs9wyS8dM3zHojnEH",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "77ZqRUBNypoHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQcBpgxA",
+     "signature": "SigV2RNrzsLz4zB8QPT6Hed4WNY72qivv6gVbBCXuDYFqDa1432hkzPmwhXM1aZfQq2SQx8Z32aEJ2z2t1SHw2YgqKkRM",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+     "signature": "SigV2XSjcW24mDyiKGF4ALCvQobPqekFyc2NigNbaANCwtEnAg4BNb5iJrvsiuqAzFE6B16Ew5WCBE48C2PZoH6B8qeVG",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+     "signature": "SigV26v4Q73CshP9dynzwTfUTcxS78fhkSw2PiX2imLAAZtDthfYzyQhLX9sUY3VUzSZei8diFd3JwtGgxSm44SNFRHi2",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "77ZqRUBNypoHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQcBpgxA",
+     "signature": "SigV27smV1yRn8GCj19zpKHpteyeAywGQrhYUaBuFHUC3wWkBWRTT4dki8wq4TvL3WmRkjbVP7CHk47gnzUFN5Ukau1Ai",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+     "signature": "SigV2Z54hpKf8ra14xqorBsM57bY1fqQrmBvMVCUf3bXb9roRAYbg7aKzfTEVqSLT4V2xAMPwSgaWHAMp3dJgjDJNxyf2",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+     "signature": "SigV2LkFVGokwsPKZgPEN282Y9EegsAE4YfuyvZdVL2UCniXcPxjmpsQZe9MdP8ccx5S4abWWYXcZHbvYP6GaqeHJpWi2",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "77ZqRUBNypoHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQcBpgxA",
+     "signature": "SigV2BkEtce2mgs9Ru9zKrEAtjLf4W9gbdcUboUemrQJRUjRVK5q5mnUi6PT8fn5M6MWFrPFr1YetabsZsQ9K2n2oyyKU",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+     "signature": "SigV2RRqX7bVjYcHG4Q31uPH7PdJAmaLhxwhMrNNNt1kqcM7BW65qHrPx7kcN3UY5GomLAFHeeJyFuSuK4RLKELVJShje",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+     "signature": "SigV2MRegYU5Hehy64wxn8YoMbFPsaPJZEvNSwMBxUihiV6jTEk9aFVNUuPhgiF8N32aXDz6CYPsPTBVDTGumGxV6G2so",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "77ZqRUBNypoHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQcBpgxA",
+     "signature": "SigV2FdPYk6HpnzD4CUPe94RR6uAjtakrmTvvFR3DWTQTs6ec2jYMVDhCfS5XEsuNQEWKaqSnhrfkUEmLyQuJbpAckYsL",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+     "signature": "SigV2VTe1MXggEtVP22xikYRGaKZX6kZ1SULxDZwjQ7ccVJmuUv1KHwz2ydbAUYFCgyp8HNV67CvbQR7mSJnG6bcPyL6w",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+     "signature": "SigV23wtTefJavX4NqBzungpbywZy2jYesCCGA1hkF1MrhFAv1fq5E4EhVFvi1zhxQHGvkx1ragmKZx29RceAtzFrW7hA",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "77ZqRUBNypoHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQcBpgxA",
+     "signature": "SigV2LHr6WQaCDnrHLtTWMBk9aNBadsJdL5NgECngJEBEEt17Vr6ETBuY26771FwEU43ZacM1o75uMht8BdtwMuL1S8Av",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+     "signature": "SigV2dT35ouRukCRDFVHMwoBY2ghY9A5DZr3r8MvXrPyoLfpq6GWviEWEXi5e95naJChTSN8mBjz2QJT4cSK4YLJgzdyQ",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+     "signature": "SigV2NuePptNpEsyKCoWYK5156FcFaUuariZvz6eGAfero6qNPgMXb5Zmw22R1TBqbtZW7NRQpuYMyx7uUYKKmgiewLKi",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "77ZqRUBNypoHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQcBpgxA",
+     "signature": "SigV228p5VbAFdyKYoR87n3i3ZsMRRKv4QF15xXC4ujiC6qp5YAhBMJ9GNAn8dUVb7xy2drVd5Dk8FG9ECaKFA9SUYSbk",
+     "oracle_verify": true,
+     "oracle_version": 2
+    }
+   ],
+   "negative": [
+    {
+     "what": "wrong address (subaddress 0/1 for a 0/0 signature)",
+     "verify": false
+    },
+    {
+     "what": "message changed",
+     "verify": false
+    }
+   ]
+  },
+  "mainnet": {
+   "primary_address": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+   "private_view_key": "d6e37b8d06f9de58a17a0075a68cf2355223b53e8dfc939b023f4171600f5202",
+   "public_view_key": "143e848725803bb70d2c3ce4e5558090cf83fcab58104dfcb86d8dd6ffcd321e",
+   "public_spend_key": "42f96abbbbaa75b3b59c0fcb5252ef08aa89463054efd8ab559cdb4a431bba45",
+   "subaddresses": {
+    "0/1": "8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw",
+    "0/2": "88XsJwGTougcoZkYGJ63PSCPSfF4USN8UG3tYJGjKwPDJzoQqAYDM1m1TC7dPh6xNgMGF9PgsUa56iU2JwTPqJktGb59Ppc",
+    "1/0": "8AxbD2UeiqCTgtJyhxWmfd7zrQzvDEcSuShUzbcUbEbhJXUBY3X3RCaFiNRb9MRTeXZM3Y3VFmtWtfv2kL45yBV8L25kmmS",
+    "1/1": "87msWK6LdRuHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQdhqdJy",
+    "2/7": "8Ag5Cg6TZKS98HzUAiJvPqbQ9QqqB7nhiiKJKefCXeSqZgtGgfikACLJ1Do4ptJDRH3HZezRfQArkUvEAKdPocwK8a99m6K"
+   },
+   "signatures": [
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+     "signature": "SigV25JarpSvt2ccKUZadWmHBUu6KugyxtTugsTaEDNAH5R1k1xHj1X1LgmxcNzcbyX6Vp3PaemWarKPzUEe9sSjB2KdP",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw",
+     "signature": "SigV2QNoa7LgHKtDJqaPYK8hwXgaGuEf1NHxNN8YMXZLDC2GfHeyCvvFLLjsjjSPXbdXvQNT8kpZh4eJrgfwQa2VwC1xy",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "87msWK6LdRuHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQdhqdJy",
+     "signature": "SigV2JWM3jPgf6XM6tqPFdza6f62ipXcHJPDuYCm741J235usBpbfA3NbosbVw4Dc1VvWJ5cLcEd6wvkDqfJB3YgjQj4V",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+     "signature": "SigV2Jtj724TLvdgc3zKq3a4BFy6SAmT81ZgJyfx7MBEw1muD3rfPBw7CgMq2roUZd7ATSjR2vEdsHEJzMVy1ufh8fpC7",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw",
+     "signature": "SigV2XLz5LpUBMMDQg2JwjuHYbwPKXRYbCV53DY85DpQXXS964dSNsXgHhqU5R2Qs95H1se4zAA7rqBhdRYGPyZXmqEPs",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "87msWK6LdRuHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQdhqdJy",
+     "signature": "SigV24hUfLtPkXfAe4DRPCcgPRSQm68VbhCFytPZb7JUMdRafgG4djAdtZJDG122xjo77Zhd2jnUJRnkomajwu8fdgiZn",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+     "signature": "SigV2Vp4e8T8XnMzQ1Q7CUCctDwJvCZkRPw5mNgRgswswqTD7ModwfhQ5XcVbtQFkqDx7b83Q9zDdmruBtS2q3PTdSjrZ",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw",
+     "signature": "SigV2ZoY6N3LA6xUCwYiDFiQKPs2nqcjktYeuHMENFbG2rYgx7zCJNap5hMZSt8mguN7gGMdHjNWSvPW9p9GYPMRjQy9b",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "87msWK6LdRuHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQdhqdJy",
+     "signature": "SigV2Jxxm9G2bb9e8iVSns2TCoMSfeCo6SuwNzCbSd5WBoKaQ6AAB9iZZbtNNxMy9G1cH22S6P6SNeKirm5zoVxMe2B53",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+     "signature": "SigV2Qu9QpXXu6ea93oE6pkX2c5XKRZKg1BBYocy95VNzZGFDGgzZ1H3ewZh6bf77FwNrJ2QLt1u8tREc4E46JhVVAaUZ",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw",
+     "signature": "SigV2RyMk3bAycToMdLXzp8MhBUTHCh79rYPyjFp4cJtgBEW8jgWUVEQQ44oPrNY5aWmasfQG5mJbFPKb9ie4Mxzfw3xS",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "87msWK6LdRuHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQdhqdJy",
+     "signature": "SigV2fJT4fRnY9uFARD5vr8iCHe7eVnNCnqTVFUBsEaS3T31oGvmEMLG9ng7Yz8Mbksd842VTM51RyJhXd4JgbKk7UgRb",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+     "signature": "SigV2Bnpq32wpbaH8yTgYNoGmEJjL6GabDZHpa1xzyxVf6wP582uJkHizntrjTnsueaaKqBYeuoz1MUYLiKZisZK5tTq2",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw",
+     "signature": "SigV2bBdQPWasNL7LzVxscpKB3RQEwsp1ZMKzWAmYYbCScvakLAcovSjBEeWbKL9ywainfwjZkSxW5w3E8YjXHxbHftgQ",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "87msWK6LdRuHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQdhqdJy",
+     "signature": "SigV2C756fNsnhmkQDJpqUGXQwZ1qjSnaYpDRobnW6MgDQJwhPPXh3npdYJk9QCkhpNoH2aQzcwykRi7PzAf3dCeJxoY7",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+     "signature": "SigV2PC7n8HsjvMr81DoMMksNeiCYcEbicKw1oGT1FatHC81uVqfSpTcaCYWcfZp4UocMP2HTNpuBCRLjLZnNKefQhGdT",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw",
+     "signature": "SigV2UATBXnmvBxi1ecTifgsbJhBotEk9VrU4dMxd8EEyS5KWQkHg6yyN4rJguB1FjBz9WP6SEpqLcrnnHeXu5A462Tfj",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "87msWK6LdRuHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQdhqdJy",
+     "signature": "SigV2KuY6hB7eZ3LDFtyzNY8kCPXEzG6NPRMPZE1MDRK9QVN5Jnpda67WBvz36w1Hh6A6N6D2jQwJGBaiDU5Y2UDJ1mPA",
+     "oracle_verify": true,
+     "oracle_version": 2
+    }
+   ],
+   "negative": [
+    {
+     "what": "wrong address (subaddress 0/1 for a 0/0 signature)",
+     "verify": false
+    },
+    {
+     "what": "message changed",
+     "verify": false
+    }
+   ]
+  },
+  "testnet": {
+   "primary_address": "9uhrexkctcLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4Ps39mP",
+   "private_view_key": "d6e37b8d06f9de58a17a0075a68cf2355223b53e8dfc939b023f4171600f5202",
+   "public_view_key": "143e848725803bb70d2c3ce4e5558090cf83fcab58104dfcb86d8dd6ffcd321e",
+   "public_spend_key": "42f96abbbbaa75b3b59c0fcb5252ef08aa89463054efd8ab559cdb4a431bba45",
+   "subaddresses": {
+    "0/1": "BgiLkp9FnoqNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1LhBrNA",
+    "0/2": "BeFzbtTpaXYcoZkYGJ63PSCPSfF4USN8UG3tYJGjKwPDJzoQqAYDM1m1TC7dPh6xNgMGF9PgsUa56iU2JwTPqJktGfEG4ou",
+    "1/0": "BggiVyg1VT4TgtJyhxWmfd7zrQzvDEcSuShUzbcUbEbhJXUBY3X3RCaFiNRb9MRTeXZM3Y3VFmtWtfv2kL45yBV8L1ot1rc",
+    "1/1": "BdVzoGHhQ3mHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQfSk8sz",
+    "2/7": "BgQCVdHpKwJ98HzUAiJvPqbQ9QqqB7nhiiKJKefCXeSqZgtGgfikACLJ1Do4ptJDRH3HZezRfQArkUvEAKdPocwK8c7Y735"
+   },
+   "signatures": [
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "9uhrexkctcLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4Ps39mP",
+     "signature": "SigV2LeXijnHXjNQTjNshs1NRh3goJehePbzRUaKZJyZMJbbYjak5tvEUgNt3dFH7ggUQATc5wWRU4GVB4HJeyVLAM9nZ",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "BgiLkp9FnoqNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1LhBrNA",
+     "signature": "SigV2csJRtn45Wcs7igVwRe9qsCVxUmfLUF33JQb28Rs6hfQddEi3NpwCPjfVVxHbJ5b9HyTzKHtDqTYi233awziKgMvV",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "BdVzoGHhQ3mHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQfSk8sz",
+     "signature": "SigV2DT9iMGX1LCuaxEx8A1xEpHXQKLehCJpefepnwkaHwNFNUET9CR3NFtr1aQKNde31UWTAXnLPuewH5Tgp9ssd5597",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "9uhrexkctcLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4Ps39mP",
+     "signature": "SigV24BQ6KeJYDPzU9CXduU75NW1L5TdqiYcidF5q6yDztYAYM3PTYUBT8m9dxWXYkFcoEbPKPszbeUtKHTFSNW9GdykR",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "BgiLkp9FnoqNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1LhBrNA",
+     "signature": "SigV2AZ6V1tKZMXa6nGrG66deGvXPpLKoHGMXYKYTftkWJ8EARYv52KAgdDCieawroTysjg3L4FXULXkALjRtUGv3SJ6Y",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "BdVzoGHhQ3mHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQfSk8sz",
+     "signature": "SigV2XrzZudTMBPDeNqBE7Jh3BCYTBFeFtANWJQ4LThm1PojTZtFNadS6VawDHAuRhptqL3KAi8NFcPaTW3bWg1J9WdSe",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "9uhrexkctcLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4Ps39mP",
+     "signature": "SigV2CEcWwPgFkRS4N6nuNKAA7gg9q3wb5CLRJSgHbRQ5KZEgjhKEqXS2ZUdV3iJseZCWn1bnpqE8RZrM9HPWXaGVwDC6",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "BgiLkp9FnoqNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1LhBrNA",
+     "signature": "SigV2WWacaxzehEUDzBaMdXhmyd2NmVPyMBkAz1FspGZTwBQUFcJuALisJaTDDJKbC8ewZj7fVAxghfYF3SXxdZF9W12D",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "BdVzoGHhQ3mHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQfSk8sz",
+     "signature": "SigV2fyrdZrnR19j1aLcu9YPVtDEkaKfCnTowRBsazeLupSQJCo8if9D9VTsYMAPhHxQpUuLZQ1igKzpdg4pMHyG8sCye",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "9uhrexkctcLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4Ps39mP",
+     "signature": "SigV2Gh5cTFqJEztj2r3PoCJiVNVJCgTTvUyVyK1798ycMN5Z1Bw4u4VX6Yv36bstvwz6k3VStm4T9Uz7xYJkLr93A4nh",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "BgiLkp9FnoqNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1LhBrNA",
+     "signature": "SigV28cJUji2wx4iYMjbg4DZzL87H5MTrxmgLNWNVxekujA2ZHtZvsdXtPdr5szLNEenA1bauePDZLMUukdk9tL2HpHj7",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "BdVzoGHhQ3mHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQfSk8sz",
+     "signature": "SigV21c2EHT1uTWxS9sCNqbhX25dWTt8P6Ex6CbzCwqGxj55oj13QUAoXNJv6sFGf92RSfMM9z1yfC3cNUPjjxYsF3Acj",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 0,
+     "address": "9uhrexkctcLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4Ps39mP",
+     "signature": "SigV2BoWPfAgVdwjBoH6AvhH8W55AQDQVTazNKX8etBB8x1He9jvEz34vJivDtGAgYGTLoUEWEw2gBaFahgJtpFdKbFPk",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 0,
+     "index": 1,
+     "address": "BgiLkp9FnoqNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1LhBrNA",
+     "signature": "SigV2PnZaJvYEc1Z6spGUCNBeeVAz14XfAvDMPFcRKbmrdK4b3ZVqYngkPqJ1BDRHHfyAs39NeHgHje6Aq4veuSfCG3Ct",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "view",
+     "account": 1,
+     "index": 1,
+     "address": "BdVzoGHhQ3mHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQfSk8sz",
+     "signature": "SigV24HSnTzwUiuFhW4XnPzTEWQXPBde2wmpurdCGqp4bv7hNUrK47X3oUFV9W2q3UubahE27b5crU3WZz5zMKxzaB29F",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 0,
+     "address": "9uhrexkctcLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4Ps39mP",
+     "signature": "SigV2dTKX4itLtiADeA3Z8TEfKtSoM8CriosGL1RXjXPGeV5zUdrK1hokXSW1CdcFrpjsYN7fXwmWcTwZDFf8q7E4j3BZ",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 0,
+     "index": 1,
+     "address": "BgiLkp9FnoqNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1LhBrNA",
+     "signature": "SigV2VMyubaioRCk3tzZ9mtit2DDHeTn6mJTY5T7eQLdwGfvq7pdHCuiTHHqAfsn4bPSwk9MhKZUmHLedBJuS1ifw9htt",
+     "oracle_verify": true,
+     "oracle_version": 2
+    },
+    {
+     "message": "sigelo\n{\"addr\":\"x\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:z1\",\"method\":\"monero\",\"nonce\":\"z1\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+     "mode": "spend",
+     "account": 1,
+     "index": 1,
+     "address": "BdVzoGHhQ3mHAYCkePhRHqDn5KtoCvwFRK1kEohMGHaURg2adMchE6SXiDntQyHiVAMGkyJ4WSUe18GbTkwR5ynUQfSk8sz",
+     "signature": "SigV2L9YFk6h7zRXCcw3LuV87SMQob85zgoUSc1kRvz1e4B5hcbF9YSjcjhtGxrZLqpsYuU29FBH6MMH524fdeBhqQMxq",
+     "oracle_verify": true,
+     "oracle_version": 2
+    }
+   ],
+   "negative": [
+    {
+     "what": "wrong address (subaddress 0/1 for a 0/0 signature)",
+     "verify": false
+    },
+    {
+     "what": "message changed",
+     "verify": false
+    }
+   ]
+  }
+ },
+ "wallet_rpc_oracle": {
+  "note": "Oracle: live monero-wallet-rpc (RPC version 1.30, v0.18.x) on stagenet, 2026-09-23. rpc_verify is its stateless verify {data: message, address, signature} result. sigelo_accepts is what verifySigeloMoneroSigAddr(JSON.parse(message minus its \"sigelo\\n\"), address, signature).good must be (SPEC §6.2): subaddresses accepted against their own (D, C), integrated refused although wallet2 accepts it. The four \"wallet-rpc sign at (0,i)\" entries were re-recorded 2026-09-29 (same RPC 1.30, --offline) from a wallet restored from this file's private_spend_key, so the addresses they sign for are the documented wallet's own (networks.stagenet primary_address and subaddresses 0/1), not a live one.",
+  "entries": [
+   {
+    "what": "test-vectors.json vectors.binding_monero_subaddress_spend, sig_addr under the stagenet spelling of its addr",
+    "vector": "binding_monero_subaddress_spend",
+    "kind": "subaddress",
+    "message": "sigelo\n{\"addr\":\"8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zR3tqX8YpYZ96nxJ2jkHZcd\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+    "signature": "SigV2WTQ1HbgE5vRU9EGBV6stpWidsfXdVeTrPSFBAHDUj4iMjNifRYQqC9WRx7nKxpbY61DSEekUkB3cYBadn1sDrCnd",
+    "sigelo_accepts": true,
+    "rpc_verify": {
+     "good": true,
+     "signature_type": "spend",
+     "version": 2
+    }
+   },
+   {
+    "what": "test-vectors.json vectors.binding_monero_subaddress_view, sig_addr under the stagenet spelling of its addr",
+    "vector": "binding_monero_subaddress_view",
+    "kind": "subaddress",
+    "message": "sigelo\n{\"addr\":\"8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zRfqzFAY9QhSedg5cZnbdSn\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+    "signature": "SigV2bB792cPH2nKdbcS6M3nAaXRgpLzybry6gQtYgR2jDiWPSbAVFYUbGGDYVPn6fzZB1TcoMuHYD5eoXM5zqAGwX8Qf",
+    "sigelo_accepts": true,
+    "rpc_verify": {
+     "good": true,
+     "signature_type": "view",
+     "version": 2
+    }
+   },
+   {
+    "what": "test-vectors.json negative.binding_monero_subaddress_base_sig, sig_addr under the stagenet spelling of its addr",
+    "vector": "binding_monero_subaddress_base_sig",
+    "kind": "subaddress",
+    "message": "sigelo\n{\"addr\":\"8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zRo31zNY1aj6xbpSL8bTeDD\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+    "signature": "SigV2fHchPWHUUYUL1TahvnrhX4AEpxofqi8xrfX5vVQVxsu3crQ9VNEAeF8PULR1k9ccmE4o7FbfQgPKTFE6SkUrpCXa",
+    "sigelo_accepts": false,
+    "rpc_verify": {
+     "good": false,
+     "signature_type": "spend",
+     "version": 0
+    }
+   },
+   {
+    "what": "test-vectors.json negative.binding_monero_subaddress_base_sig, sig_addr under the stagenet spelling of the BASE address",
+    "vector": "binding_monero_subaddress_base_sig",
+    "kind": "standard",
+    "message": "sigelo\n{\"addr\":\"8AzDTrwu2ByNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RGmbrw\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zRo31zNY1aj6xbpSL8bTeDD\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+    "signature": "SigV2fHchPWHUUYUL1TahvnrhX4AEpxofqi8xrfX5vVQVxsu3crQ9VNEAeF8PULR1k9ccmE4o7FbfQgPKTFE6SkUrpCXa",
+    "sigelo_accepts": true,
+    "rpc_verify": {
+     "good": true,
+     "signature_type": "view",
+     "version": 2
+    }
+   },
+   {
+    "what": "test-vectors.json negative.binding_monero_integrated_addr, sig_addr under the stagenet spelling of its addr",
+    "vector": "binding_monero_integrated_addr",
+    "kind": "integrated",
+    "message": "sigelo\n{\"addr\":\"4DrzBWurDWkX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m625gToHWcaYU5PFTjz\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zRB5sGLYgiaoQm6ekJZ9aP4\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "5E52GMpos7rX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m625gToHWcaYU4GHCmn",
+    "signature": "SigV22P7HpvutDSjEFT6wGSRpp6VUaEcEETxpwfK5ev6CWdgH35VKd4orK4f3v2VeupJTFYKZJFbA8EGzUMK1WY6jEas3",
+    "sigelo_accepts": false,
+    "rpc_verify": {
+     "good": true,
+     "signature_type": "view",
+     "version": 2
+    }
+   },
+   {
+    "what": "wallet-rpc sign at (0,0), spend mode, over a binding body naming that address",
+    "account": 0,
+    "index": 0,
+    "mode": "spend",
+    "kind": "standard",
+    "message": "sigelo\n{\"addr\":\"54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zQvhomvYxNXUnpowKAwRYrC\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+    "signature": "SigV2Bwa3n7qnEL5QchPbpy1AdVaUbYfeJnw1qdN8J64x3BnDegifLm3gPfoPhBkQC6dMWV665ofuUWtV7Dvfs2yPRxgU",
+    "sigelo_accepts": true,
+    "rpc_verify": {
+     "good": true,
+     "signature_type": "spend",
+     "version": 2
+    }
+   },
+   {
+    "what": "wallet-rpc sign at (0,0), view mode, over a binding body naming that address",
+    "account": 0,
+    "index": 0,
+    "mode": "view",
+    "kind": "standard",
+    "message": "sigelo\n{\"addr\":\"54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zQvhomvYxNXUnpowKAwRYrC\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+    "signature": "SigV2VeFmW12SH3hCu5frMBRVe156esRj8okUaGsnXqDhU6vVFJUeojPTwF68KXsKZc9zPDQ1KxBVwmX2XRCZ1i5mHHN3",
+    "sigelo_accepts": true,
+    "rpc_verify": {
+     "good": true,
+     "signature_type": "view",
+     "version": 2
+    }
+   },
+   {
+    "what": "wallet-rpc sign at (0,1), spend mode, over a binding body naming that address",
+    "account": 0,
+    "index": 1,
+    "mode": "spend",
+    "kind": "subaddress",
+    "message": "sigelo\n{\"addr\":\"7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zQvhomvYxNXUnpowKAwRYrC\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+    "signature": "SigV28rzMW5zUcnsMqBoJGomgmjQCEuhXbbCL5izZk1PtEhupcVmkiGMZ2sjYQAJ1KaJ4nBHHhtzps7upfeAxoi3Saodq",
+    "sigelo_accepts": true,
+    "rpc_verify": {
+     "good": true,
+     "signature_type": "spend",
+     "version": 2
+    }
+   },
+   {
+    "what": "wallet-rpc sign at (0,1), view mode, over a binding body naming that address",
+    "account": 0,
+    "index": 1,
+    "mode": "view",
+    "kind": "subaddress",
+    "message": "sigelo\n{\"addr\":\"7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE\",\"exp\":1764979200,\"iat\":1757203200,\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"nonce\":\"zQvhomvYxNXUnpowKAwRYrC\",\"typ\":\"binding\",\"v\":\"sigelo/0\"}",
+    "address": "7AnBP22wNasNkoeGgo6qsZ74EGxYSEHWtHW1ESHASN5JM3ySgMoNrvDZo4E2j5QyWnRCv6T8aiKnMTAtWgxLFLaK1RVRapE",
+    "signature": "SigV2X9RAgq1kiVfWQSzXi5xT471wpcJGvF88rjeMpEzv9tko5Tj32fS6k7fC7xg1tYPh641WhvLbCHkE5EhvLY6nb3re",
+    "sigelo_accepts": true,
+    "rpc_verify": {
+     "good": true,
+     "signature_type": "view",
+     "version": 2
+    }
+   }
+  ]
+ }
+}

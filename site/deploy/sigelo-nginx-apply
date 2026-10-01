@@ -1,0 +1,172 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# sigelo-nginx-apply — installs /var/www/sigelo.io/deploy/nginx.conf as the sigelo.io nginx
+# config, tests it, reloads nginx; restores the previous file if `nginx -t` fails.
+#
+# Installed by site/deploy/server-setup.sh as /usr/local/sbin/sigelo-nginx-apply (root:root
+# 0755), with one sudoers line letting the unprivileged deploy user `sigelo` run it and nothing
+# else as root:   sigelo ALL=(root) NOPASSWD: /usr/local/sbin/sigelo-nginx-apply
+#
+#   sudo -n /usr/local/sbin/sigelo-nginx-apply [--os debian|alpine] [--check FILE]
+#
+# --check FILE only runs the allowlist below over FILE and exits (runs anywhere, no root: the
+# authoring host uses it to test site/deploy/nginx.conf).
+#
+# Why an allowlist: the source file is writable by `sigelo`, and nginx parses its config as root.
+# Without a filter, whoever holds the deploy key could point error_log at /etc/cron.d, `include`
+# any file or load a module, i.e. become root. So the file is copied to a root-owned temp file
+# first (no swap between check and install), and every statement must be on its own line, start
+# with an allowlisted directive, and use the fixed paths below for root, logs and certificates.
+# What a stolen deploy key can still do: change the site's content, headers and redirects. That
+# is the intended scope, not a proof (the filter is reviewed, not audited).
+set -eu
+
+WEBROOT=/var/www/sigelo.io
+DOMAIN=sigelo.io
+SRC=$WEBROOT/deploy/nginx.conf
+BACKUPS=/var/backups/sigelo-nginx
+
+say() { printf '[sigelo-nginx-apply] %s\n' "$*"; }
+die() { printf '[sigelo-nginx-apply] ERROR: %s\n' "$*" >&2; exit 1; }
+
+check_conf() { # $1 = file; prints every offending line, returns 1 if any
+  # The tokenizer follows nginx's own (ngx_conf_read_token): a quote opens a string only at the
+  # start of a token and must be followed by a space, ; or {; a backslash escapes the next byte;
+  # # starts a comment only at the start of a token. Whatever it cannot place is rejected:
+  # quotes inside a token, text after the terminator, strings spanning lines.
+  awk -v W="$WEBROOT" -v D="$DOMAIN" '
+    function bad(msg) { printf "  line %d: %s: %s\n", NR, msg, raw; err = 1; return 0 }
+    function tokenize(l,    i, j, c, q, L) {   # fills tok[1..ntok] and term; 0 if malformed
+      ntok = 0; term = ""; L = length(l); i = 1
+      while (i <= L) {
+        c = substr(l, i, 1)
+        if (c == " " || c == "\t") { i++; continue }
+        if (term != "") return bad("text after the end of the statement")
+        if (c == ";" || c == "{" || c == "}") { term = c; i++; continue }
+        if (c == "#") return bad("comment after a statement (comments go on their own line)")
+        if (c == "\"" || c == "\047") {
+          q = c; j = i + 1
+          while (j <= L && substr(l, j, 1) != q) { if (substr(l, j, 1) == "\\") j++; j++ }
+          if (j > L) return bad("unterminated quoted string (strings stay on one line)")
+          tok[++ntok] = substr(l, i + 1, j - i - 1)
+          c = substr(l, j + 1, 1)
+          if (c != "" && c != " " && c != "\t" && c != ";" && c != "{") return bad("text right after a quoted string")
+          i = j + 1; continue
+        }
+        j = i
+        while (j <= L) {
+          c = substr(l, j, 1)
+          if (c == " " || c == "\t" || c == ";" || c == "{" || c == "}") break
+          if (c == "\"" || c == "\047") return bad("quote inside a token")
+          if (c == "\\") j++
+          j++
+        }
+        tok[++ntok] = substr(l, i, j - i); i = j
+      }
+      if (term == "") return bad("statement does not end on its line with ; or {")
+      return 1
+    }
+    BEGIN {
+      n = split("map log_format server_tokens server listen server_name return access_log error_log " \
+        "ssl_certificate ssl_certificate_key ssl_protocols ssl_ciphers ssl_prefer_server_ciphers " \
+        "ssl_session_timeout ssl_session_cache ssl_session_tickets ssl_reject_handshake root index " \
+        "log_not_found types default_type charset charset_types gzip gzip_vary gzip_min_length " \
+        "gzip_types add_header location if rewrite try_files http2", a, " ")
+      for (i = 1; i <= n; i++) allowed[a[i]] = 1
+      depth = 0; block = ""; blockdepth = 0
+    }
+    {
+      raw = $0; line = $0
+      sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line)
+      if (line == "" || line ~ /^#/) next
+      if (!tokenize(line)) next
+      if (term == "}") {
+        if (ntok != 0) { bad("} must be alone on its line"); next }
+        if (depth == 0) { bad("unbalanced }"); next }
+        depth--; if (depth < blockdepth) { block = ""; blockdepth = 0 }
+        next
+      }
+      if (ntok == 0) { bad("empty statement"); next }
+      if (block == "map") { if (term != ";" || ntok != 2) bad("map entry is not key value;"); next }
+      if (block == "types") {
+        ok = (term == ";" && ntok >= 2 && tok[1] ~ /^[a-z]+\/[a-z0-9.+-]+$/)
+        for (i = 2; i <= ntok; i++) if (tok[i] !~ /^[a-z0-9]+$/) ok = 0
+        if (!ok) bad("types entry is not type/subtype ext ...;")
+        next
+      }
+      d = tok[1]
+      if (!(d in allowed)) { bad("directive not allowed: " d); next }
+      if (term == "{") {
+        depth++
+        if (d == "map" || d == "types") { if (block != "") bad("nested map/types"); block = d; blockdepth = depth }
+        else if (d != "server" && d != "location" && d != "if") bad("block not allowed: " d)
+        next
+      }
+      v = (ntok == 2) ? tok[2] : ""
+      if (d == "root" && v != W "/dist" && v != "/var/www/acme") bad("root must be " W "/dist or /var/www/acme")
+      if (d == "access_log" && !(ntok == 2 && v == "off") && !(ntok == 3 && tok[2] == "/var/log/nginx/sigelo/access.log" && tok[3] == "sigelo_noip")) bad("access_log must be off or /var/log/nginx/sigelo/access.log sigelo_noip")
+      if (d == "error_log" && !(ntok == 3 && tok[2] == "/var/log/nginx/sigelo/error.log" && tok[3] ~ /^(crit|alert|emerg|error|warn)$/)) bad("error_log must be /var/log/nginx/sigelo/error.log <level>")
+      if (d == "ssl_certificate" && v != "/etc/letsencrypt/live/" D "/fullchain.pem") bad("ssl_certificate must be the " D " certificate under /etc/letsencrypt/live")
+      if (d == "ssl_certificate_key" && v != "/etc/letsencrypt/live/" D "/privkey.pem") bad("ssl_certificate_key must be the " D " key under /etc/letsencrypt/live")
+      if (d == "log_format" && (tok[2] != "sigelo_noip" || ntok != 3)) bad("only log_format sigelo_noip, one quoted format")
+      if (d == "ssl_session_cache" && !(ntok == 2 && v ~ /^shared:[a-z_]+:[0-9]+m$/)) bad("ssl_session_cache must be shared:<name>:<n>m")
+    }
+    END { if (depth != 0) { printf "  unbalanced braces at end of file (depth %d)\n", depth; err = 1 } exit err }
+  ' "$1"
+}
+
+os=""; check_only=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --os) [ $# -ge 2 ] || die "--os needs debian or alpine"; os=$2; shift 2 ;;
+    --check) [ $# -ge 2 ] || die "--check needs a file"; check_only=$2; shift 2 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+if [ -n "$check_only" ]; then
+  check_conf "$check_only" || die "$check_only fails the allowlist (lines above)"
+  say "$check_only passes the allowlist"; exit 0
+fi
+
+[ "$(id -u)" = 0 ] || die "run as root (sudo -n $0)"
+if [ -z "$os" ]; then if [ -d /etc/nginx/http.d ]; then os=alpine; else os=debian; fi; fi
+case $os in
+  debian) dest=/etc/nginx/conf.d/sigelo.io.conf ;;
+  alpine) dest=/etc/nginx/http.d/sigelo.io.conf ;;
+  *) die "--os must be debian or alpine" ;;
+esac
+[ -f "$SRC" ] || die "no $SRC (deploy.sh uploads it)"
+
+tmp=$(mktemp /tmp/sigelo-nginx.XXXXXX)
+trap 'rm -f "$tmp"' EXIT
+cp "$SRC" "$tmp"   # from here on only the root-owned copy is read
+say "allowlist check of $SRC"
+check_conf "$tmp" || die "$SRC fails the allowlist (lines above); nothing installed"
+
+mkdir -p "$BACKUPS" /var/log/nginx/sigelo
+if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+  say "$dest unchanged"
+  say "nginx -t"; nginx -t
+  say "no reload needed"; exit 0
+fi
+
+backup=""
+if [ -f "$dest" ]; then backup=$BACKUPS/sigelo.io.conf.$(date -u +%Y%m%dT%H%M%SZ); cp -p "$dest" "$backup"; say "previous config saved as $backup"; fi
+say "install $dest"
+install -m 0644 -o root -g root "$tmp" "$dest"
+say "nginx -t"
+if ! nginx -t; then
+  if [ -n "$backup" ]; then cp -p "$backup" "$dest"; say "restored $backup"; nginx -t || true; else rm -f "$dest"; say "removed the failing $dest"; fi
+  die "nginx -t failed; the running nginx is untouched"
+fi
+say "reload nginx"
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  systemctl reload nginx 2>/dev/null || systemctl restart nginx
+elif command -v rc-service >/dev/null 2>&1; then
+  rc-service nginx reload 2>/dev/null || rc-service nginx start
+else
+  nginx -s reload
+fi
+ls -1t "$BACKUPS"/sigelo.io.conf.* 2>/dev/null | tail -n +11 | while read -r old; do rm -f "$old"; done   # keep 10
+say "done"

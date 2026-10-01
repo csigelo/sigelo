@@ -1,0 +1,19 @@
+{
+  "name": "sigelo-sim",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "description": "Seeded swarm simulation of sigelo agents, worlds and a keeper (see README.md)",
+  "scripts": {
+    "build": "cd ../ts && npm ci --ignore-scripts && npx tsc && cd ../spend && npm ci --ignore-scripts && npx tsc",
+    "sim": "node swarm.mjs && node worlds.mjs && node keeper-swarm.mjs && node keeper-scenarios.mjs",
+    "swarm": "node swarm.mjs",
+    "worlds": "node worlds.mjs",
+    "keeper": "node keeper-swarm.mjs",
+    "keeper-scenarios": "node keeper-scenarios.mjs",
+    "mutants": "node mutants.mjs",
+    "worlds-plant": "node worlds.mjs --plant bare-genesis --no-go",
+    "keeper-mutants": "node keeper-scenarios.mjs --mutants",
+    "plants": "node worlds.mjs --plant bare-genesis --no-go && node keeper-scenarios.mjs --mutants && node keeper-swarm.mjs --selftest && node mutants.mjs"
+  }
+}

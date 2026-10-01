@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/genesis.json",
+  "title": "sigelo/0 genesis",
+  "description": "An identity's genesis document (SPEC §4, §3.1). Its DID is did:sigelo: + multibase(SHA-256(JCS(genesis))); no key outside the §3.1 row. Also the shape of a rotation's next_genesis and of each bundle issuers entry.",
+  "type": "object",
+  "required": ["v", "typ", "key", "recovery", "created", "nonce"],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "$ref": "common.json#/$defs/version" },
+    "typ": { "const": "genesis" },
+    "key": { "$ref": "common.json#/$defs/publicKey" },
+    "recovery": {
+      "description": "The recovery commitment, or null: theft of the identity key is then terminal.",
+      "anyOf": [{ "$ref": "common.json#/$defs/commitment" }, { "type": "null" }]
+    },
+    "created": { "$ref": "common.json#/$defs/created" },
+    "nonce": { "$ref": "common.json#/$defs/nonce", "description": "16 random bytes by default; verifiers check the form and the 64-character bound, not the byte length (SPEC §2)." }
+  }
+}

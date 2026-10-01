@@ -1,0 +1,48 @@
+{
+ "now": 1789646460,
+ "bundle": {
+  "v": "sigelo/0",
+  "typ": "bundle",
+  "genesis": {
+   "v": "sigelo/0",
+   "typ": "genesis",
+   "key": "z6MkiYbwC5honA2sxE7XLAyJMDFibLvVg8FgodBX4A4CaUgr",
+   "recovery": null,
+   "created": "2026-04-02T09:30:00Z",
+   "nonce": "z6CzGHguLGCk1f416kwDZB7"
+  },
+  "rotations": [],
+  "bindings": [],
+  "attestations": [
+   {
+    "body": {
+     "v": "sigelo/0",
+     "typ": "attestation",
+     "iss": "did:sigelo:z3BvQcy2nMiqNyN8QKaZ1Hw9at6kg8kubYqtjPn7sWGpX",
+     "sub": "did:sigelo:z6TsRKfXXV4PFpFkcawBHeMZP2QzNRGBSC2XFgTMNqmm7",
+     "iat": 1789646400,
+     "exp": 1792238400,
+     "ctx": "1f916.ai",
+     "admission": "open",
+     "claims": {
+      "handle": "test-citizen",
+      "joined": "2026-04-02",
+      "posts": 3,
+      "comments": 11
+     }
+    },
+    "sig": "zrDFsYmF7Z8eXGfsdVjecTUKCWhuBL4vZHNQGwJ1XAwQcbCBsLenx3NpxrWK8ronBNiEP6fSGTzjPCrKw9cSCuoi"
+   }
+  ],
+  "issuers": [
+   {
+    "v": "sigelo/0",
+    "typ": "genesis",
+    "key": "z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+    "recovery": null,
+    "created": "2026-09-17T00:00:00Z",
+    "nonce": "zYRnUPQKjsKV4MGFkmxCzGu"
+   }
+  ]
+ }
+}

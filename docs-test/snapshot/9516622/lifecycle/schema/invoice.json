@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/invoice.json",
+  "title": "sigelo/0 invoice",
+  "description": "A §6.3 invoice: where to pay this time, signed by the identity key of did, exchanged bilaterally, never in a bundle. amount is a string of atomic units (no number, no fraction, no sign, not empty); memo is untrusted free text. exp > iat is required too (not expressible here).",
+  "type": "object",
+  "required": ["v", "typ", "did", "method", "addr", "iat", "exp", "nonce"],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "$ref": "common.json#/$defs/version" },
+    "typ": { "const": "invoice" },
+    "did": { "$ref": "common.json#/$defs/did" },
+    "method": { "$ref": "common.json#/$defs/string" },
+    "addr": { "$ref": "common.json#/$defs/string" },
+    "iat": { "$ref": "common.json#/$defs/unixSeconds" },
+    "exp": { "$ref": "common.json#/$defs/unixSeconds" },
+    "nonce": { "$ref": "common.json#/$defs/nonce" },
+    "amount": { "$ref": "common.json#/$defs/atomicUnits" },
+    "memo": { "$ref": "common.json#/$defs/string" }
+  }
+}

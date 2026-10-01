@@ -1,0 +1,13 @@
+[Unit]
+Description=sigelo soak health check: notify and log when UNHEALTHY
+# check.mjs --notify: on UNHEALTHY, one line in soak-alerts.log and a desktop notification
+# (notify-send, if the session bus is reachable); one more line when it is HEALTHY again.
+# It exits 1 while UNHEALTHY, so the unit shows failed too (systemctl --user --failed).
+# No clock condition: a host clock set back is one of the things it reports.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node %h/.local/share/sigelo-soak/app/spend/soak/check.mjs --notify
+# It asks the keeper's /health and the wallet-rpc with 30 s timeouts each.
+TimeoutStartSec=5min
+UMask=0077

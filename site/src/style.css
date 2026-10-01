@@ -1,0 +1,33 @@
+/* sigelo.io — one stylesheet, no web fonts, no scripts. Light by default, dark by preference. */
+:root { --bg: #fdfdfb; --fg: #1d1d1b; --muted: #5d5d58; --line: #d9d9d2; --code: #f1f1ec; --link: #0b5cad; --warn-bg: #fff6d6; --warn-line: #d8b545; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151514; --fg: #e6e6e1; --muted: #a3a39c; --line: #3a3a36; --code: #232321; --link: #7fb6f0; --warn-bg: #2d2711; --warn-line: #8a7426; }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0 auto; max-width: 52rem; padding: 0 16px 3rem; background: var(--bg); color: var(--fg);
+  font: 1rem/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-wrap: break-word; }
+a { color: var(--link); }
+header { border-bottom: 1px solid var(--line); padding: 1rem 0 .5rem; }
+.site { margin: 0 0 .5rem; color: var(--muted); }
+.site a { color: var(--fg); font-weight: 700; text-decoration: none; }
+nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .25rem .9rem; font-size: .95rem; }
+nav a[aria-current="page"] { color: var(--fg); font-weight: 700; text-decoration: none; }
+.status { margin: .75rem 0 .25rem; padding: .5rem .75rem; background: var(--warn-bg); border-left: 4px solid var(--warn-line); font-size: .9rem; }
+main { padding-top: .5rem; }
+h1, h2, h3, h4 { line-height: 1.25; margin: 1.6em 0 .5em; }
+h1 { font-size: 1.7rem; margin-top: 1rem; }
+h2 { font-size: 1.3rem; border-bottom: 1px solid var(--line); padding-bottom: .2em; }
+h3 { font-size: 1.1rem; }
+code, pre { font: .88em/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code); border-radius: 3px; }
+code { padding: .05em .3em; }
+pre { padding: .75rem; overflow-x: auto; }
+pre code { padding: 0; background: none; font-size: 1em; }
+blockquote { margin: 1em 0; padding: 0 1em; border-left: 4px solid var(--line); color: var(--muted); }
+.table { overflow-x: auto; margin: 1em 0; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid var(--line); padding: .35em .55em; text-align: left; vertical-align: top; }
+th { background: var(--code); }
+.center { text-align: center; } .right { text-align: right; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 2em 0; }
+footer { margin-top: 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }

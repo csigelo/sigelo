@@ -1,0 +1,28 @@
+{
+  "name": "sigelo-mcp",
+  "version": "0.1.0",
+  "mcpName": "io.github.csigelo/sigelo",
+  "description": "stdio MCP server for sigelo: portable agent identity tools, plus keeper wallet verbs when SIGELO_WALLET_URL/TOKEN are set",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sigelo-mcp": "server.mjs"
+  },
+  "files": [
+    "server.mjs"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node test.mjs",
+    "prepack": "node ../../release/prepack.mjs pre",
+    "postpack": "node ../../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: the npm account and names are an Owner decision (ROADMAP D1); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+  },
+  "dependencies": {
+    "sigelo": "file:../../ts",
+    "sigelo-agent": "file:../../adapters/moadim",
+    "sigelo-spend": "file:../../spend"
+  }
+}

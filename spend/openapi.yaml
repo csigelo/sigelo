@@ -1,0 +1,990 @@
+openapi: 3.1.0
+# The keeper's HTTP surface as built: derived from spend/service.ts (with policy.ts, tree.ts and
+# approval.ts for the shapes they own) at 2be39a5, cross-read against spend/README.md; the seven
+# README/code disagreements found then were fixed in the code and the README after c261ee8, and
+# this file follows both. Where they ever disagree again, this file follows the code.
+# Signed sigelo objects are referenced from ../schema/ (JSON Schema 2020-12, OpenAPI 3.1's own
+# dialect), so a sigelo bundle or §6.3 invoice here is exactly the SPEC object.
+info:
+  title: sigelo-spend keeper
+  version: 0.1.0
+  summary: The bounded-spending keeper (MONERO.md §4) — loopback HTTP, one agent per bearer token.
+  license: { name: MIT, identifier: MIT }
+  description: |
+    A non-LLM service over one `monero-wallet-rpc`. Each agent is one Monero **account** with its
+    own bearer token, caps, allowlist and derived sigelo identity. The request never names an
+    account: the token decides it. Loopback only (127.0.0.1); stagenet-only and experimental
+    until audited.
+
+    **Errors.** Every error response is `{error, code, …}` (`#/components/schemas/Error`):
+    `error` names the failing check in prose, `code` is that check as a token (the reason's
+    prefix, see `Error.code`), and a cap refusal adds `facts`. Some answers carry more fields
+    beside those (a replay's `txid`, a revoke's `revoked`, /health's `service`); they are listed
+    per response. An unexpected exception on any route is `500 {error: "service: …", code: internal}`.
+
+    **Status codes.** 200 · 202 approval needed · 400 malformed request (`request`, or `body`
+    for a broken stream) · 401 missing, unknown or revoked token (`token`; every route but
+    `/approve`, which takes no token) · 403 refused by policy · 404 unknown route or foreign
+    `?agent=` · 408 body too slow (10 s, `body`) · 409 `ref` reused for a different payment
+    (`repeat`) · 413 body over 1 MB (`body`) · 500 the log could not be written (`log`) or an
+    unexpected exception (`internal`) · 502 the wallet refused, failed or answered malformed
+    (`wallet`, `wallet_locked`, `wallet_funds`, `wallet_offline`, `wallet_slow`) — and, on `/pay` and `/fund`, UNCERTAIN (`code:
+    relay_failed`: the money may have moved; never retry) · 503 the keeper's clock is behind the
+    newest line it signed, or before its build's floor (`clock_behind`, every route that signs:
+    nothing was signed, logged or sent; try later).
+
+    **Free and paid (`licence_required`).** A keeper without a valid licence (spend/README.md
+    "Install") is the free tier: one keeper, one agent, that agent's whole policy. The paid
+    verbs refuse with **403, `code: licence_required`** — a refusal like every other check, not
+    402 — and the message names the feature and why the licence is not valid, then says that
+    nothing was signed, logged or sent: `POST /delegate`, `POST /fund`, `POST /approve`, and a
+    `/pay` that would need an approval (above `approval_above`; refused, never paid without
+    one). `POST /revoke`, `GET /delegates` and every other route are never gated. The licence
+    is a sigelo attestation, verified offline at start, on a policy reload and before each paid
+    verb; an expired one makes the paid verbs refuse from that second and changes nothing else.
+servers:
+  - url: http://127.0.0.1:38090
+    description: The default port (`sigelo-spend serve --port`). Loopback only; never exposed.
+security:
+  - bearer: []
+tags:
+  - name: agent
+    description: The four verbs of MONERO.md §4.2 (`sigelo-wallet balance/receive/pay/history`), plus /bind for the harness.
+  - name: delegation
+    description: MONERO.md §4.3 — agents creating, funding and revoking agents under themselves.
+  - name: approval
+    description: MONERO.md §4.1 step 8 — the second signature above `approval_above`.
+  - name: read
+    description: The caller's own budget, log and health.
+
+paths:
+  /pay:
+    post:
+      tags: [agent]
+      operationId: pay
+      summary: Pay, through every §4.1 check and the two-phase relay.
+      description: |
+        Serialised one at a time with /delegate, /fund, /revoke and /approve (the lane); the body
+        is read whole before the request joins it. Checks, in order: token → agent, `bucket`,
+        request shape and destination, **repeat** (`ref`), allowlist, amount, per-transaction cap,
+        per-period budget, rate, approval. Both caps count amount + fee. A `ref` already logged
+        within `dedupe_seconds` (a pending wait: until its `exp`) is answered from the log with
+        `repeat: true`, and nothing is built. The body is parsed with sigelo's strict parser
+        (duplicate keys refused) because it carries signed objects.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayRequest' }
+      responses:
+        '200':
+          description: Paid (a receipt), already paid (`repeat`, the first receipt), or a dry run (no receipt).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Paid'
+                  - $ref: '#/components/schemas/DryRun'
+        '202':
+          description: Needs an approval (§4.1 step 8). A keeper-signed `pending` line was written; nothing touched the wallet. Run the same pay again after an approver posts to /approve.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalNeeded' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Refused by policy; `code` names the check. A cap refusal carries `facts`. A payment above `approval_above` on a keeper without a licence is `licence_required`: nothing was written, nothing built.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '409':
+          description: This `ref` was used for a different payment within the window. Use a new ref.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    properties: { ref: { type: string } }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '500': { $ref: '#/components/responses/LogFailed' }
+        '502':
+          description: |
+            Either the wallet refused or failed at the build step (nothing relayed; `code`
+            `wallet`, `wallet_offline` (no connection to its daemon), `wallet_slow` (still
+            building when the keeper's 180 s build wait ran out: built with do_not_relay, so
+            never sent; run the same request later), `wallet_locked` or `wallet_funds`, the last two with the account's balance beside them), or **UNCERTAIN** (`code: relay_failed`): relay_tx failed, timed
+            out or answered oddly, or a crash left only the intent line — the transaction may
+            have been broadcast, it stays debited, and it must not be paid again.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/WalletError'
+                  - $ref: '#/components/schemas/Uncertain'
+        '503': { $ref: '#/components/responses/ClockBehind' }
+
+  /approve:
+    post:
+      tags: [approval]
+      operationId: approve
+      summary: An approver's signature over a pending spend-approval request.
+      description: |
+        No bearer token: the approver's signature, its bundle (verified offline, its CURRENT DID
+        in the policy's `approvers`) and the pending line's nonce are the authorisation. Pays
+        nothing; the agent's next run of the same pay does, once.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body, sig, bundle]
+              additionalProperties: false
+              properties:
+                body: { $ref: '#/components/schemas/SpendApproval' }
+                sig: { $ref: '../schema/common.json#/$defs/signature', description: "The approver's current identity key over \"sigelo\\n\" ‖ JCS(body)." }
+                bundle: { $ref: '../schema/bundle.json', description: "The approver's own bundle." }
+      responses:
+        '200':
+          description: Approved; a keeper-signed `approved` line was written.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, ref, agent, approver, nonce, exp, next]
+                properties:
+                  status: { const: approved }
+                  ref: { type: string }
+                  agent: { type: string, description: The requesting agent's name. }
+                  approver: { $ref: '../schema/common.json#/$defs/did' }
+                  nonce: { type: string }
+                  exp: { $ref: '../schema/common.json#/$defs/unixSeconds' }
+                  next: { type: string }
+        '400':
+          description: 'The body is not strict JSON (`code: request`) or its stream broke (`code: body`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Refused; `code` is `approval` and `error` names the check (shape, keeper/net, time, approver bundle, signature, pending request, self-approval, single use) — or `licence_required` on a keeper without a valid licence (approvals are paid), checked first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '500': { $ref: '#/components/responses/LogFailed' }
+        '503': { $ref: '#/components/responses/ClockBehind' }
+
+  /balance:
+    get:
+      tags: [agent]
+      operationId: balance
+      summary: The caller's account balance (never the wallet total) and what its policy still allows.
+      responses:
+        '200':
+          description: The balance and the usage figures /budget gives.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - type: object
+                    required: [agent, account, balance, unlocked_balance, blocks_to_unlock]
+                    properties:
+                      agent: { type: string }
+                      account: { $ref: '#/components/schemas/AccountIndex' }
+                      balance: { $ref: '#/components/schemas/Atomic' }
+                      unlocked_balance: { $ref: '#/components/schemas/Atomic' }
+                      blocks_to_unlock: { type: integer, minimum: 0 }
+                  - $ref: '#/components/schemas/Usage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '502': { $ref: '#/components/responses/Wallet' }
+
+  /receive:
+    post:
+      tags: [agent]
+      operationId: receive
+      summary: A fresh subaddress of the caller's account, labelled with the purpose. Never reused.
+      description: Rate-limited like /pay (`rate_per_minute`, in memory). An empty body is `{}`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                purpose: { type: string, maxLength: 200, description: Stored as the wallet's label for the subaddress. }
+      responses:
+        '200':
+          description: The new subaddress.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [address, account, index]
+                properties:
+                  address: { type: string }
+                  account: { $ref: '#/components/schemas/AccountIndex' }
+                  index: { type: integer, minimum: 1, description: The subaddress's minor index. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '502': { $ref: '#/components/responses/Wallet' }
+
+  /history:
+    get:
+      tags: [agent]
+      operationId: history
+      summary: The caller's payments out (one per payment, its latest line) and transfers in, newest first.
+      parameters:
+        - name: n
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+      responses:
+        '200':
+          description: The caller's entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent, account, entries]
+                properties:
+                  agent: { type: string }
+                  account: { $ref: '#/components/schemas/AccountIndex' }
+                  entries:
+                    type: array
+                    items:
+                      oneOf:
+                        - $ref: '#/components/schemas/HistoryOut'
+                        - $ref: '#/components/schemas/HistoryIn'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '502': { $ref: '#/components/responses/Wallet' }
+
+  /bind:
+    post:
+      tags: [agent]
+      operationId: bind
+      summary: The keeper's `sig_addr` for the caller's OWN (i, 0) address over a binding body the agent built.
+      description: |
+        `body` must pass SPEC §3.1 `structure(body, 'binding')`, name `method: "monero"`, the
+        agent's DID as `id`, its own account address (i, 0) as `addr`, and an `iat`..`exp` window
+        containing now (iat ≤ now + 300) and spanning at most 30 days. View mode for account 0,
+        spend mode for any other. The agent adds its own `sig_id` (SPEC §6).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              additionalProperties: false
+              properties:
+                body: { $ref: '../schema/binding.json' }
+      responses:
+        '200':
+          description: The address signature, checked before it leaves.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [addr, account, mode, sig_addr]
+                properties:
+                  addr: { type: string }
+                  account: { $ref: '#/components/schemas/AccountIndex' }
+                  mode: { enum: [view, spend] }
+                  sig_addr: { type: string, pattern: '^SigV2', description: A Monero SigV2 message signature (SPEC §6.2). }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '502': { $ref: '#/components/responses/Wallet' }
+        '503': { $ref: '#/components/responses/ClockBehind' }
+
+  /delegate:
+    post:
+      tags: [delegation]
+      operationId: delegate
+      summary: Create a delegate under the caller, with its own account, identity and token; optionally fund it.
+      description: |
+        Paid: on a keeper without a valid licence, 403 `licence_required` (after the token check,
+        before anything else). Refused by a `--dry-run` keeper (403 `dry_run`) and when policy.json has no
+        `recovery_commitment`. Each cap asked for must be ≤ the caller's (above → refused, not
+        clamped); a cap left out is the caller's. The delegate exists from the moment its signed
+        line is on disk: a funding refusal after that leaves it unfunded and says so in `fund`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, fund]
+              additionalProperties: false
+              properties:
+                name: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$', description: Never reused, not even after revocation. }
+                fund: { $ref: '#/components/schemas/Atomic', description: 'Atomic units; "0" for none.' }
+                caps:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    per_tx_max: { $ref: '#/components/schemas/Atomic' }
+                    per_period_max: { $ref: '#/components/schemas/Atomic' }
+                    rate_per_minute: { type: integer, minimum: 0 }
+                    max_delegates: { type: integer, minimum: 0 }
+                    approval_above: { oneOf: [{ $ref: '#/components/schemas/Atomic' }, { type: 'null' }] }
+                allow:
+                  type: array
+                  description: A subset of the caller's allowlist; left out, the caller's, copied.
+                  items: { $ref: '#/components/schemas/AllowRule' }
+      responses:
+        '200':
+          description: The delegate's credentials — the token is in this answer and nowhere else — and the funding outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, account, address, did, genesis, identity_seed_hex, url, token, shown_once, fund]
+                properties:
+                  name: { type: string }
+                  account: { $ref: '#/components/schemas/AccountIndex' }
+                  address: { type: string, description: The account's (i, 0) subaddress, where funding goes. }
+                  did: { $ref: '../schema/common.json#/$defs/did' }
+                  genesis: { $ref: '../schema/genesis.json' }
+                  identity_seed_hex: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  url: { type: string, format: uri }
+                  token: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  shown_once: { type: string }
+                  fund:
+                    description: |
+                      null when `fund` was "0"; otherwise `{http, …}`: `http` is the HTTP status /pay would
+                      have answered for the funding, and the rest is that answer's body unchanged — so a
+                      funding above `approval_above` is `{http: 202, status: "approval_needed", code:
+                      "approval", ref, error, approval_request}`. The delegate exists whatever `http` says.
+                    oneOf:
+                      - type: 'null'
+                      - allOf:
+                          - type: object
+                            required: [http]
+                            properties: { http: { enum: [200, 202, 400, 403, 409, 500, 502] } }
+                          - oneOf:
+                              - $ref: '#/components/schemas/Paid'
+                              - $ref: '#/components/schemas/ApprovalNeeded'
+                              - $ref: '#/components/schemas/Error'
+                              - $ref: '#/components/schemas/Uncertain'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '500': { $ref: '#/components/responses/LogFailed' }
+        '502': { $ref: '#/components/responses/Wallet' }
+        '503': { $ref: '#/components/responses/ClockBehind' }
+
+  /fund:
+    post:
+      tags: [delegation]
+      operationId: fund
+      summary: Pay the caller's own live delegate's (i, 0) — an ordinary spend of the caller, idempotent like /pay.
+      description: 'Paid: on a keeper without a valid licence, 403 `licence_required` (after the token check). A delegate made while licensed keeps paying from what it holds.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, amount]
+              additionalProperties: false
+              properties:
+                name: { type: string }
+                amount: { type: string, description: Atomic units; checked by the /pay path. }
+                ref: { type: string }
+      responses:
+        '200':
+          description: As /pay.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Paid'
+        '202':
+          description: As /pay.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalNeeded' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '409': { $ref: '#/components/responses/Refused' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '500': { $ref: '#/components/responses/LogFailed' }
+        '502':
+          description: As /pay.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/WalletError'
+                  - $ref: '#/components/schemas/Uncertain'
+        '503': { $ref: '#/components/responses/ClockBehind' }
+
+  /revoke:
+    post:
+      tags: [delegation]
+      operationId: revoke
+      summary: Revoke a delegate (any strict ancestor) and sweep its whole subtree one hop to the caller's (r, 0).
+      description: Re-running writes no second line and sweeps whatever unlocked or arrived since. The keeper never sweeps on its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: Revoked, and each account's sweep outcome.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Revoked'
+                  - type: object
+                    required: [to, sweeps]
+                    properties:
+                      to: { type: string, description: "The caller's (r, 0)." }
+                      sweeps: { type: array, items: { $ref: '#/components/schemas/Sweep' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '500': { $ref: '#/components/responses/LogFailed' }
+        '502':
+          description: Revoked, but the caller's address could not be read, so nothing was swept. Run revoke again.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/Revoked'
+        '503': { $ref: '#/components/responses/ClockBehind' }
+
+  /delegates:
+    get:
+      tags: [delegation]
+      operationId: delegates
+      summary: Every delegate below the caller — live, revoked or orphaned — with clamped caps and its account's balance.
+      responses:
+        '200':
+          description: The caller's subtree.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent, max_delegates, left, delegates]
+                properties:
+                  agent: { type: string }
+                  max_delegates: { type: integer, minimum: 0 }
+                  left: { type: integer, minimum: 0 }
+                  delegates:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, parent, account, address, did, status, caps, allow, max_delegates]
+                      properties:
+                        name: { type: string }
+                        parent: { type: string }
+                        account: { $ref: '#/components/schemas/AccountIndex' }
+                        address: { type: string }
+                        did: { $ref: '../schema/common.json#/$defs/did' }
+                        status: { enum: [live, revoked, orphaned] }
+                        caps:
+                          type: object
+                          required: [per_tx_max, per_period_max, rate_per_minute]
+                          properties:
+                            per_tx_max: { $ref: '#/components/schemas/Atomic' }
+                            per_period_max: { $ref: '#/components/schemas/Atomic' }
+                            period_seconds: { type: integer, description: Present for a live delegate (effective caps). }
+                            rate_per_minute: { type: integer }
+                        allow: { type: array, items: { $ref: '#/components/schemas/AllowRule' } }
+                        max_delegates: { type: integer, minimum: 0 }
+                        balance: { $ref: '#/components/schemas/Atomic' }
+                        unlocked_balance: { $ref: '#/components/schemas/Atomic' }
+                        blocks_to_unlock: { type: integer }
+                        holds_funds: { const: true, description: A dead delegate still holding funds; revoke again sweeps it. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /budget:
+    get:
+      tags: [read]
+      operationId: budget
+      summary: The caller's caps, spent (incl. fees) and remaining in the window.
+      parameters:
+        - name: agent
+          in: query
+          required: false
+          description: 'May only name the caller; any other name is 404 `code: bucket`.'
+          schema: { type: string }
+        - name: bucket
+          in: query
+          required: false
+          description: Today's clients' spelling of `agent`; read only when `agent` is absent.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The caller's budget.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - type: object
+                    required: [agent, bucket, account]
+                    properties:
+                      agent: { type: string }
+                      bucket: { type: string, description: Same as agent. }
+                      account: { $ref: '#/components/schemas/AccountIndex' }
+                  - $ref: '#/components/schemas/Usage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The query named another agent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /log:
+    get:
+      tags: [read]
+      operationId: log
+      summary: The caller's own signed spend-log lines (delegation lines excluded).
+      responses:
+        '200':
+          description: Every spend line whose agent is the caller, in log order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries: { type: array, items: { $ref: '#/components/schemas/Receipt' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /health:
+    get:
+      tags: [read]
+      operationId: health
+      summary: Wallet height, the caller's account balance, and the keeper's own identity.
+      responses:
+        '200':
+          description: Healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [net, dry_run, service, height, agent, account, balance, unlocked_balance]
+                properties:
+                  net: { $ref: '#/components/schemas/Net' }
+                  dry_run: { type: boolean }
+                  service: { $ref: '#/components/schemas/Service' }
+                  height: { type: integer, minimum: 0 }
+                  agent: { type: string }
+                  account: { $ref: '#/components/schemas/AccountIndex' }
+                  balance: { $ref: '#/components/schemas/Atomic' }
+                  unlocked_balance: { $ref: '#/components/schemas/Atomic' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '502':
+          description: 'The wallet did not answer, or answered without a height or a balance (`code: wallet`). The keeper''s own facts are still given.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code, net, dry_run, service]
+                properties:
+                  error: { type: string }
+                  code: { const: wallet }
+                  net: { $ref: '#/components/schemas/Net' }
+                  dry_run: { type: boolean }
+                  service: { $ref: '#/components/schemas/Service' }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: |
+        The agent's token (64 hex characters from `sigelo-spend token new` or `/delegate`),
+        sent as `Authorization: Bearer <token>` — the prefix `Bearer ` exactly, case-sensitive.
+        The keeper stores only its SHA-256. A missing, unknown and revoked token get the same
+        answer on every route: 401, `code: token`.
+
+  responses:
+    BadRequest:
+      description: Malformed request — not strict JSON, an unknown or mistyped field. `code` is `request` or the route's own (`delegate`, `revoke`, `bind`, `purpose`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: 'No, unknown or revoked bearer token (`code: token`).'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Refused:
+      description: Refused by policy; `code` names the check.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BodyTimeout:
+      description: 'The body did not arrive in full within 10 s (`code: body`); the connection is closed.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BodyTooLarge:
+      description: 'The body is over 1 MB (`code: body`); the connection is closed.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    LogFailed:
+      description: 'spend.log could not be written (`code: log`); the message says what did not happen.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ClockBehind:
+      description: |
+        The keeper's clock reads more than 300 s behind the newest `ts` it signed in spend.log, or
+        before the build's floor (`code: clock_behind`, MONERO.md §4.1 "Clock"). Nothing was signed,
+        logged or sent; the same request succeeds once the host clock is set (NTP).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Wallet:
+      description: 'The wallet refused, failed or answered malformed (`code` `wallet`, `wallet_offline`, `wallet_slow`, `wallet_locked` or `wallet_funds`).'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/WalletError' }
+
+  schemas:
+    Atomic:
+      type: string
+      pattern: '^(0|[1-9][0-9]*)$'
+      description: Atomic units as a decimal string (1 XMR = 10^12). Never a JSON number.
+    AccountIndex:
+      type: integer
+      minimum: 0
+      description: The agent's Monero account (major index). Decided by the token, never by the request.
+    Net:
+      enum: [mainnet, stagenet, testnet]
+    Service:
+      type: object
+      required: [did, key]
+      properties:
+        did: { $ref: '../schema/common.json#/$defs/did' }
+        key: { $ref: '../schema/common.json#/$defs/publicKey' }
+      description: "The keeper's own sigelo identity: identitySeed(K, 0), genesis nonce derived from the key, created pinned to 1970-01-01T00:00:00Z. Every log line is signed by it."
+
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error: { type: string, description: The failing check in prose. Safe to show; never parse it — use `code`. }
+        code:
+          type: string
+          description: |
+            The check that refused: the reason's prefix before `:` (spend/service.ts `codeOf`),
+            except an allowlist refusal that is really a spent or expired invoice (`invoice`) and
+            the wallet's two kinds of "not enough" (`wallet_locked`, `wallet_funds`) and a wallet
+            with no connection to its daemon (`wallet_offline`), and a build that ran out the
+            keeper's build wait (`wallet_slow`). Values the
+            code produces: token, bucket, request, purpose, ref, to, to.addr, to.did, allowlist,
+            invoice, amount, per_tx_max, per_period_max, rate_per_minute, repeat, approval,
+            relay_failed, wallet, wallet_locked, wallet_funds, wallet_offline, wallet_slow, log, body, route, bind, delegate,
+            fund, revoke, dry_run, licence_required (403: a paid verb on a keeper without a valid
+            licence), clock_behind (503), internal (the catch-all 500), service (a
+            reason with no prefix). Not closed: new checks add values.
+          examples: [allowlist, per_period_max, wallet_locked, licence_required]
+        facts: { $ref: '#/components/schemas/Facts' }
+    Facts:
+      type: object
+      description: The numbers behind a cap refusal (per_tx_max, per_period_max), so a client can say it without parsing `error`.
+      required: [cost, limit, fee_included]
+      properties:
+        cost: { $ref: '#/components/schemas/Atomic' }
+        limit: { $ref: '#/components/schemas/Atomic' }
+        fee_included: { type: boolean, description: true when the check ran on amount + fee (after the wallet priced it). }
+        left: { $ref: '#/components/schemas/Atomic' }
+        until: { $ref: '../schema/common.json#/$defs/unixSeconds', description: When the oldest debit in the window rolls out. }
+    WalletError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          description: On wallet_locked / wallet_funds from /pay, the account's balance beside the refusal.
+          properties:
+            balance: { $ref: '#/components/schemas/Atomic' }
+            unlocked_balance: { $ref: '#/components/schemas/Atomic' }
+            blocks_to_unlock: { type: integer, minimum: 0 }
+    Uncertain:
+      type: object
+      description: The money may have moved. Logged as relay_failed (or only an intent line exists) and debited. Do not pay again; tell the operator.
+      required: [error, code, ref, txid]
+      properties:
+        error: { type: string }
+        code: { const: relay_failed }
+        ref: { type: string }
+        txid: { type: string, pattern: '^[0-9a-f]{64}$' }
+        fee: { $ref: '#/components/schemas/Atomic' }
+        repeat: { const: true, description: Present when this is a replay of an earlier outcome. }
+
+    PayRequest:
+      type: object
+      required: [to, amount, purpose]
+      additionalProperties: false
+      properties:
+        to: { $ref: '#/components/schemas/Destination' }
+        amount: { $ref: '#/components/schemas/Atomic', description: 'Above 0, at most 2^53−1. (A non-atomic string is refused 403 `amount`; an empty one 400 `request`.)' }
+        purpose: { type: string, minLength: 1, maxLength: 200, description: Copied into the signed log line. }
+        ref:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Idempotency key. Absent, the keeper derives sha256(account ‖ JCS({to without bundle, amount, purpose})).
+        bucket: { type: string, minLength: 1, description: Legacy; must name the token's own agent. Never selects an account. }
+    Destination:
+      description: '`{label}` alone (a name from the caller''s own allowlist), or an address with optional evidence. Own properties only; any other key is refused.'
+      oneOf:
+        - type: object
+          required: [label]
+          additionalProperties: false
+          properties:
+            label: { type: string }
+        - type: object
+          required: [addr]
+          additionalProperties: false
+          properties:
+            addr: { type: string, description: A Monero standard address or subaddress on the policy's network. Integrated addresses are refused. }
+            did: { $ref: '../schema/common.json#/$defs/did' }
+            bundle: { $ref: '../schema/bundle.json', description: The payee's bundle, for a DID or issuer allowlist rule. Evidence, not the destination. }
+            invoice:
+              type: object
+              description: A SPEC §6.3 invoice envelope. Must name a subaddress; paid exactly its amount if it has one; paid once.
+              required: [body, sig]
+              additionalProperties: false
+              properties:
+                body: { $ref: '../schema/invoice.json' }
+                sig: { $ref: '../schema/common.json#/$defs/signature' }
+    AllowRule:
+      type: object
+      description: 'An allowlist rule (policy.ts): `{addr, label?}` a literal address, or a DID / issuer rule.'
+      properties:
+        addr: { type: string }
+        label: { type: string, pattern: '^[A-Za-z0-9._-]{1,64}$' }
+        did: { $ref: '../schema/common.json#/$defs/did' }
+        issuer: { $ref: '../schema/common.json#/$defs/did' }
+        ctx: { type: string }
+
+    Plan:
+      type: object
+      required: [account_index, destinations, unlock_time, priority, do_not_relay]
+      properties:
+        account_index: { $ref: '#/components/schemas/AccountIndex' }
+        destinations:
+          type: array
+          items:
+            type: object
+            required: [address, amount]
+            properties:
+              address: { type: string }
+              amount: { $ref: '#/components/schemas/Atomic' }
+        unlock_time: { type: integer }
+        priority: { type: integer }
+        do_not_relay: { type: boolean }
+    LogEntry:
+      type: object
+      description: One spend-log entry. Signed by the keeper over "sigelo\n" ‖ JCS(entry); `status` is INSIDE the signature, so an intent line cannot pass for a receipt.
+      required: [ts, request, plan, txid, amount, fee]
+      properties:
+        ts: { $ref: '../schema/common.json#/$defs/unixSeconds' }
+        status:
+          enum: [intent, relayed, relay_failed, pending, approved]
+          description: Absent on lines written before two-phase relay; read as relayed.
+        request:
+          type: object
+          required: [to, amount, purpose]
+          properties:
+            to:
+              type: object
+              required: [addr]
+              properties:
+                addr: { type: string }
+                did: { $ref: '../schema/common.json#/$defs/did' }
+                invoice:
+                  type: object
+                  required: [did, nonce]
+                  properties: { did: { type: string }, nonce: { type: string } }
+            amount: { $ref: '#/components/schemas/Atomic' }
+            purpose: { type: string }
+            agent: { type: string }
+            bucket: { type: string, description: Instead of agent, on lines written before per-agent entries. }
+            ref: { type: string }
+            fp: { type: string }
+            approval: { type: string, description: The spend-approval nonce this spend used (and so spent). }
+        plan: { $ref: '#/components/schemas/Plan' }
+        txid: { type: string, description: 64 hex characters; empty on a pending or approved line. }
+        amount: { $ref: '#/components/schemas/Atomic' }
+        fee: { $ref: '#/components/schemas/Atomic' }
+        approval_request: { $ref: '#/components/schemas/SpendApproval' }
+        approval:
+          type: object
+          required: [body, sig, approver, key]
+          properties:
+            body: { $ref: '#/components/schemas/SpendApproval' }
+            sig: { type: string }
+            approver: { $ref: '../schema/common.json#/$defs/did' }
+            key: { $ref: '../schema/common.json#/$defs/publicKey' }
+    Receipt:
+      type: object
+      description: A signed log line. A receipt proper is a line with `entry.status` relayed; `error` (outside the signature) is what the wallet said, on a relay_failed line.
+      required: [entry, sig]
+      properties:
+        entry: { $ref: '#/components/schemas/LogEntry' }
+        sig: { $ref: '../schema/common.json#/$defs/signature' }
+        error: { type: string }
+    Paid:
+      type: object
+      required: [ref, txid, fee, receipt]
+      properties:
+        ref: { type: string }
+        txid: { type: string, pattern: '^[0-9a-f]{64}$' }
+        fee: { $ref: '#/components/schemas/Atomic' }
+        receipt: { $ref: '#/components/schemas/Receipt' }
+        repeat: { const: true, description: A replay of the first outcome. }
+        already_paid: { const: true, description: With repeat. Not paid again. }
+        warning: { type: string, description: Relayed, but the relayed line could not be written; the intent line still counts the spend. }
+    DryRun:
+      type: object
+      description: A --dry-run keeper stops after the caps. No receipt, nothing relayed or logged.
+      required: [dry_run, amount, fee, cost, plan]
+      properties:
+        dry_run: { const: true }
+        amount: { $ref: '#/components/schemas/Atomic' }
+        fee: { $ref: '#/components/schemas/Atomic' }
+        cost: { $ref: '#/components/schemas/Atomic' }
+        plan: { $ref: '#/components/schemas/Plan' }
+    ApprovalNeeded:
+      description: A fresh wait (a pending line just written, `error` the reason) or a replayed one (answered from that line, `repeat` and `pending`, no `error`).
+      oneOf:
+        - type: object
+          required: [status, code, ref, error, approval_request]
+          properties:
+            status: { const: approval_needed }
+            code: { const: approval }
+            ref: { type: string }
+            error: { type: string, description: 'The reason (`approval: …`).' }
+            approval_request: { $ref: '#/components/schemas/SpendApproval' }
+          not: { required: [repeat] }
+        - type: object
+          required: [repeat, status, code, ref, pending]
+          properties:
+            repeat: { const: true }
+            status: { const: approval_needed }
+            code: { const: approval }
+            ref: { type: string }
+            pending: { $ref: '#/components/schemas/Receipt', description: The keeper-signed pending line. }
+            approval_request: { $ref: '#/components/schemas/SpendApproval', description: The pending line's request (present whenever the line carries one). }
+    SpendApproval:
+      type: object
+      description: The keeper-local spend-approval body (spend/approval.ts; not a SPEC object, no bundle slot accepts it). The approver signs exactly the body the 202 handed out.
+      required: [v, typ, keeper, net, agent, ref, to, amount, purpose, nonce, iat, exp]
+      additionalProperties: false
+      properties:
+        v: { const: sigelo/0 }
+        typ: { const: spend-approval }
+        keeper: { $ref: '../schema/common.json#/$defs/did' }
+        net: { $ref: '#/components/schemas/Net' }
+        agent: { $ref: '../schema/common.json#/$defs/did' }
+        ref: { type: string, minLength: 1 }
+        to: { type: string, description: The resolved destination address. }
+        amount: { $ref: '#/components/schemas/Atomic' }
+        purpose: { type: string, minLength: 1 }
+        nonce: { type: string, pattern: '^[0-9a-f]{32}$' }
+        iat: { $ref: '../schema/common.json#/$defs/unixSeconds' }
+        exp: { $ref: '../schema/common.json#/$defs/unixSeconds' }
+    Usage:
+      type: object
+      required: [per_tx_max, per_period_max, period_seconds, window_start, spent, remaining, rate]
+      properties:
+        per_tx_max: { $ref: '#/components/schemas/Atomic' }
+        per_period_max: { $ref: '#/components/schemas/Atomic' }
+        period_seconds: { type: integer }
+        window_start: { type: integer }
+        spent: { $ref: '#/components/schemas/Atomic', description: Including fees. }
+        remaining: { $ref: '#/components/schemas/Atomic' }
+        rate:
+          type: object
+          required: [limit, used]
+          properties:
+            limit: { type: integer }
+            used: { type: integer }
+    HistoryOut:
+      type: object
+      required: [ts, dir, status, amount, fee, to, purpose, txid]
+      properties:
+        ts: { type: integer }
+        dir: { const: out }
+        status: { enum: [intent, relayed, relay_failed, pending, approved] }
+        amount: { $ref: '#/components/schemas/Atomic' }
+        fee: { $ref: '#/components/schemas/Atomic' }
+        to: { type: string }
+        label: { type: string }
+        did: { $ref: '../schema/common.json#/$defs/did' }
+        purpose: { type: string }
+        txid: { type: string }
+    HistoryIn:
+      type: object
+      required: [ts, dir, status, amount, txid, address, index, note]
+      properties:
+        ts: { type: integer }
+        dir: { const: in }
+        status: { enum: [pool, locked, received] }
+        amount: { $ref: '#/components/schemas/Atomic' }
+        txid: { type: string }
+        address: { type: string }
+        index: { type: integer, minimum: 0 }
+        note: { type: string, description: The label /receive gave the subaddress. }
+    Revoked:
+      type: object
+      required: [revoked, already, cascade]
+      properties:
+        revoked: { type: string }
+        already: { type: boolean, description: A revoke line already covered it; no new line was written. }
+        cascade: { type: array, items: { type: string }, description: Every delegate in the revoked subtree. }
+    Sweep:
+      type: object
+      required: [name, account, status]
+      properties:
+        name: { type: string }
+        account: { $ref: '#/components/schemas/AccountIndex' }
+        status: { enum: [swept, uncertain, skipped, error] }
+        reason: { type: string }
+        error: { type: string }
+        balance: { $ref: '#/components/schemas/Atomic' }
+        unlocked_balance: { $ref: '#/components/schemas/Atomic' }
+        blocks_to_unlock: { type: integer }
+        amount: { $ref: '#/components/schemas/Atomic' }
+        fee: { $ref: '#/components/schemas/Atomic' }
+        txs:
+          type: array
+          items:
+            type: object
+            required: [txid, status]
+            properties:
+              txid: { type: string }
+              status: { type: string }

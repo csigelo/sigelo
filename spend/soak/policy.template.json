@@ -1,0 +1,40 @@
+{
+  "net": "stagenet",
+  "wallet": {
+    "rpc": "http://127.0.0.1:38083/json_rpc"
+  },
+  "unlock_time": 0,
+  "priority": 1,
+  "dedupe_seconds": 600,
+  "max_approval_ttl": 7200,
+  "approvers": [
+    {
+      "did": "<approver DID: gen-keys.mjs policy fills it from keys/>"
+    }
+  ],
+  "recovery_commitment": "<recoveryCommitment(S): gen-keys.mjs policy fills it from keys/>",
+  "agents": {
+    "soak-root": {
+      "account": 0,
+      "token_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "did": "<soak-root DID: gen-keys.mjs policy fills it from keys/>",
+      "genesis": "<soak-root genesis: gen-keys.mjs policy fills it from keys/>",
+      "per_tx_max": "500000000",
+      "per_period_max": "20000000000",
+      "period_seconds": 86400,
+      "rate_per_minute": 2,
+      "approval_above": "400000000",
+      "max_delegates": 2,
+      "allow": [
+        {
+          "label": "bob",
+          "addr": "<subaddress 0/1 of the soak wallet: gen-keys.mjs policy fills it>"
+        },
+        {
+          "label": "carol",
+          "addr": "<subaddress 0/2 of the soak wallet: gen-keys.mjs policy fills it>"
+        }
+      ]
+    }
+  }
+}

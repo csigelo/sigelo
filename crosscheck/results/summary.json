@@ -1,0 +1,325 @@
+{
+ "date": "2026-09-29",
+ "seed": 20260929,
+ "scale": 1.0,
+ "seconds": 110,
+ "oracles": {
+  "sigelo_under_test": "4e1a5aa10b8fdad4703c97eb840bc87d31902db6",
+  "json-canonicalization": "19d51d7fe467d4706a3ff08adf8a748f29fc21e0",
+  "wycheproof": "3fa63dd0344abb611f1fb1d77e119938603ea230",
+  "ed25519-speccheck": "65519336fda78a3d016e947df6d82848aca0c9da",
+  "monero-python": "1.1.1",
+  "PyNaCl": "1.6.2",
+  "base58": "2.1.1",
+  "libsodium": "bundled with PyNaCl",
+  "rfc8032.txt_bytes": 103210,
+  "python": "3.12.14",
+  "node": "v24.18.1",
+  "go": "go version go1.27.1 linux/arm64"
+ },
+ "results": {
+  "jcs-testdata": {
+   "cases": 8,
+   "byte_equal": 6,
+   "rejected_by_design": 2,
+   "fail": 0
+  },
+  "jcs-random": {
+   "documents": 20000,
+   "oracles_agree": 20000,
+   "ts_equal": 20000,
+   "go_equal": 20000,
+   "oracle_splits": 0,
+   "divergences": 0,
+   "top_level_scalar_go_ref_skipped": 1252
+  },
+  "jcs-restricted": {
+   "float": {
+    "cases": 300,
+    "ts_rejects": 300,
+    "go_rejects": 300,
+    "same_stage": 300
+   },
+   "nonchar": {
+    "cases": 300,
+    "ts_rejects": 300,
+    "go_rejects": 300,
+    "same_stage": 300
+   },
+   "lone-surrogate": {
+    "cases": 300,
+    "ts_rejects": 300,
+    "go_rejects": 300,
+    "same_stage": 300
+   },
+   "duplicate-key": {
+    "cases": 300,
+    "ts_rejects": 300,
+    "go_rejects": 300,
+    "same_stage": 300
+   },
+   "__proto__": {
+    "cases": 300,
+    "ts_rejects": 300,
+    "go_rejects": 300,
+    "same_stage": 300
+   },
+   "depth-513": {
+    "cases": 300,
+    "ts_rejects": 300,
+    "go_rejects": 300,
+    "same_stage": 300
+   }
+  },
+  "jcs-numbers": {
+   "integers": {
+    "integers": 100008,
+    "oracles_agree": 100008,
+    "ts_equal": 100008,
+    "go_equal": 100008
+   },
+   "out_of_range_integers": {
+    "out_of_range": 6,
+    "ts_rejects": 6,
+    "go_rejects": 6
+   },
+   "doubles": {
+    "doubles": 100000,
+    "oracles_agree": 100000,
+    "accepted_integers": 12243,
+    "rejected_non_integers": 87757,
+    "divergences": 0
+   }
+  },
+  "monero-base58": {
+   "encode": {
+    "encode": 10000,
+    "ts_equal": 10000,
+    "go_equal": 10000
+   },
+   "decode": {
+    "decode": 20000,
+    "oracle_accepts": 13601,
+    "oracle_rejects": 6399,
+    "agree": 19935,
+    "explained": 65,
+    "divergences": 0
+   }
+  },
+  "monero-address": {
+   "derive": {
+    "wallets_from_seed": 5000,
+    "subaddresses": 2500,
+    "ts_equal": 7500,
+    "go_equal": 7500
+   },
+   "parse_valid": {
+    "valid": 10000,
+    "standard": 5000,
+    "integrated": 2500,
+    "subaddress": 2500,
+    "ts_equal": 10000,
+    "go_equal": 10000
+   },
+   "parse_adversarial": {
+    "adversarial": 10000,
+    "agree": 8066,
+    "explained": 1934,
+    "divergences": 0,
+    "by_category": {
+     "kind-length-mismatch": {
+      "cases": 1480,
+      "agree": 1480,
+      "explained": 0
+     },
+     "unknown-prefix": {
+      "cases": 1535,
+      "agree": 1535,
+      "explained": 0
+     },
+     "special-point": {
+      "cases": 1489,
+      "agree": 1076,
+      "explained": 413
+     },
+     "checksum": {
+      "cases": 1497,
+      "agree": 1497,
+      "explained": 0
+     },
+     "random-key": {
+      "cases": 2955,
+      "agree": 1434,
+      "explained": 1521
+     },
+     "bad-length": {
+      "cases": 1044,
+      "agree": 1044,
+      "explained": 0
+     }
+    }
+   }
+  },
+  "monero-seed": {
+   "encode": {
+    "keys": 4004,
+    "canonical_scalars": 3000,
+    "ts_equal": 4004,
+    "go_equal": 4004
+   },
+   "decode": {
+    "phrases": 8004,
+    "agree": 7978,
+    "explained": 26,
+    "divergences": 0
+   }
+  },
+  "ed25519": {
+   "rfc8032_7.1": {
+    "vectors": 5,
+    "names": [
+     "1",
+     "2",
+     "3",
+     "1024",
+     "SHA(abc)"
+    ],
+    "verify_ts": 5,
+    "verify_go": 5,
+    "pubkey_ts": 5,
+    "pubkey_go": 5
+   },
+   "wycheproof": {
+    "vectors": 151,
+    "valid": 88,
+    "invalid": 63,
+    "acceptable": 0,
+    "ts_match": 151,
+    "go_match": 151
+   },
+   "speccheck": {
+    "cases": 12,
+    "ts": "XXVVVVXXXXXX",
+    "go": "XXVVVVXXXXXX",
+    "policy": "XXVVVVXXXXXX",
+    "libsodium_published": "XXXVXXXXXXXX",
+    "go_crypto_ed25519_published": "VVVVXXXXXXXV"
+   },
+   "end_to_end_libsodium": {
+    "bodies": 500,
+    "signing_input_ts": 500,
+    "signing_input_go": 500,
+    "pubkey_ts": 500,
+    "pubkey_go": 500,
+    "sign_ts_equals_libsodium": 500,
+    "verify_ts": 500,
+    "verify_go": 500,
+    "malleated_rejected_ts": 800,
+    "malleated_rejected_go": 800,
+    "malleated_rejected_libsodium": 800,
+    "malleated": 800
+   }
+  },
+  "base58btc-multibase": {
+   "encode": 10000,
+   "ts_equal": 10000,
+   "go_equal": 10000,
+   "decode_go_equal": 10000,
+   "key_decode_ts": 2000,
+   "key_decode_ts_equal": 2000
+  }
+ },
+ "jcs_testdata_rows": [
+  {
+   "case": "arrays.json",
+   "ts": "match",
+   "go": "match",
+   "refs_reproduce_expected": [
+    true,
+    true,
+    true
+   ],
+   "verdict": "byte-equal"
+  },
+  {
+   "case": "french.json",
+   "ts": "match",
+   "go": "match",
+   "refs_reproduce_expected": [
+    true,
+    true,
+    true
+   ],
+   "verdict": "byte-equal"
+  },
+  {
+   "case": "structures.json",
+   "ts": "non-integer number 56.0",
+   "go": "non-integer number 56.0",
+   "refs_reproduce_expected": [
+    true,
+    true,
+    true
+   ],
+   "verdict": "rejected by design (SPEC §3: no floats)"
+  },
+  {
+   "case": "unicode.json",
+   "ts": "match",
+   "go": "match",
+   "refs_reproduce_expected": [
+    true,
+    true,
+    true
+   ],
+   "verdict": "byte-equal"
+  },
+  {
+   "case": "values.json",
+   "ts": "non-integer number 333333333.33333329",
+   "go": "non-integer number 333333333.33333329",
+   "refs_reproduce_expected": [
+    true,
+    true,
+    true
+   ],
+   "verdict": "rejected by design (SPEC §3: no floats)"
+  },
+  {
+   "case": "weird.json",
+   "ts": "match",
+   "go": "match",
+   "refs_reproduce_expected": [
+    true,
+    true,
+    true
+   ],
+   "verdict": "byte-equal"
+  },
+  {
+   "case": "structures.json[56.0->56]",
+   "ts": "match",
+   "go": "match",
+   "refs_reproduce_expected": [
+    true,
+    true,
+    true
+   ],
+   "verdict": "byte-equal"
+  },
+  {
+   "case": "values.json[ints]",
+   "ts": "match",
+   "go": "match",
+   "refs_reproduce_expected": [
+    true,
+    true,
+    true
+   ],
+   "verdict": "byte-equal"
+  }
+ ],
+ "divergences": 0,
+ "explained": 2025,
+ "oracle_splits": 0
+}

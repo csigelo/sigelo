@@ -1,0 +1,14 @@
+{
+  "commit": "c2c9cdc",
+  "date": "2026-10-01",
+  "where": "the test host, go1.27.1, node v24.18.1",
+  "go_test_pass_lines": "498",
+  "conformance_checks": "242",
+  "conformance_checks_vectors_only": "188",
+  "impl_cases": "139",
+  "impl_groups": "positive 14/14, monero 9/9, negative 29/29, parity 87/87",
+  "impl_not_scored": "6",
+  "mcp_checks": "50",
+  "moadim_checks": "84",
+  "note": "Measured by running, at the commit above: `go test ./... -v` (indented PASS lines); `sigelo-verify --conformance ../test-vectors.json` (with ts/test/monero-vectors.json beside it: 242; test-vectors.json alone, as a release ships it: 188 and one SKIP line); `sigelo-verify --conformance test-vectors.json --impl ./sigelo-verify`; `npm test` in integrations/mcp and adapters/moadim. The ts/ and spend/ suites were not re-run for the site; their figures are the recorded ones (README.md, ts/README.md, spend/README.md at cad0357)."
+}

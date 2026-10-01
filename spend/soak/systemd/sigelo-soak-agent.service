@@ -1,0 +1,20 @@
+[Unit]
+Description=sigelo soak scripted agent, one tick
+After=sigelo-soak-keeper.service
+
+# No After=time-sync.target: this is a --user unit, and the user manager has no such target
+# (systemctl --user: time-sync.target not-found), so the line would order nothing. The wait is
+# ExecCondition instead: systemd-time-wait-sync returns at once when timesyncd has synced this
+# boot (/run/systemd/timesync/synchronized) or the kernel clock is NTP-synced (chronyd);
+# otherwise the timeout ends it (exit 124, or 143 from busybox's timeout) and the tick is
+# SKIPPED, not failed. The timer fires again when NTP steps the clock (the observed boot
+# behaviour, README "Wrong-clock risk"), so the tick then runs on the right time. On a host
+# without systemd-time-wait-sync, drop the line.
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/bin/timeout 10 /usr/lib/systemd/systemd-time-wait-sync
+ExecStart=/usr/bin/node %h/.local/share/sigelo-soak/app/spend/soak/agent.mjs
+# A tick sleeps ~62 s between root spends (rate_per_minute 2) and waits up to 330 s per command.
+TimeoutStartSec=25min
+UMask=0077

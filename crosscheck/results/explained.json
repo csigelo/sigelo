@@ -1,0 +1,210 @@
+[
+ {
+  "section": "monero-base58",
+  "why": "oracle-bug: monero-python accepts a full base58 block equal to 2^64 (checks > 2^64, Monero base58.cpp refuses any 64-bit carry); sigelo refuses it",
+  "count": 65,
+  "examples": [
+   {
+    "section": "monero-base58",
+    "why": "oracle-bug: monero-python accepts a full base58 block equal to 2^64 (checks > 2^64, Monero base58.cpp refuses any 64-bit carry); sigelo refuses it",
+    "s": "jpXCZedGfVR",
+    "oracle": "'0000000000000000'",
+    "ts": {
+     "ok": false,
+     "err": "base58: block overflows its byte length"
+    },
+    "go": {
+     "err": "base58: block overflows its byte length",
+     "ok": false
+    }
+   },
+   {
+    "section": "monero-base58",
+    "why": "oracle-bug: monero-python accepts a full base58 block equal to 2^64 (checks > 2^64, Monero base58.cpp refuses any 64-bit carry); sigelo refuses it",
+    "s": "jpXCZedGfVR",
+    "oracle": "'0000000000000000'",
+    "ts": {
+     "ok": false,
+     "err": "base58: block overflows its byte length"
+    },
+    "go": {
+     "err": "base58: block overflows its byte length",
+     "ok": false
+    }
+   },
+   {
+    "section": "monero-base58",
+    "why": "oracle-bug: monero-python accepts a full base58 block equal to 2^64 (checks > 2^64, Monero base58.cpp refuses any 64-bit carry); sigelo refuses it",
+    "s": "jpXCZedGfVR",
+    "oracle": "'0000000000000000'",
+    "ts": {
+     "ok": false,
+     "err": "base58: block overflows its byte length"
+    },
+    "go": {
+     "err": "base58: block overflows its byte length",
+     "ok": false
+    }
+   }
+  ]
+ },
+ {
+  "section": "monero-address",
+  "why": "sigelo-stricter (Monero check_key): monero-python does not decode the keys; the spend key is not a canonical curve point per the RFC 8032 §6 reference decoder, and Monero's get_account_address_from_str runs check_key on both keys",
+  "count": 977,
+  "examples": [
+   {
+    "section": "monero-address",
+    "why": "sigelo-stricter (Monero check_key): monero-python does not decode the keys; the spend key is not a canonical curve point per the RFC 8032 §6 reference decoder, and Monero's get_account_address_from_str runs check_key on both keys",
+    "cat": "special-point",
+    "addr": "ACGQvSCX7VGjpXCZedGfVQjpXCZedGfVQjpXCZedGfVQNHDajGmJugNhetx3aHkj7qA3yBjuQDEb9hb4wNwcuGsJbW7TEZ1UP6WJzEtYRT",
+    "oracle": {
+     "ok": true,
+     "net": "testnet",
+     "spend": "f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+     "view": "38f11517ff1503f30cf6cb38ad2bcc361d0e29d904bce0f2a7f484a3936ad1ce"
+    },
+    "sigelo": {
+     "ok": false,
+     "err": "point: not a canonical curve point (ge_frombytes_vartime)"
+    }
+   },
+   {
+    "section": "monero-address",
+    "why": "sigelo-stricter (Monero check_key): monero-python does not decode the keys; the spend key is not a canonical curve point per the RFC 8032 §6 reference decoder, and Monero's get_account_address_from_str runs check_key on both keys",
+    "cat": "random-key",
+    "addr": "84snGtQZa7fQN1tTWcDAgJV1HTR5rW7PX3MzbSJzyLQ7UDkiuiiWQJG3JzsKpUozYd8TjxSCsQep6RcMzYTTXtLiV5jbY3h",
+    "oracle": {
+     "ok": true,
+     "net": "mainnet",
+     "spend": "3fefce58e4c5b68bac9c6137ec8d5ba76e28a1bded880a0e1f04b5b2b3da18a2",
+     "view": "bcb35c1d5af95d0dcffa5dd83e38ee2c9b4f00b9da2d379321b80676423373f8"
+    },
+    "sigelo": {
+     "ok": false,
+     "err": "point: not a canonical curve point (ge_frombytes_vartime)"
+    }
+   },
+   {
+    "section": "monero-address",
+    "why": "sigelo-stricter (Monero check_key): monero-python does not decode the keys; the spend key is not a canonical curve point per the RFC 8032 §6 reference decoder, and Monero's get_account_address_from_str runs check_key on both keys",
+    "cat": "random-key",
+    "addr": "7AgDuyYTbaXYUeXTmGvqp97XUNPxubZWPYLzHqy96VdLexosFxn5PWbCk6inaRxWyEHKqiWsRgGkBiZDqxTzpGo1FKBPYAP",
+    "oracle": {
+     "ok": true,
+     "net": "stagenet",
+     "spend": "de7bf9bc784a60bc2fcd5aa5b283a627033f144306f618bb65b021ec3f1573e2",
+     "view": "f611e15ebd3e1c463510c174912249619989d96e44457cf871c131ffbcf7707e"
+    },
+    "sigelo": {
+     "ok": false,
+     "err": "point: not a canonical curve point (ge_frombytes_vartime)"
+    }
+   }
+  ]
+ },
+ {
+  "section": "monero-address",
+  "why": "sigelo-stricter (Monero check_key): monero-python does not decode the keys; the view key is not a canonical curve point per the RFC 8032 §6 reference decoder, and Monero's get_account_address_from_str runs check_key on both keys",
+  "count": 957,
+  "examples": [
+   {
+    "section": "monero-address",
+    "why": "sigelo-stricter (Monero check_key): monero-python does not decode the keys; the view key is not a canonical curve point per the RFC 8032 §6 reference decoder, and Monero's get_account_address_from_str runs check_key on both keys",
+    "cat": "special-point",
+    "addr": "BfKzbfr9J458vZdSrn3JxuLyQeR1G7quGdKwjGhwYox8XwRrjNeeAGWjpXCZedGfVQjpXCZedGfVQjpXCZedGfVQFQzm4wb",
+    "oracle": {
+     "ok": true,
+     "net": "testnet",
+     "spend": "bca36daf80a8262f5f18620a67240e7768760badb310f7d92ec113a8f166edb8",
+     "view": "f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+    },
+    "sigelo": {
+     "ok": false,
+     "err": "point: not a canonical curve point (ge_frombytes_vartime)"
+    }
+   },
+   {
+    "section": "monero-address",
+    "why": "sigelo-stricter (Monero check_key): monero-python does not decode the keys; the view key is not a canonical curve point per the RFC 8032 §6 reference decoder, and Monero's get_account_address_from_str runs check_key on both keys",
+    "cat": "special-point",
+    "addr": "43qNVk3h5otbirK4rQkSJK88TQ5ugKUY9MKKkLuzwWUJfy3wvFUVRxSjpXCZedGfVQjpXCZedGfVQjpXCZedGfVQFLNNZmq",
+    "oracle": {
+     "ok": true,
+     "net": "mainnet",
+     "spend": "3a5b1e8376ecefcf962c64e824b3f82a9e65912b49591a7975ffea318de503e8",
+     "view": "f6ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+    },
+    "sigelo": {
+     "ok": false,
+     "err": "point: not a canonical curve point (ge_frombytes_vartime)"
+    }
+   },
+   {
+    "section": "monero-address",
+    "why": "sigelo-stricter (Monero check_key): monero-python does not decode the keys; the view key is not a canonical curve point per the RFC 8032 §6 reference decoder, and Monero's get_account_address_from_str runs check_key on both keys",
+    "cat": "special-point",
+    "addr": "9tDjtJLSsMPMbgFmMGwq3eJaC6SDZpHxhZyXLqecPJrgKZss2UNaQrK111111111111111111111111111111111FUQpJmJ",
+    "oracle": {
+     "ok": true,
+     "net": "testnet",
+     "spend": "1bcb2b8276fd1e7b258b1c86450139690ec54afad48b76c52451edc7ceb4e56f",
+     "view": "0100000000000000000000000000000000000000000000000000000000000080"
+    },
+    "sigelo": {
+     "ok": false,
+     "err": "point: not a canonical curve point (ge_frombytes_vartime)"
+    }
+   }
+  ]
+ },
+ {
+  "section": "monero-seed",
+  "why": "oracle-bug: monero-python formats a word triple worth >= 2^32 as 9 hex digits and endian_swap keeps 8, returning a wrong key silently; Monero electrum-words.cpp:326 refuses the phrase ((x mod 2^32) mod 1626 != w1 whenever x >= 2^32, as 1626 does not divide 2^32) and so does sigelo",
+  "count": 26,
+  "examples": [
+   {
+    "section": "monero-seed",
+    "why": "oracle-bug: monero-python formats a word triple worth >= 2^32 as 9 hex digits and endian_swap keeps 8, returning a wrong key silently; Monero electrum-words.cpp:326 refuses the phrase ((x mod 2^32) mod 1626 != w1 whenever x >= 2^32, as 1626 does not divide 2^32) and so does sigelo",
+    "phrase": "neon nutshell coils woken tawny aisle names talent taken fuming edited anxiety myth organs randomly fibula misery enlist utmost geyser yawning soggy rodent clue coils",
+    "oracle_hex": "845c1692eb8b4d3145f6011075261bd1cd18061405be19b85dedbca7e889ab6d",
+    "ts": {
+     "ok": false,
+     "err": "mnemonic: words 7-9 are not a Monero seed encoding (electrum-words.cpp:326)"
+    },
+    "go": {
+     "err": "mnemonic: words 7-9 are not a Monero seed encoding (electrum-words.cpp:326)",
+     "ok": false
+    }
+   },
+   {
+    "section": "monero-seed",
+    "why": "oracle-bug: monero-python formats a word triple worth >= 2^32 as 9 hex digits and endian_swap keeps 8, returning a wrong key silently; Monero electrum-words.cpp:326 refuses the phrase ((x mod 2^32) mod 1626 != w1 whenever x >= 2^32, as 1626 does not divide 2^32) and so does sigelo",
+    "phrase": "faulty bamboo lesson musical distance directed necklace iceberg laboratory duckling mugged cake firm unplugs opened together taboo pencil drowning antics devoid muddy batch pedantic taboo",
+    "oracle_hex": "6c7e4c65a1e70210aa7169123cb02d97828b5eb7ca0d0fd21fce8824f51a718d",
+    "ts": {
+     "ok": false,
+     "err": "mnemonic: words 4-6 are not a Monero seed encoding (electrum-words.cpp:326)"
+    },
+    "go": {
+     "err": "mnemonic: words 4-6 are not a Monero seed encoding (electrum-words.cpp:326)",
+     "ok": false
+    }
+   },
+   {
+    "section": "monero-seed",
+    "why": "oracle-bug: monero-python formats a word triple worth >= 2^32 as 9 hex digits and endian_swap keeps 8, returning a wrong key silently; Monero electrum-words.cpp:326 refuses the phrase ((x mod 2^32) mod 1626 != w1 whenever x >= 2^32, as 1626 does not divide 2^32) and so does sigelo",
+    "phrase": "myth digit looking upkeep large tutor mostly tadpoles tacit template pyramid problems chlorine vessel phone inexact podcast push network inbound rumble sample awkward examine large",
+    "oracle_hex": "99096c4e5d30416869fd0110910bb1fd113580b822adc404926d995406464630",
+    "ts": {
+     "ok": false,
+     "err": "mnemonic: words 7-9 are not a Monero seed encoding (electrum-words.cpp:326)"
+    },
+    "go": {
+     "err": "mnemonic: words 7-9 are not a Monero seed encoding (electrum-words.cpp:326)",
+     "ok": false
+    }
+   }
+  ]
+ }
+]

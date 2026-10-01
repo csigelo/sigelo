@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigelo.invalid/schema/v0/binding.json",
+  "title": "sigelo/0 binding body",
+  "description": "A payment binding, cross-signed by the identity key (sig_id) and the payment key (sig_addr) (SPEC §6, §3.1). method is open-ended: a verifier with no routine for it reports the binding unsupported. The spec fixes addr's form for two methods, checked here: ed25519-test (a multibase Ed25519 public key, §6.1a) and monero (a 95-character standard address or subaddress; an integrated address is refused, §6.2). exp > iat is required too (not expressible here).",
+  "type": "object",
+  "required": ["v", "typ", "id", "method", "addr", "iat", "exp", "nonce"],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "$ref": "common.json#/$defs/version" },
+    "typ": { "const": "binding" },
+    "id": { "$ref": "common.json#/$defs/did" },
+    "method": { "$ref": "common.json#/$defs/string", "examples": ["monero", "ed25519-test", "opaque-test"] },
+    "addr": { "$ref": "common.json#/$defs/string" },
+    "iat": { "$ref": "common.json#/$defs/unixSeconds" },
+    "exp": { "$ref": "common.json#/$defs/unixSeconds" },
+    "nonce": { "$ref": "common.json#/$defs/multibase" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "method": { "const": "ed25519-test" } }, "required": ["method"] },
+      "then": { "properties": { "addr": { "$ref": "common.json#/$defs/publicKey" } } }
+    },
+    {
+      "if": { "properties": { "method": { "const": "monero" } }, "required": ["method"] },
+      "then": { "properties": { "addr": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{95}$" } } }
+    }
+  ]
+}

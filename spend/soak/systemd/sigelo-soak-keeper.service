@@ -1,0 +1,27 @@
+[Unit]
+Description=sigelo-spend keeper for the stagenet soak (port 38200)
+# After= only, no Wants=: starting the keeper never starts a second wallet-rpc. The keeper
+# answers TRY LATER while the wallet is away.
+After=monero-wallet-rpc-stagenet.service
+
+# It does not wait for the clock: the read-only routes and TRY LATER answers need it up, and on
+# a clock set back it signs nothing (clock_behind, spend/README.md "The clock guard"). No
+# After=time-sync.target either: a --user unit cannot order against the system manager's target.
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/sigelo-soak/keeper
+# The daemon fallback (spend/README.md): the first address is the wallet-rpc unit's own
+# --daemon-address; the keeper moves the wallet-rpc along the rest when its daemon stops answering.
+Environment="SIGELO_DAEMONS=node.monerodevs.org:38089 node2.monerodevs.org:38089 xmr-lux.boldsuck.org:38081 stagenet.xmr-tw.org:38081"
+ExecStart=/usr/bin/node %h/.local/share/sigelo-soak/app/spend/dist/cli.js serve policy.json --port 38200
+Restart=always
+RestartSec=10
+# To keep it down (an incident): spend/soak/freeze.sh, a drop-in Restart=no in
+# ~/.config/systemd/user/sigelo-soak-keeper.service.d/. Not `mask --runtime`: this file lives in
+# ~/.config/systemd/user, which outranks /run/user/<uid>/systemd/user, so a runtime mask is shadowed
+# and Restart=always revives the keeper 10 s after a kill (the T14 rehearsal, README incident #5).
+UMask=0077
+
+[Install]
+WantedBy=default.target

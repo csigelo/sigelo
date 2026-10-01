@@ -1,0 +1,118 @@
+{
+ "commit": "8e971d06ee6a3ce0a66acae1bb4df062114df043",
+ "short": "8e971d0",
+ "created": "2026-09-23T19:52:41Z",
+ "note": "Files are exactly git show <commit>:<path>, except ts/README.md, cut to its identity part (sections \"Monero bindings\" and \"Root seed\" removed).",
+ "conditions": {
+  "lifecycle": {
+   "digest": "5d555e3db77d9d6b32cd016524331e33cf751c8b911e189e1c5088e4beb1f4e4",
+   "files": [
+    {
+     "path": "QUICKSTART.md",
+     "bytes": 9434,
+     "sha256": "d49d5c3f905c9bdc2b3526bb813bc345292577bc8f0a25fcdb7eff3b57812996"
+    },
+    {
+     "path": "SPEC.md",
+     "bytes": 30294,
+     "sha256": "2d32e175677e043ded5b8992303286b52e3f9b63ab0652a1e7e1c7f57c55125f"
+    },
+    {
+     "path": "examples/world.mjs",
+     "bytes": 3887,
+     "sha256": "b6630831e179015f4b786f9a911f3986a04ebd6e055370f59dc3cf9dc64e76cc"
+    },
+    {
+     "path": "schema/attestation-envelope.json",
+     "bytes": 815,
+     "sha256": "e988d34d41486c5c4d99723167dfd9bebf3dd3fc6f383bb253efd3150ac0ada0"
+    },
+    {
+     "path": "schema/attestation.json",
+     "bytes": 1314,
+     "sha256": "4ed0ec3076dce27c2b3111ed2e498444b0acb2f3260012554ac63d1318aaa528"
+    },
+    {
+     "path": "schema/binding-envelope.json",
+     "bytes": 1031,
+     "sha256": "ee0776068eb3a2dc06217ec449426d109eb50e985aff216c9ef8f6e711ae48d1"
+    },
+    {
+     "path": "schema/binding.json",
+     "bytes": 1683,
+     "sha256": "d07764dfa84b00b9cac58126558f0898c493b48eb3c6f841cf7f5df7e1287bb4"
+    },
+    {
+     "path": "schema/bundle.json",
+     "bytes": 1817,
+     "sha256": "393a9ca601cc62c85efc9bd445a66e569d1f1111aa2940de78621f800967b186"
+    },
+    {
+     "path": "schema/challenge.json",
+     "bytes": 771,
+     "sha256": "d2cd8f0b88718608257f9a359d316f6449d4d8130ee96a6ba2e5822ab430ac02"
+    },
+    {
+     "path": "schema/check.mjs",
+     "bytes": 14457,
+     "sha256": "a82670944911c99cf6e58b1506b6a406615b7157cf34e80d24d7486d7d906aa2"
+    },
+    {
+     "path": "schema/common.json",
+     "bytes": 4206,
+     "sha256": "162044b24c2db2892bf77755c8e07f5616cc0659ed09d3928573df4df1f407ee"
+    },
+    {
+     "path": "schema/genesis.json",
+     "bytes": 1087,
+     "sha256": "dd9f9c5d175fbf92b0b99c002ce1003b61b39ce4b483ade9c10dad5d47d6ed57"
+    },
+    {
+     "path": "schema/invoice.json",
+     "bytes": 1129,
+     "sha256": "11645d93aa533a8a04abeec0580a354e23cf8aeb4b1e86f73907db0f6df83532"
+    },
+    {
+     "path": "schema/rotation-envelope.json",
+     "bytes": 790,
+     "sha256": "83a9daf913c63a0f4de7e7d7ea25718be001cd2a4d8d115b517fd5c4696c13dd"
+    },
+    {
+     "path": "schema/rotation.json",
+     "bytes": 1021,
+     "sha256": "d5ae503257939dad854088ecbcc930f927dc744a14bd0aff27091c5ae769b510"
+    },
+    {
+     "path": "schema/verify-result.json",
+     "bytes": 2226,
+     "sha256": "ec69513a3f4051bb8966eeae4026409aee9538eb68d120e820ab8c1004154799"
+    },
+    {
+     "path": "test-vectors.json",
+     "bytes": 176596,
+     "sha256": "c0f631aca84b3a1ceb56988a1d9f373e8cb9faa47707de43354bdbac8683e5e6"
+    },
+    {
+     "path": "ts/README.md",
+     "bytes": 3826,
+     "sha256": "0ad4eac8bdf2af434efe7b2decb94527bb3b2855dd0d65e22a9df41f98f06ee7"
+    }
+   ]
+  },
+  "verifier": {
+   "digest": "9ad506e9e9631d4814a5cd4e321a21722b4a696334396ccd21b181f1a65bdf9c",
+   "files": [
+    {
+     "path": "SPEC.md",
+     "bytes": 30294,
+     "sha256": "2d32e175677e043ded5b8992303286b52e3f9b63ab0652a1e7e1c7f57c55125f"
+    },
+    {
+     "path": "test-vectors.json",
+     "bytes": 176596,
+     "sha256": "c0f631aca84b3a1ceb56988a1d9f373e8cb9faa47707de43354bdbac8683e5e6"
+    }
+   ]
+  }
+ }
+}
