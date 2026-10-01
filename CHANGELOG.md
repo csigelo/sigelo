@@ -100,7 +100,13 @@ history, which is not public. This public history starts at the import of 2026-1
   gate fails loudly when the secret is missing in this repository and reports hits as file and count
   only; it is its own job so it never hides the other results. The `spend` step of the `ts` job failed
   on the runner and passes here under the same node, npm and shell; it now annotates its FAIL lines
-  so the next run names the check. macOS and Windows are still unproven at runtime.
+  so the next run names the check. Second run (`648b53f`): Go and the release build green; Linux failed
+  one spend test because `init --create-wallet-rpc` wrote `/usr/bin/monero-wallet-rpc` into the unit
+  regardless — `init` now resolves the binary (`--wallet-rpc-bin` or PATH) and refuses without it
+  (`194fd86`); on Windows the systemd-unit and POSIX-mode checks SKIP with their reason and the Go
+  cross-check gets its `.exe` (the keeper is a Linux systemd service; Windows is a verifier and agent
+  platform); the ts pty tests use util-linux `script`/`setsid`, else a python pty helper, else SKIP,
+  and every suite's FAIL lines become annotations on every OS (`a71fb06`). macOS is still unproven.
 - **sigelo.io is live** (`site/deploy/`, deployed 2026-10-01 from the export): one Let's Encrypt
   certificate for `sigelo.io`, `www`, `sigelo.net` and its `www` (the `.net` names 301 to the apex),
   nginx with the security headers, no client IPs in logs, HSTS at five minutes for the first week;

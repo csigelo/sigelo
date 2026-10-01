@@ -196,6 +196,27 @@ function keeperSetup(f: ReturnType<typeof flags>, net: string): { K: Uint8Array;
   };
 }
 
+/**
+ * The monero-wallet-rpc the wallet-rpc unit runs, resolved now to an absolute path: `--wallet-rpc-bin`,
+ * else the first `monero-wallet-rpc` on PATH. Refused when there is none, or it is not an executable
+ * file: an operator who asks for the unit needs the binary, and a unit naming a binary that is not
+ * there fails only later, at `systemctl start`. `doctor` checks again that it still exists.
+ */
+function walletRpcBin(given: string | undefined): string {
+  // A file (not a directory) with an execute bit; Windows has no POSIX modes, so there it must exist.
+  const runnable = (p: string): boolean => { try { const st = statSync(p); return !st.isDirectory() && (process.platform === 'win32' || (st.mode & 0o111) !== 0); } catch { return false; } };
+  if (given !== undefined) {
+    const p = resolve(given);
+    if (!runnable(p)) throw new Error(`--wallet-rpc-bin ${p} is not an executable file`);
+    return p;
+  }
+  const exts = process.platform === 'win32' ? ['', ...(process.env['PATHEXT'] ?? '.EXE').split(';').filter(Boolean)] : [''];
+  for (const d of (process.env['PATH'] ?? '').split(process.platform === 'win32' ? ';' : ':').filter(Boolean)) {
+    for (const e of exts) { const p = resolve(d, `monero-wallet-rpc${e}`); if (runnable(p)) return p; }
+  }
+  throw new Error('--create-wallet-rpc needs monero-wallet-rpc, and there is none on PATH: install it (the Monero CLI release, getmonero.org) or give --wallet-rpc-bin <path>');
+}
+
 export interface InitResult { dir: string; did: string; token: string; tokenPath: string; url: string; units: string[]; lines: string[] }
 
 export function init(argv: string[]): InitResult {
@@ -226,7 +247,7 @@ export function init(argv: string[]): InitResult {
     if (!existsSync(resolve(file)) || !existsSync(resolve(pw))) throw new Error(`--wallet-file ${file} or --password-file ${pw} does not exist`);
     if (daemons.length === 0) throw new Error('--create-wallet-rpc needs --daemons a[,b,…]: the first is the wallet-rpc\'s --daemon-address, the rest the keeper\'s fallback');
     const wport = port(one(f, '--wallet-rpc-port'), '--wallet-rpc-port', net === 'stagenet' ? 38088 : 18088);
-    const bin = one(f, '--wallet-rpc-bin') ?? '/usr/bin/monero-wallet-rpc';
+    const bin = walletRpcBin(one(f, '--wallet-rpc-bin'));
     rpc = `http://127.0.0.1:${wport}/json_rpc`;
     login = `sigelo:${randomBytes(18).toString('base64url')}`;
     walletUnit = `[Unit]

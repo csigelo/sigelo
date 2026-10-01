@@ -30,6 +30,12 @@ jobs:
           fi
   ts:
     runs-on: ubuntu-latest
+    # `shell: bash` is `bash -eo pipefail`; the default is `bash -e`, without pipefail, so in run
+    # 36923176793 `npm test | tee … || {annotate}` never saw npm's failure and spend failed this
+    # job with no annotation (the matrix cells, which set it, annotated the same FAIL).
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
@@ -46,8 +52,11 @@ jobs:
       # generator must reproduce the committed file exactly
       - run: node dist/gen_vectors.js > /tmp/ts-vectors.json && diff -u ../test-vectors.json /tmp/ts-vectors.json
         working-directory: ts
-      # every vector, or nothing
-      - run: node dist/test.js | tee /tmp/ts-out && grep -q '^ALL PASS$' /tmp/ts-out
+      # every vector, or nothing; failures as annotations (as for spend below)
+      - run: |
+          node dist/test.js 2>&1 | tee /tmp/ts-out || {
+            { grep '^FAIL ' /tmp/ts-out | head -n 7; grep -E -m 3 'Error|^node:' /tmp/ts-out; tail -n 3 /tmp/ts-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=ts node dist\/test.js::/'; exit 1; }
+          grep -q '^ALL PASS$' /tmp/ts-out
         working-directory: ts
       # `sigelo-verify --conformance --impl` (ROADMAP T7): the Go binary and ts/ (through its
       # wrapper) as candidates must both score ALL PASS, a deliberately broken wrapper must FAIL,
@@ -74,7 +83,7 @@ jobs:
       - run: |
           npm ci --ignore-scripts
           npm test 2>&1 | tee /tmp/spend-out || {
-            { grep '^FAIL ' /tmp/spend-out | head -n 7; tail -n 3 /tmp/spend-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=spend npm test::/'; exit 1; }
+            { grep '^FAIL ' /tmp/spend-out | head -n 7; grep -E -m 3 'Error|^node:' /tmp/spend-out; tail -n 3 /tmp/spend-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=spend npm test::/'; exit 1; }
           grep -q '^ALL PASS$' /tmp/spend-out
         working-directory: spend
 
@@ -112,7 +121,11 @@ jobs:
         working-directory: ts
       - run: node dist/gen_vectors.js > "$RUNNER_TEMP/ts-vectors.json" && diff -u ../test-vectors.json "$RUNNER_TEMP/ts-vectors.json"
         working-directory: ts
-      - run: node dist/test.js | tee "$RUNNER_TEMP/ts-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/ts-out"
+      # failures as annotations, as in the ts job (run 36923176793 failed this step on macOS with none)
+      - run: |
+          node dist/test.js 2>&1 | tee "$RUNNER_TEMP/ts-out" || {
+            { grep '^FAIL ' "$RUNNER_TEMP/ts-out" | head -n 7; grep -E -m 3 'Error|^node:' "$RUNNER_TEMP/ts-out"; tail -n 3 "$RUNNER_TEMP/ts-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=ts node dist\/test.js::/'; exit 1; }
+          grep -q '^ALL PASS$' "$RUNNER_TEMP/ts-out"
         working-directory: ts
       - run: >-
           npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
@@ -121,7 +134,7 @@ jobs:
       - run: |
           npm ci --ignore-scripts
           npm test 2>&1 | tee "$RUNNER_TEMP/spend-out" || {
-            { grep '^FAIL ' "$RUNNER_TEMP/spend-out" | head -n 7; tail -n 3 "$RUNNER_TEMP/spend-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=spend npm test::/'; exit 1; }
+            { grep '^FAIL ' "$RUNNER_TEMP/spend-out" | head -n 7; grep -E -m 3 'Error|^node:' "$RUNNER_TEMP/spend-out"; tail -n 3 "$RUNNER_TEMP/spend-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=spend npm test::/'; exit 1; }
           grep -q '^ALL PASS$' "$RUNNER_TEMP/spend-out"
         working-directory: spend
       - run: npm test

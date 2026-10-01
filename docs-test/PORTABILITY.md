@@ -71,6 +71,27 @@ loopback-only network namespace.
 | `ts` (ubuntu): spend `npm ci --ignore-scripts && npm test` | **failed** after 36 s | **not reproduced**: 721 passed, 0 failed, 3 SKIP here under every variant above, Node 22 and 24. Not `--ignore-scripts` (`npm test` runs `tsc` itself) and not the live wallet or `monero-wallet-rpc` (they SKIP) | the step (and the matrix's) now writes each `FAIL` line and the last output lines as annotations, which are public: the next run names the failing check. **Open** until then |
 | `wallet-rpc canary` | not run (schedule / manual only) | — | unrun on GitHub |
 
+## GitHub Actions, 2026-10-01 (run 36923176793, public commit 648b53f, the second run)
+
+Every cell now got past the line-ending check and ran its suites. Annotations are public; the
+causes below were read from them and from the code (macOS and Windows cannot be run here).
+
+| Job / cell | Result | Cause | Now |
+|---|---|---|---|
+| `go`, `release-build` (ubuntu) | **passed** (release-build: both builds identical, `pack-test.sh` passing) | — | — |
+| `identity-strings` | **failed**, as designed | the `DEVICE_STRINGS` secret is not set | Owner: set the secret |
+| `ts` job and `portability` ubuntu Node 22, 24, current: spend | **720 passed, 1 failed** | `doctor (--create-wallet-rpc install, …)`: `init` wrote `ExecStart=/usr/bin/monero-wallet-rpc` unconditionally and doctor rightly failed it where no such file exists; the test host has the binary, so it never showed here. In the `ts` job the failure had no annotation: that job ran the default `bash -e`, without pipefail | `init --create-wallet-rpc` resolves the binary at init time (`--wallet-rpc-bin <path>`, else the first `monero-wallet-rpc` on PATH), **refuses** without one, and writes its absolute path into the unit; doctor still checks it exists. The test uses a stub (exit 0) via `--wallet-rpc-bin`, plus refusal checks (none on PATH, a missing path, no execute bit) and a doctor check on a vanished binary. Proven here with `monero-wallet-rpc` removed from PATH. The `ts` job now runs `shell: bash` (`-eo pipefail`) |
+| `portability` Windows Node 22, 24: spend | **706 passed, 7 failed** | the Go cross-check spawned `sigelo-verify` without `.exe`; the rest are systemd-unit content and POSIX-mode checks (backslash paths escaped in `ExecStart`, no 0600 on NTFS) | `.exe` on win32. Unit and mode checks SKIP on win32 with "the keeper runs as a systemd unit; Windows is a verifier/agent platform, not a keeper host" (or "Windows has no POSIX modes"); the policy, the gate, receipts, the licence and the fake wallet still run there. **Unproven until the next run** |
+| `portability` macOS Node 22, 24: ts `node dist/test.js` | **failed, no annotation** | not yet known from the run. Most likely (from the code): the M4 `--human` pty test only checked that a `script` exists, and macOS's BSD `script` has no `-c`, so its output files were never written and the suite crashed reading them (a crash prints no `FAIL`) | the pty checks use util-linux `script`/`setsid` where present, else a python3 helper (`os.forkpty`, `os.setsid`; exercised here with `SIGELO_TEST_PTY=python`), else SKIP with the reason; a missing output file is a FAIL, not a crash. The ts step now annotates `FAIL` lines, the first `Error` lines and the last lines on every OS. **Cause pending the next run's annotations** |
+
+## Platforms
+
+`ts/` (library, `sigelo-offline`), `go/`, `adapters/moadim/` and `integrations/mcp/` are
+cross-platform: Linux, macOS, Windows. `spend/`'s `init`, `doctor` and units are **Linux**: the
+keeper runs as a systemd unit; Windows is a verifier/agent platform, not a keeper host. The
+HTTP keeper (`sigelo-spend serve`) and the agent CLI `sigelo-wallet` may run anywhere Node runs,
+but a keeper outside Linux is unsupported (spend/README "Platforms").
+
 ## Matrix
 
 Status: **fixed** (changed in this sweep), **ok** (checked, nothing to do), **doc** (a limit,
@@ -108,13 +129,13 @@ by the sweep for files it did not own, landed after it).
 | 27 | `npx tsc` needs devDependencies | ts/, spend/, adapters/moadim | ok: `typescript` 5.9.3 is a pinned devDependency and `npm ci` installs it |
 | 28 | Locale / TZ / umask | all suites | ok: proven identical above |
 | 29 | Go: static, cross-built, vetted | go/ | ok: proven above. windows/arm64 builds but is not in `release/build.sh`'s five targets (adding it changes the release set: Owner's call) |
-| 30 | CI ran on ubuntu only | .github/workflows/conformance.yml | **fixed, ran once, red**: `portability` job, ubuntu/macos/windows × Node 22/24 + current on ubuntu, `shell: bash`, every `uses:` pinned to a 40-hex SHA (v7 of checkout, setup-node, setup-go, upload-artifact since 2026-10-01: v4/v5 ran on the deprecated Node 20). The first run (below, "GitHub Actions") stopped every cell at the line-ending check (#1), before any suite: macOS and Windows are still **unrun**, not known green |
+| 30 | CI ran on ubuntu only | .github/workflows/conformance.yml | **fixed, ran twice, red**: `portability` job, ubuntu/macos/windows × Node 22/24 + current on ubuntu, `shell: bash`, every `uses:` pinned to a 40-hex SHA (v7 of checkout, setup-node, setup-go, upload-artifact since 2026-10-01: v4/v5 ran on the deprecated Node 20). The first run ("GitHub Actions" above) stopped every cell at the line-ending check (#1), before any suite. The second (run 36923176793) ran every suite: Linux spend 720/1, Windows spend 706/7, macOS ts failed; fixed as that section says, **unproven until the next run**. `shell: bash` is now set on the `ts` job too |
 
 ## Not proven
 
 - **macOS, Windows, glibc Linux, x86_64, Node current**: not run here (Node 22 ran here since
-  2026-10-01, a musl build), and not yet on GitHub either: the first run stopped
-  every matrix cell before its suites (see "GitHub Actions"). The CI
+  2026-10-01, a musl build). On GitHub the second run (36923176793) reached every suite and
+  was red on all three systems; the fixes are unproven until the next run (see "GitHub Actions"). The CI
   matrix covers macOS arm64, Windows x86_64, ubuntu x86_64 on Node 22/24 (+ current); nothing
   covers Linux arm64 glibc or Windows arm64 (runner labels `ubuntu-24.04-arm` /
   `windows-11-arm` could be added once their availability for this repository is confirmed).

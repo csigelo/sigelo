@@ -1176,24 +1176,60 @@ try {
   const argvW = cli(['ceremony', '--net', 'stagenet', '--recipient', RCPT, '--out', join(cerTmp, 'argv'), ...scWords.split(' ')], standIn);
   t('ceremony CLI refuses words as arguments without echoing them', argvW.code === 2 && argvW.err.includes('never go on the command line') && !pairLeak(argvW.err, scWords));
 
-  // --human without a controlling terminal: setsid makes a session that has none.
-  if (spawnSync('setsid', ['--version']).error !== undefined) console.log('SKIP ceremony CLI --human without a tty (no setsid on PATH)');
+  // --human needs a terminal, and the two checks below need a session without one and a pty.
+  // util-linux `setsid -w` and `script -qec` provide them on Linux; macOS has no setsid and a BSD
+  // `script` with no -c (it would leave the output files unwritten), so there a python3 helper
+  // does the same (os.setsid, os.forkpty). Windows has neither os.forkpty nor a /dev/tty: SKIP.
+  // SIGELO_TEST_PTY=python forces the helper on Linux, to exercise the macOS path.
+  const forcePy = process.env['SIGELO_TEST_PTY'] === 'python';
+  const pyProbe = spawnSync('python3', ['-c', 'import os, sys; os.forkpty; os.setsid; print(sys.executable)']);
+  const python = pyProbe.status === 0 ? pyProbe.stdout.toString().trim() : undefined;
+  const PY_SETSID = 'import os, sys\nos.setsid()\nos.execv(sys.argv[1], sys.argv[1:])\n';
+  const PY_PTY = [
+    'import os, sys',
+    'pid, fd = os.forkpty()',
+    'if pid == 0:',
+    '    os.execv("/bin/sh", ["/bin/sh", "-c", sys.argv[1]])',
+    'chunks = []',
+    'while True:',
+    '    try:',
+    '        b = os.read(fd, 65536)',
+    '    except OSError:',
+    '        break',
+    '    if not b:',
+    '        break',
+    '    chunks.append(b)',
+    '_, st = os.waitpid(pid, 0)',
+    'sys.stdout.buffer.write(b"".join(chunks))',
+    'sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 1)',
+  ].join('\n') + '\n';
+  const setsidV = spawnSync('setsid', ['--version']);
+  const hasSetsid = !forcePy && setsidV.error === undefined && setsidV.status === 0;
+  const scriptV = spawnSync('script', ['--version']);
+  const utilScript = !forcePy && scriptV.error === undefined && scriptV.stdout.toString().includes('util-linux');
+
+  // --human without a controlling terminal: a new session has none.
+  if (!hasSetsid && python === undefined) console.log(`SKIP ceremony CLI --human without a tty (no setsid and no python3 with os.setsid on PATH${process.platform === 'win32' ? '; Windows has no /dev/tty' : ''})`);
   else {
-    const ns = spawnSync('setsid', ['-w', process.argv[0]!, OFFLINE, 'ceremony', '--net', 'stagenet', '--recipient', RCPT, '--out', join(cerTmp, 'notty'), '--human'], { env: { PATH: standIn } });
-    t('ceremony CLI --human with no terminal: exit 2, says why, stdout empty, nothing written (no fallback to stdout)',
+    const argv = [process.argv[0]!, OFFLINE, 'ceremony', '--net', 'stagenet', '--recipient', RCPT, '--out', join(cerTmp, 'notty'), '--human'];
+    const ns = hasSetsid ? spawnSync('setsid', ['-w', ...argv], { env: { PATH: standIn } }) : spawnSync(python!, ['-c', PY_SETSID, ...argv], { env: { PATH: standIn } });
+    t(`ceremony CLI --human with no terminal (${hasSetsid ? 'setsid' : 'python3 os.setsid'}): exit 2, says why, stdout empty, nothing written (no fallback to stdout)`,
       ns.status === 2 && ns.stderr.toString().includes('cannot open /dev/tty') && ns.stdout.toString() === '' && !readdirSync(cerTmp).includes('notty'));
   }
 
-  // --human on a real pseudo-terminal: util-linux `script` gives the child one; stdout and
-  // stderr go to files, so what `script` prints is exactly what reached /dev/tty.
-  if (spawnSync('script', ['--version']).error !== undefined) console.log('SKIP ceremony CLI --human on a pty (no util-linux `script` on PATH; the injected-sink checks above still ran)');
+  // --human on a real pseudo-terminal: stdout and stderr go to files, so what the pty shows is
+  // exactly what reached /dev/tty.
+  if (!utilScript && python === undefined) console.log(`SKIP ceremony CLI --human on a pty (no util-linux \`script\` and no python3 with os.forkpty on PATH${scriptV.error === undefined ? '; the `script` here is not util-linux (BSD script has no -c)' : ''}; the injected-sink checks above still ran)`);
   else {
     const q = (x: string): string => `'${x.replace(/'/g, `'\\''`)}'`;
     const onPty = (dir: string, extra: string[]) => {
       const cmd = [process.argv[0]!, OFFLINE, 'ceremony', '--net', 'stagenet', '--recipient', RCPT, '--out', join(cerTmp, dir), '--keepers', '2', ...extra].map(q).join(' ');
-      const r = spawnSync('script', ['-q', '-e', '-c', `${cmd} >${q(join(cerTmp, dir + '.out'))} 2>${q(join(cerTmp, dir + '.err'))}`, '/dev/null'], { env: { PATH: standIn } });
-      return { code: r.status, tty: r.stdout.toString(), out: readFileSync(join(cerTmp, dir + '.out'), 'utf-8'), err: readFileSync(join(cerTmp, dir + '.err'), 'utf-8') };
+      const line = `${cmd} >${q(join(cerTmp, dir + '.out'))} 2>${q(join(cerTmp, dir + '.err'))}`;
+      const r = utilScript ? spawnSync('script', ['-q', '-e', '-c', line, '/dev/null'], { env: { PATH: standIn } }) : spawnSync(python!, ['-c', PY_PTY, line], { env: { PATH: standIn } });
+      const read = (f: string): string => { try { return readFileSync(join(cerTmp, f), 'utf-8'); } catch { return `(${f} was not written: the pty helper did not run the command; status ${r.status}, ${r.stderr?.toString().trim()})`; } };
+      return { code: r.status, tty: r.stdout?.toString() ?? '', out: read(dir + '.out'), err: read(dir + '.err') };
     };
+    console.log(`ceremony CLI --human on a pty via ${utilScript ? 'util-linux script' : 'python3 os.forkpty'}`);
     // Baseline: the same imported root without --human. Its wordlist tokens are the fixed messages' own.
     const base = onPty('pty0', ['--import', wordsFile, COLD]);
     const hum = onPty('pty1', ['--import', wordsFile, COLD, '--human']);
@@ -1204,7 +1240,7 @@ try {
       hum.err.includes('went to /dev/tty') && [...wordTokens(hum.out + hum.err)].every((w) => allowed.has(w)) && !pairLeak(hum.out + hum.err, scWords) &&
       !leaks(hum.out + hum.err, SChex, scWords, recHex) && same(JSON.parse(hum.out).public, JSON.parse(base.out).public));
     const rnd = onPty('pty2', ['--human']);
-    const rndWords = fakePlain(join(cerTmp, 'pty2')).mnemonic;
+    const rndWords: string = rnd.code === 0 ? fakePlain(join(cerTmp, 'pty2')).mnemonic : '(no backup.age: the pty run failed)';
     t('ceremony CLI --human, fresh root: the words on the tty are the ones in backup.age, and nowhere in stdout/stderr',
       rnd.code === 0 && numbered(rnd.tty) === rndWords && !pairLeak(rnd.out + rnd.err, rndWords) &&
       !leaks(rnd.out + rnd.err, bytesToHex(rootFromMnemonic(rndWords)), rndWords, bytesToHex(recoverySeed(rootFromMnemonic(rndWords)))));

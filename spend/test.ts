@@ -42,6 +42,10 @@ const ok = (name: string, cond: boolean, detail = ''): void => {
   console.error(`FAIL ${name}${detail === '' ? '' : ` — ${detail}`}`);
 };
 const skip = (name: string, reason: string): void => { skipped++; console.log(`SKIP ${name} — ${reason}`); };
+/** spend/README "Platforms": units and POSIX modes are Linux; on Windows those checks SKIP, saying so. */
+const WIN = process.platform === 'win32';
+const NOT_A_KEEPER_HOST = 'the keeper runs as a systemd unit; Windows is a verifier/agent platform, not a keeper host';
+const onKeeperHost = (name: string, cond: () => boolean, detail: () => string = () => ''): void => { if (WIN) skip(name, NOT_A_KEEPER_HOST); else ok(name, cond(), detail()); };
 const refuses = (name: string, d: { ok: boolean; reason?: string }, prefix: string): void =>
   ok(name, d.ok === false && (d.reason ?? '').startsWith(prefix), `wanted ${JSON.stringify(prefix)}…, got ${d.ok ? 'ok:true' : JSON.stringify(d.reason)}`);
 const accepts = (name: string, d: { ok: boolean; reason?: string }): void =>
@@ -1928,7 +1932,7 @@ const rawSend = (port: number, text: string) => {
     writeFileSync(lock, full(other.pid!, BOOT, otherStart), { mode: 0o600 });
     await refusedStart('lock: a live lock (this boot, pid alive, same starttime) is refused as before', [`pid ${other.pid}`, 'another keeper', lock]);
     ok('lock: a refused start leaves the live lock as it was', readFileSync(lock, 'utf-8') === full(other.pid!, BOOT, otherStart));
-  } else ok('lock: /proc missing — the boot_id/starttime checks are Linux-only (skipped here)', true);
+  } else skip('lock: the boot_id/starttime checks', 'this host has no /proc (not Linux); the no-/proc fallback block below runs instead');
   writeFileSync(lock, `${other.pid}\n{"pid":1,"boot_id":"x","start":1}\n`, { mode: 0o600 });
   await refusedStart('lock: a second line naming another pid is not a lock this keeper understands — refused, remove by hand', ['does not hold a pid', 'by hand']);
   other.kill('SIGTERM');
@@ -2404,17 +2408,19 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     a1['max_delegates'] === 0 && JSON.stringify(a1['allow']) === JSON.stringify([{ label: 'bob', addr: LITERAL }]) && loadPolicy(join(k1, 'policy.json')).net === 'stagenet');
   const token1 = readFileSync(join(k1, 'agent.token'), 'utf-8').trim();
   ok('init: agent.token holds the token whose hash is in the policy', tokenHash(token1) === a1['token_hash']);
-  if (process.platform !== 'win32') ok('init: the directory is 0700, spend.key, policy.json and agent.token 0600', mode(k1) === 0o700 && ['spend.key', 'policy.json', 'agent.token', 'install.json'].every((f) => mode(join(k1, f)) === 0o600));
+  onKeeperHost('init: the directory is 0700, spend.key, policy.json and agent.token 0600', () => mode(k1) === 0o700 && ['spend.key', 'policy.json', 'agent.token', 'install.json'].every((f) => mode(join(k1, f)) === 0o600));
   const did1 = loadKeeper(k1, loadRoot(join(k1, 'policy.json'))).did;
   ok('init: prints the keeper DID a licence is issued to', i1.out.includes(`keeper DID    ${did1}`));
   ok('init: prints the agent\'s URL, token path and the prompt snippet of MONERO.md §4.2, verbatim (the README\'s and MONERO.md\'s, byte for byte)', i1.out.includes(`SIGELO_WALLET_URL=http://127.0.0.1:${port1}\nSIGELO_WALLET_TOKEN=$(cat ${join(k1, 'agent.token')})\n\n${SNIPPET}\n`) &&
     SNIPPET.split('\n').length === 10 && readFileSync(join(here, '..', 'README.md'), 'utf-8').includes(SNIPPET) && readFileSync(join(here, '..', '..', 'MONERO.md'), 'utf-8').includes(SNIPPET));
   ok('init: says it runs on this host with your keys, nothing hosted', i1.out.includes('Runs on this host with your wallet and your keys; nothing is hosted'));
   const unit1 = readFileSync(join(k1, 'systemd', `sigelo-keeper-k1.service`), 'utf-8');
-  ok('init: the keeper unit runs the frozen copy: serve <dir>/policy.json --port, Restart=always, no SIGELO_DAEMONS when none was given',
-    unit1.includes(`ExecStart="${process.execPath}" "${join(k1, 'app', 'node_modules', 'sigelo-spend', 'dist', 'cli.js')}" "serve" "${join(k1, 'policy.json')}" "--port" "${port1}"`) &&
+  ok('init: the frozen copy holds sigelo and sigelo-spend, without the compiled test', existsSync(join(k1, 'app', 'node_modules', 'sigelo', 'dist', 'sigelo.js')) &&
+    existsSync(join(k1, 'app', 'node_modules', 'sigelo-spend', 'dist', 'cli.js')) && !existsSync(join(k1, 'app', 'node_modules', 'sigelo-spend', 'dist', 'test.js')));
+  onKeeperHost('init: the keeper unit runs the frozen copy: serve <dir>/policy.json --port, Restart=always, no SIGELO_DAEMONS when none was given',
+    () => unit1.includes(`ExecStart="${process.execPath}" "${join(k1, 'app', 'node_modules', 'sigelo-spend', 'dist', 'cli.js')}" "serve" "${join(k1, 'policy.json')}" "--port" "${port1}"`) &&
     unit1.includes('Restart=always') && !unit1.includes('SIGELO_DAEMONS') && existsSync(join(k1, 'app', 'node_modules', 'sigelo', 'dist', 'sigelo.js')) &&
-    !existsSync(join(k1, 'app', 'node_modules', 'sigelo-spend', 'dist', 'test.js')), unit1);
+    !existsSync(join(k1, 'app', 'node_modules', 'sigelo-spend', 'dist', 'test.js')), () => unit1);
   ok('init: --no-systemd writes no unit outside the directory', !existsSync(join(scratch, 'config', 'systemd')));
   const again = await cli(['init', '--dir', k1, '--no-systemd', '--wallet-rpc', rpc], join(scratch, 'reg-x.json'));
   ok('init: refuses an existing non-empty directory', again.code === 1 && again.err.includes(`${k1} exists and is not empty — init never writes over a keeper`), again.err);
@@ -2433,22 +2439,55 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   // --create-wallet-rpc: a unit for the operator's own wallet file, loopback, with an RPC login
   const kw = join(scratch, 'kw'), wf = join(scratch, 'my-wallet'), pwf = join(scratch, 'my-wallet.pw');
   writeFileSync(wf, 'x', { mode: 0o600 }); writeFileSync(pwf, 'pw\n', { mode: 0o600 });
+  // init resolves monero-wallet-rpc now and refuses without one; a stub that exits 0 stands in
+  // for it, so this runs the same on a host with the real binary and on a runner without.
+  const stubDir = join(scratch, 'stub-bin'), emptyDir = join(scratch, 'empty-bin');
+  mkdirSync(stubDir); mkdirSync(emptyDir);
+  const stub = join(stubDir, WIN ? 'monero-wallet-rpc.cmd' : 'monero-wallet-rpc');
+  writeFileSync(stub, WIN ? '@exit /b 0\r\n' : '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const wargs = (dir: string): string[] => ['init', '--dir', dir, '--no-systemd', '--create-wallet-rpc', '--wallet-file', wf, '--password-file', pwf, '--daemons', 'node.example.org:38089'];
+  const noBin = await cli(wargs(join(scratch, 'k-nobin')), join(scratch, 'reg-nobin.json'), { PATH: emptyDir });
+  const goneBin = await cli([...wargs(join(scratch, 'k-nobin')), '--wallet-rpc-bin', join(emptyDir, 'monero-wallet-rpc')], join(scratch, 'reg-nobin.json'));
+  ok('init --create-wallet-rpc: no monero-wallet-rpc on PATH, or a --wallet-rpc-bin that is not there, is refused, naming the fix, and writes nothing',
+    noBin.code === 1 && noBin.err.includes('needs monero-wallet-rpc, and there is none on PATH') && noBin.err.includes('--wallet-rpc-bin <path>') &&
+    goneBin.code === 1 && goneBin.err.includes(`--wallet-rpc-bin ${join(emptyDir, 'monero-wallet-rpc')} is not an executable file`) && !existsSync(join(scratch, 'k-nobin')), noBin.err + goneBin.err);
+  if (WIN) skip('init --create-wallet-rpc: a --wallet-rpc-bin without the execute bit is refused', 'Windows has no POSIX modes');
+  else {
+    const plain = join(emptyDir, 'not-executable');
+    writeFileSync(plain, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    const nx = await cli([...wargs(join(scratch, 'k-nobin')), '--wallet-rpc-bin', plain], join(scratch, 'reg-nobin.json'));
+    ok('init --create-wallet-rpc: a --wallet-rpc-bin without the execute bit is refused', nx.code === 1 && nx.err.includes(`--wallet-rpc-bin ${plain} is not an executable file`) && !existsSync(join(scratch, 'k-nobin')), nx.err);
+  }
+  const kp = join(scratch, 'kp');
+  const ip = await cli(wargs(kp), join(scratch, 'reg-p.json'), { PATH: [emptyDir, stubDir].join(WIN ? ';' : ':'), PATHEXT: '.EXE;.CMD' });
+  ok('init --create-wallet-rpc: without --wallet-rpc-bin, the first monero-wallet-rpc on PATH is used', ip.code === 0, ip.err);
+  onKeeperHost('init --create-wallet-rpc: the unit runs the PATH binary by its absolute path', () => readFileSync(join(kp, 'systemd', 'sigelo-wallet-rpc-kp.service'), 'utf-8').includes(`ExecStart="${stub}" "--stagenet"`),
+    () => readFileSync(join(kp, 'systemd', 'sigelo-wallet-rpc-kp.service'), 'utf-8'));
   const iw = await cli(['init', '--dir', kw, '--no-systemd', '--create-wallet-rpc', '--wallet-file', wf, '--password-file', pwf, '--wallet-rpc-port', String(await freePort()),
-    '--daemons', 'node.example.org:38089,[::1]:38081', '--notify'], join(scratch, 'reg-w.json'));
+    '--daemons', 'node.example.org:38089,[::1]:38081', '--notify', '--wallet-rpc-bin', stub], join(scratch, 'reg-w.json'));
   const wunit = readFileSync(join(kw, 'systemd', 'sigelo-wallet-rpc-kw.service'), 'utf-8'), kunit = readFileSync(join(kw, 'systemd', 'sigelo-keeper-kw.service'), 'utf-8');
   const wpol = loadPolicy(join(kw, 'policy.json'));
-  ok('init --create-wallet-rpc: the wallet-rpc unit binds 127.0.0.1 with --rpc-login (the policy holds it), --stagenet, an untrusted daemon, over the given wallet file',
-    iw.code === 0 && /"--rpc-bind-ip" "127\.0\.0\.1"/.test(wunit) && wunit.includes(`"--rpc-login" "${wpol.wallet.login}"`) && wpol.wallet.login?.startsWith('sigelo:') === true &&
+  ok('init --create-wallet-rpc --wallet-rpc-bin: exits 0, the policy holds a generated RPC login', iw.code === 0 && wpol.wallet.login?.startsWith('sigelo:') === true, iw.err);
+  onKeeperHost('init --create-wallet-rpc: the wallet-rpc unit runs the given binary, binds 127.0.0.1 with --rpc-login (the policy holds it), --stagenet, an untrusted daemon, over the given wallet file',
+    () => iw.code === 0 && wunit.startsWith('[Unit]') && wunit.includes(`ExecStart="${stub}" "--stagenet"`) && /"--rpc-bind-ip" "127\.0\.0\.1"/.test(wunit) && wunit.includes(`"--rpc-login" "${wpol.wallet.login}"`) && wpol.wallet.login?.startsWith('sigelo:') === true &&
     wunit.includes('"--stagenet"') && wunit.includes('"--untrusted-daemon"') && wunit.includes(`"--wallet-file" "${wf}"`) && wunit.includes('"--daemon-address" "node.example.org:38089"') &&
-    !wunit.includes('--trusted-daemon ') && !wunit.includes('disable-rpc-login'), iw.err + wunit);
+    !wunit.includes('--trusted-daemon ') && !wunit.includes('disable-rpc-login'), () => iw.err + wunit);
   ok('init --daemons: the keeper unit carries SIGELO_DAEMONS in order, after the wallet unit; --notify adds the hourly doctor',
     kunit.includes('Environment="SIGELO_DAEMONS=node.example.org:38089 [::1]:38081"') && kunit.includes('After=sigelo-wallet-rpc-kw.service') &&
     readFileSync(join(kw, 'systemd', 'sigelo-keeper-kw-check.timer'), 'utf-8').includes('OnCalendar=*-*-* *:15:00') &&
     readFileSync(join(kw, 'systemd', 'sigelo-keeper-kw-check.service'), 'utf-8').includes('"doctor" "--dir"'), kunit);
   const dw = await cli(['doctor', '--dir', kw], join(scratch, 'reg-w.json'));
-  ok('doctor (--create-wallet-rpc install, wallet-rpc not running): every unit checks, the wallet-rpc is unreachable, the install is valid (exit 2)',
-    dw.code === 2 && dw.out.includes('ok   unit sigelo-wallet-rpc-kw.service: wallet-rpc on 127.0.0.1 with an RPC login') && dw.out.includes('WARN wallet-rpc unreachable') &&
-    dw.out.includes('INSTALL VALID, with warnings') && !dw.out.includes('FAIL'), dw.out);
+  onKeeperHost('doctor (--create-wallet-rpc install, wallet-rpc not running): every unit checks, the wallet-rpc is unreachable, the install is valid (exit 2)',
+    () => dw.code === 2 && dw.out.includes('ok   unit sigelo-wallet-rpc-kw.service: wallet-rpc on 127.0.0.1 with an RPC login') && dw.out.includes('WARN wallet-rpc unreachable') &&
+    dw.out.includes('INSTALL VALID, with warnings') && !dw.out.includes('FAIL'), () => dw.out);
+  if (WIN) skip('doctor: a wallet-rpc unit whose binary is gone fails the install', NOT_A_KEEPER_HOST);
+  else {
+    const wunitPath = join(kw, 'systemd', 'sigelo-wallet-rpc-kw.service');
+    writeFileSync(wunitPath, wunit.replace(`ExecStart="${stub}"`, `ExecStart="${join(emptyDir, 'monero-wallet-rpc')}"`), { mode: 0o600 });
+    const dNoBin = await cli(['doctor', '--dir', kw], join(scratch, 'reg-w.json'));
+    writeFileSync(wunitPath, wunit, { mode: 0o600 });
+    ok('doctor: a wallet-rpc unit whose binary is gone fails the install', dNoBin.code === 1 && dNoBin.out.includes(`FAIL unit sigelo-wallet-rpc-kw.service: ExecStart runs "${join(emptyDir, 'monero-wallet-rpc')}", which does not exist`), dNoBin.out);
+  }
 
   // doctor on k1: wallet reachable (RPC 1.30), keeper not yet running
   const d1 = await cli(['doctor', '--dir', k1], REG);
@@ -2459,11 +2498,14 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   const dOld = await cli(['doctor', '--dir', k1], REG);
   w.mode.version = undefined;
   ok('doctor: a wallet-rpc outside RPC_RANGE fails the install (exit 1)', dOld.code === 1 && dOld.out.includes('FAIL wallet-rpc: RPC version 1.40 is outside 1.30–1.33') && dOld.out.includes('INSTALL INVALID'), dOld.out);
-  const k1unit = join(k1, 'systemd', 'sigelo-keeper-k1.service');
-  writeFileSync(k1unit, unit1.replace('sigelo-spend/dist/cli.js', 'sigelo-spend/dist/gone.js'), { mode: 0o600 });
-  const dGone = await cli(['doctor', '--dir', k1], REG);
-  writeFileSync(k1unit, unit1, { mode: 0o600 });
-  ok('doctor: a unit whose script is missing fails the install', dGone.code === 1 && dGone.out.includes('gone.js does not exist'), dGone.out);
+  if (WIN) skip('doctor: a unit whose script is missing fails the install', NOT_A_KEEPER_HOST);
+  else {
+    const k1unit = join(k1, 'systemd', 'sigelo-keeper-k1.service');
+    writeFileSync(k1unit, unit1.replace('sigelo-spend/dist/cli.js', 'sigelo-spend/dist/gone.js'), { mode: 0o600 });
+    const dGone = await cli(['doctor', '--dir', k1], REG);
+    writeFileSync(k1unit, unit1, { mode: 0o600 });
+    ok('doctor: a unit whose script is missing fails the install', dGone.code === 1 && dGone.out.includes('gone.js does not exist'), dGone.out);
+  }
   ok('doctor: a directory init did not make is invalid', (await cli(['doctor', '--dir', scratch], REG)).out.includes('FAIL install:'));
 
   // ---- the free tier: everything one agent needs, on the keeper init made, with no licence
@@ -2513,7 +2555,9 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   rmSync(join(k1, 'licence.json'), { recursive: false, force: true });
   writeFileSync(licFile, JSON.stringify(issueLicence(did1, { seats: 2 })), { mode: 0o600 });
   const li = await cli(['licence', 'install', licFile, '--dir', k1], REG);
-  ok('licence install: a valid licence is installed 0600 and described', li.code === 0 && li.out.includes('tier pro (licence to') && mode(join(k1, 'licence.json')) === 0o600, li.err + li.out);
+  ok('licence install: a valid licence is installed and described', li.code === 0 && li.out.includes('tier pro (licence to') && existsSync(join(k1, 'licence.json')), li.err + li.out);
+  if (WIN) skip('licence install: licence.json is 0600', 'Windows has no POSIX modes');
+  else ok('licence install: licence.json is 0600', mode(join(k1, 'licence.json')) === 0o600);
   ok('licence: the running keeper is pro from its next request, no restart', s1.licence().tier === 'pro');
   const dl2 = await api(port1, '/delegate', { method: 'POST', token: token1, body: { name: 'helper', fund: '0' } });
   ok('licence: /delegate now passes the gate (and stops at the policy: max_delegates 0, no recovery_commitment)', dl2.status === 403 && dl2.body['code'] === 'delegate', JSON.stringify(dl2.body));
@@ -2616,11 +2660,11 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   const payBob = async (p: number, token: string, purpose: string): Promise<Receipt | undefined> =>
     (await api(p, '/pay', { method: 'POST', token, body: { to: { label: 'bob' }, amount: '10000000000', purpose } })).body['receipt'] as Receipt | undefined;
   // The Go reference verifier on a bundle file: its §9.1 result, or { reject }; built once into the scratch dir.
-  const goBin = join(scratch, 'sigelo-verify');
+  const goBin = join(scratch, WIN ? 'sigelo-verify.exe' : 'sigelo-verify');
   const hasGo = spawnSync('go', ['-C', join(root, 'go'), 'build', '-o', goBin, './cmd/sigelo-verify'], { encoding: 'utf-8', env: process.env }).status === 0;
   const goVerify = (file: string, now: number): Record<string, unknown> => {
     const r = spawnSync(goBin, [file, '--now', String(now)], { encoding: 'utf-8' });
-    return r.status === 0 ? JSON.parse(r.stdout) as Record<string, unknown> : { reject: r.stderr };
+    return r.status === 0 ? JSON.parse(r.stdout) as Record<string, unknown> : { reject: r.stderr ?? String(r.error) };
   };
   try {
     const S = rootFromMnemonic(newRoot()), RC = recoveryCommitment(S), K0 = keeperRoot(S, 0), K1 = keeperRoot(S, 1);

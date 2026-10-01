@@ -20,7 +20,7 @@ const USAGE = `sigelo-spend serve <policy.json> [--dry-run] [--port 38090]
 sigelo-spend token new <policy.json> [<agent>]
 sigelo-spend pay <policy.json> <request.json> [--port 38090]
 sigelo-spend approve-request <policy.json> <ref>
-sigelo-spend init [--dir D] [--net stagenet|mainnet] (--wallet-rpc URL [--wallet-rpc-login u:p] | --create-wallet-rpc --wallet-file F --password-file P [--wallet-rpc-port N])
+sigelo-spend init [--dir D] [--net stagenet|mainnet] (--wallet-rpc URL [--wallet-rpc-login u:p] | --create-wallet-rpc --wallet-file F --password-file P [--wallet-rpc-port N] [--wallet-rpc-bin PATH])
                   [--daemons a,b,c] [--port 38090] [--agent NAME] [--account N] [--allow label=addr ...] [--per-tx XMR] [--per-day XMR] [--notify] [--no-systemd] [--licence FILE]
                   [--keeper-package keeper-<j>.json | --recovery-commitment sha256:… | --adopt RECOVERED.json [--key F]]
 sigelo-spend doctor [--dir D] [--notify]

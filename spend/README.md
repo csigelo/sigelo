@@ -38,7 +38,9 @@ systemd `--user` units: the keeper (`Restart=always`, `SIGELO_DAEMONS` from `--d
 `--notify` an hourly `doctor --notify`, and with `--create-wallet-rpc --wallet-file F
 --password-file P` a unit for `monero-wallet-rpc` over your wallet file — `--rpc-bind-ip
 127.0.0.1`, a generated `--rpc-login` (kept in `policy.json`), `--untrusted-daemon`, the first
-`--daemons` entry as its `--daemon-address`. It installs them in `~/.config/systemd/user` and
+`--daemons` entry as its `--daemon-address`. The unit runs the binary by the absolute path `init`
+resolves: `--wallet-rpc-bin <path>`, else the first `monero-wallet-rpc` on PATH; with neither,
+`init` refuses (a unit for a binary that is not there would only fail at `systemctl start`). It installs them in `~/.config/systemd/user` and
 runs `daemon-reload` (`--no-systemd`: the unit files are written to `<dir>/systemd/` only), then
 prints the keeper DID, the `systemctl --user enable --now …` line, and what the agent needs:
 `SIGELO_WALLET_URL`, `SIGELO_WALLET_TOKEN=$(cat <dir>/agent.token)` and the prompt snippet below.
@@ -79,6 +81,16 @@ the wallet-rpc or the keeper not answering, the clock) and `FAIL` (the install),
 1). `--notify` appends a line to `<dir>/alerts.log` and sends a desktop notification when it
 turns unhealthy, and one when it is healthy again. To upgrade, `init` a new directory and move
 the wallet over; `init` never writes into a keeper that exists.
+
+### Platforms
+
+The keeper runs as a systemd unit; Windows is a verifier/agent platform, not a keeper host.
+`init`, `doctor` and the units are **Linux** (systemd `--user`, POSIX modes, `/proc` for the
+lock). The HTTP keeper (`serve`) and `sigelo-wallet` may run anywhere Node runs, but a keeper
+outside Linux is unsupported. The rest of sigelo — `ts/` (the library and `sigelo-offline`),
+`go/`, `adapters/moadim/`, `integrations/mcp/` — is cross-platform: Linux, macOS, Windows. On
+Windows this package's test suite SKIPs its unit and file-mode checks, saying so, and runs the
+rest (policy, gate, receipts, licence, the fake wallet). See docs-test/PORTABILITY.md.
 
 ### Free and paid
 
