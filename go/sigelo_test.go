@@ -289,6 +289,8 @@ func TestJCS(t *testing.T) {
 		}
 	}
 	check("go: the §5.2 challenge nonce is exempt", Structure(at(V, "vectors", "challenge", "body").(Object).With("nonce", "any opaque thing, 0OIl"), "challenge") == nil)
+	// §5.2: these five fields and no others, so nothing is smuggled into the signed bytes.
+	rejects("go: a challenge with a sixth key is refused", Structure(at(V, "vectors", "challenge", "body").(Object).With("amount", int64(1)), "challenge"), `challenge: unknown field "amount"`)
 	_, aerr := decodeKey("z" + strings.Repeat("0", 100))
 	check(fmt.Sprintf("go: the alphabet is checked before the length (%v)", aerr), aerr != nil && aerr.Error() == `multibase: "0" is not a base58btc digit`)
 }

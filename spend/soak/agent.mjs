@@ -13,8 +13,10 @@
 // behaviour and counts as "tolerated", not a mismatch. Nothing here throws out of the tick.
 //
 // An outage tick (soak incident #4: the host had no network for 32 h) is one where the wallet height
-// did not advance since the previous tick's snapshot, or the keeper answered wallet_offline. In it, a
-// TRY LATER where the script expected success is the keeper failing closed, so its verdict is
+// did not advance since the previous tick's snapshot, or the keeper answered wallet_offline, or the
+// keeper itself was unreachable (code `unreachable`: connection refused, e.g. during a freeze, drill 2
+// tick 58, R13). In it, a TRY LATER where the script expected success is the keeper failing
+// closed, so its verdict is
 // "outage", not MISMATCH; the tick is counted in outage_ticks and gets a kind:"outage" line. Any other
 // unexpected answer is still a MISMATCH. A carol rent given up after 3 h in which every pay attempt
 // was an outage TRY LATER is "abandoned_offline" (tolerated), not a mismatch.
@@ -91,7 +93,7 @@ function wallet(who, token, args, expect) {
   let o;
   try { o = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { o = { status: 'crash', code: r.error ? String(r.error.code ?? r.error) : `noparse(${r.signal ?? r.status})`, message: `${r.stdout} ${r.stderr}` }; }
   const got = `${o.status}/${o.code}`;
-  if (o.code === 'wallet_offline' && !outage.includes('wallet_offline')) outage.push('wallet_offline');
+  if ((o.code === 'wallet_offline' || o.code === 'unreachable') && !outage.includes(o.code)) outage.push(o.code);
   const cmd = `sigelo-wallet ${args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`;
   const v = judge(cmd, who, got, r.status, oneLine(o.message), expect, Date.now() - t0);
   if (o.status === 'try_later') stats.try_later++;

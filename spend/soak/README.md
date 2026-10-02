@@ -430,6 +430,8 @@ bob, carol rent 1 and the delegate funding in the same tick (drill 1: one output
 with `recover --new-keeper 1`; the Go verifier accepted the bundle, the stolen `spend.key` is refused.
 *Findings*: a leftover `serve --dry-run` from an earlier test, on a copy of the policy, still took the
 root token after the freeze (killed; step 2.5 now checks); `freeze.sh` cannot spare the wallet-rpc.
+*Follow-up (R13)*: `freeze.sh` now kills every keeper on the policy or the port (step 3b) and warns
+on other policies' keepers; the agent counts an `unreachable` keeper as an outage tick, not a MISMATCH.
 
 ## Incident rehearsal (T14) — ran 2026-10-01; next drill: quarterly
 
@@ -489,11 +491,14 @@ it). Paste its output into the timeline: every step prints its UTC time.
    live**: the agent creates the day's delegate at ~00:02Z and revokes it about an hour later, so
    outside that hour there is none. Record "none live": that is a valid outcome, and the root
    proof shows the same thing (no process accepts any token). The next agent tick must log TRY
-   LATERs, not crash; it still counts the unreachable `balance` as a MISMATCH (6df3b67 and 9516622
-   alike: an unreachable keeper with a moving height is not an outage tick). Nothing else should
-   accept the tokens: check it, `pgrep -af 'cli.js serve'` must show nothing. Drill 2 found a
-   leftover `serve --dry-run` on a copy of the policy that took the root token; `freeze.sh` kills
-   only the pid in `spend.lock`. That is the whole of revoke-all today (INCIDENT §2).
+   LATERs, not crash; since R13 an `unreachable` keeper makes it an outage tick (`balance` →
+   verdict `outage`, `kind:"outage"` reason `unreachable`), not a MISMATCH (6df3b67 and 9516622
+   counted one). Nothing else may accept the tokens: `freeze.sh` (step 3b, R13) kill -9s every
+   process serving that `policy.json` (realpath, symlinks and relative paths resolved) or holding the
+   keeper port, not only the `spend.lock` pid, logs each one's uid, parent and cgroup, and asserts
+   the port closed; `serve` processes on other policies are printed as a WARNING (`IDENTICAL
+   CONTENT` = a copy that takes these tokens: kill it by hand). Still check `pgrep -af 'cli.js
+   serve'` shows nothing that should not run. That is the whole of revoke-all (INCIDENT §2).
 
 **3. Sweep to the vault** (the "clean host": a separate wallet dir on tmpfs, another port):
 

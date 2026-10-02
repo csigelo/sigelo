@@ -633,6 +633,11 @@ C.fatal_next_genesis_created_fraction = [bnd([], [], { rotations: [{ ...pick(RV,
 C.fatal_issuer_nonce_float = [bnd([], [], { issuers: [{ ...gw, nonce: 0.5 }] }), { reject: 'bundle: non-integer number' }];
 // SPEC §7.3/§7.4: two entries are two candidates even when byte-identical; no verifier deduplicates.
 C.fatal_duplicate_rotation_is_fork = [bnd([], [], { rotations: [pick(RV, ENVELOPE), pick(RV, ENVELOPE)] }), { reject: 'chain: fork at' }];
+// SPEC §7.2: hash(next_genesis) == next, or the rotation is not a candidate and the chain ends at
+// its node. The swapped next_genesis carries the same commitment, so only the hash check stops it;
+// an attestation to the next DID is accepted through a good rotation and discarded through this one.
+C.rotation_followed_attestation_to_next = [bnd([], [envA({ sub: d1 })], { rotations: [pick(RV, ENVELOPE)] }), counts([], 1, 0, 0)];
+C.rotation_next_genesis_not_next = [bnd([], [envA({ sub: d1 })], { rotations: [{ ...pick(RV, ENVELOPE), next_genesis: { ...g1, nonce: g0.nonce } }] }), counts([], 0, 1, 0)];
 // A lone surrogate cannot be written to this UTF-8 file raw: such a case travels as escaped JSON text in `raw`.
 const kase = (bd: J, e: J): J => (hasLoneSurrogate(bd) ? { raw: pyDumps(bd), expect: e } : { bundle: bd, expect: e });
 // Bundle TEXT (`raw`), read with the strict parser. A duplicate key makes the text ambiguous, so

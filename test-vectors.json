@@ -5411,6 +5411,156 @@
             "reject": "chain: fork at"
           }
         },
+        "rotation_followed_attestation_to_next": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+                  "iat": 1759276800,
+                  "reason": "voluntary"
+                },
+                "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL",
+                  "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zVPYtbNU6bZFwfzo7Y2U2Ri"
+                }
+              }
+            ],
+            "bindings": [],
+            "attestations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "attestation",
+                  "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+                  "sub": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "ctx": "1f916.ai",
+                  "admission": "invite",
+                  "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+                  "claims": {
+                    "joined": "2026-04-02",
+                    "posts": 412,
+                    "standing": "citizen"
+                  }
+                },
+                "sig": "z3aJmoKvyFRWQFbcuGz4UVSmDrjEMYJaaRD8pDJCj9mdew7DAoiRjADPR131hxFpG9E3FGBbHWkGhFSsEbQsYnGTQ"
+              }
+            ],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 1,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 0
+            }
+          }
+        },
+        "rotation_next_genesis_not_next": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+                  "iat": 1759276800,
+                  "reason": "voluntary"
+                },
+                "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL",
+                  "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+                }
+              }
+            ],
+            "bindings": [],
+            "attestations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "attestation",
+                  "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+                  "sub": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "ctx": "1f916.ai",
+                  "admission": "invite",
+                  "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+                  "claims": {
+                    "joined": "2026-04-02",
+                    "posts": 412,
+                    "standing": "citizen"
+                  }
+                },
+                "sig": "z3aJmoKvyFRWQFbcuGz4UVSmDrjEMYJaaRD8pDJCj9mdew7DAoiRjADPR131hxFpG9E3FGBbHWkGhFSsEbQsYnGTQ"
+              }
+            ],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 1,
+              "bindings": 0
+            }
+          }
+        },
         "raw_binding_good_and_float": {
           "raw": "{\"v\":\"sigelo/0\",\"typ\":\"bundle\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"rotations\":[],\"bindings\":[{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"binding\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"ed25519-test\",\"addr\":\"z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4\",\"iat\":1757203200,\"exp\":1764979200,\"nonce\":\"zTHKNvrWPf52gDYivvHooQP\"},\"sig_id\":\"z5kKgaz4cYTnLMZCkYaQGkKHQzuZ6zYT7UcLbPKLgYraa5h8Vw5c5WRFRjBjArFPiuyP8WXRqws4yjqWG5FbLpzWc\",\"sig_addr\":\"zb8oXnaBqNwdP3sFkpR8LBHqQdoLRkhWmP8owZLsSLv617RMqrLamzPyuUCGZ7tNhXJbJQnxKrdyit9ZYDGCG2Xp\"},{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"binding\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"ed25519-test\",\"addr\":\"z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4\",\"iat\":1757203200.5,\"exp\":1764979200,\"nonce\":\"zTHKNvrWPf52gDYivvHooQP\"},\"sig_id\":\"z1\",\"sig_addr\":\"z1\"}],\"attestations\":[],\"issuers\":[{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ\",\"recovery\":null,\"created\":\"2026-01-01T00:00:00Z\",\"nonce\":\"zP4rMbpayn6a9JeaZgpVMMj\"}]}",
           "expect": {

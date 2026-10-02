@@ -57,7 +57,8 @@ In this order. On the soak, `spend/soak/freeze.sh --now` does steps 1–2 and ch
    seconds that the unit is `inactive`/`failed` and not `auto-restart`, and that the lock is
    still there. Then stop `monero-wallet-rpc` the same way (drop-in, `disable`, then
    `systemctl --user stop`: a clean stop saves the wallet file).
-   Every bearer token dies with the process: nothing else accepts them.
+   Every bearer token dies with the process: nothing else accepts them, provided you kill every
+   keeper serving that policy, not only the lock's pid; test keepers count (`freeze.sh` step 3b).
 3. Never restart a keeper on this host or this policy directory. Disconnect the host; image
    it if you can. Treat `spend.key` and every wallet file on it as the attacker's.
 

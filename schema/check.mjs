@@ -193,6 +193,7 @@ const parityExpressible = {
   fatal_rotation_recovery_key_y_ge_p: 'a key that is no usable Ed25519 point (SPEC §2)',
   binding_ed25519_test_addr_all_zero_unproven: 'an ed25519-test addr that is no usable Ed25519 point (SPEC §2)',
   fatal_duplicate_rotation_is_fork: 'a fork (§7.3 chain walk over valid signatures)',
+  rotation_next_genesis_not_next: 'a sub off the chain, since hash(next_genesis) != next ends it (§7.2 hash check)',
 };
 for (const [n, c] of Object.entries(N.parity.cases)) {
   counts.parity++;
