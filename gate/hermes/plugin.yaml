@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+name: sigelo-gate
+version: "0.0.1"
+description: "Provenance gate (prototype): inbound A2A messages and A2A tool results are DATA unless they carry a verified sigelo/instruction attestation from a pinned operator DID; privileged tools in gated chats need one. Offline; no network."
+author: "sigelo"
+provides_hooks:
+  - pre_gateway_dispatch
+  - pre_tool_call
+  - transform_tool_result

@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\"" }] }],
+    "UserPromptExpansion": [{ "hooks": [{ "type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\"" }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\"" }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\"" }] }]
+  }
+}

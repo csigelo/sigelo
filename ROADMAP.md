@@ -421,3 +421,5 @@ challenge proof, offline verification); the keeper already contains the conseque
 small harness plugin for Hermes and Claude Code — content signed by the operator's DID (a signed-message
 envelope = an attestation with `ctx`, no wire change) may instruct and call privileged tools; unsigned or
 other-DID content is wrapped as data and can call nothing. Owner idea, 2026-10-02.
+Status: design and prototype in [gate/](gate/README.md), 2026-10-02 (Claude Code hook + Hermes plugin, offline, tested on
+crafted inputs, not live-tested or reviewed). Envelope: `ctx: "sigelo/instruction"`, `claims {text_sha256, nonce}`.

@@ -5,6 +5,22 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## v0.1.0 — 2026-10-02 (draft)
 
+- **The provenance gate, prototype (`gate/`, `6df8a59`, `d12a2e1`, `665353a`).** Prompt injection is untrusted
+  text steering a model; a signature cannot stop persuasion, but it settles who said it, so the harness can
+  enforce the rule the model cannot: instructions only from identities allowed to instruct, everything else is
+  data however it is phrased. The signed instruction is an ordinary §5 attestation, `ctx: "sigelo/instruction"`,
+  `claims {text_sha256, nonce, tools?}`, carried on the prompt's last line — no wire change. Claude Code: a
+  `UserPromptSubmit` hook records a grant only for a real operator prompt whose hash matches; a `PreToolUse`
+  hook denies `Bash`, `Write`, `Edit`, `Monitor`, `PowerShell` without one and never returns `allow`, so Claude
+  Code's own permissions stay in force; the grant closes after any web or MCP read and at the next turn. Hermes:
+  a standalone plugin fences inbound A2A messages as data unless verified and blocks shell, file-write, code
+  and delegation tools without a grant. Reviewed before publication as stranger, attacker and lawyer
+  (gate/REVIEW.md): one bypass found and fixed (`Monitor`), slash commands now close the grant, hook matchers
+  replaced by one list; live `claude -p` check: unsigned shell denied, signed multi-line prompt allowed, an
+  envelope hidden in a file ignored. Open and stated: with default file ownership the agent's own user can
+  switch the gate off; inside a signed turn, text read with `Read` can still steer the granted shell. 33 tests.
+  Status: prototype; no release before an external review.
+
 - **Nothing private on GitHub (Owner rule, `a1b944e`).** The `DEVICE_STRINGS` Actions secret — the private pattern
   list itself — was deleted; the CI identity job now checks only generic shapes (home-directory paths, private
   addresses) outside tests and docs. The real gate stays local, in `release/publish.sh`, before every push. The
