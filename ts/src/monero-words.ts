@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * The Monero English mnemonic wordlist: monero-project/monero src/mnemonics/english.h at
  * d02c7c57a7b9e9ce0eead684a48345c6f48fea81, 1626 words, unique prefix length 3. SHA-256 of

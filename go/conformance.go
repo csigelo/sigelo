@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package sigelo
 
 // The conformance run over test-vectors.json (and, when given, ts/test/monero-vectors.json):

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
 // Mechanical grader for the spec-only verifier condition (docs-test/TASK-verifier.md).
 //
 //   node docs-test/grade-verifier.mjs [--vectors FILE] [--timeout MS] [--verbose] [--json] -- <cmd> [args...]

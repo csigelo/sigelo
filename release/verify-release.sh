@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Verifies a signed release (v0.1.1 on; v0.1.0 is unsigned). Run inside a clone of the repository.
 #
 #   release/verify-release.sh <tag> [<artefact-dir> | <base-url>]

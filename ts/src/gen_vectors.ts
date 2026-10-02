@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * Regenerates `../test-vectors.json` from the documented seeds, byte-for-byte.
  *

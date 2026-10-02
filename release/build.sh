@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # The release artifacts (ROADMAP T4, §5.5) and their SHA256SUMS:
 #
 #   release/build.sh [outdir]          default outdir: release/dist
@@ -26,7 +27,8 @@
 # changes (yours, or another tool's) cannot reach an artifact, and the script says when there
 # are any. The npm tarballs are packed there with the lockfiles (`npm ci --ignore-scripts`, then `npm pack`, whose prepack builds dist/ and whose
 # release/prepack.mjs pins the `file:` sibling dependencies to ^<v>). npm writes fixed mtimes
-# into a tarball, so the same commit and the same node/npm/typescript give the same bytes.
+# into the tar; release/normalize-tgz.mjs then replaces node's zlib output with stored deflate
+# blocks, so the same commit and typescript give the same bytes whatever node builds them.
 # All five packages carry one version; the build refuses otherwise.
 #
 # Same commit + same Go toolchain ⇒ byte-identical binaries on any host: CGO off (no libc, no
@@ -96,6 +98,7 @@ for p in ts spend adapters/moadim integrations/mcp kit; do
 	[ "$p" = integrations/mcp ] || [ "$p" = kit ] || (cd "$src/$p" && retry npm ci --ignore-scripts --no-audit --no-fund --silent)
 	(cd "$src/$p" && npm pack --silent --pack-destination "$out" >/dev/null)
 done
+node "$src/release/normalize-tgz.mjs" "$out"/*.tgz
 for t in sigelo sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
 	[ -f "$out/$t-$v.tgz" ] || { echo "build.sh: npm pack made no $t-$v.tgz" >&2; exit 1; }
 	# the published manifest must name no sibling directory

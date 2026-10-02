@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Monero primitives for `method: "monero"` bindings (SPEC §6.2).
 //
 // A port of ts/src/monero.ts (and the former py/monero.py), which were checked line by line

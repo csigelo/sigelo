@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * sigelo-spend — policy evaluation (MONERO.md §4.1).
  *

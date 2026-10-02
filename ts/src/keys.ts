@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * Root-seed derivation (MONERO.md §2). One 32-byte root `S`, generated offline, is the only
  * backup; everything else is a pure function of it.

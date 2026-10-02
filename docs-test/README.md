@@ -1,8 +1,7 @@
 # docs-test: the comprehension harness
 
-Measures whether a model can use sigelo from its documents alone (ROADMAP R3, T5, T11). A
-model gets **only** a task prompt and a frozen docs snapshot; what it produces is graded by a
-program. No model grades anything, and a score is what the grader prints.
+Measures whether a model can use sigelo from its documents alone: it gets **only** a task prompt
+and a frozen docs snapshot, and a program grades what it produces.
 
 | File | What |
 |---|---|
@@ -13,6 +12,7 @@ program. No model grades anything, and a score is what the grader prints.
 | `grade.mjs` | grades a lifecycle run: 10 points |
 | `grade-verifier.mjs` | grades a verifier: N/M bundle cases built from `test-vectors.json` |
 | `RESULTS.md` | every measurement so far, and the reporting format |
+| `check-budgets.mjs`, `budgets.json` | word budgets for the public docs (CI, ts job): `node docs-test/check-budgets.mjs` |
 
 ## Conditions
 
@@ -34,8 +34,7 @@ TypeScript/JavaScript, not Go), with the CLI of `sigelo-verify`:
 Needs node ≥ 22.18, `ts/` installed and built (`cd ts && npm ci && npx tsc`), and Go on
 `PATH` for the reference verifier (or pass `--go` a built `sigelo-verify`).
 
-In the public repository only `HEAD` and the public tags exist as revisions: the short hashes these
-pages cite (`c261ee8`, `a64d9c1`, …) are private history, so give `snapshot.sh` `HEAD` or a tag.
+Give `snapshot.sh` `HEAD` or a tag.
 
 ```sh
 # 1. freeze the docs at the tag the round measures; quote MANIFEST.json's digests beside scores
@@ -54,15 +53,10 @@ node docs-test/grade.mjs runs/<id>                         # grade at once: `now
 node docs-test/grade-verifier.mjs --vectors docs-test/snapshot/<hash>/verifier/test-vectors.json -- <its command>
 ```
 
-Keep the full transcript of every run (every tool call and its output). It is how the
-docs-only rule is audited: a lifecycle transcript that reads `ts/dist/*.js`, or a verifier
-transcript that reaches anything but the two files, is **void**, not low-scoring. Record its
-SHA-256.
-
-Sandboxing is the runner's job, and the harness cannot enforce it: the workspace holds
-compiled JS a model could read, the mock world's state files (`world.local.json`,
-`challenge.local.json`) sit where a model could edit them, and nothing here blocks the network.
-Run each candidate in a container or VM with no network and only its workspace mounted.
+Keep every run's full transcript and its SHA-256: a lifecycle run that reads `ts/dist/*.js`, or a
+verifier run that reads anything but its two files, is **void**. The harness cannot enforce this
+(compiled JS and the world's state files sit in the workspace): run each candidate in a container
+or VM with no network and only its workspace mounted.
 
 ## The lifecycle rubric (grade.mjs)
 
@@ -82,26 +76,15 @@ One point each. Artifact names are fixed by TASK-lifecycle.md; `_world/` comes f
 | 9 | invariants | every artifact parses strictly (no duplicate keys, no `__proto__`), holds no non-integer number, validates against `schema/` for its slot (validator taken verbatim from `schema/check.mjs`); `challenge-*.signed.json` is exactly `{did, sig}`; both results validate as `verify-result` and discarded nothing |
 | 10 | reported DID | `report.json` `did` equals, in full, the current DID `verify()` computes for `bundle-recovered.json` |
 
-Points depend on each other where the protocol does: without a verifying `bundle.json`,
-points 3, 4, 5, 7, 8 and 9 cannot pass; a genesis that does not parse sinks most of them. The table names the first failing check for each point.
+Without a verifying `bundle.json`, points 3, 4, 5, 7, 8 and 9 cannot pass.
 
 ## The verifier score (grade-verifier.mjs)
 
-Every case is a bundle file, built from `test-vectors.json` the way `go/conformance.go`
-builds its checks: the two bundles with a full §9.1 `expect` (compared by value on the six
-§9.1 fields; extra per-item fields ignored), each genesis's DID, each attestation and binding
-wrapped in a bundle (proof status pinned), the rotation chains, every negative that a bundle
-can carry (discarded item, resulting chain, or exit 1), and all `parity` cases. Invoice
-vectors cannot enter a bundle and are listed, not scored. Groups: `positive`, `monero`
-(§6.2), `negative`, `parity`. At `c261ee8` that is 113 cases; `sigelo-verify` scores 113/113.
-
-The same cases, with the same names and verdicts, are built into the Go binary:
-`sigelo-verify --conformance test-vectors.json --impl '<its command>'` (go/README.md,
-"Checking another implementation"). It adopts this grader's protocol verbatim and differs
-only in being a gate: it exits 1 on any FAIL, where this script always exits 0, and it splices
-each case from the vectors file's bytes instead of re-serializing. Keep the two in step: a case
-added here goes into `go/cmd/sigelo-verify/impl.go` in the same change (CI diffs their lines).
-At cad0357 both count 139 cases (`SCORE 139/139` for the Go binary).
+Every case is a bundle file built from `test-vectors.json` (groups `positive`, `monero`,
+`negative`, `parity`); invoices cannot enter a bundle and are not scored. The protocol and case
+list equal `sigelo-verify --conformance --impl` (go/README.md), which differs only by exiting 1 on
+any FAIL (this script always exits 0). A case added here goes into `go/cmd/sigelo-verify/impl.go`
+in the same change; CI diffs their lines.
 
 ## Reporting
 
@@ -111,5 +94,4 @@ One row per run in RESULTS.md:
 |---|---|---|---|---|---|---|---|---|---|
 | YYYY-MM-DD | 3 | lifecycle \| verifier (language) | exact model id | Claude \| GPT \| Gemini \| open-weights | `<short hash>` + condition digest (first 16 hex) | `n/10` or `N/M` (+ per-group) | wall clock, prompt to "done" | SHA-256 of the transcript | point numbers and grader lines |
 
-Several runs per cell; report each, not an average. A CHANGELOG line per round names the
-failing steps. A void run (docs-only rule broken) is listed as void with the reason.
+Report each run, not an average; list void runs as void with the reason.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * sigelo-spend — the delegation tree (MONERO.md §4.3, §8 G5).
  *

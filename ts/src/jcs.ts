@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * RFC 8785 (JCS) canonicalization and a strict JSON parser, restricted per SPEC §3:
  * integers only, no floats, no duplicate keys.

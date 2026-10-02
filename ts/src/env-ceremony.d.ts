@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * The host surface src/ceremony.ts, src/offline.ts and their tests add to src/env.d.ts's:
  * files with modes, synchronous child processes for `age`, UTF-8 text. Same reason as

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Freeze what a round-3 candidate may read (docs-test/README.md).
 #
 #   docs-test/snapshot.sh [REV]                  docs-test/snapshot/<short-hash>/{lifecycle,verifier}/ + MANIFEST.json

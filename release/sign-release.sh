@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Signs a release (ROADMAP §5.5): writes <artefact-dir>/release.json.
 #
 #   release/sign-release.sh <tag> <artefact-dir>

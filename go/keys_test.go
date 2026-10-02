@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package sigelo
 
 // MONERO.md §2 key derivation against ts/src/keys.ts. The keeper/agent seeds are ts/src/test.ts

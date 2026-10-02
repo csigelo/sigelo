@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // The net/http example: GET /sigelo/challenge?did=…, POST /sigelo/login { challenge, did, sig, bundle }.
 package main
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * sigelo-spend — the licence (spend/README.md "Install", "Free and paid").
  *

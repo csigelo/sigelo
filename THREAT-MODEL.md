@@ -135,11 +135,9 @@ precedence rule in SPEC §7.1 exists precisely because timestamps cannot be reli
 ### 3.7a The keeper host's clock
 The keeper is where sigelo does read a clock: every spend.log line carries its `ts`, and every
 cap, rate, dedupe and approval window is measured back from `now` (MONERO.md §4.1 "Clock").
-A host that boots without the time can sign with a clock set back. The soak host's clock
-boots at January 2026 (its build epoch) until NTP answers, and without a network that lasts hours (spend/soak/README.md,
-incident #4, "Wrong-clock risk"). Lines signed then fall out of every window once the clock is
-corrected, so spends stop counting against the cap, in a log that cannot be amended. Guard
-(`7a91fdb`): every signing route refuses `503 clock_behind` (a TRY LATER, nothing signed,
+A host that boots without the time (some boot at their build epoch until NTP answers) can sign
+with a clock set back. Lines signed then fall out of every window once the clock is corrected,
+so spends stop counting against the cap, in a log that cannot be amended. Guard: every signing route refuses `503 clock_behind` (a TRY LATER, nothing signed,
 logged or sent) when `now` is before the build floor or more than 300 s behind the newest `ts`
 the keeper signed (spend/README.md, "The clock guard"). Not covered: a clock set *ahead*, or a
 wrong clock on a keeper with no signed lines yet past the floor. `spend/soak/check.mjs` flags a
@@ -168,7 +166,7 @@ Consequences by key:
 | An agent's keeper token | attacker spends that agent's account, to its allowlist, up to its caps (clamped by its delegators'); above `approval_above`, where set, it also needs an approver | no, bounded by the account's balance and policy |
 | A delegating agent's token | the same, and it can mint and fund delegates — only from its own account, since funding a delegate is a spend | no, bounded the same way |
 | A token and an approver's key | spends above `approval_above` too, still within the caps | no, bounded by policy |
-| Agents' keeper host | every account in its wallet; and, through its keeper root, it can sign as every agent under it — on keeper 0, which the ceremony also hands the root identity seed, as the root identity too | coins **no**; identities yes — the recovery key is not on the host, and since `164b8c4` that includes the keeper's own DID (its genesis commits to the root's recovery key, not one derived from `spend.key`; a keeper keyed before is abandoned instead) |
+| Agents' keeper host | every account in its wallet; and, through its keeper root, it can sign as every agent under it — on keeper 0, which the ceremony also hands the root identity seed, as the root identity too | coins **no**; identities yes — the recovery key is not on the host, including for the keeper's own DID (its genesis commits to the root's recovery key, not one derived from `spend.key`) |
 | Treasury keeper host | the whole treasury | **no** |
 
 Therefore: the agent runtime holds its identity key and a bearer token, never a Monero key.
@@ -252,8 +250,7 @@ The rival has first-mover adoption and a registry agents can already search.
 
 **What sigelo must therefore do instead.** Be findable by the agents that would adopt it,
 without becoming a registry: static machine-readable docs (`/llms.txt`, `/adopt.md`), an MCP
-server listed where agents look for tools, and a DID method registration (ROADMAP §3, R1,
-T1–T3). None of these is on the verification path; if all go down, every bundle still
+server listed where agents look for tools, and a DID method registration. None of these is on the verification path; if all go down, every bundle still
 verifies. Advertising `did:sigelo` inside an ERC-8004 registration file would be an
-advertisement, not a dependency, but it touches the no-discovery rule (CLAUDE.md) and is the
-Owner's call.
+advertisement, not a dependency, but it touches the no-discovery rule (CLAUDE.md) and is
+undecided.

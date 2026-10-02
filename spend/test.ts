@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * sigelo-spend tests. `npm test` must end with ALL PASS.
  *
@@ -2818,9 +2819,11 @@ const liveCall = async (method: string, params: unknown): Promise<Record<string,
     return (await res.json() as { result?: Record<string, unknown> }).result ?? null;
   } catch { return null; }
 };
-const liveAddress = await liveCall('get_address', { account_index: 0 });
+// SIGELO_TEST_NO_LIVE=1 leaves a reachable wallet alone (this section and the canary's live half).
+const NO_LIVE = process.env['SIGELO_TEST_NO_LIVE'] === '1';
+const liveAddress = NO_LIVE ? null : await liveCall('get_address', { account_index: 0 });
 if (liveAddress === null) {
-  skip('live wallet 127.0.0.1:38083', 'unreachable');
+  skip('live wallet 127.0.0.1:38083', NO_LIVE ? 'SIGELO_TEST_NO_LIVE=1' : 'unreachable');
 } else {
   const addr = String(liveAddress['address']);
   // Its own directory: a fresh spend.log, or the mock-wallet section's spends above would
@@ -2957,7 +2960,7 @@ if (liveAddress !== null) {
   rmSync(walletDir, { recursive: true, force: true });
 }
 
-await (await import('./canary.js')).canary({ ok, skip, mockWallet }); // the wallet-rpc canary (ROADMAP §5.5)
+await (await import('./canary.js')).canary({ ok, skip, mockWallet, ...(NO_LIVE ? { live: 'http://127.0.0.1:1/json_rpc' } : {}) }); // the wallet-rpc canary (ROADMAP §5.5)
 rmSync(dir, { recursive: true, force: true });
 console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);
 if (failed > 0) process.exit(1);

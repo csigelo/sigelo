@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * sigelo-spend — the HTTP service (MONERO.md §4).
  *

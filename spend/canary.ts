@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * The wallet-rpc canary (ROADMAP §5.5): the `monero-wallet-rpc` interface the keeper depends
  * on, pinned. Method names, the parameters the keeper sends and the result fields it reads —

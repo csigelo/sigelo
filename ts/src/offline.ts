@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
 /**
  * `sigelo-offline` — root seed for sigelo × Monero (MONERO.md §2, §4.5). Run it with no network.
  *

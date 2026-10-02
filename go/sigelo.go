@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package sigelo is the SPEC §9 verifier for sigelo v0.1 (wire `sigelo/0`): portable agent
 // identity.
 //

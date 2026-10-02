@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * Conformance run against ../test-vectors.json. `npx tsc && node dist/test.js`.
  *
@@ -165,6 +166,8 @@ t('challenge verifies against genesis.key', verifySig(g0.key, ch.body, ch.sig));
 // A challenge body has none of an attestation's fields, so the required-field check fires
 // first; the typ binding is what rejects it once the shapes overlap (SPEC §3, §5.2).
 rejects('challenge body is rejected in the attestation slot', () => structure(ch.body, 'attestation'), 'attestation:');
+// A parsed non-integer is a RawNumber object in ts and a Number in Go: neither is a body (as go/sigelo.go).
+rejects('a parsed 1.5 in the genesis slot is not an object, as in Go', () => verify(parse(JSON.stringify({ ...(P.bundle as Any).bundle, genesis: 0 }).replace('"genesis":0', '"genesis":1.5')) as Bundle, 0), 'genesis: body is not an object');
 // §5.2: these five fields and no others, so nothing is smuggled into the signed bytes.
 rejects('a challenge with a sixth key is refused', () => structure({ ...ch.body, amount: 1 }, 'challenge'), 'challenge: unknown field "amount"');
 rejects('typ: challenge is rejected in the attestation slot',

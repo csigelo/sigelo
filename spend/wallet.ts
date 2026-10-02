@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
 /**
  * sigelo-wallet — the agent's side of the keeper (MONERO.md §4.2, §8 G3).
  *

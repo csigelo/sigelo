@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * The root ceremony and its restore (MONERO.md §4.5, §8 G7), as a library so the one step that
  * touches the outside world — age encryption — is a small injectable `Age`. src/offline.ts is

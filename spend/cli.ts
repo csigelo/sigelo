@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
 /**
  * sigelo-spend — command line (MONERO.md §4).
  *

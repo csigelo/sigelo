@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * The monero-wallet-rpc versions the keeper accepts (MONERO.md §4.1 "The wallet-rpc it
  * accepts"). Its own module so `sigelo-spend doctor` ships it; canary.ts, which is not in the

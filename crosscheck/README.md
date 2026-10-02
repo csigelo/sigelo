@@ -1,30 +1,20 @@
-# crosscheck — sigelo against third-party code (ROADMAP T12)
+# crosscheck — sigelo against third-party code
 
-Every other check in this repository was written by the same model family that wrote sigelo
-(ROADMAP R8). Here the **expected answers come from code and vectors sigelo's authors did not
-write**; `ts/` and `go/` are the things under test. Nothing in `ts/` or `go/` is modified: ts is
-compiled into `.work/ts-dist`, and the Go driver reaches three unexported primitives through a
-`go build -overlay` file (`go-driver/export.go.txt`).
+`ts/` and `go/` checked against answers from code and vectors sigelo's authors did not write
+(RFC 8785 references, Wycheproof, speccheck, libsodium, monero-python, RFC 8032). Nothing in `ts/`
+or `go/` is modified; the Go driver reaches three unexported primitives through `go build -overlay`.
 
-```
-crosscheck/run.sh              # full run, ~2 min on the test host
+```sh
+crosscheck/run.sh              # full run, ~2 min
 crosscheck/run.sh --quick      # 10 % of the random cases
 crosscheck/run.sh --self-test  # damages every 7th sigelo answer; passes only if every section notices
 ```
 
-`run.sh` is idempotent: what it fetches or builds lives in `.work/` (git-ignored) and is reused.
-**Network** is needed only for what is missing there — three git checkouts pinned to commits,
-a venv from PyPI with pinned versions, and `rfc8032.txt` checked against a SHA-256 — plus
-`ts/node_modules` and the Go module cache entry for `filippo.io/edwards25519` if absent (sigelo's
-own dependencies). With `.work/` populated it runs offline. Random cases come from one seed
-(`CROSSCHECK_SEED`, default 20260929) and are reproducible; exit status is 0 iff there is no
-unexplained divergence. A run writes `results/latest/` (git-ignored, so a run never dirties the
-tree): `summary.json` (counts, oracle versions, sigelo commit), `divergences.json`,
-`explained.json` (each explained disagreement class with a count and examples),
-`oracle-splits.json` (third-party oracles disagreeing among themselves). The same four files in
-`results/` are the recorded run the tables below cite; they change only by hand, `cp
-results/latest/*.json results/` after a full run you mean to record, committed with the README
-update that cites it.
+Exit 0 iff no unexplained divergence. Fetches and builds go to `.work/` (git-ignored) and are
+reused; network is needed only to fill it (pinned checkouts, a pinned PyPI venv, `rfc8032.txt`
+checked by SHA-256). Random cases come from `CROSSCHECK_SEED` (default 20260929). Output:
+`results/latest/{summary,divergences,explained,oracle-splits}.json`; `results/` holds the recorded
+run the tables cite (update by copying after a full run, with the README).
 
 ## Oracles
 
@@ -38,13 +28,11 @@ update that cites it.
 | novifinancial/ed25519-speccheck `cases.json` | commit `6551933` | 12 edge cases (small order, non-canonical A/R, S ≥ L, cofactored vs cofactorless) |
 | `base58` (PyPI) | 2.1.1 | sigelo's base58btc multibase (keys, signatures) |
 
-Not used: `monero-rs` (Rust; no toolchain on the host), Monero C++ itself (no C compiler on the
-host). Where monero-python and sigelo disagree, the Monero C++ source is cited instead
-(`src/common/base58.cpp` decode_block, `src/mnemonics/electrum-words.cpp:326`, master at the
-time of the run). monero-python has **no message signatures**, so SigV2 is not cross-checked by
-this directory (the `wallet_rpc_oracle` test in `spend/` runs it against monero-wallet-rpc).
+Where monero-python and sigelo disagree, Monero's C++ source decides (below). SigV2 is not
+covered here (monero-python has no message signatures); `ts/`'s `wallet_rpc_oracle` checks it
+against `monero-wallet-rpc`.
 
-## Results — 2026-09-29, sigelo 4e1a5aa, seed 20260929: 0 divergences
+## Recorded run (`results/summary.json`): 0 divergences
 
 | Target | Cases | ts | go | Notes |
 |---|---|---|---|---|
@@ -88,12 +76,3 @@ applied to speccheck's third-party case table); everything else is an oracle's a
   sigelo does too, and refuses addresses whose key is not a canonical curve point. Every one of
   these was confirmed not decodable by the RFC 8032 §6 reference decoder. Small-order and
   identity points are *accepted* by both sides, as by Monero's `check_key`.
-
-## Observed once, not reproduced
-
-In a run before the random generator was made independent of `PYTHONHASHSEED` (so that run's
-documents cannot be regenerated), the Node reference returned one answer in 20 000 that
-disagreed with the Python and Go references and with sigelo ts and go (the key `"A"`
-came out as `"\\"`). The document is recorded; re-running the Node reference on it alone gives
-the agreed answer, and six further full batches produced no split. It was counted as an oracle
-split, not a sigelo result.

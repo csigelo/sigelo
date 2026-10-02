@@ -50,8 +50,7 @@ canonical encoding (y < p; not x = 0 with the sign bit set) of a curve point tha
 small order: exactly the keys the §2 verification rule could ever accept a signature under.
 All-zero, the identity and the other small-order points, non-canonical spellings and non-points
 are malformed, `key: not a valid Ed25519 point (non-canonical, off the curve or of small order)`,
-at the slot's severity: fatal for a genesis or rotation, per item for a binding (an
-*unproven* `ed25519-test` binding was accepted with an `addr` nothing could ever sign for).
+at the slot's severity: fatal for a genesis or rotation, per item for a binding.
 A point with a torsion component but not of small order is a valid key, as it is to the
 signature check.
 

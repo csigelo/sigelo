@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * sigelo v0.1 (wire `sigelo/0`) — portable agent identity.
  *
@@ -11,7 +12,7 @@
 import * as ed from '@noble/ed25519';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { bytesToHex, concatBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { canonicalize, JcsError, parse, parseBytes } from './jcs.js';
+import { canonicalize, JcsError, parse, parseBytes, RawNumber } from './jcs.js';
 import { verifySigeloMoneroSigAddr } from './monero.js';
 
 // @noble/ed25519 v3 keeps the synchronous API behind an injected hash so the package can stay
@@ -205,7 +206,7 @@ function envelope(env: object, slot: Slot): void {
  * so it is done first and its error is reported under the slot.
  */
 export function structure(body: unknown, slot: Slot): void {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new SigeloError(`${slot}: body is not an object`);
+  if (typeof body !== 'object' || body === null || Array.isArray(body) || body instanceof RawNumber) throw new SigeloError(`${slot}: body is not an object`);
   const b = body as Record<string, unknown>;
   try {
     // A bundle's attestations and bindings are canonicalized one by one in verify(): a float

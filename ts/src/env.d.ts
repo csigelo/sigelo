@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * The entire host surface this package uses. Declared here rather than depending on
  * @types/node: CLAUDE.md caps the dependency list, and the runtime needs are this small.

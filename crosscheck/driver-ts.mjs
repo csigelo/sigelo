@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Batch driver for sigelo's TypeScript implementation: one JSON request per stdin line, one JSON
 // answer per stdout line, in order (the same protocol as go-driver/main.go). It imports the ts/
 // sources compiled into .work/ts-dist by run.sh and calls only sigelo's own entry points; the

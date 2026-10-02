@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Root-seed derivation (MONERO.md §2), the same functions as ts/src/keys.ts, so a Go keeper or
 // verifier derives byte-for-byte the keys the ts offline box derives. Kept out of sigelo.go:
 // a world that only verifies bundles never reads this file.

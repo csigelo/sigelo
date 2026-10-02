@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package sigelo
 
 import "strings"

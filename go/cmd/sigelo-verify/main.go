@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Command sigelo-verify verifies a sigelo bundle offline (SPEC §9) and prints the §9.1 result.
 //
 //	sigelo-verify <bundle.json|-> [--now N]

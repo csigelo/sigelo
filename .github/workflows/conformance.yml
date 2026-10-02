@@ -42,6 +42,8 @@ jobs:
         working-directory: ts
       - run: npx tsc
         working-directory: ts
+      # public docs stay within their word budgets (docs-test/budgets.json)
+      - run: node docs-test/check-budgets.mjs
       # vectors must be reproducible byte-for-byte from the documented seeds: the TypeScript
       # generator must reproduce the committed file exactly
       - run: node dist/gen_vectors.js > /tmp/ts-vectors.json && diff -u ../test-vectors.json /tmp/ts-vectors.json

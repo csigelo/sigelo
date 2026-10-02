@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """ROADMAP T12: sigelo's primitives against third-party code and test suites.
 
 sigelo (ts/ and go/) is the thing under test; every expected answer comes from code or

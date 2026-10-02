@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * The entire host surface this package uses, declared rather than depended on — the same
  * choice ts/src/env.d.ts makes, for the same reason: CLAUDE.md caps the dependency list and

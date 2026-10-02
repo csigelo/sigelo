@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Batch driver for the THIRD-PARTY oracle cyberphone/json-canonicalization node-es6/canonicalize.js
 // (JSON.parse, then the reference canonicalizer). Same line protocol as the other drivers.
 const path = require('node:path');

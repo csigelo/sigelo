@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Batch driver for the THIRD-PARTY oracle: cyberphone/json-canonicalization's Go reference
 // (webpki.org/jsoncanonicalizer, by the RFC 8785 author). Same line protocol as the sigelo
 // drivers. "jcs" canonicalizes JSON text; "num" formats a float64 (given as 16 hex digits of its

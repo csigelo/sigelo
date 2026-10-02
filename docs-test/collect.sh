@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Collect a lifecycle run for grading:  docs-test/collect.sh <workspace> <dest>
 # Copies <workspace>/out/ to <dest>/ and the mock world's state (world.local.json, the world's
 # identity; challenge.local.json, its outstanding challenges) to <dest>/_world/, which grade.mjs uses

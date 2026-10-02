@@ -18,6 +18,13 @@ history, which is not public. This public history starts at the import of 2026-1
   SimpleX (`62407e2`, `709f412`).
 
 ### 2026-10-02
+- **Spec coverage:** vectors for §7.2 `hash(next_genesis) == next` and a sixth-key challenge test in both suites (`9cd82d0`).
+- **ts = go messages:** 2,960-case mutation differential, 0 result or message differences after `4e1c8d2`.
+- **Hygiene:** SPDX MIT headers on every source file (`fe4e8ac`); spend suite runs offline with `SIGELO_TEST_NO_LIVE=1` (`00af8e4`).
+- **Reproducible tarballs:** gzip normalised so SHA256SUMS no longer depend on the Node version (`8e197df`).
+- **Docs halved:** every public README cut to commands-first with budgets enforced in CI (`docs-test/check-budgets.mjs`).
+- **Drill 2:** freeze in 6 s, keeper identity recovered offline from the root, fees 2.4 %; freeze.sh now kills every keeper on the policy (`bce9114`, `6099880`).
+- **Gate pass 3:** orphan-process kill, background denylist, TUI paste fix, session-scope taint, HARDENING.md (`297501c`).
 
 - **World:** `sigelo.io/world/` issues §5.2 challenges, `admission: "open"` and 90-day self-reported conformance
   attestations; `POST /world/verify` returns §9.1 (`5191235`, `4088ce2`).

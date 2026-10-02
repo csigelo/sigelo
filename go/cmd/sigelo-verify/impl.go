@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package main
 
 // `--conformance --impl '<command>'`: the vectors run against a CANDIDATE verifier, not this

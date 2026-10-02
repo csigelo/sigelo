@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
 // ts/ as a candidate for `sigelo-verify --conformance --impl` (and docs-test/grade-verifier.mjs):
 // the TASK-verifier.md interface over ts/dist (run `npx tsc` in ts/ first).
 //
@@ -20,8 +21,14 @@ const args = process.argv.slice(2);
 const broken = args[0] === '--break' && args.shift();
 const [file, flag, now] = args;
 if (!file || flag !== '--now' || !/^\d+$/.test(now ?? '')) { console.error('usage: ts-candidate.mjs [--break] <bundle.json|-> --now N'); process.exit(2); }
+let doc;
+try { doc = parseBytes(readFileSync(file === '-' ? 0 : file)); } catch (e) {
+  if (!(e instanceof JcsError)) { console.error(e); process.exit(3); }
+  console.error(`REJECT: parse: ${e.message}`); // the prefix sigelo-verify prints
+  process.exit(1);
+}
 try {
-  const r = verify(parseBytes(readFileSync(file === '-' ? 0 : file)), Number(now));
+  const r = verify(doc, Number(now));
   if (broken) for (const b of r.bindings) if (b.proof === 'unproven') b.proof = 'proven';
   console.log(canonicalize(r));
 } catch (e) {

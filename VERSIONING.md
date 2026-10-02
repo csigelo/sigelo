@@ -1,11 +1,10 @@
 # sigelo — versioning
 
-Two things carry version numbers and they move independently: the **wire** (`v` inside every
-signed object, SPEC §3.1) and the **packages** (npm, the Go module). An agent that adopts a
-format that then changes under it does not come back, so the wire moves rarely and loudly.
+Two things carry versions and move independently: the **wire** (`v` in every signed object,
+SPEC §3.1) and the **packages** (npm, the Go module). The wire moves rarely and loudly.
 
-**Status:** v0.1.0 is tagged (`v0.1.0` and `go/v0.1.0`, 2026-10-02) as a GitHub pre-release, a draft: wire
-`sigelo/0` may change until v0.2; the keeper is stagenet-only and unaudited; nothing is on npm yet.
+**Status:** v0.1.0 (tags `v0.1.0`, `go/v0.1.0`) is a draft pre-release: wire `sigelo/0` may change
+until v0.2; the keeper is stagenet-only and unaudited; nothing is on npm yet.
 
 ## 1. The wire: `sigelo/0`
 
@@ -17,7 +16,7 @@ starting `wire:`, the commit hash, and at least one vector that fails on the old
 
 **Frozen at tag `v0.2`.** From then on, `sigelo/0` means exactly SPEC.md and
 `test-vectors.json` as they stand at that tag. The freeze needs **30 consecutive days with no
-wire change** first (ROADMAP R6); any wire change restarts the count. After it, a wire change
+wire change** first; any wire change restarts the count. After it, a wire change
 is `sigelo/1` or it does not happen.
 
 **A breaking change is any of:**
@@ -47,21 +46,18 @@ for a rule the spec already states, provided both shipped implementations pass i
 ## 3. Test vectors
 
 `test-vectors.json` is versioned with the wire, not the packages. Its `spec` field names the
-wire (`"sigelo v0.1 (wire sigelo/0)"`). Every release records its SHA-256 in `SHA256SUMS`
-(ROADMAP §5.5). After the freeze the file only grows, under §1's rule; nothing in it is edited.
+wire (`"sigelo v0.1 (wire sigelo/0)"`). Every release records its SHA-256 in `SHA256SUMS`. After the freeze the file only grows, under §1's rule; nothing in it is edited.
 It is regenerated from documented seeds by `ts/src/gen_vectors.ts`, and CI diffs the result.
 
 ## 4. Packages
 
-Semver, per package: `sigelo` (ts), `sigelo-spend`, `sigelo-agent`, the Go module. Each
-package states the wire versions it speaks. Until `1.0.0`, a minor bump may break the package
+Semver, in lockstep in 0.x: `sigelo` (ts), `sigelo-spend`, `sigelo-agent`, `sigelo-mcp`,
+`sigelo-recovery-kit`, the Go module. Each package states the wire versions it speaks. Until `1.0.0`, a minor bump may break the package
 API; it may never change the wire. A package that starts speaking `sigelo/1` gets a new major.
-The Go module's path is `github.com/csigelo/sigelo/go` in the public repository
-(release/publish.sh rewrites the private tree's bare `sigelo` at export, T4). The module sits in
-the repository's `go/` directory, so Go resolves `go install
-github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.0` through the tag `go/v0.1.0`, not
-`v0.1.0`: every release pushes both tags on the same commit. `sigelo-verify` releases carry
-static binaries and a signed release object (ROADMAP §5.5).
+The Go module is `github.com/csigelo/sigelo/go`, in the `go/` directory, so
+`go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.0` resolves through the tag
+`go/v0.1.0`; every release pushes both tags on one commit. Releases carry static `sigelo-verify`
+binaries and a signed `release.json`.
 
 ## 5. Deprecation
 

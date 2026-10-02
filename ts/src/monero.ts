@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * Monero primitives for `method: "monero"` bindings (SPEC §6.2).
  *

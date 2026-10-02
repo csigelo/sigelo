@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
 // Mechanical grader for the docs-only lifecycle condition (docs-test/TASK-lifecycle.md).
 //
 //   node docs-test/grade.mjs <out-dir> [--now N] [--go PATH/TO/sigelo-verify] [--json]

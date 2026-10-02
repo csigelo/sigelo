@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * sigelo-spend — the spend-approval (MONERO.md §4.1 step 8, "The spend-approval"; §8 G6).
  *

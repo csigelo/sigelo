@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package sigelo
 
 // A run over test-vectors.json and ts/test/monero-vectors.json: the reference verifier's
@@ -289,6 +291,9 @@ func TestJCS(t *testing.T) {
 		}
 	}
 	check("go: the §5.2 challenge nonce is exempt", Structure(at(V, "vectors", "challenge", "body").(Object).With("nonce", "any opaque thing, 0OIl"), "challenge") == nil)
+	nb, _ := Parse([]byte(`{"genesis":1.5}`))
+	_, gerr := Verify(nb, 0, nil)
+	rejects("go: a parsed 1.5 in the genesis slot is not an object, as in ts", gerr, "genesis: body is not an object")
 	// §5.2: these five fields and no others, so nothing is smuggled into the signed bytes.
 	rejects("go: a challenge with a sixth key is refused", Structure(at(V, "vectors", "challenge", "body").(Object).With("amount", int64(1)), "challenge"), `challenge: unknown field "amount"`)
 	_, aerr := decodeKey("z" + strings.Repeat("0", 100))

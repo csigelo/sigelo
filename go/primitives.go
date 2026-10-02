@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Primitives TypeScript takes from @noble: base58btc multibase and Ed25519 verification. Kept out of
 // sigelo.go so the §9 verifier there reads on its own.
 package sigelo

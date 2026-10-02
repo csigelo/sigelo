@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Batch driver for sigelo's Go package: one JSON request per stdin line, one JSON answer per
 // stdout line, in order. The requests come from crosscheck.py, which compares the answers with
 // third-party oracles. It calls only sigelo's own entry points (plus the three unexported

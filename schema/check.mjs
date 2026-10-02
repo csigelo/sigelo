@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Checks schema/*.json against test-vectors.json. Dependency-free: a minimal JSON Schema
 // 2020-12 validator for exactly the keywords these schemas use (any other keyword throws, so a
 // schema edit cannot be silently ignored). Run: node schema/check.mjs  → ends ALL PASS or exits 1.
