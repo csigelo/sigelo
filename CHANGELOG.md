@@ -3,6 +3,23 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## unreleased — 2026-10-02, the site cut to the bone, and visits counted
+
+- **Eight pages, hard budgets (`978fad6`).** The Owner's verdict on the first site: verbose, over-disclosing,
+  a waste of visiting agents' tokens. Now: `/` 69 words (what, three commands, six links, one status
+  line), `/adopt` 152, `/verify` 76, `/keeper` 100, `/contact` 7; `/spec`, `/security`, `/changelog` are
+  the raw documents. `llms.txt` is 91 words and lists the raw docs and `llms-full.txt` (47 KB, was
+  172) with their sizes so an agent chooses what to spend. The site test fails the build when a page
+  exceeds its budget. Removed as pages: evidence, integrations, did-method, why, monero, quickstart,
+  kit, vectors (all still under `/raw/`). No process, history or counts on any page.
+- **Visits counted on the server (`83bcac7`).** Agents never run JavaScript, so analytics are built from
+  nginx logs: the client address is cut to its network (IPv4 /24, IPv6 /48) before it is written,
+  the query string and the referrer's path are dropped, the user agent and `Accept` header are kept
+  (they tell an agent from a browser), 30 days retention, no cookies, no third party. GoAccess every
+  15 minutes and a 40-line `agents.txt` (AI agents by name, programmatic clients, browsers, the
+  `llms.txt` → `adopt.md` → mock-world funnel), both behind basic auth at `/_stats/`. First day:
+  ClaudeBot 68 requests, GPTBot 56, about 59 human visitors.
+
 ## unreleased — 2026-10-01, the rehearsal, the site, and the first two products
 
 - **Incident rehearsal T14 ran** (spend/soak/README incident #5, INCIDENT.md; timeline in the operator's

@@ -16,6 +16,7 @@ site/deploy/deploy.sh sigelo@sigelo.io --rollback  # serve the previous upload a
 | `nginx.conf` | the server config; deploy.sh reinstalls it on every deploy | server: `/etc/nginx/conf.d/sigelo.io.conf` (Alpine: `http.d/`) |
 | `sigelo-nginx-apply` | root helper: allowlist check, install, `nginx -t` (restores the old file on failure), reload | server: `/usr/local/sbin/`, via one sudo rule |
 | `server-setup.sh` | ONE-TIME server preparation, as root, by hand | server |
+| `stats-agents.sh` | the agent/human split of the visits as `agents.txt` (≤ 40 lines, phone-sized); `server-setup.sh --stats` installs it with the 15-minute timer | server: `/usr/local/sbin/sigelo-stats-agents` |
 | `apache.conf` | the same behaviour for Apache 2.4; install by hand, deploy with `--no-config` | server |
 
 Flags of `deploy.sh`: `--os debian|alpine` (default: the helper detects it), `--dry-run`,
@@ -30,9 +31,11 @@ Flags of `deploy.sh`: `--os debian|alpine` (default: the helper detects it), `--
   dist/                        what nginx serves (root)
   dist.prev/                   the previous upload: --rollback swaps it with dist
   deploy/nginx.conf            the uploaded config; only the helper reads it, after copying it
+  stats/                       root 0755: index.html (GoAccess) and agents.txt, at /_stats/
 /var/www/acme/                 ACME HTTP-01 webroot (port 80)
-/var/log/nginx/sigelo/         access.log (no client addresses), error.log (crit); 7 days
+/var/log/nginx/sigelo/         access.log (address cut to /24 or /48), error.log (crit); 30 days
 /usr/local/sbin/sigelo-nginx-apply, /etc/sudoers.d/sigelo-deploy
+/usr/local/sbin/sigelo-stats{,-agents}, sigelo-stats.{service,timer}, /etc/nginx/sigelo-stats.htpasswd
 ```
 
 The deploy user `sigelo` is unprivileged: it owns the web root and may run exactly one command as
@@ -132,7 +135,7 @@ certbot renew --dry-run
 cat > /etc/logrotate.d/sigelo <<'ROT'
 /var/log/nginx/sigelo/*.log {
     daily
-    rotate 7
+    rotate 30
     missingok
     notifempty
     compress
@@ -193,6 +196,19 @@ and against a node emulation of nginx.conf's headers with `--no-tls` (all header
 broken variant — no CSP, a charset on JSON — fails as it should). The TLS, HSTS and redirect checks
 have not run against a real server yet.
 
+## Visit statistics (`/_stats/`)
+
+Server-side only: no script, cookie or third party on the site. `server-setup.sh --stats` (as
+root, once, on a prepared server) installs GoAccess, the password file, and `sigelo-stats.timer`,
+which every 15 minutes rebuilds `/var/www/sigelo.io/stats/index.html` (GoAccess over every log
+kept, `--anonymize-ip` as a second cut, the hosts panel off) and `agents.txt` (`stats-agents.sh`:
+AI agents by name, programmatic clients, crawlers, browsers, `Accept: text/markdown`, the agent
+funnel `/llms.txt` → `/adopt.md` → `/index.json` → `/examples/world.mjs`, top paths for agents and
+for humans). Both are served at `https://sigelo.io/_stats/` behind basic auth (user `owner`; the
+password lives only on the Owner's phone, the server keeps its SHA-512 crypt hash), `noindex`,
+`no-store`, not in the sitemap; `check.mjs` checks the 401 and the sitemap. The check's own
+requests count as `node` under programmatic clients.
+
 ## Rollback
 
 `site/deploy/deploy.sh sigelo@sigelo.io --rollback` swaps `dist` and `dist.prev` on the server
@@ -203,13 +219,18 @@ fails, and the last ten installed configs are in `/var/backups/sigelo-nginx/`.
 
 ## Privacy
 
-- **No client addresses are kept.** The access log's address field is a literal `-`, the referrer
-  is not logged, the error log is at `crit` (nginx writes the client address into every
-  `error`-level line), requests for other hostnames are dropped unlogged, and the files rotate
-  daily with 7 kept. What remains — time, request, status, size, user agent — tells which agents
-  and crawlers read the site, the one figure worth having, without knowing who they are.
-  Chosen over `access_log off` because a week of anonymous logs is enough to see abuse or a broken
-  link and is no record of anyone.
+- **No raw client addresses are kept.** The access log's first field is the address cut to its
+  network (IPv4 /24 → `a.b.c.0`, IPv6 /48 → `a:b:c::`): a pseudonym shared by everyone on that
+  network, coarse enough to name no one, fine enough for GoAccess to estimate unique visitors
+  (with the user agent and the day). Chosen over a salted hash, which nginx cannot compute without
+  a scripting module the allowlist would have to admit, and over no address at all, which makes
+  every visitor with the same browser one visitor. The referrer is cut to scheme and host, the
+  path loses its query string; time, method, status, size, user agent, `Accept` and request time
+  are kept, because agents never run scripts and these lines are the only place they show up.
+  The error log is at `crit` (nginx writes the full address into every `error`-level line),
+  requests for other hostnames and for `/_stats/` are not logged, and the files rotate daily with
+  30 kept: 30 days of truncated-address logs and the reports built from them, nothing else.
+
 - **The site sets no cookies, runs no scripts and loads nothing from another origin**
   (`site/test/run.mjs` checks); `Referrer-Policy: no-referrer` keeps it from leaking where readers
   go next.

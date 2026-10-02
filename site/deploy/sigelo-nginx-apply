@@ -16,7 +16,8 @@
 # Without a filter, whoever holds the deploy key could point error_log at /etc/cron.d, `include`
 # any file or load a module, i.e. become root. So the file is copied to a root-owned temp file
 # first (no swap between check and install), and every statement must be on its own line, start
-# with an allowlisted directive, and use the fixed paths below for root, logs and certificates.
+# with an allowlisted directive, and use the fixed paths below for root, logs, certificates and
+# the stats password file (auth_basic_user_file: nginx reads it at request time).
 # What a stolen deploy key can still do: change the site's content, headers and redirects. That
 # is the intended scope, not a proof (the filter is reviewed, not audited).
 set -eu
@@ -71,7 +72,7 @@ check_conf() { # $1 = file; prints every offending line, returns 1 if any
         "ssl_certificate ssl_certificate_key ssl_protocols ssl_ciphers ssl_prefer_server_ciphers " \
         "ssl_session_timeout ssl_session_cache ssl_session_tickets ssl_reject_handshake root index " \
         "log_not_found types default_type charset charset_types gzip gzip_vary gzip_min_length " \
-        "gzip_types add_header location if rewrite try_files http2", a, " ")
+        "gzip_types add_header location if rewrite try_files http2 auth_basic auth_basic_user_file", a, " ")
       for (i = 1; i <= n; i++) allowed[a[i]] = 1
       depth = 0; block = ""; blockdepth = 0
     }
@@ -103,12 +104,13 @@ check_conf() { # $1 = file; prints every offending line, returns 1 if any
         next
       }
       v = (ntok == 2) ? tok[2] : ""
-      if (d == "root" && v != W "/dist" && v != "/var/www/acme") bad("root must be " W "/dist or /var/www/acme")
-      if (d == "access_log" && !(ntok == 2 && v == "off") && !(ntok == 3 && tok[2] == "/var/log/nginx/sigelo/access.log" && tok[3] == "sigelo_noip")) bad("access_log must be off or /var/log/nginx/sigelo/access.log sigelo_noip")
+      if (d == "root" && v != W "/dist" && v != W "/stats" && v != "/var/www/acme") bad("root must be " W "/dist, " W "/stats or /var/www/acme")
+      if (d == "access_log" && !(ntok == 2 && v == "off") && !(ntok == 3 && tok[2] == "/var/log/nginx/sigelo/access.log" && tok[3] ~ /^sigelo_(noip|anon)$/)) bad("access_log must be off or /var/log/nginx/sigelo/access.log sigelo_anon|sigelo_noip")
+      if (d == "auth_basic_user_file" && v != "/etc/nginx/sigelo-stats.htpasswd") bad("auth_basic_user_file must be /etc/nginx/sigelo-stats.htpasswd")
       if (d == "error_log" && !(ntok == 3 && tok[2] == "/var/log/nginx/sigelo/error.log" && tok[3] ~ /^(crit|alert|emerg|error|warn)$/)) bad("error_log must be /var/log/nginx/sigelo/error.log <level>")
       if (d == "ssl_certificate" && v != "/etc/letsencrypt/live/" D "/fullchain.pem") bad("ssl_certificate must be the " D " certificate under /etc/letsencrypt/live")
       if (d == "ssl_certificate_key" && v != "/etc/letsencrypt/live/" D "/privkey.pem") bad("ssl_certificate_key must be the " D " key under /etc/letsencrypt/live")
-      if (d == "log_format" && (tok[2] != "sigelo_noip" || ntok != 3)) bad("only log_format sigelo_noip, one quoted format")
+      if (d == "log_format" && (tok[2] !~ /^sigelo_(noip|anon)$/ || ntok != 3)) bad("only log_format sigelo_anon or sigelo_noip, one quoted format")
       if (d == "ssl_session_cache" && !(ntok == 2 && v ~ /^shared:[a-z_]+:[0-9]+m$/)) bad("ssl_session_cache must be shared:<name>:<n>m")
     }
     END { if (depth != 0) { printf "  unbalanced braces at end of file (depth %d)\n", depth; err = 1 } exit err }

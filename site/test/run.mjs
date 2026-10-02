@@ -176,8 +176,37 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   for (const l of items) { const u = l.match(/\]\(([^)]+)\)/)[1]; if (!u.startsWith(ORIGIN) || await status(local(u)) !== 200) bad.push(u); }
   ok(bad.length === 0, `llms.txt: all ${items.length} links are on ${ORIGIN} and resolve${bad.length ? ` (${bad.join(' ')})` : ''}`);
   const full = (await get('/llms-full.txt')).body.toString();
-  ok(/built from commit [0-9a-f]{40} \(\d{4}-\d\d-\d\dT/.test(full) && full.includes('==> https://sigelo.io/spec.md <=='), 'llms-full.txt: header names the commit and date; carries spec.md');
+  const parts = [...full.matchAll(/^==> https:\/\/sigelo\.io\/([\w-]+)\.md <==$/gm)].map((m) => m[1]);
+  ok(parts.join() === 'spec,adopt,verify,keeper,security', `llms-full.txt: carries spec, adopt, verify, keeper, security only (${parts.join(', ')})`);
+  const sz = Buffer.byteLength(full); const kb = `${Math.max(1, Math.round(sz / 1024))} KB`;
+  ok(t.includes(`(${ORIGIN}/llms-full.txt): ${kb}`), `llms.txt: states llms-full.txt's size (${kb})`);
+  ok(items.filter((l) => lines.indexOf(l) < lines.indexOf('## Optional')).length <= 8, 'llms.txt: at most 8 links before Optional');
   ok((await get('/adopt.md')).body.toString().split('\n').length <= 90, 'adopt.md: short enough to follow (≤ 90 lines)');
+}
+
+// ---- the page list and the word budgets ---------------------------------------------------------
+// The reader pays per token. Words = whitespace-separated tokens holding a letter or digit;
+// inside fenced code and on link-list lines they count half. llms.txt counts every word in full.
+{
+  const PAGES = ['adopt', 'changelog', 'contact', 'index', 'keeper', 'security', 'spec', 'verify'];
+  const got = htmlFiles.filter((f) => /^\/[\w-]+\.html$/.test(f)).map((f) => f.slice(1, -5)).sort();
+  ok(got.join() === PAGES.join(), `pages: exactly ${PAGES.join(', ')} (${got.join(', ')})`);
+  const words = (md, half = true) => {
+    let w = 0; let fence = false;
+    for (const line of md.split('\n')) {
+      if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
+      const k = !half ? 1 : fence || /^\s*[-*] .*\]\(/.test(line) ? 0.5 : 1;
+      w += k * line.split(/\s+/).filter((x) => /[\p{L}\p{N}]/u.test(x)).length;
+    }
+    return w;
+  };
+  const BUDGET = { '/index.md': 120, '/adopt.md': 250, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80 };
+  for (const [f, max] of Object.entries(BUDGET)) {
+    const w = words(readFileSync(join(DIST, f), 'utf8'));
+    ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);
+  }
+  const lw = words(readFileSync(join(DIST, 'llms.txt'), 'utf8'), false);
+  ok(lw <= 150, `budget: /llms.txt ${lw} words ≤ 150 (all counted in full)`);
 }
 
 // ---- robots.txt and sitemap.xml ---------------------------------------------------------------

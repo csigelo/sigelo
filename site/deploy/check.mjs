@@ -11,7 +11,8 @@
 // /examples/world.mjs and a /sha256/<hex>/ file (whose hash is recomputed); Accept: text/markdown
 // on /, /spec.html and /spec serves the Markdown twin; index.json's sha256s match the files
 // served; its built_from.commit is the local HEAD and not dirty; security.txt has not expired;
-// the security and cache headers of site/deploy/nginx.conf; HSTS; http:// → https:// and
+// the security and cache headers of site/deploy/nginx.conf; /_stats/ answers 401 (basic auth,
+// noindex, no-store) and is not in the sitemap; HSTS; http:// → https:// and
 // www → apex 301s. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
 //
 // Flags:
@@ -162,6 +163,15 @@ else {
   const srv = got['/'].h.get('server');
   ok(!srv || !/\d/.test(srv), `Server header carries no version (server_tokens off; got "${srv ?? 'none'}")`);
   ok(!got['/'].h.get('set-cookie'), '/: sets no cookie');
+}
+
+// ---- /_stats/: the visit statistics are private --------------------------------------------
+ok(!got['/sitemap.xml'].body.toString().includes('/_stats'), '/sitemap.xml: does not list /_stats/');
+if (NODE) skip('/_stats/: 401 without credentials, noindex, no-store', 'nginx serves /_stats/, the node test server does not');
+else {
+  const r = await get(at('/_stats/'), {}, 'manual');
+  ok(r.status === 401 && /^Basic /i.test(r.h.get('www-authenticate') ?? '') && /noindex/.test(r.h.get('x-robots-tag') ?? '') && r.h.get('cache-control') === 'no-store',
+    `/_stats/: 401 Basic without credentials, X-Robots-Tag noindex, Cache-Control no-store (got ${r.status || r.error}, "${r.h.get('www-authenticate') ?? ''}", "${r.h.get('x-robots-tag') ?? ''}", "${r.h.get('cache-control') ?? ''}")`);
 }
 
 // ---- TLS: HSTS and the redirects --------------------------------------------------------------

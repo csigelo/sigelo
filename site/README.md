@@ -18,29 +18,27 @@ node site/test/run.mjs --serve 8080    # just serve it (localhost, 127.0.0.1 and
 |---|---|
 | `build.mjs` | the generator and its Markdown renderer (one file, no dependencies) |
 | `src/*.md` | the pages written for the site: front matter (`title`, `description`), then Markdown with `{{…}}` values the build fills from the tree |
-| `src/measured.json` | figures that come from *running* things (suite counts, `--impl` cases), with the commit they were measured at. Re-measure and update it when the code changes |
 | `src/style.css` | the one stylesheet; dark/light by `prefers-color-scheme` |
 | `test/run.mjs` | the site check (below) |
 | `test/TASK-site.md`, `test/collect.sh`, `test/grade-site.mjs` | a docs-test-style task: a model gets only the served site and the release files and must produce a verified bundle; graded 6 points |
 
 ## What the build reads
 
-- **Rendered as pages** (and copied as their `.md` twin, links rewritten to the site):
-  SPEC.md → `/spec`, THREAT-MODEL.md → `/threat-model`, VERSIONING.md → `/versioning`,
-  SECURITY.md → `/security`, QUICKSTART.md → `/quickstart`, WHY.md → `/why`, MONERO.md →
-  `/monero`, CHANGELOG.md → `/changelog`. Pages from `src/`: `/` (index), `/adopt`, `/verify`,
-  `/vectors`, `/keeper`, `/integrations`, `/evidence`, `/did-method`.
-- **Verbatim** under `/raw/<repo path>`: those eight documents, `test-vectors.json`,
+- **Rendered as pages** (and copied as their `.md` twin, links rewritten to the site): SPEC.md →
+  `/spec`, SECURITY.md → `/security`, CHANGELOG.md → `/changelog`. Pages from `src/`: `/` (index),
+  `/adopt`, `/verify`, `/keeper`, `/contact`. Nothing else: `test/run.mjs` fails on any other page
+  and on a page over its word budget (index 120, adopt 250, verify 150, keeper 200, contact 80,
+  llms.txt 150).
+- **Verbatim** under `/raw/<repo path>`: those three, QUICKSTART, WHY, THREAT-MODEL, VERSIONING,
+  MONERO, kit/README.md, spend/README.md (listed with sizes in llms.txt), `test-vectors.json`,
   `schema/*.json`, `spend/openapi.yaml` (its `../schema/` references resolve there). Also
   `/test-vectors.json`, and `/sha256/<hex>/SPEC.md` and `/sha256/<hex>/test-vectors.json`, which
   never change once published.
 - `/examples/world.mjs`: `examples/world.mjs` with its one import changed from
   `../ts/dist/sigelo.js` to the npm package `sigelo` (a header says so), so an agent with the
   release tarballs can run the mock world without a clone.
-- From the tree at build time: vector counts and sha256s, package versions, the Go module
-  path, line counts of the adapters (`{{code:path}}`, the adapters' own rule), the docs-test
-  RESULTS table (`{{table:docs-test/RESULTS.md:1}}`), the commit and its date. The output is a
-  function of the commit; no wall clock.
+- From the tree at build time: vector counts and sha256s, package versions, the commit (in
+  `index.json` only). The output is a function of the commit; no wall clock.
 
 A relative link in a repository document that is not a page or a raw copy points at
 `https://github.com/csigelo/sigelo/blob/main/<path>` (`main` is the branch release/publish.sh creates).

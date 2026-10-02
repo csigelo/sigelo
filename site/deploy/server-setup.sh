@@ -15,6 +15,15 @@
 #                         so the ACME account is not tied to a person; LE no longer sends expiry mail)
 #   --test-cert           use Let's Encrypt's staging CA (untrusted cert, no rate limits) for a dry run
 #   --skip-cert           do not run certbot (a certificate is already at /etc/letsencrypt/live/sigelo.io)
+#   --stats               ONLY the visit-statistics step, on a server this script already prepared
+#                         (needs sigelo-nginx-apply and stats-agents.sh beside it): goaccess, the
+#                         /_stats/ password file, the 15-minute sigelo-stats timer, the helper
+#                         refreshed (its allowlist knows auth_basic), log rotation at 30 days. A
+#                         fresh server runs the script once without it, then once with it.
+#   --stats-htpasswd FILE with --stats: install FILE (one line, owner:<crypt hash>, e.g. from
+#                         `openssl passwd -6 -stdin`) as /etc/nginx/sigelo-stats.htpasswd; without
+#                         it an existing file is kept, and a missing one gets a random password,
+#                         printed once
 #
 # Requires: DNS A (and AAAA, if the server has IPv6) for sigelo.io AND www.sigelo.io already pointing
 # here, and ports 80/443 open — certbot proves control over HTTP-01 on port 80.
@@ -31,7 +40,7 @@ say() { printf '\n==> %s\n' "$*"; }
 run() { printf '+ %s\n' "$*"; "$@"; }
 die() { printf 'server-setup.sh: %s\n' "$*" >&2; exit 1; }
 
-os=""; key=""; email=""; testcert=""; skipcert=0
+os=""; key=""; email=""; testcert=""; skipcert=0; stats=0; htfile=""
 while [ $# -gt 0 ]; do
   case $1 in
     --os) os=$2; shift 2 ;;
@@ -40,12 +49,16 @@ while [ $# -gt 0 ]; do
     --email) email=$2; shift 2 ;;
     --test-cert) testcert=--test-cert; shift ;;
     --skip-cert) skipcert=1; shift ;;
+    --stats) stats=1; shift ;;
+    --stats-htpasswd) htfile=$2; shift 2 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 
 [ "$(id -u)" = 0 ] || die "run as root"
-for f in nginx.conf sigelo-nginx-apply; do [ -f "$HERE/$f" ] || die "$HERE/$f missing: copy it next to this script"; done
+if [ "$stats" = 1 ]; then need="sigelo-nginx-apply stats-agents.sh"; else need="nginx.conf sigelo-nginx-apply"; fi
+for f in $need; do [ -f "$HERE/$f" ] || die "$HERE/$f missing: copy it next to this script"; done
+[ -z "$htfile" ] || [ "$stats" = 1 ] || die "--stats-htpasswd goes with --stats"
 if [ -z "$os" ]; then
   . /etc/os-release
   case "$ID ${ID_LIKE:-}" in *alpine*) os=alpine ;; *debian*|*ubuntu*) os=debian ;; *) die "unsupported OS '$ID': pass --os debian|alpine" ;; esac
@@ -57,6 +70,137 @@ case $os in
 esac
 if [ -n "$key" ]; then printf '%s' "$key" | grep -Eq '^(ssh-ed25519|ecdsa-sha2-nistp[0-9]+|sk-ssh-ed25519@openssh.com|ssh-rsa) [A-Za-z0-9+/=]+( .*)?$' || die "--key does not look like one OpenSSH public key line"; fi
 echo "server-setup.sh: $os, config $CONF, web root $WEBROOT"
+
+install_helper() {
+  run install -m 0755 -o root -g root "$HERE/sigelo-nginx-apply" /usr/local/sbin/sigelo-nginx-apply
+  printf '+ write /etc/sudoers.d/sigelo-deploy\n'
+  printf 'sigelo ALL=(root) NOPASSWD: /usr/local/sbin/sigelo-nginx-apply\n' > /etc/sudoers.d/sigelo-deploy.tmp
+  chmod 0440 /etc/sudoers.d/sigelo-deploy.tmp
+  run visudo -cf /etc/sudoers.d/sigelo-deploy.tmp
+  run mv /etc/sudoers.d/sigelo-deploy.tmp /etc/sudoers.d/sigelo-deploy
+}
+
+# 30 days: the window the statistics cover. The log holds no raw address (nginx.conf, Privacy).
+write_logrotate() {
+  printf '+ write /etc/logrotate.d/sigelo\n'
+  cat > /etc/logrotate.d/sigelo <<'ROT'
+/var/log/nginx/sigelo/*.log {
+    daily
+    rotate 30
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+    postrotate
+        nginx -s reopen 2>/dev/null || true
+    endscript
+}
+ROT
+}
+
+if [ "$stats" = 1 ]; then
+  HT=/etc/nginx/sigelo-stats.htpasswd
+  if [ "$os" = debian ]; then WEBGRP=www-data; else WEBGRP=nginx; fi
+
+  say "S1. packages: goaccess, openssl"
+  if [ "$os" = debian ]; then run env DEBIAN_FRONTEND=noninteractive apt-get install -y goaccess openssl
+  else run apk add --no-cache goaccess openssl; fi
+
+  say "S2. the config helper (its allowlist knows auth_basic, the stats root, log_format sigelo_anon)"
+  install_helper
+
+  say "S3. the /_stats/ password file $HT (user owner)"
+  if [ -n "$htfile" ]; then
+    [ "$(wc -l < "$htfile")" -le 1 ] && grep -Eq '^owner:\$(6|5|apr1)\$[^:[:space:]]+$' "$htfile" || die "$htfile: want one line owner:<\$6\$, \$5\$ or \$apr1\$ hash>"
+    run install -m 0640 -o root -g "$WEBGRP" "$htfile" "$HT"
+  elif [ -f "$HT" ]; then echo "$HT exists: kept"
+  else
+    pw=$(openssl rand -base64 18 | tr -d '/+=\n')
+    printf 'owner:%s\n' "$(printf '%s' "$pw" | openssl passwd -6 -stdin)" > "$HT.tmp"
+    chown root:"$WEBGRP" "$HT.tmp"; chmod 0640 "$HT.tmp"; mv "$HT.tmp" "$HT"
+    printf 'stats login: owner / %s   (shown once; only its hash is kept on the server)\n' "$pw"
+  fi
+
+  say "S4. $WEBROOT/stats, /usr/local/sbin/sigelo-stats-agents, /usr/local/sbin/sigelo-stats"
+  run install -d -m 0755 -o root -g root "$WEBROOT/stats"
+  run install -m 0755 -o root -g root "$HERE/stats-agents.sh" /usr/local/sbin/sigelo-stats-agents
+  printf '+ write /usr/local/sbin/sigelo-stats\n'
+  cat > /usr/local/sbin/sigelo-stats.tmp <<'RUN'
+#!/bin/sh
+# sigelo-stats — written by site/deploy/server-setup.sh --stats; run every 15 minutes. Rebuilds
+# /var/www/sigelo.io/stats/{agents.txt,index.html} (served at https://sigelo.io/_stats/) from
+# every access log logrotate keeps (30 days). Lines of the old address-less format (first
+# field "-") are not GoAccess-parsable and are left out of its report; agents.txt counts them.
+set -eu
+LOGS=/var/log/nginx/sigelo
+OUT=/var/www/sigelo.io/stats
+umask 022
+ls "$LOGS"/access.log* >/dev/null 2>&1 || { echo "sigelo-stats: no logs yet"; exit 0; }
+/usr/local/sbin/sigelo-stats-agents "$LOGS" "$OUT/agents.txt"
+for f in "$LOGS"/access.log*; do case $f in *.gz) gzip -dc "$f" ;; *) cat "$f" ;; esac; done \
+  | grep -v '^- ' \
+  | goaccess - --no-global-config \
+      --log-format='%h %^ %^ [%d:%t %^] "%m %U %H" %s %b "%R" "%u" "%^" %T' \
+      --date-format='%d/%b/%Y' --time-format='%H:%M:%S' \
+      --anonymize-ip --ignore-panel=HOSTS --ignore-panel=REMOTE_USER --ignore-panel=GEO_LOCATION \
+      --no-query-string --num-tests=0 --html-report-title='sigelo.io, last 30 days' \
+      -o "$OUT/.index.new.html"
+chmod 0644 "$OUT/.index.new.html"
+mv -f "$OUT/.index.new.html" "$OUT/index.html"
+RUN
+  chmod 0755 /usr/local/sbin/sigelo-stats.tmp
+  mv /usr/local/sbin/sigelo-stats.tmp /usr/local/sbin/sigelo-stats
+
+  say "S5. every 15 minutes"
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    printf '+ write /etc/systemd/system/sigelo-stats.service and .timer\n'
+    cat > /etc/systemd/system/sigelo-stats.service <<'UNIT'
+[Unit]
+Description=sigelo.io visit statistics (GoAccess report and agents.txt)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sigelo-stats
+Nice=10
+IOSchedulingClass=idle
+ProtectSystem=strict
+ReadWritePaths=/var/www/sigelo.io/stats
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+UNIT
+    cat > /etc/systemd/system/sigelo-stats.timer <<'UNIT'
+[Unit]
+Description=sigelo.io visit statistics every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnCalendar=*:0/15
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+    run systemctl daemon-reload
+    run systemctl enable --now sigelo-stats.timer
+    run systemctl start sigelo-stats.service
+  else
+    printf '+ write /etc/periodic/15min/sigelo-stats\n'
+    printf '#!/bin/sh\nexec /usr/local/sbin/sigelo-stats\n' > /etc/periodic/15min/sigelo-stats
+    run chmod 0755 /etc/periodic/15min/sigelo-stats
+    run /usr/local/sbin/sigelo-stats
+  fi
+
+  say "S6. log rotation: daily, 30 kept"
+  write_logrotate
+
+  say "done: https://$DOMAIN/_stats/ (user owner) once nginx.conf with the /_stats/ location is deployed"
+  exit 0
+fi
 
 say "1. packages: nginx, certbot (+ nginx plugin), sudo, logrotate"
 if [ "$os" = debian ]; then
@@ -103,12 +247,7 @@ for f in /etc/nginx/sites-enabled/default /etc/nginx/http.d/default.conf; do
 done
 
 say "5. the config helper and the one sudo rule"
-run install -m 0755 -o root -g root "$HERE/sigelo-nginx-apply" /usr/local/sbin/sigelo-nginx-apply
-printf '+ write /etc/sudoers.d/sigelo-deploy\n'
-printf 'sigelo ALL=(root) NOPASSWD: /usr/local/sbin/sigelo-nginx-apply\n' > /etc/sudoers.d/sigelo-deploy.tmp
-chmod 0440 /etc/sudoers.d/sigelo-deploy.tmp
-run visudo -cf /etc/sudoers.d/sigelo-deploy.tmp
-run mv /etc/sudoers.d/sigelo-deploy.tmp /etc/sudoers.d/sigelo-deploy
+install_helper
 
 say "6. certificate for $DOMAIN, www.$DOMAIN, $ALT and www.$ALT (certbot certonly --nginx, HTTP-01)"
 if [ "$skipcert" = 1 ]; then echo "--skip-cert"
@@ -159,22 +298,8 @@ else
 fi
 run certbot renew --dry-run
 
-say "8. log rotation: /var/log/nginx/sigelo/*.log daily, 7 kept (the log has no client addresses)"
-printf '+ write /etc/logrotate.d/sigelo\n'
-cat > /etc/logrotate.d/sigelo <<'ROT'
-/var/log/nginx/sigelo/*.log {
-    daily
-    rotate 7
-    missingok
-    notifempty
-    compress
-    delaycompress
-    sharedscripts
-    postrotate
-        nginx -s reopen 2>/dev/null || true
-    endscript
-}
-ROT
+say "8. log rotation: /var/log/nginx/sigelo/*.log daily, 30 kept (no raw client addresses)"
+write_logrotate
 
 say "9. the site config (what every deploy reinstalls), through the same helper deploy.sh uses"
 if [ ! -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ]; then
@@ -198,4 +323,6 @@ say "done"
 cat <<NEXT
 From the machine holding the repository and the deploy key:
     site/deploy/deploy.sh sigelo@$DOMAIN --os $os
+Then the visit statistics, here, as root (stats-agents.sh beside this script):
+    sh $0 --stats
 NEXT
