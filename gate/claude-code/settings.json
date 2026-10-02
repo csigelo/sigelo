@@ -1,8 +1,9 @@
 {
   "hooks": {
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\"" }] }],
-    "UserPromptExpansion": [{ "hooks": [{ "type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\"" }] }],
-    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\"" }] }],
-    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\"" }] }]
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\" || exit 2", "timeout": 10}]}],
+    "UserPromptExpansion": [{"hooks": [{"type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\" || exit 2", "timeout": 10}]}],
+    "PreToolUse": [{"hooks": [{"type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\" || exit 2", "timeout": 10}]}],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\" || exit 2", "timeout": 10}]}],
+    "PostToolUseFailure": [{"hooks": [{"type": "command", "command": "node \"$SIGELO_HOME/gate/claude-code/gate.mjs\" || exit 2", "timeout": 10}]}]
   }
 }

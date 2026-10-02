@@ -19,7 +19,17 @@ history, which is not public. This public history starts at the import of 2026-1
   replaced by one list; live `claude -p` check: unsigned shell denied, signed multi-line prompt allowed, an
   envelope hidden in a file ignored. Open and stated: with default file ownership the agent's own user can
   switch the gate off; inside a signed turn, text read with `Read` can still steer the granted shell. 33 tests.
-  Status: prototype; no release before an external review.
+  Status: prototype; no release before an external review. Second pass (`be75ec3`, `0ad968f`): the hooks
+  install into `/etc/claude-code/managed-settings.json`, which ranks above user, project and `--settings` files
+  and whose hooks a lower file cannot remove; gate code and config root-owned; state in `/var/lib/sigelo-gate`
+  written only by a helper running as `sigelo-gate` through one no-argument doas/sudo rule, which checks the
+  signature and nonce itself; a missing helper or gate file denies. Taint: every tool result except pure writes
+  taints the turn, after which privileged tools are denied unless the instruction was signed with
+  `--allow-after-read`. MCP tools named like writers, `Task` and `Agent` are privileged by default; hooks time out
+  at 10 s and answer in under 2 s; errors deny. Live: unsigned denied, signed allowed, signed+Read+Bash denied,
+  signed with the flag allowed. 54 + 13 (root layout) + 28 (Hermes) checks. Known: a Read and a Bash sent in the
+  same batch pass; a granted shell can start things that outlive the grant; `claude` itself must be root-owned
+  with auto-update off on a gated host.
 
 - **Nothing private on GitHub (Owner rule, `a1b944e`).** The `DEVICE_STRINGS` Actions secret — the private pattern
   list itself — was deleted; the CI identity job now checks only generic shapes (home-directory paths, private

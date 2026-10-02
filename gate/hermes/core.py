@@ -9,6 +9,7 @@ from sigelo_accept import did_of, jcs, unmb  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey  # noqa: E402
 
 CTX, LINE, SKEW = 'sigelo/instruction', 'sigelo-instruction: ', 60
+MCP_WRITE = 'write|edit|create|delete|remove|update|insert|set|execute|exec|run|send|post|put|push|commit|merge|move|rename|upload|deploy|install|kill|pay|transfer'  # = gate.mjs
 ATT_KEYS = ['admission', 'claims', 'ctx', 'exp', 'iat', 'iss', 'sub', 'typ', 'v']
 GEN_KEYS = ['created', 'key', 'nonce', 'recovery', 'typ', 'v']
 A2A_FRAME = re.compile(r'^\[A2A inbound — message from a remote agent peer named .*?\]\n\n', re.S)
@@ -36,6 +37,10 @@ def load_config(path=None):
     if not ops: raise ValueError('config: pin at least one operator genesis')
     return {'agent': c['agent'], 'operators': ops, 'max_ttl': c.get('max_ttl', 600),
             'privileged': c.get('hermes_privileged', ['terminal', 'write_file', 'patch', 'execute_code', 'delegate_task']),
+            # an MCP tool (mcp_<server>_<tool>) whose name says it changes something is privileged unless allowlisted
+            'mcp_write': re.compile(c.get('mcp_write_pattern', MCP_WRITE), re.I), 'mcp_allow': c.get('hermes_mcp_allow', []),
+            # every tool result taints an open grant except these (their result is Hermes' own confirmation)
+            'taint_exempt': c.get('hermes_taint_exempt', ['write_file', 'patch', 'todo']),
             'platforms': c.get('hermes_platforms', ['a2a']),
             'data_tools': c.get('hermes_data_tools', ['a2a_call', 'a2a_orchestrate', 'a2a_history'])}
 
@@ -72,11 +77,18 @@ def verify_instruction(text, env, cfg, now=None, nonces=None):
     c = b['claims'] if isinstance(b['claims'], dict) else {}
     if c.get('text_sha256') != hashlib.sha256(text.encode('utf-8')).hexdigest(): raise ValueError('text does not match the signed hash')
     if not isinstance(c.get('nonce'), str) or not 16 <= len(c['nonce']) <= 64: raise ValueError('nonce missing')
+    names = lambda x: isinstance(x, list) and all(isinstance(y, str) for y in x)
+    if 'tools' in c and not names(c['tools']): raise ValueError('tools must be a list of names')
+    if 'taint_ok' in c and c['taint_ok'] is not True and not names(c['taint_ok']): raise ValueError('taint_ok must be true or a list of names')
     if nonces is not None:
         for n in [n for n, exp in nonces.items() if exp <= now]: del nonces[n]
         if c['nonce'] in nonces: raise ValueError('already used (replay)')
         nonces[c['nonce']] = b['exp']
     return b
+
+
+def privileged(cfg, tool):
+    return tool in cfg['privileged'] or (tool.startswith('mcp_') and tool not in cfg['mcp_allow'] and bool(cfg['mcp_write'].search(tool[4:])))
 
 
 def _attr(s):  # attacker-influenced (peer name, a DID from the envelope): no quotes, tags or newlines
