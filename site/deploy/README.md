@@ -209,6 +209,14 @@ password lives only on the Owner's phone, the server keeps its SHA-512 crypt has
 `no-store`, not in the sitemap; `check.mjs` checks the 401 and the sitemap. The check's own
 requests count as `node` under programmatic clients.
 
+## The world (`/world/`)
+
+`world/server.mjs` runs as `sigelo-world.service` (user `sigelo`, loopback 8790) behind the `/world/`
+location; world/README.md is the whole story. Once, after a first deploy has shipped `world-app/`:
+`sh server-setup.sh --world sha256:<recovery commitment>` (with `sigelo-world.service` and
+`sigelo-world-apply` beside it) installs nodejs, the unit, the issuer key and the second sudo rule
+(`sigelo-world-apply`: restart the unit, nothing else). Commit the printed genesis as `world/genesis.json`.
+
 ## Rollback
 
 `site/deploy/deploy.sh sigelo@sigelo.io --rollback` swaps `dist` and `dist.prev` on the server

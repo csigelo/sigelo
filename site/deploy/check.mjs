@@ -13,7 +13,9 @@
 // served; its built_from.commit is the local HEAD and not dirty; security.txt has not expired;
 // the security and cache headers of site/deploy/nginx.conf; /_stats/ answers 401 (basic auth,
 // noindex, no-store) and is not in the sitemap; HSTS; http:// → https:// and
-// www → apex 301s. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
+// www → apex 301s; when index.json has a `world` block, the world (world/README.md): a §5.2
+// challenge, the whole attest flow with a fixed-seed check agent (the ts library from ts/dist; one
+// subject, idempotent for 24 h) and /world/stats with counts only. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
 //
 // Flags:
 //   --origin URL       what to check (default https://sigelo.io); index.json's URLs are mapped onto it
@@ -138,6 +140,38 @@ if (ok(ix && ix.name === 'sigelo' && ix.built_from?.commit, 'index.json parses a
     else ok(r.h.get('cache-control') === YEAR, `${p.slice(0, 22)}…: Cache-Control "${YEAR}" (got "${r.h.get('cache-control')}")`);
   }
   ok(imm.length === 2, 'index.json lists the two immutable copies (SPEC.md, test-vectors.json)');
+}
+
+// ---- the world: challenge, attest, stats ------------------------------------------------------
+if (!ix?.world) note('index.json has no world block: the world checks are skipped');
+else {
+  const w = ix.world, wurl = (u) => at(local(u));
+  let lib = null;
+  try { lib = await import(new URL('../../ts/dist/sigelo.js', import.meta.url)); } catch (e) { note(`no ts/dist (cd ts && npx tsc): ${e.message}`); }
+  const g = await get(wurl(w.genesis));
+  let genesis = null; try { genesis = JSON.parse(g.body); } catch { /* reported */ }
+  ok(g.status === 200 && genesis && lib && lib.did(genesis) === w.issuer, `/world/genesis.json: 200, hashes to index.json's world.issuer ${w.issuer}`);
+  // A fixed seed: the same check agent every run, so the world counts one subject, not one per deploy.
+  const agent = lib && lib.keygen({ seed: createHash('sha256').update('sigelo.io check.mjs agent').digest(), recovery: 'sha256:' + '0'.repeat(64), created: '2026-10-02T00:00:00Z', nonce: new Uint8Array(16) });
+  const cr = agent ? await get(wurl(w.challenge.replace('{did}', encodeURIComponent(agent.did)))) : { status: 0 };
+  let ch = null; try { ch = JSON.parse(cr.body); } catch { /* reported */ }
+  ok(cr.status === 200 && ch && Object.keys(ch).join() === 'v,typ,did,ctx,nonce' && ch.ctx === w.ctx && ch.did === agent.did, `/world/challenge: 200, the five §5.2 fields, ctx ${w.ctx} (got ${show(cr)})`);
+  let issued = null;
+  if (ch?.nonce) {
+    const signed = lib.challenge({ secret: agent.secret, genesis: agent.genesis, ctx: ch.ctx, nonce: ch.nonce });
+    const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: agent.genesis, rotations: [], bindings: [], attestations: [], issuers: [] };
+    try {
+      const r = await fetch(wurl(w.attest), { method: 'POST', body: JSON.stringify({ challenge: ch, did: agent.did, sig: signed.sig, bundle }), signal: AbortSignal.timeout(20000) });
+      issued = r.status === 200 ? await r.json() : { status: r.status, error: (await r.json().catch(() => ({}))).error };
+    } catch (e) { issued = { error: e.message }; }
+  }
+  const res = issued?.attestation && lib.verify({ v: 'sigelo/0', typ: 'bundle', genesis: agent.genesis, rotations: [], bindings: [], attestations: [issued.attestation], issuers: [issued.issuer] }, Math.floor(Date.now() / 1000));
+  ok(res && res.attestations[w.issuer]?.length === 1 && Object.keys(issued.attestation).join() === 'body,sig' && issued.attestation.body.admission === 'open',
+    `/world/attest: an attestation from ${w.issuer.slice(0, 24)}… that verifies offline in a bundle (got ${issued?.attestation ? JSON.stringify(issued.attestation.body.claims) : JSON.stringify(issued)})`);
+  const st = await get(wurl(w.stats));
+  let sj = null; try { sj = JSON.parse(st.body); } catch { /* reported */ }
+  ok(st.status === 200 && sj && Number.isInteger(sj.attestations) && Object.keys(sj).join() === 'issuer,ctx,attestations,subjects' && (NODE || st.h.get('cache-control') === 'no-store'),
+    `/world/stats: 200, counts only, not cached (got ${show(st)} ${st.body.toString().trim().slice(0, 160)})`);
 }
 
 // ---- security.txt -----------------------------------------------------------------------------

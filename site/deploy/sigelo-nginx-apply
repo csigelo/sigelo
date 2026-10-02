@@ -17,7 +17,8 @@
 # any file or load a module, i.e. become root. So the file is copied to a root-owned temp file
 # first (no swap between check and install), and every statement must be on its own line, start
 # with an allowlisted directive, and use the fixed paths below for root, logs, certificates and
-# the stats password file (auth_basic_user_file: nginx reads it at request time).
+# the stats password file (auth_basic_user_file: nginx reads it at request time), and the one
+# loopback upstream of the world service (proxy_pass http://127.0.0.1:8790).
 # What a stolen deploy key can still do: change the site's content, headers and redirects. That
 # is the intended scope, not a proof (the filter is reviewed, not audited).
 set -eu
@@ -72,7 +73,8 @@ check_conf() { # $1 = file; prints every offending line, returns 1 if any
         "ssl_certificate ssl_certificate_key ssl_protocols ssl_ciphers ssl_prefer_server_ciphers " \
         "ssl_session_timeout ssl_session_cache ssl_session_tickets ssl_reject_handshake root index " \
         "log_not_found types default_type charset charset_types gzip gzip_vary gzip_min_length " \
-        "gzip_types add_header location if rewrite try_files http2 auth_basic auth_basic_user_file", a, " ")
+        "gzip_types add_header location if rewrite try_files http2 auth_basic auth_basic_user_file " \
+        "limit_req_zone limit_req limit_req_status client_max_body_size proxy_pass", a, " ")
       for (i = 1; i <= n; i++) allowed[a[i]] = 1
       depth = 0; block = ""; blockdepth = 0
     }
@@ -111,6 +113,13 @@ check_conf() { # $1 = file; prints every offending line, returns 1 if any
       if (d == "ssl_certificate" && v != "/etc/letsencrypt/live/" D "/fullchain.pem") bad("ssl_certificate must be the " D " certificate under /etc/letsencrypt/live")
       if (d == "ssl_certificate_key" && v != "/etc/letsencrypt/live/" D "/privkey.pem") bad("ssl_certificate_key must be the " D " key under /etc/letsencrypt/live")
       if (d == "log_format" && (tok[2] !~ /^sigelo_(noip|anon)$/ || ntok != 3)) bad("only log_format sigelo_anon or sigelo_noip, one quoted format")
+      # The world (world/README.md): one fixed loopback upstream, a rate-limit zone keyed on the
+      # truncated address only, small bodies. proxy_set_header is not allowed: no address leaves nginx.
+      if (d == "proxy_pass" && v != "http://127.0.0.1:8790") bad("proxy_pass must be http://127.0.0.1:8790 (the world service)")
+      if (d == "limit_req_zone" && !(ntok == 4 && tok[2] == "$sigelo_net" && tok[3] ~ /^zone=sigelo_[a-z]+:[0-9]+m$/ && tok[4] ~ /^rate=[0-9]+r\/[ms]$/)) bad("limit_req_zone must be $sigelo_net zone=sigelo_<name>:<n>m rate=<n>r/m")
+      if (d == "limit_req" && !(ntok >= 2 && ntok <= 4 && tok[2] ~ /^zone=sigelo_[a-z]+$/ && (ntok < 3 || tok[3] ~ /^burst=[0-9]+$/) && (ntok < 4 || tok[4] == "nodelay"))) bad("limit_req must be zone=sigelo_<name> [burst=<n>] [nodelay]")
+      if (d == "limit_req_status" && v !~ /^(429|503)$/) bad("limit_req_status must be 429 or 503")
+      if (d == "client_max_body_size" && v !~ /^[0-9]+[km]?$/) bad("client_max_body_size must be <n>[k|m]")
       if (d == "ssl_session_cache" && !(ntok == 2 && v ~ /^shared:[a-z_]+:[0-9]+m$/)) bad("ssl_session_cache must be shared:<name>:<n>m")
     }
     END { if (depth != 0) { printf "  unbalanced braces at end of file (depth %d)\n", depth; err = 1 } exit err }

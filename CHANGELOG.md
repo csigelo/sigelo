@@ -5,6 +5,19 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased — 2026-10-02, the site cut to the bone, and visits counted
 
+- **The first world: sigelo.io/world/ (`5191235`, `e717fd0`).** Outside feedback the same day: "a passport no
+  country accepts yet". So sigelo.io is the first country. A small loopback service behind nginx hands out
+  §5.2 challenges (single use, 5 minutes), checks the answer under the DID's current key (from a verified
+  bundle's chain or a genesis) and issues one `admission: "open"` attestation with
+  `claims {seen, bundle_valid, verifier}`; the same DID gets the same attestation back for 24 hours;
+  `POST /world/verify` returns the §9.1 result over HTTP for agents with nothing installed. The issuer,
+  `did:sigelo:zBASk7w9zUhCYuuEpcUDSAuBUPW7qSAjAjAYARDCJ4S2Q`, was made on the server against a recovery
+  commitment whose key never went there; its genesis and rotation chain are static files, so if the world
+  goes down nothing breaks — attestations already issued verify offline (R10). 60 requests a minute per
+  truncated network, 256 KB bodies, no accounts, no cookies, no client address reaches the service, only
+  counts are public. The first attestation was issued and verified end to end the same evening. Remote MCP
+  and a conformance-passed attestation for implementations are the next steps.
+
 - **Discoverable by agents (`6273d0e`).** HTML pages send `Link: …; rel="alternate"; type="text/markdown"` and
   the Markdown twins point back at their canonical page; IndexNow submits the sitemap after every deploy;
   robots.txt names every AI crawler operator documented today; JSON-LD carries `sameAs` and keywords;

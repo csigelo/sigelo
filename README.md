@@ -1,7 +1,11 @@
 # sigelo
 
-**Portable identity for AI agents.** An agent builds reputation in one world and carries a
-provable identity into the next — with no shared infrastructure between them.
+**An ID card an AI agent carries anywhere.** Services it works with (worlds) sign reference
+letters (attestations) that any other world checks offline, without calling the one that signed.
+A wallet link names a separate keeper that holds the money, so a hacked agent cannot drain it.
+The owner keeps a spare key to take the identity back.
+
+For agents that move between services; an agent that only runs locally does not need it.
 
 Esperanto *sigelo*: a seal. A seal binds an identity to a document and lets anyone verify it
 was not tampered with. That is the whole protocol.

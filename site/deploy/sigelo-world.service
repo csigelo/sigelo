@@ -1,0 +1,32 @@
+# site/deploy/sigelo-world.service — the world at https://sigelo.io/world/ (world/server.mjs).
+# SPDX-License-Identifier: MIT
+# Installed by `server-setup.sh --world` as /etc/systemd/system/sigelo-world.service. deploy.sh
+# ships the code to /var/www/sigelo.io/world-app (deploy-owned); /usr/local/sbin/sigelo-world-apply
+# (the deploy user's one world sudo rule) copies it, root-owned, to /opt/sigelo-world/app and
+# restarts this unit. It runs as sigelo-world, a system user with no shell and no ssh, which alone
+# owns the issuer key in /var/lib/sigelo-world (0700, files 0600): the deploy user cannot read it.
+# Loopback only; nginx proxies /world/.
+[Unit]
+Description=sigelo.io world: challenges, attestations, bundle verification
+After=network.target
+
+[Service]
+User=sigelo-world
+Group=sigelo-world
+EnvironmentFile=/etc/sigelo-world.env
+ExecStart=/usr/bin/node /opt/sigelo-world/app/world/server.mjs
+Restart=always
+RestartSec=2
+StateDirectory=sigelo-world
+StateDirectoryMode=0700
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

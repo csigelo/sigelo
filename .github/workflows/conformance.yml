@@ -75,6 +75,11 @@ jobs:
       - run: >-
           npm ci --ignore-scripts && npm test | tee /tmp/moadim-out && grep -q '^ALL PASS' /tmp/moadim-out && grep -q '^ok   go: same current DID$' /tmp/moadim-out
         working-directory: adapters/moadim
+      # sigelo.io's world (world/test.mjs): challenge, attestation, refusals and rotation on a
+      # random loopback port against the freshly built library, judged by the Go verifier (go
+      # run; it FAILs, not skips, without go), plus the nginx allowlist for /world/. A few seconds.
+      - run: >-
+          node world/test.mjs | tee /tmp/world-out && grep -q '^ALL PASS' /tmp/world-out && grep -q '^ok go sigelo-verify: ACCEPT' /tmp/world-out
       # the bounded-spending service (MONERO.md §4). Same job, after `npx tsc` above: it
       # depends on `sigelo` as `file:../ts`, so it links dist/ and there must be a dist/ to link.
       # Its live-wallet section SKIPs on a runner with no monero-wallet-rpc on 127.0.0.1:38083.
@@ -130,6 +135,9 @@ jobs:
       - run: >-
           npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
         working-directory: adapters/moadim
+      # OS-neutral: a random loopback port, `go run` for the judge, `sh` (Git Bash on Windows) for the allowlist
+      - run: >-
+          node world/test.mjs | tee "$RUNNER_TEMP/world-out" && grep -q '^ALL PASS' "$RUNNER_TEMP/world-out" && grep -q '^ok go sigelo-verify: ACCEPT' "$RUNNER_TEMP/world-out"
       # failures as annotations, as in the ts job
       - run: |
           npm ci --ignore-scripts

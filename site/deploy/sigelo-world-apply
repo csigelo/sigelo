@@ -1,0 +1,38 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# sigelo-world-apply — after deploy.sh shipped new code to /var/www/sigelo.io/world-app (owned by
+# the deploy user), copies it root-owned to /opt/sigelo-world/app (refusing anything but regular
+# files and directories), logs the code's sha256 to the journal (tag sigelo-world-apply) and on
+# stdout, restarts sigelo-world.service and fails unless it comes back up. Takes no arguments and
+# does nothing else: it is the deploy user's second and last root command.
+#
+# The hash is the sha256 of `sha256sum` over every file, sorted by path, from inside the tree
+# (deploy.sh prints the same over what it staged): it does not stop a stolen deploy key from
+# shipping its own code, it records what ran, in a log the deploy user cannot rewrite.
+#
+# Installed by site/deploy/server-setup.sh --world as /usr/local/sbin/sigelo-world-apply
+# (root:root 0755), with the sudoers line   sigelo ALL=(root) NOPASSWD: /usr/local/sbin/sigelo-world-apply
+set -eu
+SRC=/var/www/sigelo.io/world-app
+DST=/opt/sigelo-world
+[ $# -eq 0 ] || { echo "[sigelo-world-apply] takes no arguments" >&2; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "[sigelo-world-apply] run as root (sudo -n $0)" >&2; exit 1; }
+[ -f "$SRC/world/server.mjs" ] || { echo "[sigelo-world-apply] $SRC/world/server.mjs missing" >&2; exit 1; }
+umask 022
+install -d -m 0755 -o root -g root "$DST"
+rm -rf "$DST/app.new"
+cp -R "$SRC" "$DST/app.new"
+odd=$(find "$DST/app.new" ! -type f ! -type d | head -n 3)
+if [ -n "$odd" ]; then rm -rf "$DST/app.new"; echo "[sigelo-world-apply] refused: not a regular file or directory: $odd" >&2; exit 1; fi
+chown -R root:root "$DST/app.new"; chmod -R u+rwX,go-w,go+rX "$DST/app.new"
+hash=$(cd "$DST/app.new" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do sha256sum "$f"; done | sha256sum | cut -d' ' -f1)
+rm -rf "$DST/app.prev"; [ ! -d "$DST/app" ] || mv "$DST/app" "$DST/app.prev"; mv "$DST/app.new" "$DST/app"
+logger -t sigelo-world-apply "code sha256 $hash" 2>/dev/null || true
+echo "[sigelo-world-apply] code sha256 $hash"
+systemctl restart sigelo-world.service
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if systemctl is-active --quiet sigelo-world.service && ss -ltn 'sport = :8790' | grep -q 8790; then echo "[sigelo-world-apply] sigelo-world active on 127.0.0.1:8790"; exit 0; fi
+  sleep 1
+done
+journalctl -u sigelo-world.service -n 20 --no-pager >&2 || true
+echo "[sigelo-world-apply] sigelo-world did not come up" >&2; exit 1

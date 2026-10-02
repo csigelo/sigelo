@@ -20,6 +20,14 @@
 #                         /_stats/ password file, the 15-minute sigelo-stats timer, the helper
 #                         refreshed (its allowlist knows auth_basic), log rotation at 30 days. A
 #                         fresh server runs the script once without it, then once with it.
+#   --world SHA256      ONLY the world step (world/README.md), on a server this script prepared and
+#                         deploy.sh has shipped world-app/ to (needs sigelo-world.service and
+#                         sigelo-world-apply beside it; Debian/systemd): nodejs, the system user
+#                         sigelo-world (sole owner of /var/lib/sigelo-world; migrates a world that
+#                         ran as sigelo), the unit, the second sudo rule, and — first time only —
+#                         the issuer key, made here with the recovery COMMITMENT given
+#                         (sha256:<64 hex>; the recovery key itself never comes here). Prints
+#                         the issuer genesis: commit it as world/genesis.json.
 #   --stats-htpasswd FILE with --stats: install FILE (one line, owner:<crypt hash>, e.g. from
 #                         `openssl passwd -6 -stdin`) as /etc/nginx/sigelo-stats.htpasswd; without
 #                         it an existing file is kept, and a missing one gets a random password,
@@ -40,7 +48,7 @@ say() { printf '\n==> %s\n' "$*"; }
 run() { printf '+ %s\n' "$*"; "$@"; }
 die() { printf 'server-setup.sh: %s\n' "$*" >&2; exit 1; }
 
-os=""; key=""; email=""; testcert=""; skipcert=0; stats=0; htfile=""
+os=""; key=""; email=""; testcert=""; skipcert=0; stats=0; htfile=""; world=""
 while [ $# -gt 0 ]; do
   case $1 in
     --os) os=$2; shift 2 ;;
@@ -51,12 +59,15 @@ while [ $# -gt 0 ]; do
     --skip-cert) skipcert=1; shift ;;
     --stats) stats=1; shift ;;
     --stats-htpasswd) htfile=$2; shift 2 ;;
+    --world) world=$2; shift 2 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 
 [ "$(id -u)" = 0 ] || die "run as root"
-if [ "$stats" = 1 ]; then need="sigelo-nginx-apply stats-agents.sh"; else need="nginx.conf sigelo-nginx-apply"; fi
+if [ "$stats" = 1 ]; then need="sigelo-nginx-apply stats-agents.sh"
+elif [ -n "$world" ]; then need="sigelo-nginx-apply sigelo-world-apply sigelo-world.service"
+else need="nginx.conf sigelo-nginx-apply"; fi
 for f in $need; do [ -f "$HERE/$f" ] || die "$HERE/$f missing: copy it next to this script"; done
 [ -z "$htfile" ] || [ "$stats" = 1 ] || die "--stats-htpasswd goes with --stats"
 if [ -z "$os" ]; then
@@ -75,6 +86,8 @@ install_helper() {
   run install -m 0755 -o root -g root "$HERE/sigelo-nginx-apply" /usr/local/sbin/sigelo-nginx-apply
   printf '+ write /etc/sudoers.d/sigelo-deploy\n'
   printf 'sigelo ALL=(root) NOPASSWD: /usr/local/sbin/sigelo-nginx-apply\n' > /etc/sudoers.d/sigelo-deploy.tmp
+  # the second rule exists once --world installed its helper (re-running --stats keeps it)
+  if [ -x /usr/local/sbin/sigelo-world-apply ]; then printf 'sigelo ALL=(root) NOPASSWD: /usr/local/sbin/sigelo-world-apply\n' >> /etc/sudoers.d/sigelo-deploy.tmp; fi
   chmod 0440 /etc/sudoers.d/sigelo-deploy.tmp
   run visudo -cf /etc/sudoers.d/sigelo-deploy.tmp
   run mv /etc/sudoers.d/sigelo-deploy.tmp /etc/sudoers.d/sigelo-deploy
@@ -98,6 +111,56 @@ write_logrotate() {
 }
 ROT
 }
+
+if [ -n "$world" ]; then
+  APP=$WEBROOT/world-app
+  STATE=/var/lib/sigelo-world
+  [ "$os" = debian ] && [ -d /run/systemd/system ] || die "--world needs Debian/Ubuntu with systemd"
+  [ -f "$APP/world/server.mjs" ] || die "$APP/world/server.mjs missing: run deploy.sh once first (it ships world-app/)"
+
+  say "W1. nodejs"
+  command -v node >/dev/null 2>&1 || run env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+  node -e 'process.exit(+process.versions.node.split(".")[0] >= 20 ? 0 : 1)' || die "node >= 20 needed, have $(node -v)"
+
+  say "W2. the restart helper, the second sudo rule (and the nginx helper, whose allowlist knows /world/)"
+  run install -m 0755 -o root -g root "$HERE/sigelo-world-apply" /usr/local/sbin/sigelo-world-apply
+  install_helper
+
+  say "W3. the system user sigelo-world (no shell, no ssh), sole owner of the issuer key in $STATE"
+  # The deploy user (sigelo) must not read the key: before this step the world ran as sigelo and
+  # owned $STATE. Idempotent migration: stop the unit, hand $STATE to sigelo-world, then restart
+  # under the new unit (W4). The path is unchanged, so /etc/sigelo-world.env and the DID are too.
+  if ! id sigelo-world >/dev/null 2>&1; then
+    run useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin sigelo-world
+  fi
+  run passwd -l sigelo-world >/dev/null
+  if systemctl is-active --quiet sigelo-world.service && [ "$(systemctl show -p User --value sigelo-world.service)" != sigelo-world ]; then
+    run systemctl stop sigelo-world.service
+  fi
+  run install -d -m 0700 -o sigelo-world -g sigelo-world "$STATE"
+  run chown -R sigelo-world:sigelo-world "$STATE"
+  run find "$STATE" -type f -exec chmod 0600 {} +
+  if [ -f "$STATE/issuer.json" ]; then echo "$STATE/issuer.json exists: kept"
+  else
+    printf '%s' "$world" | grep -Eq '^sha256:[0-9a-f]{64}$' || die "--world wants the recovery commitment, sha256:<64 lowercase hex>"
+    run su -s /bin/sh sigelo-world -c "umask 077; node $APP/world/server.mjs keygen $world $STATE/issuer.json >/dev/null"
+  fi
+  # the point of this step, checked: the deploy user cannot read the key
+  if su -s /bin/sh sigelo -c "test -r $STATE/issuer.json" 2>/dev/null; then die "the deploy user can still read $STATE/issuer.json"; fi
+  printf '+ write /etc/sigelo-world.env\n'
+  printf 'SIGELO_WORLD_KEY=%s/issuer.json\nSIGELO_WORLD_PORT=8790\n' "$STATE" > /etc/sigelo-world.env
+  chmod 0644 /etc/sigelo-world.env
+
+  say "W4. sigelo-world.service (as sigelo-world; code copied root-owned to /opt/sigelo-world/app by the helper)"
+  run install -m 0644 -o root -g root "$HERE/sigelo-world.service" /etc/systemd/system/sigelo-world.service
+  run systemctl daemon-reload
+  run systemctl enable sigelo-world.service
+  run /usr/local/sbin/sigelo-world-apply
+
+  say "done: the issuer genesis (commit it as world/genesis.json, then deploy):"
+  su -s /bin/sh sigelo-world -c "node -e 'const g=JSON.parse(require(\"fs\").readFileSync(process.argv[1],\"utf8\")).genesis;console.log(JSON.stringify(g))' $STATE/issuer.json"
+  exit 0
+fi
 
 if [ "$stats" = 1 ]; then
   HT=/etc/nginx/sigelo-stats.htpasswd

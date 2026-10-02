@@ -7,7 +7,7 @@
 // Every page exists twice: /<page>.html and /<page>.md. Repository documents are copied, not
 // rewritten: verbatim under /raw/<repo path>, and SPEC.md + test-vectors.json once more under
 // /sha256/<hex>/. Keep pages short: site/test/run.mjs enforces word budgets.
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, posix } from 'node:path';
@@ -35,6 +35,20 @@ const commit = git('rev-parse', 'HEAD');
 const commitDate = git('log', '-1', '--format=%cI', 'HEAD');
 const dirty = git('status', '--porcelain', '--untracked-files=no') !== '';
 const pkg = (p) => JSON.parse(read(p));
+// The world's DID for index.json, without importing ts/dist (the build needs no tsc). A genesis is
+// six ASCII string-or-null fields, whose JCS form is exactly sorted keys + JSON.stringify; anything
+// else is refused rather than guessed. check.mjs compares the result with what the live world says.
+function genesisDid(g) {
+  const keys = Object.keys(g).sort();
+  if (keys.join() !== 'created,key,nonce,recovery,typ,v' || !keys.every((k) => g[k] === null || typeof g[k] === 'string' && /^[\x20-\x7e]*$/.test(g[k]) && !/["\\]/.test(g[k])))
+    throw new Error('world/genesis.json is not a plain sigelo genesis');
+  const h = sha256(JSON.stringify(g, keys));
+  let x = BigInt('0x' + h), out = '1'.repeat(h.match(/^(00)*/)[0].length / 2);
+  const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let tail = '';
+  while (x > 0n) { tail = A[Number(x % 58n)] + tail; x /= 58n; }
+  return 'did:sigelo:z' + out + tail;   // base58btc: each leading zero byte is a '1'
+}
 
 // ---------------------------------------------------------------------------------------------
 // The site map. `repo` pages are a repository document rendered as is; the rest come from site/src.
@@ -353,6 +367,10 @@ export function build() {
   if (!world.includes("from '../ts/dist/sigelo.js'")) throw new Error('examples/world.mjs import changed; update build.mjs');
   put('examples/world.mjs', world.replace("from '../ts/dist/sigelo.js'", "from 'sigelo'").replace('// SPDX-License-Identifier: MIT\n',
     `// SPDX-License-Identifier: MIT\n// Import changed to the npm package 'sigelo': run it where \`sigelo\` is installed (\`node world.mjs challenge <genesis.json>\`).\n`));
+  // The world (world/README.md): its issuer genesis and rotation chain are static files, so they
+  // stay published when the service is down (attestations already issued verify offline anyway).
+  // Absent until server-setup.sh --world made the issuer key (a fresh server): no world block then.
+  for (const f of ['genesis.json', 'rotations.json']) if (existsSync(join(ROOT, 'world', f))) put(`world/${f}`, readBytes(`world/${f}`));
   put('style.css', readFileSync(join(SITE, 'src', 'style.css')));
   put('.nojekyll', '');
   put('CNAME', 'sigelo.io\n');
@@ -416,6 +434,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
   const file = (p, url) => ({ url: `${ORIGIN}${url}`, sha256: sha256(readBytes(p)), bytes: readBytes(p).length });
   const impl = (dir) => { const j = pkg(`${dir}/package.json`); return { name: j.name, version: j.version, path: `${dir}/`, language: 'TypeScript',
     registry: 'npm', published: false, bin: j.bin ? Object.keys(j.bin) : [] }; };
+  const worldDid = existsSync(join(ROOT, 'world/genesis.json')) ? genesisDid(JSON.parse(read('world/genesis.json'))) : null;
   const index = {
     name: 'sigelo', homepage: `${ORIGIN}/`, description: SOFTWARE.description,
     wire: 'sigelo/0', spec_version: 'v0.1', status: 'draft', wire_frozen: false,
@@ -441,6 +460,8 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
       ['sitemap', '/sitemap.xml'], ['security_txt', '/.well-known/security.txt'], ['mock_world', '/examples/world.mjs']].map(([k, v]) => [k, `${ORIGIN}${v}`])),
     pages: PAGES.map((p) => ({ slug: p.slug, html: p.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${p.slug}.html`, markdown: `${ORIGIN}/${p.slug}.md`,
       ...(p.repo && { source: p.repo, source_sha256: sha256(readBytes(p.repo)) }) })),
+    ...(worldDid && { world: { ctx: 'sigelo.io', issuer: worldDid, challenge: `${ORIGIN}/world/challenge?did={did}`, attest: `${ORIGIN}/world/attest`,
+      verify: `${ORIGIN}/world/verify`, stats: `${ORIGIN}/world/stats`, genesis: `${ORIGIN}/world/genesis.json`, rotations: `${ORIGIN}/world/rotations.json` } }),
     contact: { email: CONTACT_EMAIL, simplex: SIMPLEX_SET ? SIMPLEX : null, security: SECURITY_EMAIL, security_policy: `${ORIGIN}/security.html` },
   };
   put('index.json', JSON.stringify(index, null, 2) + '\n');

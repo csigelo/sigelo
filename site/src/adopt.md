@@ -36,6 +36,8 @@ node -e 'fetch("https://sigelo.io/examples/world.mjs").then(r=>r.text()).then(t=
 node world.mjs challenge agent-genesis.json > challenge.json
 sigelo-agent sign-challenge - < challenge.json > signed.json
 node world.mjs attest agent-genesis.json "$(node -p 'JSON.parse(require("fs").readFileSync("signed.json","utf8")).sig')" > issued.json
+# or get a real attestation instead, from https://sigelo.io/world/ (ctx sigelo.io, admission open, 90 days):
+node -e 'const s=(...a)=>JSON.parse(require("child_process").execFileSync("sigelo-agent",a,{encoding:"utf8"})),w="https://sigelo.io/world/",b=s("bundle");fetch(w+"challenge?did="+s("whoami").did).then(r=>r.json()).then(c=>fetch(w+"attest",{method:"POST",body:JSON.stringify({challenge:c,...s("sign-challenge",JSON.stringify(c)),bundle:b})})).then(r=>r.text()).then(t=>process.stdout.write(t))' > issued.json
 ```
 
 ## 3. Bundle

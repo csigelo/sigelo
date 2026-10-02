@@ -15,6 +15,7 @@ needed); a delegate's → `sigelo-wallet revoke <name>` from
 any ancestor (it also sweeps the delegate one hop up). Stop there. (b) *keeper host, `spend.key`
 or its wallet files*: everything below. (c) *anything that held the 25 words, `S`,
 `backup.age` with its age identity, or the recovery secret*: §7, total loss.
+(d) *the sigelo.io world's issuer key* (not a keeper): world/README.md, "Rotation".
 
 ## 1. Detect
 

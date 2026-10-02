@@ -15,6 +15,10 @@
 #   3. uploads site/deploy/nginx.conf to <webroot>/deploy/ and runs, through sudo, the one root
 #      command the deploy user may run: /usr/local/sbin/sigelo-nginx-apply (allowlist, install,
 #      nginx -t, reload; restores the old file if the test fails). --no-config skips it;
+#   3b. ships the world service (world/server.mjs + the built ts/ library and its two @noble
+#      dependencies) into <webroot>/world-app (previous kept as world-app.prev) and, once
+#      server-setup.sh --world installed it, restarts it through the deploy user's second and last
+#      sudo command, /usr/local/sbin/sigelo-world-apply (after the nginx step below);
 #   4. node site/deploy/check.mjs --origin <origin>: exit status is the check's (set -e stops
 #      here on a failure); then, for https://sigelo.io only, site/deploy/indexnow.sh submits the
 #      sitemap's URLs to IndexNow (it never fails the deploy).
@@ -36,12 +40,13 @@ WEBROOT=${SIGELO_WEBROOT:-/var/www/sigelo.io}
 case $WEBROOT in /*) ;; *) echo "deploy.sh: SIGELO_WEBROOT must be absolute" >&2; exit 1 ;; esac
 printf '%s' "$WEBROOT" | grep -Eq '^[A-Za-z0-9/._-]+$' || { echo "deploy.sh: SIGELO_WEBROOT: letters, digits, / . _ - only" >&2; exit 1; }
 APPLY=/usr/local/sbin/sigelo-nginx-apply
+WORLD_APPLY=/usr/local/sbin/sigelo-world-apply
 
 die() { printf 'deploy.sh: %s\n' "$*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
 usage() { sed -n '5,7p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
-target=""; os=""; dry=0; noconfig=0; rollback=0; origin=https://sigelo.io; dirty_ok=0
+codehash=""; target=""; os=""; dry=0; noconfig=0; rollback=0; origin=https://sigelo.io; dirty_ok=0
 while [ $# -gt 0 ]; do
   case $1 in
     --os) [ $# -ge 2 ] || usage; os=$2; shift 2 ;;
@@ -125,7 +130,25 @@ else
 fi
 rsh "set -e; cd $WEBROOT; find dist.new -type d -exec chmod 755 {} +; find dist.new -type f -exec chmod 644 {} +; test -f dist.new/index.html; if [ -d dist ] && diff -r dist dist.new >/dev/null 2>&1; then rm -rf dist.new; echo \"unchanged: same files already live, dist.prev kept\"; else if [ -d dist ]; then rm -rf dist.prev; mv dist dist.prev; fi; mv dist.new dist; echo \"swapped: dist.prev = the previous upload\"; fi"
 
-step "4/4 web server config (nginx), then the post-deploy check"
+step "3b/4 the world service → $target:$WEBROOT/world-app (previous kept as world-app.prev)"
+run sh -c "cd '$root/ts' && npx tsc"
+stage=${TMPDIR:-/tmp}/sigelo-world-app.$$
+printf '+ stage world/server.mjs, ts/package.json, ts/dist/*.js (no tests), ts/node_modules/@noble in %s\n' "$stage"
+if [ "$dry" = 0 ]; then
+  rm -rf "$stage"; mkdir -p "$stage/world" "$stage/ts/dist" "$stage/ts/node_modules"
+  cp "$root/world/server.mjs" "$stage/world/"; cp "$root/ts/package.json" "$stage/ts/"
+  for f in "$root"/ts/dist/*.js; do case ${f##*/} in test.js|gen_vectors.js) ;; *) cp "$f" "$stage/ts/dist/" ;; esac; done
+  cp -R "$root/ts/node_modules/@noble" "$stage/ts/node_modules/"
+  # the same hash sigelo-world-apply logs for the code it installs: the two must match
+  if command -v sha256sum >/dev/null 2>&1; then sum="sha256sum"; else sum="shasum -a 256"; fi
+  codehash=$(cd "$stage" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do $sum "$f"; done | $sum | cut -d' ' -f1)
+  echo "+ world code sha256 $codehash"
+fi
+printf '+ tar -C %s -cf - . | %s %s %s\n' "$stage" "$SSH" "$target" "'… world-app.new, swap'"
+[ "$dry" = 1 ] || tar -C "$stage" -cf - . | $SSH "$target" "set -e; cd $WEBROOT; rm -rf world-app.new; mkdir world-app.new; tar -xf - -C world-app.new; chmod -R go-w,a+rX world-app.new; if [ -d world-app ]; then rm -rf world-app.prev; mv world-app world-app.prev; fi; mv world-app.new world-app"
+[ "$dry" = 1 ] || rm -rf "$stage"
+
+step "4/4 web server config (nginx), the world restart, then the post-deploy check"
 if [ "$noconfig" = 1 ]; then
   echo "--no-config: the installed nginx config is left as it is"
 else
@@ -133,6 +156,10 @@ else
   [ "$dry" = 1 ] || $SSH "$target" "cat > $WEBROOT/deploy/nginx.conf" <"$root/site/deploy/nginx.conf"
   rsh "sudo -n $APPLY${os:+ --os $os}"
 fi
+wout=$(rsh "if [ -x $WORLD_APPLY ]; then sudo -n $WORLD_APPLY; else echo \"world not installed yet (server-setup.sh --world): code shipped, nothing restarted\"; fi") || { printf '%s\n' "$wout"; die "sigelo-world-apply failed"; }
+printf '%s\n' "$wout"
+# the helper logs the sha256 of the code it installed (journal tag sigelo-world-apply): it must be what was staged here
+case $wout in *"code sha256 "*) case $wout in *"code sha256 $codehash"*) ;; *) die "the server installed world code other than what was staged here (sha256 $codehash)" ;; esac ;; esac
 run node "$root/site/deploy/check.mjs" --origin "$origin" --commit "$head" $checkflags
 # IndexNow: only for the real site (the key file is published at https://sigelo.io/<key>.txt)
 if [ "$origin" = https://sigelo.io ] && [ -x "$root/site/deploy/indexnow.sh" ]; then
