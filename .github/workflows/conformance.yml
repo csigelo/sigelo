@@ -8,31 +8,20 @@ on:
 jobs:
   # Its own job, so a missing secret or a hit never hides the test results of the other jobs.
   identity-strings:
+    # GitHub holds only public, sanitised data (Owner rule, 2026-10-02): the private pattern list that
+    # gates every export lives on the maintainer's machine and runs in release/publish.sh before any
+    # push. This job only catches the generic shapes a slip would take: a home directory path, a
+    # user-profile path, a private IP. It stores and prints nothing identifying.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
-      # No tracked file may name the maintainer's device, accounts or time zone (ROADMAP §5.1).
-      # Every pattern comes from the DEVICE_STRINGS secret, one extended regex per line, and
-      # none is written here: even a "generic" pattern inline (a home path, a mail-address
-      # prefix, a UTC offset) publishes what this check protects (AUDIT A5). Only a fork, or a
-      # pull request from one, has no secrets: there the step says it was skipped. In this
-      # repository a missing secret is a visible WARNING (not a failure: the export gate in
-      # release/publish.sh already ran on this tree, and a red job on every push only sends mail). A hit is reported as file and count only:
-      # the matching line, printed in a public log, would publish the string it found.
-      - name: no device or identity strings
-        env:
-          DEVICE_STRINGS: '${{ secrets.DEVICE_STRINGS }}'
-          NO_SECRETS_HERE: "${{ github.repository != 'csigelo/sigelo' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) }}"
+      - name: no home paths or private addresses
         run: |
-          printf '%s\n' "$DEVICE_STRINGS" | grep -v '^[[:space:]]*$' > /tmp/device-patterns || true
-          if [ ! -s /tmp/device-patterns ]; then
-            if [ "$NO_SECRETS_HERE" = true ]; then echo "::notice title=identity-string check skipped::$GITHUB_REPOSITORY ($GITHUB_EVENT_NAME) has no DEVICE_STRINGS secret: a fork, or a pull request from one"; exit 0; fi
-            echo '::warning title=DEVICE_STRINGS secret missing::the repository secret DEVICE_STRINGS (one extended regex per line, ROADMAP 5.1) is not set, so the identity-string check did not run here; the same list gates every export in release/publish.sh before anything is pushed. Set the secret to make this job real.'
-            exit 0
+          if git grep -nIE '(/home/[a-z][a-z0-9_-]*/|/Users/[A-Za-z][A-Za-z0-9_-]*/|C:\\Users\\|/root/\.|192\.168\.[0-9]+\.[0-9]+|10\.[0-9]+\.[0-9]+\.[0-9]+|fd[0-9a-f]{2}:)' -- . ':!*.md' ':!*test*' ':!*/testdata/*' | grep -vE 'example|placeholder|\$HOME|~/' ; then
+            echo '::error title=home path or private address in tracked file::reword it; the full identity gate runs locally in release/publish.sh'; exit 1
           fi
-          if git grep -cIiE -f /tmp/device-patterns -- .; then
-            echo '::error title=device or identity strings::tracked files above (file:count) match DEVICE_STRINGS: reword them, do not weaken this check'; exit 1
-          fi
+          echo 'ok: no home paths or private addresses in tracked non-doc files'
+
   ts:
     runs-on: ubuntu-latest
     # `shell: bash` is `bash -eo pipefail`; the default is `bash -e`, without pipefail, so in run

@@ -28,6 +28,21 @@
 #                         the issuer key, made here with the recovery COMMITMENT given
 #                         (sha256:<64 hex>; the recovery key itself never comes here). Prints
 #                         the issuer genesis: commit it as world/genesis.json.
+#   --guard             ONLY the self-healing step, on a server this script prepared (Debian/systemd;
+#                         nothing beside it needed): nginx.service gets Restart=on-failure (a
+#                         drop-in; Debian ships Restart=no), sigelo-world.service is checked for
+#                         its Restart=always, and /usr/local/sbin/sigelo-selfcheck runs hourly
+#                         (sigelo-selfcheck.timer, root): it fetches / and /world/stats through
+#                         nginx on 127.0.0.1 and /world/stats from the world on 127.0.0.1:8790,
+#                         restarts whichever unit fails, and logs to the journal
+#   --backup AGE-RECIPIENT  ONLY the state-backup step (Debian/systemd): age, the recipient
+#                         (age1…, the PUBLIC half; the identity stays on the Owner's phone) in
+#                         /etc/sigelo-backup.recipient, /usr/local/sbin/sigelo-vps-backup and
+#                         sigelo-vps-backup.timer (daily 03:30 Europe/Berlin): the world state, the
+#                         nginx config and stats password file, /etc/letsencrypt, the sigelo units,
+#                         helpers and sudo rule, the release mirror and stats if present, as
+#                         /home/csigelo/backup/vps-state-<stamp>.tgz.age (csigelo 0600, 7 kept);
+#                         runs it once. Restore: site/deploy/README.md, "Rebuilding the server"
 #   --stats-htpasswd FILE with --stats: install FILE (one line, owner:<crypt hash>, e.g. from
 #                         `openssl passwd -6 -stdin`) as /etc/nginx/sigelo-stats.htpasswd; without
 #                         it an existing file is kept, and a missing one gets a random password,
@@ -48,7 +63,7 @@ say() { printf '\n==> %s\n' "$*"; }
 run() { printf '+ %s\n' "$*"; "$@"; }
 die() { printf 'server-setup.sh: %s\n' "$*" >&2; exit 1; }
 
-os=""; key=""; email=""; testcert=""; skipcert=0; stats=0; htfile=""; world=""
+os=""; key=""; email=""; testcert=""; skipcert=0; stats=0; htfile=""; world=""; guard=0; backup=""
 while [ $# -gt 0 ]; do
   case $1 in
     --os) os=$2; shift 2 ;;
@@ -60,6 +75,8 @@ while [ $# -gt 0 ]; do
     --stats) stats=1; shift ;;
     --stats-htpasswd) htfile=$2; shift 2 ;;
     --world) world=$2; shift 2 ;;
+    --guard) guard=1; shift ;;
+    --backup) backup=$2; shift 2 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -67,6 +84,7 @@ done
 [ "$(id -u)" = 0 ] || die "run as root"
 if [ "$stats" = 1 ]; then need="sigelo-nginx-apply stats-agents.sh"
 elif [ -n "$world" ]; then need="sigelo-nginx-apply sigelo-world-apply sigelo-world.service"
+elif [ "$guard" = 1 ] || [ -n "$backup" ]; then need=""
 else need="nginx.conf sigelo-nginx-apply"; fi
 for f in $need; do [ -f "$HERE/$f" ] || die "$HERE/$f missing: copy it next to this script"; done
 [ -z "$htfile" ] || [ "$stats" = 1 ] || die "--stats-htpasswd goes with --stats"
@@ -111,6 +129,170 @@ write_logrotate() {
 }
 ROT
 }
+
+if [ "$guard" = 1 ]; then
+  [ "$os" = debian ] && [ -d /run/systemd/system ] || die "--guard needs Debian/Ubuntu with systemd"
+  command -v curl >/dev/null 2>&1 || run env DEBIAN_FRONTEND=noninteractive apt-get install -y curl
+
+  say "G1. nginx restarts on failure (drop-in; the Debian unit has Restart=no)"
+  run install -d -m 0755 /etc/systemd/system/nginx.service.d
+  printf '+ write /etc/systemd/system/nginx.service.d/sigelo-restart.conf\n'
+  cat > /etc/systemd/system/nginx.service.d/sigelo-restart.conf <<'UNIT'
+# written by site/deploy/server-setup.sh --guard
+[Unit]
+StartLimitIntervalSec=10min
+StartLimitBurst=5
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+UNIT
+  run systemctl daemon-reload
+
+  say "G2. sigelo-world.service restarts itself (Restart=always in the unit file)"
+  if [ "$(systemctl show -p Restart --value sigelo-world.service)" = always ]; then echo "sigelo-world.service: Restart=always"
+  else echo "sigelo-world.service: Restart is not 'always': run --world again to reinstall the unit"; fi
+  echo "nginx.service: Restart=$(systemctl show -p Restart --value nginx.service)"
+
+  say "G3. /usr/local/sbin/sigelo-selfcheck and sigelo-selfcheck.timer (hourly)"
+  printf '+ write /usr/local/sbin/sigelo-selfcheck\n'
+  cat > /usr/local/sbin/sigelo-selfcheck.tmp <<'RUN'
+#!/bin/sh
+# sigelo-selfcheck — written by site/deploy/server-setup.sh --guard; run hourly by
+# sigelo-selfcheck.timer as root. Fetches / and /world/stats through nginx on 127.0.0.1 (TLS,
+# server name sigelo.io) and /world/stats from the world itself on 127.0.0.1:8790; restarts the
+# unit that fails (nginx only after nginx -t passes), checks again, logs every step to the journal
+# (journalctl -u sigelo-selfcheck). Exit 1 when something is still down after its restart.
+set -u
+site() { curl -fsS -o /dev/null --max-time 15 --resolve sigelo.io:443:127.0.0.1 "https://sigelo.io$1"; }
+world() { curl -fsS -o /dev/null --max-time 10 http://127.0.0.1:8790/world/stats; }
+rc=0
+if ! world; then
+  echo "sigelo-selfcheck: the world on 127.0.0.1:8790 does not answer /world/stats: restarting sigelo-world.service"
+  systemctl restart sigelo-world.service; sleep 5
+  if world; then echo "sigelo-selfcheck: sigelo-world back after restart"; else echo "sigelo-selfcheck: sigelo-world STILL DOWN"; rc=1; fi
+fi
+if ! site / || ! site /world/stats; then
+  echo "sigelo-selfcheck: nginx does not serve / or /world/stats on 127.0.0.1: restarting nginx"
+  if nginx -t 2>&1; then systemctl restart nginx.service; sleep 3
+  else echo "sigelo-selfcheck: nginx -t fails: not restarting"; fi
+  if site / && site /world/stats; then echo "sigelo-selfcheck: nginx back after restart"; else echo "sigelo-selfcheck: / or /world/stats STILL DOWN"; rc=1; fi
+fi
+[ $rc = 0 ] && echo "sigelo-selfcheck: ok (/, /world/stats via nginx; world on :8790)"
+exit $rc
+RUN
+  chmod 0755 /usr/local/sbin/sigelo-selfcheck.tmp
+  mv /usr/local/sbin/sigelo-selfcheck.tmp /usr/local/sbin/sigelo-selfcheck
+  printf '+ write /etc/systemd/system/sigelo-selfcheck.service and .timer\n'
+  cat > /etc/systemd/system/sigelo-selfcheck.service <<'UNIT'
+[Unit]
+Description=sigelo.io self-check: /, /world/stats on localhost; restart nginx or the world on failure
+After=nginx.service sigelo-world.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sigelo-selfcheck
+TimeoutStartSec=3min
+UNIT
+  cat > /etc/systemd/system/sigelo-selfcheck.timer <<'UNIT'
+[Unit]
+Description=sigelo.io self-check, hourly
+
+[Timer]
+OnBootSec=10min
+OnCalendar=hourly
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
+UNIT
+  run systemctl daemon-reload
+  run systemctl enable --now sigelo-selfcheck.timer
+  run systemctl start sigelo-selfcheck.service
+  journalctl -u sigelo-selfcheck.service -n 3 --no-pager -o cat || true
+  say "done"
+  exit 0
+fi
+
+if [ -n "$backup" ]; then
+  [ "$os" = debian ] && [ -d /run/systemd/system ] || die "--backup needs Debian/Ubuntu with systemd"
+  printf '%s' "$backup" | grep -Eq '^age1[02-9ac-hj-np-z]{58}$' || die "--backup wants an age recipient (age1…, the public key; never the identity)"
+  id csigelo >/dev/null 2>&1 || die "no user csigelo: the archives are written to /home/csigelo/backup"
+
+  say "B1. age"
+  command -v age >/dev/null 2>&1 || run env DEBIAN_FRONTEND=noninteractive apt-get install -y age
+
+  say "B2. the recipient (public key only) in /etc/sigelo-backup.recipient"
+  printf '%s\n' "$backup" > /etc/sigelo-backup.recipient
+  chmod 0644 /etc/sigelo-backup.recipient
+
+  say "B3. /usr/local/sbin/sigelo-vps-backup"
+  cat > /usr/local/sbin/sigelo-vps-backup.tmp <<'RUN'
+#!/bin/sh
+# sigelo-vps-backup — written by site/deploy/server-setup.sh --backup; run daily by
+# sigelo-vps-backup.timer as root. Tars the server's state, encrypts it with age to the recipient in
+# /etc/sigelo-backup.recipient (its identity is on the Owner's phone only: this server cannot read
+# its own backups) and writes /home/csigelo/backup/vps-state-<stamp>.tgz.age, csigelo 0600, 7 kept.
+# The phone's nightly sigelo-backup fetches the newest one. Restore: site/deploy/README.md.
+set -eu
+OUT=/home/csigelo/backup
+R=$(cat /etc/sigelo-backup.recipient)
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+umask 077
+list=""
+for p in /var/lib/sigelo-world /etc/sigelo-world.env /etc/nginx/conf.d/sigelo* /etc/nginx/sigelo-stats.htpasswd \
+         /etc/letsencrypt /etc/systemd/system/sigelo-* /etc/systemd/system/nginx.service.d \
+         /usr/local/sbin/sigelo-* /usr/local/bin/sigelo-* /etc/sudoers.d/sigelo-deploy /etc/logrotate.d/sigelo \
+         /etc/sigelo-backup.recipient /var/backups/sigelo-nginx /var/www/sigelo.io/releases /var/www/sigelo.io/stats; do
+  if [ -e "$p" ]; then list="$list ${p#/}"; fi
+done
+install -d -m 0700 -o csigelo -g csigelo "$OUT"
+tmp=$OUT/.vps-state-$STAMP.tmp
+# shellcheck disable=SC2086
+tar -C / -czf - $list | age -r "$R" -o "$tmp"
+chown csigelo:csigelo "$tmp"; chmod 0600 "$tmp"
+mv "$tmp" "$OUT/vps-state-$STAMP.tgz.age"
+( cd "$OUT" && ls -t vps-state-*.tgz.age | tail -n +8 | xargs -r rm -f )
+echo "sigelo-vps-backup: $OUT/vps-state-$STAMP.tgz.age, $(wc -c < "$OUT/vps-state-$STAMP.tgz.age") bytes:$list"
+RUN
+  chmod 0755 /usr/local/sbin/sigelo-vps-backup.tmp
+  mv /usr/local/sbin/sigelo-vps-backup.tmp /usr/local/sbin/sigelo-vps-backup
+
+  say "B4. sigelo-vps-backup.service and .timer (daily 03:30 Europe/Berlin, before the phone's 04:00 pull)"
+  cat > /etc/systemd/system/sigelo-vps-backup.service <<'UNIT'
+[Unit]
+Description=sigelo.io state backup, age-encrypted to the Owner's phone key
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sigelo-vps-backup
+Nice=10
+IOSchedulingClass=idle
+ProtectSystem=strict
+ReadWritePaths=/home/csigelo/backup
+PrivateTmp=yes
+PrivateNetwork=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+UNIT
+  cat > /etc/systemd/system/sigelo-vps-backup.timer <<'UNIT'
+[Unit]
+Description=sigelo.io state backup, daily
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Europe/Berlin
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+  run systemctl daemon-reload
+  run systemctl enable --now sigelo-vps-backup.timer
+  run systemctl start sigelo-vps-backup.service
+  journalctl -u sigelo-vps-backup.service -n 1 --no-pager -o cat || true
+  say "done"
+  exit 0
+fi
 
 if [ -n "$world" ]; then
   APP=$WEBROOT/world-app

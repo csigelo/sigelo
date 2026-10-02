@@ -27,6 +27,11 @@ append-only, never served). nginx passes no client address to the service; its l
 anonymised one (`/24`, `/48`). Rate limit: 60 requests a minute per truncated address (nginx
 `limit_req`, burst 20). No accounts, no cookies.
 
+**Terms** (the world, the remote MCP endpoint and the site; https://sigelo.io/privacy.html#terms):
+free, no account, provided as is, without warranty; they may be rate-limited, changed or withdrawn.
+Attestations already issued stay verifiable offline whatever happens to the service. Abuse, such as
+automated bulk attestation farming or attacks, gets blocked.
+
 Run and test: `node world/test.mjs` (the whole flow, the Go verifier as judge, the nginx allowlist).
 Install: `server-setup.sh --world sha256:<recovery commitment>` after one `deploy.sh`; then commit the
 genesis it prints as `world/genesis.json` (and `rotations.json` = `{"genesis": …, "rotations": []}`)

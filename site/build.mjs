@@ -25,6 +25,14 @@ export const SIMPLEX = 'https://smp10.simplex.im/a#18LjfJawmkVxvFtCHFo-yyzPo8Kr3
 export const SIMPLEX_SET = !/^<.*>$/.test(SIMPLEX);
 export const CONTACT_EMAIL = 'contact@sigelo.io';
 export const SECURITY_EMAIL = 'security@sigelo.io';
+// The release mirror (site/deploy/mirror-release.sh): files live on the server under
+// /var/www/sigelo.io/releases/<tag>/, never in dist/ or git. The build knows each mirrored tag only
+// by its SHA256SUMS, committed as site/src/releases/<tag>.SHA256SUMS (the script writes it).
+export const MIRROR = `${ORIGIN}/releases/`;
+// The official names (SECURITY.md "Official channels"; index.json `official`). The issuer DID is
+// not listed here: it is computed from world/genesis.json, and site/test/run.mjs checks SECURITY.md names it.
+export const NPM_USER = 'csigelo';
+export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit'];
 
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const readBytes = (p) => readFileSync(join(ROOT, p));
@@ -50,6 +58,23 @@ function genesisDid(g) {
   return 'did:sigelo:z' + out + tail;   // base58btc: each leading zero byte is a '1'
 }
 
+// The latest mirrored release: the highest vX.Y.Z among site/src/releases/<tag>.SHA256SUMS.
+const semver = (t) => t.slice(1).split(/[.-]/).slice(0, 3).map(Number);
+const cmpTag = (a, b) => { const x = semver(a), y = semver(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; };
+function latestRelease() {
+  const dir = join(SITE, 'src', 'releases');
+  const tags = existsSync(dir) ? readdirSync(dir).map((f) => f.match(/^(v\d+\.\d+\.\d+)\.SHA256SUMS$/)?.[1]).filter(Boolean).sort(cmpTag) : [];
+  if (!tags.length) return null;
+  const tag = tags[tags.length - 1];
+  const files = readFileSync(join(dir, `${tag}.SHA256SUMS`), 'utf8').trim().split('\n').map((l) => {
+    const m = l.match(/^([0-9a-f]{64}) [ *]([A-Za-z0-9._-]+)$/);
+    if (!m) throw new Error(`site/src/releases/${tag}.SHA256SUMS: not a sha256sum line: ${l}`);
+    return { name: m[2], sha256: m[1] };
+  });
+  return { tag, files };
+}
+export const RELEASE = latestRelease();
+
 // ---------------------------------------------------------------------------------------------
 // The site map. `repo` pages are a repository document rendered as is; the rest come from site/src.
 export const PAGES = [
@@ -63,11 +88,12 @@ export const PAGES = [
   { slug: 'security', repo: 'SECURITY.md', type: 'WebPage', title: 'Security policy',
     description: 'How to report a vulnerability in sigelo: channels, scope, response times, safe harbour, and the areas not yet reviewed.' },
   { slug: 'contact', src: 'site/src/contact.md', type: 'ContactPage' },
+  { slug: 'privacy', src: 'site/src/privacy.md', type: 'WebPage' },
   { slug: 'changelog', repo: 'CHANGELOG.md', type: 'WebPage', title: 'Changelog',
     description: 'Every change to sigelo, newest first, as recorded in the repository\'s CHANGELOG.md.' },
 ];
 const NAV = [['adopt', 'Adopt'], ['accept', 'Accept'], ['spec', 'Spec'], ['verify', 'Verify'], ['keeper', 'Keeper'], ['security', 'Security'],
-  ['contact', 'Contact'], ['changelog', 'Changelog']];
+  ['contact', 'Contact'], ['changelog', 'Changelog'], ['privacy', 'Privacy']];
 
 // Repository files published verbatim under /raw/<path>. OPTIONAL: listed in llms.txt with their size.
 const SCHEMAS = readdirSync(join(ROOT, 'schema')).filter((f) => f.endsWith('.json')).sort().map((f) => `schema/${f}`);
@@ -272,7 +298,10 @@ function rewriteMd(md, link) {
 const vectorsBytes = readBytes('test-vectors.json');
 const vectors = JSON.parse(vectorsBytes);
 const specBytes = readBytes('SPEC.md');
+const worldDidEarly = existsSync(join(ROOT, 'world/genesis.json')) ? genesisDid(JSON.parse(read('world/genesis.json'))) : null;
 const VALUES = {
+  ...(RELEASE && { release_tag: RELEASE.tag, release_url: `/releases/${RELEASE.tag}/` }),
+  ...(worldDidEarly && { issuer_did_short: `${worldDidEarly.slice(0, 'did:sigelo:zBASk7'.length)}…` }),
   spec_sha256: sha256(specBytes), vectors_sha256: sha256(vectorsBytes),
   version: pkg('ts/package.json').version,
   repo: REPO, contact_email: CONTACT_EMAIL, security_email: SECURITY_EMAIL,
@@ -375,6 +404,10 @@ export function build() {
   put('style.css', readFileSync(join(SITE, 'src', 'style.css')));
   put('.nojekyll', '');
   put('CNAME', 'sigelo.io\n');
+  // Release signing (release/RELEASE.md "Signing"): the SSH key that signs tags and the release
+  // identity that signs release.json, both pinned in the repository and copied here verbatim.
+  put('.well-known/sigelo-release-signers', readBytes('release/allowed_signers'));
+  put('.well-known/sigelo-release-identity.json', readBytes('release/release-identity.json'));
   // IndexNow ownership proof: /<key>.txt holds the key (site/deploy/indexnow.sh submits after a deploy).
   const indexnowKey = readFileSync(join(SITE, 'deploy', 'indexnow-key.txt'), 'utf8').trim();
   put(`${indexnowKey}.txt`, indexnowKey);
@@ -423,11 +456,12 @@ ${L('Keeper', '/keeper.md', 'pay in Monero without holding a key')}
 
 ${L('Security', '/security.md', 'report a vulnerability')}
 ${L('Contact', '/contact.md', 'e-mail, SimpleX')}
-${L('Index', '/index.json', 'sha256s, versions, release files')}
+${L('Index', '/index.json', 'sha256s, versions, release files')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}
 
 ## Optional
 
 ${L('llms-full.txt', '/llms-full.txt', kb(Buffer.byteLength(full)))}
+${L('Privacy and terms', '/privacy.md', 'logs, retention, terms')}
 ${OPTIONAL.map((p) => L(p, `/raw/${p}`, kb(readBytes(p).length))).join('\n')}
 ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS.reduce((n, s) => n + readBytes(s).length, 0))}`)}
 `);
@@ -436,7 +470,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
   const file = (p, url) => ({ url: `${ORIGIN}${url}`, sha256: sha256(readBytes(p)), bytes: readBytes(p).length });
   const impl = (dir) => { const j = pkg(`${dir}/package.json`); return { name: j.name, version: j.version, path: `${dir}/`, language: 'TypeScript',
     registry: 'npm', published: false, bin: j.bin ? Object.keys(j.bin) : [] }; };
-  const worldDid = existsSync(join(ROOT, 'world/genesis.json')) ? genesisDid(JSON.parse(read('world/genesis.json'))) : null;
+  const worldDid = worldDidEarly;
   const index = {
     name: 'sigelo', homepage: `${ORIGIN}/`, description: SOFTWARE.description,
     wire: 'sigelo/0', spec_version: 'v0.1', status: 'draft', wire_frozen: false,
@@ -457,7 +491,22 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     release: { version: VERSION, published: false, artefacts: [
       ...['sigelo', 'sigelo-spend', 'sigelo-agent', 'sigelo-mcp', 'sigelo-recovery-kit'].map((n) => `${n}-${VERSION}.tgz`),
       ...['linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64', 'windows-amd64.exe'].map((t) => `sigelo-verify-${t}`),
-      `sigelo-verify-src-${VERSION}.tar.gz`, 'test-vectors.json', 'SHA256SUMS'] },
+      `sigelo-verify-src-${VERSION}.tar.gz`, 'test-vectors.json', 'SHA256SUMS'],
+      ...(RELEASE && { tag: RELEASE.tag, mirror: MIRROR, github: `${REPO}/releases/tag/${RELEASE.tag}`,
+        sha256sums: `${MIRROR}${RELEASE.tag}/SHA256SUMS`,
+        files: RELEASE.files.map((f) => ({ name: f.name, sha256: f.sha256, url: `${MIRROR}${RELEASE.tag}/${f.name}` })) }) },
+    official: {
+      statement: `${ORIGIN}/security.html#official-channels`,
+      domains: ['sigelo.io', 'sigelo.net'], redirect_only: ['sigelo.net'],
+      repository: REPO,
+      releases: [`${REPO}/releases`, MIRROR], checksums: 'SHA256SUMS',
+      maintainer: 'csigelo', github_user: 'csigelo',
+      email: [CONTACT_EMAIL, SECURITY_EMAIL], email_receive_only: true,
+      npm_user: NPM_USER, packages: NPM_PACKAGES, packages_published: false,
+      issuer_did: worldDid, world_genesis: `${ORIGIN}/world/genesis.json`,
+      never_asks_for: ['seed', 'key', 'token', 'payment'],
+      report_impersonation: SECURITY_EMAIL,
+    },
     agent_surfaces: Object.fromEntries([['llms_txt', '/llms.txt'], ['llms_full_txt', '/llms-full.txt'], ['adopt', '/adopt.md'],
       ['sitemap', '/sitemap.xml'], ['security_txt', '/.well-known/security.txt'], ['mock_world', '/examples/world.mjs']].map(([k, v]) => [k, `${ORIGIN}${v}`])),
     pages: PAGES.map((p) => ({ slug: p.slug, html: p.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${p.slug}.html`, markdown: `${ORIGIN}/${p.slug}.md`,
@@ -465,6 +514,10 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     ...(worldDid && { world: { ctx: 'sigelo.io', issuer: worldDid, challenge: `${ORIGIN}/world/challenge?did={did}`, attest: `${ORIGIN}/world/attest`,
       conformance: `${ORIGIN}/world/conformance`, mcp: `${ORIGIN}/mcp`, verify: `${ORIGIN}/world/verify`, stats: `${ORIGIN}/world/stats`, genesis: `${ORIGIN}/world/genesis.json`, rotations: `${ORIGIN}/world/rotations.json` } }),
     contact: { email: CONTACT_EMAIL, simplex: SIMPLEX_SET ? SIMPLEX : null, security: SECURITY_EMAIL, security_policy: `${ORIGIN}/security.html` },
+    privacy: `${ORIGIN}/privacy.html`, terms: `${ORIGIN}/privacy.html#terms`,
+    release_signing: { since: 'v0.1.1', release_json: 'release.json', ctx: 'sigelo.io/release',
+      identity: genesisDid(JSON.parse(read('release/release-identity.json'))), identity_genesis: `${ORIGIN}/.well-known/sigelo-release-identity.json`,
+      tag_signers: `${ORIGIN}/.well-known/sigelo-release-signers`, verify: `${REPO}/blob/${BRANCH}/release/verify-release.sh` },
   };
   put('index.json', JSON.stringify(index, null, 2) + '\n');
 
@@ -490,6 +543,7 @@ ${locs.map((l) => `<url><loc>${l}</loc><lastmod>${commitDate.slice(0, 10)}</last
 ${SIMPLEX_SET ? `Contact: ${SIMPLEX}\n` : ''}Expires: ${expires}
 Canonical: ${ORIGIN}/.well-known/security.txt
 Policy: ${ORIGIN}/security.html
+Policy: ${ORIGIN}/security.html#official-channels
 Preferred-Languages: en
 `);
 

@@ -17,7 +17,9 @@ site/deploy/deploy.sh sigelo@sigelo.io --rollback  # serve the previous upload a
 | `sigelo-nginx-apply` | root helper: allowlist check, install, `nginx -t` (restores the old file on failure), reload | server: `/usr/local/sbin/`, via one sudo rule |
 | `server-setup.sh` | ONE-TIME server preparation, as root, by hand | server |
 | `stats-agents.sh` | the agent/human split of the visits as `agents.txt` (≤ 40 lines, phone-sized); `server-setup.sh --stats` installs it with the 15-minute timer | server: `/usr/local/sbin/sigelo-stats-agents` |
+| `watch.sh` | the watchdog: reachability probes (site, TLS, `/world/stats`, `/mcp`), notify when down, throttled | the Owner's phone: `~/.local/bin/sigelo-watch` + `sigelo-watch.timer` (user) |
 | `apache.conf` | the same behaviour for Apache 2.4; install by hand, deploy with `--no-config` | server |
+| `mirror-release.sh` | `<tag> [user@host]`: `gh release download` → every file against SHA256SUMS → upload to `releases/<tag>/` (never changed once there) → `releases/index.json`, `latest` → re-download over HTTPS and compare | your machine (gh, node, ssh) |
 
 Flags of `deploy.sh`: `--os debian|alpine` (default: the helper detects it), `--dry-run`,
 `--no-config` (files only), `--origin URL` (check a staging origin instead of https://sigelo.io),
@@ -32,6 +34,9 @@ Flags of `deploy.sh`: `--os debian|alpine` (default: the helper detects it), `--
   dist.prev/                   the previous upload: --rollback swaps it with dist
   deploy/nginx.conf            the uploaded config; only the helper reads it, after copying it
   stats/                       root 0755: index.html (GoAccess) and agents.txt, at /_stats/
+  releases/                    the release mirror, at /releases/ (mirror-release.sh): <tag>/ files 0644,
+                               index.json, index.md, latest -> <tag>; dist/releases -> ../releases
+                               is a symlink deploy.sh puts in every upload, so no deploy deletes it
 /var/www/acme/                 ACME HTTP-01 webroot (port 80)
 /var/log/nginx/sigelo/         access.log (address cut to /24 or /48), error.log (crit); 30 days
 /usr/local/sbin/sigelo-nginx-apply, /etc/sudoers.d/sigelo-deploy
@@ -211,11 +216,65 @@ requests count as `node` under programmatic clients.
 
 ## The world (`/world/`)
 
-`world/server.mjs` runs as `sigelo-world.service` (user `sigelo`, loopback 8790) behind the `/world/`
+`world/server.mjs` runs as `sigelo-world.service` (user `sigelo-world`, loopback 8790) behind the `/world/`
 location; world/README.md is the whole story. Once, after a first deploy has shipped `world-app/`:
 `sh server-setup.sh --world sha256:<recovery commitment>` (with `sigelo-world.service` and
 `sigelo-world-apply` beside it) installs nodejs, the unit, the issuer key and the second sudo rule
 (`sigelo-world-apply`: restart the unit, nothing else). Commit the printed genesis as `world/genesis.json`.
+
+## Releases (`/releases/`)
+
+`site/deploy/mirror-release.sh v0.1.0 sigelo-vps` copies a GitHub release to
+`/var/www/sigelo.io/releases/v0.1.0/` after checking every file against the release's
+`SHA256SUMS`, writes `releases/index.json` (tags, files, sizes, sha256s) and the Markdown
+listings nginx serves at `/releases/` and `/releases/<tag>/`, points `latest` at the highest tag,
+and downloads every file back over HTTPS. A mirrored tag never changes (the script refuses
+different files), so nginx serves `/releases/v*/` files immutable for a year and `index.json`,
+the listings and `latest/` for five minutes. The binaries are never in git or `dist/`; the site
+learns a release from `site/src/releases/<tag>.SHA256SUMS`, which the script writes: commit it
+and redeploy. The installed helper allows no root but `dist/`, so nginx reaches the mirror
+through the `dist/releases` symlink rather than a second `root`.
+
+## Watchdog, self-check, state backup
+
+**Phone** — `site/deploy/watch.sh`, installed as `~/.local/bin/sigelo-watch` with
+`~/.config/systemd/user/sigelo-watch.{service,timer}` (every 15 minutes). It asks only whether the
+site is reachable and working — `/`, `/llms.txt`, `/index.json`, `/spec.md`, the `http://` → `https://`
+301, a certificate valid 7 more days, `/world/stats`, `/mcp` initialize — never content or release
+state (that is `check.mjs --quiet` at deploy time). A failure is retried after 20 s, and does not
+count when the phone itself is offline. One `notify-send -u critical` when an incident starts, then
+at most one an hour (a global `last-notify` cap, whatever the state); recovery is a log line;
+success is silent. Log: `~/.local/share/sigelo-watch/alerts.log`. Tests use `--no-notify`;
+`--origin URL` implies it and a scratch state, so a test never changes what the timer watches.
+
+**Server, self-healing** — `server-setup.sh --guard`: `nginx.service` gets `Restart=on-failure`
+(a drop-in; Debian ships `Restart=no`), `sigelo-world.service` already has `Restart=always`, and
+root's `sigelo-selfcheck.timer` runs `/usr/local/sbin/sigelo-selfcheck` hourly: `/` and
+`/world/stats` through nginx on 127.0.0.1, `/world/stats` from the world on :8790; it restarts the
+failing unit (nginx only after `nginx -t`) and logs to `journalctl -u sigelo-selfcheck`.
+
+**Server, state backup** — `server-setup.sh --backup age1…`: root's `sigelo-vps-backup.timer`
+(daily 03:30 Europe/Berlin) tars `/var/lib/sigelo-world` (issuer key, attestations, nonces),
+`/etc/sigelo-world.env`, the nginx config and stats password file, `/etc/letsencrypt`, the sigelo
+units, helpers, sudo rule and logrotate file, `/var/backups/sigelo-nginx`, the release mirror and
+the stats, encrypted with age to a recipient whose identity is only on the Owner's phone
+(`~/.config/sigelo/vps-backup.key`): `/home/csigelo/backup/vps-state-<stamp>.tgz.age`, csigelo
+0600, 7 kept. The server cannot read its own backups. The phone's nightly `sigelo-backup` (04:00)
+pulls the newest into `~/.local/share/sigelo-vps-state/`, which its own passphrase-encrypted
+archive then carries back to the VPS: each side holds the other's secrets, encrypted to a key the
+holder lacks.
+
+## Rebuilding the server
+
+From a fresh Debian 13 host with DNS pointed at it, in this order (the phone's
+`~/.config/sigelo/RESTORE.md` has the same steps with paths): decrypt the newest
+`vps-state-*.tgz.age` on the phone (`age -d -i ~/.config/sigelo/vps-backup.key`); as root on the
+server, `tar -C / -xzf vps.tgz etc/letsencrypt` and then `server-setup.sh --key …` (the certificate
+is found and kept: no re-issue); `deploy.sh` from the phone; `tar … var/lib/sigelo-world
+etc/sigelo-world.env` and `server-setup.sh --world keep` (the old issuer key is kept and re-owned:
+same DID, no new genesis); `tar … etc/nginx/sigelo-stats.htpasswd var/www/sigelo.io/stats` and
+`--stats`; `tar … var/www/sigelo.io/releases`; `--guard`; `--backup <age-keygen -y vps-backup.key>`;
+then `check.mjs` must say ALL PASS.
 
 ## Rollback
 

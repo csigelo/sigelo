@@ -16,7 +16,9 @@
 // www → apex 301s; when index.json has a `world` block, the world (world/README.md): a §5.2
 // challenge, the whole attest flow with a fixed-seed check agent (the ts library from ts/dist; one
 // subject, idempotent for 24 h), /world/stats with counts only, /world/conformance refusing an empty
-// body and /mcp answering initialize. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
+// body and /mcp answering initialize; the release mirror /releases/<tag>/ (SHA256SUMS, one binary
+// downloaded and hashed, every file's content type, /releases/index.json, latest); /security.md's
+// "Official channels" and index.json official.issuer_did. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
 //
 // Flags:
 //   --origin URL       what to check (default https://sigelo.io); index.json's URLs are mapped onto it
@@ -28,6 +30,7 @@
 //                      /spec to /spec.html: skip those checks (they are nginx's job)
 //   --commit SHA       expected build commit (default: git rev-parse HEAD of this repository)
 //   --any-commit       do not compare the build commit (after a rollback)
+//   --quiet            print only the FAIL lines and the summary (the phone watchdog, site/deploy/watch.sh)
 // Uses node's fetch, no dependencies, node >= 22.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -38,7 +41,7 @@ const CANON = 'https://sigelo.io';
 const argv = process.argv.slice(2);
 const flag = (f) => argv.includes(f);
 const opt = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
-const known = new Set(['--origin', '--no-tls', '--no-www', '--node-server', '--commit', '--any-commit', '--alt', '--no-alt']);
+const known = new Set(['--origin', '--no-tls', '--no-www', '--node-server', '--commit', '--any-commit', '--alt', '--no-alt', '--quiet']);
 const ALT = flag('--no-alt') ? [] : [opt('--alt', 'sigelo.net')].filter((x) => x && !x.startsWith('--'));
 for (let i = 0; i < argv.length; i++) {
   if (!known.has(argv[i])) { console.error(`check.mjs: unknown argument ${argv[i]}`); process.exit(2); }
@@ -69,10 +72,11 @@ const H = {
 };
 const HOUR = 'public, max-age=3600', YEAR = 'public, max-age=31536000, immutable';
 
+const QUIET = flag('--quiet'), say = QUIET ? () => {} : console.log;
 let n = 0, skipped = 0; const fails = [];
-const ok = (cond, what) => { n++; if (cond) console.log(`ok ${what}`); else { fails.push(what); console.log(`FAIL ${what}`); } return cond; };
-const skip = (what, why) => { skipped++; console.log(`skip ${what} (${why})`); };
-const note = (what) => console.log(`note ${what}`);
+const ok = (cond, what) => { n++; if (cond) say(`ok ${what}`); else { fails.push(what); console.log(`FAIL ${what}`); } return cond; };
+const skip = (what, why) => { skipped++; say(`skip ${what} (${why})`); };
+const note = (what) => say(`note ${what}`);
 const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 const get = async (url, headers = {}, redirect = 'follow') => {
   try {
@@ -84,7 +88,7 @@ const at = (path) => ORIGIN + path;
 const local = (u) => (u.startsWith(CANON) ? u.slice(CANON.length) || '/' : u);
 const show = (r) => (r.status ? `${r.status}, ${r.type || 'no content-type'}` : `no response: ${r.error}`);
 
-console.log(`checking ${ORIGIN}${NO_TLS ? ' (--no-tls)' : ''}${NODE ? ' (--node-server)' : ''}`);
+say(`checking ${ORIGIN}${NO_TLS ? ' (--no-tls)' : ''}${NODE ? ' (--node-server)' : ''}`);
 
 // ---- the files: 200 and the exact content type ------------------------------------------------
 const got = {};
@@ -141,6 +145,46 @@ if (ok(ix && ix.name === 'sigelo' && ix.built_from?.commit, 'index.json parses a
     else ok(r.h.get('cache-control') === YEAR, `${p.slice(0, 22)}…: Cache-Control "${YEAR}" (got "${r.h.get('cache-control')}")`);
   }
   ok(imm.length === 2, 'index.json lists the two immutable copies (SPEC.md, test-vectors.json)');
+}
+
+// ---- the release mirror (site/deploy/mirror-release.sh) and the official names ----------------
+if (ix?.release?.tag && NODE) skip('/releases/: the mirror', 'it lives on the server, outside dist/; the node test server does not have it');
+else if (ix?.release?.tag) {
+  const rel = ix.release, base = `/releases/${rel.tag}/`;
+  const sr = await get(at(`${base}SHA256SUMS`));
+  const sums = new Map(sr.body.toString().trim().split('\n').map((l) => l.match(/^([0-9a-f]{64}) [ *](.+)$/)?.slice(1).reverse() ?? ['?', '?']));
+  ok(sr.status === 200 && sr.type === T.txt && sums.size === rel.files.length && rel.files.every((f) => sums.get(f.name) === f.sha256),
+    `${base}SHA256SUMS: 200, ${T.txt}, the ${rel.files.length} sha256s index.json lists (got ${show(sr)}, ${sums.size} lines)`);
+  ok(sr.h.get('cache-control') === YEAR, `${base}SHA256SUMS: Cache-Control "${YEAR}" (got "${sr.h.get('cache-control')}")`);
+  const bin = rel.files.find((f) => f.name === 'sigelo-verify-linux-arm64') ?? rel.files.find((f) => f.name.startsWith('sigelo-verify-'));
+  if (bin) {
+    const br = await get(at(base + bin.name));
+    ok(br.status === 200 && sha256(br.body) === sums.get(bin.name) && br.type === 'application/octet-stream',
+      `${base}${bin.name}: 200, application/octet-stream, sha256 = SHA256SUMS (got ${show(br)}, ${br.body.length} bytes)`);
+  }
+  // every file: present with the right type (HEAD only; mirror-release.sh downloads them all)
+  const TYPE = (n) => (/\.(tgz|tar\.gz)$/.test(n) ? 'application/gzip' : n.endsWith('.json') ? 'application/json' : 'application/octet-stream');
+  const wrong = [];
+  for (const f of rel.files) {
+    let r; try { r = await fetch(at(base + f.name), { method: 'HEAD', signal: AbortSignal.timeout(20000) }); } catch (e) { wrong.push(`${f.name} (${e.message})`); continue; }
+    if (r.status !== 200 || r.headers.get('content-type') !== TYPE(f.name)) wrong.push(`${f.name} (${r.status}, ${r.headers.get('content-type')})`);
+  }
+  ok(wrong.length === 0, `${base}: all ${rel.files.length} files 200 with their content type (tgz/tar.gz application/gzip, binaries and .exe octet-stream)${wrong.length ? ` (wrong: ${wrong.join(', ')})` : ''}`);
+  const mi = await get(at('/releases/index.json'));
+  let mj = null; try { mj = JSON.parse(mi.body); } catch { /* reported */ }
+  const mrel = mj?.releases?.find((r) => r.tag === rel.tag);
+  ok(mi.status === 200 && mi.type === T.json && mrel && mrel.files.every((f) => sums.get(f.name) === f.sha256 && Number.isInteger(f.bytes)) && mi.h.get('cache-control') === 'public, max-age=300',
+    `/releases/index.json: 200, lists ${rel.tag} with sizes and the same sha256s, Cache-Control 5 min (got ${show(mi)}, "${mi.h.get('cache-control')}")`);
+  const lt = await get(at(`/releases/${mj?.latest ?? 'latest'}/SHA256SUMS`)); const ll = await get(at('/releases/latest/SHA256SUMS'));
+  ok(ll.status === 200 && ll.body.equals(lt.body) && ll.h.get('cache-control') === 'public, max-age=300', `/releases/latest/ = ${mj?.latest} (short cache; got ${show(ll)}, "${ll.h.get('cache-control')}")`);
+  const ls = await get(at('/releases/'));
+  ok(ls.status === 200 && ls.type === T.md && ls.body.toString().includes(rel.tag), `/releases/: the Markdown listing names ${rel.tag} (got ${show(ls)})`);
+}
+{
+  const sm = await get(at('/security.md'));
+  ok(sm.status === 200 && sm.body.toString().includes('## Official channels'), `/security.md: has "Official channels" (got ${show(sm)})`);
+  ok(ix?.official?.issuer_did && (!ix.world || ix.official.issuer_did === ix.world.issuer) && sm.body.toString().includes(ix.official.issuer_did),
+    `index.json official.issuer_did = world.issuer = the DID /security.md names (${ix?.official?.issuer_did})`);
 }
 
 // ---- the world: challenge, attest, stats ------------------------------------------------------

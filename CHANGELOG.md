@@ -5,6 +5,26 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## v0.1.0 — 2026-10-02 (draft)
 
+- **Nothing private on GitHub (Owner rule, `a1b944e`).** The `DEVICE_STRINGS` Actions secret — the private pattern
+  list itself — was deleted; the CI identity job now checks only generic shapes (home-directory paths, private
+  addresses) outside tests and docs. The real gate stays local, in `release/publish.sh`, before every push. The
+  private repository and its history are mirrored to the project's own server, never to GitHub.
+- **sigelo.io serves the releases and names its official channels (`62407e2`).** `site/deploy/mirror-release.sh
+  <tag>` mirrors a GitHub release to `https://sigelo.io/releases/<tag>/`, every file checked against SHA256SUMS
+  before upload and downloaded back afterwards; a tag never changes once mirrored; `/releases/index.json` and
+  `/releases/latest/`. SECURITY.md "Official channels" lists the only domains, repository, release sources,
+  maintainer name, mailboxes, npm names and the world's issuer DID, and says no one will ever ask for a seed,
+  key, token or payment; mirrored as index.json `official` and one line on `/` and `/contact`.
+- **/privacy, terms, and signed releases from v0.1.1 (`709f412`).** Privacy and terms in 121 words: truncated-
+  address logs kept 30 days, no cookies, scripts or third parties; the world keeps issued attestations and
+  five-minute nonces and no client address; the free services are as is, may be rate-limited or withdrawn, and
+  issued attestations stay verifiable offline. Releases from v0.1.1 are signed twice: an SSH-signed tag
+  (`release/allowed_signers`, published at `/.well-known/sigelo-release-signers`) and `release.json`, a
+  self-issued `ctx: sigelo.io/release` attestation by a dedicated release identity over tag, commit and
+  SHA256SUMS; `release/verify-release.sh <tag>` checks all three. v0.1.0 stays unsigned.
+- **Mail is receive-only** until sigelo.io can send: a reply from any other mailbox would name the maintainer, so
+  replies go over SimpleX (SECURITY.md, `/contact`).
+
 The first tagged release, a GitHub pre-release holding everything below including the v0.1 draft; the wire
 `sigelo/0` may still change until v0.2, and the keeper is stagenet-only and unaudited.
 

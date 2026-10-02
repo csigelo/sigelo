@@ -12,6 +12,9 @@
 #   2. uploads site/dist/ into <webroot>/dist.new on the server — rsync --delete when both sides
 #      have rsync, otherwise `tar | ssh` — then swaps it in: dist → dist.prev, dist.new → dist
 #      (an identical upload is discarded, so re-running keeps the real previous version);
+#   2b. links dist/releases -> ../releases in every upload: the release mirror
+#      (site/deploy/mirror-release.sh) lives in <webroot>/releases, outside dist, so a deploy
+#      never deletes it, and nginx reaches it through dist (its one site root);
 #   3. uploads site/deploy/nginx.conf to <webroot>/deploy/ and runs, through sudo, the one root
 #      command the deploy user may run: /usr/local/sbin/sigelo-nginx-apply (allowlist, install,
 #      nginx -t, reload; restores the old file if the test fails). --no-config skips it;
@@ -86,7 +89,7 @@ command -v "${SSH%% *}" >/dev/null || die "${SSH%% *} not found"
 
 if [ "$rollback" = 1 ]; then
   step "rollback: swap dist and dist.prev on the server"
-  rsh "set -e; cd $WEBROOT; test -d dist.prev || { echo \"no dist.prev to roll back to\" >&2; exit 1; }; rm -rf dist.swap; mv dist dist.swap; mv dist.prev dist; mv dist.swap dist.prev; echo \"now serving the previous upload\""
+  rsh "set -e; cd $WEBROOT; test -d dist.prev || { echo \"no dist.prev to roll back to\" >&2; exit 1; }; rm -rf dist.swap; mv dist dist.swap; mv dist.prev dist; mv dist.swap dist.prev; test -e dist/releases || ln -s ../releases dist/releases; echo \"now serving the previous upload\""
   step "post-deploy check (any commit: a rollback serves an older build)"
   run node "$root/site/deploy/check.mjs" --origin "$origin" --any-commit $checkflags
   exit 0
@@ -129,7 +132,7 @@ else
   printf '+ tar -C %s -cf - . | %s %s %s\n' "$dist" "$SSH" "$target" "'set -e; mkdir $WEBROOT/dist.new; tar -xf - -C $WEBROOT/dist.new'"
   [ "$dry" = 1 ] || tar -C "$dist" -cf - . | $SSH "$target" "set -e; mkdir $WEBROOT/dist.new; tar -xf - -C $WEBROOT/dist.new"
 fi
-rsh "set -e; cd $WEBROOT; find dist.new -type d -exec chmod 755 {} +; find dist.new -type f -exec chmod 644 {} +; test -f dist.new/index.html; if [ -d dist ] && diff -r dist dist.new >/dev/null 2>&1; then rm -rf dist.new; echo \"unchanged: same files already live, dist.prev kept\"; else if [ -d dist ]; then rm -rf dist.prev; mv dist dist.prev; fi; mv dist.new dist; echo \"swapped: dist.prev = the previous upload\"; fi"
+rsh "set -e; cd $WEBROOT; mkdir -p releases; rm -f dist.new/releases; ln -s ../releases dist.new/releases; find dist.new -type d -exec chmod 755 {} +; find dist.new -type f -exec chmod 644 {} +; test -f dist.new/index.html; if [ -d dist ] && diff -r dist dist.new >/dev/null 2>&1; then rm -rf dist.new; echo \"unchanged: same files already live, dist.prev kept\"; else if [ -d dist ]; then rm -rf dist.prev; mv dist dist.prev; fi; mv dist.new dist; echo \"swapped: dist.prev = the previous upload\"; fi"
 
 step "3b/4 the world service → $target:$WEBROOT/world-app (previous kept as world-app.prev)"
 run sh -c "cd '$root/ts' && npx tsc"

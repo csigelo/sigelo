@@ -14,7 +14,7 @@ sigelo-verify bundle.json                                   # verify a bundle
 npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper ¹
 ```
 
-¹ After the first npm publish; until then [adopt](/adopt.html) installs the [release](https://github.com/csigelo/sigelo/releases) tarballs.
+¹ After the first npm publish; until then [adopt](/adopt.html) installs the [release tarballs]({{release_url}}).
 
 - [Adopt](/adopt.html)
 - [Accept](/accept.html)
@@ -23,5 +23,8 @@ npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper ¹
 - [Keeper](/keeper.html)
 - [Security](/security.html)
 - [Contact](/contact.html)
+- [Privacy](/privacy.html)
 
 Status: draft, wire `sigelo/0` may change until v0.2; keeper stagenet-only, unaudited.
+
+[Official](/security.html#official-channels): sigelo.io · github.com/csigelo/sigelo · issuer `{{issuer_did_short}}` — anything else is not us.

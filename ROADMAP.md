@@ -411,3 +411,13 @@ need something public. Either publish v0.1 labelled as not ready for adoption, o
 privately with reviewers and publish at v0.2 only. Recommended: the first.
 
 Sources: llmstxt.org · docs.getmonero.org/mnemonics/legacy · monero `electrum-words.cpp` · github.com/tevador/polyseed · developers.openai.com/api/docs/bots · support.anthropic.com/en/articles/8896518 · docs.perplexity.ai (perplexity-crawlers) · modelcontextprotocol.io/registry/about · eips.ethereum.org/EIPS/eip-8004 · arxiv.org/abs/2606.26028.
+
+## 7. Next product line: the provenance gate (after the operational basics are green)
+
+Prompt injection is untrusted text steering a model; no signature stops persuasion. What a signature settles is
+*who said it*, which lets the harness enforce the one rule the model cannot: instructions only from identities
+allowed to give them, everything else is data however it is phrased. sigelo supplies the pieces (DIDs, §5.2
+challenge proof, offline verification); the keeper already contains the consequence for money. The product: a
+small harness plugin for Hermes and Claude Code — content signed by the operator's DID (a signed-message
+envelope = an attestation with `ctx`, no wire change) may instruct and call privileged tools; unsigned or
+other-DID content is wrapped as data and can call nothing. Owner idea, 2026-10-02.

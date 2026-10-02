@@ -8,3 +8,6 @@ description: How to reach the sigelo maintainer: contact@sigelo.io or SimpleX; v
 - SimpleX: {{simplex}}
 - Security: [security policy](/security.html), [`{{security_email}}`](mailto:{{security_email}})
 - GitHub: <{{repo}}>
+- Privacy: [privacy and terms](/privacy.html)
+
+[Official](/security.html#official-channels): sigelo.io · github.com/csigelo/sigelo · issuer `{{issuer_did_short}}` — anything else is not us.

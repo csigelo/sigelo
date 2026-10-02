@@ -4,7 +4,7 @@ description: The agent path for sigelo, in exact commands: install, make an iden
 ---
 # Adopt sigelo
 
-Node ≥ 22.18, POSIX shell. Nothing is on npm yet: install the release files (`release/build.sh` makes them) from `$d`.
+Node ≥ 22.18, POSIX shell. Nothing is on npm yet: download the files of [/releases/{{release_tag}}/]({{release_url}}) into `$d`.
 
 ```sh
 mkdir my-agent && cd my-agent && npm init -y >/dev/null

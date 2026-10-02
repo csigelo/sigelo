@@ -60,6 +60,9 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const BASE = `http://127.0.0.1:${server.address().port}`;
 const get = async (path, headers = {}) => { const r = await fetch(BASE + path, { headers }); return { status: r.status, type: r.headers.get('content-type') ?? '', body: Buffer.from(await r.arrayBuffer()) }; };
 const local = (url) => (url.startsWith(ORIGIN) ? url.slice(ORIGIN.length) || '/' : url);
+// /releases/ is the release mirror, a directory on the server outside dist/ (site/deploy/mirror-release.sh):
+// it cannot resolve here, so links into it are skipped and site/deploy/check.mjs checks them live.
+const MIRRORED = (path) => path.startsWith('/releases/');
 
 // ---- a small HTML reader: tags balance, attributes, ids, scripts ------------------------------
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
@@ -139,6 +142,7 @@ for (const [f, links] of linksOf) {
   for (const href of links) {
     if (/^(https?:|mailto:|simplex:)/.test(href) && !href.startsWith(ORIGIN)) continue;
     const u = new URL(local(href), BASE + f);
+    if (MIRRORED(u.pathname)) continue;
     if (await status(u.pathname) !== 200) { bad.push(href); continue; }
     if (u.hash) {
       const target = u.pathname.endsWith('/') ? `${u.pathname}index.html` : u.pathname;
@@ -152,7 +156,7 @@ for (const [f, links] of linksOf) {
 for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') && !x.startsWith('/sha256/'))) {
   const md = readFileSync(join(DIST, f), 'utf8').replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
   const bad = [];
-  for (const [, u] of md.matchAll(/\]\((\/[^)\s]*)\)/g)) { const p = new URL(u, BASE).pathname; if (await status(p) !== 200) bad.push(u); }
+  for (const [, u] of md.matchAll(/\]\((\/[^)\s]*)\)/g)) { const p = new URL(u, BASE).pathname; if (!MIRRORED(p) && await status(p) !== 200) bad.push(u); }
   ok(bad.length === 0, `${f}: internal links resolve${bad.length ? ` (broken: ${bad.slice(0, 5).join(' ')})` : ''}`);
 }
 
@@ -177,14 +181,15 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   const items = lines.filter((l) => l.startsWith('- '));
   ok(items.every((l) => /^- \[[^\]]+\]\([^)]+\)(: .+)?$/.test(l)), `llms.txt: every list item is "- [name](url): description" (${items.length})`);
   const bad = [];
-  for (const l of items) { const u = l.match(/\]\(([^)]+)\)/)[1]; if (!u.startsWith(ORIGIN) || await status(local(u)) !== 200) bad.push(u); }
+  for (const l of items) { const u = l.match(/\]\(([^)]+)\)/)[1]; if (!u.startsWith(ORIGIN) || (!MIRRORED(local(u)) && await status(local(u)) !== 200)) bad.push(u); }
   ok(bad.length === 0, `llms.txt: all ${items.length} links are on ${ORIGIN} and resolve${bad.length ? ` (${bad.join(' ')})` : ''}`);
   const full = (await get('/llms-full.txt')).body.toString();
   const parts = [...full.matchAll(/^==> https:\/\/sigelo\.io\/([\w-]+)\.md <==$/gm)].map((m) => m[1]);
   ok(parts.join() === 'spec,adopt,verify,keeper,security', `llms-full.txt: carries spec, adopt, verify, keeper, security only (${parts.join(', ')})`);
   const sz = Buffer.byteLength(full); const kb = `${Math.max(1, Math.round(sz / 1024))} KB`;
   ok(t.includes(`(${ORIGIN}/llms-full.txt): ${kb}`), `llms.txt: states llms-full.txt's size (${kb})`);
-  ok(items.filter((l) => lines.indexOf(l) < lines.indexOf('## Optional')).length <= 9, 'llms.txt: at most 9 links before Optional');
+  ok(items.filter((l) => lines.indexOf(l) < lines.indexOf('## Optional')).length <= 10, 'llms.txt: at most 10 links before Optional');
+  ok(t.includes(`- [Releases](${ORIGIN}/releases/): binaries, tarballs, SHA256SUMS`), 'llms.txt: names the release mirror /releases/');
   ok((await get('/adopt.md')).body.toString().split('\n').length <= 90, 'adopt.md: short enough to follow (≤ 90 lines)');
 }
 
@@ -192,7 +197,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
 // The reader pays per token. Words = whitespace-separated tokens holding a letter or digit;
 // inside fenced code and on link-list lines they count half. llms.txt counts every word in full.
 {
-  const PAGES = ['accept', 'adopt', 'changelog', 'contact', 'index', 'keeper', 'security', 'spec', 'verify'];
+  const PAGES = ['accept', 'adopt', 'changelog', 'contact', 'index', 'keeper', 'privacy', 'security', 'spec', 'verify'];
   const got = htmlFiles.filter((f) => /^\/[\w-]+\.html$/.test(f)).map((f) => f.slice(1, -5)).sort();
   ok(got.join() === PAGES.join(), `pages: exactly ${PAGES.join(', ')} (${got.join(', ')})`);
   const words = (md, half = true) => {
@@ -204,13 +209,28 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     }
     return w;
   };
-  const BUDGET = { '/index.md': 120, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80 };
+  const BUDGET = { '/index.md': 120, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150 };
   for (const [f, max] of Object.entries(BUDGET)) {
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);
   }
   const lw = words(readFileSync(join(DIST, 'llms.txt'), 'utf8'), false);
   ok(lw <= 150, `budget: /llms.txt ${lw} words ≤ 150 (all counted in full)`);
+  // /privacy: its two halves have their own caps (privacy 90, terms 60 words).
+  const [pv, tm] = readFileSync(join(DIST, 'privacy.md'), 'utf8').split(/^## Terms$/m);
+  ok(tm !== undefined && words(pv.replace(/^# .*$/m, '')) <= 90 && words(tm) <= 60, `budget: /privacy.md privacy ${words(pv.replace(/^# .*$/m, ''))} ≤ 90, terms ${words(tm ?? '')} ≤ 60`);
+}
+
+// ---- privacy, terms, release signing -------------------------------------------------------------
+{
+  const ix = JSON.parse(readFileSync(join(DIST, 'index.json'), 'utf8'));
+  const html = readFileSync(join(DIST, 'privacy.html'), 'utf8');
+  ok(ix.privacy === `${ORIGIN}/privacy.html` && ix.terms === `${ORIGIN}/privacy.html#terms` && html.includes('id="terms"'), 'index.json: privacy and terms (/privacy.html#terms) resolve');
+  ok(['index.md', 'contact.md'].every((p) => readFileSync(join(DIST, p), 'utf8').includes('(/privacy.md)')), '/ and /contact link /privacy.html');
+  const same = (w, r) => readFileSync(join(DIST, w)).equals(readFileSync(join(ROOT, r)));
+  ok(same('.well-known/sigelo-release-signers', 'release/allowed_signers') && same('.well-known/sigelo-release-identity.json', 'release/release-identity.json')
+    && /^\S+ namespaces="git" ssh-ed25519 \S+$/m.test(readFileSync(join(ROOT, 'release/allowed_signers'), 'utf8')) && /^did:sigelo:z\w+$/.test(ix.release_signing?.identity ?? ''),
+    `release signing: /.well-known/sigelo-release-signers and -identity.json = release/, index.json release_signing.identity ${ix.release_signing?.identity}`);
 }
 
 // ---- robots.txt and sitemap.xml ---------------------------------------------------------------
@@ -259,6 +279,29 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(vers, 'index.json: implementation versions = their package.json');
   ok(ix.pages.every((p) => !p.source || p.source_sha256 === sha256(readFileSync(join(ROOT, p.source)))), 'index.json: page sources hash to the tree\'s files');
   ok(ix.release.artefacts.includes('SHA256SUMS') && ix.release.artefacts.filter((a) => a.startsWith('sigelo-verify-')).length === 6, 'index.json: release artefacts named (5 binaries + source archive, SHA256SUMS)');
+  // The mirror: release.files is the committed SHA256SUMS of the latest mirrored tag, line for line.
+  const rel = ix.release;
+  const sumsFile = join(SITE, 'src', 'releases', `${rel.tag}.SHA256SUMS`);
+  const sums = existsSync(sumsFile) ? readFileSync(sumsFile, 'utf8').trim().split('\n').map((l) => l.split(/ [ *]/)) : [];
+  ok(rel.mirror === `${ORIGIN}/releases/` && rel.sha256sums === `${ORIGIN}/releases/${rel.tag}/SHA256SUMS` && sums.length > 0
+    && rel.files.length === sums.length && rel.files.every((f, i) => f.sha256 === sums[i][0] && f.name === sums[i][1] && f.url === `${ORIGIN}/releases/${rel.tag}/${f.name}`),
+    `index.json: release.mirror, and release.files = site/src/releases/${rel.tag}.SHA256SUMS (${rel.files?.length} files)`);
+  if (rel.tag === `v${rel.version}`) ok([...rel.files.map((f) => f.name), 'SHA256SUMS'].sort().join() === [...rel.artefacts].sort().join(), `index.json: release.files of ${rel.tag} = release.artefacts (+ SHA256SUMS)`);
+  ok(!files.some((f) => f.startsWith('/releases/')), 'dist has no /releases/ (the mirror lives on the server, outside dist/)');
+  // The official names: index.json `official`, SECURITY.md "Official channels", one line on / and /contact.
+  const of = ix.official ?? {};
+  const sec = readFileSync(join(ROOT, 'SECURITY.md'), 'utf8');
+  const section = sec.match(/^## Official channels\n([\s\S]*?)(?=\n## )/m)?.[1] ?? '';
+  ok(of.issuer_did && of.issuer_did === ix.world?.issuer && of.domains?.join() === 'sigelo.io,sigelo.net' && of.repository === 'https://github.com/csigelo/sigelo'
+    && of.npm_user === 'csigelo' && of.maintainer === 'csigelo' && of.packages?.length === 5 && of.releases?.includes(`${ORIGIN}/releases/`),
+    `index.json: official (domains, repository, releases, issuer_did = world.issuer, npm_user, ${of.packages?.length} packages, maintainer)`);
+  ok(section && section.trim().split('\n').length <= 11 && [of.issuer_did, of.repository, `${ORIGIN}/releases/`, 'sigelo.net', 'security@sigelo.io', ...(of.packages ?? [])].every((s) => s && section.includes(s)),
+    `SECURITY.md: "## Official channels" (${section.trim().split('\n').length + 1} lines ≤ 12) names the issuer DID, repository, mirror, domains, packages, security@`);
+  ok(idsOf.get('/security.html')?.has('official-channels'), '/security.html: #official-channels anchor');
+  for (const p of ['/index.md', '/contact.md']) {
+    const t = readFileSync(join(DIST, p), 'utf8');
+    ok(t.includes('anything else is not us') && t.includes(of.issuer_did?.slice(0, 17)) && t.includes('github.com/csigelo/sigelo'), `${p}: the one "Official: … anything else is not us" line`);
+  }
 }
 
 // ---- security.txt (RFC 9116) ------------------------------------------------------------------
@@ -273,6 +316,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(exp.length === 1 && /Z$/.test(exp[0]) && ms > Date.now() && ms - Date.now() <= 366 * 86400e3 + 86400e3 * 30, `security.txt: one Expires, in the future, about a year out (${exp[0]})`);
   ok(field('Canonical')[0] === `${ORIGIN}/.well-known/security.txt`, 'security.txt: Canonical');
   ok(field('Policy')[0] === `${ORIGIN}/security.html` && await status('/security.html') === 200, 'security.txt: Policy resolves');
+  ok(field('Policy')[1] === `${ORIGIN}/security.html#official-channels` && idsOf.get('/security.html')?.has('official-channels'), 'security.txt: second Policy, /security.html#official-channels, resolves to its anchor');
   ok(t.split('\n').every((l) => !l.trim() || l.startsWith('#') || /^[A-Za-z-]+: \S/.test(l)), 'security.txt: every line is a comment or a field');
 }
 
