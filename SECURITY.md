@@ -81,7 +81,7 @@ If you are unsure whether something is in bounds, ask first through any channel 
 ## A live keeper compromise
 
 If you run a keeper and believe its host, a token or `spend.key` is compromised, act first:
-follow **INCIDENT.md** (stop, sweep to the vault, recovery-rotate, report). Report to us
+follow [INCIDENT.md](https://sigelo.io/raw/INCIDENT.md) (stop, sweep to the vault, recovery-rotate, report). Report to us
 afterwards if you suspect a sigelo bug caused it, with the preserved `spend.log` (it holds no
 secrets; it names destinations, amounts and purposes, so redact what you must). Never send
 `spend.key`, a token, a seed or the 25 words to anyone, including us.

@@ -63,7 +63,7 @@ Sources fetched 2026-10-02; dates are the pages' own where they show one.
    PR title: `Add csigelo/sigelo (Identity)`. Drop the badge if Glama has not listed it yet.
    awesome-ai-agents (e2b-dev) lists agents only: sigelo is not one, skip.
 7. **DID method** — PR to w3c/did-extensions adding `methods/sigelo.json` (not registered today):
-   `{"name": "sigelo", "status": "registered", "verifiableDataRegistry": "None (self-certifying: the DID is the SHA-256 of its genesis document)", "contactName": "csigelo", "contactEmail": "contact@sigelo.io", "contactWebsite": "https://sigelo.io", "specification": "https://sigelo.io/spec.html"}`
+   `{"name": "sigelo", "status": "registered", "verifiableDataRegistry": "None (self-certifying: the DID is the SHA-256 of its genesis document)", "contactName": "csigelo", "contactEmail": "the contact address", "contactWebsite": "https://sigelo.io", "specification": "https://sigelo.io/spec.html"}`
    Reviewers check the spec for DID syntax, CRUD operations and Security/Privacy sections
    (README of w3c/did-extensions); SPEC.md has the syntax (§DID) and SECURITY/THREAT-MODEL, but
    no CRUD heading: add a short DID-method section to SPEC.md first, or expect review questions.

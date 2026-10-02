@@ -7,7 +7,7 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    release notes link to it); VERSIONING.md status line; ROADMAP §6 step 8; site footnotes.
    `node site/build.mjs && node site/test/run.mjs` passes. Commit.
 2. Sync and push:
-   `SIGELO_AUTHOR='csigelo <contact@sigelo.io>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go sh release/publish.sh`
+   `SIGELO_AUTHOR='csigelo <csigelo@users.noreply.github.com>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go sh release/publish.sh`
    `GIT_SSH_COMMAND='ssh -i ~/.ssh/sigelo_ed25519 -o IdentitiesOnly=yes' git -C ../sigelo-public push`
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a`
@@ -55,7 +55,7 @@ Two signatures over the tagged commit; neither key is the deploy key or the main
 From the private repository, every time:
 
 ```sh
-SIGELO_AUTHOR='csigelo <contact@sigelo.io>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go SIGELO_EXCLUDE='RISKS.md JOURNAL.md commercial' sh release/publish.sh
+SIGELO_AUTHOR='csigelo <csigelo@users.noreply.github.com>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go SIGELO_EXCLUDE='RISKS.md JOURNAL.md commercial' sh release/publish.sh
 GIT_SSH_COMMAND='ssh -i ~/.ssh/sigelo_ed25519 -o IdentitiesOnly=yes' git -C ../sigelo-public push
 ```
 

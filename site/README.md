@@ -111,7 +111,7 @@ sets its own short `max-age`). Which content type Pages sends for `.md` was not 
 ## Before deploying (decision D1)
 
 Decided 2026-10-01: the account **`csigelo`** (the pseudonym is the handle; no other name),
-the domain **sigelo.io**, the general e-mail **`contact@sigelo.io`**. Still open: a display name
+the domain **sigelo.io**, the general e-mail **the contact address**. Still open: a display name
 beyond the handle (if any), the `security@sigelo.io` mailbox and its age recipient, the vendor
 DID ceremony, prices and hours, hosting and DNS.
 
@@ -122,7 +122,7 @@ DID ceremony, prices and hours, hosting and DNS.
 2. **Contact** — `security.txt` says `Contact: mailto:security@sigelo.io`, the mailbox
    SECURITY.md plans at the domain; the mailbox must exist before the site goes up. SECURITY.md
    still reads `age1<to-be-filled-at-D1>` and `<simplex-contact-address>` (it is rendered as is
-   on `/security`). The general address `contact@sigelo.io` is on `/kit` and `/keeper`. Add an `Encryption:` line to security.txt once the age
+   on `/security`). The general address the contact address is on `/kit` and `/keeper`. Add an `Encryption:` line to security.txt once the age
    recipient is published, and a `Contact:` line for GitHub private vulnerability reporting once
    the repository exists. The site's security.txt `Expires` is the commit date plus a year: rebuild
    and redeploy before it lapses.

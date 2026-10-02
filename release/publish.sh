@@ -1,7 +1,7 @@
 #!/bin/sh
 # release/publish.sh — the PUBLIC export of this repository (ROADMAP §5.1).
 #
-#   SIGELO_AUTHOR='csigelo <contact@sigelo.io>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go \
+#   SIGELO_AUTHOR='csigelo <csigelo@users.noreply.github.com>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go \
 #     release/publish.sh [--fresh [--i-know-this-rewrites-history]] [outdir]
 #                                                                  default outdir: ../sigelo-public
 #
@@ -34,7 +34,7 @@
 #
 # Environment:
 #   SIGELO_AUTHOR          required: the project pseudonym, `Name <email>` (never the real one);
-#                          decided at D1: `csigelo <contact@sigelo.io>`
+#                          decided at D1: `csigelo <csigelo@users.noreply.github.com>`
 #   SIGELO_DEVICE_STRINGS  the private pattern file (see above)
 #   SIGELO_GO_MODULE       optional: rewrite the Go module path (bare `sigelo` today) to e.g.
 #                          github.com/csigelo/sigelo/go, in go.mod and the one import of it

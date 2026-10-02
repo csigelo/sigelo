@@ -97,7 +97,7 @@ const NAV = [['adopt', 'Adopt'], ['accept', 'Accept'], ['spec', 'Spec'], ['verif
 
 // Repository files published verbatim under /raw/<path>. OPTIONAL: listed in llms.txt with their size.
 const SCHEMAS = readdirSync(join(ROOT, 'schema')).filter((f) => f.endsWith('.json')).sort().map((f) => `schema/${f}`);
-const OPTIONAL = ['QUICKSTART.md', 'WHY.md', 'THREAT-MODEL.md', 'VERSIONING.md', 'MONERO.md', 'kit/README.md', 'spend/README.md'];
+const OPTIONAL = ['QUICKSTART.md', 'WHY.md', 'THREAT-MODEL.md', 'INCIDENT.md', 'VERSIONING.md', 'MONERO.md', 'kit/README.md', 'spend/README.md'];
 export const RAW = ['SPEC.md', 'SECURITY.md', 'CHANGELOG.md', ...OPTIONAL, 'test-vectors.json', ...SCHEMAS, 'spend/openapi.yaml'];
 const repoToPage = Object.fromEntries(PAGES.filter((p) => p.repo).map((p) => [p.repo, p.slug]));
 
