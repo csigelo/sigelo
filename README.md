@@ -8,6 +8,11 @@ was not tampered with. That is the whole protocol.
 
 Status: **draft v0.1**, wire format `sigelo/0`. Nothing is stable until v1.0.
 
+The DID is the hash of a genesis document holding an Ed25519 key, worlds sign attestations about it,
+and anyone verifies the bundle offline: no server, registry or chain. Site:
+[sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt) for agents). MCP server:
+`sigelo-mcp`, registry name `io.github.csigelo/sigelo`.
+
 **Why an agent would use this:** [`WHY.md`](WHY.md). What you get on day one with no
 counterparties, what it gives an agent moving between worlds, an orchestrator running
 subagents, a world admitting agents and an operator funding them, how it compares with doing
@@ -154,6 +159,9 @@ Implementations and adapters:
   identity for a looped agent, 77 lines, one dependency, no Rust changes. Its Monero half —
   bind a wallet, hand out receive addresses, sign and check invoices — is a further 131 lines
   in a separate file, so an identity-only install still reads 77
+- [`adapters/hermes/`](adapters/hermes/INTEGRATION.md) — agent side for Nous Research's Hermes
+  Agent: 9 lines of `config.yaml` (its MCP client + the existing skill), zero code; identity and
+  the four wallet verbs, tested through the real `hermes -z`
 
 Target integration cost for a world is under 100 lines and one dependency. If it is more
 than that, file an issue — that is a bug in the design, not in your integration.

@@ -2,7 +2,7 @@
 
 The website, built for agents first: every page is HTML with a Markdown twin at the same path,
 plus `llms.txt`, `llms-full.txt`, `adopt.md`, `index.json`, `robots.txt`, `sitemap.xml` and
-`.well-known/security.txt` at the root (ROADMAP §3). Static files only: no JavaScript to read
+`.well-known/security.txt` at the root (ROADMAP §3), plus the IndexNow key file `/<key>.txt`. Static files only: no JavaScript to read
 it, no cookies, no analytics, no requests to another origin. It is generated from the
 repository's own documents at build time, so it cannot say something the tree does not.
 
@@ -140,23 +140,12 @@ DID ceremony, prices and hours, hosting and DNS.
    the registry's check that the npm package belongs to the server; `test/run.mjs` checks the two
    agree. Publish only after `sigelo-mcp` is on npm.
 
-### `server.json` fields written from memory (check against the registry's current schema)
+### `server.json`, `robots.txt`, discoverability
 
-Not verified against a live schema on this host: the `$schema` URL and its date
-(`2025-09-29`; a later revision may exist), whether `title` and `websiteUrl` are accepted at the
-top level, `packages[].runtimeHint`, whether `registryBaseUrl` is required or optional,
-`environmentVariables[].format` values (`filepath`, `string`), and the 100-character limit on
-`description` (the test enforces it). Validate with `mcp-publisher validate` (or the registry's
-schema) before publishing.
-
-### `robots.txt` sources
-
-The crawler tokens and the first three sources are ROADMAP §3's (OpenAI
-developers.openai.com/api/docs/bots, Anthropic support.anthropic.com/en/articles/8896518,
-Perplexity docs.perplexity.ai perplexity-crawlers). The URLs given for CCBot, Amazonbot,
-Meta-ExternalAgent, Google-Extended and Applebot-Extended were written from memory and not
-fetched (unverified). Only the product tokens matter to a crawler; the full user-agent strings
-are on those pages.
+`server.json` validates against the registry schema `2025-12-11`, and the robots.txt crawler
+tokens were checked against their operators' pages on 2026-10-02: sources, the Owner's steps
+(registry, Search Console, Bing, IndexNow, topics, directories) and what was rejected are in
+[`SEO.md`](SEO.md).
 
 ## Running TASK-site
 

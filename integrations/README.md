@@ -23,6 +23,7 @@ in PowerShell run the same commands with `cd` and `;`, as in [QUICKSTART](../QUI
 | any MCP client | stdio MCP server | [mcp/server.mjs](mcp/server.mjs) | **tested here** — scripted client, 50 checks, every tool, both protocol eras |
 | Claude Code | skills-dir plugin = skill + MCP server; subagents inherit it | [claude-code/](claude-code/README.md) | **tested here** — 2.1.281: plugin loaded, MCP connected via symlink, Haiku session + a subagent ran init→challenge→attest→bundle→verify |
 | shell-only agents | CLI skill + `sigelo-agent`/`sigelo-wallet` | [skills-cli/sigelo/](skills-cli/sigelo/SKILL.md) | **tested here** — commands smoke-tested against `examples/world.mjs`; not run inside a harness |
+| Hermes Agent (`NousResearch/hermes-agent`) | `mcp_servers:` + `skills.external_dirs` in `~/.hermes/config.yaml` | [../adapters/hermes/](../adapters/hermes/INTEGRATION.md) | **tested here** — v0.21.5+ (`e9d7a18`): unmodified `hermes -z`, scripted model, 12 checks incl. wallet verbs and go/ re-verify |
 | OpenAI Codex CLI | `[mcp_servers.sigelo]` in `~/.codex/config.toml`; skill in `~/.agents/skills`; AGENTS.md | [codex.md](codex.md) | doc-verified |
 | OpenCode | `mcp` block (`type: local`, command array) in `opencode.json`; skill; AGENTS.md | [opencode.md](opencode.md) | doc-verified; per-agent MCP filtering UNVERIFIED |
 | Agent Zero (`agent0ai/agent-zero`) | MCP via Settings → MCP/A2A; `usr/skills/`; optional native Python tool | [agent-zero.md](agent-zero.md) | doc-verified; node in the image, settings file, native tool UNVERIFIED |

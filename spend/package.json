@@ -1,7 +1,27 @@
 {
   "name": "sigelo-spend",
   "version": "0.1.0",
-  "description": "Bounded Monero spending policy service for sigelo agents (MONERO.md §4)",
+  "description": "Monero keeper for AI agents: bounded per-agent spending and receiving, the agent never holds a key (sigelo)",
+  "keywords": [
+    "monero",
+    "xmr",
+    "ai-agents",
+    "agent-payments",
+    "wallet",
+    "spending-limits",
+    "monero-wallet-rpc",
+    "payments",
+    "sigelo"
+  ],
+  "homepage": "https://sigelo.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csigelo/sigelo.git",
+    "directory": "spend"
+  },
+  "bugs": {
+    "url": "https://github.com/csigelo/sigelo/issues"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {

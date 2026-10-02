@@ -15,7 +15,9 @@
 #   3. uploads site/deploy/nginx.conf to <webroot>/deploy/ and runs, through sudo, the one root
 #      command the deploy user may run: /usr/local/sbin/sigelo-nginx-apply (allowlist, install,
 #      nginx -t, reload; restores the old file if the test fails). --no-config skips it;
-#   4. node site/deploy/check.mjs --origin <origin>: exit status is the check's.
+#   4. node site/deploy/check.mjs --origin <origin>: exit status is the check's (set -e stops
+#      here on a failure); then, for https://sigelo.io only, site/deploy/indexnow.sh submits the
+#      sitemap's URLs to IndexNow (it never fails the deploy).
 #
 # --rollback swaps dist and dist.prev on the server (no build, no sudo), then checks with
 # --any-commit. Run it again to roll forward.
@@ -132,4 +134,8 @@ else
   rsh "sudo -n $APPLY${os:+ --os $os}"
 fi
 run node "$root/site/deploy/check.mjs" --origin "$origin" --commit "$head" $checkflags
+# IndexNow: only for the real site (the key file is published at https://sigelo.io/<key>.txt)
+if [ "$origin" = https://sigelo.io ] && [ -x "$root/site/deploy/indexnow.sh" ]; then
+  if [ "$dry" = 1 ]; then "$root/site/deploy/indexnow.sh" --dry-run; else "$root/site/deploy/indexnow.sh"; fi
+fi
 [ "$dry" = 1 ] && echo "deploy.sh: dry run complete; nothing was run" || echo "deploy.sh: deployed $head to $origin"

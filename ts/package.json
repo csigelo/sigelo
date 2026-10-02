@@ -1,7 +1,29 @@
 {
   "name": "sigelo",
   "version": "0.1.0",
-  "description": "Reference TypeScript implementation of the sigelo protocol (wire sigelo/0)",
+  "description": "Portable, offline-verifiable identity for AI agents: Ed25519 DIDs, signed attestations and bundles (sigelo reference library)",
+  "keywords": [
+    "ai-agents",
+    "agent-identity",
+    "identity",
+    "did",
+    "decentralized-identifier",
+    "ed25519",
+    "attestation",
+    "offline-verification",
+    "signature",
+    "portable-reputation",
+    "sigelo"
+  ],
+  "homepage": "https://sigelo.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csigelo/sigelo.git",
+    "directory": "ts"
+  },
+  "bugs": {
+    "url": "https://github.com/csigelo/sigelo/issues"
+  },
   "license": "MIT",
   "type": "module",
   "main": "dist/sigelo.js",

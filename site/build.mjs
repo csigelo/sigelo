@@ -282,14 +282,18 @@ const VERSION = VALUES.version;
 const SOFTWARE = {
   '@type': 'SoftwareSourceCode', '@id': `${ORIGIN}/#software`, name: 'sigelo',
   description: 'Portable, offline-verifiable identity for AI agents.',
-  url: `${ORIGIN}/`, codeRepository: REPO, programmingLanguage: ['TypeScript', 'Go'],
+  url: `${ORIGIN}/`, codeRepository: REPO, sameAs: REPO, programmingLanguage: ['TypeScript', 'Go'],
+  keywords: 'AI agents, agent identity, DID, Ed25519, attestations, offline verification, MCP, Monero',
   license: 'https://spdx.org/licenses/MIT', version: VERSION,
 };
+// TechArticle dateModified: the last commit that touched the page's source (not the build's).
+const modified = (p) => git('log', '-1', '--format=%cI', '--', p) || commitDate;
 function jsonld(page, title, description) {
   const url = page.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${page.slug}.html`;
   const node = { '@id': `${url}#page`, url, name: title, description };
   const graph = [{ '@type': 'WebSite', '@id': `${ORIGIN}/#website`, url: `${ORIGIN}/`, name: 'sigelo' }, SOFTWARE];
-  if (page.type === 'TechArticle') graph.push({ ...node, '@type': 'TechArticle', headline: title });
+  if (page.type === 'TechArticle') graph.push({ ...node, '@type': 'TechArticle', headline: /sigelo/i.test(title) ? title : `sigelo ${title.toLowerCase()}`,
+    dateModified: modified(page.repo ?? page.src), about: { '@id': SOFTWARE['@id'] }, isPartOf: { '@id': `${ORIGIN}/#website` } });
   else if (page.type === 'ContactPage') graph.push({ ...node, '@type': 'ContactPage', mainEntity: { '@type': 'Organization', name: 'sigelo', url: `${ORIGIN}/`,
     contactPoint: [
       { '@type': 'ContactPoint', contactType: 'general', email: CONTACT_EMAIL },
@@ -352,6 +356,9 @@ export function build() {
   put('style.css', readFileSync(join(SITE, 'src', 'style.css')));
   put('.nojekyll', '');
   put('CNAME', 'sigelo.io\n');
+  // IndexNow ownership proof: /<key>.txt holds the key (site/deploy/indexnow.sh submits after a deploy).
+  const indexnowKey = readFileSync(join(SITE, 'deploy', 'indexnow-key.txt'), 'utf8').trim();
+  put(`${indexnowKey}.txt`, indexnowKey);
 
   const mdOut = {};
   for (const page of PAGES) {
@@ -382,7 +389,7 @@ export function build() {
   const L = (name, url, desc) => `- [${name}](${ORIGIN}${url})${desc ? `: ${desc}` : ''}`;
   put('llms.txt', `# sigelo
 
-> Portable, offline-verifiable identity for AI agents. Draft: wire sigelo/0 may change until v0.2.
+> Portable, offline-verifiable identity for AI agents: a DID hashed from a genesis holding an Ed25519 key, attestations signed by worlds, bundles verified offline; MCP server sigelo-mcp. Draft: wire sigelo/0 may change until v0.2.
 
 ## Docs
 
@@ -438,9 +445,11 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
   };
   put('index.json', JSON.stringify(index, null, 2) + '\n');
 
-  // robots.txt: everything allowed; AI crawlers named so the intent is explicit.
+  // robots.txt: everything allowed; AI crawlers named so the intent is explicit. Tokens as their
+  // operators published them on 2026-10-02 (sources in site/SEO.md); matching is case-insensitive.
   const bots = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User',
-    'CCBot', 'Amazonbot', 'Meta-ExternalAgent', 'Google-Extended', 'Applebot-Extended', '*'];
+    'Google-Extended', 'Applebot', 'Applebot-Extended', 'CCBot', 'Amazonbot', 'Amzn-SearchBot', 'Meta-ExternalAgent', 'Meta-WebIndexer',
+    'MistralAI-User', 'MistralAI-Index', 'DuckAssistBot', '*'];
   put('robots.txt', `${bots.map((u) => `User-agent: ${u}`).join('\n')}\nAllow: /\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
 
   // sitemap.xml: every HTML page plus the agent surfaces.

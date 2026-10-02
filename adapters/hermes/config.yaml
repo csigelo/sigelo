@@ -1,0 +1,15 @@
+# sigelo for Hermes Agent (NousResearch/hermes-agent): merge into ~/.hermes/config.yaml, or into
+# ~/.hermes/profiles/<name>/config.yaml for one identity per profile (change the identity path).
+# Put SIGELO_HOME=/path/to/a/built/sigelo/checkout in ~/.hermes/.env. Nothing else is installed.
+mcp_servers:
+  sigelo:
+    command: node
+    args: ["${SIGELO_HOME}/integrations/mcp/server.mjs"]
+    env:
+      SIGELO_IDENTITY: "${userHome}/.hermes/sigelo.local.json"
+      # the keeper's four wallet verbs (MONERO.md §4.2): uncomment both, token from your operator
+      # SIGELO_WALLET_URL: "http://127.0.0.1:38090"
+      # SIGELO_WALLET_TOKEN: "${SIGELO_WALLET_TOKEN}"
+skills:
+  external_dirs:
+    - "${SIGELO_HOME}/integrations/claude-code/skills"

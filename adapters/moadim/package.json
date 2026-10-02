@@ -1,7 +1,27 @@
 {
   "name": "sigelo-agent",
   "version": "0.1.0",
-  "description": "sigelo v0.1 agent-side sidecar for moadim: a persistent agent identity, challenge signing, attestation collection and SPEC §8 bundles",
+  "description": "Agent-side sigelo CLI: create an identity (DID), sign world challenges, collect attestations, build verifiable bundles",
+  "keywords": [
+    "ai-agents",
+    "agent-identity",
+    "did",
+    "ed25519",
+    "attestation",
+    "cli",
+    "challenge-response",
+    "offline-verification",
+    "sigelo"
+  ],
+  "homepage": "https://sigelo.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csigelo/sigelo.git",
+    "directory": "adapters/moadim"
+  },
+  "bugs": {
+    "url": "https://github.com/csigelo/sigelo/issues"
+  },
   "license": "MIT",
   "type": "module",
   "main": "dist/sigelo-agent.js",

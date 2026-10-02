@@ -121,7 +121,11 @@ for (const f of htmlFiles) {
   ok(graph?.['@context'] === 'https://schema.org' && types.includes('SoftwareSourceCode'), `${f}: JSON-LD parses, schema.org, SoftwareSourceCode present (${types.join(', ')})`);
   const sw = graph?.['@graph']?.find((g) => g['@type'] === 'SoftwareSourceCode');
   ok(sw && sw.codeRepository && sw.programmingLanguage?.length && sw.license, `${f}: SoftwareSourceCode has codeRepository, programmingLanguage, license`);
-  if (/^\/(spec|threat-model)\.html$/.test(f)) ok(types.includes('TechArticle'), `${f}: TechArticle`);
+  ok(sw?.sameAs === sw?.codeRepository, `${f}: SoftwareSourceCode sameAs = codeRepository`);
+  if (/^\/(spec|threat-model)\.html$/.test(f)) {
+    const art = graph?.['@graph']?.find((g) => g['@type'] === 'TechArticle');
+    ok(art && art.headline && art.headline.length <= 110 && !Number.isNaN(Date.parse(art.dateModified)), `${f}: TechArticle with headline (≤ 110 chars) and dateModified`);
+  }
   const external = tags.filter((t) => (t.tag === 'link' && t.attrs.rel !== 'canonical' && /^https?:/.test(t.attrs.href)) || (/^(img|script|iframe|source|video|audio)$/.test(t.tag) && t.attrs.src));
   ok(external.length === 0, `${f}: loads nothing from another origin or by src=`);
   ok(!/\sstyle=|<style\b|\son[a-z]+=/i.test(html), `${f}: no inline style or event handler (CSP default-src 'self')`);
@@ -217,7 +221,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(bad.length === 0, `robots.txt: every line is a comment or a known field${bad.length ? ` (${bad[0]})` : ''}`);
   ok(!/^disallow:\s*\S/im.test(t), 'robots.txt: disallows nothing');
   const uas = [...t.matchAll(/^User-agent:\s*(\S+)/gim)].map((m) => m[1]);
-  const want = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'CCBot', 'Amazonbot', 'Meta-ExternalAgent', 'Google-Extended', 'Applebot-Extended', '*'];
+  const want = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'Google-Extended', 'Applebot', 'Applebot-Extended', 'CCBot', 'Amazonbot', 'Amzn-SearchBot', 'Meta-ExternalAgent', 'Meta-WebIndexer', 'MistralAI-User', 'MistralAI-Index', 'DuckAssistBot', '*'];
   ok(want.every((w) => uas.includes(w)), `robots.txt: names the crawlers of ROADMAP §3 (${uas.length} user-agents)`);
   const sm = t.match(/^Sitemap:\s*(\S+)/im)?.[1];
   ok(sm === `${ORIGIN}/sitemap.xml` && await status(local(sm)) === 200, 'robots.txt: Sitemap line resolves');
@@ -227,6 +231,13 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   const locs = [...x.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
   const badLocs = []; for (const l of locs) if (!l.startsWith(ORIGIN) || await status(local(l)) !== 200) badLocs.push(l);
   ok(locs.length >= htmlFiles.length && badLocs.length === 0, `sitemap.xml: ${locs.length} URLs, all on ${ORIGIN}, all resolve`);
+}
+
+// ---- IndexNow: /<key>.txt holds site/deploy/indexnow-key.txt's key --------------------------
+{
+  const key = readFileSync(join(SITE, 'deploy', 'indexnow-key.txt'), 'utf8').trim();
+  const r = await get(`/${key}.txt`);
+  ok(/^[a-zA-Z0-9-]{8,128}$/.test(key) && r.status === 200 && r.type.startsWith('text/plain') && r.body.toString().trim() === key, 'IndexNow: /<key>.txt serves the key as text/plain');
 }
 
 // ---- index.json -------------------------------------------------------------------------------

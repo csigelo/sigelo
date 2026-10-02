@@ -5,6 +5,20 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased — 2026-10-02, the site cut to the bone, and visits counted
 
+- **Discoverable by agents (`6273d0e`).** HTML pages send `Link: …; rel="alternate"; type="text/markdown"` and
+  the Markdown twins point back at their canonical page; IndexNow submits the sitemap after every deploy;
+  robots.txt names every AI crawler operator documented today; JSON-LD carries `sameAs` and keywords;
+  `integrations/mcp/server.json` follows the registry's 2025-12-11 schema; all five packages have keywords,
+  homepage, repository and bugs. A 404 under `/sha256/` was cached as immutable for a year — fixed.
+  `site/SEO.md` lists what the account holder must do (GitHub topics, Search Console, Bing, the MCP registry
+  publish after npm) and what was rejected with its source.
+- **Hermes Agent adapter (`adapters/hermes`, `7475a5c`).** Nous Research's runtime (MIT, Python, v0.21.5) is an
+  MCP client and reads SKILL.md, so a Hermes agent gets a sigelo identity and the keeper's verbs from nine
+  lines of `config.yaml` and no code; its test drives the real `hermes` binary four times with a scripted
+  model: identity made, challenge signed, attestation stored, bundle accepted by the Go verifier, four
+  wallet verbs against a mock keeper. Hermes has no identity of its own and lists DID/Ed25519 as out of
+  scope for its A2A design; gating its peer trust on a sigelo challenge is noted as an upstream proposal.
+
 - **Eight pages, hard budgets (`978fad6`).** The Owner's verdict on the first site: verbose, over-disclosing,
   a waste of visiting agents' tokens. Now: `/` 69 words (what, three commands, six links, one status
   line), `/adopt` 152, `/verify` 76, `/keeper` 100, `/contact` 7; `/spec`, `/security`, `/changelog` are

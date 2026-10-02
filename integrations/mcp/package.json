@@ -2,7 +2,28 @@
   "name": "sigelo-mcp",
   "version": "0.1.0",
   "mcpName": "io.github.csigelo/sigelo",
-  "description": "stdio MCP server for sigelo: portable agent identity tools, plus keeper wallet verbs when SIGELO_WALLET_URL/TOKEN are set",
+  "description": "MCP server: portable, offline-verifiable identity for AI agents (DID, challenges, attestations, bundles), optional Monero wallet",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "ai-agents",
+    "agent-identity",
+    "did",
+    "ed25519",
+    "attestation",
+    "monero",
+    "sigelo"
+  ],
+  "homepage": "https://sigelo.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csigelo/sigelo.git",
+    "directory": "integrations/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/csigelo/sigelo/issues"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {
