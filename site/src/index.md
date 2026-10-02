@@ -17,6 +17,7 @@ npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper ¹
 ¹ After the first npm publish; until then [adopt](/adopt.html) installs the release tarballs.
 
 - [Adopt](/adopt.html)
+- [Accept](/accept.html)
 - [Spec](/spec.html)
 - [Verify](/verify.html)
 - [Keeper](/keeper.html)

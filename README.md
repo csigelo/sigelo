@@ -31,6 +31,14 @@ macOS and Windows on x86_64 and arm64. On Windows, file modes such as 0600 are i
 secret files under your own profile. What is proven on which system:
 [`docs-test/PORTABILITY.md`](docs-test/PORTABILITY.md).
 
+## Accept
+
+A service that admits agents (a world) logs one in by its sigelo identity in three steps: send a
+challenge, check the signed answer against the agent's bundle, optionally attest. Drop-ins of two
+functions each, `challenge(did, ctx)` and `accept(challenge, answer, bundle)`, for node, Python
+and Go, with Express, Flask and net/http examples: [`accept/`](accept/README.md); `sh accept/test.sh`
+runs them against a real agent. Live example: [`world/`](world/README.md).
+
 ---
 
 ## Build and test

@@ -184,7 +184,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(parts.join() === 'spec,adopt,verify,keeper,security', `llms-full.txt: carries spec, adopt, verify, keeper, security only (${parts.join(', ')})`);
   const sz = Buffer.byteLength(full); const kb = `${Math.max(1, Math.round(sz / 1024))} KB`;
   ok(t.includes(`(${ORIGIN}/llms-full.txt): ${kb}`), `llms.txt: states llms-full.txt's size (${kb})`);
-  ok(items.filter((l) => lines.indexOf(l) < lines.indexOf('## Optional')).length <= 8, 'llms.txt: at most 8 links before Optional');
+  ok(items.filter((l) => lines.indexOf(l) < lines.indexOf('## Optional')).length <= 9, 'llms.txt: at most 9 links before Optional');
   ok((await get('/adopt.md')).body.toString().split('\n').length <= 90, 'adopt.md: short enough to follow (≤ 90 lines)');
 }
 
@@ -192,7 +192,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
 // The reader pays per token. Words = whitespace-separated tokens holding a letter or digit;
 // inside fenced code and on link-list lines they count half. llms.txt counts every word in full.
 {
-  const PAGES = ['adopt', 'changelog', 'contact', 'index', 'keeper', 'security', 'spec', 'verify'];
+  const PAGES = ['accept', 'adopt', 'changelog', 'contact', 'index', 'keeper', 'security', 'spec', 'verify'];
   const got = htmlFiles.filter((f) => /^\/[\w-]+\.html$/.test(f)).map((f) => f.slice(1, -5)).sort();
   ok(got.join() === PAGES.join(), `pages: exactly ${PAGES.join(', ')} (${got.join(', ')})`);
   const words = (md, half = true) => {
@@ -204,7 +204,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     }
     return w;
   };
-  const BUDGET = { '/index.md': 120, '/adopt.md': 250, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80 };
+  const BUDGET = { '/index.md': 120, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80 };
   for (const [f, max] of Object.entries(BUDGET)) {
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);

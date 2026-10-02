@@ -1,0 +1,18 @@
+{
+  "name": "sigelo-accept",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Accept a sigelo identity in any node web stack: challenge(did, ctx) and accept(challenge, answer, bundle)",
+  "license": "MIT",
+  "type": "module",
+  "main": "sigelo-accept.mjs",
+  "dependencies": {
+    "sigelo": "file:../../ts"
+  },
+  "devDependencies": {
+    "express": "^5.2.1"
+  },
+  "scripts": {
+    "example": "node example.mjs"
+  }
+}

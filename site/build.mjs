@@ -55,6 +55,7 @@ function genesisDid(g) {
 export const PAGES = [
   { slug: 'index', src: 'site/src/index.md', type: 'SoftwareSourceCode' },
   { slug: 'adopt', src: 'site/src/adopt.md', type: 'TechArticle' },
+  { slug: 'accept', src: 'site/src/accept.md', type: 'TechArticle' },
   { slug: 'spec', repo: 'SPEC.md', type: 'TechArticle', title: 'Specification',
     description: 'The sigelo specification, wire sigelo/0: signing input, genesis and DID, attestations, bindings, rotation and recovery, bundles, the verification algorithm.' },
   { slug: 'verify', src: 'site/src/verify.md', type: 'WebPage' },
@@ -65,7 +66,7 @@ export const PAGES = [
   { slug: 'changelog', repo: 'CHANGELOG.md', type: 'WebPage', title: 'Changelog',
     description: 'Every change to sigelo, newest first, as recorded in the repository\'s CHANGELOG.md.' },
 ];
-const NAV = [['adopt', 'Adopt'], ['spec', 'Spec'], ['verify', 'Verify'], ['keeper', 'Keeper'], ['security', 'Security'],
+const NAV = [['adopt', 'Adopt'], ['accept', 'Accept'], ['spec', 'Spec'], ['verify', 'Verify'], ['keeper', 'Keeper'], ['security', 'Security'],
   ['contact', 'Contact'], ['changelog', 'Changelog']];
 
 // Repository files published verbatim under /raw/<path>. OPTIONAL: listed in llms.txt with their size.
@@ -412,6 +413,7 @@ export function build() {
 ## Docs
 
 ${L('Adopt', '/adopt.md', 'identity, challenge, bundle, verify; exact commands')}
+${L('Accept', '/accept.md', 'log agents in by sigelo identity: node, Python, Go')}
 ${L('Spec', '/spec.md', 'the protocol, wire sigelo/0')}
 ${L('Test vectors', '/test-vectors.json', 'real signatures from documented seeds')}
 ${L('Verify', '/verify.md', 'reference verifier, conformance, your implementation')}

@@ -5,6 +5,17 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased — 2026-10-02, the site cut to the bone, and visits counted
 
+- **Accepting a sigelo identity is two functions (`accept/`, `3d741c6`).** Drop-ins for node (on the `sigelo`
+  library, 28 lines), Python (`cryptography` plus `sigelo-verify`, or opt-in `SIGELO_VERIFY=https://sigelo.io/world/verify`
+  for zero install, 41 lines) and Go (on the reference verifier, 53 lines): `challenge(did, ctx)` issues a
+  single-use §5.2 challenge; `accept(challenge, answer, bundle)` returns the §9.1 result only when the bundle
+  verifies, its current DID is the one claimed and the current key signed the challenge. Express, Flask and
+  net/http examples. `accept/test.sh` drives all three with a real `sigelo-agent`: accept, a rotated identity,
+  a bare genesis; rejected: replay, tampered signature, someone else's bundle, a rotated-away key, a forged
+  nonce, B answering A's challenge; the same ten cases pass against the live remote verifier. Site: `/accept`.
+- **CI gate (`d5e1428`).** A missing `DEVICE_STRINGS` secret is a warning, not a failure: the export gate
+  already ran on every pushed tree, and a red job per push only produced failure mail.
+
 - **The first world: sigelo.io/world/ (`5191235`, `e717fd0`).** Outside feedback the same day: "a passport no
   country accepts yet". So sigelo.io is the first country. A small loopback service behind nginx hands out
   §5.2 challenges (single use, 5 minutes), checks the answer under the DID's current key (from a verified
