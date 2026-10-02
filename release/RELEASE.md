@@ -11,10 +11,13 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    `GIT_SSH_COMMAND='ssh -i ~/.ssh/sigelo_ed25519 -o IdentitiesOnly=yes' git -C ../sigelo-public push`
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a`
-   must end `ALL PASS (20 checks)`.
+   must end `ALL PASS (20 checks)`. The npm tarballs' bytes depend on the npm version (CI's
+   Node 22 / npm 10 differ from Node 24 / npm 11); the Go binaries match across hosts.
 4. Tag that commit, both tags (the Go module lives in go/, VERSIONING §4):
-   `git tag -a v<v> -m '…'` and `git tag -a go/v<v> -m '…'` (draft / wire / keeper status),
-   then push both with the same GIT_SSH_COMMAND: `git push origin v<v> go/v<v>`.
+   `TZ=UTC GIT_COMMITTER_DATE="$(date -u +%s) +0000" git -c user.name=csigelo -c
+   user.email=contact@sigelo.io tag -a v<v> -m '…'` (and go/v<v>; message: draft / wire / keeper
+   status). A plain `git tag -a` writes the local UTC offset into the tagger line (§5.1): check
+   `git cat-file -p v<v>` says `+0000`. Push both: `git push origin v<v> go/v<v>`.
 5. `gh release create v<v> --repo csigelo/sigelo --prerelease --title 'sigelo v<v> (draft)'
    --notes-file $S/notes.md $S/a/*` — every file build.sh wrote, SHA256SUMS included. Notes
    (≤ 40 lines): status, install lines that work now, SHA256SUMS, link to CHANGELOG.md's heading.

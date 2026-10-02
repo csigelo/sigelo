@@ -1,5 +1,10 @@
 name: conformance
-on: [push, pull_request]
+# Pushes to main and pull requests only: a tag push (v0.1.0, go/v0.1.0) points at a commit main
+# already ran, and triggering on it only duplicated every run (and every failure mail).
+on:
+  push:
+    branches: [main]
+  pull_request:
 jobs:
   # Its own job, so a missing secret or a hit never hides the test results of the other jobs.
   identity-strings:
@@ -78,8 +83,12 @@ jobs:
       # sigelo.io's world (world/test.mjs): challenge, attestation, refusals and rotation on a
       # random loopback port against the freshly built library, judged by the Go verifier (go
       # run; it FAILs, not skips, without go), plus the nginx allowlist for /world/. A few seconds.
-      - run: >-
-          node world/test.mjs | tee /tmp/world-out && grep -q '^ALL PASS' /tmp/world-out && grep -q '^ok go sigelo-verify: ACCEPT' /tmp/world-out
+      # Failures (FAIL lines, a crash's first Error/cause lines) as annotations, as for spend below.
+      - run: |
+          node world/test.mjs 2>&1 | tee /tmp/world-out || {
+            { grep '^FAIL ' /tmp/world-out | head -n 7; grep -E -m 4 'Error|cause|^node:' /tmp/world-out; tail -n 3 /tmp/world-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=world node world\/test.mjs::/'; exit 1; }
+          grep -q '^ALL PASS' /tmp/world-out && grep -q '^ok go sigelo-verify: ACCEPT' /tmp/world-out || {
+            { grep '^FAIL ' /tmp/world-out | head -n 7; grep -E -m 4 'Error|cause|^node:' /tmp/world-out; tail -n 3 /tmp/world-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=world node world\/test.mjs::/'; exit 1; }
       # the bounded-spending service (MONERO.md §4). Same job, after `npx tsc` above: it
       # depends on `sigelo` as `file:../ts`, so it links dist/ and there must be a dist/ to link.
       # Its live-wallet section SKIPs on a runner with no monero-wallet-rpc on 127.0.0.1:38083.
@@ -136,8 +145,11 @@ jobs:
           npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
         working-directory: adapters/moadim
       # OS-neutral: a random loopback port, `go run` for the judge, `sh` (Git Bash on Windows) for the allowlist
-      - run: >-
-          node world/test.mjs | tee "$RUNNER_TEMP/world-out" && grep -q '^ALL PASS' "$RUNNER_TEMP/world-out" && grep -q '^ok go sigelo-verify: ACCEPT' "$RUNNER_TEMP/world-out"
+      - run: |
+          node world/test.mjs 2>&1 | tee "$RUNNER_TEMP/world-out" || {
+            { grep '^FAIL ' "$RUNNER_TEMP/world-out" | head -n 7; grep -E -m 4 'Error|cause|^node:' "$RUNNER_TEMP/world-out"; tail -n 3 "$RUNNER_TEMP/world-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=world node world\/test.mjs::/'; exit 1; }
+          grep -q '^ALL PASS' "$RUNNER_TEMP/world-out" && grep -q '^ok go sigelo-verify: ACCEPT' "$RUNNER_TEMP/world-out" || {
+            { grep '^FAIL ' "$RUNNER_TEMP/world-out" | head -n 7; grep -E -m 4 'Error|cause|^node:' "$RUNNER_TEMP/world-out"; tail -n 3 "$RUNNER_TEMP/world-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=world node world\/test.mjs::/'; exit 1; }
       # failures as annotations, as in the ts job
       - run: |
           npm ci --ignore-scripts

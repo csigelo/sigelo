@@ -19,6 +19,18 @@ let n = 0, failed = 0;
 const ok = (cond, what) => { n++; if (cond) console.log(`ok ${what}`); else { failed++; console.log(`FAIL ${what}`); } };
 const cli = (...a) => spawnSync(process.execPath, [SERVER, ...a], { encoding: 'utf8' });
 const same = (a, b) => canonicalize(a) === canonicalize(b);
+// A child process while the world is up runs asynchronously: a spawnSync blocks the event loop,
+// so fetch's pooled keep-alive socket outlives the server's 5 s keepAliveTimeout unnoticed and
+// the next request goes out on a socket the server already closed — on CI the 7 s conformance
+// run below ended in `TypeError: fetch failed … other side closed` (ECONNRESET on Windows).
+const exec = (cmd, args, { input, ...opts } = {}) => new Promise((resolve) => {
+  const p = spawn(cmd, args, opts); let stdout = '', stderr = '';
+  p.stdout.setEncoding('utf8').on('data', (d) => { stdout += d; });
+  p.stderr.setEncoding('utf8').on('data', (d) => { stderr += d; });
+  p.on('error', (error) => resolve({ status: null, stdout, stderr, error }));
+  p.on('close', (status) => resolve({ status, stdout, stderr }));
+  p.stdin.end(input ?? '');
+});
 console.warn = () => {};   // keygen's recovery: null warning is for humans; the agents here have none on purpose
 
 // ---- issuer identity: recovery key "off-site" (here: another file), commitment only to keygen ----
@@ -65,17 +77,17 @@ ok(same(a.body.claims, { seen: new Date(a.body.iat * 1000).toISOString().slice(0
 ok(same(first.res.json.issuer, issuerGenesis), 'issuer: the genesis keygen printed');
 
 // ---- the Go reference verifier counts it ----
-const goVerify = (bundle, now) => {
+const goVerify = async (bundle, now) => {
   const p = join(dir, `b${n}.json`); writeFileSync(p, JSON.stringify(bundle));
   const built = join(GO, 'sigelo-verify');
-  const r = existsSync(built) ? spawnSync(built, [p, '--now', String(now)], { encoding: 'utf8' })
-    : spawnSync('go', ['run', './cmd/sigelo-verify', p, '--now', String(now)], { cwd: GO, encoding: 'utf8' });
+  const r = existsSync(built) ? await exec(built, [p, '--now', String(now)])
+    : await exec('go', ['run', './cmd/sigelo-verify', p, '--now', String(now)], { cwd: GO });
   return r.status === 0 ? JSON.parse(r.stdout) : { reject: r.stderr || r.error?.message };
 };
 const issuedBundle = bundleOf(agent.genesis, [], [a], [first.res.json.issuer]);
-const g = goVerify(issuedBundle, a.body.iat + 60);
+const g = await goVerify(issuedBundle, a.body.iat + 60);
 ok(g.attestations?.[ISS]?.length === 1 && g.rejected?.attestations === 0 && g.did === agent.did, `go sigelo-verify: ACCEPT, 1 attestation from ${ISS.slice(0, 20)}…, 0 rejected${g.reject ? ` (${g.reject})` : ''}`);
-ok(goVerify(issuedBundle, a.body.exp).rejected?.attestations === 1, 'go sigelo-verify: rejected at exp (90 days later)');
+ok((await goVerify(issuedBundle, a.body.exp)).rejected?.attestations === 1, 'go sigelo-verify: rejected at exp (90 days later)');
 
 // ---- refusals ----
 const replay = await post('/world/attest', { challenge: first.c, did: agent.did, sig: first.signed.sig, genesis: agent.genesis });
@@ -133,8 +145,8 @@ const VECTORS = join(ROOT, 'test-vectors.json'), vectorsSha = createHash('sha256
 const candidate = join(GO, 'cmd/sigelo-verify/testdata/ts-candidate.mjs');
 const implArgs = ['--conformance', VECTORS, '--impl', `node '${candidate}'`];
 const built = join(GO, 'sigelo-verify');
-const run = existsSync(built) ? spawnSync(built, implArgs, { encoding: 'utf8', maxBuffer: 1 << 24 })
-  : spawnSync('go', ['run', './cmd/sigelo-verify', ...implArgs], { cwd: GO, encoding: 'utf8', maxBuffer: 1 << 24 });
+const run = existsSync(built) ? await exec(built, implArgs)
+  : await exec('go', ['run', './cmd/sigelo-verify', ...implArgs], { cwd: GO });
 const summary = (run.stdout ?? '').split('\n\n').slice(1).join('\n\n');   // what follows the PASS lines
 ok(run.status === 0 && /^\d+ passed, 0 failed$/m.test(summary) && /^ALL PASS$/m.test(summary), `sigelo-verify --impl over ts-candidate.mjs: ALL PASS (${(summary.match(/^\d+ passed, \d+ failed$/m) ?? [run.stderr?.slice(0, 200)])[0]})`);
 const total = Number((summary.match(/^(\d+) passed/m) ?? [])[1]);
@@ -151,7 +163,7 @@ const ca = cf.res.json.attestation;
 ok(cf.res.status === 200 && ca?.body.ctx === 'sigelo.io/conformance' && ca.body.admission === 'open' && ca.body.exp - ca.body.iat === 90 * 86400 && ca.body.sub === agent.did,
   `conformance: 200, ctx sigelo.io/conformance, open, 90 days${cf.res.json.error ? ` (${cf.res.json.error})` : ''}`);
 ok(ca && same(ca.body.claims, { conformance: { implementation: `sigelo-ts ${impl.version}`, vectors: vectorsSha, passed: total, total, self_reported: true, runner: `sigelo-verify ${impl.version}` } }), `conformance claims: ${JSON.stringify(ca?.body.claims)}`);
-const gc = ca && goVerify(bundleOf(agent.genesis, [], [a, ca], [issuerGenesis]), ca.body.iat + 60);
+const gc = ca && await goVerify(bundleOf(agent.genesis, [], [a, ca], [issuerGenesis]), ca.body.iat + 60);
 ok(gc?.attestations?.[ISS]?.length === 2 && gc.rejected?.attestations === 0, `go sigelo-verify: the bundle with the admission and the conformance attestation, both accepted${gc?.reject ? ` (${gc.reject})` : ''}`);
 ok((await post('/world/conformance', cf.body({}))).status === 409, 'conformance: a replayed challenge is 409');
 const badSha = await confAnswer(agent, { vectors_sha256: '0'.repeat(64) });
@@ -177,7 +189,7 @@ ok(init.status === 200 && init.h.get('content-type') === 'application/json' && i
 const inited = await mcpPost({ jsonrpc: '2.0', method: 'notifications/initialized' }, { 'mcp-protocol-version': '2025-11-25' });
 ok(inited.status === 202 && inited.text === '', 'mcp notifications/initialized: 202, no body');
 const tl = await mcpPost({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { 'mcp-protocol-version': '2025-11-25' });
-const stdio = spawnSync(process.execPath, [join(ROOT, 'integrations/mcp/server.mjs')], { input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', encoding: 'utf8', env: { ...process.env, SIGELO_IDENTITY: join(dir, 'none.json'), SIGELO_WALLET_URL: '' } });
+const stdio = await exec(process.execPath, [join(ROOT, 'integrations/mcp/server.mjs')], { input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', env: { ...process.env, SIGELO_IDENTITY: join(dir, 'none.json'), SIGELO_WALLET_URL: '' } });
 const stdioVerify = (() => { try { return JSON.parse(stdio.stdout.split('\n')[0]).result.tools.find((t) => t.name === 'sigelo_verify'); } catch { return undefined; } })();
 ok(tl.status === 200 && tl.json.result.tools.length === 1 && stdioVerify && same(tl.json.result.tools[0], stdioVerify), 'mcp tools/list: sigelo_verify alone, identical to the stdio server\'s definition');
 const call = await mcpPost({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'sigelo_verify', arguments: { bundle: vec.bundle, now: vec.now } } }, { 'mcp-protocol-version': '2025-11-25' });
@@ -221,7 +233,7 @@ const rr = cli('rotate', '-', join(dir, 'g1.json'), join(dir, 'g2.json'), join(d
 const chain = rr.status === 0 ? JSON.parse(rr.stdout) : null;
 ok(chain && chain.rotations.length === 1 && chain.rotations[0].body.reason === 'recovery'
   && verify(bundleOf(chain.genesis, chain.rotations), Math.floor(Date.now() / 1000)).did === did(newIssuer), 'rotate: a recovery rotation whose chain resolves to the new issuer');
-ok(goVerify(issuedBundle, a.body.iat + 60).attestations?.[ISS]?.length === 1, 'attestations issued before the rotation still verify offline under the old issuer genesis');
+ok((await goVerify(issuedBundle, a.body.iat + 60)).attestations?.[ISS]?.length === 1, 'attestations issued before the rotation still verify offline under the old issuer genesis');
 
 // ---- nginx: the /world/ location passes the deploy helper's allowlist; a foreign upstream does not ----
 const apply = join(ROOT, 'site/deploy/sigelo-nginx-apply'), conf = join(ROOT, 'site/deploy/nginx.conf');
