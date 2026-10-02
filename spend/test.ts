@@ -24,14 +24,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { attest, bind, canonicalize, commitmentOf, did as didOf, keygen, rotate, sign, verify, verifySig, type Binding, type Bundle, type Genesis } from 'sigelo';
+import { attest, bind, canonicalize, commitmentOf, did as didOf, keygen, rotate, sign, verify, verifySig, type Binding, type Bundle, type Genesis, type Rotation } from 'sigelo';
 import { approvalRequest, checkApproval, stillValid, type ApprovalBody, type ApproveContext, type Approved } from './approval.js';
 import { agentIdentitySeed, deriveIdentity, keeperRoot, mnemonicFromRoot, newRoot, recoveryCommitment, recoverySeed, rootFromMnemonic, walletFromRoot } from 'sigelo/dist/keys.js';
 import { ceremony } from 'sigelo/dist/ceremony.js';
 import { encodeAddress, hashToScalar, sigeloMoneroSigAddr, signMessage, subaddress, subaddressKeys, verifySigeloMoneroSigAddr } from 'sigelo/dist/monero.js';
 import { agentOf, evaluate, fingerprint, invoiceKey, parsePolicy, sameHash, tokenHash, type Destination, type PayRequest, type Policy, type Prior, type Spent } from './policy.js';
 import { BUILD_TIMEOUT_MS, CLOCK_FLOOR, CLOCK_SKEW, DAEMON_FAILS, DAEMON_STALE_MS, DAEMON_SWITCH_MS, codeOf, keeperGenesis, keeperIdentity, loadKeeper, loadPolicy, loadRoot, parseDaemons, priorOf, readLog, serve as serveBare, spentOf, startOf, WALLET_TIMEOUT_MS, type Receipt, type ServeOptions } from './service.js';
-import { checkLicence, DEV_VENDOR_DID, describe as describeLicence, licenceRefusal, readLicence, vendorDid, type KeeperEntry } from './licence.js';
+import { checkLicence, DEV_VENDOR_DID, describe as describeLicence, LICENCE_SKEW, licenceRefusal, readLicence, rememberVendorChain, TERM_MAX_DAYS, vendorDid, type KeeperEntry } from './licence.js';
 import { SNIPPET } from './init.js';
 import { explain, LINES, run, toAtomic, toXmr, type Outcome } from './wallet.js';
 import { asTreeEntry, covered, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry } from './tree.js';
@@ -64,18 +64,27 @@ const seed = (b: number): Uint8Array => Uint8Array.from({ length: 32 }, () => b)
  * test serves through `serve`, which installs a pro licence for the keeper first, so the paid
  * routes (delegation, approvals) keep their own tests; section 2l runs the free tier on `serveBare`.
  */
-const vendorId = keygen({ recovery: seed(0x61), seed: seed(0x62) });
+const vendorRec = keygen({ recovery: seed(0x60), seed: seed(0x61) }); // its key is the vendor's recovery key (rotation tests, 2l)
+const vendorId = keygen({ recovery: vendorRec.key, seed: seed(0x62) });
 process.env['SIGELO_VENDOR_DID'] = vendorId.did;
 process.env['SIGELO_SPEND_REGISTRY'] = join(mkdtempSync(join(tmpdir(), 'sigelo-spend-registry-')), 'keepers.json');
-const LIC_IAT = 1700000000, LIC_EXP = 4102444800; // 2023 … 2100
-const issueLicence = (sub: string, o: { seats?: number; iat?: number; exp?: number; ctx?: string; claims?: Record<string, unknown>; secret?: Uint8Array } = {}) => ({
-  attestation: attest({ secret: o.secret ?? vendorId.secret, iss: vendorId.did, sub, iat: o.iat ?? LIC_IAT, exp: o.exp ?? LIC_EXP, ctx: o.ctx ?? 'sigelo-spend',
-    admission: 'payment', claims: o.claims ?? { tier: 'pro', seats: o.seats ?? 1 } }),
-  issuer: vendorId.genesis,
-});
+// A licence's term is at most 3 × 366 days (licence.ts TERM_MAX_DAYS): each one is centred on the
+// clock it is checked at (`at`, default the real clock): a year back, two years forward.
+const YEAR = 366 * 86400, REAL_NOW = Math.floor(Date.now() / 1000);
+type LicOpts = { seats?: number; iat?: number; exp?: number; at?: number; ctx?: string; claims?: Record<string, unknown>; secret?: Uint8Array;
+  iss?: string; issuer?: typeof vendorId.genesis; rotations?: Rotation[]; legacy?: boolean };
+const issueLicence = (sub: string, o: LicOpts = {}) => {
+  const at = o.at ?? REAL_NOW;
+  return {
+    attestation: attest({ secret: o.secret ?? vendorId.secret, iss: o.iss ?? vendorId.did, sub, iat: o.iat ?? at - YEAR, exp: o.exp ?? at + 2 * YEAR, ctx: o.ctx ?? 'sigelo-spend',
+      admission: 'payment', claims: o.claims ?? { tier: 'pro', seats: o.seats ?? 1 } }),
+    issuer: o.issuer ?? vendorId.genesis,
+    ...(!o.legacy && { rotations: o.rotations ?? [] }),
+  };
+};
 const serve = (o: ServeOptions): ReturnType<typeof serveBare> => {
   const did = loadKeeper(dirname(o.policyPath), loadRoot(o.policyPath)).did;
-  writeFileSync(join(dirname(o.policyPath), 'licence.json'), JSON.stringify(issueLicence(did)), { mode: 0o600 });
+  writeFileSync(join(dirname(o.policyPath), 'licence.json'), JSON.stringify(issueLicence(did, { at: o.clock?.() })), { mode: 0o600 });
   return serveBare(o);
 };
 
@@ -2356,30 +2365,95 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   for (const k of [kA, kB]) writeFileSync(join(k, 'policy.json'), '{}', { mode: 0o600 });
   const gA = genesisOf(kA), gB = genesisOf(kB), dA = didOf(gA), dB = didOf(gB);
   const T = 1790700000;
-  const pro = checkLicence(issueLicence(dA, { seats: 3 }), gA, kA, T, []);
-  ok('licence: a vendor-signed attestation to this keeper is pro, with its seats and exp', pro.tier === 'pro' && pro.seats === 3 && pro.exp === LIC_EXP && pro.sub === dA, JSON.stringify(pro));
+  const lic = (sub: string, o: LicOpts = {}) => issueLicence(sub, { at: T, ...o });
+  const pro = checkLicence(lic(dA, { seats: 3 }), gA, kA, T, []);
+  ok('licence: a vendor-signed attestation to this keeper is pro, with its seats and exp', pro.tier === 'pro' && pro.seats === 3 && pro.exp === T + 2 * YEAR && pro.chain === 1 && !pro.legacy && pro.sub === dA, JSON.stringify(pro));
   const whyOf = (raw: unknown, own = gA, dir = kA, at = T, keepers: KeeperEntry[] = []): string => { const s = checkLicence(raw, own, dir, at, keepers); return s.tier === 'free' ? s.why : 'PRO'; };
   ok('licence: no licence.json is the free tier', (() => { const s = readLicence(kA, gA, T); return s.tier === 'free' && s.why === 'no licence.json'; })());
-  ok('licence: expired → free, "expired at"', whyOf(issueLicence(dA, { exp: T - 1 })) === `the licence expired at ${new Date((T - 1) * 1000).toISOString().replace('.000Z', 'Z')}`, whyOf(issueLicence(dA, { exp: T - 1 })));
-  const tampered = issueLicence(dA); (tampered.attestation.body.claims as Record<string, unknown>)['seats'] = 99;
+  ok('licence: expired → free, "expired at"', whyOf(lic(dA, { exp: T - 1 })) === `the licence expired at ${new Date((T - 1) * 1000).toISOString().replace('.000Z', 'Z')}`, whyOf(lic(dA, { exp: T - 1 })));
+  const tampered = lic(dA); (tampered.attestation.body.claims as Record<string, unknown>)['seats'] = 99;
   ok('licence: seats edited after issue → tampered (the signature no longer verifies)', whyOf(tampered).startsWith('the licence\'s signature does not verify under the vendor key'), whyOf(tampered));
-  const moved = issueLicence(dA); moved.attestation.body.exp = LIC_EXP + 1;
+  const moved = lic(dA); moved.attestation.body.exp = T + 2 * YEAR + 1;
   ok('licence: exp edited after issue → tampered', whyOf(moved).startsWith('the licence\'s signature does not verify'), whyOf(moved));
-  const reSub = issueLicence(dA); reSub.attestation.body.sub = dB;
+  const reSub = lic(dA); reSub.attestation.body.sub = dB;
   ok('licence: sub edited after issue → tampered, not "another keeper"', whyOf(reSub, gB, kB).startsWith('the licence\'s signature does not verify'), whyOf(reSub, gB, kB));
   const stranger = keygen({ recovery: seed(0x63), seed: seed(0x64) });
-  ok('licence: signed by another key under the vendor\'s genesis → tampered', whyOf(issueLicence(dA, { secret: stranger.secret })).startsWith('the licence\'s signature does not verify'));
-  const selfIssued = { attestation: attest({ secret: stranger.secret, iss: stranger.did, sub: dA, iat: LIC_IAT, exp: LIC_EXP, ctx: 'sigelo-spend', admission: 'payment', claims: { tier: 'pro', seats: 1 } }), issuer: stranger.genesis };
+  ok('licence: signed by another key under the vendor\'s genesis → tampered', whyOf(lic(dA, { secret: stranger.secret })).startsWith('the licence\'s signature does not verify'));
+  const selfIssued = { attestation: attest({ secret: stranger.secret, iss: stranger.did, sub: dA, iat: T - YEAR, exp: T + YEAR, ctx: 'sigelo-spend', admission: 'payment', claims: { tier: 'pro', seats: 1 } }), issuer: stranger.genesis };
   ok('licence: issued by any DID but the vendor\'s → free, naming both', whyOf(selfIssued) === `the licence is issued by ${stranger.did}, not the vendor ${vendorId.did}`, whyOf(selfIssued));
-  ok('licence: another ctx → free', whyOf(issueLicence(dA, { ctx: '1f916.ai' })).includes('is for "1f916.ai", not sigelo-spend'));
-  ok('licence: claims other than {tier: pro, seats} → free', ['gold', undefined].every((t) => whyOf(issueLicence(dA, { claims: { tier: t ?? 'pro', seats: 1, ...(t === undefined && { extra: 1 }) } })).includes('claims are not')));
-  ok('licence: issued to another keeper → free, naming it', whyOf(issueLicence(dB)) === `the licence is issued to ${dB}, not this keeper (${dA})`, whyOf(issueLicence(dB)));
-  ok('licence: not yet valid → free', whyOf(issueLicence(dA, { iat: T + 600 })).includes('not valid before'));
-  ok('licence: not {attestation, issuer} → free', whyOf({ ...issueLicence(dA), extra: 1 }) === 'the licence file is not {attestation, issuer}');
+  ok('licence: another ctx → free', whyOf(lic(dA, { ctx: '1f916.ai' })).includes('is for "1f916.ai", not sigelo-spend'));
+  ok('licence: claims other than {tier: pro, seats} → free', ['gold', undefined].every((t) => whyOf(lic(dA, { claims: { tier: t ?? 'pro', seats: 1, ...(t === undefined && { extra: 1 }) } })).includes('claims are not')));
+  ok('licence: issued to another keeper → free, naming it', whyOf(lic(dB)) === `the licence is issued to ${dB}, not this keeper (${dA})`, whyOf(lic(dB)));
+  ok('licence: iat more than LICENCE_SKEW ahead → free, "ahead of this host\'s clock"', whyOf(lic(dA, { iat: T + LICENCE_SKEW + 1 })).includes(`more than ${LICENCE_SKEW} s ahead of this host's clock`), whyOf(lic(dA, { iat: T + 600 })));
+  ok('licence: iat within LICENCE_SKEW ahead (a vendor clock a little fast) → pro', whyOf(lic(dA, { iat: T + LICENCE_SKEW })) === 'PRO', whyOf(lic(dA, { iat: T + LICENCE_SKEW })));
+  ok('licence: a term above 3 × 366 days → free, "longest sold"', whyOf(lic(dA, { iat: T - 10, exp: T - 10 + TERM_MAX_DAYS * 86400 + 1 })).includes(`longer than ${TERM_MAX_DAYS} days, the longest sold`) &&
+    whyOf(lic(dA, { iat: T - 10, exp: T - 10 + TERM_MAX_DAYS * 86400 })) === 'PRO', whyOf(lic(dA, { iat: T - 10, exp: T - 10 + TERM_MAX_DAYS * 86400 + 1 })));
+  ok('licence: not {attestation, issuer, rotations} → free', whyOf({ ...lic(dA), extra: 1 }) === 'the licence file is not {attestation, issuer, rotations}');
+  {
+    // The legacy single-key file {attestation, issuer}: accepted, warned.
+    const leg = checkLicence(lic(dA, { legacy: true }), gA, kA, T, []);
+    ok('licence: the legacy single-key file {attestation, issuer} is still pro, marked legacy, and describe warns', leg.tier === 'pro' && leg.legacy && leg.chain === 1 &&
+      describeLicence(leg).includes('WARNING legacy single-key licence') && !describeLicence(pro).includes('legacy') && describeLicence(pro).includes('vendor chain length 1'), describeLicence(leg));
+  }
+  {
+    // ---- the vendor chain (runbook §6, RISKS R14): the pin is the vendor's genesis; the licence carries the
+    // chain; only the chain's CURRENT key licenses; the keeper keeps the longest chain it has seen.
+    const fresh = (): string => mkdtempSync(join(scratch, 'kc-'));
+    const at = (raw: unknown, dir: string): string => whyOf(raw, gA, dir);
+    const vRec2 = keygen({ recovery: seed(0x68), seed: seed(0x69) });
+    const v2 = keygen({ recovery: vendorRec.key, seed: seed(0x65) }), thief = keygen({ recovery: vendorRec.key, seed: seed(0x66) }), rec = keygen({ recovery: vRec2.key, seed: seed(0x67) });
+    const rotV = rotate({ genesis: vendorId.genesis, next_genesis: v2.genesis, iat: T - 5000, reason: 'voluntary', secret: vendorId.secret });
+    const rotT = rotate({ genesis: vendorId.genesis, next_genesis: thief.genesis, iat: T - 3000, reason: 'voluntary', secret: vendorId.secret });
+    // The recovery deliberately carries an EARLIER iat than the thief's rotation (SPEC §7.1: never reorder by time).
+    const rotR = rotate({ genesis: vendorId.genesis, next_genesis: rec.genesis, iat: T - 9000, reason: 'recovery', secret: vendorRec.secret });
+    const byV2 = lic(dA, { iss: v2.did, secret: v2.secret, rotations: [rotV] }), byG = lic(dA), byGLegacy = lic(dA, { legacy: true });
+    const byThief = lic(dA, { iss: thief.did, secret: thief.secret, rotations: [rotT] }), byRec = lic(dA, { iss: rec.did, secret: rec.secret, rotations: [rotR] });
+    const remember = (raw: unknown, dir: string) => rememberVendorChain(dir, raw, gA, T, []);
+    const d1 = fresh();
+    const s2 = checkLicence(byV2, gA, d1, T, []);
+    ok('licence chain: after a voluntary vendor rotation, a licence by the new key carrying the rotation is pro (chain 2), the pin unchanged (genesis)', s2.tier === 'pro' && s2.chain === 2 && describeLicence(s2).includes('vendor chain length 2'), JSON.stringify(s2));
+    ok('licence chain: a keeper that has not seen the rotation still takes a licence by the genesis key', at(byG, d1) === 'PRO' && at(byGLegacy, d1) === 'PRO');
+    remember(byV2, d1);
+    const rec1 = JSON.parse(readFileSync(join(d1, 'vendor-chain.json'), 'utf-8')) as { genesis: unknown; rotations: unknown[] };
+    ok('licence chain: the keeper records the chain it saw in vendor-chain.json (0600)', didOf(rec1.genesis as Genesis) === vendorId.did && rec1.rotations.length === 1 && (WIN || mode(join(d1, 'vendor-chain.json')) === 0o600));
+    ok('licence chain: once seen, a licence by the rotated-away key is refused — the vendor reissues after a rotation (SPEC §5: a verifier that knows a DID was rotated away from stops trusting it)',
+      at(byG, d1).includes('shorter than the 2 this keeper has seen') && at(byGLegacy, d1).includes('shorter than the 2') &&
+      at(lic(dA, { rotations: [rotV] }), d1).includes('which the vendor has rotated away from') && at(byV2, d1) === 'PRO', `${at(byG, d1)} | ${at(lic(dA, { rotations: [rotV] }), d1)}`);
+    ok('licence chain: a licence carrying the rotation but signed by the old key is refused even on a fresh keeper', at(lic(dA, { rotations: [rotV] }), fresh()).includes('rotated away from'));
+    ok('licence chain: a forked chain inside one licence (two voluntary rotations from the genesis) is refused', at(lic(dA, { iss: v2.did, secret: v2.secret, rotations: [rotV, rotT] }), fresh()).includes('vendor chain does not verify (chain: fork at'));
+    ok('licence chain: a chain that forks from the one seen is refused', at(byThief, d1).includes('forks from the one this keeper has seen'), at(byThief, d1));
+    // The stolen key: the vendor recovered (rotR); the thief still holds the genesis key.
+    const d2 = fresh();
+    remember(byRec, d2);
+    ok('licence chain, stolen key: after the vendor\'s recovery rotation, a licence the thief mints with the old key is refused', at(byG, d2).includes('shorter than the 2') && at(byGLegacy, d2).includes('shorter'), at(byG, d2));
+    ok('licence chain, stolen key: …and so is one under the thief\'s own voluntary rotation, newer than the recovery (precedence, SPEC §7.1)', at(byThief, d2).includes('forks from the one this keeper has seen') && at(byRec, d2) === 'PRO', at(byThief, d2));
+    const d3 = fresh();
+    remember(byThief, d3);
+    ok('licence chain: a keeper that saw the thief\'s rotation first still takes the vendor\'s recovery (a recovery supersedes a seen voluntary chain)', at(byThief, d3) === 'PRO' && at(byRec, d3) === 'PRO');
+    remember(byRec, d3);
+    ok('licence chain: …and from then on refuses the thief\'s licence', at(byThief, d3).includes('forks from'), at(byThief, d3));
+    const d4 = fresh();
+    writeFileSync(join(d4, 'vendor-chain.json'), '{"genesis": 1}', { mode: 0o600 });
+    ok('licence chain: a damaged vendor-chain.json fails closed and says how to reset', at(byG, d4).includes('vendor-chain.json (the vendor chain this keeper has seen) does not verify') && at(byG, d4).includes('remove it'), at(byG, d4));
+    const d5 = fresh();
+    writeFileSync(join(d5, 'vendor-chain.json'), JSON.stringify({ genesis: stranger.genesis, rotations: [] }), { mode: 0o600 });
+    ok('licence chain: a vendor-chain.json for another vendor than the pin binds nothing', at(byG, d5) === 'PRO');
+    const was = process.env['SIGELO_VENDOR_DID'];
+    process.env['SIGELO_VENDOR_DID'] = v2.did;
+    const notGenesis = at(byV2, fresh());
+    process.env['SIGELO_VENDOR_DID'] = was;
+    ok('licence chain: the pin is the vendor\'s GENESIS — a pin to a later key matches no chain', notGenesis === `the licence's vendor chain starts at ${vendorId.did}, not the vendor ${v2.did}`, notGenesis);
+    const d6 = fresh();
+    writeFileSync(join(d6, 'policy.json'), '{}', { mode: 0o600 });
+    const g6 = genesisOf(d6), byV2for6 = lic(didOf(g6), { iss: v2.did, secret: v2.secret, rotations: [rotV] });
+    writeFileSync(join(d6, 'licence.json'), JSON.stringify(byV2for6), { mode: 0o600 });
+    const r6 = readLicence(d6, g6, T);
+    ok('licence chain: readLicence (start, reload, each paid verb) records the chain of a valid licence', r6.tier === 'pro' && existsSync(join(d6, 'vendor-chain.json')), JSON.stringify(r6));
+  }
   const reg2: KeeperEntry[] = [{ dir: kA, did: dA, genesis: gA }, { dir: kB, did: dB, genesis: gB }];
-  ok('licence: seats 2 issued to keeper A also covers keeper B registered on the same host', checkLicence(issueLicence(dA, { seats: 2 }), gB, kB, T, reg2).tier === 'pro');
-  ok('licence: seats 1 does not cover a host running 2 keepers', whyOf(issueLicence(dA, { seats: 1 }), gB, kB, T, reg2) === 'the licence covers 1 keeper; this host runs 2');
-  ok('licence: …nor does it cover its own keeper once a second is registered', whyOf(issueLicence(dA, { seats: 1 }), gA, kA, T, reg2) === 'the licence covers 1 keeper; this host runs 2');
+  ok('licence: seats 2 issued to keeper A also covers keeper B registered on the same host', checkLicence(lic(dA, { seats: 2 }), gB, kB, T, reg2).tier === 'pro');
+  ok('licence: seats 1 does not cover a host running 2 keepers', whyOf(lic(dA, { seats: 1 }), gB, kB, T, reg2) === 'the licence covers 1 keeper; this host runs 2');
+  ok('licence: …nor does it cover its own keeper once a second is registered', whyOf(lic(dA, { seats: 1 }), gA, kA, T, reg2) === 'the licence covers 1 keeper; this host runs 2');
   {
     const was = process.env['SIGELO_VENDOR_DID'];
     delete process.env['SIGELO_VENDOR_DID'];

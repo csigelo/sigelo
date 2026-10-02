@@ -24,7 +24,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { decodeAddress } from 'sigelo/dist/monero.js';
 import { verifySig } from 'sigelo';
-import { checkLicence, describe, LICENCE_FILE, licenceRefusal, liveKeepers, readLicence, register, registryPath, type LicenceStatus } from './licence.js';
+import { checkLicence, describe, LICENCE_FILE, licenceRefusal, liveKeepers, readLicence, register, rememberVendorChain, registryPath, type LicenceStatus } from './licence.js';
 import { parsePolicy, tokenHash } from './policy.js';
 import { commitmentOf, keygen } from 'sigelo';
 import { CLOCK_FLOOR, CLOCK_SKEW, IDENTITY_FILE, keeperBundle, keeperGenesis, keeperOf, loadKeeper, loadPolicy, parseDaemons, readLog, walletRpc, type KeeperId } from './service.js';
@@ -610,6 +610,7 @@ export async function operator(argv: string[]): Promise<number> {
     if (s.tier !== 'pro') throw new Error(`licence install: not installed — ${s.why}`);
     writeFileSync(join(dir, `${LICENCE_FILE}.new`), JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
     renameSync(join(dir, `${LICENCE_FILE}.new`), join(dir, LICENCE_FILE));
+    rememberVendorChain(dir, raw, id.genesis, now()); // vendor-chain.json: a shorter or forked chain is refused from now on
     console.log(`installed ${join(dir, LICENCE_FILE)}: ${describe(s)}. A running keeper uses it from its next request.`);
     return 0;
   }

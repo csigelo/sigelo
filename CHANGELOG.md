@@ -18,6 +18,7 @@ history, which is not public. This public history starts at the import of 2026-1
   SimpleX (`62407e2`, `709f412`).
 
 ### 2026-10-02
+- **Licence check:** vendor genesis pinned, vendor chain verified from the licence, longest-chain rule, term ≤ 3 years; legacy files warned (`dba9b9e`). Vendor ceremony procedure published (`release/vendor-ceremony.md`).
 - **Spec coverage:** vectors for §7.2 `hash(next_genesis) == next` and a sixth-key challenge test in both suites (`9cd82d0`).
 - **ts = go messages:** 2,960-case mutation differential, 0 result or message differences after `4e1c8d2`.
 - **Hygiene:** SPDX MIT headers on every source file (`fe4e8ac`); spend suite runs offline with `SIGELO_TEST_NO_LIVE=1` (`00af8e4`).

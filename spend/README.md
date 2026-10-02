@@ -114,7 +114,8 @@ licence_required: delegation (POST /delegate) is a paid feature of sigelo-spend 
 approval_above)`, `receipts export (sigelo-spend receipts export)`, `a second keeper on this
 host (multi-keeper)`; the parenthesis says why: `no licence.json`, `the licence expired at …`,
 `the licence's signature does not verify …`, `the licence covers 1 keeper; this host runs 2`,
-…). `sigelo-wallet` prints it as `REFUSED: the wallet service refused (…). Tell your operator.`
+`the licence carries a vendor chain of 1, shorter than the 2 this keeper has seen …`, `the
+licence's term … is longer than 1098 days …`, …). `sigelo-wallet` prints it as `REFUSED: the wallet service refused (…). Tell your operator.`
 Fail closed: without a licence a payment that needs an approval is refused, never paid without
 one. Never gated: `POST /revoke` (a safety verb) and `GET /delegates`; a delegate created while
 licensed keeps paying from what it holds after the licence lapses, an approval already on file
@@ -123,21 +124,37 @@ log lines — are the same in both tiers; the licence adds no line to `spend.log
 
 ### The licence is a sigelo attestation
 
-The licence is the protocol's own object (SPEC §5): issued by the vendor's DID (`iss`) to your
-keeper's DID (`sub`, printed by `init` and `licence show`), `ctx: "sigelo-spend"`, `admission:
+The licence is the protocol's own object (SPEC §5): issued by the vendor's current key (`iss`) to
+your keeper's DID (`sub`, printed by `init` and `licence show`), `ctx: "sigelo-spend"`, `admission:
 "payment"`, `claims: {"tier": "pro", "seats": N}`, and an `exp`. `licence.json` next to
-`policy.json` is `{attestation, issuer}`: the signed attestation and the vendor's genesis. The
-keeper checks it with sigelo's own verifier, **offline** — the genesis must hash to the vendor
-DID, the signature must verify under its key, `iat ≤ now < exp` (SPEC §9 step 5), `sub` must be
-this keeper (or another keeper `init` registered on this host, with `seats` covering every
-keeper there) — at start, on every policy reload and before each paid verb, so an expiry takes
-effect the second it passes and a licence installed while the keeper runs takes effect on its
-next request. There is no network call anywhere: no activation server, no phone-home, no
-revocation list (SPEC §5: freshness comes from reissuance — a renewal is a new attestation). A keeper that
-cannot reach anyone keeps working in whatever tier its file proves.
+`policy.json` is `{attestation, issuer, rotations}`: the signed attestation, the vendor's genesis
+and the vendor's rotations — an ordinary chain (SPEC §7), no new wire object. The keeper checks it
+with sigelo's own verifier, **offline**: the genesis must hash to the vendor DID (the pin is the
+vendor's `chain[0]`, so a vendor rotation needs no release); the chain must verify (SPEC §7.3) and
+the attestation must be signed by the chain's **current** key; `exp - iat` at most 3 × 366 days
+(the longest term sold) and `iat` at most 300 s ahead of this host's clock; `iat ≤ now < exp` (SPEC
+§9 step 5); `sub` must be this keeper (or another keeper `init` registered on this host, with
+`seats` covering every keeper there). It does so at start, on every policy reload and before each
+paid verb, so an expiry takes effect the second it passes and a licence installed while the keeper
+runs takes effect on its next request.
+
+The keeper keeps the longest valid vendor chain it has seen in `vendor-chain.json` beside
+`licence.json`, and refuses a licence whose chain is shorter or forks from it — except where
+sigelo's own precedence picks the licence's chain (a recovery rotation supersedes a voluntary one,
+SPEC §7.1). SPEC §5 has an attestation verify under its own `iss` whatever the issuer did later, and
+a verifier that knows a DID was rotated away from stops trusting it; the keeper knows, from the
+chain. So **after any vendor rotation the vendor reissues every live licence**: a licence signed
+by the old key keeps working on a keeper that has not yet seen the rotation, and is refused
+(`… shorter than the 2 this keeper has seen …` or `… which the vendor has rotated away from …`) on
+one that has. A stolen vendor key, once the vendor has recovered, licenses nothing to a keeper that
+has seen the recovery, and its licences before that end within three years. The legacy file
+`{attestation, issuer}` (no chain; the issuer must be the vendor genesis) is still accepted, and
+`licence show` warns `legacy single-key licence`. There is no network call anywhere: no activation
+server, no phone-home, no revocation list (SPEC §5: freshness comes from reissuance — a renewal is
+a new attestation). A keeper that cannot reach anyone keeps working in whatever tier its file proves.
 
 ```
-sigelo-spend licence show [--dir D]             the keeper DID and the tier, with why
+sigelo-spend licence show [--dir D]             the keeper DID and the tier (seats, expiry, vendor chain length), with why
 sigelo-spend licence install <file> [--dir D]   verified first; a licence that does not cover this keeper is not installed
 sigelo-spend receipts export [--dir D] --since <YYYY-MM-DD|unix> [--format json|csv]
 ```
@@ -159,8 +176,9 @@ placeholder minted for the constant with its key discarded, so no licence verifi
 which is never packed, and the stagenet soak one minted into its own soak directory: soak/README.md, "The paid tier, end to end"). The check sits in MIT code on a host the operator controls: it marks the
 commercial terms; it is not DRM and hides nothing from the operator, who holds every key. A vendor
 issues a licence with sigelo's own `attest({secret, iss: <vendor DID>, sub: <keeper DID>, iat, exp,
-ctx: "sigelo-spend", admission: "payment", claims: {tier: "pro", seats: N}})` and sends `{attestation,
-issuer: <vendor genesis>}`; nothing about it involves the customer's keys or money.
+ctx: "sigelo-spend", admission: "payment", claims: {tier: "pro", seats: N}})`, signed by its current
+key, and sends `{attestation, issuer: <vendor genesis>, rotations: <vendor rotations>}`
+(commercial/issue-licence.mjs); nothing about it involves the customer's keys or money.
 
 ## Policy file
 
