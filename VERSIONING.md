@@ -4,6 +4,9 @@ Two things carry version numbers and they move independently: the **wire** (`v` 
 signed object, SPEC §3.1) and the **packages** (npm, the Go module). An agent that adopts a
 format that then changes under it does not come back, so the wire moves rarely and loudly.
 
+**Status:** v0.1.0 is tagged (`v0.1.0` and `go/v0.1.0`, 2026-10-02) as a GitHub pre-release, a draft: wire
+`sigelo/0` may change until v0.2; the keeper is stagenet-only and unaudited; nothing is on npm yet.
+
 ## 1. The wire: `sigelo/0`
 
 `v` is `"sigelo/0"`. Verifiers reject any other value (invariant 7; SPEC §9 step 2). There is

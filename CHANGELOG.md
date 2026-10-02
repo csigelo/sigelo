@@ -3,7 +3,12 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
-## unreleased — 2026-10-02, the site cut to the bone, and visits counted
+## v0.1.0 — 2026-10-02 (draft)
+
+The first tagged release, a GitHub pre-release holding everything below including the v0.1 draft; the wire
+`sigelo/0` may still change until v0.2, and the keeper is stagenet-only and unaudited.
+
+### 2026-10-02, the site cut to the bone, and visits counted
 
 - **Conformance attestations and remote MCP (`4088ce2`).** `POST /world/conformance` takes an agent's challenge
   answer plus the summary `sigelo-verify --conformance --impl` printed; the world checks the vectors are the ones
@@ -70,7 +75,7 @@ history, which is not public. This public history starts at the import of 2026-1
   `llms.txt` → `adopt.md` → mock-world funnel), both behind basic auth at `/_stats/`. First day:
   ClaudeBot 68 requests, GPTBot 56, about 59 human visitors.
 
-## unreleased — 2026-10-01, the rehearsal, the site, and the first two products
+### 2026-10-01, the rehearsal, the site, and the first two products
 
 - **Incident rehearsal T14 ran** (spend/soak/README incident #5, INCIDENT.md; timeline in the operator's
   drill directory): detect → wallet-rpc down 1 min 41 s → last sweep to the vault 15 min 26 s; the vault
@@ -201,7 +206,7 @@ history, which is not public. This public history starts at the import of 2026-1
 spend 659 → 745 passed with the live wallet. Code lines: `spend/service.ts` 1 037, `spend/cli.ts` 126,
 `spend/init.ts` 494, `spend/licence.ts` 84, `ts/src/ceremony.ts` 169, `ts/src/offline.ts` 167 (CLAUDE.md).
 
-## unreleased — 2026-09-29 (evening), round 3 on today's docs, the one-seed ceremony, Carrot, and a stranger's clone
+### 2026-09-29 (evening), round 3 on today's docs, the one-seed ceremony, Carrot, and a stranger's clone
 
 - **Round 3 of the comprehension harness** (docs-test/RESULTS.md), docs frozen at `9dadab0`
   (`docs-test/snapshot/9dadab0`, lifecycle digest `ff3639074728bd09…`, verifier `469da8a3c59fe898…`).
@@ -251,7 +256,7 @@ spend 659 → 745 passed with the live wallet. Code lines: `spend/service.ts` 1 
 ts 595 → 620, spend 652 → 659, go 498. Code lines: `ts/src/ceremony.ts` 150, `ts/src/offline.ts` 150,
 `spend/service.ts` 974 (CLAUDE.md).
 
-## unreleased — 2026-09-29, the readiness bar: six gaps closed in one day
+### 2026-09-29, the readiness bar: six gaps closed in one day
 
 wire: an envelope has exactly its defined keys (`bcee912`, SPEC §3.1; vectors
 `attestation_good_and_envelope_extra_keys`, `binding_envelope_extra_key`,
@@ -326,7 +331,7 @@ envelope rule above); the spend keeper's formats are unchanged; the live soak st
 ts 591 → 595, go 494 → 498, spend 617 → 652 passed with the live wallet. Code lines: `ts/src/sigelo.ts` 364,
 `go/sigelo.go` 383, `spend/service.ts` 975 (CLAUDE.md).
 
-## unreleased — 2026-09-29, soak incident #4: 32 h offline, and the clock
+### 2026-09-29, soak incident #4: 32 h offline, and the clock
 
 The test host lost its network for 32 h because its network manager stopped auto-connecting
 after a failed handshake and nothing could re-authorise it unattended. The keeper failed closed — nothing was sent, every line verifies — but the tooling
@@ -362,7 +367,7 @@ wire formats (receipts, spend-approvals, log lines) are unchanged; no error code
 
 spend: 592 → 617 passed with the live wallet (559 → 584 + 2 skipped without it).
 
-## unreleased — 2026-09-24, hostile-JSON differential (ts vs go)
+### 2026-09-24, hostile-JSON differential (ts vs go)
 
 wire: D1 nesting depth 512 (`425d2bb`), S1 `created` format (`bc7165a`), S2 canonical curve points
 (`731483b`), S3 commitment format (`63cceed`), S4 nonce format (`c5faf69`), S5 noncharacters (`001ecfa`);
@@ -433,7 +438,7 @@ each in both implementations with the same reason text, a SPEC MUST and vectors:
   report AT the offending character, the convention the Go `fail` comment spells out; a
   nine-message table runs in both suites.
 
-## unreleased — 2026-09-24, audit before the public export
+### 2026-09-24, audit before the public export
 
 wire: A1 two identical rotation entries are a fork (`7c285ea`, vector `fatal_duplicate_rotation_is_fork`).
 
@@ -466,7 +471,7 @@ Self-audit of the whole tree (AUDIT.md), three findings closed with tests and ve
   excluded. ROADMAP §5.1 no longer describes the maintainer's setup.
 - PORTABILITY.md: what is proven, documented and unrun across operating systems.
 
-## unreleased (still wire `sigelo/0`) — 2026-09-17
+### 2026-09-17 (still wire `sigelo/0`)
 
 Spec gaps found on first independent review, all closed with vectors.
 

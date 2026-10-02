@@ -14,7 +14,7 @@ sigelo-verify bundle.json                                   # verify a bundle
 npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper ¹
 ```
 
-¹ After the first npm publish; until then [adopt](/adopt.html) installs the release tarballs.
+¹ After the first npm publish; until then [adopt](/adopt.html) installs the [release](https://github.com/csigelo/sigelo/releases) tarballs.
 
 - [Adopt](/adopt.html)
 - [Accept](/accept.html)

@@ -6,7 +6,7 @@ description: sigelo-verify, the reference verifier: one static binary, no networ
 
 `sigelo-verify` is the reference verifier (SPEC §9): one static binary, no network.
 
-Install a release binary, `sigelo-verify-<os>-<arch>`, and check it against `SHA256SUMS`. After the first publish: `go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v{{version}}`.
+Install a [release](https://github.com/csigelo/sigelo/releases) binary, `sigelo-verify-<os>-<arch>`, and check it against `SHA256SUMS`, or `go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v{{version}}`.
 
 ```sh
 sigelo-verify bundle.json [--now N]       # exit 0 and the result as JSON; 1 REJECT; 2 usage

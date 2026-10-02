@@ -1,3 +1,5 @@
+Posted: https://github.com/NousResearch/hermes-agent/issues/131484 (2026-10-02)
+
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Draft. Not posted anywhere. -->
 <!-- HOW TO POST (Owner):
