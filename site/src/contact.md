@@ -4,7 +4,7 @@ description: How to reach the sigelo maintainer: contact@sigelo.io or SimpleX; v
 ---
 # Contact
 
-- E-mail: [`{{contact_email}}`](mailto:{{contact_email}})
+- E-mail: [`{{contact_email}}`](mailto:{{contact_email}}) — receive-only for now; replies come over SimpleX
 - SimpleX: {{simplex}}
 - Security: [security policy](/security.html), [`{{security_email}}`](mailto:{{security_email}})
 - GitHub: <{{repo}}>

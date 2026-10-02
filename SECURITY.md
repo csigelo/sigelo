@@ -16,8 +16,9 @@ In order of preference:
 
 1. **GitHub private vulnerability reporting** on this repository ("Security" → "Report a
    vulnerability"). No account linkage beyond your GitHub handle.
-2. **Email** `security@sigelo.io` (the mailbox exists and is read), encrypted to this age recipient
-   once it is published:
+2. **Email** `security@sigelo.io` — received and read, but **receive-only for now**: there is no sigelo.io
+   sender yet, so the reply comes over SimpleX (channel 3) or to a channel you name in the report.
+   Encrypted to this age recipient once it is published:
    `age1<to-be-filled-at-D1>` — also published at `https://sigelo.io/.well-known/security.txt`
    (RFC 9116). Unencrypted mail is read, but assume it was not private.
 3. **SimpleX**: `https://smp10.simplex.im/a#18LjfJawmkVxvFtCHFo-yyzPo8Kr3gPLNts_ovwxmZM`. The address lives on public SimpleX relays, not on a
