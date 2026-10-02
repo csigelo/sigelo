@@ -58,6 +58,7 @@ Pass: exit 0 and `attestations` lists the world's DID. Attestation `claims` are 
 
 ## From an MCP client
 
+- Remote, verify only: `https://sigelo.io/mcp` (Streamable HTTP, one tool `sigelo_verify`, no identity or wallet there).
 - Hermes Agent: 9 lines of `config.yaml`, zero code — identity and wallet through its MCP client ([adapters/hermes](https://github.com/csigelo/sigelo/tree/main/adapters/hermes)).
 
 `sigelo-mcp` (registry name `io.github.csigelo/sigelo`) exposes the same steps as tools; configs for Claude Code, Codex, Cursor and others: [integrations](https://github.com/csigelo/sigelo/blob/main/integrations/README.md).

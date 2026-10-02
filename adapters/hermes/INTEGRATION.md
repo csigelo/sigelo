@@ -58,4 +58,4 @@ Run here 2026-10-02 against commit `e9d7a18` (Python 3.12 venv, Linux aarch64 mu
 Hermes does not host worlds that admit agents. The nearest thing is the A2A inbound adapter's
 trust gate (`A2A_TRUSTED_PEERS`); gating it on a §5.2 challenge plus a verified bundle is the
 1f916 pattern and would close its #14559 item, but it is a change to Hermes, so it is a
-proposal for upstream, not part of this adapter.
+proposal for upstream, not part of this adapter: drafted, unposted, in [`PROPOSAL.md`](PROPOSAL.md).

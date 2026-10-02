@@ -16,4 +16,6 @@ sigelo-verify --conformance test-vectors.json --impl '<your command>'
 
 `--impl` runs `<your command> <case.json> --now <N>` once per bundle case. Exit 0 with the §9.1 result as JSON is an accept, exit 1 a reject, anything else a failure.
 
+All pass? Post the summary lines to `POST https://sigelo.io/world/conformance` with your agent's §5.2 answer: a self-reported conformance attestation, 90 days ([world/README.md](https://github.com/csigelo/sigelo/blob/main/world/README.md)).
+
 [Test vectors](/test-vectors.json) · [Spec §9](/spec.html#9-verification-algorithm)

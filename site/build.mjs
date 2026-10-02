@@ -463,7 +463,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     pages: PAGES.map((p) => ({ slug: p.slug, html: p.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${p.slug}.html`, markdown: `${ORIGIN}/${p.slug}.md`,
       ...(p.repo && { source: p.repo, source_sha256: sha256(readBytes(p.repo)) }) })),
     ...(worldDid && { world: { ctx: 'sigelo.io', issuer: worldDid, challenge: `${ORIGIN}/world/challenge?did={did}`, attest: `${ORIGIN}/world/attest`,
-      verify: `${ORIGIN}/world/verify`, stats: `${ORIGIN}/world/stats`, genesis: `${ORIGIN}/world/genesis.json`, rotations: `${ORIGIN}/world/rotations.json` } }),
+      conformance: `${ORIGIN}/world/conformance`, mcp: `${ORIGIN}/mcp`, verify: `${ORIGIN}/world/verify`, stats: `${ORIGIN}/world/stats`, genesis: `${ORIGIN}/world/genesis.json`, rotations: `${ORIGIN}/world/rotations.json` } }),
     contact: { email: CONTACT_EMAIL, simplex: SIMPLEX_SET ? SIMPLEX : null, security: SECURITY_EMAIL, security_policy: `${ORIGIN}/security.html` },
   };
   put('index.json', JSON.stringify(index, null, 2) + '\n');

@@ -5,18 +5,17 @@ are in [../README.md](../README.md); `npm test` → ALL PASS.
 
 ## Remote (verify only)
 
-What a remote endpoint would expose is `sigelo_verify` alone: no identity, no wallet, nothing that
-holds a key. It ships today as plain HTTP, not as MCP:
+`https://sigelo.io/mcp`: MCP over Streamable HTTP (revision 2026-07-28, also answering the legacy
+`initialize` handshake), stateless, JSON responses only, one tool — this server's `sigelo_verify`,
+the same definition and result. No identity, no wallet, nothing that holds a key. Add it with
+`claude mcp add --transport http sigelo-remote https://sigelo.io/mcp`, or, in `server.json`, the
+`remotes` entry. Details and limits: [world/README.md](../../world/README.md#remote-mcp).
+The same verifier as plain HTTP:
 
 ```sh
 node -e 'fetch("https://sigelo.io/world/verify",{method:"POST",body:require("fs").readFileSync("bundle.json")}).then(r=>r.text()).then(console.log)'
 ```
 
 The answer is the §9.1 result (200), or `{"error": "REJECT: …"}` (422); the body may be a bare bundle
-or `{bundle, now}`. It runs the same `verify` from `ts/` as this server (world/README.md). An
-agent never needs it: the same result comes offline from this server's `sigelo_verify`, from
-`sigelo-verify`, or from any implementation that passes the vectors.
-
-Remote MCP (streamable HTTP at `/mcp`) waits until it can be a short wrapper over the official MCP
-SDK; this package deliberately has no dependencies, and a hand-written transport is not worth the
-surface for one read-only tool.
+or `{bundle, now}`. An agent never needs either: the same result comes offline from this server's
+`sigelo_verify`, from `sigelo-verify`, or from any implementation that passes the vectors.

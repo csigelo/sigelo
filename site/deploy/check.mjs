@@ -15,7 +15,8 @@
 // noindex, no-store) and is not in the sitemap; HSTS; http:// → https:// and
 // www → apex 301s; when index.json has a `world` block, the world (world/README.md): a §5.2
 // challenge, the whole attest flow with a fixed-seed check agent (the ts library from ts/dist; one
-// subject, idempotent for 24 h) and /world/stats with counts only. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
+// subject, idempotent for 24 h), /world/stats with counts only, /world/conformance refusing an empty
+// body and /mcp answering initialize. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
 //
 // Flags:
 //   --origin URL       what to check (default https://sigelo.io); index.json's URLs are mapped onto it
@@ -172,6 +173,18 @@ else {
   let sj = null; try { sj = JSON.parse(st.body); } catch { /* reported */ }
   ok(st.status === 200 && sj && Number.isInteger(sj.attestations) && Object.keys(sj).join() === 'issuer,ctx,attestations,subjects' && (NODE || st.h.get('cache-control') === 'no-store'),
     `/world/stats: 200, counts only, not cached (got ${show(st)} ${st.body.toString().trim().slice(0, 160)})`);
+  // POST /world/conformance and the remote MCP endpoint (world/mcp.mjs): reachable, refusing and answering as built
+  const postTo = async (url, body, headers = {}) => {
+    try { const r = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(20000) }); return { status: r.status, h: r.headers, text: await r.text() }; }
+    catch (e) { return { status: 0, h: new Headers(), text: '', error: e.cause?.code ?? e.message }; }
+  };
+  const cf = await postTo(wurl(w.conformance ?? `${CANON}/world/conformance`), '');
+  ok(cf.status === 400 && /JSON/.test(cf.text), `/world/conformance: an empty body is 400 (got ${cf.status || cf.error} ${cf.text.trim().slice(0, 100)})`);
+  const mi = await postTo(wurl(w.mcp ?? `${CANON}/mcp`), JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'check.mjs', version: '0' } } }),
+    { accept: 'application/json, text/event-stream', 'content-type': 'application/json' });
+  let mj = null; try { mj = JSON.parse(mi.text); } catch { /* reported */ }
+  ok(mi.status === 200 && mj?.result?.protocolVersion === '2025-11-25' && mj.result.capabilities?.tools && !mi.h.get('mcp-session-id') && (NODE || mi.h.get('cache-control') === 'no-store'),
+    `/mcp initialize: 200, protocolVersion, capabilities.tools, no session, not cached (got ${mi.status || mi.error} ${mi.text.trim().slice(0, 120)})`);
 }
 
 // ---- security.txt -----------------------------------------------------------------------------

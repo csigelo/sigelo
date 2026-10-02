@@ -15,7 +15,8 @@
 #   3. uploads site/deploy/nginx.conf to <webroot>/deploy/ and runs, through sudo, the one root
 #      command the deploy user may run: /usr/local/sbin/sigelo-nginx-apply (allowlist, install,
 #      nginx -t, reload; restores the old file if the test fails). --no-config skips it;
-#   3b. ships the world service (world/server.mjs + the built ts/ library and its two @noble
+#   3b. ships the world service (world/server.mjs, mcp.mjs and conformance.mjs, test-vectors.json
+#      — the bytes the site serves, so the world names the same sha256 — + the built ts/ library and its @noble
 #      dependencies) into <webroot>/world-app (previous kept as world-app.prev) and, once
 #      server-setup.sh --world installed it, restarts it through the deploy user's second and last
 #      sudo command, /usr/local/sbin/sigelo-world-apply (after the nginx step below);
@@ -133,10 +134,10 @@ rsh "set -e; cd $WEBROOT; find dist.new -type d -exec chmod 755 {} +; find dist.
 step "3b/4 the world service → $target:$WEBROOT/world-app (previous kept as world-app.prev)"
 run sh -c "cd '$root/ts' && npx tsc"
 stage=${TMPDIR:-/tmp}/sigelo-world-app.$$
-printf '+ stage world/server.mjs, ts/package.json, ts/dist/*.js (no tests), ts/node_modules/@noble in %s\n' "$stage"
+printf '+ stage world/{server,mcp,conformance}.mjs, test-vectors.json, ts/package.json, ts/dist/*.js (no tests), ts/node_modules/@noble in %s\n' "$stage"
 if [ "$dry" = 0 ]; then
   rm -rf "$stage"; mkdir -p "$stage/world" "$stage/ts/dist" "$stage/ts/node_modules"
-  cp "$root/world/server.mjs" "$stage/world/"; cp "$root/ts/package.json" "$stage/ts/"
+  cp "$root/world/server.mjs" "$root/world/mcp.mjs" "$root/world/conformance.mjs" "$stage/world/"; cp "$root/test-vectors.json" "$stage/"; cp "$root/ts/package.json" "$stage/ts/"
   for f in "$root"/ts/dist/*.js; do case ${f##*/} in test.js|gen_vectors.js) ;; *) cp "$f" "$stage/ts/dist/" ;; esac; done
   cp -R "$root/ts/node_modules/@noble" "$stage/ts/node_modules/"
   # the same hash sigelo-world-apply logs for the code it installs: the two must match

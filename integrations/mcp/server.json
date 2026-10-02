@@ -44,5 +44,11 @@
         }
       ]
     }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://sigelo.io/mcp"
+    }
   ]
 }

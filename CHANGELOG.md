@@ -5,6 +5,18 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased — 2026-10-02, the site cut to the bone, and visits counted
 
+- **Conformance attestations and remote MCP (`4088ce2`).** `POST /world/conformance` takes an agent's challenge
+  answer plus the summary `sigelo-verify --conformance --impl` printed; the world checks the vectors are the ones
+  it serves and the summary is a clean run of all their cases, then issues a 90-day attestation in ctx
+  `sigelo.io/conformance` with `claims.conformance {implementation, vectors, passed, total, self_reported: true,
+  runner}`. The world ran nothing and the claim says so; an attestation from a run we do ourselves is the later,
+  paid product. `https://sigelo.io/mcp` is MCP over Streamable HTTP (revision 2026-07-28, also answering the
+  legacy `initialize` handshakes), written by hand with no dependencies: stateless, JSON responses only, one
+  tool, `sigelo_verify` — no identity, no wallet, no key. `server.json` lists it as a `remotes` entry. 67 world
+  checks, inspector `tools/call` live.
+- **Hermes proposal drafted, not posted (`1cbfaf6`).** A feature request for one generic hook, a pluggable A2A peer
+  authenticator; sigelo would ship as a standalone plugin per their contributing rules.
+
 - **Accepting a sigelo identity is two functions (`accept/`, `3d741c6`).** Drop-ins for node (on the `sigelo`
   library, 28 lines), Python (`cryptography` plus `sigelo-verify`, or opt-in `SIGELO_VERIFY=https://sigelo.io/world/verify`
   for zero install, 41 lines) and Go (on the reference verifier, 53 lines): `challenge(did, ctx)` issues a
