@@ -4,8 +4,10 @@
 # from a sigelo checkout with ts/ built (cd ts && npm ci && npx tsc).
 #
 #   install-root.sh --agent-user USER --config gate.json [--gate-user sigelo-gate] [--prefix DIR]
-#                   [--rule FILE] [--no-managed]
+#                   [--rule FILE] [--no-managed] [--i-accept-user-writable-claude]
 #   install-root.sh --uninstall --agent-user USER [--gate-user sigelo-gate] [--prefix DIR] [--rule FILE]
+#   install-root.sh --check-claude --agent-user USER [--claude PATH] [--agent-home DIR]   (no root needed
+#                   when USER is you): list the paths through which USER can replace the claude binary
 #
 # Result (paths under --prefix, default /):
 #   /usr/local/lib/sigelo-gate/       gate code, ts/dist and @noble, the gate-state wrapper   root:root, read-only
@@ -14,13 +16,17 @@
 #   /etc/doas.d/sigelo-gate.conf      (doas) or /etc/sudoers.d/sigelo-gate (sudo): USER may run the wrapper,
 #                                     with no arguments, as GATE_USER, and nothing else
 #   /etc/claude-code/managed-settings.json   the hooks, merged into any existing file           root:root 0644
+#                                     plus env DISABLE_AUTOUPDATER=1 and DISABLE_UPDATES=1 (left on uninstall)
+# It refuses to install while the agent's user can replace `claude` itself (a per-user, self-updating
+# install: ~/.local/bin/claude, ~/.local/share/claude, ~/.claude/local, a user npm prefix), because a
+# granted shell could swap in a build that ignores hooks; --i-accept-user-writable-claude overrides.
 # Managed settings rank above every user, project, local and --settings file and their hooks cannot be
 # switched off from below (disableAllHooks there does not reach managed hooks). --prefix writes the
 # managed file under DIR too, which Claude Code does not read: that is for tests.
 set -eu
 die() { echo "install-root: $*" >&2; exit 1; }
 SRC=$(cd "$(dirname "$0")/../.." && pwd)
-AGENT='' CONFIG='' GU=sigelo-gate P='' RULE='' MANAGED=1 UNINSTALL=0
+AGENT='' CONFIG='' GU=sigelo-gate P='' RULE='' MANAGED=1 UNINSTALL=0 CHECK=0 ACCEPT=0 CLAUDE_BIN='' AH=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --agent-user) AGENT=$2; shift ;;
@@ -30,12 +36,53 @@ while [ $# -gt 0 ]; do
     --rule) RULE=$2; shift ;;
     --no-managed) MANAGED=0 ;;
     --uninstall) UNINSTALL=1 ;;
+    --check-claude) CHECK=1 ;;
+    --i-accept-user-writable-claude) ACCEPT=1 ;;
+    --claude) CLAUDE_BIN=$2; shift ;;
+    --agent-home) AH=$2; shift ;;
     *) die "unknown argument $1" ;;
   esac
   shift
 done
-[ "$(id -u)" = 0 ] || die 'run as root'
 [ -n "$AGENT" ] && id "$AGENT" >/dev/null 2>&1 || die '--agent-user must name an existing user'
+as_agent() { if [ "$(id -un)" = "$AGENT" ]; then sh -c "$1"; else su -s /bin/sh "$AGENT" -c "$1"; fi; }
+# Every existing path that decides which `claude` runs, and that the agent's user owns or can write
+# (the file, or any directory above it: a writable directory lets it rename and replace the file).
+# A sticky directory (/tmp) counts only for the entry itself, as in gate.mjs's layout check.
+claude_resolve() { # in the main shell, so claude_remedy sees the result
+  [ -n "$AH" ] || AH=$(awk -F: -v u="$AGENT" '$1 == u { print $6 }' /etc/passwd)
+  [ -n "$CLAUDE_BIN" ] || CLAUDE_BIN=$(as_agent 'PATH=$(sh -lc "echo \$PATH" 2>/dev/null || echo "$PATH"); command -v claude' 2>/dev/null || true)
+}
+claude_writable() {
+  for p in "$CLAUDE_BIN" "$(readlink -f "$CLAUDE_BIN" 2>/dev/null)" "$AH/.local/bin/claude" "$AH/.local/share/claude" "$AH/.claude/local"; do
+    [ -n "$p" ] && { [ -e "$p" ] || [ -L "$p" ]; } || continue
+    d=$p first=1
+    while :; do
+      if [ "$(stat -c %U "$d")" = "$AGENT" ] || { as_agent "test -w '$d'" 2>/dev/null && { [ $first = 1 ] || [ ! -k "$d" ]; }; }; then
+        echo "$p (via $d)"; break
+      fi
+      [ "$d" = / ] && break; d=$(dirname "$d") first=0
+    done
+  done | awk '!seen[$0]++'
+}
+claude_remedy() {
+  cat >&2 <<EOT
+  A granted shell can replace that binary with a build that skips hooks or ignores managed settings, so
+  the gate is only as strong as it. Remedy, as root (the agent's user must not own or write any of it):
+    install -o root -g root -m 0755 "\$(readlink -f "$CLAUDE_BIN")" /usr/local/bin/claude
+    rm -rf $AH/.local/bin/claude $AH/.local/share/claude $AH/.claude/local
+    and make /usr/local/bin come first in the agent's PATH.
+  This installer also puts env DISABLE_AUTOUPDATER=1 (no background self-update) and DISABLE_UPDATES=1
+  (no \`claude update\`) into managed settings; update by re-running the install line above as root.
+  To install anyway: --i-accept-user-writable-claude.
+EOT
+}
+if [ "$CHECK" = 1 ]; then
+  claude_resolve; W=$(claude_writable)
+  [ -z "$W" ] && { echo "install-root: no path to claude is writable by $AGENT"; exit 0; }
+  echo "install-root: $AGENT can replace claude through:" >&2; echo "$W" | sed 's/^/  /' >&2; claude_remedy; exit 1
+fi
+[ "$(id -u)" = 0 ] || die 'run as root'
 [ "$AGENT" != root ] || die 'the agent must not run as root'
 case "$GU" in *[!a-z0-9_-]*|'') die '--gate-user: lower-case letters, digits, _ and - only' ;; esac
 NODE=$(command -v node) || die 'node not found'
@@ -54,18 +101,22 @@ fi
 # Hook command: absolute paths, an empty environment (no NODE_OPTIONS, no PATH games), and any failure
 # to run (node or gate.mjs missing, a crash) becomes exit 2, which blocks: Claude Code treats exit 1 as
 # a non-blocking error and would let the call through.
-HOOKCMD="/usr/bin/env -i $NODE $GATE --config $CONF || exit 2"
+# SessionStart and Stop cannot block (Stop's exit 2 would keep Claude working), so they get the plain line.
+# Two of Claude Code's own variables pass through, for kill_orphans (gate.mjs checks CLAUDE_PID is an ancestor).
+HOOKCMD="/usr/bin/env -i CLAUDE_PID=\"\$CLAUDE_PID\" CLAUDE_CODE_SESSION_ID=\"\$CLAUDE_CODE_SESSION_ID\" $NODE $GATE --config $CONF"
 merge() { # $1 = add | remove; edits $MSET, keeping everything that is not ours
   "$NODE" -e '
     const fs = require("fs"), [f, mode, cmd, ours] = process.argv.slice(1);
     const s = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : {};
     s.hooks ??= {};
-    for (const ev of ["UserPromptSubmit", "UserPromptExpansion", "PreToolUse", "PostToolUse", "PostToolUseFailure"]) {
+    for (const ev of ["SessionStart", "UserPromptSubmit", "UserPromptExpansion", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]) {
       const kept = (s.hooks[ev] ?? []).filter((m) => !(m.hooks ?? []).some((h) => String(h.command).includes(ours)));
-      s.hooks[ev] = mode === "add" ? [...kept, { hooks: [{ type: "command", command: cmd, timeout: 10 }] }] : kept;
+      const c = ["SessionStart", "Stop"].includes(ev) ? cmd : cmd + " || exit 2";
+      s.hooks[ev] = mode === "add" ? [...kept, { hooks: [{ type: "command", command: c, timeout: 10 }] }] : kept;
       if (!s.hooks[ev].length) delete s.hooks[ev];
     }
     if (!Object.keys(s.hooks).length) delete s.hooks;
+    if (mode === "add") s.env = { ...s.env, DISABLE_AUTOUPDATER: "1", DISABLE_UPDATES: "1" };
     fs.writeFileSync(f + ".tmp", JSON.stringify(s, null, 2) + "\n", { mode: 0o644 }); fs.renameSync(f + ".tmp", f);
   ' "$MSET" "$1" "$HOOKCMD" "$GATE"
 }
@@ -78,6 +129,12 @@ if [ "$UNINSTALL" = 1 ]; then
 fi
 
 [ -f "$CONFIG" ] || die '--config must name the gate.json to install (agent, operators)'
+claude_resolve; W=$(claude_writable)
+if [ -n "$W" ]; then
+  echo "install-root: $AGENT can replace claude through:" >&2; echo "$W" | sed 's/^/  /' >&2
+  [ "$ACCEPT" = 1 ] || { claude_remedy; die 'refusing to install (see above)'; }
+  echo "install-root: continuing anyway (--i-accept-user-writable-claude)" >&2
+fi
 [ -f "$SRC/ts/dist/sigelo.js" ] && [ -d "$SRC/ts/node_modules/@noble" ] || die "build ts first: cd $SRC/ts && npm ci && npx tsc"
 
 # 1. the gate's own user: no login, no home, owns only the state
@@ -116,8 +173,3 @@ if [ "$MANAGED" = 1 ]; then merge add; chown root:root "$MSET"; chmod 644 "$MSET
 
 echo "install-root: installed ($KIND rule $RULE, state writer user $GU, agent user $AGENT)"
 [ "$MANAGED" = 1 ] && echo "install-root: hooks in $MSET — restart Claude Code; /status names the managed source"
-CL=$(su -s /bin/sh "$AGENT" -c 'command -v claude' 2>/dev/null || true)
-if [ -n "$CL" ] && su -s /bin/sh "$AGENT" -c "test -w \"\$(readlink -f '$CL')\"" 2>/dev/null; then
-  echo "install-root: WARNING: $CL is writable by $AGENT (a self-updating user install). A granted shell can" >&2
-  echo "  replace it with a build that skips hooks. Install Claude Code root-owned and disable the auto-updater." >&2
-fi

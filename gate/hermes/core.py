@@ -10,6 +10,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey  
 
 CTX, LINE, SKEW = 'sigelo/instruction', 'sigelo-instruction: ', 60
 MCP_WRITE = 'write|edit|create|delete|remove|update|insert|set|execute|exec|run|send|post|put|push|commit|merge|move|rename|upload|deploy|install|kill|pay|transfer'  # = gate.mjs
+# Hermes tool names as its registry has them (tools/*.py registry.register(name=…), checked 2026-10-01): tools that
+# run commands or code, drive a process, browser or desktop, write files, delegate, schedule later runs, or persist
+# text that later sessions read as instructions (skills, memory). Every other tool's result taints (DESIGN §6).
+HERMES_PRIVILEGED = ['terminal', 'process_manage', 'execute_code', 'write_file', 'patch', 'delegate_task', 'cronjob_manage',
+                     'browser_exec', 'browser_cdp', 'computer_use', 'skill_manage', 'memory',
+                     'browser_vault_fill', 'browser_vault_enter_code', 'browser_vault_save_login', 'browser_vault_unlock']
 ATT_KEYS = ['admission', 'claims', 'ctx', 'exp', 'iat', 'iss', 'sub', 'typ', 'v']
 GEN_KEYS = ['created', 'key', 'nonce', 'recovery', 'typ', 'v']
 A2A_FRAME = re.compile(r'^\[A2A inbound — message from a remote agent peer named .*?\]\n\n', re.S)
@@ -36,11 +42,11 @@ def load_config(path=None):
         ops[did_of(g)] = g
     if not ops: raise ValueError('config: pin at least one operator genesis')
     return {'agent': c['agent'], 'operators': ops, 'max_ttl': c.get('max_ttl', 600),
-            'privileged': c.get('hermes_privileged', ['terminal', 'write_file', 'patch', 'execute_code', 'delegate_task']),
+            'privileged': c.get('hermes_privileged', HERMES_PRIVILEGED),
             # an MCP tool (mcp_<server>_<tool>) whose name says it changes something is privileged unless allowlisted
             'mcp_write': re.compile(c.get('mcp_write_pattern', MCP_WRITE), re.I), 'mcp_allow': c.get('hermes_mcp_allow', []),
             # every tool result taints an open grant except these (their result is Hermes' own confirmation)
-            'taint_exempt': c.get('hermes_taint_exempt', ['write_file', 'patch', 'todo']),
+            'taint_exempt': c.get('hermes_taint_exempt', ['write_file', 'patch', 'todo_list', 'todo']),
             'platforms': c.get('hermes_platforms', ['a2a']),
             'data_tools': c.get('hermes_data_tools', ['a2a_call', 'a2a_orchestrate', 'a2a_history'])}
 

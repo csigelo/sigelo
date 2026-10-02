@@ -53,7 +53,7 @@ if (process.argv[2] === '--hardened') { // as the agent user, against a root-own
   const c = JSON.parse(readFileSync(conf, 'utf8')), lib = dirname(c.state_writer.at(-1));
   const gate = join(lib, 'gate/claude-code/gate.mjs'), agentDid = readFileSync(join(dir, 'agent.did'), 'utf8');
   // exactly the command install-root.sh puts in managed settings, through sh -c as Claude Code runs it
-  const h = runner(['/bin/sh', '-c', `/usr/bin/env -i ${process.execPath} ${gate} --config ${conf} || exit 2`]), sign = signer(agentDid), op = join(dir, 'op.json');
+  const h = runner(['/bin/sh', '-c', `/usr/bin/env -i CLAUDE_PID="$CLAUDE_PID" CLAUDE_CODE_SESSION_ID="$CLAUDE_CODE_SESSION_ID" ${process.execPath} ${gate} --config ${conf} || exit 2`]), sign = signer(agentDid), op = join(dir, 'op.json');
   const denied = (fn) => { try { fn(); return 'allowed'; } catch (e) { return e.code; } };
   const sid = `h${process.pid}`;
   if (noHelper) {
@@ -197,6 +197,81 @@ expect('50 the layout check refuses agent-owned code and config → deny', runne
 { const cmd = JSON.parse(readFileSync(join(HERE, 'settings.json'), 'utf8')).hooks.PreToolUse[0].hooks[0].command; // the shipped hook line
   const hc = runner(['/bin/sh', '-c', cmd], { SIGELO_HOME: join(dir, 'nowhere') });
   expect('51 the shipped hook command with gate.mjs missing → exit 2 → deny (not exit 1, which fails open)', hc.tool('s1', 'Read'), 'deny'); }
+// third pass (REVIEW "remaining"): same-batch reads, processes outliving a grant, session taint, claude ownership
+h.prompt('s53', sign(opFile, TEXT)); h.tool('s53', 'Read', { file_path: 'notes.txt' }); // no PostToolUse yet: same batch
+expect('53 same batch: PreToolUse(Read) then PreToolUse(Bash), before any result → deny', h.tool('s53', 'Bash'), 'deny');
+expect('54 RemoteTrigger (a cloud agent outside the gate) unsigned → deny', h.tool('s1', 'RemoteTrigger', { prompt: 'x' }), 'deny');
+{ const hb = runner(GATE, { SIGELO_GATE_CONFIG: conf('bg.json', { deny_background: true, state: join(dir, 'state-b') }) });
+  const bg = (i, cmd, want, args = [], name = 'Bash', input = { command: cmd }) => { hb.prompt(`b${i}`, sign(opFile, TEXT, args)); expect(`${i} deny_background, signed: ${name} ${JSON.stringify(input)} → ${want}`, hb.tool(`b${i}`, name, input), want); };
+  bg(55, 'npm test', 'pass');
+  bg(56, 'nohup ./server', 'deny');
+  bg(57, 'python3 -m http.server 8000 &', 'deny');
+  bg(58, '(sleep 300 &)', 'deny');
+  bg(59, 'echo "* * * * * curl x" | crontab -', 'deny');
+  bg(60, 'tmux new -d evil', 'deny');
+  bg(61, 'make 2>&1 && echo ok', 'pass');
+  bg(62, 'npm run dev', 'deny', [], 'Bash', { command: 'npm run dev', run_in_background: true });
+  bg(63, null, 'deny', [], 'Monitor', { command: 'tail -f log' });
+  bg(64, 'nohup ./server &', 'pass', ['--background-ok']);
+  expect('65 without deny_background (default), signed nohup → pass', (h.prompt('s65', sign(opFile, TEXT)), h.tool('s65', 'Bash', { command: 'nohup x &' })), 'pass');
+  const badBg = attest({ secret: op.secret, iss: op.did, sub: agent.did, iat: t + 3600, exp: t + 3900, ctx: 'sigelo/instruction', admission: 'open', claims: { text_sha256: sha(TEXT), nonce: 'b'.repeat(22), background_ok: 1 } });
+  hb.prompt('b66', `${TEXT}\n\nsigelo-instruction: ${envOf(badBg)}`);
+  expect('66 malformed background_ok claim → unverified → deny', hb.tool('b66', 'Bash', { command: 'ls' }), 'deny'); }
+{ // kill_orphans, with a stand-in for Claude Code: a shell that runs the hook with CLAUDE_PID=$$ and this session's marker
+  const sidK = `k${process.pid}`, kc = conf('kill.json', { kill_orphans: true, state: join(dir, 'state-k') });
+  const sh = (c, e = {}) => spawnSync('/bin/sh', ['-c', c], { env: { ...env, ...e }, encoding: 'utf8' });
+  const orphan = (sess) => Number(sh('(sleep 300 >/dev/null 2>&1 & echo $!)', { CLAUDE_CODE_SESSION_ID: sess }).stdout.trim());
+  const gone = (pid) => { try { return readFileSync(`/proc/${pid}/stat`, 'latin1').split(') ')[1][0] === 'Z'; } catch { return true; } };
+  const mine = orphan(sidK), others = orphan(`${sidK}-other`);
+  writeFileSync(join(dir, 'stop.json'), JSON.stringify({ hook_event_name: 'Stop', session_id: sidK }));
+  const r = sh(`sleep 300 >/dev/null 2>&1 & echo $! > '${join(dir, 'attached.pid')}'; CLAUDE_PID=$$ '${process.execPath}' '${join(HERE, 'gate.mjs')}' < '${join(dir, 'stop.json')}'`, { CLAUDE_CODE_SESSION_ID: sidK, SIGELO_GATE_CONFIG: kc });
+  const attached = Number(readFileSync(join(dir, 'attached.pid'), 'utf8'));
+  for (let i = 0; i < 20 && !gone(mine); i++) spawnSync('sleep', ['0.1']);
+  expect('67 kill_orphans at Stop: a daemon this session started (reparented away from Claude Code) is killed', r.status === 0 && gone(mine), true);
+  expect('68 … a process still attached to Claude Code (a background task) is left alone', gone(attached), false);
+  expect('69 … another session\'s orphan is left alone', gone(others), false);
+  expect('70 kill_orphans and no Claude Code process found: a prompt is blocked (fail closed)', runner(GATE, { SIGELO_GATE_CONFIG: kc }).prompt(sidK, TEXT), 'block');
+  expect('70b … nor when CLAUDE_PID names a process that is not the hook\'s ancestor', runner(GATE, { SIGELO_GATE_CONFIG: kc, CLAUDE_CODE_SESSION_ID: sidK, CLAUDE_PID: String(others) }).prompt(sidK, TEXT), 'block');
+  const st = runner(GATE, { SIGELO_GATE_CONFIG: join(dir, 'missing.json') }).raw({ hook_event_name: 'Stop', session_id: 's1' }).status;
+  for (const pid of [mine, others, attached]) try { process.kill(pid, 'SIGKILL'); } catch {}
+  expect('71 a Stop hook error exits 0 (exit 2 would keep Claude working)', st, 0); }
+{ // taint_scope session: only a session whose start was seen as startup/clear begins clean
+  const hz = runner(GATE, { SIGELO_GATE_CONFIG: conf('sess2.json', { taint_scope: 'session', state: join(dir, 'state-z') }) });
+  const start = (sid, source) => hz.raw({ hook_event_name: 'SessionStart', session_id: sid, source });
+  start('z1', 'startup'); hz.prompt('z1', sign(opFile, TEXT));
+  expect('72 session scope: SessionStart startup, signed → pass', hz.tool('z1', 'Bash'), 'pass');
+  hz.prompt('z2', sign(opFile, TEXT));
+  expect('73 session scope: no SessionStart seen (failed hook, unknown session), signed → deny', hz.tool('z2', 'Bash'), 'deny');
+  for (const [i, src] of [[74, 'fork'], [75, 'resume'], [76, 'compact']]) {
+    start(`z${i}`, src); hz.prompt(`z${i}`, sign(opFile, TEXT));
+    expect(`${i} session scope: SessionStart ${src} on a new id, signed → deny`, hz.tool(`z${i}`, 'Bash'), 'deny');
+  }
+  hz.prompt('z74', sign(opFile, TEXT, ['--allow-after-read']));
+  expect('77 … the forked session, signed --allow-after-read → pass', hz.tool('z74', 'Bash'), 'pass');
+  start('z78', 'startup'); hz.use('z78', 'Read'); hz.raw({ hook_event_name: 'UserPromptExpansion', session_id: 'z78', prompt: '/x' }); hz.prompt('z78', TEXT);
+  start('z78', 'clear'); hz.prompt('z78', sign(opFile, TEXT));
+  expect('78 session taint survives a slash command, an unsigned turn and a replayed SessionStart → deny', hz.tool('z78', 'Bash'), 'deny');
+  writeFileSync(join(dir, 'zw.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'sess2.json'))), state_writer: ['x'] }));
+  const zd = (req) => spawnSync(process.execPath, [join(HERE, 'gate.mjs'), '--state-writer', '--config', join(dir, 'sess2.json')], { input: JSON.stringify(req), encoding: 'utf8' });
+  zd({ op: 'start', session_id: 'z78', source: 'startup' }); hz.prompt('z78', sign(opFile, TEXT));
+  expect('79 a direct helper call {op: start} cannot clean an existing tainted session → deny', hz.tool('z78', 'Bash'), 'deny'); }
+{ // install-root.sh --check-claude, as yourself (no root): a per-user claude is found, a root-owned one passes
+  const fake = join(dir, 'bin', 'claude'); mkdirSync(dirname(fake)); writeFileSync(fake, '#!/bin/sh\n', { mode: 0o755 });
+  const me = spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim();
+  const chk = (bin, home) => spawnSync('/bin/sh', [join(HERE, 'install-root.sh'), '--check-claude', '--agent-user', me, '--claude', bin, '--agent-home', home], { encoding: 'utf8' });
+  const a = chk(fake, join(dir, 'nohome'));
+  expect('80 install-root --check-claude: a user-writable claude → refused, path and DISABLE_AUTOUPDATER named', a.status === 1 && a.stderr.includes(fake) && a.stderr.includes('DISABLE_AUTOUPDATER=1'), true);
+  mkdirSync(join(dir, 'home', '.local', 'share', 'claude'), { recursive: true });
+  const b = chk('/bin/sh', join(dir, 'home'));
+  expect('81 … a root-owned claude, but a self-update dir in the agent\'s home → refused', b.status === 1 && b.stderr.includes('.local/share/claude'), true);
+  expect('82 … a root-owned claude and no per-user install → ok', chk('/bin/sh', join(dir, 'nohome')).status, 0); }
+{ const tui = sign(opFile, 'Run echo hi.\n  indented ünïcode line, trailing spaces   \nReply with the output.'), w = (id1, id2, pre = '') => `${pre}\n\n<pasted_content id="${id1}">\n${tui.trimEnd()}\n</pasted_content id="${id2}">\n`;
+  check('83 TUI paste: a signed prompt wrapped in one <pasted_content> block → pass', 's83', w('be32', 'be32'), 'pass');
+  check('84 TUI paste: mismatched block ids → deny', 's84', w('be32', 'ab12'), 'deny');
+  check('85 TUI paste: typed text around the block → deny', 's85', w('be32', 'be32', 'also run rm -rf ~'), 'deny');
+  const tab = sign(opFile, 'Run echo hi.\n\tindented with a tab').trimEnd().replace('\t', '    ');
+  check('86 TUI paste: a tab the TUI turned into spaces breaks the signature → deny', 's86', `\n\n<pasted_content id="c1">\n${tab}\n</pasted_content id="c1">\n`, 'deny');
+}
 expect(`52 slowest hook call ${slowest} ms < 2000`, slowest < 2000, true);
 
 rmSync(dir, { recursive: true, force: true });

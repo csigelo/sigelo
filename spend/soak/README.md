@@ -37,11 +37,12 @@ to one derived from `spend.key`. So a soak keyed from `164b8c4` on can recover i
 `keys/S.hex` alone: `sigelo-offline recover --genesis keeper/identity.json - --new-keeper 1 <
 keys/S.hex > keeper.recovered.json`, then `sigelo-spend init --adopt keeper.recovered.json` on the
 new keeper directory (`gen-keys.test.mjs` runs the recover line). The licence `gen-keys.mjs`
-issues names that DID. **The LIVE soak is not one of them**: its keeper was keyed before
-`identity.json` (a `spend.key`, no `identity.json`), so it keeps its legacy DID, whose recovery
+issues names that DID. The live soak is one of them since drill 2 (incident #6, 2026-10-02),
+which ran the recover line on it offline and verified the result. A soak keyed before `164b8c4`
+(a `spend.key`, no `identity.json`; the two burnt directories) keeps its legacy DID, whose recovery
 derives from `spend.key` — abandoned, not recovered, after a compromise; `gen-keys.mjs policy`
 and `check` say so, and never add an `identity.json` to it (that would change the DID its licence
-names). Nothing to do now; the next rekey into a new soak directory gets a recoverable keeper.
+names).
 
 **Daemons.** The wallet-rpc unit starts on `node.monerodevs.org:38089`; the keeper's
 `SIGELO_DAEMONS` lists it first, then `node2.monerodevs.org:38089`, `xmr-lux.boldsuck.org:38081`
@@ -186,9 +187,10 @@ also refuses to overwrite a `keys/approver.json` whose DID it would not derive n
 **Day 0** is `started` in `soak-stats.json`, written by the agent's first tick in that soak
 directory; `check.mjs` prints it as `uptime … since <started>`, and the "once the soak is 2 h old"
 rule below counts from it. The soak keyed 2026-09-23 (day 0 19:48:36Z) ended in the T14
-rehearsal (incident #5) and is evidence now; the current soak is a new directory on REVISION
-c2c9cdc, keeper live 2026-10-01 13:56:27Z, `started` 14:00:16Z (its first tick). Its day 7 is
-2026-10-08, and the 14 days of T6 count again from there.
+rehearsal (incident #5) and is evidence now; so is its successor (c2c9cdc/9516622, day 0
+2026-10-01 14:00:16Z), ended by drill 2 (incident #6). The current soak is a new directory on
+REVISION 7ba0c4e (code = c929667), keeper live 2026-10-02 18:46:08Z, `started` at its first tick
+(`soak-stats.json`); the 14 days of T6 count from there.
 
 `check.mjs` prints `HEALTHY` when the keeper and the timer are active, a tick ran in the last
 hour, no command was UNCERTAIN, every `spend.log` line verifies under the keeper key (derived
@@ -414,6 +416,21 @@ word. *Fix* (spend/, takes effect at the next redeploy of `app/`): builds wait 1
 LATER: the wallet is still working on that payment (a slow network); nothing was sent. Run the
 same command in a few minutes.` The agent's `try_later/*` tolerance covers it unchanged.
 
+**#6 — 2026-10-02: drill 2, a keeper rekey with `freeze.sh` (its first real use).** Soak 9516622
+(day 0 10-01 14:00:16Z, 57 ticks), repo c929667; the wallet-rpc was kept up and reused (step 2.4).
+*Durations* (UTC): detect 18:22:04 → **frozen 18:22:10 (6 s**; drill 1: 1 min 41 s) → last sweep
+18:24:04 (2 min 00 s; no clean-host refresh here) → vault spendable 18:43:54 → new keeper live
+18:46:08 (24 min 04 s) → first payment 19:31:36 (tick 2, 1 h 09 min 32 s). *freeze.sh*: every
+assertion held: keeper failed, NRestarts 0, `spend.lock` kept and byte-identical, nothing restarted
+by tick 58 (18:30Z, TRY LATER `unreachable`, no crash, `balance` still counted a MISMATCH).
+*Funds*: 0.0736367 → vault in one priority-2 sweep (0.07195224, fee 0.00163608 = 2.2 %, 0.00004838
+dust left) → back in one `transfer_split` to 8 outputs (0.07182776, fee 0.00011316); tick 2 paid
+bob, carol rent 1 and the delegate funding in the same tick (drill 1: one output, rent 1 abandoned).
+*Recovery*: the new keeper (keyed at HEAD, `identity.json`, pro) recovered offline from `keys/S.hex`
+with `recover --new-keeper 1`; the Go verifier accepted the bundle, the stolen `spend.key` is refused.
+*Findings*: a leftover `serve --dry-run` from an earlier test, on a copy of the policy, still took the
+root token after the freeze (killed; step 2.5 now checks); `freeze.sh` cannot spare the wallet-rpc.
+
 ## Incident rehearsal (T14) — ran 2026-10-01; next drill: quarterly
 
 Walks INCIDENT.md (repo root) case (b) end to end on this soak. It ends this keeper directory for good.
@@ -464,13 +481,19 @@ it). Paste its output into the timeline: every step prints its UTC time.
    stops and names the fallback (`systemctl --user stop`, which deletes the lock; the evidence
    copy has it).
 4. The wallet-rpc: `systemctl --user stop` (a clean stop saves the wallet file), asserted down.
+   A drill that reuses the wallet and sweeps from it in place keeps it up. `freeze.sh` has no
+   switch for that; drill 2 set `SIGELO_FREEZE_WALLET_UNIT` to a unit that does not exist
+   (`show` says `Restart=no`, `inactive`, so the checks pass and the stop is skipped).
 5. **Revoke-all by killing:** `. env.sh; sigelo-wallet balance` → `TRY LATER: the wallet service
    is not answering.` Then the live delegate's token from `state.json` `delegate`, **if one is
    live**: the agent creates the day's delegate at ~00:02Z and revokes it about an hour later, so
    outside that hour there is none. Record "none live": that is a valid outcome, and the root
    proof shows the same thing (no process accepts any token). The next agent tick must log TRY
-   LATERs, not crash (6df3b67's agent counted the unreachable `balance` as a MISMATCH). Nothing else
-   accepts the tokens: that is the whole of revoke-all today (INCIDENT §2).
+   LATERs, not crash; it still counts the unreachable `balance` as a MISMATCH (6df3b67 and 9516622
+   alike: an unreachable keeper with a moving height is not an outage tick). Nothing else should
+   accept the tokens: check it, `pgrep -af 'cli.js serve'` must show nothing. Drill 2 found a
+   leftover `serve --dry-run` on a copy of the policy that took the root token; `freeze.sh` kills
+   only the pid in `spend.lock`. That is the whole of revoke-all today (INCIDENT §2).
 
 **3. Sweep to the vault** (the "clean host": a separate wallet dir on tmpfs, another port):
 
@@ -506,11 +529,12 @@ drill, reuse the stagenet wallet, in this order:
    --rpc-bind-ip 127.0.0.1 --rpc-bind-port 38086 --disable-rpc-login --no-initial-sync --log-file
    ~/drill/vault/rpc.log`; not 38085, which the spend suite's interop test binds), then `refresh
    {start_height: <tip at step 0>}`, `sweep_all {address: <allowance address>}`, record the txid,
-   stop it. Expect the sweep-back to land as **one** output. Until change multiplies, each payment
-   on the new keeper then locks the whole balance for 10 blocks (~20 min), bob goes first every
-   tick, and carol's first rent may be `abandoned` (a MISMATCH that is the drill's doing). Not tried
-   yet: `transfer_split` to several destinations that are all the allowance address (e.g. 8 equal
-   parts) instead of one `sweep_all`.
+   stop it. A `sweep_all` lands as **one** output: until change multiplies, each payment on the new
+   keeper then locks the whole balance for 10 blocks (~20 min), bob goes first every tick, and
+   carol's first rent may be `abandoned` (a MISMATCH that is the drill's doing). Instead (drill 2):
+   `transfer_split` with 8 destinations that are all the allowance address, each (balance − fee −
+   headroom) / 8, the fee from a first `do_not_relay: true` build: one tx, 8 outputs, fee
+   0.00011316; the headroom stays in the vault as change.
 2. `sh spend/soak/unfreeze.sh` (removes the drop-ins, enables both units; it refuses while the
    frozen `policy.json` is still at `$SIGELO_SOAK_DIR`), then `systemctl --user start
    monero-wallet-rpc-stagenet`: `setup.sh` (`gen-keys.mjs policy`) asks the wallet-rpc, so it must

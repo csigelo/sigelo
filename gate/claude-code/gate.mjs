@@ -9,14 +9,17 @@
 //                        tool whose result can carry outside text taints the grant BEFORE it runs
 //                        (if the taint cannot be recorded, that tool is denied).
 //   PostToolUse(Failure) web and MCP results are labelled as DATA; the taint is recorded again.
-// State is written either in-process (user-level install) or, hardened (DESIGN §7), only through the
+//   SessionStart         taint_scope "session": a resumed, forked or compacted session starts tainted.
+//   Stop                 kill_orphans: processes this session's tools started that left Claude Code's
+//                        process tree (daemons) are killed at turn end (HARDENING.md §2).
+// State is written either in-process (user-level install) or, hardened (HARDENING.md §1), only through the
 // `state_writer` helper, which runs as another user and re-verifies everything it is asked to record.
 //   gate.mjs [--config <gate.json>]                   the hook (stdin: hook JSON)
 //   gate.mjs --state-writer --config <gate.json>      the helper's entry point (stdin: one request)
 // Config: --config, else $SIGELO_GATE_CONFIG, else ~/.config/sigelo-gate/gate.json. Offline; no network.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,11 +33,18 @@ const now = () => Math.floor(Date.now() / 1000);
 const clean = (s) => String(s).replace(/[^\w :./'-]/g, '?').slice(0, 160); // a reason can quote attacker text (iss)
 const arg = (k) => { const i = process.argv.indexOf(k); return i < 0 ? undefined : process.argv[i + 1]; };
 
-export const PRIVILEGED = ['Bash', 'Monitor', 'PowerShell', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent'];
-// An MCP tool whose name says it changes something is privileged unless allowlisted (a heuristic: DESIGN §4).
+// RemoteTrigger starts a cloud agent, outside this machine and this gate: privileged like a subagent.
+export const PRIVILEGED = ['Bash', 'Monitor', 'PowerShell', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent', 'RemoteTrigger'];
+// An MCP tool whose name says it changes something is privileged unless allowlisted (a heuristic: HARDENING.md §4).
 export const MCP_WRITE = 'write|edit|create|delete|remove|update|insert|set|execute|exec|run|send|post|put|push|commit|merge|move|rename|upload|deploy|install|kill|pay|transfer';
 // Tools whose result is only the harness's own confirmation: they do not taint. Everything else does.
 export const TAINT_EXEMPT = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'TodoWrite'];
+// deny_background (HARDENING.md §2): shell commands that look like they start something outliving the turn.
+// A regex over the command text: it over-matches (a URL with `&`, `at` as a word) and misses anything
+// spelled indirectly (a script, `eval`, base64). Monitor and run_in_background are background by design.
+export const BACKGROUND = '\\b(nohup|setsid|disown|systemd-run|crontab|start-stop-daemon|daemonize)\\b'
+  + '|(^|[;&|(\\n`]|\\$\\()\\s*((sudo|doas|exec|command|env)\\s+)*(at|batch|screen|tmux)\\b'
+  + '|(^|[^&|>])&(?![&>])';
 
 export function loadConfig(path = arg('--config') ?? process.env.SIGELO_GATE_CONFIG ?? join(homedir(), '.config/sigelo-gate/gate.json')) {
   const c = parseBytes(readFileSync(path));
@@ -45,6 +55,7 @@ export function loadConfig(path = arg('--config') ?? process.env.SIGELO_GATE_CON
   const w = c.state_writer;
   if (w !== undefined && !(Array.isArray(w) && w.length && w.every((x) => typeof x === 'string'))) throw new Error('config: state_writer must be an argv list');
   if (![undefined, 'turn', 'session'].includes(c.taint_scope)) throw new Error('config: taint_scope is "turn" or "session"');
+  for (const k of ['kill_orphans', 'deny_background']) if (![undefined, true, false].includes(c[k])) throw new Error(`config: ${k} is true or false`);
   return {
     path, agent: c.agent, operators, max_ttl: c.max_ttl ?? 600,
     privileged: c.privileged ?? PRIVILEGED,
@@ -53,6 +64,8 @@ export function loadConfig(path = arg('--config') ?? process.env.SIGELO_GATE_CON
     label: c.label ?? ['WebFetch', 'WebSearch', 'mcp__*'],
     state: c.state ?? join(homedir(), '.local/state/sigelo-gate'),
     state_writer: w ?? null, layout_check: c.layout_check ?? w !== undefined,
+    kill_orphans: c.kill_orphans ?? false, deny_background: c.deny_background ?? false,
+    background: new RegExp(c.background_pattern ?? BACKGROUND),
   };
 }
 
@@ -64,6 +77,11 @@ export const taints = (cfg, tool) => listed(cfg.taint, tool) && !listed(cfg.tain
 
 /** Trailing spaces, tabs, CR and LF only (not JS trimEnd's Unicode set), the same in sign.mjs and core.py. */
 export const rtrim = (s) => s.replace(/[ \t\r\n]+$/, '');
+/** The interactive TUI (2.1.284, live) hands a pasted prompt to UserPromptSubmit as `\n\n<pasted_content id="x">\n…
+ *  \n</pasted_content id="x">\n`, with tabs turned into spaces. Only a prompt that is exactly one such block is
+ *  unwrapped; anything typed around it leaves the prompt as is, so it does not verify. */
+const PASTE = /^[\r\n]*<pasted_content id="([\w-]{1,32})">\n([\s\S]*)\n<\/pasted_content id="\1">$/;
+export const unpaste = (prompt) => rtrim(prompt).match(PASTE)?.[2] ?? prompt;
 /** Split a prompt into (text, envelope string | null). The envelope is the LAST line. */
 export function split(prompt) {
   const lines = rtrim(prompt).split('\n'), last = lines.at(-1);
@@ -92,6 +110,7 @@ export function verifyInstruction(text, env, cfg, t = now()) {
   if (typeof c.nonce !== 'string' || c.nonce.length < 16 || c.nonce.length > 64) throw new Error('nonce missing');
   if (c.tools !== undefined && !names(c.tools)) throw new Error('tools must be a list of names');
   if (c.taint_ok !== undefined && c.taint_ok !== true && !names(c.taint_ok)) throw new Error('taint_ok must be true or a list of names');
+  if (c.background_ok !== undefined && c.background_ok !== true) throw new Error('background_ok must be true');
   return b;
 }
 
@@ -138,8 +157,15 @@ function readState(cfg, sid) {
 export function applyOp(cfg, req) {
   const sid = req?.session_id;
   if (typeof sid !== 'string' || !sid || sid.length > 200) throw new Error('request needs a session_id');
-  const s = read(cfg, sid, {}), keep = s.session_tainted ? { session_tainted: s.session_tainted } : {};
+  const fresh = !existsSync(file(cfg, sid)), s = read(cfg, sid, {});
+  const keep = { ...(s.session_clean && { session_clean: true }), ...(s.session_tainted && { session_tainted: s.session_tainted }) };
   if (req.op === 'close') { write(cfg, sid, keep); return { ok: true }; }
+  if (req.op === 'start') { // taint_scope "session": only a brand-new session id can be marked clean, never an existing one
+    if (cfg.taint_scope !== 'session' || !fresh) return { ok: true };
+    const src = String(req.source ?? '?').replace(/[^a-z]/g, '').slice(0, 20);
+    write(cfg, sid, ['startup', 'clear'].includes(src) ? { session_clean: true } : { session_tainted: `session ${src}` });
+    return { ok: true };
+  }
   if (req.op === 'taint') {
     const tool = String(req.tool ?? '?').slice(0, 120);
     const n = { ...s };
@@ -149,7 +175,9 @@ export function applyOp(cfg, req) {
     return { ok: true };
   }
   if (req.op !== 'prompt') throw new Error('unknown op');
-  const { text, env } = split(String(req.prompt ?? ''));
+  // session scope: a session whose start was not seen (a fork, a resume, a failed SessionStart) may hold read text
+  if (cfg.taint_scope === 'session' && !keep.session_clean && !keep.session_tainted) keep.session_tainted = 'session start not seen';
+  const { text, env } = split(unpaste(String(req.prompt ?? '')));
   write(cfg, sid, keep); // a new turn closes any earlier grant first
   if (env === null) return { ok: true, msg: null };
   let b;
@@ -160,7 +188,7 @@ export function applyOp(cfg, req) {
   if (seen[b.claims.nonce]) return { ok: true, msg: 'sigelo-gate: this signed instruction was already used (replay). Privileged tools stay disabled this turn.' };
   write(cfg, '_nonces', { ...seen, [b.claims.nonce]: b.exp });
   const c = b.claims;
-  write(cfg, sid, { ...keep, grant: { text, env, exp: b.exp, iss: b.iss, tools: c.tools ?? null, taint_ok: c.taint_ok ?? null }, ...(keep.session_tainted && { tainted: keep.session_tainted }) });
+  write(cfg, sid, { ...keep, grant: { text, env, exp: b.exp, iss: b.iss, tools: c.tools ?? null, taint_ok: c.taint_ok ?? null, background_ok: c.background_ok === true }, ...(keep.session_tainted && { tainted: keep.session_tainted }) });
   const after = c.taint_ok === true ? 'and stay enabled after files, web or tool output are read (taint_ok)'
     : Array.isArray(c.taint_ok) ? `until anything is read, except ${clean(c.taint_ok.join(', '))} (taint_ok)` : 'until anything (a file, a search, web, MCP or command output) is read';
   return { ok: true, msg: `sigelo-gate: verified instruction from ${b.iss}, allowed to instruct this agent. Privileged tools are enabled for this turn ${after}.` };
@@ -178,23 +206,66 @@ function op(cfg, req) {
 }
 
 /** The reason to deny, or null to let Claude Code's own permission flow decide. */
-function denyReason(cfg, s, tool) {
+export const background = (cfg, tool, input) => tool === 'Monitor' || input?.run_in_background === true
+  || (typeof input?.command === 'string' && cfg.background.test(input.command));
+function denyReason(cfg, s, tool, input) {
   const g = s.grant;
   const ok = g && (g.taint_ok === true || (Array.isArray(g.taint_ok) && g.taint_ok.includes(tool)));
   const why = !g ? 'no signed instruction from an allowed DID in this turn'
     : s.tainted && !ok ? `untrusted content (${clean(s.tainted)}) was read after the signed instruction, which did not allow it (taint_ok)`
       : g.tools && !g.tools.includes(tool) ? `the signed instruction does not cover ${tool}`
-        : null;
+        : cfg.deny_background && !g.background_ok && background(cfg, tool, input) ? 'this looks like it starts a process that outlives the turn, which the signed instruction did not allow (background_ok)'
+          : null;
   if (why) return `sigelo-gate: ${tool} needs a signed instruction (${why}). Ask the operator to sign one with gate/claude-code/sign.mjs.`;
   try { verifyInstruction(g.text, g.env, cfg); } catch (e) { return `sigelo-gate: ${tool} denied, grant no longer valid (${clean(e.message)}).`; }
   return null;
 }
 const needsTaint = (cfg, s, tool) => taints(cfg, tool) && ((s.grant && !s.tainted) || (cfg.taint_scope === 'session' && !s.session_tainted));
 
+// ---- kill_orphans (Linux /proc). Claude Code puts CLAUDE_CODE_SESSION_ID and CLAUDE_PID into the environment
+// of every tool and hook process (2.1.284, live). An orphan is a process of this user carrying this session's
+// marker whose parent chain no longer reaches Claude Code: a daemon a tool started (nohup, setsid, `&` in a
+// subshell). Attached processes (run_in_background tasks, running hooks) are left alone. A process that
+// clears its environment (env -i) or is started by another service (systemd-run, cron, at) is not caught.
+const environ = (pid) => { try { return readFileSync(`/proc/${pid}/environ`, 'latin1').split('\0'); } catch { return []; } };
+const ppid = (pid) => { try { const t = readFileSync(`/proc/${pid}/stat`, 'latin1'); return Number(t.slice(t.lastIndexOf(')') + 2).split(' ')[1]); } catch { return 0; } };
+export function orphans(sid) {
+  const mark = `CLAUDE_CODE_SESSION_ID=${sid}`;
+  // Claude Code's pid: CLAUDE_PID from the nearest process of the hook's own chain carrying this session's marker
+  // (the hardened hook line passes both through `env -i`, as `sh -c` may exec it), and it must be an ancestor.
+  const anc = [];
+  for (let p = process.pid, i = 0; p > 1 && i < 64; p = ppid(p), i++) anc.push(p);
+  const e = anc.map(environ).find((x) => x.includes(mark)) ?? [];
+  const claude = Number((e.find((x) => x.startsWith('CLAUDE_PID=')) ?? '').slice(11)) || 0;
+  if (claude <= 1 || !anc.includes(claude)) throw new Error('kill_orphans: cannot find the Claude Code process');
+  const me = process.getuid(), out = [];
+  for (const d of readdirSync('/proc')) {
+    const pid = Number(d);
+    if (!pid || pid === process.pid) continue;
+    try { if (statSync(`/proc/${pid}`).uid !== me) continue; } catch { continue; }
+    if (!environ(pid).includes(mark)) continue;
+    let p = pid;
+    for (let i = 0; p > 1 && p !== claude && i < 64; i++) p = ppid(p);
+    if (p !== claude) out.push(pid);
+  }
+  return out;
+}
+function killOrphans(cfg, sid) {
+  if (!cfg.kill_orphans) return;
+  for (let pass = 0; pass < 3; pass++) { // a dying daemon may have forked once more
+    const list = orphans(sid);
+    if (!list.length) return;
+    for (const pid of list) try { process.kill(pid, 'SIGKILL'); } catch { /* gone already */ }
+  }
+}
+
 /** One hook event → { out (JSON to print) | null }. Throws on internal errors (the caller fails closed). */
 export function handle(cfg, input) {
   const ev = input.hook_event_name, sid = input.session_id, tool = String(input.tool_name ?? '');
   checkLayout(cfg);
+  if (ev === 'SessionStart') { if (cfg.taint_scope === 'session') op(cfg, { op: 'start', session_id: sid, source: input.source }); return null; }
+  if (ev === 'Stop' || ev === 'UserPromptSubmit' || ev === 'UserPromptExpansion') killOrphans(cfg, sid);
+  if (ev === 'Stop') return null;
   if (ev === 'UserPromptExpansion') { op(cfg, { op: 'close', session_id: sid }); return null; }
   if (ev === 'UserPromptSubmit') {
     const { msg } = op(cfg, { op: 'prompt', session_id: sid, prompt: String(input.prompt ?? '') });
@@ -204,7 +275,7 @@ export function handle(cfg, input) {
     const isPriv = privileged(cfg, tool);
     if (!isPriv && !taints(cfg, tool)) return null;
     const s = readState(cfg, sid);
-    const why = isPriv ? denyReason(cfg, s, tool) : null;
+    const why = isPriv ? denyReason(cfg, s, tool, input.tool_input) : null;
     if (why) return deny(why);
     if (needsTaint(cfg, s, tool)) { // before the content exists: if it cannot be recorded, the tool does not run
       try { op(cfg, { op: 'taint', session_id: sid, tool }); } catch (e) { return deny(`sigelo-gate: ${tool} denied, could not record that its result is untrusted (${clean(e.message)}).`); }
@@ -224,6 +295,8 @@ const deny = (why) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', perm
 
 /** Fail closed: exit 2 blocks a tool call (PreToolUse), a prompt or a slash command, whatever stdout says. */
 function failClosed(ev, why) {
+  // Stop: exit 2 would keep Claude working; SessionStart cannot block (a missed start taints: applyOp)
+  if (ev === 'Stop' || ev === 'SessionStart') { process.stderr.write(`sigelo-gate: ${ev}: ${clean(why)}\n`); process.exit(0); }
   const msg = `sigelo-gate error, failing closed: ${clean(why)}`;
   if (ev === 'PreToolUse') process.stdout.write(JSON.stringify(deny(msg)) + '\n');
   else if (ev?.startsWith('UserPrompt')) process.stdout.write(JSON.stringify({ decision: 'block', reason: msg }) + '\n');

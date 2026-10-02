@@ -21,7 +21,7 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$PREP"; chown "$AGENT" "$PREP"
 as_agent "env -u CLAUDECODE node '$HERE/test.mjs' --prep '$PREP'"
-sh "$HERE/install-root.sh" --agent-user "$AGENT" --config "$PREP/gate.json" --gate-user "$GU" --prefix "$P/root" --rule "$RULE" --no-managed
+sh "$HERE/install-root.sh" --agent-user "$AGENT" --config "$PREP/gate.json" --gate-user "$GU" --prefix "$P/root" --rule "$RULE" --no-managed --i-accept-user-writable-claude
 CONF=$P/root/etc/sigelo-gate/gate.json
 A=0; as_agent "env -u CLAUDECODE node '$HERE/test.mjs' --hardened '$CONF' '$PREP'" || A=1
 mv "$P/root/usr/local/lib/sigelo-gate/gate-state" "$P/gate-state.away"

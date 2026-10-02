@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
 // Sign a prompt as the operator, for the sigelo provenance gate (gate/DESIGN.md).
-//   node sign.mjs --to did:sigelo:z…AGENT [--ttl 600] [--tools Bash,Edit] [--allow-after-read[=Bash,Edit]] < prompt.txt
+//   node sign.mjs --to did:sigelo:z…AGENT [--ttl 600] [--tools Bash,Edit] [--allow-after-read[=Bash,Edit]]
+//                 [--background-ok] < prompt.txt
 //                                                                                        → signed prompt
 //     --allow-after-read   claims.taint_ok: the grant survives reading files, searches, web, MCP and command
 //                          output in this turn (all granted tools, or only the listed ones). Without it, the
 //                          first read ends the grant for privileged tools (DESIGN §5).
+//     --background-ok      claims.background_ok: with deny_background set, the turn may start processes that
+//                          outlive it (nohup, `&`, Monitor, run_in_background; HARDENING.md §2).
 //   node sign.mjs --genesis                                                                → your genesis, to pin
 // The key is the operator's sigelo-agent store, named by $SIGELO_OPERATOR_IDENTITY: no default, so the
 // agent's own identity file is never picked up. Run it where the agent cannot read that file.
@@ -32,9 +35,10 @@ if (!to?.startsWith('did:sigelo:z')) die('--to <agent DID> is required');
 if (!Number.isInteger(ttl) || ttl < 1) die('--ttl must be a positive integer (seconds)');
 const text = rtrim(readFileSync(0, 'utf8'));
 if (!text) die('empty prompt on stdin');
+if (text.includes('\t')) process.stderr.write('sign: warning: the text has tabs; the interactive TUI turns pasted tabs into spaces, so it will verify only through claude -p\n');
 const iat = Math.floor(Date.now() / 1000);
 const a = attest({
   secret: Uint8Array.from(Buffer.from(s.secret, 'hex')), iss: did(head), sub: to, iat, exp: iat + ttl, ctx: CTX, admission: 'open',
-  claims: { text_sha256: createHash('sha256').update(text, 'utf8').digest('hex'), nonce: randomBytes(16).toString('base64url'), ...(tools && { tools: tools.split(',') }), ...(taintOk !== undefined && { taint_ok: taintOk }) },
+  claims: { text_sha256: createHash('sha256').update(text, 'utf8').digest('hex'), nonce: randomBytes(16).toString('base64url'), ...(tools && { tools: tools.split(',') }), ...(taintOk !== undefined && { taint_ok: taintOk }), ...(process.argv.includes('--background-ok') && { background_ok: true }) },
 });
 process.stdout.write(`${text}\n\n${LINE}${Buffer.from(JSON.stringify(a)).toString('base64url')}\n`);

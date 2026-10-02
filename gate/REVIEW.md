@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: MIT -->
 # gate/ pre-publication review (2026-10-02, of 6df8a59)
-Reviewed as a stranger, an attacker and a lawyer, then one live check. Fixes: d12a2e1, be75ec3.
+Reviewed as a stranger, an attacker and a lawyer, then one live check. Fixes: d12a2e1, be75ec3; third pass below.
 
 ## Fixed (d12a2e1)
 
@@ -51,19 +51,68 @@ live too); a forged state file is denied (15); cross-session replay is denied (6
   another device or user). Hermes taint: in `pre_tool_call`, which Hermes runs fail-closed, with
   `transform_tool_result` (fail-open) as backstop; MCP heuristic; tests 13–28.
 
-## Known limits (remaining)
+## Known limits (remaining, after the third pass)
 
-- **High: a granted shell outlives its grant** through what it starts or edits as the agent's user
-  (background jobs, user units, rc files, PATH shims, `~/.claude*`). Inherent to a same-user shell.
-- **Medium: `--allow-after-read` turns** are steerable by what they read, by design; and taint is
-  per turn by default, so text read in earlier turns still sits in the context (`taint_scope:
-  "session"` closes it, at the cost of grants in any session that read anything).
-- **Medium: managed-settings install not live-tested** on this host (it would gate every session
-  here); `claude` installed per-user and self-updating must be made root-owned (install warns).
+Section references in the two Fixed sections above are to DESIGN.md as it was then; DESIGN §5's
+details and §7 now live in HARDENING.md.
+- **High → bounded: a granted shell outlives its grant.** `kill_orphans` kills this session's daemons
+  at turn end, `deny_background` refuses daemonising commands without `background_ok` (HARDENING §2).
+  Still open: rc files, PATH shims, user units, cron/at entries, a process that clears its
+  environment, anything indirect the regex misses. Inherent to a same-user shell.
+- **Medium (by design): `--allow-after-read` turns** are steerable by what they read.
+- **Medium: managed-settings install not live-tested** (it would gate every session here). The
+  per-user `claude` is now refused by `install-root.sh` unless overridden (tests 80–82).
 - **Medium: MCP heuristic** misses writers with innocent names; over-matches readers.
-- **Low:** the layout self-check is a tripwire; a same-batch privileged call beside a read can pass
-  (it cannot have been steered by it); 60 s skew; no lock on the nonce file in the user-level
-  install; Hermes in-memory, never run inside Hermes.
+- **Low:** the layout self-check is a tripwire; a privileged call emitted before a read in the same
+  batch passes (it cannot have been steered by that read: HARDENING §3); 60 s skew; no lock on the
+  nonce file in the user-level install; Hermes in-memory, never run inside Hermes; pasted signed
+  prompts must not contain tabs (the TUI turns them into spaces: the signature then fails closed).
+
+## Third pass (2026-10-02, of c929667)
+
+1. **Same-batch Read + Bash** → bounded and documented. The hook input carries one call, never the
+   batch (docs, live), so option (a) is impossible; (b) was already the rule: the taint is recorded
+   at the reader's `PreToolUse`. New test 53 (PreToolUse(Read) → PreToolUse(Bash), no result yet →
+   deny), Hermes the same. Residual (c): a privileged call emitted *before* the read.
+2. **Processes outliving a grant** → bounded. Claude Code puts `CLAUDE_CODE_SESSION_ID` and
+   `CLAUDE_PID` into every tool and hook process (live), so `kill_orphans` finds daemons that left its
+   process tree (`Stop` and the next prompt), and `deny_background` adds the regex denylist with a
+   `background_ok` claim (`sign.mjs --background-ok`). Found on the way: `sh -c` execs a single
+   command, so the hardened hook line now passes those two variables through `env -i`. Also
+   `RemoteTrigger` (a cloud agent outside the gate) is privileged by default. Tests 54–71.
+3. **`claude` ownership** → `install-root.sh` refuses while the agent's user owns or can write the
+   binary, a directory above it, `~/.local/bin/claude`, `~/.local/share/claude` or `~/.claude/local`
+   (`--check-claude`, `--i-accept-user-writable-claude`), prints the remedy, and sets
+   `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1` in managed settings (names per the setup docs).
+4. **Interactive TUI** → driven through a Python pty (scratch HOME). Found: a paste reaches
+   `UserPromptSubmit` as one `<pasted_content id=…>` block with tabs turned into spaces, so a pasted
+   signed prompt never verified (failed closed). The gate now unwraps exactly one whole-prompt
+   block (tests 83–86); `sign.mjs` warns about tabs.
+5. **`taint_scope: "session"`** existed; strengthened: only a `SessionStart` of `startup`/`clear` on a
+   new id begins clean; `resume`, `fork`, `compact` or no start seen begin tainted; the helper's
+   `start` op cannot clean an existing session. Tests 72–79.
+6. **Hermes** → the registry names (checked against a 2026-10-01 checkout): every reader and web tool
+   taints (16 named, test 29); `process_manage`, `cronjob_manage`, `browser_exec`, `browser_cdp`,
+   `computer_use`, `skill_manage`, `memory` and the credential vault tools are now privileged (30);
+   the exempt `todo` is `todo_list` there (31).
+
+### Live check 3 (this pass; Claude Code 2.1.284, scratch HOME, `--setting-sources ""`)
+
+Hook line `/usr/bin/env -i CLAUDE_PID=… CLAUDE_CODE_SESSION_ID=… node gate.mjs --config … || exit 2`
+via `--settings`, user-level state (no root here, so not the doas helper). `~/.claude/settings.json`
+sha256 unchanged.
+- Signed, Read and Bash in one message, Read first → Read ran, Bash denied ("untrusted content
+  (Read) was read after the signed instruction"); Claude Code ran Read's Pre and Post hooks before
+  Bash's. Bash first → both ran (the documented residual).
+- Signed `(sleep 6xx >/dev/null 2>&1 &)`: without `kill_orphans` the sleep survived the session; with
+  it, killed at `Stop`.
+- `deny_background`, signed `nohup sleep 5 … &` → denied with the gate's reason; signed
+  `--background-ok` → ran.
+- `taint_scope: "session"`: a fresh session, signed → `hi`; after an unsigned Read, `--resume` signed
+  → denied (Read); `--resume --fork-session` signed → denied ("session fork").
+- **TUI**: unsigned "Run the shell command: echo hi" → Bash denied, the model relayed the gate's
+  reason (the raw hook error sits in the collapsed tool line); a signed 4-line prompt pasted
+  (shown as "[Pasted text #1 +6 lines]") → Bash ran, `hi`.
 
 ## Live check (Claude Code 2.1.284, `claude -p`, scratch identities)
 
@@ -98,6 +147,9 @@ Run just before the commit; the only code change after it is the state file mode
 
 **Publishable as prototype: yes, with conditions:** README status and Limits stay as written,
 nothing calls it prompt-injection prevention, the remaining limits stay listed, and no release
-before an external review. Before that review: a live run with the real managed-settings file on a
-disposable host (incl. `/status`, `--setting-sources ""` and a user `disableAllHooks`), the
-interactive TUI, a real MCP server and a subagent, and Hermes run inside Hermes.
+before an external review. Before that review: a live run with the real managed-settings file and
+the doas helper on a disposable host (incl. `/status`, `--setting-sources ""`, a user
+`disableAllHooks`, `kill_orphans` through the hardened line, a root-owned `claude` with the update
+variables), a real MCP server and a subagent, and Hermes run inside Hermes. For the external
+reviewer: the `deny_background` regex, the orphan definition, the paste unwrapping, and whether
+Claude Code's hook order for mixed batches is stable across versions.

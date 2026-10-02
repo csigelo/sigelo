@@ -86,13 +86,23 @@ check('24 mcp_github_create_issue unsigned → blocked', turn('t24', TEXT, 'mcp_
 check('25 mcp_github_get_file_contents unsigned → allowed', turn('t25', TEXT, 'mcp_github_get_file_contents') == [True])
 cfg['mcp_allow'] = ['mcp_memory_create_entities']
 check('26 mcp writer listed in hermes_mcp_allow → allowed', turn('t26', TEXT, 'mcp_memory_create_entities') == [True])
+# third pass: Hermes' own readers and web tools (registry names) taint; its runners and persisters are privileged
+cfg['mcp_allow'] = []
+readers = ['read_file', 'search_files', 'read_terminal', 'session_search', 'skill_view', 'web_search', 'web_extract', 'x_search',
+           'browser_navigate', 'browser_snapshot', 'browser_console', 'browser_get_images', 'browser_vision', 'vision_analyze', 'video_analyze', 'feishu_doc_read']
+bad = [t for t in readers if turn(f'r_{t}', signed(TEXT, opk, op, agent), t, 'terminal') != [True, False]]
+check(f'29 signed, then any of {len(readers)} Hermes readers/web tools, then terminal → blocked{" (failed: " + ", ".join(bad) + ")" if bad else ""}', not bad)
+runners = ['process_manage', 'cronjob_manage', 'browser_exec', 'browser_cdp', 'computer_use', 'skill_manage', 'memory', 'browser_vault_fill']
+bad = [t for t in runners if turn(f'p_{t}', TEXT, t) != [False]]
+check(f'30 unsigned: {", ".join(runners)} → blocked{" (failed: " + ", ".join(bad) + ")" if bad else ""}', not bad)
+check('31 todo_list does not taint: signed, todo_list, terminal → allowed', turn('t31', signed(TEXT, opk, op, agent), 'todo_list', 'terminal') == [True, True])
 if shutil.which('node'):  # interop: an envelope from the Claude Code signer verifies here
     store = os.path.join(tmp, 'op.json')
     with open(os.open(store, os.O_WRONLY | os.O_CREAT, 0o600), 'w') as f: json.dump({'v': 'sigelo/0', 'secret': opk.private_bytes_raw().hex(), 'genesis': opg, 'rotations': [], 'attestations': [], 'issuers': []}, f)
     env = {k: v for k, v in os.environ.items() if k != 'CLAUDECODE'}  # sign.mjs refuses inside Claude Code
     p = subprocess.run(['node', os.path.join(HERE, '..', 'claude-code', 'sign.mjs'), '--to', agent], input=TEXT, capture_output=True, text=True, env={**env, 'SIGELO_OPERATOR_IDENTITY': store})
-    check('27 sign.mjs envelope verifies in Python', p.returncode == 0 and gate(p.stdout, 'x', cfg)[0] == 'instruction')
+    check('32 sign.mjs envelope verifies in Python', p.returncode == 0 and gate(p.stdout, 'x', cfg)[0] == 'instruction')
     p = subprocess.run(['node', os.path.join(HERE, '..', 'claude-code', 'sign.mjs'), '--to', agent, '--allow-after-read=terminal'], input=TEXT, capture_output=True, text=True, env={**env, 'SIGELO_OPERATOR_IDENTITY': store})
-    check('28 sign.mjs --allow-after-read=terminal: Python reads taint_ok, terminal allowed after read_file', p.returncode == 0 and turn('t28', p.stdout, 'read_file', 'terminal') == [True, True])
+    check('33 sign.mjs --allow-after-read=terminal: Python reads taint_ok, terminal allowed after read_file', p.returncode == 0 and turn('t28', p.stdout, 'read_file', 'terminal') == [True, True])
 print(f'ALL PASS ({len(results)})' if all(results) else f'{results.count(False)} of {len(results)} FAILED')
 sys.exit(0 if all(results) else 1)
