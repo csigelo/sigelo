@@ -31,6 +31,8 @@
 //   --commit SHA       expected build commit (default: git rev-parse HEAD of this repository)
 //   --any-commit       do not compare the build commit (after a rollback)
 //   --quiet            print only the FAIL lines and the summary (the phone watchdog, site/deploy/watch.sh)
+// Every request sends User-Agent UA (below): nginx.conf logs it to access-self.log, not access.log,
+// so the project's own checks stay out of the visit statistics.
 // Uses node's fetch, no dependencies, node >= 22.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -38,6 +40,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const CANON = 'https://sigelo.io';
+const UA = 'sigelo-selfcheck/1 (+https://sigelo.io/privacy)';
 const argv = process.argv.slice(2);
 const flag = (f) => argv.includes(f);
 const opt = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
@@ -80,7 +83,7 @@ const note = (what) => say(`note ${what}`);
 const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 const get = async (url, headers = {}, redirect = 'follow') => {
   try {
-    const r = await fetch(url, { headers, redirect, signal: AbortSignal.timeout(20000) });
+    const r = await fetch(url, { headers: { 'user-agent': UA, ...headers }, redirect, signal: AbortSignal.timeout(20000) });
     return { status: r.status, h: r.headers, type: r.headers.get('content-type') ?? '', body: Buffer.from(await r.arrayBuffer()), url: r.url };
   } catch (e) { return { status: 0, h: new Headers(), type: '', body: Buffer.alloc(0), error: e.cause?.code ?? e.message }; }
 };
@@ -166,7 +169,7 @@ else if (ix?.release?.tag) {
   const TYPE = (n) => (/\.(tgz|tar\.gz)$/.test(n) ? 'application/gzip' : n.endsWith('.json') ? 'application/json' : 'application/octet-stream');
   const wrong = [];
   for (const f of rel.files) {
-    let r; try { r = await fetch(at(base + f.name), { method: 'HEAD', signal: AbortSignal.timeout(20000) }); } catch (e) { wrong.push(`${f.name} (${e.message})`); continue; }
+    let r; try { r = await fetch(at(base + f.name), { method: 'HEAD', headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20000) }); } catch (e) { wrong.push(`${f.name} (${e.message})`); continue; }
     if (r.status !== 200 || r.headers.get('content-type') !== TYPE(f.name)) wrong.push(`${f.name} (${r.status}, ${r.headers.get('content-type')})`);
   }
   ok(wrong.length === 0, `${base}: all ${rel.files.length} files 200 with their content type (tgz/tar.gz application/gzip, binaries and .exe octet-stream)${wrong.length ? ` (wrong: ${wrong.join(', ')})` : ''}`);
@@ -206,7 +209,7 @@ else {
     const signed = lib.challenge({ secret: agent.secret, genesis: agent.genesis, ctx: ch.ctx, nonce: ch.nonce });
     const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: agent.genesis, rotations: [], bindings: [], attestations: [], issuers: [] };
     try {
-      const r = await fetch(wurl(w.attest), { method: 'POST', body: JSON.stringify({ challenge: ch, did: agent.did, sig: signed.sig, bundle }), signal: AbortSignal.timeout(20000) });
+      const r = await fetch(wurl(w.attest), { method: 'POST', headers: { 'user-agent': UA }, body: JSON.stringify({ challenge: ch, did: agent.did, sig: signed.sig, bundle }), signal: AbortSignal.timeout(20000) });
       issued = r.status === 200 ? await r.json() : { status: r.status, error: (await r.json().catch(() => ({}))).error };
     } catch (e) { issued = { error: e.message }; }
   }
@@ -219,7 +222,7 @@ else {
     `/world/stats: 200, counts only, not cached (got ${show(st)} ${st.body.toString().trim().slice(0, 160)})`);
   // POST /world/conformance and the remote MCP endpoint (world/mcp.mjs): reachable, refusing and answering as built
   const postTo = async (url, body, headers = {}) => {
-    try { const r = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(20000) }); return { status: r.status, h: r.headers, text: await r.text() }; }
+    try { const r = await fetch(url, { method: 'POST', headers: { 'user-agent': UA, ...headers }, body, signal: AbortSignal.timeout(20000) }); return { status: r.status, h: r.headers, text: await r.text() }; }
     catch (e) { return { status: 0, h: new Headers(), text: '', error: e.cause?.code ?? e.message }; }
   };
   const cf = await postTo(wurl(w.conformance ?? `${CANON}/world/conformance`), '');

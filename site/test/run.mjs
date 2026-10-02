@@ -193,6 +193,21 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok((await get('/adopt.md')).body.toString().split('\n').length <= 90, 'adopt.md: short enough to follow (≤ 90 lines)');
 }
 
+// ---- /changelog: terse, impersonal --------------------------------------------------------------
+// The reader pays per token: every bullet in the file (continuation lines joined) is ≤ 220
+// characters, and nowhere a story, a feedback quote or a first person. The why lives
+// in the internal JOURNAL.md.
+{
+  const cl = readFileSync(join(DIST, 'changelog.md'), 'utf8');
+  const bullets = cl.split(/\n(?=- |\S)/).filter((b) => b.startsWith('- ')).map((b) => b.replace(/\s*\n\s*/g, ' ').trim());
+  const long = bullets.filter((b) => [...b].length > 220);
+  ok(bullets.length > 0 && long.length === 0, `changelog: all ${bullets.length} bullets ≤ 220 characters${long.length ? ` (over: ${long.map((b) => b.slice(0, 40)).join(' | ')})` : ''}`);
+  const BANNED = [/\bOwner\b/, /\b[Ff]eedback\b/, /\bthe same day\b/i, /(?:^|[\s("])[Ww]e /m, /(?:^|[\s("])I (?=[a-z])/m,
+    /\b(?:an?|each|its own|one|the|Haiku|Sonnet|Opus|sub)\s*agents? (?:ran|found|wrote|fixed|reviewed|built|did|made|checked|closed|proved)\b/i, /\bby (?:an?|each|its own|one) agent\b/i];
+  const hits = BANNED.filter((re) => re.test(cl));
+  ok(hits.length === 0, `changelog: no narration (Owner, agent as actor, feedback, "the same day", first person)${hits.length ? ` — hit ${hits.join(' ')}` : ''}`);
+}
+
 // ---- the page list and the word budgets ---------------------------------------------------------
 // The reader pays per token. Words = whitespace-separated tokens holding a letter or digit;
 // inside fenced code and on link-list lines they count half. llms.txt counts every word in full.

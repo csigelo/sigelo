@@ -107,7 +107,8 @@ check_conf() { # $1 = file; prints every offending line, returns 1 if any
       }
       v = (ntok == 2) ? tok[2] : ""
       if (d == "root" && v != W "/dist" && v != W "/stats" && v != "/var/www/acme") bad("root must be " W "/dist, " W "/stats or /var/www/acme")
-      if (d == "access_log" && !(ntok == 2 && v == "off") && !(ntok == 3 && tok[2] == "/var/log/nginx/sigelo/access.log" && tok[3] ~ /^sigelo_(noip|anon)$/)) bad("access_log must be off or /var/log/nginx/sigelo/access.log sigelo_anon|sigelo_noip")
+      # access-self.log: requests by the project itself (nginx.conf, $sigelo_self); if= takes a sigelo_ variable only
+      if (d == "access_log" && !(ntok == 2 && v == "off") && !((ntok == 3 || ntok == 4) && tok[2] ~ /^\/var\/log\/nginx\/sigelo\/access(-self)?\.log$/ && tok[3] ~ /^sigelo_(noip|anon)$/ && (ntok == 3 || tok[4] ~ /^if=\$sigelo_[a-z]+$/))) bad("access_log must be off or /var/log/nginx/sigelo/access.log|access-self.log sigelo_anon|sigelo_noip [if=$sigelo_<var>]")
       if (d == "auth_basic_user_file" && v != "/etc/nginx/sigelo-stats.htpasswd") bad("auth_basic_user_file must be /etc/nginx/sigelo-stats.htpasswd")
       if (d == "error_log" && !(ntok == 3 && tok[2] == "/var/log/nginx/sigelo/error.log" && tok[3] ~ /^(crit|alert|emerg|error|warn)$/)) bad("error_log must be /var/log/nginx/sigelo/error.log <level>")
       if (d == "ssl_certificate" && v != "/etc/letsencrypt/live/" D "/fullchain.pem") bad("ssl_certificate must be the " D " certificate under /etc/letsencrypt/live")

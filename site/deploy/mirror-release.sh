@@ -155,11 +155,12 @@ node - "$tmp/$tag" "$origin/releases/$tag/" <<'EOF'
 const { readFileSync } = require('node:fs');
 const { createHash } = require('node:crypto');
 const [dir, base] = process.argv.slice(2);
+const UA = 'sigelo-selfcheck/1 (+https://sigelo.io/privacy)';  // nginx.conf: logged to access-self.log
 const lines = readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n').map((l) => l.match(/^([0-9a-f]{64}) [ *](.+)$/).slice(1));
 (async () => {
   let bad = 0;
   for (const [sha, name] of [...lines, [createHash('sha256').update(readFileSync(`${dir}/SHA256SUMS`)).digest('hex'), 'SHA256SUMS']]) {
-    const r = await fetch(base + name, { signal: AbortSignal.timeout(120000) });
+    const r = await fetch(base + name, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(120000) });
     const b = Buffer.from(await r.arrayBuffer());
     const got = createHash('sha256').update(b).digest('hex');
     const ok = r.status === 200 && got === sha;

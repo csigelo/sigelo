@@ -41,7 +41,7 @@
 #                         sigelo-vps-backup.timer (daily 03:30 Europe/Berlin): the world state, the
 #                         nginx config and stats password file, /etc/letsencrypt, the sigelo units,
 #                         helpers and sudo rule, the release mirror and stats if present, as
-#                         /home/csigelo/backup/vps-state-<stamp>.tgz.age (csigelo 0600, 7 kept);
+#                         <admin home>/backup/vps-state-<stamp>.tgz.age (admin user, 0600, 7 kept);
 #                         runs it once. Restore: site/deploy/README.md, "Rebuilding the server"
 #   --stats-htpasswd FILE with --stats: install FILE (one line, owner:<crypt hash>, e.g. from
 #                         `openssl passwd -6 -stdin`) as /etc/nginx/sigelo-stats.htpasswd; without
@@ -112,12 +112,25 @@ install_helper() {
 }
 
 # 30 days: the window the statistics cover. The log holds no raw address (nginx.conf, Privacy).
+# access-self.log (the project's own requests, nginx.conf $sigelo_self): 7 days, for debugging.
 write_logrotate() {
   printf '+ write /etc/logrotate.d/sigelo\n'
   cat > /etc/logrotate.d/sigelo <<'ROT'
-/var/log/nginx/sigelo/*.log {
+/var/log/nginx/sigelo/access.log /var/log/nginx/sigelo/error.log {
     daily
     rotate 30
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+    postrotate
+        nginx -s reopen 2>/dev/null || true
+    endscript
+}
+/var/log/nginx/sigelo/access-self.log {
+    daily
+    rotate 7
     missingok
     notifempty
     compress
@@ -163,9 +176,11 @@ UNIT
 # server name sigelo.io) and /world/stats from the world itself on 127.0.0.1:8790; restarts the
 # unit that fails (nginx only after nginx -t passes), checks again, logs every step to the journal
 # (journalctl -u sigelo-selfcheck). Exit 1 when something is still down after its restart.
+# User-Agent UA: nginx logs it to access-self.log, out of the visit statistics.
 set -u
-site() { curl -fsS -o /dev/null --max-time 15 --resolve sigelo.io:443:127.0.0.1 "https://sigelo.io$1"; }
-world() { curl -fsS -o /dev/null --max-time 10 http://127.0.0.1:8790/world/stats; }
+UA='sigelo-selfcheck/1 (+https://sigelo.io/privacy)'
+site() { curl -fsS -o /dev/null --max-time 15 -A "$UA" --resolve sigelo.io:443:127.0.0.1 "https://sigelo.io$1"; }
+world() { curl -fsS -o /dev/null --max-time 10 -A "$UA" http://127.0.0.1:8790/world/stats; }
 rc=0
 if ! world; then
   echo "sigelo-selfcheck: the world on 127.0.0.1:8790 does not answer /world/stats: restarting sigelo-world.service"
@@ -217,7 +232,7 @@ fi
 if [ -n "$backup" ]; then
   [ "$os" = debian ] && [ -d /run/systemd/system ] || die "--backup needs Debian/Ubuntu with systemd"
   printf '%s' "$backup" | grep -Eq '^age1[02-9ac-hj-np-z]{58}$' || die "--backup wants an age recipient (age1…, the public key; never the identity)"
-  id csigelo >/dev/null 2>&1 || die "no user csigelo: the archives are written to /home/csigelo/backup"
+  id csigelo >/dev/null 2>&1 || die "no user csigelo: the archives are written to its ~/backup"
 
   say "B1. age"
   command -v age >/dev/null 2>&1 || run env DEBIAN_FRONTEND=noninteractive apt-get install -y age
@@ -232,10 +247,10 @@ if [ -n "$backup" ]; then
 # sigelo-vps-backup — written by site/deploy/server-setup.sh --backup; run daily by
 # sigelo-vps-backup.timer as root. Tars the server's state, encrypts it with age to the recipient in
 # /etc/sigelo-backup.recipient (its identity is on the Owner's phone only: this server cannot read
-# its own backups) and writes /home/csigelo/backup/vps-state-<stamp>.tgz.age, csigelo 0600, 7 kept.
+# its own backups) and writes <admin home>/backup/vps-state-<stamp>.tgz.age, admin user 0600, 7 kept.
 # The phone's nightly sigelo-backup fetches the newest one. Restore: site/deploy/README.md.
 set -eu
-OUT=/home/csigelo/backup
+OUT="$(getent passwd csigelo | cut -d: -f6)/backup"
 R=$(cat /etc/sigelo-backup.recipient)
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 umask 077
@@ -259,6 +274,7 @@ RUN
   mv /usr/local/sbin/sigelo-vps-backup.tmp /usr/local/sbin/sigelo-vps-backup
 
   say "B4. sigelo-vps-backup.service and .timer (daily 03:30 Europe/Berlin, before the phone's 04:00 pull)"
+  BKDIR="$(getent passwd csigelo | cut -d: -f6)/backup"
   cat > /etc/systemd/system/sigelo-vps-backup.service <<'UNIT'
 [Unit]
 Description=sigelo.io state backup, age-encrypted to the Owner's phone key
@@ -269,12 +285,13 @@ ExecStart=/usr/local/sbin/sigelo-vps-backup
 Nice=10
 IOSchedulingClass=idle
 ProtectSystem=strict
-ReadWritePaths=/home/csigelo/backup
+ReadWritePaths=__BKDIR__
 PrivateTmp=yes
 PrivateNetwork=yes
 PrivateDevices=yes
 NoNewPrivileges=yes
 UNIT
+  sed -i "s|__BKDIR__|$BKDIR|" /etc/systemd/system/sigelo-vps-backup.service
   cat > /etc/systemd/system/sigelo-vps-backup.timer <<'UNIT'
 [Unit]
 Description=sigelo.io state backup, daily
@@ -377,6 +394,7 @@ if [ "$stats" = 1 ]; then
 # /var/www/sigelo.io/stats/{agents.txt,index.html} (served at https://sigelo.io/_stats/) from
 # every access log logrotate keeps (30 days). Lines of the old address-less format (first
 # field "-") are not GoAccess-parsable and are left out of its report; agents.txt counts them.
+# access.log* only: the project's own requests are in access-self.log (nginx.conf), not here.
 set -eu
 LOGS=/var/log/nginx/sigelo
 OUT=/var/www/sigelo.io/stats
@@ -440,7 +458,7 @@ UNIT
     run /usr/local/sbin/sigelo-stats
   fi
 
-  say "S6. log rotation: daily, 30 kept"
+  say "S6. log rotation: daily, 30 kept (access-self.log 7)"
   write_logrotate
 
   say "done: https://$DOMAIN/_stats/ (user owner) once nginx.conf with the /_stats/ location is deployed"

@@ -9,6 +9,7 @@
 # /<key>.txt, which is how the engines check that the submitter controls the host (the key is
 # public by design: anyone can read it at that URL). deploy.sh runs this after a passing check;
 # it never fails a deploy (exit 0 on any HTTP answer, the status printed). Node >= 22 (fetch).
+# The fetch of our own key file sends User-Agent sigelo-selfcheck/1 (out of the visit statistics).
 set -eu
 root=$(cd "$(dirname "$0")/../.." && pwd)
 origin=https://sigelo.io; dry=0
@@ -22,6 +23,7 @@ done
 INDEXNOW_DRY=$dry INDEXNOW_ORIGIN=$origin node --input-type=module - "$root" <<'JS'
 import { readFileSync } from 'node:fs';
 const root = process.argv[2];
+const UA = 'sigelo-selfcheck/1 (+https://sigelo.io/privacy)';
 const key = readFileSync(`${root}/site/deploy/indexnow-key.txt`, 'utf8').trim();
 if (!/^[a-zA-Z0-9-]{8,128}$/.test(key)) { console.error('indexnow.sh: bad key in site/deploy/indexnow-key.txt'); process.exit(1); }
 const origin = process.env.INDEXNOW_ORIGIN;
@@ -30,7 +32,7 @@ if (process.env.INDEXNOW_DRY === '1') { console.log('+ POST https://api.indexnow
 const urlList = [...readFileSync(`${root}/site/dist/sitemap.xml`, 'utf8').matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
 const body = { host, key, keyLocation: `${origin}/${key}.txt`, urlList };
 try {
-  const keyFile = await fetch(body.keyLocation, { signal: AbortSignal.timeout(20000) });
+  const keyFile = await fetch(body.keyLocation, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20000) });
   if (keyFile.status !== 200 || (await keyFile.text()).trim() !== key) { console.log(`indexnow: ${body.keyLocation} does not serve the key (${keyFile.status}); nothing submitted`); process.exit(0); }
   const r = await fetch('https://api.indexnow.org/indexnow', { method: 'POST', headers: { 'content-type': 'application/json; charset=utf-8' },
     body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });

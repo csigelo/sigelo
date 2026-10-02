@@ -39,6 +39,7 @@ Flags of `deploy.sh`: `--os debian|alpine` (default: the helper detects it), `--
                                is a symlink deploy.sh puts in every upload, so no deploy deletes it
 /var/www/acme/                 ACME HTTP-01 webroot (port 80)
 /var/log/nginx/sigelo/         access.log (address cut to /24 or /48), error.log (crit); 30 days
+                               access-self.log: the project's own requests, same format; 7 days
 /usr/local/sbin/sigelo-nginx-apply, /etc/sudoers.d/sigelo-deploy
 /usr/local/sbin/sigelo-stats{,-agents}, sigelo-stats.{service,timer}, /etc/nginx/sigelo-stats.htpasswd
 ```
@@ -211,8 +212,18 @@ AI agents by name, programmatic clients, crawlers, browsers, `Accept: text/markd
 funnel `/llms.txt` → `/adopt.md` → `/index.json` → `/examples/world.mjs`, top paths for agents and
 for humans). Both are served at `https://sigelo.io/_stats/` behind basic auth (user `owner`; the
 password lives only on the Owner's phone, the server keeps its SHA-512 crypt hash), `noindex`,
-`no-store`, not in the sitemap; `check.mjs` checks the 401 and the sitemap. The check's own
-requests count as `node` under programmatic clients.
+`no-store`, not in the sitemap; `check.mjs` checks the 401 and the sitemap.
+
+**Own traffic is excluded.** Every request the project makes to its own site — `check.mjs`
+(also deploy.sh's post-deploy check), `watch.sh`, `indexnow.sh`'s fetch of the key file,
+`mirror-release.sh`'s verification, the server's `sigelo-selfcheck` — sends
+`User-Agent: sigelo-selfcheck/1 (+https://sigelo.io/privacy)`. nginx.conf maps that user agent
+(`$sigelo_self` / `$sigelo_outside`) and logs those requests to `access-self.log` (same format,
+7 days kept) instead of `access.log`, with `access_log … if=`. GoAccess and `agents.txt` read
+`access.log*` only, so the programmatic/`node` counts are outsiders; `agents.txt` prints the
+excluded count as `own traffic (excluded) N, 7 days`. `site/test` and `world/test.mjs` run
+against local servers and never reach the site. Before this change the checks sent node's default
+`node` user agent: those lines stay in the 30-day window until they rotate out.
 
 ## The world (`/world/`)
 
@@ -296,7 +307,8 @@ fails, and the last ten installed configs are in `/var/backups/sigelo-nginx/`.
   are kept, because agents never run scripts and these lines are the only place they show up.
   The error log is at `crit` (nginx writes the full address into every `error`-level line),
   requests for other hostnames and for `/_stats/` are not logged, and the files rotate daily with
-  30 kept: 30 days of truncated-address logs and the reports built from them, nothing else.
+  30 kept: 30 days of truncated-address logs and the reports built from them, nothing else. The
+  project's own requests (user agent `sigelo-selfcheck/1`) go to `access-self.log`, 7 kept.
 
 - **The site sets no cookies, runs no scripts and loads nothing from another origin**
   (`site/test/run.mjs` checks); `Referrer-Policy: no-referrer` keeps it from leaking where readers

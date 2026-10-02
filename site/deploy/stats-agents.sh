@@ -21,13 +21,16 @@
 # "agents" = AI agents + programmatic clients; "humans" = browsers. 301s (http->https, www and
 # .net -> apex) are redirect hops, not visits: left out everywhere. Top paths count 200/304 only,
 # so scanners' 404s do not crowd them. ~vis = distinct (network, user agent, day): an estimate.
+# The project's own requests (user agent sigelo-selfcheck/, nginx.conf) are not visits: nginx logs
+# them to access-self.log (7 days kept), read here only to print their count as "own traffic
+# (excluded)"; one that still reaches access.log is counted there and left out the same way.
 set -eu
 LOGDIR=${1:-/var/log/nginx/sigelo}
 OUT=${2:-/var/www/sigelo.io/stats/agents.txt}
 tmp=$OUT.new
 ls "$LOGDIR"/access.log* >/dev/null 2>&1 || { echo "sigelo-stats-agents: no logs in $LOGDIR" >&2; exit 0; }
 
-for f in "$LOGDIR"/access.log*; do case $f in *.gz) gzip -dc "$f" ;; *) cat "$f" ;; esac; done | awk -F'"' -v now="$(date -u '+%Y-%m-%d %H:%M UTC')" '
+for f in "$LOGDIR"/access.log* "$LOGDIR"/access-self.log*; do [ -f "$f" ] || continue; case $f in *.gz) gzip -dc "$f" ;; *) cat "$f" ;; esac; done | awk -F'"' -v now="$(date -u '+%Y-%m-%d %H:%M UTC')" '
 function cls(ua,    u, i) {
   u = tolower(ua); name = ""
   for (i = 1; i <= nai; i++) if (index(u, tolower(ai[i]))) { name = ai[i]; return "ai" }
@@ -59,10 +62,12 @@ BEGIN {
 NF >= 7 {
   nh = split($1, h, " "); net = h[1]; day = ""
   for (i = 2; i <= nh; i++) if (substr(h[i], 1, 1) == "[") { day = substr(h[i], 9, 4) "-" mon[substr(h[i], 5, 3)] "-" substr(h[i], 2, 2); break }
-  if (first == "" || day < first) first = day
+  self = ($6 ~ /^sigelo-selfcheck\//)
+  if (!self && (first == "" || day < first)) first = day
   split($2, r, " "); path = r[2]
   split($3, s, " "); st = s[1]
   if (st == "301") next
+  if (self) { own++; next }
   ua = $6; acc = $8
   c = cls(ua)
   req[c]++; total++
@@ -80,6 +85,7 @@ END {
   printf "%-15s %7s %6s\n", "", "req", "~vis"
   for (i = 1; i <= 5; i++) printf "%-15s %7d %6d\n", lab[order[i]], req[order[i]], vis[order[i]]
   printf "%-15s %7d %6d\n", "total", total, tvis
+  printf "own traffic (excluded) %d, 7 days\n", own
   printf "Accept: text/markdown %d (agents %d)\n", md, mdag
   top(byai, 6, "AI agents by name")
   top(byprog, 4, "programmatic by client")

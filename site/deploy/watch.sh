@@ -22,7 +22,8 @@
 # most one an hour while it lasts — and never two within an hour, whatever the state says
 # (last-notify in the default state dir is shared by every run, any --state). Recovery is one log
 # line, no notification. Success is silent. Every failed run appends one line to alerts.log.
-# Exit 1 while down.
+# Exit 1 while down. Every probe of the site sends User-Agent sigelo-selfcheck/1 (nginx.conf logs
+# it to access-self.log, out of the visit statistics); the api.github.com probe does not.
 set -u
 DEFAULT_STATE="$HOME/.local/share/sigelo-watch"
 ORIGIN=https://sigelo.io; STATE=""; NOTIFY=1; REPEAT=3600; FORCE=0
@@ -50,8 +51,9 @@ import tls from 'node:tls';
 import { isIP } from 'node:net';
 const o = process.argv[2], u = new URL(o), bad = [];
 const t = () => AbortSignal.timeout(20000);
+const UA = 'sigelo-selfcheck/1 (+https://sigelo.io/privacy)';
 const req = async (path, init = {}) => {
-  try { const r = await fetch(o + path, { signal: t(), redirect: 'manual', ...init }); return { r, body: await r.text() }; }
+  try { const r = await fetch(o + path, { signal: t(), redirect: 'manual', ...init, headers: { 'user-agent': UA, ...init.headers } }); return { r, body: await r.text() }; }
   catch (e) { return { err: e.cause?.code ?? e.message }; }
 };
 const want = async (name, path, test, init) => {
@@ -70,7 +72,7 @@ await want('/mcp initialize', '/mcp', (r, b) => !!JSON.parse(b).result?.capabili
   body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'sigelo-watch', version: '0' } } }) });
 if (u.protocol === 'https:') {
   try {
-    const r = await fetch(`http://${u.host}/`, { redirect: 'manual', signal: t() });
+    const r = await fetch(`http://${u.host}/`, { redirect: 'manual', headers: { 'user-agent': UA }, signal: t() });
     if (r.status !== 301 || r.headers.get('location') !== `https://${u.host}/`) bad.push(`http:// redirect: ${r.status}`);
   } catch (e) { bad.push(`http:// redirect: ${e.cause?.code ?? e.message}`); }
   const days = await new Promise((res) => {

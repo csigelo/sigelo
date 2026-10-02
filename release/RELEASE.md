@@ -55,8 +55,9 @@ Two signatures over the tagged commit; neither key is the deploy key or the main
 From the private repository, every time:
 
 ```sh
-SIGELO_AUTHOR='csigelo <contact@sigelo.io>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go SIGELO_EXCLUDE='RISKS.md' sh release/publish.sh
+SIGELO_AUTHOR='csigelo <contact@sigelo.io>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go SIGELO_EXCLUDE='RISKS.md JOURNAL.md commercial' sh release/publish.sh
 GIT_SSH_COMMAND='ssh -i ~/.ssh/sigelo_ed25519 -o IdentitiesOnly=yes' git -C ../sigelo-public push
 ```
 
 `RISKS.md` is the internal risk register and decisions log: it names providers and Owner-only items and is never exported.
+`JOURNAL.md` is the internal engineering journal (rationale and measurements behind CHANGELOG entries) and `commercial/` holds internal commercial material; neither is exported.
