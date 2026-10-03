@@ -1,8 +1,1 @@
-{
-  "v": "sigelo/0",
-  "typ": "genesis",
-  "key": "z6Mkrid1uJ2jmqWBM32Tf7dqXc9oHNjHk4T5mp3rxngMp4t8",
-  "recovery": "sha256:e5b09e1da0cf02ecf55e3989d009cbca5d8004dfc45f391084634584907c0592",
-  "created": "2026-10-02T06:19:51Z",
-  "nonce": "zGgCxHsxtjZUcufTtHRQoKy"
-}
+{"v":"sigelo/0","typ":"genesis","key":"z6Mku2xL81pGuy4DTriWdZGkoSgukA2jb5o8HkwGjrq6Ba3C","recovery":"sha256:ecd8f74cc37cce3274e00faf25099c2df09ac80ac7bb100f0525a5e9c864e212","created":"2026-10-03T12:16:28Z","nonce":"z5nba21ALsfGZothTKsCmoc"}

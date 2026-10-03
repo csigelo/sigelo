@@ -7,5 +7,26 @@
     "created": "2026-10-02T06:19:51Z",
     "nonce": "zGgCxHsxtjZUcufTtHRQoKy"
   },
-  "rotations": []
+  "rotations": [
+    {
+      "body": {
+        "v": "sigelo/0",
+        "typ": "rotation",
+        "id": "did:sigelo:zBASk7w9zUhCYuuEpcUDSAuBUPW7qSAjAjAYARDCJ4S2Q",
+        "next": "did:sigelo:zEqNZjQDBiiufPs4NHrLw1kJD8rBitbFPyoQJoKuJFTM7",
+        "iat": 1791029806,
+        "reason": "recovery",
+        "recovery_key": "z6MkjECf2Vetnf4N3ASinDsSbtLXH8fiWTn13vpcFeRUay6a"
+      },
+      "sig": "z2aRhcbUe2oVEdzxdScUsvpYJb3PxvmrVyfn14pjoup1XVTtVeEJPk3bT8NQtaRk9xHH2u8rwHjRiVBEgTHH5S7PC",
+      "next_genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mku2xL81pGuy4DTriWdZGkoSgukA2jb5o8HkwGjrq6Ba3C",
+        "recovery": "sha256:ecd8f74cc37cce3274e00faf25099c2df09ac80ac7bb100f0525a5e9c864e212",
+        "created": "2026-10-03T12:16:28Z",
+        "nonce": "z5nba21ALsfGZothTKsCmoc"
+      }
+    }
+  ]
 }

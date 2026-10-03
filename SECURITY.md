@@ -13,7 +13,7 @@ These are the only official names; anything else that claims to be sigelo is not
 - Releases: only that repository's Releases page and `https://sigelo.io/releases/`, always with `SHA256SUMS`; from v0.1.1 also an SSH-signed tag (`/.well-known/sigelo-release-signers`) and a `release.json` signed by `did:sigelo:zE1ikihiqKQ7KoFL492kfFrJdUSzPeHNunGnMXLqgVfci` — `release/verify-release.sh <tag>` checks all three; a release without them is not ours.
 - Maintainer: `csigelo` (GitHub), no other name. E-mail: `contact@sigelo.io` and `security@sigelo.io`, receive-only for now.
 - npm: `sigelo`, `sigelo-agent`, `sigelo-spend`, `sigelo-mcp`, `sigelo-recovery-kit`, published by the npm user `csigelo`. Until they appear there, any package with these names is not ours.
-- The sigelo.io world's issuer DID is `did:sigelo:zBASk7w9zUhCYuuEpcUDSAuBUPW7qSAjAjAYARDCJ4S2Q`, its genesis at `https://sigelo.io/world/genesis.json`. An attestation from any other issuer is not from sigelo.io.
+- The sigelo.io world's issuer DID is `did:sigelo:zEqNZjQDBiiufPs4NHrLw1kJD8rBitbFPyoQJoKuJFTM7`, its genesis at `https://sigelo.io/world/genesis.json` and its rotation chain at `https://sigelo.io/world/rotations.json`. The previous DID `did:sigelo:zBASk7w9zUhCYuuEpcUDSAuBUPW7qSAjAjAYARDCJ4S2Q` was retired by a precautionary recovery rotation on 2026-10-03: do not trust attestations from it. An attestation from any other issuer is not from sigelo.io.
 - Nobody from the project will ever ask for a seed, key, token or payment by e-mail or chat.
 
 Report impersonation to `security@sigelo.io`. Machine-readable: `official` in `https://sigelo.io/index.json`.
