@@ -11,12 +11,11 @@ A fixture contract, `sigelo-a2a-pairing/0`, for the pairing step of a Hermes con
 (hermes-agent #132248). An Agent Card's name is a label anyone can type. Here the card carries a
 sigelo bundle, the receiver verifies it offline and checks a challenge answer, and the pairing
 is stored under the peer's original DID. A rotation keeps the pairing. A recovery beats a thief's
-rotation. No model runs before any of these checks.
+rotation. No model runs before these checks.
 
 Reference acceptors, one function and a JSON-file store each:
 [`accept/node/sigelo-pair.mjs`](../../../accept/node/sigelo-pair.mjs) **53** code lines,
-[`accept/python/sigelo_pair.py`](../../../accept/python/sigelo_pair.py) **67** (non-blank,
-non-comment; `test.mjs` fails at 100).
+[`accept/python/sigelo_pair.py`](../../../accept/python/sigelo_pair.py) **67** (`test.mjs` fails at 100).
 
 ## Where the bundle rides
 
@@ -24,10 +23,8 @@ One entry in `capabilities.extensions` (A2A v1.0 `AgentExtension`: `uri`, `descr
 `required`, `params`), `uri: "urn:sigelo:a2a-pairing:0"`, `required: false`, `params: { did, bundle }`.
 Not `securitySchemes`: its five types are fixed and none fits a challenge-response. Not the card's
 JWS `signatures`: signing JWS input with the identity key would break sigelo's domain separation
-(SPEC §3). An extension is the spec's place for optional behaviour, and a peer that ignores it
-still talks over bearer tokens. The URN names the contract without implying a fetch.
-Everything else on the card is what Hermes' `build_agent_card` emits (read at hermes-agent
-b71ba34, `plugins/platforms/a2a/protocol.py`).
+(SPEC §3). A peer that ignores the extension still talks over bearer tokens.
+The rest of the card is what Hermes' `build_agent_card` emits (hermes-agent b71ba34).
 
 ## In a contacts plugin
 
@@ -58,18 +55,16 @@ against two empty stores `A` and `B`:
 - `lookup`, `revoke` `{did}` → `expect` `{name, did, current_did, current_key, revoked}` or `null`
 
 The store re-reads its file at every operation, so one long-lived `Contacts` in the plugin sees a revoke the
-owner made from another process, and `issue` drops expired challenges. Two writers at the same instant still
-need a lock of the integrator's choosing.
+owner made from another process, and `issue` drops expired challenges. Two simultaneous writers still need the integrator's lock.
 
-Checks, in order: `card`, `challenge_unknown` (consumed here, single use), `challenge_expired`
+Checks, in order: `card`, `challenge_unknown` (single use), `challenge_expired`
 (`now ≥ issued + ttl`), `bundle` (§9 rejects: fork, structure), `card_did`, `challenge_did`,
 `challenge_body`, `sig`, `revoked`, `not_contact`, `stale_chain` (the store merges every rotation
-it has seen, §7.3 picks again). Conformant = every `expect` by value, every `error` by check name;
-error messages are free text. Adding a step keeps `v`; changing a step or a check is a new `v`.
+it has seen, §7.3 picks again). Conformant: every `expect` by value, every `error` by check name; messages are free text. Adding a step keeps `v`; changing a step or a check is a new `v`.
 
 Cases: both directions, replay, expiry, card name, foreign bundle, unknown peer, tampered
 attestation (discarded and counted, not fatal: SPEC §9 step 5), fork, voluntary rotation,
-thief before recovery (accepted: nothing offline can tell yet), recovery beats voluntary (§7.1),
+thief before recovery (accepted: nothing offline can tell), recovery beats voluntary (§7.1),
 thief after recovery, revocation.
 
 ## What this does not do
