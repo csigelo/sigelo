@@ -85,7 +85,7 @@ jobs:
       # Python one needs `cryptography` (a venv) and builds sigelo-verify with go. Seconds.
       - run: |
           node adapters/hermes/pairing/gen.mjs --check
-          (cd accept/node && npm ci --ignore-scripts --omit=dev --silent)
+          (cd accept/node && npm install --ignore-scripts --omit=dev --no-audit --no-fund --no-package-lock --silent)   # drop-ins ship no lockfile (accept/.gitignore)
           node adapters/hermes/pairing/test.mjs | tee /tmp/pairing-node && grep -q '^ALL PASS$' /tmp/pairing-node
           python3 -m venv /tmp/pyv && /tmp/pyv/bin/pip install -q --disable-pip-version-check cryptography
           /tmp/pyv/bin/python adapters/hermes/pairing/test.py | tee /tmp/pairing-py && grep -q '^ALL PASS$' /tmp/pairing-py
