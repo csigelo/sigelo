@@ -12,6 +12,9 @@
  * Kept out of sigelo-agent.ts so the identity core an integrator reads stays at its line count.
  * Both refuse anything that does not check: a seed that is not the genesis key, a rotation
  * whose chain does not end at the new key under the §9 verifier.
+ *
+ * Also here, for the same line-count reason: `forgetIssuer`, the holder dropping an issuer it
+ * learned (out of band, SPEC §5) was retired.
  */
 import { existsSync } from 'node:fs';
 import type { Genesis, Rotation } from 'sigelo';
@@ -76,4 +79,19 @@ export function applyRotation(s: Store, input: unknown, now: number): { store: S
   const got = verify(bundleOf(next), now).did; // throws the §9 reason if the chain is rejected
   if (got !== r.body.next) throw new SigeloError(`adopt --rotation: the chain does not follow this rotation (head is ${got}) — a recovery key that is not this identity's, or a voluntary rotation that changes the recovery commitment (SPEC §7.4)`);
   return { store: next, dropped };
+}
+
+/** SPEC §12.1 syntax of a did:sigelo. */
+const DID_RE = /^did:sigelo:z[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * Drop every attestation whose `iss` is `issuer`, and that issuer's genesis. Verifiers do not
+ * walk issuer chains (SPEC §5): an attestation under a retired issuer DID keeps verifying until
+ * its `exp`, so only the holder can stop presenting it. A local edit to the holder's own file —
+ * not a revocation list, not a judgement of the issuer. An unknown issuer removes nothing.
+ */
+export function forgetIssuer(s: Store, issuer: unknown): { store: Store; removed: number } {
+  if (typeof issuer !== 'string' || !DID_RE.test(issuer)) throw new SigeloError(`forget-issuer: ${JSON.stringify(issuer)} is not a did:sigelo:z… DID (SPEC §12.1)`);
+  const attestations = s.attestations.filter((a) => a.body.iss !== issuer);
+  return { store: { ...s, attestations, issuers: s.issuers.filter((g) => did(g) !== issuer) }, removed: s.attestations.length - attestations.length };
 }

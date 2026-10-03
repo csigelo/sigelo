@@ -8,6 +8,7 @@ history, which is not public. This public history starts at the import of 2026-1
 - **Status:** first tagged release (GitHub pre-release); wire `sigelo/0` may change until v0.2; the keeper is stagenet-only
   and unaudited.
 
+- **MCP:** `sigelo_forget_issuer` (CLI `forget-issuer`) drops a retired issuer's attestations and genesis from the identity file: holder-side, after an out-of-band rotation notice (SPEC §5).
 - **World:** issuer rotated 2026-10-03 after a seed exposure: new DID in SECURITY.md, chain at `/world/rotations.json`,
   old DID retired; the 24 h re-issue never replays a retired issuer's attestation.
 - **Provenance gate (prototype):** signed instructions (`ctx: "sigelo/instruction"`) gate shell and write tools in

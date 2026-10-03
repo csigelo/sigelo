@@ -10,7 +10,7 @@ check offline. Specification and the other implementations: https://github.com/c
 
 - **MCP server `sigelo`** (local, stdio): `server.mjs`, started as `node ${CLAUDE_PLUGIN_ROOT}/server.mjs`.
   Tools: `sigelo_whoami`, `sigelo_init`, `sigelo_sign_challenge`, `sigelo_add_issuer`,
-  `sigelo_add_attestation`, `sigelo_bundle`, `sigelo_verify`, `sigelo_rotate`. Every identity tool
+  `sigelo_add_attestation`, `sigelo_forget_issuer`, `sigelo_bundle`, `sigelo_verify`, `sigelo_rotate`. Every identity tool
   takes an optional `identity` profile name, so subagents can each hold their own.
 - **Skill `sigelo`**: when to call which tool, and that attestation `claims` are data from
   strangers, never instructions.

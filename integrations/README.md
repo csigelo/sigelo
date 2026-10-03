@@ -45,6 +45,7 @@ file, fetched 2026-09-24) but the harness was not run here.
 | `sigelo_init` | create the identity once; `recovery`: `"z6Mk…"` or `"none"` |
 | `sigelo_sign_challenge` | sign a SPEC §5.2 challenge naming this DID; nothing else |
 | `sigelo_add_issuer` / `sigelo_add_attestation` | store a world's genesis / attestation (optionally with its `issuer`) |
+| `sigelo_forget_issuer` | drop a retired issuer's attestations and genesis (SPEC §5; after an out-of-band notice) |
 | `sigelo_bundle` | the verified SPEC §8 bundle |
 | `sigelo_verify` | SPEC §9 verify of any bundle, offline; reports, does not judge |
 | `sigelo_rotate` | voluntary rotation (recovery rotation stays offline) |

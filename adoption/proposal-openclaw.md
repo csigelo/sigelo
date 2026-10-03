@@ -4,7 +4,7 @@ Title: "[Feature]: let a plugin resolve A2A peers, so a peer can prove a key-bas
 
 ## Problem
 
-`extensions/a2a/src/http.ts` (read at 8eed7e85, 2026-09-26) authenticates an A2A peer in one
+`extensions/a2a/src/http.ts` (read at c52a2778, 2026-10-03) authenticates an A2A peer in one
 way. `resolvePeerName` hashes the Bearer token and compares it with each `channels.a2a.peers.<name>.token`.
 When none matches, the request gets a 401 before any plugin hook runs. A peer is therefore whoever
 holds a secret shared by two gateways, and that secret tells a third gateway nothing.

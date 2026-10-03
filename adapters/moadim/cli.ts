@@ -19,6 +19,7 @@ const USAGE = `sigelo-agent — portable sigelo/0 identity for a moadim-run agen
   sign-challenge <json|->                sign a world's { typ: "challenge", … } body
   add-issuer <genesis json|->            store a world's genesis document
   add-attestation <{body,sig} json|->    store a world's attestation about us
+  forget-issuer <did>                    drop a retired issuer's attestations and genesis
   bundle                                 verify, then print the SPEC §8 bundle
   rotate                                 voluntary rotation to a fresh key
 
@@ -122,6 +123,11 @@ try {
     case 'add-attestation': {
       const a = input(rest[0]) as never;
       out(update((s) => { const store = id.addAttestation(s, a); return { store, result: { attestations: store.attestations.length } }; }));
+      break;
+    }
+    case 'forget-issuer': {
+      const d = rest[0];
+      out(update((s) => { const { store, removed } = adopt.forgetIssuer(s, d); return { store, result: { removed, attestations: store.attestations.length, issuers: store.issuers.map(did) } }; }));
       break;
     }
     case 'bundle': {

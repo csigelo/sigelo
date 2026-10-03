@@ -67,14 +67,14 @@ try {
   const disc = await c.rpc('server/discover', { _meta: M });
   ok(disc.result?.resultType === 'complete' && disc.result.supportedVersions.includes('2026-07-28') && disc.result._meta['io.modelcontextprotocol/serverInfo'].name === 'sigelo', 'server/discover');
   const ml = await c.rpc('tools/list', { _meta: M });
-  ok(ml.result.resultType === 'complete' && ml.result.cacheScope === 'public' && Number.isInteger(ml.result.ttlMs) && ml.result.tools.length === 8, 'modern tools/list');
+  ok(ml.result.resultType === 'complete' && ml.result.cacheScope === 'public' && Number.isInteger(ml.result.ttlMs) && ml.result.tools.length === 9, 'modern tools/list');
   const mc = await c.rpc('tools/call', { name: 'sigelo_whoami', arguments: {}, _meta: M });
   ok(mc.result.resultType === 'complete' && mc.result.isError === true, 'modern tools/call carries resultType');
   const bad = await c.rpc('tools/list', { _meta: { ...M, 'io.modelcontextprotocol/protocolVersion': '2099-01-01' } });
   ok(bad.error?.code === -32022 && bad.error.data.requested === '2099-01-01', 'unsupported modern version → -32022');
   ok((await c.rpc('ping')).result !== undefined, 'ping');
   const list = (await c.rpc('tools/list')).result.tools.map((t) => t.name).sort();
-  ok(list.join() === ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'].join(), 'tools/list without keeper = 8 identity tools', list.join());
+  ok(list.join() === ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'].join(), 'tools/list without keeper = 9 identity tools', list.join());
 
   let r = await c.call('sigelo_whoami');
   ok(r.isError && /sigelo_init/.test(r.text), 'whoami before init points at sigelo_init');
@@ -124,6 +124,22 @@ try {
   r = await c.call('sigelo_verify', { bundle: { ...bundle1, rotations: [{ body: {}, sig: 'x' }] } });
   ok(r.isError && /^REFUSED: \S/.test(r.text), 'malformed bundle → REFUSED naming the check', r.text);
 
+  // SPEC §5: a world announced (out of band) that it retired an issuer DID; the holder drops it.
+  const retired = keygen({ recovery: null }), retiredDid = did(retired.genesis);
+  const att2 = attest({ secret: retired.secret, iss: retiredDid, sub: agentDid, iat: now, exp: now + 86400, ctx: 'retired.world', admission: 'open', claims: {} });
+  r = await c.call('sigelo_add_attestation', { attestation: att2, issuer: retired.genesis });
+  ok(!r.isError && r.data.attestations === 2 && r.data.issuers.length === 2, 'second issuer stored');
+  r = await c.call('sigelo_forget_issuer', { issuer: retiredDid });
+  ok(!r.isError && r.data.removed === 1 && r.data.attestations === 1 && r.data.issuers.join() === worldDid, 'forget_issuer drops its attestation and genesis', r.text);
+  r = await c.call('sigelo_bundle');
+  ok(!r.isError && !JSON.stringify(r.data.bundle).includes(retiredDid) && r.data.bundle.issuers.length === 1 && !r.data.bundle.issuers.some((g) => did(g) === retiredDid) && r.data.bundle.attestations.length === 1, 'bundle no longer carries the retired issuer');
+  r = await c.call('sigelo_forget_issuer', { issuer: retiredDid });
+  ok(!r.isError && r.data.removed === 0 && r.data.attestations === 1, 'forget_issuer of an unknown DID → removed 0');
+  r = await c.call('sigelo_forget_issuer', { issuer: 'did:sigelo:not-a-did' });
+  ok(r.isError && /not a did:sigelo/.test(r.text), 'forget_issuer refuses a malformed DID', r.text);
+  r = await c.call('sigelo_forget_issuer', {});
+  ok(r.isError && /not a did:sigelo/.test(r.text), 'forget_issuer refuses a missing DID', r.text);
+
   r = await c.call('sigelo_rotate');
   ok(!r.isError && r.data.chain.length === 2 && r.data.did !== agentDid, 'rotate');
   r = await c.call('sigelo_whoami');
@@ -166,7 +182,7 @@ try {
   const c3 = client({ SIGELO_IDENTITY: idFile, SIGELO_WALLET_URL: url, SIGELO_WALLET_TOKEN: TOKEN });
   await c3.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   const tools = (await c3.rpc('tools/list')).result.tools;
-  ok(tools.length === 12, 'tools/list with keeper = 12');
+  ok(tools.length === 13 && tools.some((t) => t.name === 'sigelo_forget_issuer'), 'tools/list with keeper = 13');
   ok(tools.every((t) => t.inputSchema?.type === 'object' && t.description.length < 700), 'schemas are objects, descriptions short');
   r = await c3.call('sigelo_wallet_balance');
   ok(!r.isError && /^BALANCE 1.5 XMR/.test(r.text) && r.structured.status === 'done', 'wallet_balance', r.text);

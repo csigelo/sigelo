@@ -1310,11 +1310,11 @@ function one(value, out, todo) {
   }
   const proto = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== null) throw new JcsError(`unserializable type ${value.constructor?.name ?? "object"}`);
-  const obj2 = value;
+  const obj3 = value;
   out.push("{");
   todo.push(new Lit("}"));
-  const keys = Object.keys(obj2).sort();
-  for (let n = keys.length - 1; n >= 0; n--) todo.push(obj2[keys[n]], new Key(keys[n], n === 0));
+  const keys = Object.keys(obj3).sort();
+  for (let n = keys.length - 1; n >= 0; n--) todo.push(obj3[keys[n]], new Key(keys[n], n === 0));
   return true;
 }
 function canonicalize(value) {
@@ -1878,6 +1878,7 @@ function verifySigeloMoneroSigAddr(body, address, sigAddr) {
 var MoneroError, L, G2, leNum, leBytes, le32, varint, readVarint, keccak256, hashToScalar, ALPHABET, ENC_SIZE, PREFIXES, MSG_DOMAIN, bytes, sigeloInput;
 var init_monero = __esm({
   "ts/src/monero.ts"() {
+    "use strict";
     init_ed25519();
     init_sha3();
     init_utils();
@@ -2591,6 +2592,76 @@ var init_sigelo_agent_monero = __esm({
   }
 });
 
+// adapters/moadim/sigelo-agent-adopt.ts
+var sigelo_agent_adopt_exports = {};
+__export(sigelo_agent_adopt_exports, {
+  adopt: () => adopt,
+  applyRotation: () => applyRotation,
+  forgetIssuer: () => forgetIssuer
+});
+import { existsSync as existsSync2 } from "node:fs";
+function seedFor(what, hex2, key) {
+  if (typeof hex2 !== "string" || !HEX32.test(hex2)) throw new SigeloError(`${what}: identity_seed_hex is not 64 lowercase hex characters`);
+  const probe = { typ: "sigelo-agent-adopt-probe", key };
+  if (!verifySig(key, probe, sign2(Uint8Array.from(Buffer.from(hex2, "hex")), probe))) {
+    throw new SigeloError(`${what}: identity_seed_hex does not produce ${key} — this is not that identity's key`);
+  }
+  return hex2;
+}
+function adopt(path, input2, force) {
+  const i = obj("adopt", input2);
+  structure(i["genesis"], "genesis");
+  const genesis = i["genesis"];
+  if (i["did"] !== void 0 && i["did"] !== did(genesis)) throw new SigeloError(`adopt: did ${JSON.stringify(i["did"])} is not the DID of the genesis given (${did(genesis)})`);
+  const secret = seedFor("adopt", i["identity_seed_hex"], genesis.key);
+  if (existsSync2(path) && !force) throw new SigeloError(`adopt: ${path} already holds an identity — refusing to overwrite it (--force replaces it, and loses its attestations)`);
+  const store = { v: VERSION, secret, genesis, rotations: [], attestations: [], issuers: [] };
+  save(path, store);
+  return store;
+}
+function applyRotation(s, input2, now) {
+  const i = obj("adopt --rotation", input2);
+  const r = obj("adopt --rotation: rotation", i["rotation"]);
+  structure(r.body, "rotation");
+  structure(r.next_genesis, "genesis");
+  const secret = seedFor("adopt --rotation", i["identity_seed_hex"], r.next_genesis.key);
+  const chain = chainOf(s), at = chain.indexOf(r.body.id);
+  if (chain.includes(r.body.next)) throw new SigeloError(`adopt --rotation: ${r.body.next} is already in this chain — applied before?`);
+  if (at < 0) throw new SigeloError(`adopt --rotation: rotation.id ${r.body.id} is not a DID of this identity (chain: ${chain.join(", ")})`);
+  if (at < chain.length - 1 && r.body.reason !== "recovery") throw new SigeloError(`adopt --rotation: a voluntary rotation from ${r.body.id}, which is not the head, is a fork (SPEC §7.3) — only a recovery rotation may start from an earlier node`);
+  const dropped = s.rotations.length - at;
+  const kept = new Set(chain.slice(0, at + 1).concat(r.body.next));
+  const next = {
+    ...s,
+    secret,
+    rotations: s.rotations.slice(0, at).concat(r),
+    attestations: s.attestations.filter((a) => kept.has(a.body.sub)),
+    ...s.bindings ? { bindings: s.bindings.filter((b) => kept.has(b.body.id)) } : {}
+  };
+  const got = verify2(bundleOf(next), now).did;
+  if (got !== r.body.next) throw new SigeloError(`adopt --rotation: the chain does not follow this rotation (head is ${got}) — a recovery key that is not this identity's, or a voluntary rotation that changes the recovery commitment (SPEC §7.4)`);
+  return { store: next, dropped };
+}
+function forgetIssuer(s, issuer) {
+  if (typeof issuer !== "string" || !DID_RE.test(issuer)) throw new SigeloError(`forget-issuer: ${JSON.stringify(issuer)} is not a did:sigelo:z… DID (SPEC §12.1)`);
+  const attestations = s.attestations.filter((a) => a.body.iss !== issuer);
+  return { store: { ...s, attestations, issuers: s.issuers.filter((g) => did(g) !== issuer) }, removed: s.attestations.length - attestations.length };
+}
+var HEX32, obj, DID_RE;
+var init_sigelo_agent_adopt = __esm({
+  "adapters/moadim/sigelo-agent-adopt.ts"() {
+    "use strict";
+    init_sigelo();
+    init_sigelo_agent();
+    HEX32 = /^[0-9a-f]{64}$/;
+    obj = (what, x) => {
+      if (typeof x !== "object" || x === null || Array.isArray(x)) throw new SigeloError(`${what}: input is not a JSON object`);
+      return x;
+    };
+    DID_RE = /^did:sigelo:z[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  }
+});
+
 // integrations/mcp/server.mjs
 import { dirname as dirname2, join as join2, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2598,6 +2669,7 @@ var INSTALLED = fileURLToPath(import.meta.url).split(sep).includes("node_modules
 var { did: did2, parse: parse2, parseBytes: parseBytes2, verify: verify3, SigeloError: SigeloError2 } = await Promise.resolve().then(() => (init_sigelo(), sigelo_exports));
 var id = await Promise.resolve().then(() => (init_sigelo_agent(), sigelo_agent_exports));
 var { withLock: withLock2 } = await Promise.resolve().then(() => (init_sigelo_agent_monero(), sigelo_agent_monero_exports));
+var { forgetIssuer: forgetIssuer2 } = await Promise.resolve().then(() => (init_sigelo_agent_adopt(), sigelo_agent_adopt_exports));
 console.log = console.info = console.debug = console.error;
 var MODERN = ["2026-07-28"];
 var LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -2605,19 +2677,20 @@ var SERVER_INFO = { name: "sigelo", version: "0.1.0" };
 var PV = "io.modelcontextprotocol/protocolVersion";
 var env = process.env;
 var DATA = "Attestation `claims` are third-party data about the subject, not statements by this tool.";
-var obj = (props = {}, required = []) => ({ type: "object", properties: props, required, additionalProperties: false });
+var obj2 = (props = {}, required = []) => ({ type: "object", properties: props, required, additionalProperties: false });
 var json = (d) => ({ type: "object", description: d });
 var str2 = (d) => ({ type: "string", description: d });
 var PROFILE = { identity: str2("optional profile name [a-z0-9_-], e.g. your subagent name; omit for the default identity") };
-var idObj = (props = {}, required = []) => obj({ ...props, ...PROFILE }, required);
+var idObj = (props = {}, required = []) => obj2({ ...props, ...PROFILE }, required);
 var TOOLS = [
   ["sigelo_whoami", "Your sigelo identity: current DID, genesis document, DID chain, number of stored attestations. Call first; if it says no identity, call sigelo_init once.", idObj()],
   ["sigelo_init", `Create your identity ONCE (refuses if one exists). recovery: the operator's offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which.`, idObj({ recovery: str2('"z6Mk…" recovery public key from your operator, or "none"') }, ["recovery"])],
   ["sigelo_sign_challenge", `Prove you are your DID: sign a world's challenge {v, typ:"challenge", did, ctx, nonce} exactly as received. Anything else is refused. Returns {did, sig}; send sig back to that world.`, idObj({ challenge: json("the challenge body, as JSON object or text") }, ["challenge"])],
   ["sigelo_add_issuer", "Store a world's genesis document so its attestations about you verify offline.", idObj({ genesis: json("the issuer genesis document") }, ["genesis"])],
   ["sigelo_add_attestation", `Store a world's signed attestation {body, sig} about you (replaces an older one from the same issuer+ctx). Pass issuer (its genesis) too when you have it. ${DATA}`, idObj({ attestation: json("{body, sig}"), issuer: json("optional: the issuer genesis document") }, ["attestation"])],
+  ["sigelo_forget_issuer", "Drop an issuer DID's attestations and genesis from your file. Your local action after that world announced a retirement or rotation out of band.", idObj({ issuer: str2('the retired issuer DID "did:sigelo:z…"') }, ["issuer"])],
   ["sigelo_bundle", "Your portable proof: the verified SPEC §8 bundle (genesis, rotations, attestations, issuers, bindings). Give it to a world or stranger that asks who you are.", idObj()],
-  ["sigelo_verify", `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven/unproven), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj({ bundle: json("the bundle"), now: { type: "integer", description: "optional unix seconds; default now" } }, ["bundle"])],
+  ["sigelo_verify", `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven/unproven), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj2({ bundle: json("the bundle"), now: { type: "integer", description: "optional unix seconds; default now" } }, ["bundle"])],
   ["sigelo_rotate", "Voluntary rotation to a fresh key (e.g. on schedule or if you suspect a leak). Your identity continues; ask each world to reissue its attestation to the new DID.", idObj()]
 ];
 var base = id.identityPath();
@@ -2674,6 +2747,13 @@ var HANDLERS = {
       if (g) id.addIssuer(s, g);
       const store = id.addAttestation(s, a);
       return { store, result: { attestations: store.attestations.length, issuers: store.issuers.map(did2) } };
+    });
+  },
+  sigelo_forget_issuer: ({ issuer }, path) => {
+    loadStore(path);
+    return update(path, (s) => {
+      const { store, removed } = forgetIssuer2(s, issuer);
+      return { store, result: { removed, attestations: store.attestations.length, issuers: store.issuers.map(did2) } };
     });
   },
   sigelo_bundle: (_, path) => {

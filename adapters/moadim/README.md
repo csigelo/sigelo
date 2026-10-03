@@ -32,6 +32,7 @@ A `<json|->` argument is inline JSON, `-` for stdin, or a file path.
 | `sign-challenge <json\|->` | sign exactly `{ v, typ: "challenge", did, ctx, nonce }` naming our DID; anything else is refused |
 | `add-issuer <genesis json\|->` | store a world's genesis |
 | `add-attestation <{body,sig} json\|->` | store a world's attestation about us; replaces an older one from the same `iss` and `ctx` |
+| `forget-issuer <did>` | drop a retired issuer's attestations and genesis (SPEC §5) |
 | `bundle` | verify, then print the bundle (a fatal `SigeloError` is printed instead, exit 1) |
 | `rotate` | voluntary rotation, recovery commitment carried forward |
 | `wallet-set <json\|->` | install the treasury's **view-only** keys (`agent.treasury` from `sigelo-offline derive` plus `net`); spend keys refused |

@@ -42,7 +42,7 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | `sigelo-agent.ts` | **75** | identity store, `init`, `signChallenge`, `addIssuer`, `addAttestation`, `bundle`, `rotateKey` |
 | **identity total** | **77** | |
 | `sigelo-agent-monero.ts` | 131 | `walletSet`, `bindMonero`, `receive`, `invoice`, `verifyInvoice` — counted separately so an identity-only install reads 77 |
-| `sigelo-agent-adopt.ts` | 49 | `adopt`, outside the core |
+| `sigelo-agent-adopt.ts` | 55 | `adopt`, `forgetIssuer`, outside the core |
 | `cli.ts`, `test.ts` | — | argv/output and tests, not argued |
 
 Dependency: `"sigelo": "file:../../ts"` (build `ts/` first). `@types/node` and `typescript` are

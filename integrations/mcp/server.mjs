@@ -17,6 +17,7 @@ const lib = (pkg, repo) => import(INSTALLED ? pkg : repo);
 const { did, parse, parseBytes, verify, SigeloError } = await lib('sigelo', '../../ts/dist/sigelo.js');
 const id = await lib('sigelo-agent/dist/sigelo-agent.js', '../../adapters/moadim/sigelo-agent.ts');
 const { withLock } = await lib('sigelo-agent/dist/sigelo-agent-monero.js', '../../adapters/moadim/sigelo-agent-monero.ts');
+const { forgetIssuer } = await lib('sigelo-agent/dist/sigelo-agent-adopt.js', '../../adapters/moadim/sigelo-agent-adopt.ts');
 
 // stdout is the protocol. Anything a library prints (keygen's recovery warning uses
 // console.warn, but be sure) must not land there.
@@ -47,6 +48,7 @@ const TOOLS = [
   ['sigelo_sign_challenge', 'Prove you are your DID: sign a world\'s challenge {v, typ:"challenge", did, ctx, nonce} exactly as received. Anything else is refused. Returns {did, sig}; send sig back to that world.', idObj({ challenge: json('the challenge body, as JSON object or text') }, ['challenge'])],
   ['sigelo_add_issuer', 'Store a world\'s genesis document so its attestations about you verify offline.', idObj({ genesis: json('the issuer genesis document') }, ['genesis'])],
   ['sigelo_add_attestation', `Store a world's signed attestation {body, sig} about you (replaces an older one from the same issuer+ctx). Pass issuer (its genesis) too when you have it. ${DATA}`, idObj({ attestation: json('{body, sig}'), issuer: json('optional: the issuer genesis document') }, ['attestation'])],
+  ['sigelo_forget_issuer', 'Drop an issuer DID\'s attestations and genesis from your file. Your local action after that world announced a retirement or rotation out of band.', idObj({ issuer: str('the retired issuer DID "did:sigelo:z…"') }, ['issuer'])],
   ['sigelo_bundle', 'Your portable proof: the verified SPEC §8 bundle (genesis, rotations, attestations, issuers, bindings). Give it to a world or stranger that asks who you are.', idObj()],
   ['sigelo_verify', `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven/unproven), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj({ bundle: json('the bundle'), now: { type: 'integer', description: 'optional unix seconds; default now' } }, ['bundle'])],
   ['sigelo_rotate', 'Voluntary rotation to a fresh key (e.g. on schedule or if you suspect a leak). Your identity continues; ask each world to reissue its attestation to the new DID.', idObj()],
@@ -95,6 +97,7 @@ const HANDLERS = {
     loadStore(path);
     return update(path, (s) => { if (g) id.addIssuer(s, g); const store = id.addAttestation(s, a); return { store, result: { attestations: store.attestations.length, issuers: store.issuers.map(did) } }; });
   },
+  sigelo_forget_issuer: ({ issuer }, path) => { loadStore(path); return update(path, (s) => { const { store, removed } = forgetIssuer(s, issuer); return { store, result: { removed, attestations: store.attestations.length, issuers: store.issuers.map(did) } }; }); },
   sigelo_bundle: (_, path) => {
     const { bundle, result } = id.bundle(loadStore(path), nowS());
     const notes = [];

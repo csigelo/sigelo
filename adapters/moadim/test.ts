@@ -93,6 +93,16 @@ run('add-attestation', JSON.stringify({ ...attestation, now: now * 1000, now_utc
   writeFileSync(bad, bytes);
   ok('add-attestation refuses a file with invalid UTF-8, naming it', fails('add-attestation', bad).includes('invalid UTF-8 in document'));
 }
+// ── forget-issuer: the holder drops a retired issuer (SPEC §5, out-of-band notice) ─────────
+{
+  const old = keygen({ recovery: new Uint8Array(32) });
+  run('add-issuer', JSON.stringify(old.genesis));
+  run('add-attestation', JSON.stringify(attest({ secret: old.secret, iss: old.did, sub: me.did, iat: now - 60, exp: now + 86400, ctx: 'retired.test', admission: 'open', claims: {} })));
+  const f = JSON.parse(run('forget-issuer', old.did)) as { removed: number; attestations: number; issuers: string[] };
+  ok('forget-issuer drops that issuer\'s attestation and genesis, keeps the other', f.removed === 1 && f.attestations === 1 && f.issuers.join() === world.did);
+  ok('forget-issuer of an unknown DID removes nothing', (JSON.parse(run('forget-issuer', old.did)) as { removed: number }).removed === 0);
+  ok('forget-issuer refuses a malformed DID', fails('forget-issuer', 'did:sigelo:nope').includes('not a did:sigelo'));
+}
 
 // ── bundle ────────────────────────────────────────────────────────────────────────────────
 type Bundle = { genesis: Genesis; rotations: unknown[]; bindings: Binding[]; attestations: { body: { sub: string } }[]; issuers: Genesis[] };
