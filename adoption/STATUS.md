@@ -12,7 +12,7 @@ first), **live**. Dates are UTC.
 | Directory entry (stdio + remote) | mcp.so, issue route | https://github.com/chatmcp/mcpso/issues/4636 | 2026-10-03 | filed |
 | `🪪 Identity` entry | punkpeye/awesome-mcp-servers | branch https://github.com/csigelo/awesome-mcp-servers/tree/add-sigelo | 2026-10-03 | prepared; blocked on Glama |
 | `🔒 Security` remote entry | punkpeye/awesome-remote-mcp-servers | text below | 2026-10-03 | prepared; blocked on a Glama connector |
-| `did:sigelo` registration | w3c/did-extensions | branch https://github.com/csigelo/did-extensions/tree/add-did-sigelo (`methods/sigelo.json` = `release/did-method-entry.json`) | 2026-10-03 | prepared; open once SPEC §12 is live on sigelo.io |
+| `did:sigelo` registration | w3c/did-extensions | OPENED 2026-10-03: https://github.com/w3c/did-extensions/pull/764
 | Official MCP Registry | registry.modelcontextprotocol.io | `io.github.csigelo/sigelo` | — | blocked: npm, or a remote-only version (below) |
 | Glama server + connector | glama.ai | glama.ai/mcp/servers, glama.ai/mcp/connectors | — | needs a Glama sign-in |
 | Smithery | smithery.ai | smithery.ai/new | — | needs a Smithery sign-in |

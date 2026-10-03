@@ -30,6 +30,15 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
 Not yet part of a release: npm publish (`npm publish $S/a/<pkg>-<v>.tgz`, `sigelo` first; then
 flip the site's "after the first npm publish" footnote and index.json `published`).
 
+## Nightly on the maintainer's host
+
+At 02:30 a user timer runs `sigelo-nightly` (outside this repository) on a clean clone of the
+private HEAD, offline: the ts, Go (with `--conformance` and `--impl` on the ts candidate), moadim,
+spend (`SIGELO_TEST_NO_LIVE=1`), mcp, world, accept and kit suites, the schema, doc budget and
+site checks, and `npm run sim`; crosscheck (no offline mode) is run by hand. About 9 minutes
+(8m04s and 8m39s on its first two runs). Each run leaves a log and a one-line summary; a failure
+leaves `FAILED` and at most one critical desktop notification a day, success none.
+
 ## Signing (from v0.1.1; v0.1.0 is unsigned)
 
 - **Tag**: SSH signature by `~/.ssh/sigelo_release_signing`; public half `release/allowed_signers`

@@ -28,6 +28,10 @@
 //     (orphaned, with a warning), the new approver's approval pays a request made before the
 //     restart exactly once, and a root re-added on another account refuses the start.
 //
+// L — no licence.json: /delegate, /fund, /approve and a pay above approval_above refuse 403
+//     licence_required (spend/licence.ts) while a pay under the caps is paid; then a test vendor's
+//     licence is installed under the running keeper and every later step runs as pro.
+//
 // Where a document says something else than the keeper does, the step is recorded under
 // `doc_divergences` in the summary (with the quote) and does not fail the run: those are
 // findings to report, not to fix here.
@@ -40,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 import { keygen, sign } from '../ts/dist/sigelo.js';
 import { recoveryCommitment, walletFromRoot } from '../ts/dist/keys.js';
 import { startMockWallet } from './mock-wallet.mjs';
+import { installLicence, keyKeeper, testVendor } from './licence.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -138,6 +143,12 @@ const policyDoc = (agents, extra = {}) => ({
 });
 const writePolicy = (doc) => writeFileSync(policyPath, typeof doc === 'string' ? doc : JSON.stringify(doc, null, 2), { mode: 0o600 });
 writePolicy(policyDoc(Object.values(roots)));
+// The keeper starts WITHOUT a licence (section L), then a throwaway TEST vendor's pro licence is
+// installed under it (sim/licence.mjs). Its own stream, so every seeded identity above is unchanged.
+const LR = prng('licence');
+const lbytes = (n) => Uint8Array.from({ length: n }, () => Math.floor(LR() * 256));
+const vendor = testVendor(lbytes);
+const keeperId = await keyKeeper({ dir, spendDist: SPEND, bytes: lbytes, vendor });
 
 const KPORT = PORT + 1;
 const keeper = { proc: null, stderr: '', starts: 0 };
@@ -202,6 +213,17 @@ async function delegate(id, by, name, caps, fund, expect, extra = {}, why) {
   return r;
 }
 const T = (n) => tok[n] ?? D[n]?.token;
+
+// ===== L: no licence.json — the paid verbs refuse 403 licence_required, the free tier pays =====
+const LIC = /^licence_required: /;
+step('L1', 'R1 delegates without a licence', ['403:licence_required'], await call('/delegate', { method: 'POST', token: T('R1'), body: { name: 'unlicensed', fund: '0' } }), undefined, LIC);
+step('L2', 'R1 funds a delegate without a licence', ['403:licence_required'], await call('/fund', { method: 'POST', token: T('R1'), body: { name: 'unlicensed', amount: String(XMR) } }), undefined, LIC);
+step('L3', 'R5 pays above approval_above without a licence (refused, never paid unapproved)', ['403:licence_required'], await pay(T('R5'), 2n * XMR, 'r5-unlicensed'), undefined, LIC);
+step('L4', 'an approval is posted without a licence', ['403:licence_required'], await call('/approve', { method: 'POST', body: { body: {}, sig: '', bundle: {} } }), undefined, LIC);
+step('L5', 'R3 pays under its caps without a licence (the free tier keeps paying)', ['200:'], await pay(T('R3'), XMR, 'r3-unlicensed'));
+step('L6', 'a bad token on a paid verb is still 401, not a licence refusal', ['401:token'], await call('/delegate', { method: 'POST', token: 'f'.repeat(64), body: { name: 'unlicensed', fund: '0' } }));
+// Installed under the running keeper: read before the next paid verb (D1 is the first), no restart.
+await installLicence({ dir, spendDist: SPEND, vendor, keeper: keeperId });
 
 // ===== D: delegates of delegates (gap 2) =====
 await delegate('D1', 'R1', 'd1', { per_tx_max: String(6n * XMR), max_delegates: 3 }, 8n * XMR, ['200:']);

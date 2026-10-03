@@ -10,7 +10,8 @@
 //
 // Needs ts/dist and spend/dist (`cd ts && npx tsc`, `cd spend && npx tsc`). Loopback only, ports
 // ≥ 39000 (default 39100 mock, 39101 keeper), state in a fresh mkdtemp directory. It never
-// touches a real monero-wallet-rpc.
+// touches a real monero-wallet-rpc. The keeper is licensed (pro) by a throwaway test vendor
+// (sim/licence.mjs); keeper-scenarios.mjs checks the unlicensed refusals.
 //
 // Determinism: the seed fixes every identity, policy, amount and the whole flow plan (which
 // agent does what, in what order, with which ref). Outcomes that depend on wall-clock timing —
@@ -29,6 +30,7 @@ import { sigeloMoneroSigAddr, subaddress } from '../ts/dist/monero.js';
 import { readLog } from '../spend/dist/service.js';
 import { tokenHash } from '../spend/dist/policy.js';
 import { startMockWallet } from './mock-wallet.mjs';
+import { installLicence, keyKeeper, testVendor } from './licence.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -149,6 +151,14 @@ writeFileSync(policyPath, JSON.stringify({
   max_approval_ttl: MAX_TTL, approvers: approvers.map((a) => ({ did: a.did })), recovery_commitment: REC,
   agents: Object.fromEntries([...agents, probe].map((a) => [a.name, agentJson(a)])),
 }, null, 2), { mode: 0o600 });
+// The policy uses delegates and approvals, paid verbs a keeper without a licence refuses 403
+// licence_required (spend/licence.ts): the scratch keeper is a pro customer of a throwaway TEST
+// vendor (sim/licence.mjs). Its own stream, so the seeded plan above is unchanged.
+const LR = prng('licence');
+const lbytes = (n) => Uint8Array.from({ length: n }, () => Math.floor(LR() * 256));
+const vendor = testVendor(lbytes);
+const licence = { status: await installLicence({ dir, spendDist: join(ROOT, 'spend', 'dist'), vendor,
+  keeper: await keyKeeper({ dir, spendDist: join(ROOT, 'spend', 'dist'), bytes: lbytes, vendor }) }) };
 
 const events = [];
 const findings = [];
@@ -722,6 +732,7 @@ for (const e of events) { byKind[e.kind] ??= { events: 0, mismatches: 0 }; byKin
 const summary = {
   sim: 'keeper-swarm', seed: SEED, plan_hash: planHash, agents: K, flows: FLOWS, concurrency: CONC, chaos: CHAOS,
   events: events.length, mismatches: events.filter((e) => !e.ok).length, by_kind: byKind, outcomes: counts,
+  licence: { tier: licence.status.tier, seats: licence.status.seats, vendor: process.env.SIGELO_VENDOR_DID },
   keeper: { starts: keeper.starts, kills: keeper.kills, did: keeperDid, crash_retries: crashRetries, approvals_expired_under_load: expiredUnderLoad, half_body_answer_ms: halfBodyMs, stderr_tail: keeper.stderr.slice(-1500) },
   wallet: { relayed: wallet.moved.length, sweeps, injected: wallet.injected, calls: Object.fromEntries(wallet.calls) },
   log: { lines: rawLines.length, tree_lines: tree.length, uncertain_but_moved: uncertainMoved, uncertain_stayed_home: uncertainHome, intent_only: intentOnly },
