@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { Contacts, pair } from '../../../accept/node/sigelo-pair.mjs';
+import { sign } from '../../../ts/dist/sigelo.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url)), REPO = join(HERE, '../../..');
 const fx = JSON.parse(readFileSync(join(HERE, 'fixtures/pairing-v0.json'), 'utf8'));
@@ -31,6 +32,20 @@ for (const s of fx.steps) {
     if (s.error) ok(err?.check === s.error, `${what} → rejected: ${s.error}`, err ? err.message : 'accepted');
     else ok(!err && isDeepStrictEqual(got, s.expect), `${what} → ${s.expect.current_did.slice(0, 20)}… accepted`, err ? err.message : JSON.stringify(got).slice(0, 300));
   }
+}
+// Beyond the fixture, found running inside Hermes: a long-lived store (one per plugin process) must see
+// the owner's revoke made by another process, and expired challenges must not pile up.
+{
+  const A0 = fx.dids.A0, ctx = 'hermes-contacts:' + fx.dids.B0, t = fx.steps[0].now, path = join(tmp, 'two-handles.json');
+  const answer = (c) => ({ body: c, sig: sign(Buffer.from(fx.seeds.A0, 'hex'), c) });  // seed(label) is the Ed25519 secret
+  const gateway = new Contacts(path), owner = new Contacts(path);
+  pair(fx.cards.A0, answer(gateway.issue(A0, ctx, t, 'alice')), gateway, t + 1);
+  owner.revoke(A0);
+  let err; try { pair(fx.cards.A0, answer(gateway.issue(A0, ctx, t + 2)), gateway, t + 3); } catch (e) { err = e; }
+  ok(err?.check === 'revoked', 'revoke by another handle holds → rejected: revoked', err ? err.message : 'accepted');
+  ok(new Contacts(path).lookup(A0).revoked === true, 'the revoke is still on disk after the refused pairing');
+  gateway.issue(A0, ctx, t + 10_000); owner.issue(A0, ctx, t + 10_001);
+  ok(Object.keys(new Contacts(path).s.pending).length === 2, 'expired challenges are dropped at issue, live ones from both handles kept');
 }
 try { execFileSync('node', [join(HERE, 'gen.mjs'), '--check'], { stdio: 'pipe' }); ok(true, 'gen.mjs --check: fixtures reproduce from the seeds'); }
 catch (e) { ok(false, 'gen.mjs --check', String(e.stderr)); }

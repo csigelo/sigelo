@@ -32,5 +32,26 @@ for s in fx['steps']:
         except PairingError as e: got, err = None, e
         if 'error' in s: ok(err is not None and err.check == s['error'], f"{what} -> rejected: {s['error']}", err or 'accepted')
         else: ok(err is None and got == s['expect'], f"{what} -> {s['expect']['current_did'][:20]}... accepted", err or json.dumps(got))
+# Beyond the fixture, found running inside Hermes: a long-lived store (one per plugin process) must see
+# the owner's revoke made by another process, and expired challenges must not pile up.
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sigelo_accept import B58, jcs
+def b58(b):
+    n, out = int.from_bytes(b, 'big'), ''
+    while n: n, r = divmod(n, 58); out = B58[r] + out
+    return '1' * (len(b) - len(b.lstrip(b'\0'))) + out
+key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(fx['seeds']['A0']))  # seed(label) is the Ed25519 secret
+sign = lambda c: 'z' + b58(key.sign(b'sigelo\n' + jcs(c)))
+A0, ctx, t = fx['dids']['A0'], 'hermes-contacts:' + fx['dids']['B0'], fx['steps'][0]['now']
+path = os.path.join(tmp, 'two-handles.json'); gateway, owner = Contacts(path), Contacts(path)
+c = gateway.issue(A0, ctx, t, 'alice'); pair(fx['cards']['A0'], {'body': c, 'sig': sign(c)}, gateway, t + 1)
+owner.revoke(A0)
+c = gateway.issue(A0, ctx, t + 2)
+try: pair(fx['cards']['A0'], {'body': c, 'sig': sign(c)}, gateway, t + 3); err = None
+except PairingError as e: err = e
+ok(err is not None and err.check == 'revoked', 'revoke by another handle holds -> rejected: revoked', err or 'accepted')
+ok(Contacts(path).lookup(A0)['revoked'] is True, 'the revoke is still on disk after the refused pairing')
+gateway.issue(A0, ctx, t + 10_000); owner.issue(A0, ctx, t + 10_001)
+ok(len(Contacts(path).s['pending']) == 2, 'expired challenges are dropped at issue, live ones from both handles kept', Contacts(path).s['pending'].keys())
 shutil.rmtree(tmp, ignore_errors=True)
 print('ALL PASS' if not fails else f'FAILURES: {fails}'); sys.exit(1 if fails else 0)

@@ -28,17 +28,20 @@ def sig_ok(key, body, sig):
     except Exception: return False
 
 class Contacts:  # the JSON-file store: {v, pending: {nonce: {challenge, exp, name}}, contacts: {original DID: contact}}
-    def __init__(self, path):
-        self.path = path
-        self.s = json.load(open(path)) if os.path.exists(path) else {'v': V, 'pending': {}, 'contacts': {}}
+    def __init__(self, path): self.path = path; self.load()
+    def load(self):  # every operation re-reads the file: another process (the owner's revoke) may have written it
+        self.s = json.load(open(self.path)) if os.path.exists(self.path) else {'v': V, 'pending': {}, 'contacts': {}}
+        return self
     def save(self):
         with open(self.path + '.tmp', 'w') as f: json.dump(self.s, f, indent=2, ensure_ascii=False)
         os.replace(self.path + '.tmp', self.path)
     def issue(self, did, ctx, now, name=None, nonce=None):  # name: the owner pairs a new contact; None: only a known contact may answer
         nonce = nonce or 'z' + ''.join(secrets.choice(B58) for _ in range(22))
+        pending = self.load().s['pending']
+        self.s['pending'] = {n: p for n, p in pending.items() if p['exp'] > now}  # expired ones go
         c = {'v': 'sigelo/0', 'typ': 'challenge', 'did': did, 'ctx': ctx, 'nonce': nonce}
         self.s['pending'][nonce] = {'challenge': c, 'exp': now + TTL, 'name': name}; self.save(); return c
-    def lookup(self, did): return next((c for c in self.s['contacts'].values() if did in c['chain']), None)
+    def lookup(self, did): return next((c for c in self.load().s['contacts'].values() if did in c['chain']), None)
     def revoke(self, did):  # local and final for this store; pending challenges to the contact die with it
         c = self.lookup(did) or fail('not_contact', f'{did} is not a contact')
         c['revoked'] = True
@@ -52,7 +55,7 @@ def pair(card, answer, store, now):
     claimed, bundle = params.get('did'), params.get('bundle')
     if not isinstance(claimed, str) or not isinstance(bundle, dict) or bundle.get('typ') != 'bundle': fail('card', f'no {EXT} extension with params {{did, bundle}}')
     nonce = ((answer or {}).get('body') or {}).get('nonce')
-    p = store.s['pending'].pop(nonce, None) if isinstance(nonce, str) else None
+    p = store.load().s['pending'].pop(nonce, None) if isinstance(nonce, str) else None
     store.save()  # single use, whatever happens next
     if p is None: fail('challenge_unknown', 'not issued here, or already answered')
     if now >= p['exp']: fail('challenge_expired', f"expired at {p['exp']}")
@@ -71,6 +74,7 @@ def pair(card, answer, store, now):
         rotations = rotations + [x for x in old['rotations'] if jcs(x) not in seen]
         r = attempt('bundle', lambda: verify_bundle(dict(bundle, rotations=rotations), now))
         if r['did'] != claimed: fail('stale_chain', f"the rotations already seen resolve to {r['did']}, not {claimed}")
+    if (store.load().s['contacts'].get(r['chain'][0]) or {}).get('revoked'): fail('revoked', f"{r['chain'][0]} was revoked during this pairing")
     c = {'name': old['name'] if old else p['name'], 'did': r['chain'][0], 'current_did': r['did'], 'current_key': key_of(rotations, r['did']),
          'revoked': False, 'chain': r['chain'], 'rotations': rotations}
     store.s['contacts'][c['did']] = c; store.save()

@@ -16,14 +16,17 @@ const attempt = (check, f) => { try { return f(); } catch (e) { return fail(chec
 
 // The JSON-file store: { v, pending: { nonce: { challenge, exp, name } }, contacts: { original DID: contact } }.
 export class Contacts {
-  constructor(path) { this.path = path; this.s = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { v: V, pending: {}, contacts: {} }; }
+  constructor(path) { this.path = path; this.load(); }
+  // Every operation re-reads the file: another process (the owner's revoke) may have written it.
+  load() { this.s = existsSync(this.path) ? JSON.parse(readFileSync(this.path, 'utf8')) : { v: V, pending: {}, contacts: {} }; return this; }
   save() { writeFileSync(this.path + '.tmp', JSON.stringify(this.s, null, 2)); renameSync(this.path + '.tmp', this.path); }
   // name: the owner pairs a new contact under that name; null: only a known contact may answer.
   issue(did, ctx, now, name = null, nonce = multibase(randomBytes(16))) {
     const challenge = { v: 'sigelo/0', typ: 'challenge', did, ctx, nonce };
+    for (const [n, p] of Object.entries(this.load().s.pending)) if (p.exp <= now) delete this.s.pending[n];  // expired ones go
     this.s.pending[nonce] = { challenge, exp: now + TTL, name }; this.save(); return challenge;
   }
-  lookup(did) { return Object.values(this.s.contacts).find((c) => c.chain.includes(did)) ?? null; }
+  lookup(did) { return Object.values(this.load().s.contacts).find((c) => c.chain.includes(did)) ?? null; }
   revoke(did) {  // local and final for this store; pending challenges to the contact die with it
     const c = this.lookup(did) ?? fail('not_contact', `${did} is not a contact`);
     c.revoked = true;
@@ -37,7 +40,7 @@ export function pair(card, answer, store, now) {
   const claimed = ext?.params?.did, bundle = ext?.params?.bundle;
   if (typeof claimed !== 'string' || bundle?.typ !== 'bundle') fail('card', `no ${EXT} extension with params { did, bundle }`);
   const nonce = answer?.body?.nonce;
-  const p = typeof nonce === 'string' && Object.hasOwn(store.s.pending, nonce) ? store.s.pending[nonce] : fail('challenge_unknown', 'not issued here, or already answered');
+  const p = typeof nonce === 'string' && Object.hasOwn(store.load().s.pending, nonce) ? store.s.pending[nonce] : fail('challenge_unknown', 'not issued here, or already answered');
   delete store.s.pending[nonce]; store.save();                  // single use, whatever happens next
   if (now >= p.exp) fail('challenge_expired', `expired at ${p.exp}`);
   let r = attempt('bundle', () => verify(bundle, now));          // §9, offline; a fork or bad chain throws
@@ -56,6 +59,7 @@ export function pair(card, answer, store, now) {
     r = attempt('bundle', () => verify({ ...bundle, rotations }, now));
     if (r.did !== claimed) fail('stale_chain', `the rotations already seen resolve to ${r.did}, not ${claimed}`);
   }
+  if (store.load().s.contacts[r.chain[0]]?.revoked) fail('revoked', `${r.chain[0]} was revoked during this pairing`);
   const c = { name: old?.name ?? p.name, did: r.chain[0], current_did: r.did, current_key: keyOf(rotations, r.did), revoked: false, chain: r.chain, rotations };
   store.s.contacts[c.did] = c; store.save();
   return { did: c.did, current_did: c.current_did, current_key: c.current_key, attestations: r.attestations, rejected: r.rejected };

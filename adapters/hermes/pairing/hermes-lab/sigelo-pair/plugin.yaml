@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+name: sigelo-pair
+version: "0.0.1"
+description: Lab-only. sigelo-a2a-pairing/0 on Hermes A2A (card extension + deterministic pairing before any model).

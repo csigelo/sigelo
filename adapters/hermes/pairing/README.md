@@ -14,8 +14,8 @@ is stored under the peer's original DID. A rotation keeps the pairing. A recover
 rotation. No model runs before any of these checks.
 
 Reference acceptors, one function and a JSON-file store each:
-[`accept/node/sigelo-pair.mjs`](../../../accept/node/sigelo-pair.mjs) **50** code lines,
-[`accept/python/sigelo_pair.py`](../../../accept/python/sigelo_pair.py) **63** (non-blank,
+[`accept/node/sigelo-pair.mjs`](../../../accept/node/sigelo-pair.mjs) **53** code lines,
+[`accept/python/sigelo_pair.py`](../../../accept/python/sigelo_pair.py) **67** (non-blank,
 non-comment; `test.mjs` fails at 100).
 
 ## Where the bundle rides
@@ -34,7 +34,7 @@ b71ba34, `plugins/platforms/a2a/protocol.py`).
 ```python
 from sigelo_pair import Contacts, pair                  # accept/python
 store = Contacts(hermes_home + '/contacts.json')
-c = store.issue(did, ctx, now, 'alice')                 # pair: the owner confirmed did out of band; None = known contacts only
+c = store.issue(did, ctx, now, 'alice')                 # pair: the owner confirmed did (the peer's CURRENT DID) out of band; None = known contacts only
 contact = pair(card, {'body': c, 'sig': sig}, store, now)   # raises PairingError(.check) before any model runs
 ```
 
@@ -56,6 +56,10 @@ against two empty stores `A` and `B`:
 - `issue` `{did, ctx, now, contact_name}` → exactly `expect` (pass `expect.nonce` in)
 - `pair` `{card, answer: {body, sig}, now}` → `expect` `{did, current_did, current_key, attestations, rejected}` (§9.1 values), or `error`, the first failing check
 - `lookup`, `revoke` `{did}` → `expect` `{name, did, current_did, current_key, revoked}` or `null`
+
+The store re-reads its file at every operation, so one long-lived `Contacts` in the plugin sees a revoke the
+owner made from another process, and `issue` drops expired challenges. Two writers at the same instant still
+need a lock of the integrator's choosing.
 
 Checks, in order: `card`, `challenge_unknown` (consumed here, single use), `challenge_expired`
 (`now ≥ issued + ttl`), `bundle` (§9 rejects: fork, structure), `card_did`, `challenge_did`,
