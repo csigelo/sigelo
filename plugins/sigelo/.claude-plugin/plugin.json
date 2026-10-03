@@ -1,0 +1,16 @@
+{
+  "name": "sigelo",
+  "version": "0.1.0",
+  "description": "Portable, offline-verifiable identity for AI agents: create a DID, answer challenges, store attestations, present and verify bundles.",
+  "author": { "name": "csigelo", "url": "https://github.com/csigelo" },
+  "homepage": "https://sigelo.io",
+  "repository": "https://github.com/csigelo/sigelo",
+  "license": "MIT",
+  "keywords": ["identity", "agent-identity", "did", "ed25519", "attestation", "offline-verification"],
+  "documentationUrl": "https://sigelo.io/adopt.html",
+  "supportUrl": "https://sigelo.io/contact.html",
+  "privacyPolicyUrl": "https://sigelo.io/privacy.html",
+  "mcpServers": {
+    "sigelo": { "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/server.mjs"] }
+  }
+}

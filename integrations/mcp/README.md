@@ -3,6 +3,9 @@
 A zero-dependency stdio MCP server: `node server.mjs`. Tools, configs per harness and test status
 are in [../README.md](../README.md); `npm test` → ALL PASS.
 
+Claude Code plugin, no wallet ([plugins/](../../plugins/README.md)):
+`claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo`.
+
 ## Remote (verify only)
 
 `https://sigelo.io/mcp`: MCP over Streamable HTTP (revision 2026-07-28, also answering the legacy

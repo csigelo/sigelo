@@ -1,0 +1,18 @@
+{
+  "name": "csigelo",
+  "description": "sigelo: portable, offline-verifiable identity for AI agents",
+  "owner": { "name": "csigelo", "email": "contact@sigelo.io" },
+  "plugins": [
+    {
+      "name": "sigelo",
+      "source": "./plugins/sigelo",
+      "description": "Identity tools (sigelo_* MCP server) and the skill that says when to use them"
+    },
+    {
+      "name": "sigelo-gate",
+      "source": "./plugins/sigelo-gate",
+      "description": "PROTOTYPE provenance gate (hooks); off until you enable it and write its config",
+      "defaultEnabled": false
+    }
+  ]
+}

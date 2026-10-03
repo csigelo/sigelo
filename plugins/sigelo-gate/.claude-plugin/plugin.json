@@ -1,0 +1,11 @@
+{
+  "name": "sigelo-gate",
+  "version": "0.1.0",
+  "description": "PROTOTYPE, opt-in: denies privileged tools unless the prompt carries an instruction signed by your pinned operator DID.",
+  "author": { "name": "csigelo", "url": "https://github.com/csigelo" },
+  "homepage": "https://github.com/csigelo/sigelo/blob/main/gate/README.md",
+  "repository": "https://github.com/csigelo/sigelo",
+  "license": "MIT",
+  "keywords": ["security", "prompt-injection", "hooks", "prototype"],
+  "defaultEnabled": false
+}

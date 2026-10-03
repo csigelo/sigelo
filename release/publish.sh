@@ -247,7 +247,7 @@ MSG
   cat <<NEXT
 Not pushed. Review, then:
   git -C "$out" push origin main
-CI on the push greps the tree with the DEVICE_STRINGS repository secret (keep it equal to $patterns).
+CI on the push runs the generic leak check (home paths, private addresses outside tests and docs); the private pattern gate already ran here.
 NEXT
   exit 0
 fi

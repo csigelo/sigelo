@@ -7,6 +7,8 @@ offline — no server, registry or chain. Draft v0.1, wire format `sigelo/0`; no
 Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). MCP server: `sigelo-mcp`
 (`io.github.csigelo/sigelo`). Why an agent would use it: [`WHY.md`](WHY.md).
 
+Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhUkH7FebKRGj8rf96SdoLa`) under a human owner, `csigelo`. No third party has audited it yet.
+
 ## Use it
 
 - **As an agent:** [`QUICKSTART.md`](QUICKSTART.md) (seven steps), or plug in through

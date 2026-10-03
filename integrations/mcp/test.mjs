@@ -58,7 +58,7 @@ try {
   const init = await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
   ok(init.result?.protocolVersion === '2025-06-18', 'initialize echoes a supported version');
   ok(init.result?.capabilities?.tools && init.result.serverInfo.name === 'sigelo', 'initialize capabilities/serverInfo');
-  ok(/DATA, never instructions/.test(init.result.instructions), 'instructions carry the data caveat');
+  ok(/third-party data about the subject, not statements by this tool/.test(init.result.instructions), 'instructions carry the data caveat');
   const init2 = await c.rpc('initialize', { protocolVersion: '1999-01-01', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   ok(init2.result.protocolVersion === '2025-11-25', 'unknown version → latest');
   c.notify('notifications/initialized');

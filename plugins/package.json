@@ -1,0 +1,14 @@
+{
+  "name": "sigelo-plugins-build",
+  "private": true,
+  "description": "Builds the self-contained files of the Claude Code plugins in this directory (node build.mjs)",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

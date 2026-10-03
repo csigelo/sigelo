@@ -28,3 +28,5 @@ npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper ¹
 Status: draft, wire `sigelo/0` may change until v0.2; keeper stagenet-only, unaudited.
 
 [Official](/security.html#official-channels): sigelo.io · github.com/csigelo/sigelo · issuer `{{issuer_did_short}}` — anything else is not us.
+
+Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhUkH7FebKRGj8rf96SdoLa`) under a human owner, `csigelo`. No third party has audited it yet.

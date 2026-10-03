@@ -514,6 +514,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     ...(worldDid && { world: { ctx: 'sigelo.io', issuer: worldDid, challenge: `${ORIGIN}/world/challenge?did={did}`, attest: `${ORIGIN}/world/attest`,
       conformance: `${ORIGIN}/world/conformance`, mcp: `${ORIGIN}/mcp`, verify: `${ORIGIN}/world/verify`, stats: `${ORIGIN}/world/stats`, genesis: `${ORIGIN}/world/genesis.json`, rotations: `${ORIGIN}/world/rotations.json` } }),
     contact: { email: CONTACT_EMAIL, simplex: SIMPLEX_SET ? SIMPLEX : null, security: SECURITY_EMAIL, security_policy: `${ORIGIN}/security.html` },
+    claude_plugin: { marketplace: 'csigelo/sigelo', install: 'sigelo@csigelo', path: 'plugins/sigelo/', wallet: false },
     privacy: `${ORIGIN}/privacy.html`, terms: `${ORIGIN}/privacy.html#terms`,
     release_signing: { since: 'v0.1.1', release_json: 'release.json', ctx: 'sigelo.io/release',
       identity: genesisDid(JSON.parse(read('release/release-identity.json'))), identity_genesis: `${ORIGIN}/.well-known/sigelo-release-identity.json`,
