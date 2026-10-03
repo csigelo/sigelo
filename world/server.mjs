@@ -29,12 +29,27 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const VERSION = JSON.parse(readFileSync(join(HERE, '../ts/package.json'), 'utf8')).version;
 const VERIFIER = `sigelo ${VERSION}`, RUNNER = `sigelo-verify ${VERSION}`;
 const CTX = 'sigelo.io', CONF_CTX = 'sigelo.io/conformance', V = 'sigelo/0';
-const TTL = 300, DAY = 86400, LIFETIME = 90 * DAY, MAX_BODY = 256 * 1024, RING = 2048;
+const TTL = 300, DAY = 86400, LIFETIME = 90 * DAY, MAX_BODY = 256 * 1024, RING = 2048, MAX_ITEMS = 64;
 const DID_RE = /^did:sigelo:z[1-9A-HJ-NP-Za-km-z]{40,50}$/;
 const nowS = () => Math.floor(Date.now() / 1000);
 const load = (p) => parseBytes(readFileSync(p));
 const save = (p, v, mode = 0o644) => { writeFileSync(p + '.tmp', typeof v === 'string' ? v : JSON.stringify(v), { mode }); renameSync(p + '.tmp', p); };
 const fail = (status, error) => Object.assign(new Error(error), { status });
+
+// verify() is one synchronous Ed25519 check per rotation/attestation/binding (~6 ms each at steady
+// state), and the process has one thread: a single ~256 KB bundle of ~700 items blocks the event
+// loop for ~3 s, starving every other client (challenge, attest, stats, the self-check) for that
+// time. The 256 KB body cap alone does not bound this. So count the items this world will verify in
+// one request and refuse a bundle far larger than any real identity before the work starts; the
+// shared library is untouched (conformance stays exact). 64 items is ~0.4 s, so even nginx's
+// burst=20 stays under the self-check's 10 s timeout. Rejected like any other bad bundle (422 / REFUSED).
+const itemCount = (b) => (b && typeof b === 'object')
+  ? (Array.isArray(b.rotations) ? b.rotations.length : 0) + (Array.isArray(b.attestations) ? b.attestations.length : 0) + (Array.isArray(b.bindings) ? b.bindings.length : 0)
+  : 0;
+const cverify = (bundle, now) => {
+  if (itemCount(bundle) > MAX_ITEMS) throw new Error(`bundle has more than ${MAX_ITEMS} rotations+attestations+bindings: too large to verify here`);
+  return verify(bundle, now);
+};
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === 'keygen' || cmd === 'recovery-key') {
@@ -101,7 +116,7 @@ function challenge(url) {
 function currentKey(req) {
   if (req.bundle !== undefined) {
     let r;
-    try { r = verify(req.bundle, nowS()); } catch (e) { throw fail(422, `bundle: REJECT: ${e.message}`); }
+    try { r = cverify(req.bundle, nowS()); } catch (e) { throw fail(422, `bundle: REJECT: ${e.message}`); }
     if (r.did !== req.did) throw fail(400, `did is not the bundle's current DID (${r.did})`);
     return { key: [req.bundle.genesis, ...req.bundle.rotations.map((x) => x.next_genesis)].find((g) => did(g) === r.did).key, bundle_valid: true };
   }
@@ -122,7 +137,14 @@ function proveControl(req) {
   const now = nowS(), body = challengeBody(p.did, nonce);
   if (p.exp <= now) throw fail(409, 'challenge expired (5 minutes): GET /world/challenge again');
   if (p.did !== req.did) throw fail(400, 'did is not the DID this challenge was issued to');
-  if (typeof ch === 'object' && canonicalize(ch) !== canonicalize(body)) throw fail(400, 'challenge differs from the one issued: send it back unmodified');
+  // canonicalize(body) is this world's own object and never throws; canonicalize(ch) can, on a
+  // float, lone surrogate or over-deep value the client echoed back. A ch that will not canonicalize
+  // is, a fortiori, not the challenge we issued — a 400, not an uncaught 500 that logs a stack trace.
+  if (typeof ch === 'object') {
+    let same = false;
+    try { same = canonicalize(ch) === canonicalize(body); } catch { same = false; }
+    if (!same) throw fail(400, 'challenge differs from the one issued: send it back unmodified');
+  }
   const { key, bundle_valid } = currentKey(req);
   if (!verifySig(key, body, req.sig)) throw fail(400, 'sig does not verify against the current key over the challenge (SPEC §3 signing input)');
   return { now, bundle_valid };
@@ -162,7 +184,7 @@ function conformance(req) {
 
 function verifyBundle(req) {
   const bundle = req?.typ === 'bundle' ? req : req?.bundle;
-  try { return verify(bundle, Number.isSafeInteger(req?.now) ? req.now : nowS()); }
+  try { return cverify(bundle, Number.isSafeInteger(req?.now) ? req.now : nowS()); }
   catch (e) { throw fail(422, `REJECT: ${e.message}`); }
 }
 
@@ -186,7 +208,7 @@ const readBody = (req) => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 
-const mcpHandle = mcp({ parse, parseBytes, verify, version: VERSION });
+const mcpHandle = mcp({ parse, parseBytes, verify: cverify, version: VERSION });
 
 const server = createServer(async (req, res) => {
   const send = (status, v) => { if (res.headersSent) return; res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v) + '\n'); };
@@ -214,5 +236,11 @@ const server = createServer(async (req, res) => {
     send(e.status ?? 500, { error: e.status ? e.message : 'internal error', ...e.extra });
   }
 });
+// A slow client must not hold a connection open indefinitely. nginx buffers request bodies and
+// times out slow ones before this service sees them, so in production this is defence in depth;
+// it also bounds the process when reached directly (tests, a misconfigured front end).
+server.requestTimeout = 20000;   // whole request (headers + body) in 20 s
+server.headersTimeout = 10000;   // headers in 10 s (slowloris on the header block)
+server.keepAliveTimeout = 5000;  // idle keep-alive (node's default, set explicitly)
 server.listen(PORT, '127.0.0.1', () => console.log(`sigelo world ${ISS} (ctx ${CTX}) on 127.0.0.1:${server.address().port}`));
 for (const s of ['SIGTERM', 'SIGINT']) process.on(s, () => server.close(() => process.exit(0)));

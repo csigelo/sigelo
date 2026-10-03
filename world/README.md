@@ -76,4 +76,17 @@ carrying `_meta["io.modelcontextprotocol/protocolVersion"]`; `server/discover`, 
 else `400 -32020`) and legacy `initialize` (2025-11-25 … 2024-11-05). Stateless: one
 `application/json` response per POST, `202` per notification, no sessions, no SSE, GET/DELETE `405`,
 batches `400`, duplicate keys `-32700`, 256 KB limit. Any `Origin`: one pure public tool, so DNS
-rebinding gains nothing. The tool is the stdio server's `sigelo_verify` verbatim.
+rebinding gains nothing. The tool is the stdio server's `sigelo_verify` verbatim (plus the item cap
+below — the stdio server runs on local, trusted input and has none).
+
+## Abuse
+
+Verification is synchronous Ed25519 (~6 ms per rotation/attestation/binding) on one thread, so a
+bundle is capped at **64** items total (over that → refused on `/world/verify`, `/attest`,
+`/conformance`, `/mcp`; verify larger ones offline, where there is no cap) and 256 KB: one request
+blocks the loop ~0.4 s at most, under the self-check's 10 s timeout even at nginx's `burst=20`.
+Accepted residuals: the nginx limit (60 r/m, burst 20) is keyed on the /24 or /48, so an IPv6 /48
+buys a fresh bucket (inherent to accountless IP limiting); `attestations.jsonl` is append-only and
+`nonces.json` a ring of 2048, so sustained (rate-limited) attestation of fresh DIDs grows disk slowly
+and the idempotency map toward `MemoryMax=256M` — the operator rotates the log and watches disk. The
+service binds loopback behind nginx (no client address reaches it), 20 s request / 10 s header timeouts.

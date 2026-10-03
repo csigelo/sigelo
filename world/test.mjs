@@ -107,6 +107,16 @@ const big = await post('/world/attest', JSON.stringify({ pad: 'x'.repeat(300 * 1
 ok(big.status === 413, `300 KB body: ${big.status}`);
 ok((await post('/world/attest', '{"did":"a","did":"b"}')).status === 400, 'duplicate keys: 400 (strict parser)');
 ok((await get('/world/attestations.jsonl')).status === 404, 'the issued log is not served');
+// A challenge echoed back carrying a value that will not canonicalize (a float) is a 400, not an
+// uncaught 500 that writes a stack trace to the service log (server.mjs proveControl, the try/catch).
+const cEcho = (await get(`/world/challenge?did=${encodeURIComponent(agent.did)}`)).json;
+const echo = await post('/world/attest', { challenge: { ...cEcho, junk: 0.5 }, did: agent.did, sig: sign(agent.secret, cEcho), genesis: agent.genesis });
+ok(echo.status === 400 && /challenge differs/.test(echo.json.error), `a challenge echoed with a float field is 400, not 500: ${echo.status} ${echo.json.error}`);
+// A bundle with more items than this world verifies in one request (MAX_ITEMS=64) is refused before
+// the ~6 ms/item of Ed25519 work starts, so one ~256 KB bundle cannot block the event loop for seconds.
+const over = await post('/world/verify', { bundle: { ...bundleOf(agent.genesis), attestations: Array(65).fill(a) } });
+ok(over.status === 422 && /more than 64/.test(over.json.error), `an over-cap bundle (65 items) is 422: ${over.status} ${over.json.error}`);
+ok((await post('/world/verify', { bundle: { ...bundleOf(agent.genesis), attestations: Array(64).fill(a) } })).status === 200, 'a 64-item bundle still verifies (the cap is inclusive)');
 
 // ---- idempotent within 24 h, across a restart; the nonce ring survives the restart too ----
 const again = await answer(agent, { genesis: agent.genesis });
@@ -217,6 +227,8 @@ ok(refused.json.result?.isError === true && /^REFUSED: /.test(refused.json.resul
 ok((await mcpPost({ jsonrpc: '2.0', id: 10, method: 'ping' })).json.result !== undefined, 'mcp ping: {}');
 ok((await mcpPost('[{"jsonrpc":"2.0","id":1,"method":"ping"}]')).status === 400, 'mcp: a batch is 400');
 ok((await mcpPost('{"jsonrpc":"2.0","id":1,"id":2,"method":"ping"}')).json.error?.code === -32700, 'mcp: duplicate keys are a parse error (strict parser)');
+const overM = await mcpPost({ jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'sigelo_verify', arguments: { bundle: { ...bundleOf(agent.genesis), attestations: Array(65).fill(a) } } } });
+ok(overM.json.result?.isError === true && /more than 64/.test(overM.json.result.content[0].text), 'mcp: an over-cap bundle is REFUSED before verifying (the same MAX_ITEMS guard)');
 const bigM = await mcpPost(JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'ping', params: { pad: 'x'.repeat(300 * 1024) } }));
 ok(bigM.status === 413, `mcp: a 300 KB body is 413 (${bigM.status})`);
 const getM = await fetch(base + '/mcp');

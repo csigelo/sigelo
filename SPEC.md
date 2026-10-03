@@ -657,3 +657,96 @@ versus `rotation_hostile_carried` pair is the one that matters.
 
 Trust scoring · revocation lists · encryption · discovery · personal-data handling in
 `claims` (see THREAT-MODEL §6) · algorithm agility · plugin systems.
+
+---
+
+## 12. DID method `did:sigelo`
+
+Non-normative: §2–§9 in the shape of a DID method specification (W3C DID Core v1.0 §8,
+Recommendation of 19 July 2022; the `w3c/did-extensions` registry and its review checklist,
+read 3 October 2026). It adds no rule and changes no verdict; where it seems to disagree with
+§2–§9, they govern. **Method name:** `sigelo`, wire `sigelo/0` (VERSIONING.md).
+
+### 12.1 Syntax
+
+```abnf
+sigelo-did  = "did:sigelo:" sigelo-id
+sigelo-id   = "z" 32*44base58-char   ; base58btc of the 32-byte SHA-256 of JCS(genesis)
+base58-char = %x31-39 / %x41-48 / %x4A-4E / %x50-5A / %x61-6B / %x6D-7A
+```
+
+The id is **case-sensitive**, has no `:` and needs no percent-encoding. A DID URL uses only a
+fragment, naming a verification method (§12.3). DIDs are equal only as full strings (§4).
+
+### 12.2 Create
+
+Generate an Ed25519 identity key and, offline, a recovery key; write the §4 genesis with the
+recovery commitment (or `null`); the DID is `did:sigelo:` + multibase SHA-256 of its JCS form.
+Nothing is published or registered: anyone holding the genesis recomputes the DID.
+
+### 12.3 Read (resolve)
+
+There is no resolver service, by design (§1). Resolving is verifying, offline, a §8 bundle the
+subject presents (typically beside a §5.2 challenge answer): run §9 at `now`; the DID resolves
+if it is in the result's `chain`, to the `key` of the genesis of the current DID (§7.3):
+
+```json
+{ "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
+  "id": "<did>",
+  "verificationMethod": [{ "id": "<did>#<key>", "type": "Multikey",
+                           "controller": "<did>", "publicKeyMultibase": "<key>" }],
+  "authentication": ["<did>#<key>"] }
+```
+
+`<key>` is that genesis `key` verbatim (`z6Mk…`: multicodec `0xed01` + 32 bytes, §2, the
+encoding `Multikey` and `Ed25519VerificationKey2020` share). Metadata: `canonicalId` =
+`chain[0]`, `equivalentId` = the rest of `chain`. `authentication` is §5.2 proof of control.
+Not applicable: `controller` (self), `alsoKnownAs`, `assertionMethod` (attestations carry
+their own signatures, §5), `keyAgreement` (no encryption, §11), `capabilityInvocation`,
+`capabilityDelegation`, `service` (no discovery, §11). The recovery key is never a
+verification method; until used it is a hash (§4). A bundle that does not verify, or whose
+`chain` lacks `<did>`, gives `notFound`; a string outside §12.1 gives `invalidDid`.
+
+### 12.4 Update
+
+Update is rotation (§7), and it changes the DID: the chain moves to `next`, and every earlier
+DID of the chain resolves to the new key. **Voluntary:** signed by the current key, commitment
+carried forward. **Recovery:** signed by the recovery key, which must hash to the governing
+commitment (§7.2); it may install a new commitment or `null`. **Precedence** (§7.1): at any
+node a valid recovery rotation supersedes any voluntary one, regardless of `iat`; two valid
+voluntary rotations at one node reject the chain (§7.3).
+
+### 12.5 Deactivate
+
+`sigelo/0` has none; resolution never reports `deactivated`. Substitutes: attestations and
+bindings expire (`exp` is mandatory, §5, §6) and stop verifying unless reissued; the holder
+can rotate to a key whose secret is then destroyed, so nothing new verifies under the chain
+(for good once a recovery rotation has set `recovery: null`); worlds stop attesting. A signed
+deactivation is a question for v0.2.
+
+### 12.6 Security considerations
+
+THREAT-MODEL.md is the analysis. **Man in the middle:** a bundle is self-certifying — the DID
+hashes the genesis and every element is signed (§3) — so an intermediary can drop items, not
+alter them; §5.2 binds proof of control to a world-chosen nonce and session. **Key compromise
+and recovery:** the identity key is assumed hot and eventually stolen; the cold recovery key
+is committed in the genesis and beats any rotation a thief makes (§7.1, THREAT-MODEL
+§2.4–§2.5b). **Stale presentation:** a bundle shows the chain as far as its presenter chose,
+and a thief can withhold a later recovery; a verifier that has seen a longer chain for the
+same `chain[0]` keeps it, and discounts attestations near a recovery (THREAT-MODEL §3.5).
+**Not defended:** Sybil, lying issuers, the operator behind the agent (THREAT-MODEL §3).
+
+### 12.7 Privacy considerations
+
+No registry, no ledger, no resolver: creating, rotating and resolving contact no one, so no
+party learns who resolves whom, or when (no phone-home). A DID is correlatable by design — it
+carries reputation between worlds — and so is a shared `recovery` commitment: unlinkable
+presences need separate identities with separate recovery keys (MONERO.md §2 links one Owner's
+agents this way on purpose). Keys and signatures are not personal data; `claims` may be, and
+that is the issuer's charge (THREAT-MODEL §6). Bindings travel only in bundles the subject
+presents, and the view key is never disclosed automatically (§6.3).
+
+### 12.8 Conformance
+
+A `did:sigelo` resolver is a §9 verifier: `sigelo-verify --conformance` checks the reference
+against `test-vectors.json` (§10), and `--conformance --impl '<command>'` checks a candidate.

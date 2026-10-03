@@ -54,19 +54,26 @@ Sources fetched 2026-10-02; dates are the pages' own where they show one.
    `mcp-publisher login github` (as csigelo, device flow), then in `integrations/mcp/`:
    `mcp-publisher publish`; check `https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.csigelo/sigelo`.
    PulseMCP has paused submissions and ingests the registry (pulsemcp.com/submit, 2026-09-03).
+   *Status 2026-10-03:* not published (npm first, or a remote-only version: adoption/STATUS.md).
 5. **Directories** (after npm): Glama — "Add MCP Server" with the repo URL (glama.ai/mcp/faq; its
    score badge is what awesome-mcp-servers shows). mcp.so/submit and mcpservers.org/submit take
    the repo URL (free review ~2 weeks; the $39 fast lanes are not worth it). Smithery wants a
    hosted HTTP server or an `.mcpb` bundle: skip.
+   *Status 2026-10-03:* mcpservers.org filed (free, submission #9488); mcp.so filed by issue
+   (github.com/chatmcp/mcpso/issues/4636). Glama and Smithery need a sign-in: Owner.
 6. **awesome-mcp-servers** (punkpeye) PR, section `🪪 Identity`, alphabetical (after `AIops-tools`):
    `- [csigelo/sigelo](https://github.com/csigelo/sigelo) [![csigelo/sigelo MCP server](https://glama.ai/mcp/servers/csigelo/sigelo/badges/score.svg)](https://glama.ai/mcp/servers/csigelo/sigelo) 📇 🏠 🍎 🪟 🐧 - Portable, offline-verifiable agent identity: create a DID, sign world challenges, store attestations, build and verify bundles with no network; optional Monero wallet tools.`
    PR title: `Add csigelo/sigelo (Identity)`. Drop the badge if Glama has not listed it yet.
    awesome-ai-agents (e2b-dev) lists agents only: sigelo is not one, skip.
+   *Status 2026-10-03:* branch csigelo/awesome-mcp-servers:add-sigelo ready; PR waits for Glama
+   (merged PRs all carry the Glama badge).
 7. **DID method** — PR to w3c/did-extensions adding `methods/sigelo.json` (not registered today):
    `{"name": "sigelo", "status": "registered", "verifiableDataRegistry": "None (self-certifying: the DID is the SHA-256 of its genesis document)", "contactName": "csigelo", "contactEmail": "the contact address", "contactWebsite": "https://sigelo.io", "specification": "https://sigelo.io/spec.html"}`
    Reviewers check the spec for DID syntax, CRUD operations and Security/Privacy sections
    (README of w3c/did-extensions); SPEC.md has the syntax (§DID) and SECURITY/THREAT-MODEL, but
    no CRUD heading: add a short DID-method section to SPEC.md first, or expect review questions.
+   *Status 2026-10-03:* SPEC §12 written; branch csigelo/did-extensions:add-did-sigelo ready; PR
+   opens once §12 is live on sigelo.io.
 8. **Show HN** (Owner's call; must be something people can try — news.ycombinator.com/showhn.html):
    title `Show HN: sigelo – portable identity for AI agents, verified offline`; text:
    "An agent's DID is the hash of a genesis document holding its Ed25519 key. Platforms sign
