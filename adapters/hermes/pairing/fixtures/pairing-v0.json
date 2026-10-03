@@ -1,0 +1,1780 @@
+{
+  "v": "sigelo-a2a-pairing/0",
+  "note": "A2A pairing by sigelo DID. Run steps in order against two empty contact stores A and B; each pair step names its card in `cards` and either `expect`s the result or fails with `error`, the first failing check. See README.md.",
+  "extension": "urn:sigelo:a2a-pairing:0",
+  "ttl": 300,
+  "created": "2026-10-01T00:00:00Z",
+  "seeds": {
+    "A0": "3d3ffc55e31f854bd8824284f9d0a68d2ca6d469aa47e9fd6e2d482f6baf1770",
+    "A1": "5a5e1130021cc2320d204033ec8e8c6a3de0d29e4c469faaf087759645737a7d",
+    "A2": "8b3e637d683281c820b54a082c34d84864b4e481c0307b9b1fcccfe7781dde9b",
+    "A-recovery": "2147ef00af0f2467c90421ceff53ab80900da515bc2f2b6e8a6a1941be955264",
+    "A-recovery-2": "f76b4afb4e8bbbac90a76787b4a0d649b15e28fc1f5b25b5247a4a6a17fc0e41",
+    "B0": "2291cf745784a351a39a2fe563554ccc4ceb9b1ebbd47ad86ef22d468b309147",
+    "B-recovery": "01c772756ae8fd55864af7e2768b8f981613e194adf5aa4ab175b615beefab02",
+    "M0": "33579d966f13cb158977e8096527fba9b463683f5153fd57f7b96d9a603f9fec",
+    "M-recovery": "0583725060fc887ae8bae44a3371eb961330ab52a312ed084338a6b6f26f01c0",
+    "T": "e9e49983450e0ac79676aa096e90ef2e8b2119dc408f9ca81539e7eed90d1326",
+    "X": "43996ee0c94eeeb0412a7dad8a9ea5783615fbf546c7321d80ae191bc69977fb",
+    "W": "5e950924995cc82c659a2009b765ffceafb9bcd876197ec405d1d0b3f4b5f78d",
+    "W-recovery": "d0ace9ff39f8b666eb70e39094628b187156bdfc092fcd7e6cd3341b4760a4f9"
+  },
+  "dids": {
+    "A0": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+    "A1": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+    "A2": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+    "B0": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+    "M0": "did:sigelo:z4MeS8RVXJfNvLT7BfewxsyxFonXMoSRx6x2QoHsRSmtg",
+    "T": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+    "X": "did:sigelo:z26FR2Vr8Qk5RPcrp3Fqami6eeLLzbc9xbYM8KVcWwAzH",
+    "W": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3"
+  },
+  "cards": {
+    "A0": {
+      "name": "Alice",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://alice.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://alice.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://alice.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+                  "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "z4jTFg9JGE4szAknKWcBk81"
+                },
+                "rotations": [],
+                "bindings": [],
+                "attestations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "attestation",
+                      "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+                      "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "iat": 1790913600,
+                      "exp": 1793592000,
+                      "ctx": "example.world",
+                      "admission": "invite",
+                      "claims": {
+                        "joined": "2026-09-01",
+                        "tasks": 12
+                      },
+                      "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+                    },
+                    "sig": "z2kiobsTAv2AVq4CegAjszj4cLFEXy3mw1SrVVGbLJGx7r5E8uPDsYfKBzSCBtgEZJWUPx6WLSVksjoaPBTAF8Lw"
+                  }
+                ],
+                "issuers": [
+                  {
+                    "v": "sigelo/0",
+                    "typ": "genesis",
+                    "key": "z6MkwJmdAXpmSA58PqSwH7ZhFZ6CWVMvFgzGLhXFRCNEvt79",
+                    "recovery": "sha256:5e6bcddb9cb2424514d87d9232a0236bf7a77dd3f3041648ab68f961737885e3",
+                    "created": "2026-10-01T00:00:00Z",
+                    "nonce": "zE9L9kPogEjCiy6s3vnQtaT"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "B0": {
+      "name": "Bob",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://bob.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://bob.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://bob.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkiJtokaNTxVv55hsLMpSKdSPky4jm1ipRJ1L8VLxMFGMe",
+                  "recovery": "sha256:4904de777512fe60667b3b7cb7d7829cdc2b663c7c1c359538e05833fcca3b5c",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zNUoJBwNQk8VjycC3PKCZ3u"
+                },
+                "rotations": [],
+                "bindings": [],
+                "attestations": [],
+                "issuers": []
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "M0_named_alice": {
+      "name": "Alice",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://alice.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://alice.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://alice.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z4MeS8RVXJfNvLT7BfewxsyxFonXMoSRx6x2QoHsRSmtg",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6Mkir5rLqdm6chLfozzaG4RkjDQj3m4VFvWu6VTuNk8nk37",
+                  "recovery": "sha256:01066fb1a67468d8fa48d6e0ab5eb7e39237f850961fae3d892e82e44f60105c",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zEwUSKPr3JJQLLJJV8Ui7xP"
+                },
+                "rotations": [],
+                "bindings": [],
+                "attestations": [],
+                "issuers": []
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "A0_claims_with_M0_bundle": {
+      "name": "Alice",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://alice.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://alice.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://alice.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6Mkir5rLqdm6chLfozzaG4RkjDQj3m4VFvWu6VTuNk8nk37",
+                  "recovery": "sha256:01066fb1a67468d8fa48d6e0ab5eb7e39237f850961fae3d892e82e44f60105c",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zEwUSKPr3JJQLLJJV8Ui7xP"
+                },
+                "rotations": [],
+                "bindings": [],
+                "attestations": [],
+                "issuers": []
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "M0": {
+      "name": "Mallory",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://mallory.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://mallory.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://mallory.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z4MeS8RVXJfNvLT7BfewxsyxFonXMoSRx6x2QoHsRSmtg",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6Mkir5rLqdm6chLfozzaG4RkjDQj3m4VFvWu6VTuNk8nk37",
+                  "recovery": "sha256:01066fb1a67468d8fa48d6e0ab5eb7e39237f850961fae3d892e82e44f60105c",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zEwUSKPr3JJQLLJJV8Ui7xP"
+                },
+                "rotations": [],
+                "bindings": [],
+                "attestations": [],
+                "issuers": []
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "A0_tampered_attestation": {
+      "name": "Alice",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://alice.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://alice.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://alice.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+                  "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "z4jTFg9JGE4szAknKWcBk81"
+                },
+                "rotations": [],
+                "bindings": [],
+                "attestations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "attestation",
+                      "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+                      "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "iat": 1790913600,
+                      "exp": 1793592000,
+                      "ctx": "example.world",
+                      "admission": "invite",
+                      "claims": {
+                        "joined": "2026-09-01",
+                        "tasks": 1200
+                      },
+                      "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+                    },
+                    "sig": "z2kiobsTAv2AVq4CegAjszj4cLFEXy3mw1SrVVGbLJGx7r5E8uPDsYfKBzSCBtgEZJWUPx6WLSVksjoaPBTAF8Lw"
+                  }
+                ],
+                "issuers": [
+                  {
+                    "v": "sigelo/0",
+                    "typ": "genesis",
+                    "key": "z6MkwJmdAXpmSA58PqSwH7ZhFZ6CWVMvFgzGLhXFRCNEvt79",
+                    "recovery": "sha256:5e6bcddb9cb2424514d87d9232a0236bf7a77dd3f3041648ab68f961737885e3",
+                    "created": "2026-10-01T00:00:00Z",
+                    "nonce": "zE9L9kPogEjCiy6s3vnQtaT"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "A1_fork": {
+      "name": "Alice",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://alice.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://alice.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://alice.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+                  "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "z4jTFg9JGE4szAknKWcBk81"
+                },
+                "rotations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "rotation",
+                      "id": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "next": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+                      "iat": 1791001000,
+                      "reason": "voluntary"
+                    },
+                    "sig": "z668cnG2dd2CxA9QbfECtKnZqjHZ4EW9R6KW6aZZGG6pw5uk9XJf4omJUbZBt1hrJqDUbfcPmyLzzsm8kMkAf7yx2",
+                    "next_genesis": {
+                      "v": "sigelo/0",
+                      "typ": "genesis",
+                      "key": "z6MkjVxdkrRjR2Xc2dYPDciLBtmg4fpFVYvx5AE5nAYB136H",
+                      "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                      "created": "2026-10-01T00:00:00Z",
+                      "nonce": "zLuEBVzyASDv8o1LqxYJsce"
+                    }
+                  },
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "rotation",
+                      "id": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "next": "did:sigelo:z26FR2Vr8Qk5RPcrp3Fqami6eeLLzbc9xbYM8KVcWwAzH",
+                      "iat": 1791001001,
+                      "reason": "voluntary"
+                    },
+                    "sig": "z5Q8sXhPk9YmKSEVD8NNguF3o1dYB3jCmjQmwzesmcntGRQgRmjDtM2Bki6Hg9jzer6zyKHw4jG71ESpJJoYNW56R",
+                    "next_genesis": {
+                      "v": "sigelo/0",
+                      "typ": "genesis",
+                      "key": "z6Mkeup7ugNqTSkWqj1TJ1veZrdPdjZJuutdqE2hECX7t4BJ",
+                      "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                      "created": "2026-10-01T00:00:00Z",
+                      "nonce": "zXYXjYXsCAkbuDvHbK5H17w"
+                    }
+                  }
+                ],
+                "bindings": [],
+                "attestations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "attestation",
+                      "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+                      "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "iat": 1790913600,
+                      "exp": 1793592000,
+                      "ctx": "example.world",
+                      "admission": "invite",
+                      "claims": {
+                        "joined": "2026-09-01",
+                        "tasks": 12
+                      },
+                      "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+                    },
+                    "sig": "z2kiobsTAv2AVq4CegAjszj4cLFEXy3mw1SrVVGbLJGx7r5E8uPDsYfKBzSCBtgEZJWUPx6WLSVksjoaPBTAF8Lw"
+                  }
+                ],
+                "issuers": [
+                  {
+                    "v": "sigelo/0",
+                    "typ": "genesis",
+                    "key": "z6MkwJmdAXpmSA58PqSwH7ZhFZ6CWVMvFgzGLhXFRCNEvt79",
+                    "recovery": "sha256:5e6bcddb9cb2424514d87d9232a0236bf7a77dd3f3041648ab68f961737885e3",
+                    "created": "2026-10-01T00:00:00Z",
+                    "nonce": "zE9L9kPogEjCiy6s3vnQtaT"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "A1": {
+      "name": "Alice",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://alice.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://alice.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://alice.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+                  "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "z4jTFg9JGE4szAknKWcBk81"
+                },
+                "rotations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "rotation",
+                      "id": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "next": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+                      "iat": 1791001000,
+                      "reason": "voluntary"
+                    },
+                    "sig": "z668cnG2dd2CxA9QbfECtKnZqjHZ4EW9R6KW6aZZGG6pw5uk9XJf4omJUbZBt1hrJqDUbfcPmyLzzsm8kMkAf7yx2",
+                    "next_genesis": {
+                      "v": "sigelo/0",
+                      "typ": "genesis",
+                      "key": "z6MkjVxdkrRjR2Xc2dYPDciLBtmg4fpFVYvx5AE5nAYB136H",
+                      "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                      "created": "2026-10-01T00:00:00Z",
+                      "nonce": "zLuEBVzyASDv8o1LqxYJsce"
+                    }
+                  }
+                ],
+                "bindings": [],
+                "attestations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "attestation",
+                      "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+                      "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "iat": 1790913600,
+                      "exp": 1793592000,
+                      "ctx": "example.world",
+                      "admission": "invite",
+                      "claims": {
+                        "joined": "2026-09-01",
+                        "tasks": 12
+                      },
+                      "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+                    },
+                    "sig": "z2kiobsTAv2AVq4CegAjszj4cLFEXy3mw1SrVVGbLJGx7r5E8uPDsYfKBzSCBtgEZJWUPx6WLSVksjoaPBTAF8Lw"
+                  }
+                ],
+                "issuers": [
+                  {
+                    "v": "sigelo/0",
+                    "typ": "genesis",
+                    "key": "z6MkwJmdAXpmSA58PqSwH7ZhFZ6CWVMvFgzGLhXFRCNEvt79",
+                    "recovery": "sha256:5e6bcddb9cb2424514d87d9232a0236bf7a77dd3f3041648ab68f961737885e3",
+                    "created": "2026-10-01T00:00:00Z",
+                    "nonce": "zE9L9kPogEjCiy6s3vnQtaT"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "T_thief": {
+      "name": "Alice",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://alice.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://alice.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://alice.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+                  "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "z4jTFg9JGE4szAknKWcBk81"
+                },
+                "rotations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "rotation",
+                      "id": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "next": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+                      "iat": 1791001000,
+                      "reason": "voluntary"
+                    },
+                    "sig": "z668cnG2dd2CxA9QbfECtKnZqjHZ4EW9R6KW6aZZGG6pw5uk9XJf4omJUbZBt1hrJqDUbfcPmyLzzsm8kMkAf7yx2",
+                    "next_genesis": {
+                      "v": "sigelo/0",
+                      "typ": "genesis",
+                      "key": "z6MkjVxdkrRjR2Xc2dYPDciLBtmg4fpFVYvx5AE5nAYB136H",
+                      "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                      "created": "2026-10-01T00:00:00Z",
+                      "nonce": "zLuEBVzyASDv8o1LqxYJsce"
+                    }
+                  },
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "rotation",
+                      "id": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+                      "next": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+                      "iat": 1791002000,
+                      "reason": "voluntary"
+                    },
+                    "sig": "z57Rc57W3bFSWYWPXj9XUjq8DtHkMzHenpvwXM1yu8uARRsUJ4oKNpdLwHJ8VMGuSLh1ETosTqVr17PQVjxejJtMh",
+                    "next_genesis": {
+                      "v": "sigelo/0",
+                      "typ": "genesis",
+                      "key": "z6MkiLVhGvndKRw9Qc7AEstmEtMS8mxDEBggP7yxBgEAWsrL",
+                      "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                      "created": "2026-10-01T00:00:00Z",
+                      "nonce": "z2JwHgudP5iyfQ5g2Cyi3bj"
+                    }
+                  }
+                ],
+                "bindings": [],
+                "attestations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "attestation",
+                      "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+                      "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "iat": 1790913600,
+                      "exp": 1793592000,
+                      "ctx": "example.world",
+                      "admission": "invite",
+                      "claims": {
+                        "joined": "2026-09-01",
+                        "tasks": 12
+                      },
+                      "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+                    },
+                    "sig": "z2kiobsTAv2AVq4CegAjszj4cLFEXy3mw1SrVVGbLJGx7r5E8uPDsYfKBzSCBtgEZJWUPx6WLSVksjoaPBTAF8Lw"
+                  }
+                ],
+                "issuers": [
+                  {
+                    "v": "sigelo/0",
+                    "typ": "genesis",
+                    "key": "z6MkwJmdAXpmSA58PqSwH7ZhFZ6CWVMvFgzGLhXFRCNEvt79",
+                    "recovery": "sha256:5e6bcddb9cb2424514d87d9232a0236bf7a77dd3f3041648ab68f961737885e3",
+                    "created": "2026-10-01T00:00:00Z",
+                    "nonce": "zE9L9kPogEjCiy6s3vnQtaT"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    },
+    "A2_recovered": {
+      "name": "Alice",
+      "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+      "url": "https://alice.example/a2a",
+      "version": "1.0.0",
+      "provider": {
+        "organization": "Hermes Agent",
+        "url": "https://alice.example/a2a"
+      },
+      "supportedInterfaces": [
+        {
+          "url": "https://alice.example/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "stateTransitionHistory": false,
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "uri": "urn:sigelo:a2a-pairing:0",
+            "description": "sigelo identity: the pairing binds to params.did, verified offline from params.bundle",
+            "required": false,
+            "params": {
+              "did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+              "bundle": {
+                "v": "sigelo/0",
+                "typ": "bundle",
+                "genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+                  "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "z4jTFg9JGE4szAknKWcBk81"
+                },
+                "rotations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "rotation",
+                      "id": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "next": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+                      "iat": 1791001000,
+                      "reason": "voluntary"
+                    },
+                    "sig": "z668cnG2dd2CxA9QbfECtKnZqjHZ4EW9R6KW6aZZGG6pw5uk9XJf4omJUbZBt1hrJqDUbfcPmyLzzsm8kMkAf7yx2",
+                    "next_genesis": {
+                      "v": "sigelo/0",
+                      "typ": "genesis",
+                      "key": "z6MkjVxdkrRjR2Xc2dYPDciLBtmg4fpFVYvx5AE5nAYB136H",
+                      "recovery": "sha256:5d665584a13e05cc0403938712f3b4a6f98dcd8060e2e7aa8466e74923092b68",
+                      "created": "2026-10-01T00:00:00Z",
+                      "nonce": "zLuEBVzyASDv8o1LqxYJsce"
+                    }
+                  },
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "rotation",
+                      "id": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+                      "next": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+                      "iat": 1791001500,
+                      "reason": "recovery",
+                      "recovery_key": "z6Mkh1et1WQh7XYeNU772owpZSWzw3Ad7DefRFDgjaJSH5mA"
+                    },
+                    "sig": "z5YuQ1QCuqiG76yUPoMguS1Fzr3xSXSLZWASDoEZAzTm8iN8qLRKnS18gvD4GGD6tXqedMDbdLoi4HRqECPFe4bMj",
+                    "next_genesis": {
+                      "v": "sigelo/0",
+                      "typ": "genesis",
+                      "key": "z6MkjMmrGk3Dveis5CvnMxsmXKMVgeSaYri72YFx8SgPTLXL",
+                      "recovery": "sha256:f145f81fdf4fc8fd51f2e0eedc8a2d3a95c8d5e5e0a30f222b2dc50b0f342da6",
+                      "created": "2026-10-01T00:00:00Z",
+                      "nonce": "zYG4sGEE4hA1Q8Fyn3UxSD"
+                    }
+                  }
+                ],
+                "bindings": [],
+                "attestations": [
+                  {
+                    "body": {
+                      "v": "sigelo/0",
+                      "typ": "attestation",
+                      "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+                      "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+                      "iat": 1790913600,
+                      "exp": 1793592000,
+                      "ctx": "example.world",
+                      "admission": "invite",
+                      "claims": {
+                        "joined": "2026-09-01",
+                        "tasks": 12
+                      },
+                      "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+                    },
+                    "sig": "z2kiobsTAv2AVq4CegAjszj4cLFEXy3mw1SrVVGbLJGx7r5E8uPDsYfKBzSCBtgEZJWUPx6WLSVksjoaPBTAF8Lw"
+                  }
+                ],
+                "issuers": [
+                  {
+                    "v": "sigelo/0",
+                    "typ": "genesis",
+                    "key": "z6MkwJmdAXpmSA58PqSwH7ZhFZ6CWVMvFgzGLhXFRCNEvt79",
+                    "recovery": "sha256:5e6bcddb9cb2424514d87d9232a0236bf7a77dd3f3041648ab68f961737885e3",
+                    "created": "2026-10-01T00:00:00Z",
+                    "nonce": "zE9L9kPogEjCiy6s3vnQtaT"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "skills": [
+        {
+          "id": "general",
+          "name": "general",
+          "description": "General-purpose conversational agent",
+          "tags": [
+            "general"
+          ]
+        }
+      ],
+      "securitySchemes": {
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      },
+      "security": [
+        {
+          "bearer": []
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "case": "pair_b_learns_a",
+      "store": "B",
+      "op": "issue",
+      "now": 1791000010,
+      "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": "alice",
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zDoA1Mp13c1zoqZTKSYhsuW"
+      }
+    },
+    {
+      "case": "pair_b_learns_a",
+      "store": "B",
+      "op": "pair",
+      "now": 1791000011,
+      "card": "A0",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zDoA1Mp13c1zoqZTKSYhsuW"
+        },
+        "sig": "z3QUxVZbQgRnGrRoZdbE24xF8oAiEdoShTGjYca8PtH1pin4WkuQbyjARAuMbaN2G7Toc3dvhWcwZikVEK1S5Pkxw"
+      },
+      "expect": {
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+        "attestations": {
+          "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3": [
+            {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+              "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+              "iat": 1790913600,
+              "exp": 1793592000,
+              "ctx": "example.world",
+              "admission": "invite",
+              "claims": {
+                "joined": "2026-09-01",
+                "tasks": 12
+              },
+              "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+            }
+          ]
+        },
+        "rejected": {
+          "attestations": 0,
+          "bindings": 0
+        }
+      }
+    },
+    {
+      "case": "pair_a_learns_b",
+      "store": "A",
+      "op": "issue",
+      "now": 1791000020,
+      "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "ctx": "hermes-contacts:did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "contact_name": "bob",
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "ctx": "hermes-contacts:did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "nonce": "zCiftFBrC4im9Xc2S7EvqN4"
+      }
+    },
+    {
+      "case": "pair_a_learns_b",
+      "store": "A",
+      "op": "pair",
+      "now": 1791000021,
+      "card": "B0",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "ctx": "hermes-contacts:did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+          "nonce": "zCiftFBrC4im9Xc2S7EvqN4"
+        },
+        "sig": "z2E2dUUc2TDxYZiMnMR1ZyNN59kejRXt92pj7E7bKRzQN9W2ttVhX3nWn5EdgDBCFas2J5sxPvtMPSSKx1Bxm51Wt"
+      },
+      "expect": {
+        "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "current_did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "current_key": "z6MkiJtokaNTxVv55hsLMpSKdSPky4jm1ipRJ1L8VLxMFGMe",
+        "attestations": {},
+        "rejected": {
+          "attestations": 0,
+          "bindings": 0
+        }
+      }
+    },
+    {
+      "case": "lookup_both_directions",
+      "store": "A",
+      "op": "lookup",
+      "now": 1791000030,
+      "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "expect": {
+        "name": "bob",
+        "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "current_did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "current_key": "z6MkiJtokaNTxVv55hsLMpSKdSPky4jm1ipRJ1L8VLxMFGMe",
+        "revoked": false
+      }
+    },
+    {
+      "case": "lookup_both_directions",
+      "store": "B",
+      "op": "lookup",
+      "now": 1791000030,
+      "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "expect": {
+        "name": "alice",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+        "revoked": false
+      }
+    },
+    {
+      "case": "replayed_challenge",
+      "store": "B",
+      "op": "pair",
+      "now": 1791000040,
+      "card": "A0",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zDoA1Mp13c1zoqZTKSYhsuW"
+        },
+        "sig": "z3QUxVZbQgRnGrRoZdbE24xF8oAiEdoShTGjYca8PtH1pin4WkuQbyjARAuMbaN2G7Toc3dvhWcwZikVEK1S5Pkxw"
+      },
+      "error": "challenge_unknown"
+    },
+    {
+      "case": "expired_challenge",
+      "store": "B",
+      "op": "issue",
+      "now": 1791000050,
+      "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zRXg4NSDKwPZxeAyLVrezWy"
+      }
+    },
+    {
+      "case": "expired_challenge",
+      "store": "B",
+      "op": "pair",
+      "now": 1791000350,
+      "card": "A0",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zRXg4NSDKwPZxeAyLVrezWy"
+        },
+        "sig": "z3DzCoPsuzpwjqzWZZBbsG2befCYZriyFkyt2rjUuew97zeupfLuBP36eesCAkhHS7BV2kSds2B9LiXaDkZj393xc"
+      },
+      "error": "challenge_expired"
+    },
+    {
+      "case": "card_name_is_not_identity",
+      "store": "B",
+      "op": "issue",
+      "now": 1791000360,
+      "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "z88xsfbP29vyCiAtZaVBXJz"
+      }
+    },
+    {
+      "case": "card_name_is_not_identity",
+      "store": "B",
+      "op": "pair",
+      "now": 1791000361,
+      "card": "M0_named_alice",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z4MeS8RVXJfNvLT7BfewxsyxFonXMoSRx6x2QoHsRSmtg",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "z88xsfbP29vyCiAtZaVBXJz"
+        },
+        "sig": "z5JQMKBCDq2yQHykckqk5ALh3KF1xBhUpZqZ2187TjVf5KSn27ss5N27CQMcAGLzLSSDye4kp1GHvJjUiYmrubiMC"
+      },
+      "error": "challenge_did"
+    },
+    {
+      "case": "bundle_from_another_did",
+      "store": "B",
+      "op": "issue",
+      "now": 1791000370,
+      "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zLKoCkHwNabdfWJNDbcSyh6"
+      }
+    },
+    {
+      "case": "bundle_from_another_did",
+      "store": "B",
+      "op": "pair",
+      "now": 1791000371,
+      "card": "A0_claims_with_M0_bundle",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zLKoCkHwNabdfWJNDbcSyh6"
+        },
+        "sig": "z2NXKV1cPVKxPaL4GQbw9nSnS7yMbPi8ShPEv6k3PJWVzAV9HRAYqGkRsAwo36TKvyk1bfYAPQTcahkgeJns5pFBy"
+      },
+      "error": "card_did"
+    },
+    {
+      "case": "unknown_peer",
+      "store": "B",
+      "op": "issue",
+      "now": 1791000380,
+      "did": "did:sigelo:z4MeS8RVXJfNvLT7BfewxsyxFonXMoSRx6x2QoHsRSmtg",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z4MeS8RVXJfNvLT7BfewxsyxFonXMoSRx6x2QoHsRSmtg",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zVuctLiqQMtm6oRQbDoCjBj"
+      }
+    },
+    {
+      "case": "unknown_peer",
+      "store": "B",
+      "op": "pair",
+      "now": 1791000381,
+      "card": "M0",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z4MeS8RVXJfNvLT7BfewxsyxFonXMoSRx6x2QoHsRSmtg",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zVuctLiqQMtm6oRQbDoCjBj"
+        },
+        "sig": "zB68JM5bCRsAFCpxCShPU646gjLdSHtZk7jaSFiSxQq8NthXZu8RmLBrEysMyYP9duAjBZagd2uaoGZNuyEXE6Uo"
+      },
+      "error": "not_contact"
+    },
+    {
+      "case": "tampered_attestation_discarded",
+      "store": "B",
+      "op": "issue",
+      "now": 1791000390,
+      "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "z3YJ6XJsjMeqitkYCukcpPJ"
+      }
+    },
+    {
+      "case": "tampered_attestation_discarded",
+      "store": "B",
+      "op": "pair",
+      "now": 1791000391,
+      "card": "A0_tampered_attestation",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "z3YJ6XJsjMeqitkYCukcpPJ"
+        },
+        "sig": "zszuio6HiKvWN48T5Q2pmHiyEcxz1uvop6v2gQHheo5Z9d3esHnzcyYznrgcaNnkZAiuviSsmszK1zF2A9GKUsX1"
+      },
+      "expect": {
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_key": "z6MknzDBkrdU75yKQ5FEVqrqJS8ymBvhMFiNrXyMmABcrg2L",
+        "attestations": {},
+        "rejected": {
+          "attestations": 1,
+          "bindings": 0
+        }
+      }
+    },
+    {
+      "case": "chain_fork",
+      "store": "B",
+      "op": "issue",
+      "now": 1791001100,
+      "did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zPEwhtwBa6ZKVghPGC14SfD"
+      }
+    },
+    {
+      "case": "chain_fork",
+      "store": "B",
+      "op": "pair",
+      "now": 1791001101,
+      "card": "A1_fork",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zPEwhtwBa6ZKVghPGC14SfD"
+        },
+        "sig": "z4m4zzMSwLmduGRHpV3HECAnnnf7FsQF6E4pj4HYwVdpXCieyPqfz2fU7gpBvGwgvBMoYF7WEgVHFGZfjCQZiH2xe"
+      },
+      "error": "bundle"
+    },
+    {
+      "case": "voluntary_rotation",
+      "store": "B",
+      "op": "issue",
+      "now": 1791001110,
+      "did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zDXwUwJBBZtYtkTQbJavHNb"
+      }
+    },
+    {
+      "case": "voluntary_rotation",
+      "store": "B",
+      "op": "pair",
+      "now": 1791001111,
+      "card": "A1",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zDXwUwJBBZtYtkTQbJavHNb"
+        },
+        "sig": "zB53FCXuu3SEjmGj7Mc9XiBiKL8YBZpQbJttBjeh8s2XZb3dvYCPsRpDWKpsb8LMrb2Vd6vnN6ZdFsXYdGutuQAm"
+      },
+      "expect": {
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+        "current_key": "z6MkjVxdkrRjR2Xc2dYPDciLBtmg4fpFVYvx5AE5nAYB136H",
+        "attestations": {
+          "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3": [
+            {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+              "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+              "iat": 1790913600,
+              "exp": 1793592000,
+              "ctx": "example.world",
+              "admission": "invite",
+              "claims": {
+                "joined": "2026-09-01",
+                "tasks": 12
+              },
+              "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+            }
+          ]
+        },
+        "rejected": {
+          "attestations": 0,
+          "bindings": 0
+        }
+      }
+    },
+    {
+      "case": "voluntary_rotation",
+      "store": "B",
+      "op": "lookup",
+      "now": 1791001120,
+      "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "expect": {
+        "name": "alice",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z3p5EByWv12MNPD1JpmAM6RGoxM8WNwWxMTdqZv46xfbX",
+        "current_key": "z6MkjVxdkrRjR2Xc2dYPDciLBtmg4fpFVYvx5AE5nAYB136H",
+        "revoked": false
+      }
+    },
+    {
+      "case": "thief_before_recovery_undetectable",
+      "store": "B",
+      "op": "issue",
+      "now": 1791002100,
+      "did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zXDJQoR58xf2LipderYg7xV"
+      }
+    },
+    {
+      "case": "thief_before_recovery_undetectable",
+      "store": "B",
+      "op": "pair",
+      "now": 1791002101,
+      "card": "T_thief",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zXDJQoR58xf2LipderYg7xV"
+        },
+        "sig": "zYZBa2jWvqB5dwmSpetMcFjS5jtfapnpyFrwFwHikLA3J1vQK4Pgm3B8h3Z9SrkzbNPADKRbRKaCXq6CQAAcJQCK"
+      },
+      "expect": {
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+        "current_key": "z6MkiLVhGvndKRw9Qc7AEstmEtMS8mxDEBggP7yxBgEAWsrL",
+        "attestations": {
+          "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3": [
+            {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+              "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+              "iat": 1790913600,
+              "exp": 1793592000,
+              "ctx": "example.world",
+              "admission": "invite",
+              "claims": {
+                "joined": "2026-09-01",
+                "tasks": 12
+              },
+              "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+            }
+          ]
+        },
+        "rejected": {
+          "attestations": 0,
+          "bindings": 0
+        }
+      }
+    },
+    {
+      "case": "recovery_beats_voluntary",
+      "store": "B",
+      "op": "issue",
+      "now": 1791002110,
+      "did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zPALCj4nvp1k6i1psA3Bt3f"
+      }
+    },
+    {
+      "case": "recovery_beats_voluntary",
+      "store": "B",
+      "op": "pair",
+      "now": 1791002111,
+      "card": "A2_recovered",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zPALCj4nvp1k6i1psA3Bt3f"
+        },
+        "sig": "z5QtyAkag36csBNgGj8xSCdiW3zUMTZ8RDcz5WPbeNPnjf9e4Uw4HS3nVtkfbTvdVRzAwgA1LPDrsg8xHvHy5PJVW"
+      },
+      "expect": {
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+        "current_key": "z6MkjMmrGk3Dveis5CvnMxsmXKMVgeSaYri72YFx8SgPTLXL",
+        "attestations": {
+          "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3": [
+            {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:z4irZczbgqiqS43UvGcuKFVEJq6sffHmjaTGHde4XMBX3",
+              "sub": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+              "iat": 1790913600,
+              "exp": 1793592000,
+              "ctx": "example.world",
+              "admission": "invite",
+              "claims": {
+                "joined": "2026-09-01",
+                "tasks": 12
+              },
+              "admission_by": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW"
+            }
+          ]
+        },
+        "rejected": {
+          "attestations": 0,
+          "bindings": 0
+        }
+      }
+    },
+    {
+      "case": "recovery_beats_voluntary",
+      "store": "B",
+      "op": "lookup",
+      "now": 1791002120,
+      "did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+      "expect": {
+        "name": "alice",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+        "current_key": "z6MkjMmrGk3Dveis5CvnMxsmXKMVgeSaYri72YFx8SgPTLXL",
+        "revoked": false
+      }
+    },
+    {
+      "case": "recovery_beats_voluntary",
+      "store": "B",
+      "op": "lookup",
+      "now": 1791002120,
+      "did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+      "expect": null
+    },
+    {
+      "case": "thief_after_recovery",
+      "store": "B",
+      "op": "issue",
+      "now": 1791002130,
+      "did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "zA8GVgmAXTZZ84v1ybt3DN8"
+      }
+    },
+    {
+      "case": "thief_after_recovery",
+      "store": "B",
+      "op": "pair",
+      "now": 1791002131,
+      "card": "T_thief",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z2veLxnVyH8T7izYB84zLorzYZT1dkCJmeDYAJCmvUaxn",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "zA8GVgmAXTZZ84v1ybt3DN8"
+        },
+        "sig": "z2j4PWpMULauMFGpGFaHUF6AxSZ1VxBpiKjVUXfxoPXryVvaosKguyY4n8p3oa8VjhaTCxB2cbdDHH9pzMq7bEsvR"
+      },
+      "error": "stale_chain"
+    },
+    {
+      "case": "revoke",
+      "store": "B",
+      "op": "revoke",
+      "now": 1791002140,
+      "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+      "expect": {
+        "name": "alice",
+        "did": "did:sigelo:z72ZeHyijYELzGWvnD9DUeq5Q3jkFTrzXtVFpNw9YU5q3",
+        "current_did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+        "current_key": "z6MkjMmrGk3Dveis5CvnMxsmXKMVgeSaYri72YFx8SgPTLXL",
+        "revoked": true
+      }
+    },
+    {
+      "case": "revoked_pairing",
+      "store": "B",
+      "op": "issue",
+      "now": 1791002150,
+      "did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+      "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "contact_name": null,
+      "expect": {
+        "v": "sigelo/0",
+        "typ": "challenge",
+        "did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+        "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "nonce": "z724ttjiMgtQqD6zAwtMaZj"
+      }
+    },
+    {
+      "case": "revoked_pairing",
+      "store": "B",
+      "op": "pair",
+      "now": 1791002151,
+      "card": "A2_recovered",
+      "answer": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "challenge",
+          "did": "did:sigelo:z6pKysm3iEF3iyF1QrmD9Bs3nue3jua2xTMxjyhdfCV8W",
+          "ctx": "hermes-contacts:did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+          "nonce": "z724ttjiMgtQqD6zAwtMaZj"
+        },
+        "sig": "z3RY5SfegwM4hwhbR4sfuqSJcru9cWGsos6Lwvd2DWGJnhsajYtwkoprApae1GUz5XFZqVvVXPaMte565HV6wKeVe"
+      },
+      "error": "revoked"
+    },
+    {
+      "case": "revoke_is_local",
+      "store": "A",
+      "op": "lookup",
+      "now": 1791002160,
+      "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+      "expect": {
+        "name": "bob",
+        "did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "current_did": "did:sigelo:zGz92TuzC1LyQKDrYSsPtJbgH1rcSoD2wQsmdLTNVeLXW",
+        "current_key": "z6MkiJtokaNTxVv55hsLMpSKdSPky4jm1ipRJ1L8VLxMFGMe",
+        "revoked": false
+      }
+    }
+  ]
+}

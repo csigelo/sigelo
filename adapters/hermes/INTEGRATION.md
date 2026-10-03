@@ -33,3 +33,5 @@ the Docker image, gateway modes, Windows.
 
 Not built: gating Hermes' A2A inbound peers on a §5.2 challenge plus a verified bundle is a
 change to Hermes, drafted in [`PROPOSAL.md`](PROPOSAL.md).
+Pairing two agents by DID through the Agent Card, as a fixture contract:
+[`pairing/`](pairing/README.md).

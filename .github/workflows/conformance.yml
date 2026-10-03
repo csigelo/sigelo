@@ -80,6 +80,15 @@ jobs:
             { grep '^FAIL ' /tmp/world-out | head -n 7; grep -E -m 4 'Error|cause|^node:' /tmp/world-out; tail -n 3 /tmp/world-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=world node world\/test.mjs::/'; exit 1; }
           grep -q '^ALL PASS' /tmp/world-out && grep -q '^ok go sigelo-verify: ACCEPT' /tmp/world-out || {
             { grep '^FAIL ' /tmp/world-out | head -n 7; grep -E -m 4 'Error|cause|^node:' /tmp/world-out; tail -n 3 /tmp/world-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=world node world\/test.mjs::/'; exit 1; }
+      # the Hermes pairing fixtures (adapters/hermes/pairing, SPEC §5.2 + §7 + §9): they must
+      # regenerate byte for byte from the seeds, and both acceptors must run the whole set; the
+      # Python one needs `cryptography` (a venv) and builds sigelo-verify with go. Seconds.
+      - run: |
+          node adapters/hermes/pairing/gen.mjs --check
+          (cd accept/node && npm ci --ignore-scripts --omit=dev --silent)
+          node adapters/hermes/pairing/test.mjs | tee /tmp/pairing-node && grep -q '^ALL PASS$' /tmp/pairing-node
+          python3 -m venv /tmp/pyv && /tmp/pyv/bin/pip install -q --disable-pip-version-check cryptography
+          /tmp/pyv/bin/python adapters/hermes/pairing/test.py | tee /tmp/pairing-py && grep -q '^ALL PASS$' /tmp/pairing-py
       # the bounded-spending service (MONERO.md §4). Same job, after `npx tsc` above: it
       # depends on `sigelo` as `file:../ts`, so it links dist/ and there must be a dist/ to link.
       # Its live-wallet section SKIPs on a runner with no monero-wallet-rpc on 127.0.0.1:38083.

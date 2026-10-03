@@ -105,7 +105,7 @@ and `keys.go`'s derivation vectors (including the 1f916 adapter's emitted `sampl
 statically, and reproduce the `bundle` vector's §9.1 result from the binary. It also runs the
 moadim adapter's `npm test`, whose Go cross-check must run (Go is installed in that job), and
 `spend/`'s `npm test`, whose live-wallet section SKIPs without a `monero-wallet-rpc` on
-127.0.0.1:38083 (so does the ceremony's real-`age` section of `ts/` without `age`). No job needs Python; there is no Python implementation any more.
+127.0.0.1:38083 (so does the ceremony's real-`age` section of `ts/` without `age`). The only Python in CI is the thin accept/pairing drop-ins (they shell out to the Go verifier); there is no Python implementation of the protocol.
 Do not weaken any check to make a change land. Adding a vector means updating both
 implementations' tests in the same change.
 
