@@ -155,7 +155,7 @@ function issue(a) { appendFileSync(ISSUED, JSON.stringify(a) + '\n', { mode: 0o6
 function attestation(req) {
   const { now, bundle_valid } = proveControl(req);
   const prev = last.get(req.did);
-  if (prev && now - prev.body.iat < DAY) return { attestation: prev, issuer: world.genesis };   // idempotent for 24 h
+  if (prev && prev.body.iss === ISS && now - prev.body.iat < DAY) return { attestation: prev, issuer: world.genesis };   // idempotent for 24 h, never across a rotation
   const a = attest({ secret: SECRET, iss: ISS, sub: req.did, iat: now, exp: now + LIFETIME, ctx: CTX, admission: 'open',
     claims: { seen: new Date(now * 1000).toISOString().slice(0, 10), bundle_valid, verifier: VERIFIER } });
   return issue(a);
@@ -178,7 +178,7 @@ function conformance(req) {
   const { now } = proveControl(req);
   const claim = { implementation: `${im.name} ${im.version}`, vectors: vectors.sha256, passed: score.passed, total: score.total, self_reported: true, runner: RUNNER };
   const prev = lastConf.get(confKey(req.did, claim));
-  if (prev && now - prev.body.iat < DAY) return { attestation: prev, issuer: world.genesis };   // idempotent for 24 h
+  if (prev && prev.body.iss === ISS && now - prev.body.iat < DAY) return { attestation: prev, issuer: world.genesis };   // idempotent for 24 h, never across a rotation
   return issue(attest({ secret: SECRET, iss: ISS, sub: req.did, iat: now, exp: now + LIFETIME, ctx: CONF_CTX, admission: 'open', claims: { conformance: claim } }));
 }
 

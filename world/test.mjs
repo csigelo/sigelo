@@ -44,8 +44,8 @@ ok(cli('keygen', commitment, join(dir, 'issuer.json')).status === 1, 'keygen ref
 const ISS = did(issuerGenesis);
 
 let proc;
-const start = () => new Promise((resolve, reject) => {
-  proc = spawn(process.execPath, [SERVER], { env: { ...process.env, SIGELO_WORLD_KEY: join(dir, 'issuer.json'), SIGELO_WORLD_PORT: '0' } });
+const start = (key = 'issuer.json') => new Promise((resolve, reject) => {
+  proc = spawn(process.execPath, [SERVER], { env: { ...process.env, SIGELO_WORLD_KEY: join(dir, key), SIGELO_WORLD_PORT: '0' } });
   proc.stderr.on('data', (d) => process.stderr.write(d));
   proc.stdout.on('data', (d) => { const m = String(d).match(/127\.0\.0\.1:(\d+)/); if (m) resolve(`http://127.0.0.1:${m[1]}`); });
   proc.on('exit', (c) => reject(new Error(`server exited ${c}`)));
@@ -246,6 +246,14 @@ const chain = rr.status === 0 ? JSON.parse(rr.stdout) : null;
 ok(chain && chain.rotations.length === 1 && chain.rotations[0].body.reason === 'recovery'
   && verify(bundleOf(chain.genesis, chain.rotations), Math.floor(Date.now() / 1000)).did === did(newIssuer), 'rotate: a recovery rotation whose chain resolves to the new issuer');
 ok((await goVerify(issuedBundle, a.body.iat + 60)).attestations?.[ISS]?.length === 1, 'attestations issued before the rotation still verify offline under the old issuer genesis');
+
+// ---- the rotated world, same state directory: the retired issuer's attestations are never replayed ----
+base = await start('issuer2.json');
+const postRot = await answer(agent, { bundle: bundleOf(agent.genesis) });
+ok(postRot.res.status === 200 && postRot.res.json.attestation.body.iss === did(newIssuer) && same(postRot.res.json.issuer, newIssuer),
+  'after a rotation the same agent (attested < 24 h ago) gets a fresh attestation from the new issuer, not the retired one replayed');
+ok((await get('/world/stats')).json.issuer === did(newIssuer), 'stats: the new issuer');
+await stop();
 
 // ---- nginx: the /world/ location passes the deploy helper's allowlist; a foreign upstream does not ----
 const apply = join(ROOT, 'site/deploy/sigelo-nginx-apply'), conf = join(ROOT, 'site/deploy/nginx.conf');

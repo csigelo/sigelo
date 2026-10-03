@@ -9,7 +9,8 @@ history, which is not public. This public history starts at the import of 2026-1
   and unaudited.
 
 - **World:** issuer key rotated 2026-10-03 by a recovery rotation after the signing seed was exposed in an operator
-  transcript; new DID in SECURITY.md, chain at `/world/rotations.json`; the old DID is retired.
+  transcript; new DID in SECURITY.md, chain at `/world/rotations.json`; the old DID is retired. The 24 h idempotent
+  re-issue never replays a retired issuer's attestation (found by the live check after the rotation).
 - **Provenance gate (prototype):** signed instructions (`ctx: "sigelo/instruction"`) gate shell and write tools in
   Claude Code and Hermes; root-owned hooks, taint after reads, deny on error (`6df8a59`, `be75ec3`).
 - **CI:** the `DEVICE_STRINGS` secret is deleted; CI checks generic shapes only; the identity gate runs locally
