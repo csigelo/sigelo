@@ -8,7 +8,7 @@ first), **live**. Dates are UTC.
 | What | Where | URL | Date | State |
 |---|---|---|---|---|
 | Hermes A2A peer-auth hook | NousResearch/hermes-agent issue | https://github.com/NousResearch/hermes-agent/issues/131484 | 2026-10-02 | filed |
-| Hermes contacts RFC: pairing fixture | NousResearch/hermes-agent#132248 (kvnloo) | https://github.com/NousResearch/hermes-agent/issues/132248#issuecomment-5971957901 | 2026-10-03 | posted: opener + fixture link (adapters/hermes/pairing) |
+| Hermes contacts RFC: pairing fixture | NousResearch/hermes-agent#132248 (kvnloo) | https://github.com/NousResearch/hermes-agent/issues/132248#issuecomment-5973646496 | 2026-10-03 | posted ×3: opener, fixture link, run inside Hermes + 5 seams |
 | OpenClaw A2A peer resolver hook | openclaw/openclaw#164508 | https://github.com/openclaw/openclaw/issues/164508 | 2026-10-03 | filed (PR offered) |
 | Directory entry (stdio + remote) | mcpservers.org free form | submission #9488, contact@sigelo.io | 2026-10-03 | filed (free review, up to 2 weeks) |
 | Directory entry (stdio + remote) | mcp.so, issue route | https://github.com/chatmcp/mcpso/issues/4636 | 2026-10-03 | filed |

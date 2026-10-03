@@ -200,6 +200,8 @@ else
   run "spend keeper" sh -c "cd '$t/spend' && npm ci --ignore-scripts --silent && npm test 2>&1 | grep -q '^ALL PASS'"
   run "mcp server" sh -c "cd '$t/integrations/mcp' && npm test 2>&1 | grep -q 'ALL PASS'"
   run "schemas" sh -c "cd '$t' && node schema/check.mjs | grep -q '^ALL PASS'"
+  run "word budgets" sh -c "cd '$t' && node docs-test/check-budgets.mjs | grep -q '^ALL PASS'"
+  run "pairing fixtures" sh -c "cd '$t' && node adapters/hermes/pairing/gen.mjs --check >/dev/null"
   git --git-dir="$work/gate.git" --work-tree="$t" diff --quiet || die "the test run changed exported files: $(git --git-dir="$work/gate.git" --work-tree="$t" diff --stat | tail -5)"
   echo "publish.sh: ALL PASS on the export tree ($tree)"
 fi
