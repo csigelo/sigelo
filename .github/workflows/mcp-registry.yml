@@ -1,0 +1,23 @@
+# Publish the sigelo entry to the MCP Registry (registry.modelcontextprotocol.io) with GitHub OIDC:
+# no device code, no stored token. The namespace io.github.csigelo/* is proven by this repository's
+# OIDC identity. Manual trigger only; integrations/mcp/server.remote.json is the remote-only manifest
+# (the npm packages are listed in server.json and go in once they exist on npm).
+name: mcp registry
+on:
+  workflow_dispatch:
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher --version
+      - name: login (OIDC)
+        run: ./mcp-publisher login github-oidc
+      - name: publish
+        run: ./mcp-publisher publish integrations/mcp/server.remote.json
