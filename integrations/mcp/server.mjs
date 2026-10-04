@@ -25,7 +25,7 @@ console.log = console.info = console.debug = console.error;
 
 const MODERN = ['2026-07-28'];                                            // per-request _meta era
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];  // initialize era
-const SERVER_INFO = { name: 'sigelo', version: '0.1.0' };
+const SERVER_INFO = { name: 'sigelo', version: '0.1.1' };
 const PV = 'io.modelcontextprotocol/protocolVersion';
 const env = process.env;
 const WALLET = Boolean(env.SIGELO_WALLET_URL && env.SIGELO_WALLET_TOKEN);

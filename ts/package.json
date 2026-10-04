@@ -1,6 +1,6 @@
 {
   "name": "sigelo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Portable, offline-verifiable identity for AI agents: Ed25519 DIDs, signed attestations and bundles (sigelo reference library)",
   "keywords": [
     "ai-agents",

@@ -22,7 +22,7 @@ npx sigelo-agent init --no-recovery              # agent-side CLI (or --recovery
 npx -p sigelo-spend sigelo-wallet balance        # the agent's wallet client; SIGELO_WALLET_URL/_TOKEN from the operator
 npx sigelo-mcp                                   # stdio MCP server: identity tools, wallet verbs when a keeper is set
 npx -p sigelo sigelo-offline new                 # the offline root tool (this page's ts/dist/offline.js)
-go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.0   # the verifier (tag go/v0.1.0)
+go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.1   # the verifier (tag go/v0.1.1)
 ```
 
 Until then, build the tarballs in a clone and install them anywhere:
@@ -30,7 +30,7 @@ Until then, build the tarballs in a clone and install them anywhere:
 ```sh
 release/build.sh /tmp/sigelo-dist                # npm tarballs, sigelo-verify binaries, SHA256SUMS
 mkdir my-agent && cd my-agent && npm init -y >/dev/null
-d=/tmp/sigelo-dist; npm install $d/sigelo-0.1.0.tgz $d/sigelo-agent-0.1.0.tgz $d/sigelo-spend-0.1.0.tgz $d/sigelo-mcp-0.1.0.tgz
+d=/tmp/sigelo-dist; npm install $d/sigelo-0.1.1.tgz $d/sigelo-agent-0.1.1.tgz $d/sigelo-spend-0.1.1.tgz $d/sigelo-mcp-0.1.1.tgz
 npx sigelo-agent init --no-recovery
 $d/sigelo-verify-linux-arm64 --conformance $d/test-vectors.json   # your os-arch
 ```

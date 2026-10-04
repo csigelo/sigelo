@@ -1,6 +1,6 @@
 {
   "name": "sigelo-spend",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Monero keeper for AI agents: bounded per-agent spending and receiving, the agent never holds a key (sigelo)",
   "keywords": [
     "monero",

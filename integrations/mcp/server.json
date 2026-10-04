@@ -3,7 +3,7 @@
   "name": "io.github.csigelo/sigelo",
   "title": "sigelo",
   "description": "Portable, offline-verifiable identity for AI agents: DID, challenges, attestations, bundles.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "websiteUrl": "https://sigelo.io/adopt.html#from-an-mcp-client",
   "repository": {
     "url": "https://github.com/csigelo/sigelo",
@@ -15,7 +15,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "sigelo-mcp",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

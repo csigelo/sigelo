@@ -15,7 +15,7 @@ first), **live**. Dates are UTC.
 | `🪪 Identity` entry | punkpeye/awesome-mcp-servers | branch https://github.com/csigelo/awesome-mcp-servers/tree/add-sigelo | 2026-10-03 | prepared; blocked on Glama |
 | `🔒 Security` remote entry | punkpeye/awesome-remote-mcp-servers | text below | 2026-10-03 | prepared; blocked on a Glama connector |
 | `did:sigelo` registration | w3c/did-extensions | OPENED 2026-10-03: https://github.com/w3c/did-extensions/pull/764 — automated checklist: all MUST/SHOULD pass (2026-10-03); editor review pending
-| Official MCP Registry | registry.modelcontextprotocol.io | `io.github.csigelo/sigelo` | — | blocked: npm, or a remote-only version (below) |
+| Official MCP Registry | registry.modelcontextprotocol.io | `io.github.csigelo/sigelo` v0.1.0, remote only | 2026-10-04 | PUBLISHED via Actions OIDC (`gh workflow run mcp-registry.yml`); npm packages join once published |
 | Claude Code marketplace `csigelo` (`sigelo`, `sigelo-gate` prototype) | own marketplace, `.claude-plugin/marketplace.json` | `claude plugin marketplace add csigelo/sigelo` | 2026-10-03 | prepared; installs tested from a local copy; live after `release/publish.sh` + push |
 | Plugin bundle `sigelo` (no wallet) | Anthropic directory, claude.ai/directory/manage | [claude-directory.md](claude-directory.md) §B | 2026-10-03 | prepared; blocked on Owner: submitting account, GitHub link, icon; mirror push |
 | MCP connector `https://sigelo.io/mcp` | Anthropic directory, claude.ai/directory/manage | [claude-directory.md](claude-directory.md) §A | 2026-10-03 | prepared; blocked on tool `title`/`readOnlyHint` in world/mcp.mjs, then Owner |

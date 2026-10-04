@@ -1,6 +1,6 @@
 {
   "name": "sigelo-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "io.github.csigelo/sigelo",
   "description": "MCP server: portable, offline-verifiable identity for AI agents (DID, challenges, attestations, bundles), optional Monero wallet",
   "keywords": [

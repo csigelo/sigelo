@@ -1,6 +1,6 @@
 {
   "name": "sigelo-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent-side sigelo CLI: create an identity (DID), sign world challenges, collect attestations, build verifiable bundles",
   "keywords": [
     "ai-agents",

@@ -7,7 +7,7 @@ openapi: 3.1.0
 # dialect), so a sigelo bundle or §6.3 invoice here is exactly the SPEC object.
 info:
   title: sigelo-spend keeper
-  version: 0.1.0
+  version: 0.1.1
   summary: The bounded-spending keeper (MONERO.md §4) — loopback HTTP, one agent per bearer token.
   license: { name: MIT, identifier: MIT }
   description: |

@@ -3,10 +3,10 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
-## v0.1.0 — 2026-10-02 (draft)
+## v0.1.1 — 2026-10-04
 
-- **Status:** first tagged release (GitHub pre-release); wire `sigelo/0` may change until v0.2; the keeper is stagenet-only
-  and unaudited.
+- **Status:** first signed release (SSH-signed tags, `release.json`); GitHub pre-release; wire `sigelo/0` may change until
+  v0.2; the keeper is stagenet-only and unaudited.
 
 - **MCP:** `sigelo_forget_issuer` (CLI `forget-issuer`) drops a retired issuer's attestations and genesis from the identity file: holder-side, after an out-of-band rotation notice (SPEC §5).
 - **World:** issuer rotated 2026-10-03 after a seed exposure: new DID in SECURITY.md, chain at `/world/rotations.json`,
@@ -29,6 +29,13 @@ history, which is not public. This public history starts at the import of 2026-1
 - **Docs halved:** every public README cut to commands-first with budgets enforced in CI (`docs-test/check-budgets.mjs`).
 - **Drill 2:** freeze in 6 s, keeper identity recovered offline from the root, fees 2.4 %; freeze.sh now kills every keeper on the policy (`bce9114`, `6099880`).
 - **Gate pass 3:** orphan-process kill, background denylist, TUI paste fix, session-scope taint, HARDENING.md (`297501c`).
+
+## v0.1.0 — 2026-10-02 (draft)
+
+- **Status:** first tagged release (GitHub pre-release, unsigned); wire `sigelo/0` may change until v0.2; the keeper is
+  stagenet-only and unaudited.
+
+### 2026-10-02, up to the tag
 
 - **World:** `sigelo.io/world/` issues §5.2 challenges, `admission: "open"` and 90-day self-reported conformance
   attestations; `POST /world/verify` returns §9.1 (`5191235`, `4088ce2`).

@@ -1,6 +1,6 @@
 {
   "name": "sigelo-recovery-kit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "sigelo recovery kit: air-gapped root ceremony script, printed procedures, drill scheduler and self-grading timeline, runbook bound to your installation. Software you run; the vendor never holds keys.",
   "keywords": [
     "key-recovery",
