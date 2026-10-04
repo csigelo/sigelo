@@ -15,7 +15,7 @@ first), **live**. Dates are UTC.
 | `🪪 Identity` entry | punkpeye/awesome-mcp-servers | branch https://github.com/csigelo/awesome-mcp-servers/tree/add-sigelo | 2026-10-03 | prepared; blocked on Glama |
 | `🔒 Security` remote entry | punkpeye/awesome-remote-mcp-servers | text below | 2026-10-03 | prepared; blocked on a Glama connector |
 | `did:sigelo` registration | w3c/did-extensions | OPENED 2026-10-03: https://github.com/w3c/did-extensions/pull/764 — automated checklist: all MUST/SHOULD pass (2026-10-03); editor review pending
-| Official MCP Registry | registry.modelcontextprotocol.io | `io.github.csigelo/sigelo` v0.1.0, remote only | 2026-10-04 | PUBLISHED via Actions OIDC (`gh workflow run mcp-registry.yml`); npm packages join once published |
+| Official MCP Registry | registry.modelcontextprotocol.io | `io.github.csigelo/sigelo` v0.1.1: npm `sigelo-mcp` (stdio) + remote | 2026-10-04 | PUBLISHED via Actions OIDC (`gh workflow run mcp-registry.yml`, `integrations/mcp/server.json`); v0.1.0 was remote only |
 | Claude Code marketplace `csigelo` (`sigelo`, `sigelo-gate` prototype) | own marketplace, `.claude-plugin/marketplace.json` | `claude plugin marketplace add csigelo/sigelo` | 2026-10-03 | prepared; installs tested from a local copy; live after `release/publish.sh` + push |
 | Plugin bundle `sigelo` (no wallet) | Anthropic directory, claude.ai/directory/manage | [claude-directory.md](claude-directory.md) §B | 2026-10-03 | prepared; blocked on Owner: submitting account, GitHub link, icon; mirror push |
 | MCP connector `https://sigelo.io/mcp` | Anthropic directory, claude.ai/directory/manage | [claude-directory.md](claude-directory.md) §A | 2026-10-03 | prepared; blocked on tool `title`/`readOnlyHint` in world/mcp.mjs, then Owner |
@@ -47,14 +47,10 @@ Remote entry, once the connector exists (Security, alphabetical before Semgrep):
 
 ## Official MCP Registry
 
-The `packages` entry in `integrations/mcp/server.json` points at npm `sigelo-mcp`, which is not
-published, and the registry checks it. Publishing needs only the csigelo GitHub login
-(`mcp-publisher login github`). Two ways:
-
-1. After npm: `mcp-publisher publish` in `integrations/mcp/` as it is.
-2. Now: publish a copy without `packages` (remote only). Versions are immutable, so the npm
-   release would then need the next version number. Glama imports connectors from the registry,
-   which would unblock both awesome lists.
+v0.1.0 went in remote only; v0.1.1 (2026-10-04) is the full `integrations/mcp/server.json`: npm
+`sigelo-mcp` 0.1.1, whose `mcpName` the registry checks, plus the remote. `.github/workflows/mcp-registry.yml`
+publishes it through GitHub OIDC; each new version needs `server.json` and the npm package bumped first.
+Glama imports connectors from the registry, which would unblock both awesome lists.
 
 ## DID registry
 

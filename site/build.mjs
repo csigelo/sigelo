@@ -469,7 +469,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
   // index.json: the machine index. Data only.
   const file = (p, url) => ({ url: `${ORIGIN}${url}`, sha256: sha256(readBytes(p)), bytes: readBytes(p).length });
   const impl = (dir) => { const j = pkg(`${dir}/package.json`); return { name: j.name, version: j.version, path: `${dir}/`, language: 'TypeScript',
-    registry: 'npm', published: false, bin: j.bin ? Object.keys(j.bin) : [] }; };
+    registry: 'npm', published: true, bin: j.bin ? Object.keys(j.bin) : [] }; };
   const worldDid = worldDidEarly;
   const index = {
     name: 'sigelo', homepage: `${ORIGIN}/`, description: SOFTWARE.description,
@@ -485,10 +485,10 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     openapi: file('spend/openapi.yaml', '/raw/spend/openapi.yaml'),
     implementations: [
       impl('ts'),
-      { name: 'sigelo-verify', version: VERSION, path: 'go/', language: 'Go', published: false, bin: ['sigelo-verify'] },
+      { name: 'sigelo-verify', version: VERSION, path: 'go/', language: 'Go', published: true, bin: ['sigelo-verify'] },
       impl('adapters/moadim'), impl('spend'), impl('integrations/mcp'), impl('kit'),
     ],
-    release: { version: VERSION, published: false, artefacts: [
+    release: { version: VERSION, published: true, artefacts: [
       ...['sigelo', 'sigelo-spend', 'sigelo-agent', 'sigelo-mcp', 'sigelo-recovery-kit'].map((n) => `${n}-${VERSION}.tgz`),
       ...['linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64', 'windows-amd64.exe'].map((t) => `sigelo-verify-${t}`),
       `sigelo-verify-src-${VERSION}.tar.gz`, 'test-vectors.json', 'SHA256SUMS'],
@@ -502,7 +502,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
       releases: [`${REPO}/releases`, MIRROR], checksums: 'SHA256SUMS',
       maintainer: 'csigelo', github_user: 'csigelo',
       email: [CONTACT_EMAIL, SECURITY_EMAIL], email_receive_only: true,
-      npm_user: NPM_USER, packages: NPM_PACKAGES, packages_published: false,
+      npm_user: NPM_USER, packages: NPM_PACKAGES, packages_published: true,
       issuer_did: worldDid, world_genesis: `${ORIGIN}/world/genesis.json`,
       never_asks_for: ['seed', 'key', 'token', 'payment'],
       report_impersonation: SECURITY_EMAIL,

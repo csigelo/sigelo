@@ -27,8 +27,12 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    (`api.github.com/repos/csigelo/sigelo/actions/runs?event=push&branch=v<v>`) and record it in
    docs-test/PORTABILITY.md.
 
-Not yet part of a release: npm publish (`npm publish $S/a/<pkg>-<v>.tgz`, `sigelo` first; then
-flip the site's "after the first npm publish" footnote and index.json `published`).
+8. npm, from the same tarballs: `npm publish $S/a/<pkg>-<v>.tgz` for `sigelo` first, then
+   sigelo-agent, sigelo-spend, sigelo-mcp, sigelo-recovery-kit (token in a temporary userconfig, never
+   on a command line). New names show a `0.0.0-stage` placeholder for a minute or two. Check each
+   with `npm view <pkg>@<v> dist.integrity` against the tarball's sha512.
+9. Bump `integrations/mcp/server.json` to `<v>`, sync, push, `gh workflow run mcp-registry.yml -R
+   csigelo/sigelo`; `site/deploy/mirror-release.sh v<v> sigelo-vps`, commit its SHA256SUMS, deploy.
 
 ## Nightly on the maintainer's host
 
@@ -42,7 +46,7 @@ leaves `FAILED` and at most one critical desktop notification a day, success non
 ## Signing (from v0.1.1; v0.1.0 is unsigned)
 
 - **Tag**: SSH signature by `~/.ssh/sigelo_release_signing`; public half `release/allowed_signers`
-  (principal `contact@sigelo.io`) = https://sigelo.io/.well-known/sigelo-release-signers.
+  (principal `csigelo@users.noreply.github.com`) = https://sigelo.io/.well-known/sigelo-release-signers.
 - **Artefacts**: `release/sign-release.sh <tag> <dir>` refuses an unsigned tag and writes
   `release.json`: a bundle of the release identity
   did:sigelo:zE1ikihiqKQ7KoFL492kfFrJdUSzPeHNunGnMXLqgVfci (genesis `release/release-identity.json`

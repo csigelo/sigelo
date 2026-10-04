@@ -54,7 +54,7 @@ Sources fetched 2026-10-02; dates are the pages' own where they show one.
    `mcp-publisher login github` (as csigelo, device flow), then in `integrations/mcp/`:
    `mcp-publisher publish`; check `https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.csigelo/sigelo`.
    PulseMCP has paused submissions and ingests the registry (pulsemcp.com/submit, 2026-09-03).
-   *Status 2026-10-03:* not published (npm first, or a remote-only version: adoption/STATUS.md).
+   *Status 2026-10-04:* v0.1.1 published with the npm package and the remote, by `.github/workflows/mcp-registry.yml`.
 5. **Directories** (after npm): Glama — "Add MCP Server" with the repo URL (glama.ai/mcp/faq; its
    score badge is what awesome-mcp-servers shows). mcp.so/submit and mcpservers.org/submit take
    the repo URL (free review ~2 weeks; the $39 fast lanes are not worth it). Smithery wants a

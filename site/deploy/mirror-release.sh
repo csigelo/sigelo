@@ -69,12 +69,22 @@ for f in * .[!.]*; do
   [ -f "$f" ] || die "not a regular file: $f"
 done
 listed=$(sed -E 's/^[0-9a-f]{64} [ *]//' SHA256SUMS | LC_ALL=C sort)
-present=$(ls | grep -vx SHA256SUMS | LC_ALL=C sort)
+present=$(ls | grep -vx -e SHA256SUMS -e release.json | LC_ALL=C sort)
 grep -Evq '^[0-9a-f]{64} [ *][A-Za-z0-9][A-Za-z0-9._-]*$' SHA256SUMS && die "SHA256SUMS has a line that is not <sha256>  <file>"
 [ "$listed" = "$present" ] || die "SHA256SUMS and the downloaded files differ:
 listed:  $(echo $listed)
 present: $(echo $present)"
 sha256sum -c SHA256SUMS
+# release.json (signed releases, v0.1.1 on) is the one file SHA256SUMS cannot list: it attests
+# sha256(SHA256SUMS). Here only that it names this tag and these sums; release/verify-release.sh
+# checks its signature, and fetches it from the mirror by default, so it is mirrored with the rest.
+if [ -f release.json ]; then
+  node -e 'const fs=require("fs"),[t]=process.argv.slice(1),h=require("crypto").createHash("sha256").update(fs.readFileSync("SHA256SUMS")).digest("hex");
+    const c=(JSON.parse(fs.readFileSync("release.json","utf8")).attestations||[]).map((a)=>a.body&&a.body.claims).find((c)=>c&&c.tag===t);
+    if(!c||c.sha256sums_sha256!==h){console.error("release.json does not attest "+t+" with sha256(SHA256SUMS) "+h);process.exit(1)}' "$tag" \
+    || die "release.json does not match this release"
+  echo "release.json names $tag and sha256(SHA256SUMS)"
+fi
 echo "$(echo "$present" | wc -l) files + SHA256SUMS: all OK"
 
 step "2/5 site/src/releases/$tag.SHA256SUMS (the site build's copy)"
@@ -88,7 +98,7 @@ old=$tmp/old-index.json
 if [ "$dry" = 1 ]; then echo '{}' >"$old"; else $SSH "$target" "cat $R/index.json 2>/dev/null || true" >"$old"; fi
 mkdir "$tmp/top"
 latest=$(node - "$tmp" "$tag" "$REPO" "$origin" <<'EOF'
-const { readFileSync, writeFileSync, statSync } = require('node:fs');
+const { readFileSync, writeFileSync, statSync, existsSync } = require('node:fs');
 const [tmp, tag, repo] = process.argv.slice(2);
 const MIRROR = 'https://sigelo.io/releases/', GH = `https://github.com/${repo}`;
 const dir = `${tmp}/${tag}`;
@@ -97,7 +107,8 @@ const files = readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n').map((
   return { name, bytes: statSync(`${dir}/${name}`).size, sha256, url: `${MIRROR}${tag}/${name}` };
 });
 const sums = { name: 'SHA256SUMS', bytes: statSync(`${dir}/SHA256SUMS`).size, url: `${MIRROR}${tag}/SHA256SUMS` };
-const entry = { tag, url: `${MIRROR}${tag}/`, github: `${GH}/releases/tag/${tag}`, sha256sums: sums.url, files };
+const signed = existsSync(`${dir}/release.json`) ? [{ name: 'release.json', bytes: statSync(`${dir}/release.json`).size, url: `${MIRROR}${tag}/release.json` }] : [];
+const entry = { tag, url: `${MIRROR}${tag}/`, github: `${GH}/releases/tag/${tag}`, sha256sums: sums.url, ...(signed.length && { release_json: signed[0].url }), files };
 // The tag's listing: deterministic (no dates), so a re-run produces the same bytes.
 writeFileSync(`${dir}/index.md`, `# sigelo ${tag}
 
@@ -107,7 +118,7 @@ All releases: [/releases/](/releases/) and [/releases/index.json](/releases/inde
 
 | File | Bytes | SHA-256 |
 |---|---:|---|
-${[...files, sums].map((f) => `| [${f.name}](${f.name}) | ${f.bytes} | ${f.sha256 ? `\`${f.sha256}\`` : ''} |`).join('\n')}
+${[...files, sums, ...signed].map((f) => `| [${f.name}](${f.name}) | ${f.bytes} | ${f.sha256 ? `\`${f.sha256}\`` : ''} |`).join('\n')}
 `);
 let old = {}; try { old = JSON.parse(readFileSync(`${tmp}/old-index.json`, 'utf8') || '{}'); } catch { old = {}; }
 const v = (t) => t.slice(1).split(/[.-]/).slice(0, 3).map(Number);
@@ -152,14 +163,16 @@ else tar -C "$tmp/top" -cf - index.json index.md | $SSH "$target" "$remote2"; fi
 step "5/5 every file from $origin/releases/$tag/ against SHA256SUMS"
 if [ "$verify" = 0 ] || [ "$dry" = 1 ]; then echo "skipped"; exit 0; fi
 node - "$tmp/$tag" "$origin/releases/$tag/" <<'EOF'
-const { readFileSync } = require('node:fs');
+const { readFileSync, existsSync } = require('node:fs');
 const { createHash } = require('node:crypto');
 const [dir, base] = process.argv.slice(2);
 const UA = 'sigelo-selfcheck/1 (+https://sigelo.io/privacy)';  // nginx.conf: logged to access-self.log
 const lines = readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n').map((l) => l.match(/^([0-9a-f]{64}) [ *](.+)$/).slice(1));
 (async () => {
   let bad = 0;
-  for (const [sha, name] of [...lines, [createHash('sha256').update(readFileSync(`${dir}/SHA256SUMS`)).digest('hex'), 'SHA256SUMS']]) {
+  const h = (f) => createHash('sha256').update(readFileSync(`${dir}/${f}`)).digest('hex');
+  const all = [...lines, [h('SHA256SUMS'), 'SHA256SUMS'], ...(existsSync(`${dir}/release.json`) ? [[h('release.json'), 'release.json']] : [])];
+  for (const [sha, name] of all) {
     const r = await fetch(base + name, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(120000) });
     const b = Buffer.from(await r.arrayBuffer());
     const got = createHash('sha256').update(b).digest('hex');
@@ -167,7 +180,7 @@ const lines = readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n').map((
     if (!ok) bad++;
     console.log(`${ok ? 'ok' : 'FAIL'} ${base}${name}: ${r.status}, ${r.headers.get('content-type')}, ${b.length} bytes${ok ? '' : `, sha256 ${got}`}`);
   }
-  console.log(bad ? `FAILURES (${bad})` : `ALL PASS (${lines.length + 1} files)`);
+  console.log(bad ? `FAILURES (${bad})` : `ALL PASS (${all.length} files)`);
   process.exit(bad ? 1 : 0);
 })();
 EOF

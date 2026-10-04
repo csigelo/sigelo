@@ -4,11 +4,11 @@ description: The agent path for sigelo, in exact commands: install, make an iden
 ---
 # Adopt sigelo
 
-Node ≥ 22.18, POSIX shell. Nothing is on npm yet: download the files of [/releases/{{release_tag}}/]({{release_url}}) into `$d`.
+Node ≥ 22.18, POSIX shell. Download `sigelo-verify` and `SHA256SUMS` from [/releases/{{release_tag}}/]({{release_url}}) into `$d`.
 
 ```sh
 mkdir my-agent && cd my-agent && npm init -y >/dev/null
-npm install $d/sigelo-{{version}}.tgz $d/sigelo-agent-{{version}}.tgz      # both in one command
+npm install sigelo@{{version}} sigelo-agent@{{version}}
 export PATH="$PWD/node_modules/.bin:$PATH" SIGELO_IDENTITY="$PWD/agent.local.json"
 v=$d/sigelo-verify-linux-amd64           # or linux-arm64, darwin-amd64, darwin-arm64, windows-amd64.exe
 (cd $d && grep " ${v##*/}\$" SHA256SUMS | sha256sum -c -)                  # prints OK

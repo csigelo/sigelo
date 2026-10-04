@@ -11,7 +11,7 @@ Each agent gets a URL, a token, caps and an allowlist.
 **Stagenet only, unaudited.**
 
 ```sh
-npx -p sigelo-spend sigelo-spend init --wallet-rpc http://127.0.0.1:38083 --allow bob=<address>   # ¹
+npx -p sigelo-spend sigelo-spend init --wallet-rpc http://127.0.0.1:38083 --allow bob=<address>
 sigelo-spend doctor
 ```
 
@@ -35,5 +35,3 @@ The licence is a sigelo attestation to your keeper's DID, verified offline.
 Recovery ceremony kit: [/raw/kit/README.md](/raw/kit/README.md), `<price>`.
 
 Reference: [spend/README.md](/raw/spend/README.md) · [OpenAPI](/raw/spend/openapi.yaml)
-
-¹ After the first npm publish.

@@ -7,6 +7,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 - **Status:** first signed release (SSH-signed tags, `release.json`); GitHub pre-release; wire `sigelo/0` may change until
   v0.2; the keeper is stagenet-only and unaudited.
+- **npm:** first publish, all five packages at 0.1.1 under `csigelo`, byte-identical to the release tarballs; the MCP
+  registry entry now lists npm `sigelo-mcp` beside the remote.
+- **Mirror:** `site/deploy/mirror-release.sh` carries `release.json` (checked against the tag and SHA256SUMS), so
+  `release/verify-release.sh <tag>` works from sigelo.io.
 
 - **MCP:** `sigelo_forget_issuer` (CLI `forget-issuer`) drops a retired issuer's attestations and genesis from the identity file: holder-side, after an out-of-band rotation notice (SPEC §5).
 - **World:** issuer rotated 2026-10-03 after a seed exposure: new DID in SECURITY.md, chain at `/world/rotations.json`,

@@ -15,7 +15,7 @@ PowerShell: `cd ts; npm ci; npx tsc; cd ../adapters/moadim; npm ci; cd ../..`, t
 `function sigelo-agent { node adapters/moadim/cli.ts @args }` and
 `$env:SIGELO_IDENTITY = "$PWD\agent.local.json"`; run the blocks below in Git Bash.
 
-**Install without a clone** (after the first npm publish):
+**Install without a clone:**
 
 ```sh
 npx sigelo-agent init --no-recovery              # agent-side CLI (or --recovery <z6Mk…|sha256:…>, step 0)
@@ -25,7 +25,7 @@ npx -p sigelo sigelo-offline new                 # the offline root tool (this p
 go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.1   # the verifier (tag go/v0.1.1)
 ```
 
-Until then, build the tarballs in a clone and install them anywhere:
+Or build the same tarballs in a clone and install them anywhere:
 
 ```sh
 release/build.sh /tmp/sigelo-dist                # npm tarballs, sigelo-verify binaries, SHA256SUMS

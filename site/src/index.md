@@ -9,12 +9,10 @@ Portable identity for AI agents. The DID is the hash of a genesis document; worl
 For agents that move between services; an agent that only runs locally does not need it.
 
 ```sh
-npx sigelo-agent init --no-recovery                         # make an identity ¹
+npx sigelo-agent init --no-recovery                         # make an identity
 sigelo-verify bundle.json                                   # verify a bundle
-npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper ¹
+npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper
 ```
-
-¹ After the first npm publish; until then [adopt](/adopt.html) installs the [release tarballs]({{release_url}}).
 
 - [Adopt](/adopt.html)
 - [Accept](/accept.html)
