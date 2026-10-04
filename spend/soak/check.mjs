@@ -78,7 +78,12 @@ console.log(`delegates   created ${st.delegates_created}, closed ${st.delegates_
 console.log(`mismatches  ${st.mismatches}   errors ${st.errors}   outage ticks ${st.outage_ticks ?? 0}   carol abandoned offline ${st.abandoned_offline ?? 0}`);
 for (const m of st.last_mismatches.slice(-5)) console.log(`  ${m.ts} tick ${m.tick} ${m.who}: ${m.cmd}\n      expected ${m.expect}, got ${m.got}: ${m.out}`);
 if (since > 3600 && !EVIDENCE) unhealthy.push(`no tick for ${dur(since)}`);
-if (st.uncertain > 0) unhealthy.push(`${st.uncertain} UNCERTAIN`);
+// UNCERTAIN is cumulative in soak-stats.json and, by the keeper's design, only an operator can
+// settle it (check the txid in the wallet). `uncertain-acked.json` {uncertain: n, note} records that
+// the first n were checked; only newer ones page.
+const ack = readJson(join(DATA, 'uncertain-acked.json'), { uncertain: 0 });
+if (st.uncertain > (ack.uncertain ?? 0)) unhealthy.push(`${st.uncertain - (ack.uncertain ?? 0)} UNCERTAIN (${st.uncertain} total, ${ack.uncertain ?? 0} acked)`);
+else if (st.uncertain > 0) console.log(`uncertain   ${st.uncertain}, all acked: ${ack.note ?? ''}`);
 const log = nd(join(DATA, 'soak.log'));
 const errs = log.filter((r) => r.kind === 'error');
 if (errs.length) console.log(`  last error: ${errs.at(-1).ts} ${errs.at(-1).step}: ${errs.at(-1).error}`);
