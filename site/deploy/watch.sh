@@ -111,8 +111,15 @@ if ! online; then
   exit 0
 fi
 out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)
+# One failing tick is not an outage: a phone on a half-working network reaches api.github.com and
+# times out on the origin (2026-10-04, a false "DOWN" during a Wi-Fi hand-over). Notify from the
+# second consecutive failing tick on, i.e. after the timer interval has passed with the origin down.
+if [ "$prev" != down ]; then
+  echo "$stamp DOWN $ORIGIN (first tick, confirming next run): $out" >> "$LOG"
+  echo "down $now 0" > "$ST"
+  exit 1
+fi
 echo "$stamp DOWN $ORIGIN: $out" >> "$LOG"
-if [ "$prev" != down ]; then since=$now; last=0; fi
 if [ $((now - last)) -ge "$REPEAT" ]; then
   notify "sigelo.io DOWN" "$ORIGIN, down $(( (now - since) / 60 )) min: $out (log: $LOG)"
   last=$now

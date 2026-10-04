@@ -152,7 +152,14 @@ if (!EVIDENCE) try {
   const r = await fetch(WALLET_RPC, { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: '0', method: 'get_accounts' }), signal: AbortSignal.timeout(30_000) });
   const a = (await r.json()).result;
   snaps.push({ ts: new Date().toISOString(), total: String(a.total_balance), total_unlocked: String(a.total_unlocked_balance), now: true });
-} catch (e) { unhealthy.push('wallet-rpc not answering'); }
+} catch (e) {
+  // A wallet-rpc that blocks on a daemon it cannot reach is the phone being offline, not the soak
+  // being sick (2026-10-04: a Wi-Fi hand-over paged the Owner twice). Count it only when the
+  // phone itself is online.
+  const online = await fetch('https://api.github.com/', { method: 'HEAD', signal: AbortSignal.timeout(15_000) }).then(() => true, () => false);
+  if (online) unhealthy.push('wallet-rpc not answering');
+  else console.log('wallet-rpc  not answering while the phone is offline (api.github.com unreachable): not counted');
+}
 if (snaps.length > 0) {
   const first = snaps[0], last = snaps.at(-1);
   const days = Math.max((Date.parse(last.ts) - Date.parse(first.ts)) / 86400e3, 1e-9);
