@@ -25,6 +25,9 @@
 //   --no-tls           plain-HTTP origin: skip HSTS and the redirect checks
 //   --no-www           skip www.<host> (a staging origin has none)
 //   --alt DOMAIN       the second domain that 301s to the apex (default sigelo.net); --no-alt skips it
+//                      and the four below
+// sigelo.org, .online, .dev, .ai (apex and www) 301 to the apex like sigelo.net, each name checked
+// only once its A records point where the origin's do: until then a `skip` (DNS not pointed yet).
 //   --node-server      the origin is `node site/test/run.mjs --serve`, which implements the content
 //                      types and negotiation but sends no security or cache headers and does not map
 //                      /spec to /spec.html: skip those checks (they are nginx's job)
@@ -35,6 +38,7 @@
 // so the project's own checks stay out of the visit statistics.
 // Uses node's fetch, no dependencies, node >= 22.
 import { createHash } from 'node:crypto';
+import { promises as dns } from 'node:dns';
 import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +50,7 @@ const flag = (f) => argv.includes(f);
 const opt = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
 const known = new Set(['--origin', '--no-tls', '--no-www', '--node-server', '--commit', '--any-commit', '--alt', '--no-alt', '--quiet']);
 const ALT = flag('--no-alt') ? [] : [opt('--alt', 'sigelo.net')].filter((x) => x && !x.startsWith('--'));
+const EXTRA = flag('--no-alt') ? [] : ['sigelo.org', 'sigelo.online', 'sigelo.dev', 'sigelo.ai'];
 for (let i = 0; i < argv.length; i++) {
   if (!known.has(argv[i])) { console.error(`check.mjs: unknown argument ${argv[i]}`); process.exit(2); }
   if (argv[i] === '--origin' || argv[i] === '--commit' || argv[i] === '--alt') i++;
@@ -274,7 +279,7 @@ else {
   const hsts = got['/'].h.get('strict-transport-security') ?? '';
   const age = Number((hsts.match(/max-age=(\d+)/) ?? [])[1] ?? -1);
   ok(age >= 300, `HSTS on / (got "${hsts || 'missing'}")`);
-  if (age >= 300 && age < 31536000) note(`HSTS max-age=${age}: once this check passes on the live site, set max-age=31536000 in both lines of site/deploy/nginx.conf and redeploy`);
+  if (age >= 300 && age < 31536000) note(`HSTS max-age=${age}: once this check passes on the live site, set max-age=31536000 in every Strict-Transport-Security line of site/deploy/nginx.conf and redeploy`);
   const host = o.host;
   const redir = async (from, to) => {
     const r = await get(from, {}, 'manual');
@@ -291,6 +296,16 @@ else {
       await redir(`http://${alt}/`, `https://${host}/`);
       await redir(`https://${alt}/spec.md`, `https://${host}/spec.md`);
       await redir(`https://www.${alt}/`, `https://${host}/`);
+    }
+    // the other held domains: checked like sigelo.net once a name's A records are the origin's
+    const a4 = (name) => dns.resolve4(name).catch(() => []);
+    const ours = await a4(o.hostname);
+    for (const d of EXTRA) {
+      for (const [name, path] of [[d, '/spec.md'], [`www.${d}`, '/']]) {
+        const r = await a4(name);
+        if (ours.length && r.length && r.every((a) => ours.includes(a))) await redir(`https://${name}${path}`, `https://${host}${path}`);
+        else skip(`https://${name}${path} → 301 https://${host}${path}`, `DNS not pointed yet: ${name} resolves to ${r.join(' ') || 'nothing'}, ${o.hostname} to ${ours.join(' ') || 'nothing'}`);
+      }
     }
     const w = await get(`https://www.${host}/`, {}, 'manual');
     ok(/max-age=\d+/.test(w.h.get('strict-transport-security') ?? ''), `https://www.${host}/: HSTS on the redirect too`);

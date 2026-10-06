@@ -307,16 +307,18 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   const of = ix.official ?? {};
   const sec = readFileSync(join(ROOT, 'SECURITY.md'), 'utf8');
   const section = sec.match(/^## Official channels\n([\s\S]*?)(?=\n## )/m)?.[1] ?? '';
-  ok(of.issuer_did && of.issuer_did === ix.world?.issuer && of.domains?.join() === 'sigelo.io,sigelo.net' && of.repository === 'https://github.com/csigelo/sigelo'
+  ok(of.issuer_did && of.issuer_did === ix.world?.issuer && of.domains?.join() === 'sigelo.io,sigelo.net,sigelo.org,sigelo.online,sigelo.dev,sigelo.ai' && of.redirect_only?.join() === of.domains.slice(1).join() && of.repository === 'https://github.com/csigelo/sigelo'
     && of.npm_user === 'csigelo' && of.maintainer === 'csigelo' && of.packages?.length === 5 && of.releases?.includes(`${ORIGIN}/releases/`),
     `index.json: official (domains, repository, releases, issuer_did = world.issuer, npm_user, ${of.packages?.length} packages, maintainer)`);
-  ok(section && section.trim().split('\n').length <= 11 && [of.issuer_did, of.repository, `${ORIGIN}/releases/`, 'sigelo.net', 'security@sigelo.io', ...(of.packages ?? [])].every((s) => s && section.includes(s)),
+  ok(section && section.trim().split('\n').length <= 11 && [of.issuer_did, of.repository, `${ORIGIN}/releases/`, ...(of.domains ?? []).map((d) => `\`${d}\``), 'security@sigelo.io', ...(of.packages ?? [])].every((s) => s && section.includes(s)),
     `SECURITY.md: "## Official channels" (${section.trim().split('\n').length + 1} lines ≤ 12) names the issuer DID, repository, mirror, domains, packages, security@`);
   ok(idsOf.get('/security.html')?.has('official-channels'), '/security.html: #official-channels anchor');
   for (const p of ['/index.md', '/contact.md']) {
     const t = readFileSync(join(DIST, p), 'utf8');
     ok(t.includes('anything else is not us') && t.includes(of.issuer_did?.slice(0, 17)) && t.includes('github.com/csigelo/sigelo'), `${p}: the one "Official: … anything else is not us" line`);
   }
+  const cl = readFileSync(join(DIST, '/contact.md'), 'utf8').split('\n').find((l) => l.includes('anything else is not us')) ?? '';
+  ok((of.domains ?? []).length === 6 && of.domains.every((d) => cl.includes(d)) && cl.split(/[.!?] /).length === 1, '/contact.md: the "Official" line names all six domains, one sentence');
 }
 
 // ---- security.txt (RFC 9116) ------------------------------------------------------------------

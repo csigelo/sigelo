@@ -15,6 +15,11 @@
 #                         so the ACME account is not tied to a person; LE no longer sends expiry mail)
 #   --test-cert           use Let's Encrypt's staging CA (untrusted cert, no rate limits) for a dry run
 #   --skip-cert           do not run certbot (a certificate is already at /etc/letsencrypt/live/sigelo.io)
+#   --certs               ONLY the certificate step (6), on a server this script prepared and deploy.sh
+#                         has installed nginx.conf on (nothing beside it needed; node for the DNS
+#                         test): adds each of sigelo.org, .online, .dev, .ai (apex, www) whose DNS points here to the
+#                         sigelo.io lineage, prints the names skipped. Idempotent: rerun it after DNS
+#                         changes; it re-issues only when a pointed name is missing from the certificate
 #   --stats               ONLY the visit-statistics step, on a server this script already prepared
 #                         (needs sigelo-nginx-apply and stats-agents.sh beside it): goaccess, the
 #                         /_stats/ password file, the 15-minute sigelo-stats timer, the helper
@@ -48,13 +53,17 @@
 #                         it an existing file is kept, and a missing one gets a random password,
 #                         printed once
 #
-# Requires: DNS A (and AAAA, if the server has IPv6) for sigelo.io AND www.sigelo.io already pointing
-# here, and ports 80/443 open — certbot proves control over HTTP-01 on port 80.
+# Requires: DNS A (and AAAA, if the server has IPv6) for sigelo.io, www.sigelo.io, sigelo.net and
+# www.sigelo.net already pointing here, and ports 80/443 open — certbot proves control over HTTP-01
+# on port 80. sigelo.org, .online, .dev and .ai join the certificate once their DNS points here (step 6).
 # Idempotent: re-running skips what is already in place.
 set -eu
 
 DOMAIN=sigelo.io
 ALT=sigelo.net          # also owned; every name 301s to https://$DOMAIN, one certificate lineage
+# Also owned, redirect-only like $ALT (nginx.conf: one server group each); apex and www of each join
+# the same lineage as soon as their DNS points at this host.
+EXTRA="sigelo.org sigelo.online sigelo.dev sigelo.ai"
 WEBROOT=/var/www/sigelo.io
 ACME=/var/www/acme
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -63,7 +72,7 @@ say() { printf '\n==> %s\n' "$*"; }
 run() { printf '+ %s\n' "$*"; "$@"; }
 die() { printf 'server-setup.sh: %s\n' "$*" >&2; exit 1; }
 
-os=""; key=""; email=""; testcert=""; skipcert=0; stats=0; htfile=""; world=""; guard=0; backup=""
+os=""; key=""; email=""; testcert=""; skipcert=0; certs=0; stats=0; htfile=""; world=""; guard=0; backup=""
 while [ $# -gt 0 ]; do
   case $1 in
     --os) os=$2; shift 2 ;;
@@ -72,6 +81,7 @@ while [ $# -gt 0 ]; do
     --email) email=$2; shift 2 ;;
     --test-cert) testcert=--test-cert; shift ;;
     --skip-cert) skipcert=1; shift ;;
+    --certs) certs=1; shift ;;
     --stats) stats=1; shift ;;
     --stats-htpasswd) htfile=$2; shift 2 ;;
     --world) world=$2; shift 2 ;;
@@ -84,7 +94,7 @@ done
 [ "$(id -u)" = 0 ] || die "run as root"
 if [ "$stats" = 1 ]; then need="sigelo-nginx-apply stats-agents.sh"
 elif [ -n "$world" ]; then need="sigelo-nginx-apply sigelo-world-apply sigelo-world.service"
-elif [ "$guard" = 1 ] || [ -n "$backup" ]; then need=""
+elif [ "$guard" = 1 ] || [ -n "$backup" ] || [ "$certs" = 1 ]; then need=""
 else need="nginx.conf sigelo-nginx-apply"; fi
 for f in $need; do [ -f "$HERE/$f" ] || die "$HERE/$f missing: copy it next to this script"; done
 [ -z "$htfile" ] || [ "$stats" = 1 ] || die "--stats-htpasswd goes with --stats"
@@ -465,6 +475,98 @@ UNIT
   exit 0
 fi
 
+# Prints "here NAME" or "skip NAME (why)" for every NAME given: "here" when it has A/AAAA records
+# and every one of them is an address of this host. The host's addresses are read at runtime from
+# its interfaces (none is written anywhere); on a NAT host where $DOMAIN matches none of them,
+# $DOMAIN's own addresses stand in. dns.resolve* asks the DNS servers, not /etc/hosts.
+dns_points_here() {
+  node -e '
+    const dns = require("node:dns").promises, os = require("node:os");
+    const ips = async (n) => [...await dns.resolve4(n).catch(() => []), ...await dns.resolve6(n).catch(() => [])].map((a) => a.toLowerCase());
+    (async () => {
+      const [canon, ...names] = process.argv.slice(1);
+      let mine = new Set(Object.values(os.networkInterfaces()).flat().filter((a) => !a.internal).map((a) => a.address.toLowerCase()));
+      const c = await ips(canon);
+      if (!c.some((a) => mine.has(a))) { console.error(`note: ${canon} resolves to no interface address of this host (NAT?): comparing with the addresses of ${canon}`); mine = new Set(c); }
+      for (const n of names) {
+        const r = await ips(n);
+        if (r.length && r.every((a) => mine.has(a))) console.log(`here ${n}`);
+        else console.log(`skip ${n} (${r.length ? `resolves to ${r.join(" ")}, not this host` : "no A/AAAA record"})`);
+      }
+    })();
+  ' "$DOMAIN" "$@"
+}
+
+# Step 6, idempotent: the base names always; each EXTRA name only when its DNS points here. Issues
+# (or expands) the one lineage only if a wanted name is missing from it.
+cert_step() {
+  names="$DOMAIN www.$DOMAIN $ALT www.$ALT"; skipped=""
+  extra=""; for d in $EXTRA; do extra="$extra $d www.$d"; done
+  if command -v node >/dev/null 2>&1; then
+    res=$(dns_points_here $extra) || die "the DNS test (node) failed"
+    for n in $(printf '%s\n' "$res" | sed -n 's/^here //p'); do names="$names $n"; done
+    skipped=$(printf '%s\n' "$res" | sed -n 's/^skip //p')
+  else
+    skipped=$(for n in $extra; do echo "$n (no node on this host for the DNS test)"; done)
+  fi
+  if [ -n "$skipped" ]; then
+    echo "skipped, DNS not pointed here yet (rerun --certs once it is):"
+    printf '%s\n' "$skipped" | sed 's/^/    /'
+  fi
+  have=""; staging=0
+  if [ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ]; then
+    info=$(certbot certificates --cert-name "$DOMAIN" 2>/dev/null || true)
+    have=$(printf '%s\n' "$info" | sed -n 's/^ *Domains: //p')
+    if printf '%s' "$info" | grep -q TEST_CERT; then staging=1; fi
+  fi
+  missing=""; for n in $names; do case " $have " in *" $n "*) ;; *) missing="$missing $n" ;; esac; done
+  if [ -n "$have" ] && [ -z "$missing" ] && { [ -n "$testcert" ] || [ "$staging" = 0 ]; }; then
+    echo "certificate /etc/letsencrypt/live/$DOMAIN already covers: $names"
+    return 0
+  fi
+  if [ -z "$testcert" ] && [ "$staging" = 1 ]; then
+    echo "the certificate present is a --test-cert (staging) one: replacing it"
+    run certbot delete --cert-name "$DOMAIN" --non-interactive
+  elif [ -n "$have" ]; then
+    echo "adding to the certificate:$missing"
+  fi
+  if [ ! -f "$CONF" ] || ! grep -q 'listen 443' "$CONF"; then
+    # port 80 only, so nginx starts without a certificate; certonly --nginx adds its challenge here
+    printf '+ write the bootstrap HTTP-only config %s\n' "$CONF"
+    cat > "$CONF" <<BOOT
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $names;
+    access_log off;
+    location ^~ /.well-known/acme-challenge/ {
+        root $ACME;
+    }
+    location / {
+        return 404;
+    }
+}
+BOOT
+    run nginx -t
+    if [ "$os" = debian ]; then run systemctl enable nginx; run systemctl restart nginx; else run rc-service nginx restart; fi
+  fi
+  # `certonly`: certbot proves control through nginx but never edits the config, which deploy.sh
+  # owns and reinstalls from nginx.conf on every deploy (edits by `certbot --nginx` would be lost).
+  # --cert-name keeps one lineage, /etc/letsencrypt/live/$DOMAIN, the only path the helper allows.
+  if [ -n "$email" ]; then acct="-m $email --no-eff-email"; else acct=--register-unsafely-without-email; fi
+  dargs=""; for n in $names; do dargs="$dargs -d $n"; done
+  # shellcheck disable=SC2086
+  run certbot certonly --nginx $testcert --non-interactive --agree-tos $acct \
+      --cert-name "$DOMAIN" $dargs --deploy-hook 'nginx -s reload'
+}
+
+if [ "$certs" = 1 ]; then
+  say "6. certificate (--certs only)"
+  cert_step
+  say "done: run node site/deploy/check.mjs from the repository"
+  exit 0
+fi
+
 say "1. packages: nginx, certbot (+ nginx plugin), sudo, logrotate"
 if [ "$os" = debian ]; then
   run apt-get update
@@ -512,41 +614,8 @@ done
 say "5. the config helper and the one sudo rule"
 install_helper
 
-say "6. certificate for $DOMAIN, www.$DOMAIN, $ALT and www.$ALT (certbot certonly --nginx, HTTP-01)"
-if [ "$skipcert" = 1 ]; then echo "--skip-cert"
-elif [ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ] && [ -z "$testcert" ] && ! certbot certificates --cert-name "$DOMAIN" 2>/dev/null | grep -q TEST_CERT; then
-  echo "certificate already present: /etc/letsencrypt/live/$DOMAIN"
-else
-  if [ -z "$testcert" ] && certbot certificates --cert-name "$DOMAIN" 2>/dev/null | grep -q TEST_CERT; then
-    echo "the certificate present is a --test-cert (staging) one: replacing it"
-    run certbot delete --cert-name "$DOMAIN" --non-interactive
-  fi
-  if [ ! -f "$CONF" ] || ! grep -q 'listen 443' "$CONF"; then
-    # port 80 only, so nginx starts without a certificate; certonly --nginx adds its challenge here
-    printf '+ write the bootstrap HTTP-only config %s\n' "$CONF"
-    cat > "$CONF" <<BOOT
-server {
-    listen 80;
-    listen [::]:80;
-    server_name $DOMAIN www.$DOMAIN $ALT www.$ALT;
-    access_log off;
-    location ^~ /.well-known/acme-challenge/ {
-        root $ACME;
-    }
-    location / {
-        return 404;
-    }
-}
-BOOT
-    run nginx -t
-    if [ "$os" = debian ]; then run systemctl enable nginx; run systemctl restart nginx; else run rc-service nginx restart; fi
-  fi
-  # `certonly`: certbot proves control through nginx but never edits the config, which deploy.sh
-  # owns and reinstalls from nginx.conf on every deploy (edits by `certbot --nginx` would be lost).
-  if [ -n "$email" ]; then acct="-m $email --no-eff-email"; else acct=--register-unsafely-without-email; fi
-  run certbot certonly --nginx $testcert --non-interactive --agree-tos $acct \
-      -d "$DOMAIN" -d "www.$DOMAIN" -d "$ALT" -d "www.$ALT" --deploy-hook 'nginx -s reload'
-fi
+say "6. certificate: $DOMAIN, www.$DOMAIN, $ALT, www.$ALT, and each of $EXTRA (apex, www) whose DNS points here"
+if [ "$skipcert" = 1 ]; then echo "--skip-cert"; else cert_step; fi
 
 say "7. automatic renewal"
 if [ "$os" = debian ]; then

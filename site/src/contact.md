@@ -10,4 +10,4 @@ description: How to reach the sigelo maintainer: contact@sigelo.io or SimpleX; v
 - GitHub: <{{repo}}>
 - Privacy: [privacy and terms](/privacy.html)
 
-[Official](/security.html#official-channels): sigelo.io · github.com/csigelo/sigelo · issuer `{{issuer_did_short}}` — anything else is not us.
+[Official](/security.html#official-channels): sigelo.io (sigelo.net, sigelo.org, sigelo.online, sigelo.dev, sigelo.ai redirect to it) · github.com/csigelo/sigelo · issuer `{{issuer_did_short}}` — anything else is not us.

@@ -31,6 +31,8 @@ export const SECURITY_EMAIL = 'security@sigelo.io';
 export const MIRROR = `${ORIGIN}/releases/`;
 // The official names (SECURITY.md "Official channels"; index.json `official`). The issuer DID is
 // not listed here: it is computed from world/genesis.json, and site/test/run.mjs checks SECURITY.md names it.
+// Held domains that only 301 to sigelo.io (site/deploy/nginx.conf).
+export const REDIRECT_DOMAINS = ['sigelo.net', 'sigelo.org', 'sigelo.online', 'sigelo.dev', 'sigelo.ai'];
 export const NPM_USER = 'csigelo';
 export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit'];
 
@@ -497,7 +499,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
         files: RELEASE.files.map((f) => ({ name: f.name, sha256: f.sha256, url: `${MIRROR}${RELEASE.tag}/${f.name}` })) }) },
     official: {
       statement: `${ORIGIN}/security.html#official-channels`,
-      domains: ['sigelo.io', 'sigelo.net'], redirect_only: ['sigelo.net'],
+      domains: ['sigelo.io', ...REDIRECT_DOMAINS], redirect_only: REDIRECT_DOMAINS,
       repository: REPO,
       releases: [`${REPO}/releases`, MIRROR], checksums: 'SHA256SUMS',
       maintainer: 'csigelo', github_user: 'csigelo',

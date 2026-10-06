@@ -13,7 +13,7 @@
 // with nothing to clear writes nothing. A crash of this script counts as UNHEALTHY. Run hourly by
 // sigelo-soak-check.timer.
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -42,6 +42,16 @@ function alert(reasons) {
   try { was = / UNHEALTHY: /.test(readFileSync(ALERTS, 'utf-8').trimEnd().split('\n').at(-1) ?? ''); } catch { /* no alerts yet */ }
   if (reasons.length === 0 && !was) return;
   const [title, body] = reasons.length ? ['sigelo soak UNHEALTHY', reasons.join('\n')] : ['sigelo soak healthy again', 'check.mjs: HEALTHY'];
+  // Page on a transition (healthy → unhealthy, unhealthy → healthy) and otherwise at most once per
+  // REMIND while it lasts; every run still logs. Four hourly pages for one stuck daemon on 2026-10-05.
+  const REMIND = 6 * 3600e3, LASTN = join(DATA, 'last-notify');
+  let lastN = 0; try { lastN = Number(readFileSync(LASTN, 'utf-8')); } catch { /* never */ }
+  const transition = reasons.length ? !was : was;
+  if (!transition && Date.now() - lastN < REMIND) {
+    appendFileSync(ALERTS, `${new Date().toISOString()} ${reasons.length ? `UNHEALTHY: ${reasons.join('; ')}` : 'HEALTHY again'} (not paged: last page ${Math.round((Date.now() - lastN) / 60e3)} min ago)\n`);
+    return;
+  }
+  writeFileSync(LASTN, String(Date.now()));
   let sent;
   try {
     execFileSync('notify-send', ['--app-name=sigelo soak', `--urgency=${reasons.length ? 'critical' : 'normal'}`, title, body], { stdio: 'ignore', timeout: 15_000 });

@@ -1,0 +1,91 @@
+# Publish the five npm packages with npm Trusted Publishing (GitHub OIDC): no token anywhere, and
+# npm attaches a provenance attestation to each version. Each package on npmjs.com names this
+# repository and this file name (adoption/npm-trusted-publishing.md). Read 2026-10-06:
+# https://docs.npmjs.com/trusted-publishers (npm >= 11.5.1, node >= 22.14.0, GitHub-hosted runner,
+# repository.url must match) and https://docs.npmjs.com/generating-provenance-statements.
+#
+# The tarballs are rebuilt here by release/build.sh from the tag and published only if their
+# SHA256SUMS is byte for byte the one attached to the GitHub release of that tag (the maintainer's
+# build, release/RELEASE.md step 5). No release yet: wait up to 30 minutes, then fail; re-run with
+# workflow_dispatch. A version already on the registry is skipped, so a re-run is harmless.
+name: npm publish
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag to publish, e.g. v0.1.2'
+        required: true
+      go-version:
+        description: 'Go toolchain of the release build (sigelo-verify hashes depend on it)'
+        default: '1.27'
+permissions:
+  id-token: write
+  contents: read
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
+        with:
+          go-version: ${{ inputs.go-version || '1.27' }}
+          cache: false
+      - name: the tag is the packages' version
+        run: |
+          v=$(node -p 'require("./ts/package.json").version')
+          [ "$TAG" = "v$v" ] || { echo "::error title=tag/version::tag $TAG but ts/package.json is $v"; exit 1; }
+          echo "V=$v" >> "$GITHUB_ENV"
+          echo "OUT=$RUNNER_TEMP/a" >> "$GITHUB_ENV"
+      - run: sh release/build.sh "$OUT"
+      - name: SHA256SUMS equals the GitHub release's
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rel"
+          for i in $(seq 30); do
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP/rel" --clobber 2>/dev/null && break
+            [ "$i" = 30 ] && { echo "::error title=no release::no GitHub release $TAG with a SHA256SUMS after 30 minutes; nothing published. Create it (release/RELEASE.md step 5), then re-run with workflow_dispatch tag=$TAG"; exit 1; }
+            echo "waiting for release $TAG ($i/30)"; sleep 60
+          done
+          cmp "$RUNNER_TEMP/rel/SHA256SUMS" "$OUT/SHA256SUMS" || {
+            diff "$RUNNER_TEMP/rel/SHA256SUMS" "$OUT/SHA256SUMS" || true
+            echo "::error title=SHA256SUMS differ::this build of $TAG is not the released one; nothing published. Only sigelo-verify lines differ: re-run with the release's go-version"; exit 1; }
+      # trusted publishing needs npm >= 11.5.1; node 22 ships npm 10. After the build, so the build
+      # runs with the same npm as conformance.yml's release-build.
+      - run: npm install -g npm@11 --no-audit --no-fund && npm --version
+      - name: publish (sigelo first, the others depend on it)
+        run: |
+          for p in sigelo sigelo-agent sigelo-spend sigelo-mcp sigelo-recovery-kit; do
+            t="$OUT/$p-$V.tgz"
+            if [ "$(npm view "$p@$V" version 2>/dev/null || true)" = "$V" ]; then
+              echo "skip $p@$V: already on the registry"
+            else
+              npm publish "$t" --provenance --access public
+            fi
+            want=$(node -p '"sha512-" + require("crypto").createHash("sha512").update(require("fs").readFileSync(process.argv[1])).digest("base64")' "$t")
+            for i in 1 2 3 4 5 6; do
+              got=$(npm view "$p@$V" dist.integrity 2>/dev/null || true)
+              [ "$got" = "$want" ] && break
+              [ "$i" = 6 ] && { echo "::error title=$p integrity::registry has '$got', tarball is $want"; exit 1; }
+              sleep 20
+            done
+            echo "ok $p@$V $got"
+          done

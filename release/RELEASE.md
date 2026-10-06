@@ -27,10 +27,11 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    (`api.github.com/repos/csigelo/sigelo/actions/runs?event=push&branch=v<v>`) and record it in
    docs-test/PORTABILITY.md.
 
-8. npm, from the same tarballs: `npm publish $S/a/<pkg>-<v>.tgz` for `sigelo` first, then
-   sigelo-agent, sigelo-spend, sigelo-mcp, sigelo-recovery-kit (token in a temporary userconfig, never
-   on a command line). New names show a `0.0.0-stage` placeholder for a minute or two. Check each
-   with `npm view <pkg>@<v> dist.integrity` against the tarball's sha512.
+8. npm: the tag push runs `.github/workflows/npm-publish.yml` (OIDC, no token;
+   adoption/npm-trusted-publishing.md): it rebuilds the tag, waits ≤ 30 min for step 5, publishes
+   only if SHA256SUMS equals the release's; idempotent. Re-run:
+   `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`. npm pages show provenance. Fallback: a
+   temporary-userconfig token, `npm publish $S/a/<pkg>-<v>.tgz`.
 9. Bump `integrations/mcp/server.json` to `<v>`, sync, push, `gh workflow run mcp-registry.yml -R
    csigelo/sigelo`; `site/deploy/mirror-release.sh v<v> sigelo-vps`, commit its SHA256SUMS, deploy.
 

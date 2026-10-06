@@ -64,6 +64,7 @@ commit leaves `dist.prev` pointing at the real previous version.
 | `sigelo.io` | AAAA | the server's IPv6 (omit if it has none — nginx.conf listens on `[::]`; drop those lines if the kernel has IPv6 disabled) |
 | `www.sigelo.io` | A, AAAA | the same addresses (or a CNAME to `sigelo.io`) |
 | `sigelo.net`, `www.sigelo.net` | A, AAAA | the same addresses; both names 301 to `https://sigelo.io` and sit on the same certificate (the Owner holds `.net` too) |
+| `sigelo.org`, `sigelo.online`, `sigelo.dev`, `sigelo.ai` (apex and `www` each) | A | the same IPv4 as `sigelo.io`; redirect-only like `.net`, one nginx server group each (see "More held domains") |
 | `sigelo.io` | CAA (optional) | `0 issue "letsencrypt.org"` — only Let's Encrypt may issue for the domain |
 
 Mail records for `contact@` / `security@sigelo.io` (MX, SPF, DKIM, DMARC) depend on the mail host
@@ -169,6 +170,33 @@ deploy, so installer edits would be overwritten; the certificate paths are writt
 instead. Renewal uses the same authenticator against the port-80 server block; if it ever fails,
 `certbot renew --webroot -w /var/www/acme` works with the same config.
 
+## More held domains: sigelo.org, .online, .dev, .ai
+
+Each has its own port-80 and TLS server group in `nginx.conf` (301 to `https://sigelo.io`, HSTS on
+the redirect, no content), so one can later get its own role by editing its group alone. Their
+names join the `sigelo.io` certificate lineage only once their DNS points at the server: until
+then the deploy works, nginx serves them the `sigelo.io` certificate (clients refuse it), and
+`check.mjs` prints `skip … (DNS not pointed yet …)` for their eight redirect checks; once a name's A
+record matches `sigelo.io`'s, its check passes or fails like `.net`. Per domain in the registrar:
+A `@` and A `www` = `sigelo.io`'s address, CAA `0 issue "letsencrypt.org"`, TXT `@` `v=spf1 -all`,
+TXT `_dmarc` `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s; rua=mailto:security@sigelo.io`, no
+MX, no parking wildcard, DNSSEC on. `.dev` is HSTS-preloaded (browsers use HTTPS only; HTTP-01 on
+port 80 still works).
+
+After any DNS change, in this order (deploy first: certbot needs the names in the port-80 server):
+
+```sh
+site/deploy/deploy.sh sigelo@sigelo.io                  # installs nginx.conf (already done if deployed since)
+scp site/deploy/server-setup.sh csigelo@sigelo.io:/tmp/
+ssh -t csigelo@sigelo.io 'sudo sh /tmp/server-setup.sh --certs'   # adds the pointed names, lists the skipped
+node site/deploy/check.mjs                              # their redirects: ok, or skip while DNS is not pointed
+```
+
+`--certs` is idempotent: it resolves every name through DNS (node, not `/etc/hosts`), compares the
+answers with the server's own interface addresses, re-issues the one lineage (`--cert-name
+sigelo.io`) only when a pointed name is missing from it, and prints each skipped name with what it
+resolves to. Rerun it whenever the Owner has pointed another domain.
+
 ## The first deploy, then HSTS
 
 ```sh
@@ -177,7 +205,7 @@ site/deploy/deploy.sh sigelo@sigelo.io --os debian    # or alpine
 
 nginx.conf ships `Strict-Transport-Security: max-age=300`, so a TLS mistake on day one cannot
 lock visitors out for a year. When `check.mjs` passes against the live site (it prints a `note`
-while max-age is below a year), change both HSTS lines in `nginx.conf` to `max-age=31536000`,
+while max-age is below a year), change every HSTS line in `nginx.conf` to `max-age=31536000`,
 commit, deploy. No `includeSubDomains` or `preload`: both bind every future subdomain, the Owner's
 call.
 

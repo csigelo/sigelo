@@ -9,7 +9,7 @@ Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhU
 
 These are the only official names; anything else that claims to be sigelo is not us.
 
-- Domains: `sigelo.io`, and `sigelo.net`, which only redirects to it. Repository: `https://github.com/csigelo/sigelo`, the only one.
+- Domains: `sigelo.io`; `sigelo.net`, `sigelo.org`, `sigelo.online`, `sigelo.dev`, `sigelo.ai` only redirect to it. Repository: `https://github.com/csigelo/sigelo`, the only one.
 - Releases: only that repository's Releases page and `https://sigelo.io/releases/`, always with `SHA256SUMS`; from v0.1.1 also an SSH-signed tag (`/.well-known/sigelo-release-signers`) and a `release.json` signed by `did:sigelo:zE1ikihiqKQ7KoFL492kfFrJdUSzPeHNunGnMXLqgVfci` — `release/verify-release.sh <tag>` checks all three; a release without them is not ours.
 - Maintainer: `csigelo` (GitHub), no other name. E-mail: `contact@sigelo.io` and `security@sigelo.io`, receive-only for now.
 - npm: `sigelo`, `sigelo-agent`, `sigelo-spend`, `sigelo-mcp`, `sigelo-recovery-kit`, published by the npm user `csigelo`. Until they appear there, any package with these names is not ours.
