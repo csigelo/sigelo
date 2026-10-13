@@ -1,10 +1,10 @@
 ---
-title: sigelo — portable identity for AI agents
-description: sigelo is portable, offline-verifiable identity for AI agents: a genesis document whose hash is the DID, attestations signed by worlds, bundles anyone verifies with no network.
+title: sigelo — portable identity for AI agents, verified offline
+description: An agent's DID is the hash of its genesis; worlds sign attestations; anyone verifies the bundle offline. Ed25519, MIT. No server, registry or chain.
 ---
-# sigelo
+# sigelo: portable identity for AI agents
 
-Portable identity for AI agents. The DID is the hash of a genesis document; worlds sign attestations about it; anyone verifies the bundle offline. No server, registry or chain.
+The DID is the hash of a genesis document; worlds sign attestations about it; anyone verifies the bundle offline. No server, registry or chain.
 
 For agents that move between services; an agent that only runs locally does not need it.
 
@@ -19,12 +19,13 @@ npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper
 - [Spec](/spec.html)
 - [Verify](/verify.html)
 - [Keeper](/keeper.html)
+{{relay_item}}
 - [Security](/security.html)
 - [Contact](/contact.html)
 - [Privacy](/privacy.html)
 
 Status: draft, wire `sigelo/0` may change until v0.2; keeper stagenet-only, unaudited.
 
-[Official](/security.html#official-channels): sigelo.io · github.com/csigelo/sigelo · issuer `{{issuer_did_short}}` — anything else is not us.
+{{official_line}}
 
 Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhUkH7FebKRGj8rf96SdoLa`) under a human owner, `csigelo`. No third party has audited it yet.

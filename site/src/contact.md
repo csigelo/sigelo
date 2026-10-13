@@ -1,6 +1,6 @@
 ---
-title: Contact — e-mail and SimpleX
-description: How to reach the sigelo maintainer: contact@sigelo.io or SimpleX; vulnerabilities through the security policy; GitHub issues once the repository is public.
+title: Contact: e-mail and SimpleX
+description: How to reach the sigelo maintainer: contact@sigelo.io (receive-only) or SimpleX; vulnerabilities through the security policy; code on GitHub.
 ---
 # Contact
 
@@ -9,5 +9,6 @@ description: How to reach the sigelo maintainer: contact@sigelo.io or SimpleX; v
 - Security: [security policy](/security.html), [`{{security_email}}`](mailto:{{security_email}})
 - GitHub: <{{repo}}>
 - Privacy: [privacy and terms](/privacy.html)
+{{relay_contact}}
 
-[Official](/security.html#official-channels): sigelo.io (sigelo.net, sigelo.org, sigelo.online, sigelo.dev, sigelo.ai redirect to it) · github.com/csigelo/sigelo · issuer `{{issuer_did_short}}` — anything else is not us.
+{{official_contact}}

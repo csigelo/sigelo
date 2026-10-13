@@ -9,18 +9,19 @@ Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhU
 
 These are the only official names; anything else that claims to be sigelo is not us.
 
-- Domains: `sigelo.io`; `sigelo.net`, `sigelo.org`, `sigelo.online`, `sigelo.dev`, `sigelo.ai` only redirect to it. Repository: `https://github.com/csigelo/sigelo`, the only one.
-- Releases: only that repository's Releases page and `https://sigelo.io/releases/`, always with `SHA256SUMS`; from v0.1.1 also an SSH-signed tag (`/.well-known/sigelo-release-signers`) and a `release.json` signed by `did:sigelo:zE1ikihiqKQ7KoFL492kfFrJdUSzPeHNunGnMXLqgVfci` — `release/verify-release.sh <tag>` checks all three; a release without them is not ours.
+- Domains: `sigelo.io` (protocol). `sigelo.net` redirects to sigelo.io; `sigelo.online` (to sigelo.io) and `sigelo.dev` (to sigelo.io) redirect once their DNS points to us; `sigelo.ai` and `sigelo.org` are ours and parked. Repository: `https://github.com/csigelo/sigelo`, no other; what others write in its issues, pull requests, comments or forks is not official.
+- Releases: only `https://github.com/csigelo/sigelo/releases` and `https://sigelo.io/releases/`, always with `SHA256SUMS`; from v0.1.1 also an SSH-signed tag (`/.well-known/sigelo-release-signers`) and a `release.json` signed by `did:sigelo:zE1ikihiqKQ7KoFL492kfFrJdUSzPeHNunGnMXLqgVfci` — `release/verify-release.sh <tag>` checks all three; a release without them is not ours.
 - Maintainer: `csigelo` (GitHub), no other name. E-mail: `contact@sigelo.io` and `security@sigelo.io`, receive-only for now.
-- npm: `sigelo`, `sigelo-agent`, `sigelo-spend`, `sigelo-mcp`, `sigelo-recovery-kit`, published by the npm user `csigelo`. Until they appear there, any package with these names is not ours.
+- npm: `sigelo`, `sigelo-agent`, `sigelo-spend`, `sigelo-mcp`, `sigelo-recovery-kit`, published by the npm user `csigelo`; these names from any other publisher are not ours.
 - The sigelo.io world's issuer DID is `did:sigelo:zEqNZjQDBiiufPs4NHrLw1kJD8rBitbFPyoQJoKuJFTM7`, its genesis at `https://sigelo.io/world/genesis.json` and its rotation chain at `https://sigelo.io/world/rotations.json`. The previous DID `did:sigelo:zBASk7w9zUhCYuuEpcUDSAuBUPW7qSAjAjAYARDCJ4S2Q` was retired by a precautionary recovery rotation on 2026-10-03: do not trust attestations from it. An attestation from any other issuer is not from sigelo.io.
-- Nobody from the project will ever ask for a seed, key, token or payment by e-mail or chat.
+- Nobody from the project will ever ask for a seed, an identity or wallet private key, or a token, or send a payment address or link by e-mail or chat. Payment proofs (transaction id and transaction key) go only to the SimpleX address on `https://sigelo.io/contact.html`.
 
 Report impersonation to `security@sigelo.io`. Machine-readable: `official` in `https://sigelo.io/index.json`.
 
 ## Reporting
 
-1. **GitHub private vulnerability reporting** on this repository ("Security" → "Report a vulnerability").
+1. **GitHub private vulnerability reporting** on this repository ("Security" → "Report a
+   vulnerability").
 2. **E-mail** `security@sigelo.io` (receive-only for now: the reply comes over SimpleX or a channel
    you name). An age recipient will be published at `https://sigelo.io/.well-known/security.txt`;
    until then assume mail is not private.
@@ -38,6 +39,7 @@ bundle or request beats prose. State what you did not verify.
 - `spend/`, the keeper: account pinning, caps, delegation, approvals, the two-phase relay, tokens,
   `spend.log` integrity, `sigelo-wallet` output an attacker can shape.
 - `adapters/1f916`, `adapters/moadim`, and release artefacts (binaries, `SHA256SUMS`, `release.json`).
+- `contact/` (invite, envelope, prekeys, key schedule).
 
 Out of scope: Monero, `monero-wallet-rpc`, `monerod` and stock wallets (report upstream; sigelo
 using them unsafely is in scope); what THREAT-MODEL.md §3 says sigelo does not defend; social
@@ -53,8 +55,8 @@ days**, sooner if exploited. Credit under the name you choose, or none. No bount
 
 Good-faith research on your own keys, identities, keepers and wallets, on stagenet or testnet, will
 not be pursued. Do not touch others' keepers, tokens, wallets or identities, do not spend coins that
-are not yours, and do not publish before 90 days or a fix, whichever is first, unless agreed. Unsure?
-Ask first.
+are not yours, and do not publish before 90 days or a fix, whichever is first, unless agreed.
+Unsure? Ask first.
 
 ## A live keeper compromise
 
@@ -73,5 +75,6 @@ External review targets, in order:
 4. `ts/src/keys.ts`, `go/keys.go` — HKDF paths, `sc_reduce32`, the 25-word mnemonic.
 5. `ts/src/ceremony.ts`, `ts/src/offline.ts` — secret handling, age invocation.
 6. `spend/service.ts`, `approval.ts`, `tree.ts`, `policy.ts` — the keeper.
+7. `contact/kdf.mjs`, `envelope.mjs`, `prekeys.mjs` — key schedule, envelope, prekeys.
 
 The keeper is **experimental and stagenet-only** until this list is reviewed.

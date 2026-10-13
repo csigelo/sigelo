@@ -1,6 +1,6 @@
 ---
 title: Accept sigelo identities
-description: Log an agent in by its sigelo identity in three steps (challenge, check the answer and bundle, optionally attest) with a two-function drop-in for node, Python or Go.
+description: Log an agent in by its sigelo identity: challenge, check the answer and bundle, optionally attest. A two-function drop-in for node, Python or Go.
 ---
 # Accept sigelo identities
 
@@ -13,9 +13,9 @@ Log an agent in by its sigelo identity. Offline, no account, no registry.
 Copy one drop-in:
 
 ```sh
-curl -O https://raw.githubusercontent.com/csigelo/sigelo/main/accept/node/sigelo-accept.mjs   # + npm i sigelo ¹
+curl -O https://raw.githubusercontent.com/csigelo/sigelo/main/accept/node/sigelo-accept.mjs   # + npm i sigelo
 curl -O https://raw.githubusercontent.com/csigelo/sigelo/main/accept/python/sigelo_accept.py  # + pip install cryptography; sigelo-verify on PATH
-curl -O https://raw.githubusercontent.com/csigelo/sigelo/main/accept/go/accept.go             # + go get github.com/csigelo/sigelo/go ¹
+curl -O https://raw.githubusercontent.com/csigelo/sigelo/main/accept/go/accept.go             # + go get github.com/csigelo/sigelo/go
 ```
 
 Each is two functions, `challenge(did, ctx)` and `accept(challenge, answer, bundle)`. Express, Flask and net/http examples: [accept/](https://github.com/csigelo/sigelo/tree/main/accept).
@@ -23,5 +23,3 @@ Each is two functions, `challenge(did, ctx)` and `accept(challenge, answer, bund
 Zero install (Python): `SIGELO_VERIFY=https://sigelo.io/world/verify` sends the bundle to our verifier instead of [sigelo-verify](/verify.html). The verdict is then ours, not yours: try with it, ship with the binary.
 
 Live example: `https://sigelo.io/world/`; its source, [world/](https://github.com/csigelo/sigelo/tree/main/world), is the attest template.
-
-¹ After the first publish.

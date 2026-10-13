@@ -12,27 +12,25 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { REPO, CONTACT_EMAIL, SECURITY_EMAIL, SIMPLEX, RELAY_LIVE, DOMAINS, HOSTS, REPOSITORIES, PAYMENT_PLACES, BEFORE_LAUNCH, OFFICIAL } from './src/official.mjs';
 
 const SITE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(SITE);
 const DIST = join(SITE, 'dist');
 export const ORIGIN = 'https://sigelo.io';
-export const REPO = 'https://github.com/csigelo/sigelo';
+// The official names and contacts are data in site/src/official.mjs (RELAY_LIVE says which table
+// sigelo.io states); re-exported for site/test/run.mjs and relay/site/test.mjs.
+export { REPO, CONTACT_EMAIL, SECURITY_EMAIL, SIMPLEX, RELAY_LIVE, DOMAINS, HOSTS, REPOSITORIES, PAYMENT_PLACES, BEFORE_LAUNCH, OFFICIAL };
+const OFFICIAL_SRC = 'site/src/official.mjs';
 const BRANCH = 'main';
-// SIMPLEX is the one source of the address (/contact, security.txt, index.json, JSON-LD). While it
-// is an <angle-bracket> placeholder every generated surface omits it; site/test/run.mjs fails if it leaks.
-export const SIMPLEX = 'https://smp10.simplex.im/a#18LjfJawmkVxvFtCHFo-yyzPo8Kr3gPLNts_ovwxmZM';
 export const SIMPLEX_SET = !/^<.*>$/.test(SIMPLEX);
-export const CONTACT_EMAIL = 'contact@sigelo.io';
-export const SECURITY_EMAIL = 'security@sigelo.io';
 // The release mirror (site/deploy/mirror-release.sh): files live on the server under
 // /var/www/sigelo.io/releases/<tag>/, never in dist/ or git. The build knows each mirrored tag only
 // by its SHA256SUMS, committed as site/src/releases/<tag>.SHA256SUMS (the script writes it).
 export const MIRROR = `${ORIGIN}/releases/`;
-// The official names (SECURITY.md "Official channels"; index.json `official`). The issuer DID is
-// not listed here: it is computed from world/genesis.json, and site/test/run.mjs checks SECURITY.md names it.
-// Held domains that only 301 to sigelo.io (site/deploy/nginx.conf).
-export const REDIRECT_DOMAINS = ['sigelo.net', 'sigelo.org', 'sigelo.online', 'sigelo.dev', 'sigelo.ai'];
+// What sigelo.io serves, as it states it now (the / line names each).
+export const CONTENT_HOSTS = [...OFFICIAL.domains.filter((d) => d.role === 'content'), ...OFFICIAL.hosts].map((d) => d.name);
+export const RELAY_ORIGIN = 'https://sigelo.ai';
 export const NPM_USER = 'csigelo';
 export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit'];
 
@@ -84,7 +82,7 @@ export const PAGES = [
   { slug: 'adopt', src: 'site/src/adopt.md', type: 'TechArticle' },
   { slug: 'accept', src: 'site/src/accept.md', type: 'TechArticle' },
   { slug: 'spec', repo: 'SPEC.md', type: 'TechArticle', title: 'Specification',
-    description: 'The sigelo specification, wire sigelo/0: signing input, genesis and DID, attestations, bindings, rotation and recovery, bundles, the verification algorithm.' },
+    description: 'The sigelo specification, wire sigelo/0: signing input, genesis and DID, attestations, bindings, rotation, recovery, bundles, the verification algorithm.' },
   { slug: 'verify', src: 'site/src/verify.md', type: 'WebPage' },
   { slug: 'keeper', src: 'site/src/keeper.md', type: 'WebPage' },
   { slug: 'security', repo: 'SECURITY.md', type: 'WebPage', title: 'Security policy',
@@ -93,6 +91,9 @@ export const PAGES = [
   { slug: 'privacy', src: 'site/src/privacy.md', type: 'WebPage' },
   { slug: 'changelog', repo: 'CHANGELOG.md', type: 'WebPage', title: 'Changelog',
     description: 'Every change to sigelo, newest first, as recorded in the repository\'s CHANGELOG.md.' },
+  // The not-found page: no canonical, no JSON-LD, noindex; not in the nav, the sitemap, llms.txt or
+  // index.json's pages. nginx serves it for a miss once its helper allows error_page (nginx.conf).
+  { slug: '404', src: 'site/src/404.md', type: 'NotFound', noindex: true },
 ];
 const NAV = [['adopt', 'Adopt'], ['accept', 'Accept'], ['spec', 'Spec'], ['verify', 'Verify'], ['keeper', 'Keeper'], ['security', 'Security'],
   ['contact', 'Contact'], ['changelog', 'Changelog'], ['privacy', 'Privacy']];
@@ -301,6 +302,8 @@ const vectorsBytes = readBytes('test-vectors.json');
 const vectors = JSON.parse(vectorsBytes);
 const specBytes = readBytes('SPEC.md');
 const worldDidEarly = existsSync(join(ROOT, 'world/genesis.json')) ? genesisDid(JSON.parse(read('world/genesis.json'))) : null;
+// 'a', 'a and b', 'a, b and c'
+const and = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}` : xs[0]);
 const VALUES = {
   ...(RELEASE && { release_tag: RELEASE.tag, release_url: `/releases/${RELEASE.tag}/` }),
   ...(worldDidEarly && { issuer_did_short: `${worldDidEarly.slice(0, 'did:sigelo:zBASk7'.length)}…` }),
@@ -308,14 +311,73 @@ const VALUES = {
   version: pkg('ts/package.json').version,
   repo: REPO, contact_email: CONTACT_EMAIL, security_email: SECURITY_EMAIL,
   simplex: SIMPLEX_SET ? `[\`${SIMPLEX}\`](${SIMPLEX})` : 'coming; use e-mail until then',
+  ...officialLines(worldDidEarly && `${worldDidEarly.slice(0, 'did:sigelo:zBASk7'.length)}…`),
+  // The links to the relay (/, /adopt, /contact), only once it serves (RELAY_LIVE). A line that
+  // holds only an empty value is dropped (fill).
+  relay_item: RELAY_LIVE ? `- [Relay: encrypted messages between AI agents](${RELAY_ORIGIN}/)` : '',
+  relay_link: RELAY_LIVE ? ` · [Message other agents: sigelo relay](${RELAY_ORIGIN}/)` : '',
+  relay_contact: RELAY_LIVE ? `- Relay: [sigelo.ai](${RELAY_ORIGIN}/)` : '',
 };
+// Each value's inputs besides the page's own source: a page that renders a value changes when one
+// of these does, so they count towards its sitemap lastmod and dateModified (pageInputs). The
+// rendering code in this file is not counted, as the Markdown renderer is not.
+export const VALUE_SOURCES = {
+  release_tag: ['site/src/releases'], release_url: ['site/src/releases'], issuer_did_short: ['world/genesis.json'],
+  spec_sha256: ['SPEC.md'], vectors_sha256: ['test-vectors.json'], version: ['ts/package.json'],
+  repo: [OFFICIAL_SRC], contact_email: [OFFICIAL_SRC], security_email: [OFFICIAL_SRC], simplex: [OFFICIAL_SRC],
+  official_line: [OFFICIAL_SRC, 'world/genesis.json'], official_contact: [OFFICIAL_SRC, 'world/genesis.json'],
+  relay_item: [OFFICIAL_SRC], relay_link: [OFFICIAL_SRC], relay_contact: [OFFICIAL_SRC],
+};
+for (const k of Object.keys(VALUES)) if (!VALUE_SOURCES[k]) throw new Error(`site/build.mjs: template value ${k} has no VALUE_SOURCES entry`);
+// The clauses that give every domain and host its role, from an OFFICIAL-shaped table. /contact's
+// "Official" line and SECURITY.md's Domains line use these words; site/test/run.mjs requires that
+// hand-written line to equal securityDomainsLine(OFFICIAL), backticks aside, so a second,
+// contradicting role for a domain cannot be added next to the right one.
+export function domainClauses({ domains, hosts }) {
+  const redirects = domains.filter((d) => d.role === 'redirect');
+  const pending = redirects.filter((d) => !d.live);
+  const parked = domains.filter((d) => d.role === 'parked').map((d) => d.name);
+  return [
+    [...domains.filter((d) => d.role === 'content'), ...hosts].map((d) => `${d.name} (${d.what})`).join(', '),
+    ...redirects.filter((d) => d.live).map((d) => `${d.name} redirects to ${d.to}`),
+    ...(pending.length ? [`${and(pending.map((d) => `${d.name} (to ${d.to})`))} ${pending.length > 1 ? 'redirect once their' : 'redirects once its'} DNS points to us`] : []),
+    ...(parked.length ? [`${and(parked)} ${parked.length > 1 ? 'are' : 'is'} ours and parked`] : []),
+  ];
+}
+// SECURITY.md's "- Domains:" line, backticks stripped: what serves, then the other domains' roles,
+// then the repositories. The launch commit writes this line for DOMAINS (RELAY_LIVE).
+export function securityDomainsLine(official) {
+  const [serves, ...others] = domainClauses(official);
+  const repos = official.repositories;
+  const repoText = repos.length > 1
+    ? `Repositories: ${and(repos)}, no other; what others write in their issues, pull requests, comments or forks is not official.`
+    : `Repository: ${repos[0]}, no other; what others write in its issues, pull requests, comments or forks is not official.`;
+  return `- Domains: ${serves}.${others.length ? ` ${others.join('; ')}.` : ''} ${repoText}`;
+}
+// The / and /contact "Official" lines, from OFFICIAL. / names what serves (every content host and
+// repository); /contact gives every domain its role, in one sentence. site/test/run.mjs checks both.
+function officialLines(issuerShort) {
+  const bare = (u) => u.replace(/^https:\/\//, '');
+  const tail = [...OFFICIAL.repositories.map(bare), ...(issuerShort ? [`issuer \`${issuerShort}\``] : [])].join(' · ');
+  const head = '[Official](/security.html#official-channels):';
+  return {
+    official_line: `${head} ${[...CONTENT_HOSTS, tail].join(' · ')} — anything else is not us.`,
+    official_contact: `${head} ${domainClauses(OFFICIAL).join('; ')} · ${tail} — anything else is not us.`,
+  };
+}
 function fill(md, where) {
-  return md.replace(/\{\{([\w.:/-]+)\}\}/g, (all, key) => {
+  const value = (all, key) => {
     const v = VALUES[key];
     if (v === undefined) throw new Error(`${where}: unknown template value ${all}`);
     return v;
-  });
+  };
+  return md.replace(/^\{\{([\w.:/-]+)\}\}\n/gm, (all, key) => (value(all, key) === '' ? '' : all)).replace(/\{\{([\w.:/-]+)\}\}/g, value);
 }
+// What a page is rendered from: a repository document alone, or its site/src file plus the inputs
+// of each template value it uses (VALUE_SOURCES).
+const keysIn = (md) => [...new Set([...md.matchAll(/\{\{([\w.:/-]+)\}\}/g)].map((m) => m[1]))];
+export const pageInputs = (page) => (page.repo ? [page.repo]
+  : [page.src, ...new Set(keysIn(read(page.src)).flatMap((k) => VALUE_SOURCES[k] ?? []))]);
 function frontMatter(md, where) {
   const m = md.match(/^---\n([\s\S]*?)\n---\n/);
   if (!m) throw new Error(`${where}: no front matter`);
@@ -332,14 +394,18 @@ const SOFTWARE = {
   keywords: 'AI agents, agent identity, DID, Ed25519, attestations, offline verification, MCP, Monero',
   license: 'https://spdx.org/licenses/MIT', version: VERSION,
 };
-// TechArticle dateModified: the last commit that touched the page's source (not the build's).
-const modified = (p) => git('log', '-1', '--format=%cI', '--', p) || commitDate;
+// The last commit that touched any of `paths` ('' when git cannot tell, e.g. an uncommitted file).
+const lastCommit = (...paths) => git('log', '-1', '--format=%cI', '--', ...paths);
+// TechArticle dateModified: the last commit that touched what the page is rendered from (not the build's).
+const modified = (page) => lastCommit(...pageInputs(page)) || commitDate;
+const pageUrl = (p) => (p.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${p.slug}.html`);
 function jsonld(page, title, description) {
-  const url = page.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${page.slug}.html`;
-  const node = { '@id': `${url}#page`, url, name: title, description };
+  const url = pageUrl(page);
+  // The home page points at the relay's home page, which points back.
+  const node = { '@id': `${url}#page`, url, name: title, description, ...(page.slug === 'index' && RELAY_LIVE && { relatedLink: [`${RELAY_ORIGIN}/`] }) };
   const graph = [{ '@type': 'WebSite', '@id': `${ORIGIN}/#website`, url: `${ORIGIN}/`, name: 'sigelo' }, SOFTWARE];
-  if (page.type === 'TechArticle') graph.push({ ...node, '@type': 'TechArticle', headline: /sigelo/i.test(title) ? title : `sigelo ${title.toLowerCase()}`,
-    dateModified: modified(page.repo ?? page.src), about: { '@id': SOFTWARE['@id'] }, isPartOf: { '@id': `${ORIGIN}/#website` } });
+  if (page.type === 'TechArticle') graph.push({ ...node, '@type': 'TechArticle', headline: title,
+    dateModified: modified(page), about: { '@id': SOFTWARE['@id'] }, isPartOf: { '@id': `${ORIGIN}/#website` } });
   else if (page.type === 'ContactPage') graph.push({ ...node, '@type': 'ContactPage', mainEntity: { '@type': 'Organization', name: 'sigelo', url: `${ORIGIN}/`,
     contactPoint: [
       { '@type': 'ContactPoint', contactType: 'general', email: CONTACT_EMAIL },
@@ -349,10 +415,17 @@ function jsonld(page, title, description) {
   else graph.push({ ...node, '@type': 'WebPage' });
   return JSON.stringify({ '@context': 'https://schema.org', '@graph': graph }, null, 1).replace(/</g, '\\u003c');
 }
+// Open Graph and Twitter: title, description and URL only, no image (ogp.me requires og:image, so
+// link previews stay text until a logo exists). Not on the not-found page.
+const social = (title, description, url) => [['og:type', 'website'], ['og:site_name', 'sigelo'], ['og:title', title], ['og:description', description], ['og:url', url]]
+  .map(([k, v]) => `<meta property="${k}" content="${esc(v)}">\n`).join('') + '<meta name="twitter:card" content="summary">\n';
 function htmlPage(page, title, description, body) {
-  const canonical = page.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${page.slug}.html`;
+  const canonical = pageUrl(page);
   const nav = NAV.map(([s, label]) => `<li><a href="/${s}.html"${s === page.slug ? ' aria-current="page"' : ''}>${label}</a></li>`).join('');
   const status = page.slug === 'index' ? '' : `\n<p class="status">${inline(STATUS_MD, (u) => u)}</p>`;
+  const indexed = page.noindex ? '<meta name="robots" content="noindex">\n'
+    : `<link rel="canonical" href="${canonical}">\n${social(title, description, canonical)}`;
+  const ld = page.noindex ? '' : `<script type="application/ld+json">\n${jsonld(page, title, description)}\n</script>\n`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -361,13 +434,10 @@ function htmlPage(page, title, description, body) {
 <meta name="color-scheme" content="light dark">
 <title>${esc(title)}${page.slug === 'index' ? '' : ' — sigelo'}</title>
 <meta name="description" content="${esc(description)}">
-<link rel="canonical" href="${canonical}">
-<link rel="alternate" type="text/markdown" href="/${page.slug}.md" title="This page as Markdown">
+${indexed}<link rel="alternate" type="text/markdown" href="/${page.slug}.md" title="This page as Markdown">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
 <link rel="stylesheet" href="/style.css">
-<script type="application/ld+json">
-${jsonld(page, title, description)}
-</script>
-</head>
+${ld}</head>
 <body>
 <header>
 <p class="site"><a href="/">sigelo</a></p>
@@ -386,6 +456,7 @@ ${body}
 
 // ---------------------------------------------------------------------------------------------
 const kb = (n) => `${Math.max(1, Math.round(n / 1024))} KB`;
+const redirectsTo = (live) => Object.fromEntries(OFFICIAL.domains.filter((d) => d.role === 'redirect' && !!d.live === live).map((d) => [d.name, `https://${d.to}/`]));
 export function build() {
   rmSync(DIST, { recursive: true, force: true });
   const put = (p, data) => { const f = join(DIST, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, data); };
@@ -404,6 +475,9 @@ export function build() {
   // Absent until server-setup.sh --world made the issuer key (a fresh server): no world block then.
   for (const f of ['genesis.json', 'rotations.json']) if (existsSync(join(ROOT, 'world', f))) put(`world/${f}`, readBytes(`world/${f}`));
   put('style.css', readFileSync(join(SITE, 'src', 'style.css')));
+  // The icon (<link rel="icon"> on every page): a PLACEHOLDER until the Owner picks a logo;
+  // replace site/assets/icon-512.png and keep the name. A square PNG, no metadata chunks.
+  put('icon-512.png', readFileSync(join(SITE, 'assets', 'icon-512.png')));
   put('.nojekyll', '');
   put('CNAME', 'sigelo.io\n');
   // Release signing (release/RELEASE.md "Signing"): the SSH key that signs tags and the release
@@ -450,7 +524,6 @@ export function build() {
 ${L('Adopt', '/adopt.md', 'identity, challenge, bundle, verify; exact commands')}
 ${L('Accept', '/accept.md', 'log agents in by sigelo identity: node, Python, Go')}
 ${L('Spec', '/spec.md', 'the protocol, wire sigelo/0')}
-${L('Test vectors', '/test-vectors.json', 'real signatures from documented seeds')}
 ${L('Verify', '/verify.md', 'reference verifier, conformance, your implementation')}
 ${L('Keeper', '/keeper.md', 'pay in Monero without holding a key')}
 
@@ -458,11 +531,13 @@ ${L('Keeper', '/keeper.md', 'pay in Monero without holding a key')}
 
 ${L('Security', '/security.md', 'report a vulnerability')}
 ${L('Contact', '/contact.md', 'e-mail, SimpleX')}
-${L('Index', '/index.json', 'sha256s, versions, release files')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}
+${L('Index', '/index.json', 'sha256s, versions, release files')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}${
+  RELAY_LIVE ? `\n- [Relay](${RELAY_ORIGIN}/llms.txt): encrypted messages between AI agents` : ''}
 
 ## Optional
 
 ${L('llms-full.txt', '/llms-full.txt', kb(Buffer.byteLength(full)))}
+${L('Test vectors', '/test-vectors.json', 'real signatures from documented seeds')}
 ${L('Privacy and terms', '/privacy.md', 'logs, retention, terms')}
 ${OPTIONAL.map((p) => L(p, `/raw/${p}`, kb(readBytes(p).length))).join('\n')}
 ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS.reduce((n, s) => n + readBytes(s).length, 0))}`)}
@@ -499,19 +574,32 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
         files: RELEASE.files.map((f) => ({ name: f.name, sha256: f.sha256, url: `${MIRROR}${RELEASE.tag}/${f.name}` })) }) },
     official: {
       statement: `${ORIGIN}/security.html#official-channels`,
-      domains: ['sigelo.io', ...REDIRECT_DOMAINS], redirect_only: REDIRECT_DOMAINS,
-      repository: REPO,
+      domains: OFFICIAL.domains.map((d) => d.name), content: CONTENT_HOSTS,
+      roles: Object.fromEntries([...OFFICIAL.domains.filter((d) => d.role === 'content'), ...OFFICIAL.hosts].map((d) => [d.name, d.what])),
+      redirects: redirectsTo(true), redirects_pending_dns: redirectsTo(false),
+      // The older field, kept for existing readers with its old meaning: every held domain that
+      // serves nothing of its own (live and pending redirects, parked), so `domains` minus
+      // `redirect_only` is still exactly the content domains. `redirects`, `redirects_pending_dns`
+      // and `parked` give the precise roles.
+      redirect_only: OFFICIAL.domains.filter((d) => d.role !== 'content').map((d) => d.name),
+      parked: OFFICIAL.domains.filter((d) => d.role === 'parked').map((d) => d.name),
+      repository: REPO, repositories: OFFICIAL.repositories,
       releases: [`${REPO}/releases`, MIRROR], checksums: 'SHA256SUMS',
       maintainer: 'csigelo', github_user: 'csigelo',
       email: [CONTACT_EMAIL, SECURITY_EMAIL], email_receive_only: true,
       npm_user: NPM_USER, packages: NPM_PACKAGES, packages_published: true,
       issuer_did: worldDid, world_genesis: `${ORIGIN}/world/genesis.json`,
-      never_asks_for: ['seed', 'key', 'token', 'payment'],
+      // SECURITY.md's "Nobody from the project…" line, as data. No place before the relay launch.
+      payment_details_only_on: OFFICIAL.payment_places,
+      never_asks_for: ['seed', 'identity or wallet private key', 'token'],
+      never_sends_by_email_or_chat: ['payment address', 'payment link'],
+      payment_proof_only_via: `${ORIGIN}/contact.html`,
       report_impersonation: SECURITY_EMAIL,
     },
+    ...(RELAY_LIVE && { relay: { name: 'sigelo relay', homepage: `${RELAY_ORIGIN}/`, index: `${RELAY_ORIGIN}/index.json`, llms_txt: `${RELAY_ORIGIN}/llms.txt`, host: HOSTS[0].name } }),
     agent_surfaces: Object.fromEntries([['llms_txt', '/llms.txt'], ['llms_full_txt', '/llms-full.txt'], ['adopt', '/adopt.md'],
       ['sitemap', '/sitemap.xml'], ['security_txt', '/.well-known/security.txt'], ['mock_world', '/examples/world.mjs']].map(([k, v]) => [k, `${ORIGIN}${v}`])),
-    pages: PAGES.map((p) => ({ slug: p.slug, html: p.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${p.slug}.html`, markdown: `${ORIGIN}/${p.slug}.md`,
+    pages: PAGES.filter((p) => !p.noindex).map((p) => ({ slug: p.slug, html: pageUrl(p), markdown: `${ORIGIN}/${p.slug}.md`,
       ...(p.repo && { source: p.repo, source_sha256: sha256(readBytes(p.repo)) }) })),
     ...(worldDid && { world: { ctx: 'sigelo.io', issuer: worldDid, challenge: `${ORIGIN}/world/challenge?did={did}`, attest: `${ORIGIN}/world/attest`,
       conformance: `${ORIGIN}/world/conformance`, mcp: `${ORIGIN}/mcp`, verify: `${ORIGIN}/world/verify`, stats: `${ORIGIN}/world/stats`, genesis: `${ORIGIN}/world/genesis.json`, rotations: `${ORIGIN}/world/rotations.json` } }),
@@ -531,12 +619,21 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     'MistralAI-User', 'MistralAI-Index', 'DuckAssistBot', '*'];
   put('robots.txt', `${bots.map((u) => `User-agent: ${u}`).join('\n')}\nAllow: /\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
 
-  // sitemap.xml: every HTML page plus the agent surfaces.
-  const locs = [...PAGES.map((p) => (p.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${p.slug}.html`)),
-    ...['/llms.txt', '/llms-full.txt', '/adopt.md', '/index.json', '/test-vectors.json'].map((u) => `${ORIGIN}${u}`)];
+  // sitemap.xml: every indexable HTML page plus the agent surfaces; no twin (each names its HTML page
+  // as canonical) and no not-found page. lastmod is the last commit of what the page is rendered from
+  // (pageInputs; Google uses it only when it is accurate, and the build date on every URL was not);
+  // a generated file takes its newest input; left out when git cannot tell, never the build time.
+  // llms-full.txt is the parts' twins, template values filled (pageInputs); llms.txt states its
+  // size, the release mirror and, from the launch, the relay (site/src/official.mjs).
+  const partInputs = [...new Set(parts.flatMap((s) => pageInputs(PAGES.find((p) => p.slug === s))))];
+  const locs = [...PAGES.filter((p) => !p.noindex).map((p) => [pageUrl(p), lastCommit(...pageInputs(p))]),
+    [`${ORIGIN}/llms.txt`, lastCommit('site/build.mjs', 'site/src/releases', OFFICIAL_SRC, ...partInputs, ...OPTIONAL, ...SCHEMAS)],
+    [`${ORIGIN}/llms-full.txt`, lastCommit('site/build.mjs', ...partInputs)],
+    [`${ORIGIN}/index.json`, commitDate],   // it names its build commit, so every commit changes it
+    [`${ORIGIN}/test-vectors.json`, lastCommit('test-vectors.json')]];
   put('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${locs.map((l) => `<url><loc>${l}</loc><lastmod>${commitDate.slice(0, 10)}</lastmod></url>`).join('\n')}
+${locs.map(([l, d]) => `<url><loc>${l}</loc>${d ? `<lastmod>${d.slice(0, 10)}</lastmod>` : ''}</url>`).join('\n')}
 </urlset>
 `);
 

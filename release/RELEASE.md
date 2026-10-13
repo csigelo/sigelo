@@ -6,7 +6,7 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
 1. Private repo: CHANGELOG.md gets `## v<v> — <date>` over the entries it releases; VERSIONING.md
    status line; ROADMAP §6 step 8; site footnotes. `node site/build.mjs && node site/test/run.mjs`
    passes. Commit.
-2. Sync and push (the commands under "Sync command").
+2. Sync and push (the commands under "Sync commands").
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a` must end
    `ALL PASS (<n> checks)`. Go binaries and the npm tarballs (gzip rewritten by
@@ -30,7 +30,7 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
 8. npm: the tag push runs `.github/workflows/npm-publish.yml` (OIDC, no token;
    adoption/npm-trusted-publishing.md): it rebuilds the tag, waits ≤ 30 min for step 5, publishes
    only if SHA256SUMS equals the release's; idempotent. Re-run:
-   `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`. npm pages show provenance. Fallback: a
+   `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`. Fallback: a
    temporary-userconfig token, `npm publish $S/a/<pkg>-<v>.tgz`.
 9. Bump `integrations/mcp/server.json` to `<v>`, sync, push, `gh workflow run mcp-registry.yml -R
    csigelo/sigelo`; `site/deploy/mirror-release.sh v<v> sigelo-vps`, commit its SHA256SUMS, deploy.
@@ -40,9 +40,9 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
 At 02:30 a user timer runs `sigelo-nightly` (outside this repository) on a clean clone of the
 private HEAD, offline: the ts, Go (with `--conformance` and `--impl` on the ts candidate), moadim,
 spend (`SIGELO_TEST_NO_LIVE=1`), mcp, world, accept and kit suites, the schema, doc budget and
-site checks, and `npm run sim`; crosscheck (no offline mode) is run by hand. About 9 minutes
-(8m04s and 8m39s on its first two runs). Each run leaves a log and a one-line summary; a failure
-leaves `FAILED` and at most one critical desktop notification a day, success none.
+site checks, and `npm run sim`; crosscheck (no offline mode) is run by hand. About 9 minutes.
+Each run leaves a log and a one-line summary; a failure leaves `FAILED` and at most one critical
+desktop notification a day, success none.
 
 ## Signing (from v0.1.1; v0.1.0 is unsigned)
 
@@ -61,13 +61,15 @@ leaves `FAILED` and at most one critical desktop notification a day, success non
   as a voluntary rotation, so the pinned genesis holds. Its recovery key
   (`~/.config/sigelo/release-recovery.key`) is kept offline.
 
-## Sync command
+## Sync commands
 
-From the private repository:
+From the private repository, `A='csigelo <csigelo@users.noreply.github.com>'`:
 
 ```sh
-SIGELO_AUTHOR='csigelo <csigelo@users.noreply.github.com>' SIGELO_GO_MODULE=github.com/csigelo/sigelo/go SIGELO_EXCLUDE='RISKS.md JOURNAL.md commercial' sh release/publish.sh
+SIGELO_AUTHOR="$A" SIGELO_GO_MODULE=github.com/csigelo/sigelo/go sh release/publish.sh
+SIGELO_AUTHOR="$A" sh release/publish.sh --relay ../sigelo-relay-public
 GIT_SSH_COMMAND='ssh -i ~/.ssh/sigelo_ed25519 -o IdentitiesOnly=yes' git -C ../sigelo-public push
 ```
 
-`RISKS.md`, `JOURNAL.md` and `commercial/` are internal and never exported.
+Never exported: `RISKS.md`, `JOURNAL.md`, `commercial/`, `relay/`, `design/relay-plan.md`;
+`--relay` exports `relay/` alone (csigelo/sigelo-relay), pushed the same way.

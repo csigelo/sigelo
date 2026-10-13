@@ -8,6 +8,7 @@ import { did, parse, parseBytes, SigeloError } from 'sigelo';
 import * as id from './sigelo-agent.ts';
 import * as adopt from './sigelo-agent-adopt.ts';
 import * as xmr from './sigelo-agent-monero.ts';
+import * as contact from './sigelo-agent-contact.ts';
 
 const USAGE = `sigelo-agent — portable sigelo/0 identity for a moadim-run agent
 
@@ -57,8 +58,9 @@ Tier 1 (the operator's 25-word root): \`node ts/dist/offline.js recover --genesi
 --backup backup.age --identity <age id> --net <net> > recovery.local.json\` there, then
 \`sigelo-agent adopt --rotation recovery.local.json\` here, and shred the file.`;
 
-const out = (x: unknown): void => console.log(JSON.stringify(x, null, 2));
-const note = (s: string): void => console.error(`sigelo-agent: ${s}`);
+// Escaped as the contact verbs escape theirs: worlds write claims and error text reaches stderr.
+const out = (x: unknown): void => console.log(contact.safeJson(JSON.stringify(x, null, 2)));
+const note = (s: string): void => console.error(`sigelo-agent: ${contact.safeText(s)}`);
 /** Read one JSON argument, a file holding it, or stdin for `-`/nothing. sigelo's parser, so
  *  duplicate keys are rejected rather than silently resolved (SPEC §3, THREAT-MODEL §2.8), and
  *  bytes are decoded fatally: invalid UTF-8 rejects the document, as the Go verifier does. */
@@ -66,6 +68,9 @@ const input = (v: string | undefined): unknown => v === undefined || v === '-' ?
   : /^\s*[{["]/.test(v) || !existsSync(v) ? parse(v) : parseBytes(readFileSync(v));
 
 const [cmd, ...rest] = process.argv.slice(2);
+// The contact verbs live apart from the identity core (INTEGRATION.md) and need nothing below.
+// contact.exit never resolves: it exits once stdout has drained.
+if (contact.VERBS.includes(cmd ?? '')) await contact.exit(await contact.main(cmd!, rest));
 const flag = (name: string): string | undefined => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
 const path = id.identityPath();
 const now = Math.floor(Date.now() / 1000);
@@ -178,7 +183,7 @@ try {
       break;
     }
     default:
-      console.error(USAGE);
+      console.error(`${USAGE}\n\n${contact.USAGE}`);
       process.exit(2);
   }
 } catch (e) {

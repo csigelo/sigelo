@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: MIT
 // Scripted stdio client: spawns server.mjs, speaks MCP line-delimited JSON-RPC, exercises every
 // tool. A mock world is built from the library; a mock keeper is a loopback HTTP server on an
-// ephemeral port (never the soak's 38083/38200). `npm test` → ALL PASS or exit 1.
+// ephemeral port (never the soak's 38083/38200). The contact tools: listed in a clone whose contact/
+// has its dependencies (npm ci there), not in a copy of the server beside no contact/, never from
+// node_modules; against a loopback relay (relay/ here, else SIGELO_RELAY_DIR; SKIP without one):
+// pairing, parallel calls, an inbox past one result (held across a restart), a nested message, wait
+// bounds. `npm test` → ALL PASS or exit 1.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attest, did, keygen, verifySig } from '../../ts/dist/sigelo.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -15,8 +19,8 @@ const dir = mkdtempSync(join(tmpdir(), 'sigelo-mcp-'));
 let fails = 0, passes = 0;
 const ok = (c, name, extra = '') => { if (c) passes++; else { fails++; console.error(`FAIL ${name} ${extra}`); } };
 
-function client(env) {
-  const p = spawn(process.execPath, [join(here, 'server.mjs')], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+function client(env, server = join(here, 'server.mjs')) {
+  const p = spawn(process.execPath, [server], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let buf = '', next = 1; const waiting = new Map(); let stderr = '';
   p.stderr.on('data', (d) => { stderr += d; });
   p.stdout.on('data', (d) => {
@@ -32,7 +36,8 @@ function client(env) {
     let data; try { data = JSON.parse(text); } catch { data = undefined; }
     return { isError: m.result.isError, text, data, structured: m.result.structuredContent };
   };
-  return { p, rpc, raw, call, notify: (method) => p.stdin.write(JSON.stringify({ jsonrpc: '2.0', method }) + '\n'), stderr: () => stderr, close: () => p.stdin.end() };
+  const exited = new Promise((res) => p.on('exit', (code) => res(code)));
+  return { p, rpc, raw, call, exited, notify: (method) => p.stdin.write(JSON.stringify({ jsonrpc: '2.0', method }) + '\n'), stderr: () => stderr, close: () => p.stdin.end() };
 }
 
 // ---- mock keeper
@@ -51,6 +56,17 @@ const keeper = createServer((req, res) => {
 await new Promise((r) => keeper.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${keeper.address().port}`;
 
+const IDENTITY_TOOLS = ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'];
+const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_forget_contact', 'sigelo_inbox', 'sigelo_invite', 'sigelo_send'];
+// Present here only if this clone's contact/ resolves, as the server decides it.
+const HAS_CONTACT = await import('../../contact/carrier.mjs').then(() => true, (e) => { if (e.code === 'ERR_MODULE_NOT_FOUND') return false; throw e; });
+if (!HAS_CONTACT) console.log('SKIP contact tools present: contact/ does not resolve here (npm ci in contact/); the absent case still runs');
+const LISTED = [...IDENTITY_TOOLS, ...(HAS_CONTACT ? CONTACT_TOOLS : [])].sort();
+// The relay is its own AGPL package, absent from this one's export.
+const RELAY_DIR = process.env.SIGELO_RELAY_DIR ?? join(here, '..', '..', 'relay');
+const HAS_RELAY = HAS_CONTACT && existsSync(join(RELAY_DIR, 'server.mjs'));
+if (HAS_CONTACT && !HAS_RELAY) console.log('SKIP contact tools against a relay: no relay checkout (set SIGELO_RELAY_DIR)');
+
 try {
   // ---------------- identity-only server
   const idFile = join(dir, 'agent.local.json');
@@ -67,14 +83,14 @@ try {
   const disc = await c.rpc('server/discover', { _meta: M });
   ok(disc.result?.resultType === 'complete' && disc.result.supportedVersions.includes('2026-07-28') && disc.result._meta['io.modelcontextprotocol/serverInfo'].name === 'sigelo', 'server/discover');
   const ml = await c.rpc('tools/list', { _meta: M });
-  ok(ml.result.resultType === 'complete' && ml.result.cacheScope === 'public' && Number.isInteger(ml.result.ttlMs) && ml.result.tools.length === 9, 'modern tools/list');
+  ok(ml.result.resultType === 'complete' && ml.result.cacheScope === 'public' && Number.isInteger(ml.result.ttlMs) && ml.result.tools.length === LISTED.length, 'modern tools/list');
   const mc = await c.rpc('tools/call', { name: 'sigelo_whoami', arguments: {}, _meta: M });
   ok(mc.result.resultType === 'complete' && mc.result.isError === true, 'modern tools/call carries resultType');
   const bad = await c.rpc('tools/list', { _meta: { ...M, 'io.modelcontextprotocol/protocolVersion': '2099-01-01' } });
   ok(bad.error?.code === -32022 && bad.error.data.requested === '2099-01-01', 'unsupported modern version → -32022');
   ok((await c.rpc('ping')).result !== undefined, 'ping');
   const list = (await c.rpc('tools/list')).result.tools.map((t) => t.name).sort();
-  ok(list.join() === ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'].join(), 'tools/list without keeper = 9 identity tools', list.join());
+  ok(list.join() === LISTED.join(), `tools/list without keeper = 9 identity tools${HAS_CONTACT ? ' + 6 contact tools' : ''}`, list.join());
 
   let r = await c.call('sigelo_whoami');
   ok(r.isError && /sigelo_init/.test(r.text), 'whoami before init points at sigelo_init');
@@ -182,7 +198,7 @@ try {
   const c3 = client({ SIGELO_IDENTITY: idFile, SIGELO_WALLET_URL: url, SIGELO_WALLET_TOKEN: TOKEN });
   await c3.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   const tools = (await c3.rpc('tools/list')).result.tools;
-  ok(tools.length === 13 && tools.some((t) => t.name === 'sigelo_forget_issuer'), 'tools/list with keeper = 13');
+  ok(tools.length === LISTED.length + 4 && tools.some((t) => t.name === 'sigelo_forget_issuer'), `tools/list with keeper = ${LISTED.length + 4}`);
   ok(tools.every((t) => t.inputSchema?.type === 'object' && t.description.length < 700), 'schemas are objects, descriptions short');
   r = await c3.call('sigelo_wallet_balance');
   ok(!r.isError && /^BALANCE 1.5 XMR/.test(r.text) && r.structured.status === 'done', 'wallet_balance', r.text);
@@ -201,6 +217,197 @@ try {
   r = await c4.call('sigelo_wallet_balance');
   ok(r.isError && /^REFUSED/.test(r.text), 'wrong token → REFUSED line', r.text);
   c4.close();
+
+  // ---------------- contact tools, where sigelo-contact resolves
+  if (HAS_CONTACT) {
+    // A relay name that leads to a closed loopback port: accept parses and stores the code, then
+    // cannot connect, and keeps its answer queued. Nothing here reaches a network.
+    const closed = createServer();
+    await new Promise((res) => closed.listen(0, '127.0.0.1', res));
+    const port = closed.address().port;
+    await new Promise((res) => closed.close(res));
+    const c5 = client({ SIGELO_IDENTITY: join(dir, 'contact.local.json'), SIGELO_RELAY: 'relay.test',
+      SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${port}`, http: `http://127.0.0.1:${port}` } }) });
+    await c5.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
+    ok(!(await c5.call('sigelo_init', { recovery: rec.key })).isError, 'contact: init');
+    r = await c5.call('sigelo_contacts');
+    ok(!r.isError && r.data.contacts.length === 0 && r.data.invites.length === 0 && r.data.answers.length === 0, 'contact: sigelo_contacts on a fresh identity', r.text);
+    r = await c5.call('sigelo_send', { to: 'nobody', text: 'hi' });
+    ok(r.isError && /^REFUSED: not_contact/.test(r.text), 'contact: send to an unknown name refused by name', r.text);
+    r = await c5.call('sigelo_accept', { code: 'sgl1notacode' });
+    ok(r.isError && /^REFUSED: code_checksum/.test(r.text), 'contact: a mistyped code fails code_checksum', r.text);
+    const { makeInvite } = await import('../../contact/invite.mjs');
+    const code = makeInvite({ did: worldDid, relay: 'relay.test', now: Math.floor(Date.now() / 1000) }).text;
+    r = await c5.call('sigelo_accept', { code: `  ${code.slice(0, 60)}
+${code.slice(60)}
+`, wait: 1 });
+    ok(r.isError && /^REFUSED: connect/.test(r.text) && /queued/.test(r.text), 'contact: a wrapped code is read; the closed relay leaves the answer queued', r.text);
+    r = await c5.call('sigelo_contacts');
+    ok(r.data?.answers.length === 1 && r.data.answers[0].did === worldDid && r.data.answers[0].relay === 'relay.test', 'contact: the answer names the code\'s DID', r.text);
+    c5.close();
+
+    // Run from node_modules: no contact tools, and the bare name sigelo-contact is never loaded. It
+    // is not published, so whoever registers it would be handed the identity secret.
+    const nm = join(dir, 'node_modules'), squat = join(nm, 'sigelo-contact'), marker = join(dir, 'squatter-ran');
+    mkdirSync(join(nm, 'sigelo-mcp'), { recursive: true });
+    mkdirSync(squat);
+    copyFileSync(join(here, 'contact.mjs'), join(nm, 'sigelo-mcp', 'contact.mjs'));
+    writeFileSync(join(squat, 'package.json'), '{"name":"sigelo-contact","type":"module"}');
+    for (const f of ['carrier.mjs', 'kdf.mjs']) writeFileSync(join(squat, f), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'x');\n`);
+    const installed = await import(pathToFileURL(join(nm, 'sigelo-mcp', 'contact.mjs')).href);
+    const idLib = await import('../../adapters/moadim/sigelo-agent.ts');
+    ok(await installed.load({ installed: true, id: idLib }) === null && !existsSync(marker), 'contact: installed from npm, no contact tools and the name sigelo-contact is not loaded');
+    // Outside integrations/mcp of a clone (an npm tarball unpacked with tar at <shared>/x/package):
+    // a contact/ planted two levels up, package.json and all, is never loaded.
+    const lay = join(dir, 'shared'), plant = join(lay, 'contact'), marker2 = join(dir, 'plant-ran');
+    mkdirSync(join(lay, 'x', 'package'), { recursive: true });
+    mkdirSync(plant);
+    copyFileSync(join(here, 'contact.mjs'), join(lay, 'x', 'package', 'contact.mjs'));
+    writeFileSync(join(plant, 'package.json'), '{"name":"sigelo-contact","type":"module"}');
+    for (const f of ['carrier.mjs', 'kdf.mjs']) writeFileSync(join(plant, f), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker2)}, 'x');\n`);
+    const unpacked = await import(pathToFileURL(join(lay, 'x', 'package', 'contact.mjs')).href);
+    ok(await unpacked.load({ installed: false, id: idLib }) === null && !existsSync(marker2), 'contact: outside integrations/mcp of a clone, a planted contact/ is not loaded');
+  }
+
+  // ---------------- contact tools against a loopback relay, two servers
+  if (HAS_RELAY) {
+    const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
+    const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
+    const relay = await startRelay({ host: 'relay.test', db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, log: () => {},
+      policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024 }) });
+    const env = { SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } }) };
+    const a = client({ ...env, SIGELO_IDENTITY: join(dir, 'alice.local.json') }), b = client({ ...env, SIGELO_IDENTITY: join(dir, 'bob.local.json') });
+    try {
+      for (const x of [a, b]) {
+        await x.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
+        ok(!(await x.call('sigelo_init', { recovery: rec.key })).isError, 'relay: init');
+      }
+      const aDid = (await a.call('sigelo_whoami')).data.did, bDid = (await b.call('sigelo_whoami')).data.did;
+
+      // wait bounds a session: refused by name, before anything connects.
+      for (const wait of ['x', 1e12, -1, 1.5, 301]) {
+        r = await b.call('sigelo_inbox', { wait });
+        ok(r.isError && /^REFUSED: wait: whole seconds, 0 to 300$/.test(r.text), `relay: sigelo_inbox refuses wait ${JSON.stringify(wait)}`, r.text);
+      }
+      const code = (await a.call('sigelo_invite', { name: 'bob' })).data?.code;
+      ok(/^sgl1/.test(code ?? ''), 'relay: sigelo_invite');
+      const t0 = Date.now();
+      r = await b.call('sigelo_accept', { code, wait: 1e12 });
+      ok(r.isError && /^REFUSED: wait:/.test(r.text) && Date.now() - t0 < 5000, 'relay: sigelo_accept refuses wait 1e12 at once', r.text);
+
+      // Both online: alice's inbox is connected while bob accepts, so accept answers connected,
+      // with the pairing id of a live contact.
+      const aw = a.call('sigelo_inbox', { wait: 8 });
+      r = await b.call('sigelo_accept', { code, name: 'alice', wait: 30 });
+      ok(!r.isError && r.data.status === 'connected' && r.data.contact.did === aDid && /^[0-9a-f]{32}$/.test(r.data.contact.pair ?? ''), 'relay: sigelo_accept with the inviter online: connected, with the pairing id', r.text);
+      const pair = r.data?.contact?.pair;
+      r = await aw;
+      ok(!r.isError && r.data.events.some((e) => e.type === 'paired' && e.did === bDid) && r.data.more === 0, 'relay: alice\'s sigelo_inbox reports the pairing', r.text);
+      await a.call('sigelo_inbox', { wait: 1 });   // bob's prekeys, if they came after
+      ok((await a.call('sigelo_contacts')).data?.contacts[0]?.pair === pair && (await b.call('sigelo_contacts')).data?.contacts[0]?.pair === pair, 'relay: both sides list the same pairing id');
+
+      // Parallel tool calls on one server, as a client issues them: one at a time per identity, so
+      // no call takes the relay connection from another.
+      const results = [];
+      for (const round of [0, 1]) {
+        results.push(...await Promise.all([
+          a.call('sigelo_send', { to: 'bob', text: `p${round}a` }), a.call('sigelo_send', { to: 'bob', text: `p${round}b` }),
+          a.call('sigelo_inbox'), a.call('sigelo_send', { to: 'bob', text: `p${round}c` })]));
+      }
+      const sends = results.filter((_, i) => i % 4 !== 2), inboxes = results.filter((_, i) => i % 4 === 2);
+      ok(sends.every((x) => !x.isError && x.data.status === 'sent'), 'relay: 6 parallel sends, every one sent', sends.map((x) => x.text.slice(0, 120)).join(' | '));
+      ok(inboxes.every((x) => !x.isError && x.data.offline === undefined), 'relay: the inbox calls between them stay online', inboxes.map((x) => x.text.slice(0, 120)).join(' | '));
+      const got = [];
+      for (let i = 0; i < 3 && got.length < 6; i++) got.push(...((await b.call('sigelo_inbox', { wait: 2 })).data?.messages ?? []).map((m) => m.content));
+      ok(got.join() === 'p0a,p0b,p0c,p1a,p1b,p1c', 'relay: bob reads the 6 once each, in order', got.join());
+
+      // A contact's nested message (content is any JSON; sigelo's parser allows 512 levels) beside
+      // two short ones. The page is measured in the text the client gets: compact, so 500 levels
+      // are 1,000 characters, where the indented result was 507,009 and carried the other two.
+      const lib = await import('../../contact/carrier.mjs'), idLib = await import('../../adapters/moadim/sigelo-agent.ts');
+      const bFile = join(dir, 'bob.local.json');
+      const bobCarrier = new lib.Carrier({ identity: () => { const s = idLib.load(bFile); return { secret: idLib.secretOf(s), bundle: idLib.bundleOf(s) }; }, ...lib.pathsFor(bFile), ...lib.optionsFromEnv(env) });
+      let nested = [];
+      for (let i = 1; i < 500; i++) nested = [nested];
+      const sentNested = await bobCarrier.sendAll('alice', ['important 1', nested, 'important 2'], { label: '' });
+      ok(sentNested.every((x) => x.status === 'sent'), 'relay: bob sends a 500-level nested array between two short messages', JSON.stringify(sentNested).slice(0, 200));
+      r = await a.call('sigelo_inbox', { wait: 2 });
+      ok(r.data?.messages.length === 3 && r.data.messages[0].content === 'important 1' && JSON.stringify(r.data.messages[1].content) === JSON.stringify(nested)
+        && r.data.messages[2].content === 'important 2' && r.data.more === 0 && r.text.length < 3000, 'relay: one result carries all three, its text compact', `${r.text.length} characters`);
+
+      // An inbox past one result: a contact's 150,000-character message must not take the other
+      // messages of the batch with it. The first result stops before it; the next carries it alone.
+      // What did not fit is held beside the identity (0600), so a restarted server returns it.
+      ok((await b.call('sigelo_send', { to: 'alice', text: 'the meeting moved to 3pm' })).data?.status === 'sent', 'relay: a short message');
+      const big = 'y'.repeat(150000);
+      ok((await b.call('sigelo_send', { to: 'alice', text: big })).data?.status === 'sent', 'relay: a 150,000-character message');
+      ok((await b.call('sigelo_send', { to: 'alice', text: 'and bring the notes' })).data?.status === 'sent', 'relay: another short one');
+      const r1 = await a.call('sigelo_inbox', { wait: 2 });
+      ok(r1.data?.messages.map((m) => m.content).join() === 'the meeting moved to 3pm' && r1.data.more === 2 && r1.text.length <= 24000, 'relay: the first result stops before the big message and says 2 more', r1.text.slice(0, 200));
+      const heldFile = join(dir, 'alice.local.held.json');
+      ok(existsSync(heldFile) && (statSync(heldFile).mode & 0o777) === 0o600, 'relay: the two that did not fit are held in a 0600 file beside the identity');
+      a.close();
+      await a.exited;
+      const a2 = client({ ...env, SIGELO_IDENTITY: join(dir, 'alice.local.json') });
+      try {
+        await a2.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
+        const r2 = await a2.call('sigelo_inbox'), r3 = await a2.call('sigelo_inbox'), r4 = await a2.call('sigelo_inbox');
+        ok(r2.data?.messages.length === 1 && r2.data.messages[0].content === big && r2.data.more === 1, 'relay: after a restart, the next result carries the big one alone', r2.text.slice(0, 200));
+        ok(r3.data?.messages.map((m) => m.content).join() === 'and bring the notes' && r3.data.more === 0 && !existsSync(heldFile), 'relay: then the rest, and nothing is held', r3.text.slice(0, 200));
+        ok(r4.data?.messages.length === 0 && r4.data.more === 0, 'relay: and nothing twice', r4.text.slice(0, 200));
+      } finally { a2.close(); await a2.exited; }
+    } finally {
+      a.close(); b.close();
+      await Promise.all([a.exited, b.exited]);
+      await relay.close();
+    }
+  }
+
+  // ---------------- contact tools absent: a copy of the server beside no contact/
+  const copy = join(dir, 'clone'), mcp = join(copy, 'integrations', 'mcp');
+  mkdirSync(mcp, { recursive: true });
+  for (const f of ['server.mjs', 'contact.mjs']) copyFileSync(join(here, f), join(mcp, f));
+  for (const d of ['ts', 'adapters']) symlinkSync(join(here, '..', '..', d), join(copy, d), 'junction');
+  const listOf = async (cl) => { await cl.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } }); return (await cl.rpc('tools/list')).result.tools.map((t) => t.name).sort().join(); };
+  const c6 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
+  ok(await listOf(c6) === IDENTITY_TOOLS.join(), 'no sigelo-contact: the 9 identity tools only');
+  ok((await c6.rpc('tools/call', { name: 'sigelo_contacts', arguments: {} })).error?.code === -32602, 'no sigelo-contact: sigelo_contacts is an unknown tool');
+  c6.close();
+  rmSync(join(mcp, 'contact.mjs'));
+  const c7 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
+  ok(await listOf(c7) === IDENTITY_TOOLS.join(), 'a package without contact.mjs: the 9 identity tools only');
+  c7.close();
+  // A contact/ that is there but broken stops the server: it must not pass for an absent one. First
+  // one whose package.json does not name sigelo-contact, then one with no carrier.mjs.
+  copyFileSync(join(here, 'contact.mjs'), join(mcp, 'contact.mjs'));
+  mkdirSync(join(copy, 'contact'));
+  const cpkg = join(copy, 'contact', 'package.json');
+  const c11 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
+  c11.close();
+  ok(await c11.exited !== 0 && /contact[\\/]package\.json is missing, not sigelo-contact/.test(c11.stderr()), 'a contact/ without its package.json stops the server, naming it', c11.stderr().slice(0, 300));
+  writeFileSync(cpkg, '{"name":"sigelo-contact","type":"module"}');
+  writeFileSync(join(copy, 'contact', 'kdf.mjs'), '\n');
+  const c12 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
+  c12.close();
+  ok(await c12.exited !== 0 && /contact[\\/]carrier\.mjs/.test(c12.stderr()), 'a contact/ without carrier.mjs stops the server, naming it', c12.stderr().slice(0, 300));
+  for (const f of ['carrier.mjs', 'kdf.mjs']) writeFileSync(join(copy, 'contact', f), 'export const = ;\n');
+  const c8 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
+  c8.close();
+  ok(await c8.exited !== 0 && /SyntaxError/.test(c8.stderr()) && /contact[\\/](carrier|kdf)\.mjs/.test(c8.stderr()), 'a broken contact/ stops the server, naming the error', c8.stderr().slice(0, 200));
+  // So does a file missing inside contact/: only a missing contact/ or a missing npm package is absence
+  // (or a server outside integrations/mcp of a clone).
+  writeFileSync(join(copy, 'contact', 'carrier.mjs'), "import './envelope.mjs';\n");
+  writeFileSync(join(copy, 'contact', 'kdf.mjs'), '\n');
+  const c9 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
+  c9.close();
+  ok(await c9.exited !== 0 && /contact[\\/]envelope\.mjs/.test(c9.stderr()), 'a file missing inside contact/ stops the server, naming it', c9.stderr().slice(0, 300));
+  // Dependencies not installed (npm ci not run in contact/): no contact tools, said on stderr.
+  writeFileSync(join(copy, 'contact', 'carrier.mjs'), "import 'sigelo-test-package-not-installed';\n");
+  const c10 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
+  ok(await listOf(c10) === IDENTITY_TOOLS.join(), 'contact/ without its dependencies: the 9 identity tools only');
+  c10.close();
+  await c10.exited;
+  ok(/no contact tools: .*sigelo-test-package-not-installed.*\(npm ci in contact\/\)/.test(c10.stderr()), 'and one line on stderr names the package', c10.stderr().slice(0, 300));
 } finally {
   keeper.close();
   rmSync(dir, { recursive: true, force: true });

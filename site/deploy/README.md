@@ -15,9 +15,9 @@ site/deploy/deploy.sh sigelo@sigelo.io --rollback  # serve the previous upload a
 | `check.mjs` | fetches the live site and checks types, negotiation, sha256s, the build commit = local HEAD, headers, HSTS, redirects | your machine (node ≥ 22, no deps) |
 | `nginx.conf` | the server config; deploy.sh reinstalls it on every deploy | server: `/etc/nginx/conf.d/sigelo.io.conf` (Alpine: `http.d/`) |
 | `sigelo-nginx-apply` | root helper: allowlist check, install, `nginx -t` (restores the old file on failure), reload | server: `/usr/local/sbin/`, via one sudo rule |
-| `server-setup.sh` | ONE-TIME server preparation, as root, by hand | server |
+| `server-setup.sh` | ONE-TIME server preparation, as root, by hand; `--relay` prepares the relay's host instead ("The relay host") | server |
 | `stats-agents.sh` | the agent/human split of the visits as `agents.txt` (≤ 40 lines, phone-sized); `server-setup.sh --stats` installs it with the 15-minute timer | server: `/usr/local/sbin/sigelo-stats-agents` |
-| `watch.sh` | the watchdog: reachability probes (site, TLS, `/world/stats`, `/mcp`), notify when down, throttled | the Owner's phone: `~/.local/bin/sigelo-watch` + `sigelo-watch.timer` (user) |
+| `watch.sh` | the watchdog: reachability probes of sigelo.io (site, TLS, `/world/stats`, `/mcp`) and sigelo.ai (front page, `/challenge`, MQTT, TLS), notify when down, throttled | the Owner's phone: `~/.local/bin/sigelo-watch` + `sigelo-watch.timer` (user) |
 | `apache.conf` | the same behaviour for Apache 2.4; install by hand, deploy with `--no-config` | server |
 | `mirror-release.sh` | `<tag> [user@host]`: `gh release download` → every file against SHA256SUMS → upload to `releases/<tag>/` (never changed once there) → `releases/index.json`, `latest` → re-download over HTTPS and compare | your machine (gh, node, ssh) |
 
@@ -63,8 +63,9 @@ commit leaves `dist.prev` pointing at the real previous version.
 | `sigelo.io` | A | the server's IPv4 |
 | `sigelo.io` | AAAA | the server's IPv6 (omit if it has none — nginx.conf listens on `[::]`; drop those lines if the kernel has IPv6 disabled) |
 | `www.sigelo.io` | A, AAAA | the same addresses (or a CNAME to `sigelo.io`) |
-| `sigelo.net`, `www.sigelo.net` | A, AAAA | the same addresses; both names 301 to `https://sigelo.io` and sit on the same certificate (the Owner holds `.net` too) |
-| `sigelo.org`, `sigelo.online`, `sigelo.dev`, `sigelo.ai` (apex and `www` each) | A | the same IPv4 as `sigelo.io`; redirect-only like `.net`, one nginx server group each (see "More held domains") |
+| `sigelo.net`, `www.sigelo.net` | A, AAAA | the same addresses; both names 301 to `https://sigelo.ai` and sit on the same certificate (the Owner holds `.net` too) |
+| `sigelo.online`, `sigelo.dev` (apex and `www` each) | A | the same IPv4 as `sigelo.io`; redirect-only, one nginx server group each (see "More held domains"); `sigelo.org` is parked: no record here |
+| `sigelo.ai`, `www.sigelo.ai`, `relay.sigelo.ai` | A, AAAA | the relay's host, not this one ("The relay host") |
 | `sigelo.io` | CAA (optional) | `0 issue "letsencrypt.org"` — only Let's Encrypt may issue for the domain |
 
 Mail records for `contact@` / `security@sigelo.io` (MX, SPF, DKIM, DMARC) depend on the mail host
@@ -108,10 +109,13 @@ install -d -m 0700 /var/backups/sigelo-nginx
 # 4. the distribution's default site (logs client addresses, claims default_server)
 rm -f /etc/nginx/sites-enabled/default /etc/nginx/http.d/default.conf
 
-# 5. the helper and its sudo rule
-install -m 0755 -o root -g root sigelo-nginx-apply /usr/local/sbin/sigelo-nginx-apply
-echo 'sigelo ALL=(root) NOPASSWD: /usr/local/sbin/sigelo-nginx-apply' > /etc/sudoers.d/sigelo-deploy.tmp
+# 5. the helper and its sudo rule: only the argument lists deploy.sh sends ("" = none). A bare path
+#    lets sudo pass any, and `sigelo-nginx-apply --check FILE` as root prints the lines of any file.
+A=/usr/local/sbin/sigelo-nginx-apply
+install -m 0755 -o root -g root sigelo-nginx-apply $A
+echo "sigelo ALL=(root) NOPASSWD: $A \"\", $A --os debian, $A --os alpine" > /etc/sudoers.d/sigelo-deploy.tmp
 chmod 0440 /etc/sudoers.d/sigelo-deploy.tmp && visudo -cf /etc/sudoers.d/sigelo-deploy.tmp && mv /etc/sudoers.d/sigelo-deploy.tmp /etc/sudoers.d/sigelo-deploy
+sudo -l -U sigelo $A --check /etc/shadow || echo refused   # must print refused (server-setup.sh checks this)
 
 # 6. certificate: a port-80-only bootstrap config (CONF = /etc/nginx/conf.d/sigelo.io.conf, Alpine /etc/nginx/http.d/sigelo.io.conf)
 cat > "$CONF" <<'BOOT'
@@ -170,14 +174,16 @@ deploy, so installer edits would be overwritten; the certificate paths are writt
 instead. Renewal uses the same authenticator against the port-80 server block; if it ever fails,
 `certbot renew --webroot -w /var/www/acme` works with the same config.
 
-## More held domains: sigelo.org, .online, .dev, .ai
+## More held domains: sigelo.online, .dev
 
-Each has its own port-80 and TLS server group in `nginx.conf` (301 to `https://sigelo.io`, HSTS on
-the redirect, no content), so one can later get its own role by editing its group alone. Their
-names join the `sigelo.io` certificate lineage only once their DNS points at the server: until
-then the deploy works, nginx serves them the `sigelo.io` certificate (clients refuse it), and
-`check.mjs` prints `skip … (DNS not pointed yet …)` for their eight redirect checks; once a name's A
-record matches `sigelo.io`'s, its check passes or fails like `.net`. Per domain in the registrar:
+Each has its own port-80 and TLS server group in `nginx.conf` (a 301 with the path kept, HSTS on
+the redirect, no content): `.online`, like `.net`, to `https://sigelo.ai`, `.dev` to
+`https://sigelo.io` (`site/build.mjs` DOMAINS is the one table). `sigelo.ai` is the relay's, on its
+own host ("The relay host"); `sigelo.org` is parked, with no group. Their names join the
+`sigelo.io` certificate lineage only once their DNS points at the server: until then the deploy
+works, nginx serves them the `sigelo.io` certificate (clients refuse it), and `check.mjs` prints a
+`skip` for their redirect checks; once a name's A record matches `sigelo.io`'s, its check passes or
+fails like `.net` (then mark it live in DOMAINS). Per domain in the registrar:
 A `@` and A `www` = `sigelo.io`'s address, CAA `0 issue "letsencrypt.org"`, TXT `@` `v=spf1 -all`,
 TXT `_dmarc` `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s; rua=mailto:security@sigelo.io`, no
 MX, no parking wildcard, DNSSEC on. `.dev` is HSTS-preloaded (browsers use HTTPS only; HTTP-01 on
@@ -203,11 +209,10 @@ resolves to. Rerun it whenever the Owner has pointed another domain.
 site/deploy/deploy.sh sigelo@sigelo.io --os debian    # or alpine
 ```
 
-nginx.conf ships `Strict-Transport-Security: max-age=300`, so a TLS mistake on day one cannot
-lock visitors out for a year. When `check.mjs` passes against the live site (it prints a `note`
-while max-age is below a year), change every HSTS line in `nginx.conf` to `max-age=31536000`,
-commit, deploy. No `includeSubDomains` or `preload`: both bind every future subdomain, the Owner's
-call.
+The first deploys sent `Strict-Transport-Security: max-age=300`, so a TLS mistake on day one could
+not lock visitors out for a year; nginx.conf sends `max-age=31536000` since `check.mjs` passed
+against the live site (it prints a `note` while max-age is below a year). No `includeSubDomains`
+or `preload`: both bind every future subdomain, the Owner's call.
 
 ## The check
 
@@ -259,7 +264,7 @@ against local servers and never reach the site. Before this change the checks se
 location; world/README.md is the whole story. Once, after a first deploy has shipped `world-app/`:
 `sh server-setup.sh --world sha256:<recovery commitment>` (with `sigelo-world.service` and
 `sigelo-world-apply` beside it) installs nodejs, the unit, the issuer key and the second sudo rule
-(`sigelo-world-apply`: restart the unit, nothing else). Commit the printed genesis as `world/genesis.json`.
+(`sigelo-world-apply` with no argument: restart the unit, nothing else). Commit the printed genesis as `world/genesis.json`.
 
 ## Releases (`/releases/`)
 
@@ -277,14 +282,22 @@ through the `dist/releases` symlink rather than a second `root`.
 ## Watchdog, self-check, state backup
 
 **Phone** — `site/deploy/watch.sh`, installed as `~/.local/bin/sigelo-watch` with
-`~/.config/systemd/user/sigelo-watch.{service,timer}` (every 15 minutes). It asks only whether the
-site is reachable and working — `/`, `/llms.txt`, `/index.json`, `/spec.md`, the `http://` → `https://`
-301, a certificate valid 7 more days, `/world/stats`, `/mcp` initialize — never content or release
-state (that is `check.mjs --quiet` at deploy time). A failure is retried after 20 s, and does not
-count when the phone itself is offline. One `notify-send -u critical` when an incident starts, then
-at most one an hour (a global `last-notify` cap, whatever the state); recovery is a log line;
-success is silent. Log: `~/.local/share/sigelo-watch/alerts.log`. Tests use `--no-notify`;
-`--origin URL` implies it and a scratch state, so a test never changes what the timer watches.
+`~/.config/systemd/user/sigelo-watch.{service,timer}` (every 15 minutes). It asks only whether each
+site is reachable and working, never content or release state (that is `check.mjs` at deploy
+time). sigelo.io: `/`, `/llms.txt`, `/index.json`, `/spec.md`, the `http://` → `https://` 301, a
+certificate valid 7 more days, `/world/stats`, `/mcp` initialize. sigelo.ai: `/`,
+`https://relay.sigelo.ai/challenge`, an MQTT CONNECT over TLS on `relay.sigelo.ai:8883` answered by a
+CONNACK (the refused login of a probe without identity counts as up; CONNACK 0, that login
+accepted, counts as down), both certificates valid 7 more days. A failure is retried after 20 s, and does not count when the phone itself is offline.
+Each site has its own state: it is down from its second failing tick in a row; then one
+`notify-send -u critical`, at most one every 6 hours while it lasts, never two within an hour across
+both sites (a page held back goes out on a later tick); recovery is a log line; success is silent.
+Log: `~/.local/share/sigelo-watch/alerts.log`. Tests use `--no-notify`; `--origin URL` (the
+sigelo.io probes) and `--relay-origin URL [--relay-host HOST[:PORT]]` (the sigelo.ai probes) imply it
+and a scratch state (removed on exit, its log printed first), so a test never changes what the
+timer watches; `--self-test` runs the paging rules above against stubs (no probe goes out, no
+notification). Install this version only once sigelo.ai is live: until then its probes fail and
+would page.
 
 **Server, self-healing** — `server-setup.sh --guard`: `nginx.service` gets `Restart=on-failure`
 (a drop-in; Debian ships `Restart=no`), `sigelo-world.service` already has `Restart=always`, and
@@ -302,6 +315,64 @@ the stats, encrypted with age to a recipient whose identity is only on the Owner
 pulls the newest into `~/.local/share/sigelo-vps-state/`, which its own passphrase-encrypted
 archive then carries back to the VPS: each side holds the other's secrets, encrypted to a key the
 holder lacks.
+
+## The relay host (`server-setup.sh --relay`)
+
+The relay (csigelo/sigelo-relay, its own public repository) runs on a Debian 13 host of its own
+behind sigelo.ai, www.sigelo.ai and relay.sigelo.ai. `--relay` prepares that host; no sigelo.io step
+runs. It needs `site/deploy/server-setup.sh` from this repository and, from the relay repository's
+`deploy/`, `sigelo-relay-apply`, `sigelo-relay.service` and `backup.sh`, side by side. As root over
+ssh the first time (later as `csigelo`, with `sudo`), from a directory holding the four files:
+
+```sh
+ssh root@HOST 'mkdir -p /tmp/s'
+scp server-setup.sh sigelo-relay-apply sigelo-relay.service backup.sh root@HOST:/tmp/s/
+ssh -t root@HOST "sh /tmp/s/server-setup.sh --relay --key '<deploy key>' --admin-key '<admin key>' --backup age1…"
+```
+
+| Step | What |
+|---|---|
+| R1–R3 | packages; UTC and NTP (systemd-timesyncd); journald persistent, 500 MB, 2 GB kept free, the relay's namespace 7 days (its files rotate daily, at the first line written after a day: no line outlives the 7 days by more than a day while the relay writes daily; one silent for longer keeps its last lines until its next) |
+| R4 | users `csigelo` (admin; sudo asks its password: `passwd csigelo`), `sigelo` (deploy, key only: its keys in `/etc/ssh/authorized_keys/sigelo`, a file only root writes, which `--key` replaces whole, so a rerun with the new key alone revokes every other; no cron or at jobs, which would outlive a revoked key), `sigelo-relay` (system, no shell, locked) |
+| R5 | `/var/lib/sigelo-relay` (sigelo-relay 0700), `/opt/sigelo-relay` (root), `/var/www/sigelo.ai/dist` → `/opt/sigelo-relay/app/site/dist`, `/var/log/nginx/sigelo` |
+| R6 | Node.js 24 from NodeSource, pinned; the keyring installed must hold exactly the one key of the pinned fingerprint (Debian's nodejs has no `node:sqlite`) |
+| R7 | the unit (enabled; the first deploy starts it), `/etc/sigelo-relay.env` (written once, then kept: further `RELAY_*` settings go there), the helper `sigelo-relay-apply` and its sudo rule (no argument, or `--rollback`) |
+| R8–R9 | nginx (default site removed, errors at `crit`, its own error log in `/var/log/nginx/sigelo/` beside the sites', all 7 days); two certificates (webroot `/var/www/acme`; rerun after DNS changes; a `--test-cert` one is replaced by a run without the flag): lineage `sigelo.ai` for nginx, for each of the three names whose DNS points here, and lineage `relay.sigelo.ai` for the broker, for that name alone. A deploy hook copies only the `relay.sigelo.ai` lineage to `/etc/sigelo-relay/tls/` and reloads the relay and nginx: the broker parses untrusted packets, so a key taken from it must be valid for no other name, sigelo.ai's pay pages included (`check.mjs` fails a broker certificate naming more). The step runs the hook whenever that copy is missing or differs (after a restore, also with `--skip-cert`) |
+| R10–R11 | fail2ban `sshd` jail (the `nginx-limit-req` jail is written but off: nginx logs nothing below `crit` here); unattended upgrades with NodeSource, reboot at 04:30 UTC when needed |
+| R12 | nftables: inbound 22, 80, 443, 8883; only table `inet filter` is replaced, so fail2ban's survives. The first time it arms a 3-minute rollback: from a new ssh session, `systemctl stop sigelo-nft-rollback.timer && systemctl enable nftables` |
+| R13 | sshd: root off, keys only, `AllowUsers csigelo sigelo` — only once csigelo has a password and is in group `sudo`, and both users have a key; then empty root's `authorized_keys` |
+| R14 | with `--backup`: `deploy/backup.sh` as `sigelo-relay-backup`, daily 03:30 Europe/Berlin |
+| R15 | `nginx.service` gets `Restart=on-failure` (a drop-in); root's hourly `sigelo-relay-selfcheck.timer`: the relay on 127.0.0.1:8791 (`/challenge`) and :8883 (a TLS handshake), then nginx (`/challenge` and `/` on 127.0.0.1); it restarts the failing unit (nginx only after `nginx -t`), leaves a unit stopped by hand alone, logs to `journalctl -u sigelo-relay-selfcheck` |
+
+It exits 1 and lists what is left (a password, the firewall confirmation, DNS) until a rerun finds
+nothing.
+
+**Deploy** — never from this tree: from the relay's own repository (`release/publish.sh --relay
+<dir>`), `npm ci && deploy/deploy.sh` (ssh alias `sigelo-relay-deploy` = `sigelo@` the host). Every
+`package-lock.json` entry must carry its registry URL and sha512 integrity; then the tests (`npm
+test`, `test/allowance.mjs`), the helper's nginx allowlist over `deploy/nginx.conf` and the front
+page build (`--final`). The release is staged here: the tracked files, `site/dist`, and `npm ci
+--omit=dev --ignore-scripts --no-bin-links` in the stage (each package checked against its sha512,
+no install script run), hashed twice (the code, the dependencies). The stage goes up whole,
+`node_modules` included, to `/var/lib/sigelo/relay-stage`; nothing on the host fetches or
+installs. Then `sudo -n sigelo-relay-apply`: the stage read as the deploy user and unpacked
+root-owned into `/opt/sigelo-relay/app` (regular files and directories only; the last release kept
+as `app.prev`), the code and dependency sha256 in the journal, `deploy/nginx.conf` through an
+allowlist (fixed roots, log, certificate, upstream; no `include`) as
+`/etc/nginx/conf.d/sigelo-relay.conf` after `nginx -t`, a restart, and the previous release back if
+the relay does not come up. `deploy.sh` rolls the release back when either sha256 the helper logs
+is not the one it staged. Then `deploy/check.mjs`: front page, headers, `llms.txt`, `relay.json`,
+`/challenge`, MQTT CONNECT over TLS refused with CONNACK 4, both certificates (the broker's naming
+`relay.sigelo.ai` alone). `deploy/deploy.sh --rollback` swaps back.
+
+**Backup and restore** — `backup.sh` takes from `relay.db` the licences, the vendor chain, retired
+operator keys and each licensed operator's account and chain; never messages, claims or counters
+(`deploy/backup.sh --self-test`, in the relay export's proof, extracts from a seeded database and
+checks that). With the config and `/etc/letsencrypt` it writes `/home/csigelo/backup/relay-state-<stamp>.tgz.age`
+(7 kept), encrypted to a key the host does not hold. On a new host: untar `etc/letsencrypt` and
+`etc/sigelo-relay.env`, run `--relay` (R9 copies the restored `relay.sigelo.ai` certificate for the broker), deploy
+once (the relay creates its tables), `systemctl stop sigelo-relay`, `sigelo-relay-backup --restore
+<relay-licences.db, readable by sigelo-relay>`, start it.
 
 ## Rebuilding the server
 

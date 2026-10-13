@@ -260,7 +260,7 @@ const apply = join(ROOT, 'site/deploy/sigelo-nginx-apply'), conf = join(ROOT, 's
 ok(spawnSync('sh', [apply, '--check', conf]).status === 0, 'site/deploy/nginx.conf passes the allowlist');
 const text = readFileSync(conf, 'utf8');
 ok(/location \^~ \/world\/ \{[^}]*limit_req zone=sigelo_world[^}]*client_max_body_size 256k;[^}]*proxy_pass http:\/\/127\.0\.0\.1:8790;/s.test(text) && /limit_req_zone \$sigelo_net zone=sigelo_world:\d+m rate=60r\/m;/.test(text), 'nginx.conf: /world/ is rate-limited per truncated address (60 r/m), 256 KB, proxied to 127.0.0.1:8790');
-ok(/location = \/mcp \{[^}]*limit_req zone=sigelo_world[^}]*client_max_body_size 256k;[^}]*proxy_pass http:\/\/127\.0\.0\.1:8790;/s.test(text) && /"~\^\\d\+ \/mcp\(\\\?\|\$\)" "no-store";/.test(text), 'nginx.conf: /mcp, the same zone, 256 KB and upstream, not cached');
+ok(/location = \/mcp \{[^}]*limit_req zone=sigelo_world[^}]*client_max_body_size 256k;[^}]*proxy_pass http:\/\/127\.0\.0\.1:8790;/s.test(text) && /"~\^\\d\+ \/mcp\$" "no-store";/.test(text), 'nginx.conf: /mcp, the same zone, 256 KB and upstream, not cached');
 for (const [bad, line] of [['foreign upstream', 'proxy_pass http://10.0.0.1:80;'], ['another zone key', 'limit_req_zone $remote_addr zone=x:1m rate=60r/m;'], ['header passing the address', 'proxy_set_header X-Real-IP $remote_addr;']]) {
   const p = join(dir, 'bad.conf'); writeFileSync(p, `server {\n    location ^~ /world/ {\n        ${line}\n    }\n}\n`);
   ok(spawnSync('sh', [apply, '--check', p]).status !== 0, `allowlist refuses ${bad}`);

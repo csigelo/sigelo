@@ -423,3 +423,23 @@ envelope = an attestation with `ctx`, no wire change) may instruct and call priv
 other-DID content is wrapped as data and can call nothing. Owner idea, 2026-10-02.
 Status: design and prototype in [gate/](gate/README.md), 2026-10-02 (Claude Code hook + Hermes plugin, offline, tested on
 crafted inputs, not live-tested or reviewed). Envelope: `ctx: "sigelo/instruction"`, `claims {text_sha256, nonce}`.
+
+## 7. Key providers: keychain, key agent, hardware (decided 2026-10-13)
+
+Today an agent's secret key is a field in its identity file, readable by anything running as that
+user, including the model if it has a shell. Nothing of ours ever receives it (the local MCP server
+and the sidecar make no network calls; the world, the remote verifier and the relay see signatures
+and ciphertext only), so the whole exposure is the agent's own machine. After the relay ships, in
+this order, each step keeping the DID and the file format:
+
+1. **Encrypted at rest, wrapping key in the OS keychain** (macOS Keychain, Windows Credential
+   Manager, Linux Secret Service), reached through each system's own command-line tool so the MCP
+   server stays dependency-free; plain file where no keychain exists (headless servers).
+2. **A local key agent**: a separate process holds the key and signs over a local socket, like the
+   SSH agent; the MCP server and the model's process never contain the raw key.
+3. **Hardware through the key agent**: first the FIDO2 `hmac-secret` extension (any FIDO2 token,
+   Nitrokey 3 and YubiKey included: the seed is derived on the token at each use, never stored on
+   disk), then on-token Ed25519 signing where the token supports it (OpenPGP card application on
+   Nitrokey 3 and recent YubiKeys). Moving an existing identity onto hardware is one rotation.
+
+Plan: `design/key-providers.md` (approved by the Owner 2026-10-13). Sequenced after the relay is deployed and running on sigelo.ai (§6); then K1–K6 in order, 59 agent-hours.

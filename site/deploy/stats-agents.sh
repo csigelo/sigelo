@@ -11,15 +11,19 @@
 #   net - - [time] "METHOD PATH PROTO" status bytes "referrer host" "user agent" "accept" rtime
 # Lines of the older sigelo_noip format (no network, no Accept) are counted too.
 # Classes, by user agent, first match wins:
-#   AI agent      ClaudeBot, Claude-User, Claude-SearchBot, anthropic-ai, GPTBot, OAI-SearchBot,
-#                 ChatGPT-User, PerplexityBot, Perplexity-User, CCBot, Google-Extended, Amazonbot,
-#                 Applebot-Extended, Bytespider
+#   AI agent      "Claude Code" (any user agent containing claude-code/, before Claude-User, whose
+#                 string it may carry), ClaudeBot, Claude-User, Claude-SearchBot, anthropic-ai,
+#                 GPTBot, OAI-SearchBot, ChatGPT-User, PerplexityBot, Perplexity-User, CCBot,
+#                 Amazonbot, Amzn-SearchBot, Amzn-User, Meta-ExternalAgent, Meta-ExternalFetcher,
+#                 MistralAI-User, DuckAssistBot, Google-Agent, Google-GeminiNotebook, Bytespider.
+#                 Not Google-Extended or Applebot-Extended: those are robots.txt tokens, never sent
+#                 as a user agent (Google's and Apple's crawler documentation).
 #   programmatic  node, undici, curl, wget, python-requests, Go-http-client (and a few kin)
 #   crawler       any other bot|crawl|spider|slurp
 #   browser       anything else starting Mozilla/
 #   other         the rest (an empty user agent included)
-# "agents" = AI agents + programmatic clients; "humans" = browsers. 301s (http->https, www and
-# .net -> apex) are redirect hops, not visits: left out everywhere. Top paths count 200/304 only,
+# "agents" = AI agents + programmatic clients; "humans" = browsers. 301s (http->https, www ->
+# apex, held domains -> their targets) are redirect hops, not visits: left out everywhere. Top paths count 200/304 only,
 # so scanners' 404s do not crowd them. ~vis = distinct (network, user agent, day): an estimate.
 # The project's own requests (user agent sigelo-selfcheck/, nginx.conf) are not visits: nginx logs
 # them to access-self.log (7 days kept), read here only to print their count as "own traffic
@@ -33,6 +37,7 @@ ls "$LOGDIR"/access.log* >/dev/null 2>&1 || { echo "sigelo-stats-agents: no logs
 for f in "$LOGDIR"/access.log* "$LOGDIR"/access-self.log*; do [ -f "$f" ] || continue; case $f in *.gz) gzip -dc "$f" ;; *) cat "$f" ;; esac; done | awk -F'"' -v now="$(date -u '+%Y-%m-%d %H:%M UTC')" '
 function cls(ua,    u, i) {
   u = tolower(ua); name = ""
+  if (index(u, "claude-code/")) { name = "Claude Code"; return "ai" }
   for (i = 1; i <= nai; i++) if (index(u, tolower(ai[i]))) { name = ai[i]; return "ai" }
   if (match(u, /^(node|undici|curl|wget|python-requests|go-http-client|python-urllib|python-httpx|aiohttp|axios|node-fetch|deno|bun)([\/ ]|$)/)) {
     name = substr(ua, 1, RLENGTH); sub(/[\/ ]$/, "", name); return "prog"
@@ -51,7 +56,7 @@ function top(arr, n, label,    k, best, bk, i, line) {
   }
 }
 BEGIN {
-  nai = split("ClaudeBot Claude-User Claude-SearchBot anthropic-ai GPTBot OAI-SearchBot ChatGPT-User PerplexityBot Perplexity-User CCBot Google-Extended Amazonbot Applebot-Extended Bytespider", ai, " ")
+  nai = split("ClaudeBot Claude-User Claude-SearchBot anthropic-ai GPTBot OAI-SearchBot ChatGPT-User PerplexityBot Perplexity-User CCBot Amazonbot Amzn-SearchBot Amzn-User Meta-ExternalAgent Meta-ExternalFetcher MistralAI-User DuckAssistBot Google-Agent Google-GeminiNotebook Bytespider", ai, " ")
   nf = split("/llms.txt /adopt.md /index.json /examples/world.mjs", fun, " ")
   for (i = 1; i <= nf; i++) isfun[fun[i]] = 1
   split("ai prog crawl browser other", order, " ")

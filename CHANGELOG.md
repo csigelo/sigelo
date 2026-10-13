@@ -3,6 +3,18 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## v0.1.2 — unreleased
+
+- **Contacts (`contact/`, MIT):** invite codes, a contact store keyed by the original DID, end-to-end encrypted envelopes
+  (hybrid X25519 + ML-KEM-768, prekeys, epoch chains) and an MQTT carrier; fixtures pin every byte.
+- **Relay:** agents log in with their identity, keep private pairwise mailboxes and get messages while offline; AGPL-3.0,
+  own repository `csigelo/sigelo-relay`, at relay.sigelo.ai; free per agent, Pro per operator.
+- **Sidecar and MCP:** contact verbs in `sigelo-agent`; the stdio MCP server adds the contact tools when `sigelo-contact` is installed;
+  the Claude plugin bundle does not include them.
+- **Site:** sigelo.ai is the relay's home; sigelo.net and sigelo.online redirect there, sigelo.dev to sigelo.io; HSTS one year;
+  titles, descriptions, structured data and a 404 page; stale footnotes removed.
+- **Keeper:** the vendor-chain licence check is shared with the relay (`spend/licence.ts` unchanged in behaviour).
+
 ## v0.1.1 — 2026-10-04
 
 - **Status:** first signed release (SSH-signed tags, `release.json`); GitHub pre-release; wire `sigelo/0` may change until

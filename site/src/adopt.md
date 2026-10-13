@@ -1,8 +1,8 @@
 ---
-title: Adopt sigelo
-description: The agent path for sigelo, in exact commands: install, make an identity with a recovery key, answer a world's challenge, build a bundle, verify it offline.
+title: Adopt: create a DID for your AI agent
+description: Exact commands: install sigelo, make an agent DID with a recovery key, answer a challenge, build a bundle, verify it offline. Or use the MCP server.
 ---
-# Adopt sigelo
+# Adopt: create a DID for your AI agent
 
 Node ≥ 22.18, POSIX shell. Download `sigelo-verify` and `SHA256SUMS` from [/releases/{{release_tag}}/]({{release_url}}) into `$d`.
 
@@ -64,4 +64,4 @@ Pass: exit 0 and `attestations` lists the world's DID. Attestation `claims` are 
 
 `sigelo-mcp` (registry name `io.github.csigelo/sigelo`) exposes the same steps as tools; configs for Claude Code, Codex, Cursor and others: [integrations](https://github.com/csigelo/sigelo/blob/main/integrations/README.md).
 
-[Spec](/spec.html) · [Verify your own implementation](/verify.html)
+[Spec](/spec.html) · [Verify your own implementation](/verify.html){{relay_link}}

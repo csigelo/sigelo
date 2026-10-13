@@ -5,7 +5,9 @@
 //   node build.mjs --check   exit 1 if either differs from what the sources build to
 // Needs `npm ci` here and in ../ts (for @noble). Output is bundled, NOT minified: the directory
 // scan wants readable source. The sigelo plugin carries no wallet: the directory policy forbids
-// software that transfers cryptocurrency, so the four wallet tools are cut out at build time.
+// software that transfers cryptocurrency, so the four wallet tools are cut out at build time. Nor
+// the contact tools: they connect to a relay, where this plugin makes no network connections (its
+// README says so), and their post-quantum and MQTT dependencies would be bundled into it.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +37,13 @@ const resolver = {
     b.onResolve({ filter: /^sigelo$/ }, () => ({ path: sigeloSrc('sigelo') }));
     b.onResolve({ filter: /^sigelo\/dist\/[a-z_-]+\.js$/ }, (a) => ({ path: sigeloSrc(a.path.slice(12, -3)) }));
     b.onResolve({ filter: /\/ts\/dist\/[a-z_-]+\.js$/ }, (a) => ({ path: sigeloSrc(a.path.match(/([a-z_-]+)\.js$/)[1]) }));
+    // ts/src's own imports resolve here too, so every ts/src file is resolved one way. esbuild applies
+    // tsconfig.json (strict: a "use strict" line) only to files it resolves itself; monero.ts was
+    // reached both ways, and whichever finished first decided its output, so builds differed.
+    b.onResolve({ filter: /^\.\/[a-z_-]+\.js$/ }, (a) => (dirname(a.importer) === join(REPO, 'ts/src') ? { path: sigeloSrc(a.path.slice(2, -3)) } : undefined));
+    // server.mjs's import of contact.mjs gets the answer of a server without sigelo-contact: null.
+    b.onResolve({ filter: /^\.\/contact\.mjs$/ }, (a) => (a.importer === join(REPO, 'integrations/mcp/server.mjs') ? { path: 'contact.mjs', namespace: 'no-contact' } : undefined));
+    b.onLoad({ filter: /.*/, namespace: 'no-contact' }, () => ({ contents: 'export const load = async () => null;', loader: 'js' }));
     b.onLoad({ filter: /integrations\/mcp\/server\.mjs$/ }, (a) => {
       let src = readFileSync(a.path, 'utf8');
       for (const [re, to] of EDITS) {
@@ -63,6 +72,7 @@ for (const [from, to] of TARGETS) {
     banner: { js: banner(from) },
   });
   const out = r.outputFiles[0].text.replaceAll(REPO + '/', '');
+  if (/sigelo_invite|carrier\.mjs|post-quantum|from "mqtt"/.test(out)) throw new Error(`plugins/build.mjs: contact code left in plugins/${to}`);
   const dest = join(HERE, to);
   if (check) {
     let cur = '';

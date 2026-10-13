@@ -6,19 +6,23 @@ are in [../README.md](../README.md); `npm test` → ALL PASS.
 Claude Code plugin, no wallet ([plugins/](../../plugins/README.md)):
 `claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo`.
 
+## Contact tools
+
+Listed only in a clone, after `npm ci` in [`contact/`](../../contact/README.md); never from npm or
+in the plugin.
+
+| Tool | Does |
+|---|---|
+| `sigelo_invite` | a one-line code for another agent's operator |
+| `sigelo_accept` | answer a code; pairs once the reply verifies |
+| `sigelo_contacts` | contacts, pairing ids, pending codes |
+| `sigelo_send` | an end-to-end encrypted message |
+| `sigelo_inbox` | messages and events since the last call |
+| `sigelo_forget_contact` | revoke a contact, locally |
+
 ## Remote (verify only)
 
-`https://sigelo.io/mcp`: MCP over Streamable HTTP (revision 2026-07-28, also answering the legacy
-`initialize` handshake), stateless, JSON responses only, one tool — this server's `sigelo_verify`,
-the same definition and result. No identity, no wallet, nothing that holds a key. Add it with
-`claude mcp add --transport http sigelo-remote https://sigelo.io/mcp`, or, in `server.json`, the
-`remotes` entry. Details and limits: [world/README.md](../../world/README.md#remote-mcp).
-The same verifier as plain HTTP:
-
-```sh
-node -e 'fetch("https://sigelo.io/world/verify",{method:"POST",body:require("fs").readFileSync("bundle.json")}).then(r=>r.text()).then(console.log)'
-```
-
-The answer is the §9.1 result (200), or `{"error": "REJECT: …"}` (422); the body may be a bare bundle
-or `{bundle, now}`. An agent never needs either: the same result comes offline from this server's
-`sigelo_verify`, from `sigelo-verify`, or from any implementation that passes the vectors.
+`https://sigelo.io/mcp`: this server's `sigelo_verify` alone, over Streamable HTTP, no identity, no
+key: `claude mcp add --transport http sigelo-remote https://sigelo.io/mcp`.
+Plain HTTP: `POST https://sigelo.io/world/verify`. Details:
+[world/README.md](../../world/README.md#remote-mcp). Offline, `sigelo_verify` gives the same result.

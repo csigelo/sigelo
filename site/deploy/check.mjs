@@ -5,71 +5,90 @@
 //   node site/deploy/check.mjs                                   https://sigelo.io, every check
 //   node site/deploy/check.mjs --origin https://staging.example --no-www
 //   node site/deploy/check.mjs --origin http://127.0.0.1:8080 --no-tls --node-server
+//   node site/deploy/check.mjs --preflight                       the local build's off-origin targets only
 //
 // Checks: status 200 and the exact content type site/test/run.mjs serves for /, /llms.txt,
 // /adopt.md, /index.json, /.well-known/security.txt, /sitemap.xml, /robots.txt, /spec.md,
-// /examples/world.mjs and a /sha256/<hex>/ file (whose hash is recomputed); Accept: text/markdown
-// on /, /spec.html and /spec serves the Markdown twin; index.json's sha256s match the files
-// served; its built_from.commit is the local HEAD and not dirty; security.txt has not expired;
-// the security and cache headers of site/deploy/nginx.conf; /_stats/ answers 401 (basic auth,
-// noindex, no-store) and is not in the sitemap; HSTS; http:// → https:// and
-// www → apex 301s; when index.json has a `world` block, the world (world/README.md): a §5.2
-// challenge, the whole attest flow with a fixed-seed check agent (the ts library from ts/dist; one
-// subject, idempotent for 24 h), /world/stats with counts only, /world/conformance refusing an empty
-// body and /mcp answering initialize; the release mirror /releases/<tag>/ (SHA256SUMS, one binary
+// /examples/world.mjs, /icon-512.png and a /sha256/<hex>/ file (whose hash is recomputed); Accept:
+// text/markdown on /, /spec.html and /spec serves the Markdown twin; index.json's sha256s match the
+// files served; its built_from.commit is the local HEAD and not dirty; security.txt has not expired;
+// the security, cache and Link headers of site/deploy/nginx.conf; an unknown path is a 404 cached a
+// minute that still names /llms.txt (Link rel=describedby); /_stats/ answers 401 (basic auth,
+// noindex, no-store; also as /%5Fstats/ and //_stats/) and is not in the sitemap; the not-found
+// page is noindex (also as /%34%30%34.md); HSTS of a year; http:// → https:// and www → apex
+// 301s; the held domains' 301s (below); every place index.json sends people or agents off this
+// origin answers 200 itself (no redirect) with the content type of what it is: each redirect
+// target's /robots.txt (an unreachable robots.txt reads as "disallow all"), its relay URLs (the
+// relay's index.json naming the relay), the official repositories and payment places; when index.json
+// has a `world` block, the world (world/README.md): a §5.2 challenge, the whole attest flow with a
+// fixed-seed check agent (the ts library from ts/dist; one subject, idempotent for 24 h),
+// /world/stats with counts only, /world/conformance refusing an empty body and /mcp answering
+// initialize; the release mirror /releases/<tag>/ (SHA256SUMS, one binary
 // downloaded and hashed, every file's content type, /releases/index.json, latest); /security.md's
 // "Official channels" and index.json official.issuer_did. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
 //
 // Flags:
 //   --origin URL       what to check (default https://sigelo.io); index.json's URLs are mapped onto it
 //   --no-tls           plain-HTTP origin: skip HSTS and the redirect checks
-//   --no-www           skip www.<host> (a staging origin has none)
-//   --alt DOMAIN       the second domain that 301s to the apex (default sigelo.net); --no-alt skips it
-//                      and the four below
-// sigelo.org, .online, .dev, .ai (apex and www) 301 to the apex like sigelo.net, each name checked
-// only once its A records point where the origin's do: until then a `skip` (DNS not pointed yet).
+//   --no-www           skip www.<host> (a staging origin has none), and the held domains
+//   --no-alt           skip the held domains. Their table is the deployed index.json's `official`,
+//                      which must equal site/src/official.mjs OFFICIAL when the deployed build is the
+//                      local HEAD: each of `redirects` (apex and www) must 301 to its target with the
+//                      path kept, or the check FAILs, because SECURITY.md and /contact say it
+//                      redirects. Each of `redirects_pending_dns` is checked the same way once its A
+//                      records point where the origin's do (then: mark it live in official.mjs), and
+//                      is a `skip` until then.
 //   --node-server      the origin is `node site/test/run.mjs --serve`, which implements the content
 //                      types and negotiation but sends no security or cache headers and does not map
 //                      /spec to /spec.html: skip those checks (they are nginx's job)
 //   --commit SHA       expected build commit (default: git rev-parse HEAD of this repository)
 //   --any-commit       do not compare the build commit (after a rollback)
-//   --quiet            print only the FAIL lines and the summary (the phone watchdog, site/deploy/watch.sh)
+//   --quiet            print only the FAIL lines and the summary
+//   --preflight        before an upload: read the local site/dist/index.json (node site/build.mjs first)
+//                      and check only its off-origin targets, so a build that redirects or links to a
+//                      sigelo.ai that does not answer yet is refused before it is served. deploy.sh
+//                      does not run it yet (it runs the full check after the upload): run it by hand
+//                      before the deploy that flips RELAY_LIVE
+//   --index FILE       with --preflight: read FILE instead (site/test/run.mjs points it at its own server)
 // Every request sends User-Agent UA (below): nginx.conf logs it to access-self.log, not access.log,
 // so the project's own checks stay out of the visit statistics.
 // Uses node's fetch, no dependencies, node >= 22.
 import { createHash } from 'node:crypto';
 import { promises as dns } from 'node:dns';
 import { execFileSync } from 'node:child_process';
-import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { OFFICIAL } from '../src/official.mjs';
 
 const CANON = 'https://sigelo.io';
 const UA = 'sigelo-selfcheck/1 (+https://sigelo.io/privacy)';
 const argv = process.argv.slice(2);
 const flag = (f) => argv.includes(f);
 const opt = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
-const known = new Set(['--origin', '--no-tls', '--no-www', '--node-server', '--commit', '--any-commit', '--alt', '--no-alt', '--quiet']);
-const ALT = flag('--no-alt') ? [] : [opt('--alt', 'sigelo.net')].filter((x) => x && !x.startsWith('--'));
-const EXTRA = flag('--no-alt') ? [] : ['sigelo.org', 'sigelo.online', 'sigelo.dev', 'sigelo.ai'];
+const known = new Set(['--origin', '--no-tls', '--no-www', '--node-server', '--commit', '--any-commit', '--no-alt', '--quiet', '--preflight', '--index']);
+const NO_ALT = flag('--no-alt'), PREFLIGHT = flag('--preflight');
 for (let i = 0; i < argv.length; i++) {
   if (!known.has(argv[i])) { console.error(`check.mjs: unknown argument ${argv[i]}`); process.exit(2); }
-  if (argv[i] === '--origin' || argv[i] === '--commit' || argv[i] === '--alt') i++;
+  if (argv[i] === '--origin' || argv[i] === '--commit' || argv[i] === '--index') i++;
 }
 const ORIGIN = (opt('--origin', CANON) ?? '').replace(/\/+$/, '');
 const NO_TLS = flag('--no-tls'), NO_WWW = flag('--no-www') || NO_TLS, NODE = flag('--node-server');
 let o; try { o = new URL(ORIGIN); } catch { console.error(`check.mjs: --origin is not a URL: ${ORIGIN}`); process.exit(2); }
 if (!NO_TLS && o.protocol !== 'https:') { console.error('check.mjs: an http:// origin needs --no-tls'); process.exit(2); }
 
+const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+let head = null;
+try { head = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* below */ }
 let want = opt('--commit');
-if (!want && !flag('--any-commit')) {
-  const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-  try { want = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); }
-  catch { console.error('check.mjs: cannot read the local HEAD (git); pass --commit SHA or --any-commit'); process.exit(2); }
+if (!want && !flag('--any-commit') && !PREFLIGHT) {
+  if (!head) { console.error('check.mjs: cannot read the local HEAD (git); pass --commit SHA or --any-commit'); process.exit(2); }
+  want = head;
 }
 
 // The test server's types (site/test/run.mjs TYPES), byte for byte.
 const T = { html: 'text/html; charset=utf-8', md: 'text/markdown; charset=utf-8', txt: 'text/plain; charset=utf-8',
-  json: 'application/json', xml: 'application/xml', mjs: 'text/javascript; charset=utf-8', yaml: 'application/yaml', css: 'text/css; charset=utf-8' };
+  json: 'application/json', xml: 'application/xml', mjs: 'text/javascript; charset=utf-8', yaml: 'application/yaml', css: 'text/css; charset=utf-8', png: 'image/png' };
 const typeOf = (path) => T[(path.match(/\.([a-z]+)$/) ?? [])[1]] ?? (path.endsWith('/') ? T.html : null);
 // site/deploy/nginx.conf's headers, verbatim.
 const H = {
@@ -78,7 +97,8 @@ const H = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
 };
-const HOUR = 'public, max-age=3600', YEAR = 'public, max-age=31536000, immutable';
+const HOUR = 'public, max-age=3600', YEAR = 'public, max-age=31536000, immutable', MISS = 'public, max-age=60';
+const HSTS_AGE = 31536000;
 
 const QUIET = flag('--quiet'), say = QUIET ? () => {} : console.log;
 let n = 0, skipped = 0; const fails = [];
@@ -95,12 +115,60 @@ const get = async (url, headers = {}, redirect = 'follow') => {
 const at = (path) => ORIGIN + path;
 const local = (u) => (u.startsWith(CANON) ? u.slice(CANON.length) || '/' : u);
 const show = (r) => (r.status ? `${r.status}, ${r.type || 'no content-type'}` : `no response: ${r.error}`);
+const summary = () => {
+  if (fails.length) { console.log(`FAILURES (${fails.length} of ${n} checks${skipped ? `, ${skipped} skipped` : ''})`); process.exit(1); }
+  console.log(`ALL PASS (${n} checks${skipped ? `, ${skipped} skipped` : ''})`);
+  process.exit(0);
+};
+
+// Every place a build sends people or agents off this origin must answer 200 itself, with the
+// content type of what it is: each redirect's target, live or pending (its /robots.txt, text/plain:
+// an unreachable robots.txt reads as "disallow all"; sigelo.io's own is checked as the origin's),
+// the relay's home page (text/html), llms.txt (text/plain) and index.json (application/json, naming
+// the relay as sigelo.io's index.json does), the official repositories and the payment places
+// (text/html). Not followed: a redirect is a FAIL, because a parked or expired domain answers 200
+// for every path after one, and then a payment place would be someone else's page. Before the
+// relay launch that is the one repository; from it, a sigelo.io that redirects or links to a
+// sigelo.ai (or names a relay repository) that does not answer as ours FAILs.
+const mediaType = (r) => r.type.split(';')[0].trim().toLowerCase();
+async function offOrigin(ix) {
+  const of = ix?.official ?? {};
+  const targets = [...new Set([...Object.values(of.redirects ?? {}), ...Object.values(of.redirects_pending_dns ?? {})])]
+    .filter((t) => t.replace(/\/$/, '') !== CANON).map((t) => [`${t.replace(/\/$/, '')}/robots.txt`, 'text/plain']);
+  const relayKeys = ['homepage', 'llms_txt', 'index'];
+  const relayType = { homepage: 'text/html', llms_txt: 'text/plain', index: 'application/json' };
+  if (ix?.relay) ok(typeof ix.relay.name === 'string' && relayKeys.every((k) => typeof ix.relay[k] === 'string'), `index.json relay: name, ${relayKeys.join(', ')}`);
+  const urls = [...targets, ...(ix?.relay ? relayKeys.filter((k) => typeof ix.relay[k] === 'string').map((k) => [ix.relay[k], relayType[k]]) : []),
+    ...(of.repositories ?? []).map((u) => [u, 'text/html']), ...(of.payment_details_only_on ?? []).map((u) => [u, 'text/html'])];
+  ok(urls.length > 0 && Array.isArray(of.repositories) && of.repositories.length > 0, `index.json official names its repositories (${urls.length} off-origin URLs to check)`);
+  for (const [u, type] of urls) {
+    const r = await get(u, {}, 'manual');
+    const moved = r.status >= 300 && r.status < 400 ? ` to ${r.h.get('location') ?? 'nowhere'}` : '';
+    ok(r.status === 200 && mediaType(r) === type, `off-origin target serves: ${u} answers 200 ${type} itself, no redirect (got ${show(r)}${moved})`);
+    if (ix?.relay && u === ix.relay.index && r.status === 200) {
+      let rj = null; try { rj = JSON.parse(r.body); } catch { /* reported below */ }
+      ok(rj?.name === ix.relay.name && rj?.homepage === ix.relay.homepage,
+        `off-origin target serves: ${u} names the relay (name ${JSON.stringify(ix.relay.name)}, homepage ${ix.relay.homepage}; got ${rj ? `${JSON.stringify(rj.name)}, ${rj.homepage}` : 'no JSON'})`);
+    }
+  }
+}
+
+if (opt('--index') && !PREFLIGHT) { console.error('check.mjs: --index goes with --preflight'); process.exit(2); }
+if (PREFLIGHT) {
+  const file = opt('--index') ?? join(ROOT, 'site', 'dist', 'index.json');
+  let ix = null;
+  try { ix = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (e) { console.error(`check.mjs --preflight: cannot read ${file} (node site/build.mjs first): ${e.message}`); process.exit(2); }
+  say(`preflight: the off-origin targets of ${file} (built from ${String(ix?.built_from?.commit).slice(0, 12)})`);
+  await offOrigin(ix);
+  summary();
+}
 
 say(`checking ${ORIGIN}${NO_TLS ? ' (--no-tls)' : ''}${NODE ? ' (--node-server)' : ''}`);
 
 // ---- the files: 200 and the exact content type ------------------------------------------------
 const got = {};
-for (const p of ['/', '/llms.txt', '/adopt.md', '/index.json', '/.well-known/security.txt', '/sitemap.xml', '/robots.txt', '/spec.md', '/examples/world.mjs', '/style.css']) {
+for (const p of ['/', '/llms.txt', '/adopt.md', '/index.json', '/.well-known/security.txt', '/sitemap.xml', '/robots.txt', '/spec.md', '/examples/world.mjs', '/style.css', '/icon-512.png']) {
   const r = got[p] = await get(at(p));
   ok(r.status === 200 && r.type === typeOf(p), `${p}: 200, ${typeOf(p)} (got ${show(r)})`);
 }
@@ -195,6 +263,9 @@ else if (ix?.release?.tag) {
     `index.json official.issuer_did = world.issuer = the DID /security.md names (${ix?.official?.issuer_did})`);
 }
 
+// ---- off this origin: redirect targets, the relay, repositories, payment places ---------------
+await offOrigin(ix);
+
 // ---- the world: challenge, attest, stats ------------------------------------------------------
 if (!ix?.world) note('index.json has no world block: the world checks are skipped');
 else {
@@ -262,24 +333,40 @@ else {
   const srv = got['/'].h.get('server');
   ok(!srv || !/\d/.test(srv), `Server header carries no version (server_tokens off; got "${srv ?? 'none'}")`);
   ok(!got['/'].h.get('set-cookie'), '/: sets no cookie');
+  const link = got['/'].h.get('link') ?? '';
+  ok(link.includes('</index.md>; rel="alternate"; type="text/markdown"') && link.includes('</llms.txt>; rel="describedby"; type="text/plain"'),
+    `/: Link names the Markdown twin and /llms.txt (got "${link}")`);
+  const miss = await get(at(`/no-such-page-${Date.now()}`), {}, 'manual');
+  ok(miss.status === 404 && miss.h.get('cache-control') === MISS, `an unknown path: 404, Cache-Control "${MISS}" (got ${miss.status || miss.error}, "${miss.h.get('cache-control')}")`);
+  ok((miss.h.get('link') ?? '').includes('</llms.txt>; rel="describedby"; type="text/plain"'), `an unknown path: Link names /llms.txt (rel=describedby) on the 404 too (got "${miss.h.get('link') ?? 'none'}")`);
 }
 
 // ---- /_stats/: the visit statistics are private --------------------------------------------
 ok(!got['/sitemap.xml'].body.toString().includes('/_stats'), '/sitemap.xml: does not list /_stats/');
 if (NODE) skip('/_stats/: 401 without credentials, noindex, no-store', 'nginx serves /_stats/, the node test server does not');
 else {
-  const r = await get(at('/_stats/'), {}, 'manual');
-  ok(r.status === 401 && /^Basic /i.test(r.h.get('www-authenticate') ?? '') && /noindex/.test(r.h.get('x-robots-tag') ?? '') && r.h.get('cache-control') === 'no-store',
-    `/_stats/: 401 Basic without credentials, X-Robots-Tag noindex, Cache-Control no-store (got ${r.status || r.error}, "${r.h.get('www-authenticate') ?? ''}", "${r.h.get('x-robots-tag') ?? ''}", "${r.h.get('cache-control') ?? ''}")`);
+  // Percent-encoded and doubled-slash forms reach the same location: nginx.conf keys its header
+  // maps on the normalised $uri, so they must carry the same headers.
+  for (const p of ['/_stats/', '/%5Fstats/', '//_stats/']) {
+    const r = await get(at(p), {}, 'manual');
+    ok(r.status === 401 && /^Basic /i.test(r.h.get('www-authenticate') ?? '') && /noindex/.test(r.h.get('x-robots-tag') ?? '') && r.h.get('cache-control') === 'no-store',
+      `${p}: 401 Basic without credentials, X-Robots-Tag noindex, Cache-Control no-store (got ${r.status || r.error}, "${r.h.get('www-authenticate') ?? ''}", "${r.h.get('x-robots-tag') ?? ''}", "${r.h.get('cache-control') ?? ''}")`);
+  }
+}
+// The not-found page itself is noindex, whichever way its path is written.
+if (NODE) skip('/404.html and /404.md: X-Robots-Tag noindex', 'nginx sends it, the node test server does not');
+else {
+  for (const p of ['/404.html', '/404.md', '/%34%30%34.md']) {
+    const r = await get(at(p), {}, 'manual');
+    ok(r.status === 200 && /\bnoindex\b/.test(r.h.get('x-robots-tag') ?? ''), `${p}: 200, X-Robots-Tag noindex (got ${r.status || r.error}, "${r.h.get('x-robots-tag') ?? ''}")`);
+  }
 }
 
 // ---- TLS: HSTS and the redirects --------------------------------------------------------------
 if (NO_TLS) skip('HSTS, http:// → https://, www → apex', '--no-tls');
 else {
   const hsts = got['/'].h.get('strict-transport-security') ?? '';
-  const age = Number((hsts.match(/max-age=(\d+)/) ?? [])[1] ?? -1);
-  ok(age >= 300, `HSTS on / (got "${hsts || 'missing'}")`);
-  if (age >= 300 && age < 31536000) note(`HSTS max-age=${age}: once this check passes on the live site, set max-age=31536000 in every Strict-Transport-Security line of site/deploy/nginx.conf and redeploy`);
+  ok(hsts === `max-age=${HSTS_AGE}`, `HSTS on /: max-age=${HSTS_AGE}, as nginx.conf sets it (got "${hsts || 'missing'}")`);
   const host = o.host;
   const redir = async (from, to) => {
     const r = await get(from, {}, 'manual');
@@ -291,26 +378,36 @@ else {
   else {
     await redir(`https://www.${host}/spec.md`, `https://${host}/spec.md`);
     await redir(`http://www.${host}/`, `https://${host}/`);
-    // the second domain the project holds: every name 301s to the apex of the first
-    for (const alt of ALT) {
-      await redir(`http://${alt}/`, `https://${host}/`);
-      await redir(`https://${alt}/spec.md`, `https://${host}/spec.md`);
-      await redir(`https://www.${alt}/`, `https://${host}/`);
-    }
-    // the other held domains: checked like sigelo.net once a name's A records are the origin's
-    const a4 = (name) => dns.resolve4(name).catch(() => []);
-    const ours = await a4(o.hostname);
-    for (const d of EXTRA) {
-      for (const [name, path] of [[d, '/spec.md'], [`www.${d}`, '/']]) {
-        const r = await a4(name);
-        if (ours.length && r.length && r.every((a) => ours.includes(a))) await redir(`https://${name}${path}`, `https://${host}${path}`);
-        else skip(`https://${name}${path} → 301 https://${host}${path}`, `DNS not pointed yet: ${name} resolves to ${r.join(' ') || 'nothing'}, ${o.hostname} to ${ours.join(' ') || 'nothing'}`);
+    const w = await get(`https://www.${host}/`, {}, 'manual');
+    ok(w.h.get('strict-transport-security') === `max-age=${HSTS_AGE}`, `https://www.${host}/: HSTS on the redirect too (got "${w.h.get('strict-transport-security') ?? 'missing'}")`);
+    // The held domains, from the deployed index.json (site/src/official.mjs OFFICIAL). A live
+    // redirect is what SECURITY.md and /contact promise, so a missing 301 FAILs; a pending one is
+    // checked once its DNS reaches the origin's server, which serves its 301 already. Built from
+    // the local HEAD, the table must be the local one: an empty or edited `redirects` is not a pass.
+    const of = ix?.official ?? {};
+    const table = (live) => Object.fromEntries(OFFICIAL.domains.filter((d) => d.role === 'redirect' && !!d.live === live).map((d) => [d.name, `https://${d.to}/`]));
+    if (NO_ALT) skip('the held domains\' 301s', '--no-alt');
+    else if (ok(of.redirects && of.redirects_pending_dns, 'index.json official: redirects and redirects_pending_dns')) {
+      if (head && ix.built_from?.commit === head)
+        ok(JSON.stringify(of.redirects) === JSON.stringify(table(true)) && JSON.stringify(of.redirects_pending_dns) === JSON.stringify(table(false)),
+          `index.json official.redirects and redirects_pending_dns = site/src/official.mjs OFFICIAL (deployed ${JSON.stringify(of.redirects)}, local ${JSON.stringify(table(true))})`);
+      else skip('index.json official redirects = site/src/official.mjs', `the deployed build ${String(ix?.built_from?.commit).slice(0, 12)} is not the local HEAD`);
+      const a4 = (name) => dns.resolve4(name).catch(() => []);
+      const ours = await a4(o.hostname);
+      const held = async (d, to) => {
+        const base = to.replace(/\/$/, '');
+        await redir(`http://${d}/`, `${base}/`);
+        await redir(`https://${d}/spec.md?x=1`, `${base}/spec.md?x=1`);
+        await redir(`https://www.${d}/`, `${base}/`);
+      };
+      for (const [d, to] of Object.entries(of.redirects)) await held(d, to);
+      for (const [d, to] of Object.entries(of.redirects_pending_dns)) {
+        const r = await a4(d);
+        if (ours.length && r.length && r.every((a) => ours.includes(a))) { note(`${d} now resolves to this server: once its 301s pass, mark it live in site/src/official.mjs`); await held(d, to); }
+        else skip(`${d} → 301 ${to}`, `DNS not pointed yet: ${d} resolves to ${r.join(' ') || 'nothing'}, ${o.hostname} to ${ours.join(' ') || 'nothing'}`);
       }
     }
-    const w = await get(`https://www.${host}/`, {}, 'manual');
-    ok(/max-age=\d+/.test(w.h.get('strict-transport-security') ?? ''), `https://www.${host}/: HSTS on the redirect too`);
   }
 }
 
-if (fails.length) { console.log(`FAILURES (${fails.length} of ${n} checks${skipped ? `, ${skipped} skipped` : ''})`); process.exit(1); }
-console.log(`ALL PASS (${n} checks${skipped ? `, ${skipped} skipped` : ''})`);
+summary();

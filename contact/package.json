@@ -1,0 +1,21 @@
+{
+  "name": "sigelo-contact",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent contacts for sigelo identities: invite codes, a contact store, end-to-end encrypted envelopes with hybrid post-quantum key agreement, and an MQTT carrier. Protocol and client code (MIT); the relay server lives in ../relay (AGPL-3.0).",
+  "license": "MIT",
+  "type": "module",
+  "main": "invite.mjs",
+  "engines": { "node": ">=22.18" },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@noble/post-quantum": "^0.7.1",
+    "mqtt": "^5.16.0",
+    "sigelo": "^0.1.1"
+  },
+  "scripts": {
+    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs",
+    "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs"
+  }
+}

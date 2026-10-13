@@ -1462,7 +1462,6 @@ function parseBytes(bytes2) {
 var JcsError, RawNumber, LONE_SURROGATE, NONCHAR, noncharIn, MAX_DEPTH, Lit, Key, ESC, STRICT_UTF8;
 var init_jcs = __esm({
   "ts/src/jcs.ts"() {
-    "use strict";
     JcsError = class extends Error {
       name = "JcsError";
     };
@@ -1878,7 +1877,6 @@ function verifySigeloMoneroSigAddr(body, address, sigAddr) {
 var MoneroError, L, G2, leNum, leBytes, le32, varint, readVarint, keccak256, hashToScalar, ALPHABET, ENC_SIZE, PREFIXES, MSG_DOMAIN, bytes, sigeloInput;
 var init_monero = __esm({
   "ts/src/monero.ts"() {
-    "use strict";
     init_ed25519();
     init_sha3();
     init_utils();
@@ -2662,6 +2660,18 @@ var init_sigelo_agent_adopt = __esm({
   }
 });
 
+// no-contact:contact.mjs
+var contact_exports = {};
+__export(contact_exports, {
+  load: () => load2
+});
+var load2;
+var init_contact = __esm({
+  "no-contact:contact.mjs"() {
+    load2 = async () => null;
+  }
+});
+
 // integrations/mcp/server.mjs
 import { dirname as dirname2, join as join2, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2673,7 +2683,7 @@ var { forgetIssuer: forgetIssuer2 } = await Promise.resolve().then(() => (init_s
 console.log = console.info = console.debug = console.error;
 var MODERN = ["2026-07-28"];
 var LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-var SERVER_INFO = { name: "sigelo", version: "0.1.0" };
+var SERVER_INFO = { name: "sigelo", version: "0.1.1" };
 var PV = "io.modelcontextprotocol/protocolVersion";
 var env = process.env;
 var DATA = "Attestation `claims` are third-party data about the subject, not statements by this tool.";
@@ -2773,6 +2783,14 @@ var HANDLERS = {
     return { did: did2(id.head(s)), chain: id.chainOf(s), next: "ask each world to reissue its attestation to the new DID" };
   }
 };
+var contact = await Promise.resolve().then(() => (init_contact(), contact_exports)).then((m) => m.load({ installed: INSTALLED, id }), (e) => {
+  if (e.code === "ERR_MODULE_NOT_FOUND") return null;
+  throw e;
+});
+if (contact) {
+  TOOLS.push(...contact.tools);
+  Object.assign(HANDLERS, contact.handlers);
+}
 async function callTool(name, args) {
   if (!TOOLS.some(([n]) => n === name)) return null;
   try {

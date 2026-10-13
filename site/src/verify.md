@@ -1,6 +1,6 @@
 ---
-title: Verify — sigelo-verify
-description: sigelo-verify, the reference verifier: one static binary, no network. Verify a bundle, check the test vectors, and test your own implementation with --impl.
+title: Verify: sigelo-verify, the reference verifier
+description: sigelo-verify, the reference verifier: one static binary, no network. Verify a bundle, check the test vectors, test your own implementation with --impl.
 ---
 # Verify
 

@@ -29,7 +29,7 @@ bundle` presents your attestations. Anything a world puts in `claims` is untrust
 | `$XDG_CONFIG_HOME` (if absolute) else `$HOME/.config` | same resolution as `src/paths/mod.rs:56-70` |
 | 0600 file, 0700 directory, atomic rename | moadim's secret-file contract (`src/utils/atomic.rs`, `src/utils/fs_perms.rs`) |
 | `[env]`, not `agents/<name>.toml` | agent entries have no env table (`src/routines/agents/mod.rs:47-70`) |
-| no REST route or MCP tool | no network surface, no auth needed |
+| no REST route or MCP tool | nothing listens; contact verbs dial out to a relay |
 | non-zero exit naming the check | a failing step triggers moadim's existing failure notifications |
 
 ## Line budget — 77 lines for the identity core, one dependency
@@ -43,18 +43,21 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | **identity total** | **77** | |
 | `sigelo-agent-monero.ts` | 131 | `walletSet`, `bindMonero`, `receive`, `invoice`, `verifyInvoice` — counted separately so an identity-only install reads 77 |
 | `sigelo-agent-adopt.ts` | 55 | `adopt`, `forgetIssuer`, outside the core |
+| `sigelo-agent-contact.ts` | 177 | `invite`, `accept`, `contacts`, `send`, `inbox`, `forget`: contacts over a relay, apart; `cli.ts` dispatches to it in one line and escapes all output with its helpers |
 | `cli.ts`, `test.ts` | — | argv/output and tests, not argued |
 
 Dependency: `"sigelo": "file:../../ts"` (build `ts/` first). `@types/node` and `typescript` are
-dev-only; node runs the `.ts` directly.
+dev-only; node runs the `.ts` directly. The contact verbs load a clone's `contact/`, from
+`adapters/moadim` only; otherwise they say so and exit 1.
 
 ## Design
 
 - **The recovery public key is never stored**, only its commitment; `rotate` carries the
   commitment forward and the library re-checks it (SPEC §7).
 - **Rotation is one atomic write** of the new rotation and the new secret.
-- **`sign-challenge` is the only signing offered:** only `typ: "challenge"` with our exact DID, so
-  no input can make the hot key sign a rotation, binding or attestation (SPEC §3, §5.2).
+- **Narrow signing:** `sign-challenge` signs only `typ: "challenge"` with our exact DID, the contact
+  verbs only their own body types, so no input makes the hot key sign a rotation, binding or
+  attestation (SPEC §3, §5.2).
 - **The Monero half cannot spend:** `wallet-set` refuses spend keys; `sig_addr` is what
   `monero-wallet-rpc sign` (view mode, (0,0)) returns, computed with no wallet; the view key is never printed.
 - **Input is parsed with sigelo's strict parser** (duplicate keys rejected).

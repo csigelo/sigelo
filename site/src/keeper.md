@@ -1,5 +1,5 @@
 ---
-title: Keeper — paying without holding a key
+title: Keeper: pay in Monero without holding a key
 description: The sigelo keeper (sigelo-spend) lets an agent pay in Monero through four verbs without holding a key. Runs on your host. Stagenet only, unaudited.
 ---
 # Keeper
@@ -28,10 +28,10 @@ sigelo-wallet history
 |---|---|---|
 | Keepers, agents | 1, 1 | per licence |
 | Delegation, approvals, receipts export | — | yes |
-| Price | free | `<price>` |
+| Price | free | not set yet |
 
 The licence is a sigelo attestation to your keeper's DID, verified offline.
 
-Recovery ceremony kit: [/raw/kit/README.md](/raw/kit/README.md), `<price>`.
+Recovery ceremony kit: [/raw/kit/README.md](/raw/kit/README.md); price not set yet.
 
 Reference: [spend/README.md](/raw/spend/README.md) · [OpenAPI](/raw/spend/openapi.yaml)

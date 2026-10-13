@@ -1,5 +1,5 @@
 ---
-title: Privacy and terms — what sigelo.io logs
+title: Privacy and terms: what sigelo.io logs
 description: What sigelo.io and its world service log and for how long (truncated addresses, 30 days, no cookies or scripts), and the terms of the free services.
 ---
 # Privacy and terms

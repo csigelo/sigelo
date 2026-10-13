@@ -95,79 +95,127 @@ export function register(entry: KeeperEntry): void {
 
 // ---------------------------------------------------------------- the vendor chain
 
-interface Chain { chain: string[]; head: Genesis; rotations: Rotation[] }
+/** A vendor chain resolved by SPEC §7.3: its DIDs, its current genesis, and the rotations on its path. */
+export interface VendorChain { chain: string[]; head: Genesis; rotations: Rotation[] }
 const bundleOf = (genesis: Genesis, rotations: Rotation[]) =>
   ({ v: 'sigelo/0', typ: 'bundle' as const, genesis, rotations, bindings: [], attestations: [], issuers: [] });
-/** SPEC §9 step 3 with the library: the chain, its current genesis, and the rotations on its path. */
-function resolve0(genesis: Genesis, rotations: Rotation[], now: number): Chain {
+/** SPEC §9 step 3 with the library: the chain, its current genesis, and the rotations on its path. Throws as `verify` does. */
+export function resolveVendorChain(genesis: Genesis, rotations: Rotation[], now: number): VendorChain {
   const r = verify(bundleOf(genesis, rotations), now);
   const path = r.chain.slice(1).map((d, i) => rotations.find((x) => x.body.id === r.chain[i] && x.body.next === d && did(x.next_genesis) === d) as Rotation);
   return { chain: r.chain, head: path.length ? path[path.length - 1]!.next_genesis : genesis, rotations: path };
 }
 const chainPath = (dir: string): string => join(dir, CHAIN_FILE);
 /** The chain this keeper has seen, or undefined (none, or one for another vendor than the pin). Throws if unreadable. */
-function seenChain(dir: string, vendor: string, now: number): Chain | undefined {
+function seenChain(dir: string, vendor: string, now: number): VendorChain | undefined {
   const p = chainPath(dir);
   if (!existsSync(p)) return undefined;
   const raw = JSON.parse(readFileSync(p, 'utf-8')) as unknown;
   if (!plain(raw) || !plain(raw['genesis']) || !Array.isArray(raw['rotations'])) throw new Error('not {genesis, rotations}');
   structure(raw['genesis'], 'genesis');
   if (did(raw['genesis']) !== vendor) return undefined; // the pin changed: another vendor's record does not bind this one
-  return resolve0(raw['genesis'] as unknown as Genesis, raw['rotations'] as Rotation[], now);
+  return resolveVendorChain(raw['genesis'] as unknown as Genesis, raw['rotations'] as Rotation[], now);
 }
 
-interface Checked { status: LicenceStatus; chain?: Chain }
+/**
+ * What a vendor-issued attestation is checked against, whatever it licenses: this keeper's
+ * `sigelo-spend` licence, or the relay's `sigelo-relay` one (relay/operator.mjs), so the two
+ * cannot drift.
+ */
+export interface VendorRules {
+  /** The pinned vendor DID: the GENESIS of the vendor chain (chain[0]). */
+  vendor: string;
+  /** The `ctx` the attestation must carry. */
+  ctx: string;
+  /** The claims' shape for that ctx: undefined when they are good, else the refusal. */
+  claims: (claims: unknown) => string | undefined;
+  /** The longest vendor chain this verifier has seen, or undefined. A throw is refused, worded by `seenRefusal`. */
+  seen: () => VendorChain | undefined;
+  seenRefusal: (e: unknown) => string;
+  /** Who has seen that chain, in refusals: "this keeper", "this relay". */
+  seenBy: string;
+}
+export type VendorChecked =
+  | { ok: true; attestation: Attestation; legacy: boolean; chain: VendorChain; head: string }
+  | { ok: false; why: string };
 
-function evaluate(raw: unknown, own: Genesis, dir: string, now: number, keepers: KeeperEntry[]): Checked {
-  const free = (w: string): Checked => ({ status: { tier: 'free', why: w } });
-  const vendor = vendorDid();
+/**
+ * The vendor half of a licence check, in this order: the file's shape, the pin, the vendor chain
+ * (SPEC §7.3), the chain against the longest one seen (only a recovery supersedes it, SPEC §7.1),
+ * the signature, the signer is the chain's CURRENT key, `ctx`, the claims, the term, `iat` within
+ * the clock allowance, not expired. Who the licence is for is the caller's to check (checkLicence:
+ * this keeper and its seats). The order makes a tampered file read as tampered, not as expired.
+ * `chain` is the chain to remember when the caller accepts the licence.
+ */
+export function checkVendorAttestation(raw: unknown, now: number, rules: VendorRules): VendorChecked {
+  const no = (w: string): VendorChecked => ({ ok: false, why: w });
+  const vendor = rules.vendor;
   const keys = plain(raw) ? Object.keys(raw).sort().join() : '';
-  if (keys !== 'attestation,issuer' && keys !== 'attestation,issuer,rotations') return free('the licence file is not {attestation, issuer, rotations}');
+  if (keys !== 'attestation,issuer' && keys !== 'attestation,issuer,rotations') return no('the licence file is not {attestation, issuer, rotations}');
   const r0 = raw as Record<string, unknown>;
   const legacy = !('rotations' in r0);
   const issuer = r0['issuer'], att = r0['attestation'], rots = legacy ? [] : r0['rotations'];
-  try { structure(issuer, 'genesis'); } catch (e) { return free(`the licence's issuer is not a genesis (${why(e)})`); }
+  try { structure(issuer, 'genesis'); } catch (e) { return no(`the licence's issuer is not a genesis (${why(e)})`); }
   const g0 = did(issuer);
-  if (g0 !== vendor) return free(legacy ? `the licence is issued by ${g0}, not the vendor ${vendor}` : `the licence's vendor chain starts at ${g0}, not the vendor ${vendor}`);
-  if (!Array.isArray(rots) || rots.length > ROTATIONS_MAX) return free(`the licence's rotations are not a list of at most ${ROTATIONS_MAX}`);
+  if (g0 !== vendor) return no(legacy ? `the licence is issued by ${g0}, not the vendor ${vendor}` : `the licence's vendor chain starts at ${g0}, not the vendor ${vendor}`);
+  if (!Array.isArray(rots) || rots.length > ROTATIONS_MAX) return no(`the licence's rotations are not a list of at most ${ROTATIONS_MAX}`);
   // The vendor's chain, by sigelo's own rules (SPEC §7.3): a fork or a cycle in it rejects it.
-  let mine: Chain;
-  try { mine = resolve0(issuer as Genesis, rots as Rotation[], now); } catch (e) { return free(`the licence's vendor chain does not verify (${why(e)})`); }
-  // Against the chain this keeper has seen: the union of both, resolved again, must end where the licence's does.
-  let seen: Chain | undefined;
-  try { seen = seenChain(dir, vendor, now); } catch (e) { return free(`${CHAIN_FILE} (the vendor chain this keeper has seen) does not verify (${why(e)}); remove it to start over`); }
+  let mine: VendorChain;
+  try { mine = resolveVendorChain(issuer as Genesis, rots as Rotation[], now); } catch (e) { return no(`the licence's vendor chain does not verify (${why(e)})`); }
+  // Against the chain seen before: the union of both, resolved again, must end where the licence's does.
+  let seen: VendorChain | undefined;
+  try { seen = rules.seen(); } catch (e) { return no(rules.seenRefusal(e)); }
   let chain = mine;
   if (seen !== undefined) {
     const have = new Set(seen.rotations.map((x) => canonicalize(x)));
     const union = [...seen.rotations, ...mine.rotations.filter((x) => !have.has(canonicalize(x)))];
-    try { chain = resolve0(issuer as Genesis, union, now); } catch (e) {
-      return free(`the licence's vendor chain forks from the one this keeper has seen (${why(e)}) — refused; a fork under the vendor's key is resolved by the vendor's recovery rotation`);
+    try { chain = resolveVendorChain(issuer as Genesis, union, now); } catch (e) {
+      return no(`the licence's vendor chain forks from the one ${rules.seenBy} has seen (${why(e)}) — refused; a fork under the vendor's key is resolved by the vendor's recovery rotation`);
     }
     const head = chain.chain[chain.chain.length - 1];
     if (head !== mine.chain[mine.chain.length - 1]) {
       const prefix = mine.chain.every((d, i) => chain.chain[i] === d);
-      return free(prefix
-        ? `the licence carries a vendor chain of ${mine.chain.length}, shorter than the ${chain.chain.length} this keeper has seen (its key ${head} is current) — ask the vendor to reissue`
-        : `the licence's vendor chain forks from the one this keeper has seen (which ends at ${head}) — refused; only a recovery rotation supersedes a seen chain (SPEC §7.1)`);
+      return no(prefix
+        ? `the licence carries a vendor chain of ${mine.chain.length}, shorter than the ${chain.chain.length} ${rules.seenBy} has seen (its key ${head} is current) — ask the vendor to reissue`
+        : `the licence's vendor chain forks from the one ${rules.seenBy} has seen (which ends at ${head}) — refused; only a recovery rotation supersedes a seen chain (SPEC §7.1)`);
     }
   }
   const head = did(chain.head);
-  if (!plain(att) || Object.keys(att).sort().join() !== 'body,sig' || typeof att['sig'] !== 'string') return free('the licence\'s attestation is not {body, sig}');
-  try { structure(att['body'], 'attestation'); } catch (e) { return free(`the licence is not an attestation (${why(e)})`); }
+  if (!plain(att) || Object.keys(att).sort().join() !== 'body,sig' || typeof att['sig'] !== 'string') return no('the licence\'s attestation is not {body, sig}');
+  try { structure(att['body'], 'attestation'); } catch (e) { return no(`the licence is not an attestation (${why(e)})`); }
   const body = att['body'] as Attestation['body'];
   // The signature first: a licence edited after issue (seats, exp, sub) is tampered, whatever else it says.
   const nodes = [issuer as Genesis, ...chain.rotations.map((x) => x.next_genesis), ...mine.rotations.map((x) => x.next_genesis)];
   const signer = nodes.find((g) => did(g) === body.iss);
-  if (signer === undefined || !verifySig(signer.key, body, att['sig'])) return free('the licence\'s signature does not verify under the vendor key — it was altered after issue, or the vendor never signed it');
-  // SPEC §5: a verifier that knows a DID was rotated away from stops trusting it. The keeper knows.
-  if (body.iss !== head) return free(`the licence was signed by the vendor's key ${body.iss}, which the vendor has rotated away from (its chain of ${chain.chain.length} now ends at ${head}) — ask the vendor to reissue`);
-  if (body.ctx !== LICENCE_CTX) return free(`the licence is for ${JSON.stringify(body.ctx)}, not ${LICENCE_CTX}`);
-  const c = body.claims;
-  if (!plain(c) || Object.keys(c).sort().join() !== 'seats,tier' || c['tier'] !== 'pro' ||
-    !Number.isSafeInteger(c['seats']) || (c['seats'] as number) < 1 || (c['seats'] as number) > SEATS_MAX) return free('the licence\'s claims are not {"tier": "pro", "seats": N}');
-  if (body.exp - body.iat > TERM_MAX_DAYS * 86400) return free(`the licence's term (${iso(body.iat)} to ${iso(body.exp)}) is longer than ${TERM_MAX_DAYS} days, the longest sold — refused`);
-  if (body.iat > now + LICENCE_SKEW) return free(`the licence is dated ${iso(body.iat)}, more than ${LICENCE_SKEW} s ahead of this host's clock (${iso(now)}) — refused; check this host's clock`);
-  if (now >= body.exp) return free(`the licence expired at ${iso(body.exp)}`);
+  if (signer === undefined || !verifySig(signer.key, body, att['sig'])) return no('the licence\'s signature does not verify under the vendor key — it was altered after issue, or the vendor never signed it');
+  // SPEC §5: a verifier that knows a DID was rotated away from stops trusting it. This one knows, from the chain.
+  if (body.iss !== head) return no(`the licence was signed by the vendor's key ${body.iss}, which the vendor has rotated away from (its chain of ${chain.chain.length} now ends at ${head}) — ask the vendor to reissue`);
+  if (body.ctx !== rules.ctx) return no(`the licence is for ${JSON.stringify(body.ctx)}, not ${rules.ctx}`);
+  const bad = rules.claims(body.claims);
+  if (bad !== undefined) return no(bad);
+  if (body.exp - body.iat > TERM_MAX_DAYS * 86400) return no(`the licence's term (${iso(body.iat)} to ${iso(body.exp)}) is longer than ${TERM_MAX_DAYS} days, the longest sold — refused`);
+  if (body.iat > now + LICENCE_SKEW) return no(`the licence is dated ${iso(body.iat)}, more than ${LICENCE_SKEW} s ahead of this host's clock (${iso(now)}) — refused; check this host's clock`);
+  if (now >= body.exp) return no(`the licence expired at ${iso(body.exp)}`);
+  return { ok: true, attestation: att as unknown as Attestation, legacy, chain, head };
+}
+
+interface Checked { status: LicenceStatus; chain?: VendorChain }
+
+function evaluate(raw: unknown, own: Genesis, dir: string, now: number, keepers: KeeperEntry[]): Checked {
+  const free = (w: string): Checked => ({ status: { tier: 'free', why: w } });
+  const vendor = vendorDid();
+  const v = checkVendorAttestation(raw, now, {
+    vendor,
+    ctx: LICENCE_CTX,
+    claims: (c) => (!plain(c) || Object.keys(c).sort().join() !== 'seats,tier' || c['tier'] !== 'pro' ||
+      !Number.isSafeInteger(c['seats']) || (c['seats'] as number) < 1 || (c['seats'] as number) > SEATS_MAX ? 'the licence\'s claims are not {"tier": "pro", "seats": N}' : undefined),
+    seen: () => seenChain(dir, vendor, now),
+    seenRefusal: (e) => `${CHAIN_FILE} (the vendor chain this keeper has seen) does not verify (${why(e)}); remove it to start over`,
+    seenBy: 'this keeper',
+  });
+  if (!v.ok) return free(v.why);
+  const { attestation: att, legacy, chain, head } = v;
+  const body = att.body;
   const me = did(own);
   const here = keepers.some((k) => resolve(k.dir) === resolve(dir));
   const subject = body.sub === me ? own : here ? keepers.find((k) => k.did === body.sub)?.genesis : undefined;
@@ -176,12 +224,12 @@ function evaluate(raw: unknown, own: Genesis, dir: string, now: number, keepers:
   // the chain's current key as the only known issuer. An `iat` within the allowance is checked at `iat`.
   let accepted: boolean;
   try {
-    const r = verify({ ...bundleOf(subject, []), attestations: [att as unknown as Attestation] }, Math.max(now, body.iat), { [head]: chain.head });
+    const r = verify({ ...bundleOf(subject, []), attestations: [att] }, Math.max(now, body.iat), { [head]: chain.head });
     accepted = (r.attestations[head] ?? []).length === 1;
   } catch (e) { return free(`the licence does not verify (${why(e)})`); }
   if (!accepted) return free('the licence does not verify (SPEC §9 step 5)');
   const count = new Set([...keepers.map((k) => resolve(k.dir)), resolve(dir)]).size;
-  const seats = c['seats'] as number;
+  const seats = body.claims['seats'] as number;
   if (seats < count) return free(`the licence covers ${seats} keeper${seats === 1 ? '' : 's'}; this host runs ${count}`);
   return { status: { tier: 'pro', sub: body.sub, seats, iat: body.iat, exp: body.exp, keepers: count, chain: chain.chain.length, legacy }, chain };
 }
