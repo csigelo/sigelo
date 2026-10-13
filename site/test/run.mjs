@@ -33,7 +33,7 @@ const DIST = join(SITE, 'dist');
 const ORIGIN = 'https://sigelo.io';
 if (!existsSync(join(DIST, 'index.html'))) { console.error('FAIL no site/dist/index.html: run node site/build.mjs first'); process.exit(1); }
 // The tables the build renders from (importing it builds nothing): the official names and the page list.
-const { DOMAINS, HOSTS, CONTENT_HOSTS, REPOSITORIES, PAGES: PAGE_LIST, REPO, RELAY_LIVE, OFFICIAL, BEFORE_LAUNCH, PAYMENT_PLACES, VALUE_SOURCES, securityDomainsLine } = await import('../build.mjs');
+const { DOMAINS, HOSTS, CONTENT_HOSTS, REPOSITORIES, PAGES: PAGE_LIST, REPO, RELAY_LIVE, OFFICIAL, BEFORE_LAUNCH, PAYMENT_PLACES, VALUE_SOURCES, securityDomainsLine, packagesAt, RELEASED } = await import('../build.mjs');
 const git = (...a) => execFileSync('git', ['-C', ROOT, ...a], { encoding: 'utf8' }).trim();
 
 let n = 0; const fails = [];
@@ -391,10 +391,10 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(typeof RELAY_LIVE === 'boolean' && OFFICIAL.domains === (RELAY_LIVE ? DOMAINS : BEFORE_LAUNCH.domains) && OFFICIAL.hosts === (RELAY_LIVE ? HOSTS : BEFORE_LAUNCH.hosts)
     && OFFICIAL.repositories === (RELAY_LIVE ? REPOSITORIES : BEFORE_LAUNCH.repositories) && OFFICIAL.payment_places === (RELAY_LIVE ? PAYMENT_PLACES : BEFORE_LAUNCH.payment_places),
     `site/src/official.mjs OFFICIAL is ${RELAY_LIVE ? 'DOMAINS (RELAY_LIVE)' : 'BEFORE_LAUNCH (RELAY_LIVE false)'}`);
-  // Payment details: the exact files, never the relay repository as a whole (anyone can put text
+  // Payment details: the exact file, never the relay repository as a whole (anyone can put text
   // under its URL: an issue, a pull request, a fork's commit viewed through it).
-  ok(PAYMENT_PLACES.join() === 'https://sigelo.ai/pay-monero.html,https://sigelo.ai/pay-card.html,https://github.com/csigelo/sigelo-relay/blob/main/site/pay-monero.md,https://github.com/csigelo/sigelo-relay/blob/main/site/pay-card.md',
-    'site/src/official.mjs PAYMENT_PLACES: the two pay pages and the two files on the relay repository\'s default branch, not the repository');
+  ok(PAYMENT_PLACES.join() === 'https://sigelo.ai/pay-monero.html,https://github.com/csigelo/sigelo-relay/blob/main/site/pay-monero.md',
+    'site/src/official.mjs PAYMENT_PLACES: the pay page (Monero only) and its file on the relay repository\'s default branch, not the repository');
   const domains = OFFICIAL.domains;
   const redirects = (live) => Object.fromEntries(domains.filter((d) => d.role === 'redirect' && !!d.live === live).map((d) => [d.name, `https://${d.to}/`]));
   const of = ix.official ?? {};
@@ -402,8 +402,16 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     && JSON.stringify(of.redirects) === JSON.stringify(redirects(true)) && JSON.stringify(of.redirects_pending_dns) === JSON.stringify(redirects(false))
     && of.parked?.join() === domains.filter((d) => d.role === 'parked').map((d) => d.name).join()
     && of.repositories?.join() === OFFICIAL.repositories.join() && of.repository === REPO && JSON.stringify(of.payment_details_only_on) === JSON.stringify(OFFICIAL.payment_places)
-    && of.npm_user === 'csigelo' && of.maintainer === 'csigelo' && of.packages?.length === 5 && of.releases?.includes(`${ORIGIN}/releases/`),
-    `index.json: official follows OFFICIAL (domains, content, redirects, pending, parked, repositories, payment places), issuer_did = world.issuer, npm_user, ${of.packages?.length} packages, maintainer`);
+    && of.npm_user === 'csigelo' && of.maintainer === 'csigelo' && of.packages?.join() === packagesAt(RELEASED).join() && of.releases?.includes(`${ORIGIN}/releases/`),
+    `index.json: official follows OFFICIAL (domains, content, redirects, pending, parked, repositories, payment places), issuer_did = world.issuer, npm_user, the ${of.packages?.length} packages of v${RELEASED} (sigelo-contact from 0.1.2, which SECURITY.md must then name: below), maintainer`);
+  // SECURITY.md's "Nobody from the project…" line, as data: a payment address comes only with an
+  // invoice the buyer asked for, over the SimpleX address on /contact (sigelo.ai's index.json has the
+  // same two fields; relay/site/build.mjs --launch refuses the older ones).
+  const secText = readFileSync(join(ROOT, 'SECURITY.md'), 'utf8');
+  ok(of.payment_address_only_with === 'an invoice the buyer asked for' && of.invoice_only_via === `${ORIGIN}/contact.html`
+    && !('never_sends_by_email_or_chat' in of) && !('payment_proof_only_via' in of) && !('payment_address_or_link_only_with' in of)
+    && secText.includes(`- Nobody from the project will ever ask for a seed, an identity or wallet private key, or a token. A payment address comes only with an invoice you asked for, in the SimpleX conversation you opened with the address on \`${ORIGIN}/contact.html\`.`),
+    'index.json: official.payment_address_only_with and invoice_only_via say what SECURITY.md\'s "Nobody…" line says, no older field');
   // redirect_only keeps its first meaning for the readers that take content = domains minus
   // redirect_only: every held domain that serves nothing of its own, parked ones included.
   const contentDomains = domains.filter((d) => d.role === 'content').map((d) => d.name);

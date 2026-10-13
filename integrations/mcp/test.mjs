@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Scripted stdio client: spawns server.mjs, speaks MCP line-delimited JSON-RPC, exercises every
 // tool. A mock world is built from the library; a mock keeper is a loopback HTTP server on an
-// ephemeral port (never the soak's 38083/38200). The contact tools: listed in a clone whose contact/
-// has its dependencies (npm ci there), not in a copy of the server beside no contact/, never from
-// node_modules; against a loopback relay (relay/ here, else SIGELO_RELAY_DIR; SKIP without one):
-// pairing, parallel calls, an inbox past one result (held across a restart), a nested message, wait
-// bounds. `npm test` → ALL PASS or exit 1.
+// ephemeral port (never the soak's 38083/38200). The contact tools: listed when sigelo-contact
+// resolves as sigelo-agent loads it (here: npm ci in adapters/moadim and contact/); a package that
+// only takes its name's place, or one above sigelo-agent's tree, never runs. Against a loopback
+// relay (relay/ here, else SIGELO_RELAY_DIR; SKIP without one): pairing, parallel calls, an inbox
+// past one result (held across a restart), a nested message, wait bounds. `npm test` → ALL PASS or
+// exit 1.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -58,9 +59,10 @@ const url = `http://127.0.0.1:${keeper.address().port}`;
 
 const IDENTITY_TOOLS = ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'];
 const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_forget_contact', 'sigelo_inbox', 'sigelo_invite', 'sigelo_send'];
-// Present here only if this clone's contact/ resolves, as the server decides it.
-const HAS_CONTACT = await import('../../contact/carrier.mjs').then(() => true, (e) => { if (e.code === 'ERR_MODULE_NOT_FOUND') return false; throw e; });
-if (!HAS_CONTACT) console.log('SKIP contact tools present: contact/ does not resolve here (npm ci in contact/); the absent case still runs');
+// Present here only if sigelo-contact resolves, as the server decides it (contact.mjs load).
+const sidecar = await import('../../adapters/moadim/sigelo-agent-contact.ts');
+const HAS_CONTACT = await sidecar.contactLib().then(() => true, (e) => { if (sidecar.absent(e)) return false; throw e; });
+if (!HAS_CONTACT) console.log('SKIP contact tools present: sigelo-contact does not resolve here (npm ci in adapters/moadim and contact/); the absent case still runs');
 const LISTED = [...IDENTITY_TOOLS, ...(HAS_CONTACT ? CONTACT_TOOLS : [])].sort();
 // The relay is its own AGPL package, absent from this one's export.
 const RELAY_DIR = process.env.SIGELO_RELAY_DIR ?? join(here, '..', '..', 'relay');
@@ -245,28 +247,6 @@ ${code.slice(60)}
     r = await c5.call('sigelo_contacts');
     ok(r.data?.answers.length === 1 && r.data.answers[0].did === worldDid && r.data.answers[0].relay === 'relay.test', 'contact: the answer names the code\'s DID', r.text);
     c5.close();
-
-    // Run from node_modules: no contact tools, and the bare name sigelo-contact is never loaded. It
-    // is not published, so whoever registers it would be handed the identity secret.
-    const nm = join(dir, 'node_modules'), squat = join(nm, 'sigelo-contact'), marker = join(dir, 'squatter-ran');
-    mkdirSync(join(nm, 'sigelo-mcp'), { recursive: true });
-    mkdirSync(squat);
-    copyFileSync(join(here, 'contact.mjs'), join(nm, 'sigelo-mcp', 'contact.mjs'));
-    writeFileSync(join(squat, 'package.json'), '{"name":"sigelo-contact","type":"module"}');
-    for (const f of ['carrier.mjs', 'kdf.mjs']) writeFileSync(join(squat, f), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'x');\n`);
-    const installed = await import(pathToFileURL(join(nm, 'sigelo-mcp', 'contact.mjs')).href);
-    const idLib = await import('../../adapters/moadim/sigelo-agent.ts');
-    ok(await installed.load({ installed: true, id: idLib }) === null && !existsSync(marker), 'contact: installed from npm, no contact tools and the name sigelo-contact is not loaded');
-    // Outside integrations/mcp of a clone (an npm tarball unpacked with tar at <shared>/x/package):
-    // a contact/ planted two levels up, package.json and all, is never loaded.
-    const lay = join(dir, 'shared'), plant = join(lay, 'contact'), marker2 = join(dir, 'plant-ran');
-    mkdirSync(join(lay, 'x', 'package'), { recursive: true });
-    mkdirSync(plant);
-    copyFileSync(join(here, 'contact.mjs'), join(lay, 'x', 'package', 'contact.mjs'));
-    writeFileSync(join(plant, 'package.json'), '{"name":"sigelo-contact","type":"module"}');
-    for (const f of ['carrier.mjs', 'kdf.mjs']) writeFileSync(join(plant, f), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker2)}, 'x');\n`);
-    const unpacked = await import(pathToFileURL(join(lay, 'x', 'package', 'contact.mjs')).href);
-    ok(await unpacked.load({ installed: false, id: idLib }) === null && !existsSync(marker2), 'contact: outside integrations/mcp of a clone, a planted contact/ is not loaded');
   }
 
   // ---------------- contact tools against a loopback relay, two servers
@@ -363,51 +343,90 @@ ${code.slice(60)}
     }
   }
 
-  // ---------------- contact tools absent: a copy of the server beside no contact/
-  const copy = join(dir, 'clone'), mcp = join(copy, 'integrations', 'mcp');
+  // ---------------- sigelo-contact absent, refused or broken: a copy of the clone's layout whose
+  // adapters/moadim holds copies of the sidecar's sources and a node_modules of its own, where each
+  // case puts what it tests as sigelo-contact.
+  const copy = join(dir, 'clone'), mcp = join(copy, 'integrations', 'mcp'), side = join(copy, 'adapters', 'moadim');
+  const nmc = join(side, 'node_modules', 'sigelo-contact'), marker = join(dir, 'squatter-ran');
   mkdirSync(mcp, { recursive: true });
+  mkdirSync(join(side, 'node_modules'), { recursive: true });
   for (const f of ['server.mjs', 'contact.mjs']) copyFileSync(join(here, f), join(mcp, f));
-  for (const d of ['ts', 'adapters']) symlinkSync(join(here, '..', '..', d), join(copy, d), 'junction');
+  for (const f of ['package.json', 'sigelo-agent.ts', 'sigelo-agent-adopt.ts', 'sigelo-agent-monero.ts', 'sigelo-agent-contact.ts']) copyFileSync(join(here, '..', '..', 'adapters', 'moadim', f), join(side, f));
+  for (const to of [join(copy, 'ts'), join(side, 'node_modules', 'sigelo')]) symlinkSync(join(here, '..', '..', 'ts'), to, 'junction');
   const listOf = async (cl) => { await cl.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } }); return (await cl.rpc('tools/list')).result.tools.map((t) => t.name).sort().join(); };
   const c6 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
   ok(await listOf(c6) === IDENTITY_TOOLS.join(), 'no sigelo-contact: the 9 identity tools only');
   ok((await c6.rpc('tools/call', { name: 'sigelo_contacts', arguments: {} })).error?.code === -32602, 'no sigelo-contact: sigelo_contacts is an unknown tool');
   c6.close();
+  await c6.exited;
+  ok(/no contact tools: they need sigelo-contact, which comes with sigelo-agent: reinstall sigelo-agent .*: sigelo-contact is not installed in /.test(c6.stderr()), 'and one line on stderr says to reinstall sigelo-agent', c6.stderr().slice(0, 300));
+  // A sigelo-contact with the right name and version above the package's own tree: Node's walk goes
+  // on to the root, through $TMPDIR/node_modules, which may be anyone's. Never run: absent.
+  const sideLib = await import(pathToFileURL(join(side, 'sigelo-agent-contact.ts')).href);
+  const own = JSON.parse(readFileSync(join(side, 'package.json'), 'utf8')).version, [maj, min, pat] = own.split('.').map(Number);
+  const above = join(dir, 'node_modules', 'sigelo-contact'), squat = `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'x');\n`;
+  mkdirSync(above, { recursive: true });
+  writeFileSync(join(above, 'package.json'), JSON.stringify({ name: 'sigelo-contact', version: own, type: 'module' }));
+  for (const f of ['carrier.mjs', 'kdf.mjs', 'invite.mjs']) writeFileSync(join(above, f), squat);
+  const e0 = await sideLib.contactLib().then(() => null, (x) => x);
+  ok(sideLib.absent(e0) && e0.message.includes(`not loading ${realpathSync(above)}, outside this package`) && !existsSync(marker), 'contact: sigelo-contact above the package\'s own tree is named, never run, and counts as absent', e0?.message);
+  const c13 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
+  ok(await listOf(c13) === IDENTITY_TOOLS.join(), 'and the server lists the 9 identity tools only');
+  c13.close();
+  await c13.exited;
+  ok(/no contact tools: .*not loading .*sigelo-contact, outside this package/.test(c13.stderr()) && !existsSync(marker), 'saying so on stderr, its code never run', c13.stderr().slice(0, 300));
+  rmSync(join(dir, 'node_modules'), { recursive: true });
   rmSync(join(mcp, 'contact.mjs'));
   const c7 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
   ok(await listOf(c7) === IDENTITY_TOOLS.join(), 'a package without contact.mjs: the 9 identity tools only');
   c7.close();
-  // A contact/ that is there but broken stops the server: it must not pass for an absent one. First
-  // one whose package.json does not name sigelo-contact, then one with no carrier.mjs.
   copyFileSync(join(here, 'contact.mjs'), join(mcp, 'contact.mjs'));
-  mkdirSync(join(copy, 'contact'));
-  const cpkg = join(copy, 'contact', 'package.json');
+
+  // sigelo-contact, from sigelo-agent's own install, is handed the identity secret: whatever takes
+  // the name's place there must not run. Only sigelo-contact at a version within ^<sigelo-agent's>
+  // (the lockstep pin) is loaded; anything else is refused, which stops the server.
+  mkdirSync(nmc);
+  for (const f of ['carrier.mjs', 'kdf.mjs', 'invite.mjs']) writeFileSync(join(nmc, f), squat);
+  for (const [manifest, what] of [[{ name: 'sigelo-kontakt', version: own }, 'another name'], [{ name: 'sigelo-contact' }, 'no version'],
+    [{ name: 'sigelo-contact', version: `${maj}.${min + 1}.0` }, 'the next minor'], [{ name: 'sigelo-contact', version: `${own}-x` }, 'a prerelease'],
+    ...(pat > 0 ? [[{ name: 'sigelo-contact', version: `${maj}.${min}.${pat - 1}` }, 'an older patch']] : [])]) {
+    writeFileSync(join(nmc, 'package.json'), JSON.stringify({ ...manifest, type: 'module' }));
+    const e = await sideLib.contactLib().then(() => null, (x) => x);
+    ok(/^refusing .*sigelo-contact[\\/]package\.json: .*, not sigelo-contact \^/.test(e?.message ?? '') && !sideLib.absent(e) && !existsSync(marker), `contact: a package in sigelo-contact's place with ${what} is refused, never run`, e?.message);
+  }
   const c11 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
   c11.close();
-  ok(await c11.exited !== 0 && /contact[\\/]package\.json is missing, not sigelo-contact/.test(c11.stderr()), 'a contact/ without its package.json stops the server, naming it', c11.stderr().slice(0, 300));
-  writeFileSync(cpkg, '{"name":"sigelo-contact","type":"module"}');
-  writeFileSync(join(copy, 'contact', 'kdf.mjs'), '\n');
+  ok(await c11.exited !== 0 && /refusing .*sigelo-contact[\\/]package\.json/.test(c11.stderr()) && !existsSync(marker), 'one stops the server, naming it, and never runs', c11.stderr().slice(0, 300));
+  if (HAS_CONTACT) {
+    rmSync(nmc, { recursive: true });
+    symlinkSync(join(here, '..', '..', 'contact'), nmc, 'junction');
+    ok(typeof (await sideLib.contactLib()).lib.Carrier === 'function', 'contact: the real sigelo-contact in that place loads');
+    rmSync(nmc);
+    mkdirSync(nmc);
+  }
+  // A sigelo-contact at the right version but broken stops the server too: it must not pass for an
+  // absent one. No carrier.mjs, a syntax error, a file missing inside it.
+  writeFileSync(join(nmc, 'package.json'), JSON.stringify({ name: 'sigelo-contact', version: own, type: 'module' }));
+  for (const f of ['kdf.mjs', 'invite.mjs']) writeFileSync(join(nmc, f), '\n');
+  rmSync(join(nmc, 'carrier.mjs'), { force: true });
   const c12 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
   c12.close();
-  ok(await c12.exited !== 0 && /contact[\\/]carrier\.mjs/.test(c12.stderr()), 'a contact/ without carrier.mjs stops the server, naming it', c12.stderr().slice(0, 300));
-  for (const f of ['carrier.mjs', 'kdf.mjs']) writeFileSync(join(copy, 'contact', f), 'export const = ;\n');
+  ok(await c12.exited !== 0 && /sigelo-contact[\\/]carrier\.mjs/.test(c12.stderr()), 'a sigelo-contact without carrier.mjs stops the server, naming it', c12.stderr().slice(0, 300));
+  writeFileSync(join(nmc, 'carrier.mjs'), 'export const = ;\n');
   const c8 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
   c8.close();
-  ok(await c8.exited !== 0 && /SyntaxError/.test(c8.stderr()) && /contact[\\/](carrier|kdf)\.mjs/.test(c8.stderr()), 'a broken contact/ stops the server, naming the error', c8.stderr().slice(0, 200));
-  // So does a file missing inside contact/: only a missing contact/ or a missing npm package is absence
-  // (or a server outside integrations/mcp of a clone).
-  writeFileSync(join(copy, 'contact', 'carrier.mjs'), "import './envelope.mjs';\n");
-  writeFileSync(join(copy, 'contact', 'kdf.mjs'), '\n');
+  ok(await c8.exited !== 0 && /SyntaxError/.test(c8.stderr()) && /sigelo-contact[\\/]carrier\.mjs/.test(c8.stderr()), 'a broken sigelo-contact stops the server, naming the error', c8.stderr().slice(0, 200));
+  writeFileSync(join(nmc, 'carrier.mjs'), "import './envelope.mjs';\n");
   const c9 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
   c9.close();
-  ok(await c9.exited !== 0 && /contact[\\/]envelope\.mjs/.test(c9.stderr()), 'a file missing inside contact/ stops the server, naming it', c9.stderr().slice(0, 300));
-  // Dependencies not installed (npm ci not run in contact/): no contact tools, said on stderr.
-  writeFileSync(join(copy, 'contact', 'carrier.mjs'), "import 'sigelo-test-package-not-installed';\n");
+  ok(await c9.exited !== 0 && /sigelo-contact[\\/]envelope\.mjs/.test(c9.stderr()), 'a file missing inside sigelo-contact stops the server, naming it', c9.stderr().slice(0, 300));
+  // Its own dependencies not installed: no contact tools, said on stderr.
+  writeFileSync(join(nmc, 'carrier.mjs'), "import 'sigelo-test-package-not-installed';\n");
   const c10 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
-  ok(await listOf(c10) === IDENTITY_TOOLS.join(), 'contact/ without its dependencies: the 9 identity tools only');
+  ok(await listOf(c10) === IDENTITY_TOOLS.join(), 'sigelo-contact without its dependencies: the 9 identity tools only');
   c10.close();
   await c10.exited;
-  ok(/no contact tools: .*sigelo-test-package-not-installed.*\(npm ci in contact\/\)/.test(c10.stderr()), 'and one line on stderr names the package', c10.stderr().slice(0, 300));
+  ok(/no contact tools: they need sigelo-contact, .*: sigelo-contact is incomplete: .*sigelo-test-package-not-installed/.test(c10.stderr()), 'and one line on stderr names the package', c10.stderr().slice(0, 300));
 } finally {
   keeper.close();
   rmSync(dir, { recursive: true, force: true });

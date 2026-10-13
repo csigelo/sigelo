@@ -3,9 +3,9 @@
 Two things carry versions and move independently: the **wire** (`v` in every signed object,
 SPEC §3.1) and the **packages** (npm, the Go module). The wire moves rarely and loudly.
 
-**Status:** v0.1.1 (tags `v0.1.1`, `go/v0.1.1`, SSH-signed) is a draft pre-release: wire `sigelo/0`
-may change until v0.2; the keeper is stagenet-only and unaudited. The five packages are on npm at
-0.1.1; v0.1.0 was unsigned and never on npm.
+**Status:** v0.1.2 (tags `v0.1.2`, `go/v0.1.2`, SSH-signed) is a draft pre-release: wire `sigelo/0`
+may change until v0.2; the keeper is stagenet-only and unaudited; contacts and the relay are new and
+unaudited. The six packages are on npm at 0.1.2; v0.1.0 was unsigned and never on npm.
 
 ## 1. The wire: `sigelo/0`
 
@@ -53,7 +53,7 @@ It is regenerated from documented seeds by `ts/src/gen_vectors.ts`, and CI diffs
 ## 4. Packages
 
 Semver, in lockstep in 0.x: `sigelo` (ts), `sigelo-spend`, `sigelo-agent`, `sigelo-mcp`,
-`sigelo-recovery-kit`, the Go module. Each package states the wire versions it speaks. Until `1.0.0`, a minor bump may break the package
+`sigelo-recovery-kit`, `sigelo-contact` (from 0.1.2), the Go module. Each package states the wire versions it speaks. Until `1.0.0`, a minor bump may break the package
 API; it may never change the wire. A package that starts speaking `sigelo/1` gets a new major.
 The Go module is `github.com/csigelo/sigelo/go`, in the `go/` directory, so
 `go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.0` resolves through the tag

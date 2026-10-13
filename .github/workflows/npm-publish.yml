@@ -1,4 +1,4 @@
-# Publish the five npm packages with npm Trusted Publishing (GitHub OIDC): no token anywhere, and
+# Publish the npm packages with npm Trusted Publishing (GitHub OIDC): no token anywhere, and
 # npm attaches a provenance attestation to each version. Each package on npmjs.com names this
 # repository and this file name (adoption/npm-trusted-publishing.md). Read 2026-10-06:
 # https://docs.npmjs.com/trusted-publishers (npm >= 11.5.1, node >= 22.14.0, GitHub-hosted runner,
@@ -7,7 +7,12 @@
 # The tarballs are rebuilt here by release/build.sh from the tag and published only if their
 # SHA256SUMS is byte for byte the one attached to the GitHub release of that tag (the maintainer's
 # build, release/RELEASE.md step 5). No release yet: wait up to 30 minutes, then fail; re-run with
-# workflow_dispatch. A version already on the registry is skipped, so a re-run is harmless.
+# workflow_dispatch. A version already on the registry is skipped, so a re-run is harmless. When
+# every package of the tag is already there (the maintainer published the release tarballs with a
+# token, release/RELEASE.md step 8), the job stops green before building: nothing is left to do.
+# The packages of a tag: the five, and sigelo-contact from v0.1.2 (VERSIONING §4). Each must be at
+# the tag's version and every tarball must exist before the first publish, so a slip stops the job
+# with nothing published rather than half a release.
 name: npm publish
 on:
   push:
@@ -44,18 +49,57 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
-        with:
-          go-version: ${{ inputs.go-version || '1.27' }}
-          cache: false
       - name: the tag is the packages' version
         run: |
           v=$(node -p 'require("./ts/package.json").version')
           [ "$TAG" = "v$v" ] || { echo "::error title=tag/version::tag $TAG but ts/package.json is $v"; exit 1; }
+          # sigelo first: the others depend on it. sigelo-contact from 0.1.2.
+          pkgs="sigelo sigelo-agent sigelo-spend sigelo-mcp sigelo-recovery-kit"
+          [ "$(printf '%s\n' 0.1.2 "$v" | sort -V | head -n 1)" = 0.1.2 ] && pkgs="sigelo sigelo-contact sigelo-agent sigelo-spend sigelo-mcp sigelo-recovery-kit"
+          node -e '
+            const dir = { sigelo: "ts", "sigelo-contact": "contact", "sigelo-agent": "adapters/moadim",
+              "sigelo-spend": "spend", "sigelo-mcp": "integrations/mcp", "sigelo-recovery-kit": "kit" };
+            const [v, ...names] = process.argv.slice(1);
+            let bad = 0;
+            for (const n of names) {
+              const j = require(`./${dir[n]}/package.json`);
+              if (j.name === n && j.version === v && j.private !== true) continue;
+              console.log(`::error title=lockstep::${dir[n]}/package.json is ${j.name}@${j.version}${j.private === true ? " (private)" : ""}, not ${n}@${v}`);
+              bad++;
+            }
+            process.exit(bad ? 1 : 0);' "$v" $pkgs
           echo "V=$v" >> "$GITHUB_ENV"
+          echo "PKGS=$pkgs" >> "$GITHUB_ENV"
           echo "OUT=$RUNNER_TEMP/a" >> "$GITHUB_ENV"
-      - run: sh release/build.sh "$OUT"
+      # The public registry document, read without credentials (setup-node's .npmrc carries a
+      # placeholder token). 200: published; 404: not yet; anything else fails the curl and the job.
+      - name: anything left to publish?
+        run: |
+          left=
+          for p in $PKGS; do
+            code=$(curl -sS --retry 3 -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/$p/$V")
+            case $code in 200) ;; 404) left="$left $p" ;; *) echo "::error title=registry::$p@$V: HTTP $code"; exit 1 ;; esac
+          done
+          if [ -z "$left" ]; then
+            echo "::notice title=nothing to publish::every package is on the registry at $V"
+            echo "DONE=1" >> "$GITHUB_ENV"
+          else
+            echo "to publish:$left"
+          fi
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
+        if: env.DONE != '1'
+        with:
+          go-version: ${{ inputs.go-version || '1.27' }}
+          cache: false
+      - name: release/build.sh makes every tarball
+        if: env.DONE != '1'
+        run: |
+          sh release/build.sh "$OUT"
+          for p in $PKGS; do
+            [ -f "$OUT/$p-$V.tgz" ] || { echo "::error title=no tarball::release/build.sh made no $p-$V.tgz; nothing published"; exit 1; }
+          done
       - name: SHA256SUMS equals the GitHub release's
+        if: env.DONE != '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -71,9 +115,11 @@ jobs:
       # trusted publishing needs npm >= 11.5.1; node 22 ships npm 10. After the build, so the build
       # runs with the same npm as conformance.yml's release-build.
       - run: npm install -g npm@11 --no-audit --no-fund && npm --version
+        if: env.DONE != '1'
       - name: publish (sigelo first, the others depend on it)
+        if: env.DONE != '1'
         run: |
-          for p in sigelo sigelo-agent sigelo-spend sigelo-mcp sigelo-recovery-kit; do
+          for p in $PKGS; do
             t="$OUT/$p-$V.tgz"
             if [ "$(npm view "$p@$V" version 2>/dev/null || true)" = "$V" ]; then
               echo "skip $p@$V: already on the registry"

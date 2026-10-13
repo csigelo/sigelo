@@ -1,15 +1,15 @@
 # sigelo-mcp
 
-A zero-dependency stdio MCP server: `node server.mjs`. Tools, configs per harness and test status
-are in [../README.md](../README.md); `npm test` → ALL PASS.
+A stdio MCP server built on `sigelo-agent`: `node server.mjs`. Tools, configs per harness and test
+status are in [../README.md](../README.md); `npm test` → ALL PASS.
 
 Claude Code plugin, no wallet ([plugins/](../../plugins/README.md)):
 `claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo`.
 
 ## Contact tools
 
-Listed only in a clone, after `npm ci` in [`contact/`](../../contact/README.md); never from npm or
-in the plugin.
+Listed when [`sigelo-contact`](../../contact/README.md) is installed (it comes with `sigelo-agent`);
+never in the plugin.
 
 | Tool | Does |
 |---|---|

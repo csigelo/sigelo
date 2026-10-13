@@ -527,6 +527,6 @@ deliberate history rewrite only; every sync of the published repository is updat
   4. release, ROADMAP T4 (the commands are in release/build.sh's header), in the clone:
        release/build.sh && release/pack-test.sh release/dist        # tarballs, binaries, ALL PASS
        git tag v<version> && git tag go/v<version> && git push origin v<version> go/v<version>
-       npm publish release/dist/<pkg>-<version>.tgz                 # sigelo first, then spend, agent, mcp
+       npm publish release/dist/<pkg>-<version>.tgz                 # in this order: sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit
        gh release create v<version> release/dist/sigelo-verify-* release/dist/test-vectors.json release/dist/SHA256SUMS
 NEXT

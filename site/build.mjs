@@ -32,7 +32,9 @@ export const MIRROR = `${ORIGIN}/releases/`;
 export const CONTENT_HOSTS = [...OFFICIAL.domains.filter((d) => d.role === 'content'), ...OFFICIAL.hosts].map((d) => d.name);
 export const RELAY_ORIGIN = 'https://sigelo.ai';
 export const NPM_USER = 'csigelo';
-export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit'];
+export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit', 'sigelo-contact'];
+// A package that joined the lockstep after the first publish: the first version it ships at.
+export const PACKAGE_SINCE = { 'sigelo-contact': '0.1.2' };
 
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const readBytes = (p) => readFileSync(join(ROOT, p));
@@ -74,6 +76,12 @@ function latestRelease() {
   return { tag, files };
 }
 export const RELEASE = latestRelease();
+// The version the pages install and index.json calls released: the latest mirrored tag's, so a
+// package.json bumped ahead of a release never sends a reader to a version npm does not have yet.
+// Before any mirror, ts/package.json's.
+export const RELEASED = RELEASE ? RELEASE.tag.slice(1) : pkg('ts/package.json').version;
+// The npm packages of version v, in NPM_PACKAGES order.
+export const packagesAt = (v) => NPM_PACKAGES.filter((n) => !PACKAGE_SINCE[n] || cmpTag(`v${v}`, `v${PACKAGE_SINCE[n]}`) >= 0);
 
 // ---------------------------------------------------------------------------------------------
 // The site map. `repo` pages are a repository document rendered as is; the rest come from site/src.
@@ -308,7 +316,7 @@ const VALUES = {
   ...(RELEASE && { release_tag: RELEASE.tag, release_url: `/releases/${RELEASE.tag}/` }),
   ...(worldDidEarly && { issuer_did_short: `${worldDidEarly.slice(0, 'did:sigelo:zBASk7'.length)}…` }),
   spec_sha256: sha256(specBytes), vectors_sha256: sha256(vectorsBytes),
-  version: pkg('ts/package.json').version,
+  version: RELEASED,
   repo: REPO, contact_email: CONTACT_EMAIL, security_email: SECURITY_EMAIL,
   simplex: SIMPLEX_SET ? `[\`${SIMPLEX}\`](${SIMPLEX})` : 'coming; use e-mail until then',
   ...officialLines(worldDidEarly && `${worldDidEarly.slice(0, 'did:sigelo:zBASk7'.length)}…`),
@@ -323,7 +331,7 @@ const VALUES = {
 // rendering code in this file is not counted, as the Markdown renderer is not.
 export const VALUE_SOURCES = {
   release_tag: ['site/src/releases'], release_url: ['site/src/releases'], issuer_did_short: ['world/genesis.json'],
-  spec_sha256: ['SPEC.md'], vectors_sha256: ['test-vectors.json'], version: ['ts/package.json'],
+  spec_sha256: ['SPEC.md'], vectors_sha256: ['test-vectors.json'], version: ['site/src/releases', 'ts/package.json'],
   repo: [OFFICIAL_SRC], contact_email: [OFFICIAL_SRC], security_email: [OFFICIAL_SRC], simplex: [OFFICIAL_SRC],
   official_line: [OFFICIAL_SRC, 'world/genesis.json'], official_contact: [OFFICIAL_SRC, 'world/genesis.json'],
   relay_item: [OFFICIAL_SRC], relay_link: [OFFICIAL_SRC], relay_contact: [OFFICIAL_SRC],
@@ -345,7 +353,7 @@ export function domainClauses({ domains, hosts }) {
   ];
 }
 // SECURITY.md's "- Domains:" line, backticks stripped: what serves, then the other domains' roles,
-// then the repositories. The launch commit writes this line for DOMAINS (RELAY_LIVE).
+// then the repositories. The launch commit wrote this line for DOMAINS (RELAY_LIVE).
 export function securityDomainsLine(official) {
   const [serves, ...others] = domainClauses(official);
   const repos = official.repositories;
@@ -546,7 +554,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
   // index.json: the machine index. Data only.
   const file = (p, url) => ({ url: `${ORIGIN}${url}`, sha256: sha256(readBytes(p)), bytes: readBytes(p).length });
   const impl = (dir) => { const j = pkg(`${dir}/package.json`); return { name: j.name, version: j.version, path: `${dir}/`, language: 'TypeScript',
-    registry: 'npm', published: true, bin: j.bin ? Object.keys(j.bin) : [] }; };
+    registry: 'npm', published: j.version === VERSION, bin: j.bin ? Object.keys(j.bin) : [] }; };
   const worldDid = worldDidEarly;
   const index = {
     name: 'sigelo', homepage: `${ORIGIN}/`, description: SOFTWARE.description,
@@ -566,7 +574,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
       impl('adapters/moadim'), impl('spend'), impl('integrations/mcp'), impl('kit'),
     ],
     release: { version: VERSION, published: true, artefacts: [
-      ...['sigelo', 'sigelo-spend', 'sigelo-agent', 'sigelo-mcp', 'sigelo-recovery-kit'].map((n) => `${n}-${VERSION}.tgz`),
+      ...packagesAt(VERSION).map((n) => `${n}-${VERSION}.tgz`),
       ...['linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64', 'windows-amd64.exe'].map((t) => `sigelo-verify-${t}`),
       `sigelo-verify-src-${VERSION}.tar.gz`, 'test-vectors.json', 'SHA256SUMS'],
       ...(RELEASE && { tag: RELEASE.tag, mirror: MIRROR, github: `${REPO}/releases/tag/${RELEASE.tag}`,
@@ -587,13 +595,14 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
       releases: [`${REPO}/releases`, MIRROR], checksums: 'SHA256SUMS',
       maintainer: 'csigelo', github_user: 'csigelo',
       email: [CONTACT_EMAIL, SECURITY_EMAIL], email_receive_only: true,
-      npm_user: NPM_USER, packages: NPM_PACKAGES, packages_published: true,
+      npm_user: NPM_USER, packages: packagesAt(VERSION), packages_published: true,
       issuer_did: worldDid, world_genesis: `${ORIGIN}/world/genesis.json`,
-      // SECURITY.md's "Nobody from the project…" line, as data. No place before the relay launch.
+      // SECURITY.md's "Nobody from the project…" line, as data, in the field names sigelo.ai's
+      // index.json uses (relay/site/build.mjs). No place before the relay launch.
       payment_details_only_on: OFFICIAL.payment_places,
       never_asks_for: ['seed', 'identity or wallet private key', 'token'],
-      never_sends_by_email_or_chat: ['payment address', 'payment link'],
-      payment_proof_only_via: `${ORIGIN}/contact.html`,
+      payment_address_only_with: 'an invoice the buyer asked for',
+      invoice_only_via: `${ORIGIN}/contact.html`,
       report_impersonation: SECURITY_EMAIL,
     },
     ...(RELAY_LIVE && { relay: { name: 'sigelo relay', homepage: `${RELAY_ORIGIN}/`, index: `${RELAY_ORIGIN}/index.json`, llms_txt: `${RELAY_ORIGIN}/llms.txt`, host: HOSTS[0].name } }),

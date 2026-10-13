@@ -1,21 +1,80 @@
 {
   "name": "sigelo-contact",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Agent contacts for sigelo identities: invite codes, a contact store, end-to-end encrypted envelopes with hybrid post-quantum key agreement, and an MQTT carrier. Protocol and client code (MIT); the relay server lives in ../relay (AGPL-3.0).",
+  "version": "0.1.2",
+  "private": false,
+  "description": "Agent contacts for sigelo identities: invite codes, a contact store, end-to-end encrypted envelopes with hybrid post-quantum key agreement, and an MQTT carrier. Client code (MIT); the relay server is csigelo/sigelo-relay (AGPL-3.0).",
+  "keywords": [
+    "ai-agents",
+    "agent-identity",
+    "agent-messaging",
+    "end-to-end-encryption",
+    "post-quantum",
+    "ml-kem",
+    "mqtt",
+    "did",
+    "sigelo"
+  ],
+  "homepage": "https://sigelo.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csigelo/sigelo.git",
+    "directory": "contact"
+  },
+  "bugs": {
+    "url": "https://github.com/csigelo/sigelo/issues"
+  },
   "license": "MIT",
   "type": "module",
-  "main": "invite.mjs",
-  "engines": { "node": ">=22.18" },
+  "main": "carrier.mjs",
+  "exports": {
+    ".": "./carrier.mjs",
+    "./carrier": "./carrier.mjs",
+    "./carrier.mjs": "./carrier.mjs",
+    "./invite": "./invite.mjs",
+    "./invite.mjs": "./invite.mjs",
+    "./store": "./store.mjs",
+    "./store.mjs": "./store.mjs",
+    "./kdf": "./kdf.mjs",
+    "./kdf.mjs": "./kdf.mjs",
+    "./envelope": "./envelope.mjs",
+    "./envelope.mjs": "./envelope.mjs",
+    "./prekeys": "./prekeys.mjs",
+    "./prekeys.mjs": "./prekeys.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "README.md",
+    "carrier.mjs",
+    "envelope.mjs",
+    "invite.mjs",
+    "kdf.mjs",
+    "prekeys.mjs",
+    "store.mjs",
+    "fixtures/carrier-v0.json",
+    "fixtures/envelope-v0.json",
+    "fixtures/invite-v0.json",
+    "gen-carrier.mjs",
+    "gen-envelope.mjs",
+    "gen-invite.mjs",
+    "test-carrier.mjs",
+    "test-envelope.mjs",
+    "test-invite.mjs"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs",
+    "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs",
+    "prepack": "node ../release/prepack.mjs pre",
+    "postpack": "node ../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publish the release tarball (release/RELEASE.md) with SIGELO_PUBLISH=1');process.exit(1)}\""
+  },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "@noble/post-quantum": "^0.7.1",
     "mqtt": "^5.16.0",
-    "sigelo": "^0.1.1"
-  },
-  "scripts": {
-    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs",
-    "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs"
+    "sigelo": "file:../ts"
   }
 }

@@ -4,8 +4,8 @@
 #
 #   release/build.sh [outdir]          default outdir: release/dist
 #
-#   sigelo-<v>.tgz sigelo-spend-<v>.tgz sigelo-agent-<v>.tgz sigelo-mcp-<v>.tgz sigelo-recovery-kit-<v>.tgz
-#                                      the five npm packages, as `npm publish` would upload them
+#   sigelo-<v>.tgz sigelo-contact-<v>.tgz sigelo-spend-<v>.tgz sigelo-agent-<v>.tgz sigelo-mcp-<v>.tgz
+#   sigelo-recovery-kit-<v>.tgz        the six npm packages, as `npm publish` would upload them
 #                                      (sigelo-spend carries the keeper installer, `sigelo-spend init`)
 #   sigelo-verify-<os>-<arch>[.exe]    static verifier binaries: linux/darwin × amd64/arm64, windows/amd64
 #   sigelo-verify-src-<v>.tar.gz       go/ + test-vectors.json + LICENSE: `go build ./cmd/sigelo-verify`
@@ -14,10 +14,11 @@
 # release/pack-test.sh installs all of it in an empty directory and runs it. At D1 (ROADMAP §7),
 # once the npm account and the repository exist, the maintainer publishes exactly these files:
 #
-#   for t in sigelo sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do npm publish "$out/$t-<v>.tgz"; done
+#   for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do npm publish "$out/$t-<v>.tgz"; done
 #   gh release create v<v> "$out"/sigelo-verify-* "$out"/test-vectors.json "$out"/SHA256SUMS
 #
-# `sigelo` first: the other three depend on it (^<v>). Publishing a tarball runs no scripts, so
+# `sigelo` first: the others depend on it (^<v>); `sigelo-contact` before `sigelo-agent`, which
+# depends on it (^<v>), and `sigelo-mcp` on that. Publishing a tarball runs no scripts, so
 # the prepublishOnly guard in each package.json (which refuses a publish from a directory
 # without SIGELO_PUBLISH=1) does not apply to it. `go install
 # github.com/csigelo/sigelo/go/cmd/sigelo-verify@v<v>` works once the export carries that module path
@@ -29,7 +30,7 @@
 # release/prepack.mjs pins the `file:` sibling dependencies to ^<v>). npm writes fixed mtimes
 # into the tar; release/normalize-tgz.mjs then replaces node's zlib output with stored deflate
 # blocks, so the same commit and typescript give the same bytes whatever node builds them.
-# All five packages carry one version; the build refuses otherwise.
+# All six packages carry one version; the build refuses otherwise.
 #
 # Same commit + same Go toolchain ⇒ byte-identical binaries on any host: CGO off (no libc, no
 # host C toolchain), -trimpath (no build paths), -buildid= and -s -w (no build ID, no symbol or
@@ -69,9 +70,9 @@ src=$stage/src
 git clone -q --shared --no-checkout "$root" "$src"
 git -C "$src" -c advice.detachedHead=false checkout -q --detach "$commit"
 
-# The five packages share one version (VERSIONING.md: packages use semver, in lockstep in 0.x).
+# The six packages share one version (VERSIONING.md: packages use semver, in lockstep in 0.x).
 v=$(node -p 'require(process.argv[1]).version' "$src/ts/package.json")
-for p in spend adapters/moadim integrations/mcp kit; do
+for p in contact spend adapters/moadim integrations/mcp kit; do
 	pv=$(node -p 'require(process.argv[1]).version' "$src/$p/package.json")
 	[ "$pv" = "$v" ] || { echo "build.sh: $p/package.json is $pv, ts/package.json is $v; the packages move together" >&2; exit 1; }
 done
@@ -93,13 +94,14 @@ cp "$src/test-vectors.json" "$out/test-vectors.json"
 
 # npm: flaky networks are the norm on some builders; npm ci is retried, never skipped.
 retry() { n=1; until "$@"; do [ $n -ge 3 ] && return 1; n=$((n + 1)); echo "build.sh: retry $n: $*" >&2; sleep 5; done; }
-for p in ts spend adapters/moadim integrations/mcp kit; do
+for p in ts contact spend adapters/moadim integrations/mcp kit; do
 	# mcp and kit have no build step: their pack only reads their siblings' package.json, so no install.
+	# contact has none either, but runtime dependencies: npm ci checks its lockfile against them.
 	[ "$p" = integrations/mcp ] || [ "$p" = kit ] || (cd "$src/$p" && retry npm ci --ignore-scripts --no-audit --no-fund --silent)
 	(cd "$src/$p" && npm pack --silent --pack-destination "$out" >/dev/null)
 done
 node "$src/release/normalize-tgz.mjs" "$out"/*.tgz
-for t in sigelo sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
+for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
 	[ -f "$out/$t-$v.tgz" ] || { echo "build.sh: npm pack made no $t-$v.tgz" >&2; exit 1; }
 	# the published manifest must name no sibling directory
 	if tar -xzOf "$out/$t-$v.tgz" package/package.json | grep -q '"file:'; then

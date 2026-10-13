@@ -3,11 +3,12 @@
 # demo/two-machines.sh: demo/two-machines.md on one machine. Two agents, each with its own HOME and
 # identity file, and a relay on loopback at its default login rate; every node process reads one
 # injected clock. alice runs sigelo-agent from its source (adapters/moadim/cli.ts), bob as step 1 of
-# demo/two-machines.md installs it (npm run build: dist/cli.js); a copy installed from npm refuses
-# the contact verbs. They pair by code (both show the same pairing id), exchange 115 messages, one
-# of 150,000 characters and one a 500-level nested array, read through a pipe after a reader that
-# went away; one is offline for a day, then rotates its key and reads its backlog: nothing lost,
-# nothing readable on the relay. Prints DEMO PASS, or FAIL and exits 1 at the first failure.
+# demo/two-machines.md installs it (npm run build: dist/cli.js); a copy laid out as npm installs it
+# loads sigelo-contact beside it, and refuses a package that only takes that name's place. They
+# pair by code (both show the same pairing id), exchange 115 messages, one of 150,000 characters
+# and one a 500-level nested array, read through a pipe after a reader that went away; one is
+# offline for a day, then rotates its key and reads its backlog: nothing lost, nothing readable on
+# the relay. Prints DEMO PASS, or FAIL and exits 1 at the first failure.
 #   sh demo/two-machines.sh        (needs ts/ built and npm ci in contact/, relay/, adapters/moadim/)
 # The relay: SIGELO_RELAY_DIR, else relay/ here (it is its own AGPL repository once exported).
 set -eu
@@ -53,43 +54,41 @@ export SIGELO_RELAY_ENDPOINTS="{\"relay.demo\":{\"mqtt\":\"mqtt://127.0.0.1:$MQT
 on() { who=$1; shift; HOME="$W/$who" SIGELO_IDENTITY="$W/$who/.config/moadim/sigelo.local.json" "$@"; }
 
 step "the install: sigelo-agent built as demo/two-machines.md step 1 builds it"
-# npm run build (tsc -p tsconfig.build.json) into a copy of the clone's layout, so the tree here is
-# untouched: dist/ beside the package's node_modules, contact/ two levels up.
+# npm run build (tsc -p tsconfig.build.json) into a copy of the package, so the tree here is
+# untouched: dist/ beside the package's node_modules, where npm ci linked sigelo-contact to contact/.
 CLONE="$W/clone"
 mkdir -p "$CLONE/adapters/moadim"
 cp "$ROOT/adapters/moadim/package.json" "$CLONE/adapters/moadim/"
 ln -s "$ROOT/adapters/moadim/node_modules" "$CLONE/adapters/moadim/node_modules"
-ln -s "$ROOT/contact" "$CLONE/contact"
 "$ROOT/adapters/moadim/node_modules/.bin/tsc" -p "$ROOT/adapters/moadim/tsconfig.build.json" --outDir "$CLONE/adapters/moadim/dist" || die "npm run build"
 [ -f "$CLONE/adapters/moadim/dist/sigelo-agent-contact.js" ] || die "the build left out the contact verbs"
 echo "built: dist/cli.js and dist/sigelo-agent-contact.js"
-# The same build installed from npm (node_modules/sigelo-agent) refuses the contact verbs and never
-# loads a package named sigelo-contact: that name is not published, and whoever registered it would
-# be handed the identity secret. Here a squatter is installed beside it, and must not run.
+# The same build as npm installs it (node_modules/sigelo-agent) loads sigelo-contact, its dependency,
+# from its own install and hands it the identity secret: only sigelo-contact at a version within
+# ^<sigelo-agent's> loads. A package that only takes the name's place (here one with no version) is
+# refused and must not run; with none there, the verbs say to reinstall sigelo-agent, and one at the
+# right version above the install ($W/node_modules: Node's walk would reach it) is named, never run.
 NM="$W/npm/node_modules"
 mkdir -p "$NM/sigelo-agent" "$NM/sigelo-contact"
 cp -R "$CLONE/adapters/moadim/dist" "$CLONE/adapters/moadim/package.json" "$NM/sigelo-agent/"
 ln -s "$ROOT/ts" "$NM/sigelo"
 echo '{"name":"sigelo-contact","type":"module"}' > "$NM/sigelo-contact/package.json"
-for f in carrier kdf; do echo "import{writeFileSync}from'node:fs';writeFileSync('$W/squatter-ran','x');" > "$NM/sigelo-contact/$f.mjs"; done
+for f in carrier kdf invite; do echo "import{writeFileSync}from'node:fs';writeFileSync('$W/squatter-ran','x');" > "$NM/sigelo-contact/$f.mjs"; done
 rc=0; on npm node "$NM/sigelo-agent/dist/cli.js" contacts > /dev/null 2> "$W/npm.err" || rc=$?
-[ $rc = 1 ] && grep -q 'not in the npm release' "$W/npm.err" && [ ! -e "$W/squatter-ran" ] || die "the npm copy (exit $rc): $(cat "$W/npm.err")"
+[ $rc = 1 ] && grep -q 'refusing .*sigelo-contact/package.json: "sigelo-contact" no version, not sigelo-contact ^' "$W/npm.err" && [ ! -e "$W/squatter-ran" ] || die "a package in sigelo-contact's place (exit $rc): $(cat "$W/npm.err")"
 cat "$W/npm.err"
-# Nor does a copy of the build outside adapters/moadim of a clone: an npm tarball unpacked with tar
-# at <shared>/x/package would load <shared>/contact, which whoever can write <shared> plants.
-mkdir -p "$W/shared/x/package" "$W/shared/contact"
-cp -R "$CLONE/adapters/moadim/dist" "$CLONE/adapters/moadim/package.json" "$W/shared/x/package/"
-ln -s "$ROOT/adapters/moadim/node_modules" "$W/shared/x/package/node_modules"
-echo '{"name":"sigelo-contact","type":"module"}' > "$W/shared/contact/package.json"
-for f in carrier kdf invite; do echo "import{writeFileSync}from'node:fs';writeFileSync('$W/plant-ran','x');" > "$W/shared/contact/$f.mjs"; done
-rc=0; on npm node "$W/shared/x/package/dist/cli.js" contacts > /dev/null 2> "$W/plant.err" || rc=$?
-[ $rc = 1 ] && grep -q 'run from adapters/moadim of a clone' "$W/plant.err" && [ ! -e "$W/plant-ran" ] || die "a copy outside adapters/moadim (exit $rc): $(cat "$W/plant.err")"
-# A clone without contact/ says what is missing, and exits 1.
-mkdir -p "$W/bare/adapters/moadim"
-cp -R "$CLONE/adapters/moadim/dist" "$CLONE/adapters/moadim/package.json" "$W/bare/adapters/moadim/"
-ln -s "$ROOT/adapters/moadim/node_modules" "$W/bare/adapters/moadim/node_modules"
-rc=0; on bare node "$W/bare/adapters/moadim/dist/cli.js" contacts > /dev/null 2> "$W/bare.err" || rc=$?
-[ $rc = 1 ] && grep -q 'need contact/ of this clone' "$W/bare.err" || die "a clone without contact/ (exit $rc): $(cat "$W/bare.err")"
+mkdir "$W/node_modules" && mv "$NM/sigelo-contact" "$W/node_modules/"
+node -e 'console.log(JSON.stringify({ name: "sigelo-contact", version: require(process.argv[1]).version, type: "module" }))' \
+  "$ROOT/adapters/moadim/package.json" > "$W/node_modules/sigelo-contact/package.json"
+rc=0; on npm node "$NM/sigelo-agent/dist/cli.js" contacts > /dev/null 2> "$W/npm.err" || rc=$?
+[ $rc = 1 ] && grep -q 'reinstall sigelo-agent' "$W/npm.err" && grep -q 'not loading .*/node_modules/sigelo-contact, outside this package' "$W/npm.err" && [ ! -e "$W/squatter-ran" ] \
+  || die "no sigelo-contact, one above the install (exit $rc): $(cat "$W/npm.err")"
+cat "$W/npm.err"
+rm -r "$W/node_modules"
+ln -s "$ROOT/contact" "$NM/sigelo-contact"
+rc=0; on npm node "$NM/sigelo-agent/dist/cli.js" accept sgl1x > /dev/null 2> "$W/npm.err" || rc=$?
+[ $rc = 1 ] && grep -q 'code_length' "$W/npm.err" || die "the npm copy with sigelo-contact (exit $rc): $(cat "$W/npm.err")"
+echo "the npm copy, sigelo-contact beside it: accept reads the code ($(cat "$W/npm.err"))"
 
 # Two machines. agent = sigelo-agent, the contact verbs included: alice's from its source, bob's the
 # build above.

@@ -6,7 +6,8 @@ identity that survives its throwaway workbench: prove control to a world, collec
 present a SPEC §8 bundle. Zero Rust changes; hookup in [INTEGRATION.md](INTEGRATION.md).
 
 ```sh
-(cd ../../ts && npm ci && npx tsc)       # the one dependency
+(cd ../../ts && npm ci && npx tsc)
+(cd ../../contact && npm ci)
 npm ci && npm test                       # ALL PASS
 npm run build && npm link                # sigelo-agent on PATH
 sigelo-agent init --recovery <z…>        # recovery public key, generated offline
@@ -40,7 +41,7 @@ A `<json|->` argument is inline JSON, `-` for stdin, or a file path.
 | `receive [--account <n>]` | next unused subaddress (account 0 starts at minor 1) |
 | `invoice --addr <subaddress> [--amount <atomic>] [--memo <text>] [--ttl <s>]` | signed §6.3 invoice; amount is a string |
 | `verify-invoice <json\|-> --bundle <file>` | payer side: signature, time window, a `proven` binding, same network |
-| `invite`, `accept <code>`, `contacts`, `send`, `inbox`, `forget` | relay contacts, clone only (`npm ci` in `contact/`); `accept` prints the code's DID, `contacts` the pairing id: compare all 32 digits with its operator; undelivered `inbox` output waits in `*.held.json` |
+| `invite`, `accept <code>`, `contacts`, `send`, `inbox`, `forget` | relay contacts through `sigelo-contact`, a dependency; `accept` prints the code's DID, `contacts` the pairing id: compare all 32 digits with its operator; undelivered `inbox` output waits in `*.held.json` |
 
 The agent cannot spend: it holds the view key and addresses only, and nothing prints the view
 key. Spending goes through the keeper, [`spend/`](../../spend/README.md).

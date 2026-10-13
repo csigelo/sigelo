@@ -25,7 +25,7 @@ console.log = console.info = console.debug = console.error;
 
 const MODERN = ['2026-07-28'];                                            // per-request _meta era
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];  // initialize era
-const SERVER_INFO = { name: 'sigelo', version: '0.1.1' };
+const SERVER_INFO = { name: 'sigelo', version: '0.1.2' };
 const PV = 'io.modelcontextprotocol/protocolVersion';
 const env = process.env;
 const WALLET = Boolean(env.SIGELO_WALLET_URL && env.SIGELO_WALLET_TOKEN);
@@ -112,10 +112,11 @@ const HANDLERS = {
   sigelo_wallet_pay: ({ to, amount, purpose, ref }) => wallet(['pay', String(to ?? ''), String(amount ?? ''), String(purpose ?? ''), ...(ref ? ['--ref', String(ref)] : [])]),
   sigelo_wallet_history: ({ n }) => wallet(['history', ...(n ? [String(n)] : [])]),
 };
-// The contact tools (design/relay-plan.md §2), only in a clone whose contact/ has its dependencies
-// installed: contact.mjs answers null otherwise and when run from node_modules (sigelo-contact is
-// not published), and so does a package that ships no contact.mjs. This server never depends on
-// them. Anything else wrong in them stops it: a broken install must not pass for an absent one.
+// The contact tools (design/relay-plan.md §2), when sigelo-contact is installed (a dependency of
+// sigelo-agent; in a clone, npm ci in adapters/moadim and contact/): contact.mjs answers null
+// otherwise, with one line on stderr, and a package that ships no contact.mjs gets null too. This
+// server never depends on them. Anything else wrong in them stops it: a broken install must not
+// pass for an absent one.
 const contact = await import('./contact.mjs').then((m) => m.load({ installed: INSTALLED, id }), (e) => { if (e.code === 'ERR_MODULE_NOT_FOUND') return null; throw e; });
 if (contact) { TOOLS.push(...contact.tools); Object.assign(HANDLERS, contact.handlers); }
 

@@ -2,9 +2,9 @@
 /**
  * The contact verbs of the sidecar (design/relay-plan.md §2): invite, accept, contacts, send,
  * inbox, forget. Two agents swap a one-line code and become contacts, then exchange end-to-end
- * encrypted messages through a relay that sees ciphertext only. The work is sigelo-contact's
- * carrier (contact/carrier.mjs); this file is argv and output, counted apart from the 77-line
- * identity core, as the Monero half is (INTEGRATION.md).
+ * encrypted messages through a relay that sees ciphertext only. The work is the carrier of
+ * sigelo-contact, a dependency of this package (contact/ of the repository); this file is argv and
+ * output, counted apart from the 77-line identity core, as the Monero half is (INTEGRATION.md).
  *
  * The identity is the sidecar's own file; the contact store, the carrier's state and the held inbox
  * sit beside it (`sigelo.local.json` → `sigelo.local.contacts.json`, `.carrier.json`, `.held.json`,
@@ -24,8 +24,8 @@
  * paired with each other. All 32 digits: someone who swapped the code is the inviter in the
  * other's pairing, chooses the encapsulation, and can grind a short prefix to match.
  */
-import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, sep } from 'node:path';
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { bundleOf, identityPath, load, secretOf } from './sigelo-agent.ts';
 import { withLock } from './sigelo-agent-monero.ts';
@@ -76,18 +76,55 @@ interface Contact { name: string; did: string }
 interface Kdf { pairId(K: Uint8Array): string; unhex(s: unknown, len: number, check: string): Uint8Array }
 interface Invite { parseInvite(text: string, now: number): { did: string } }
 
-// The carrier is contact/ of a clone of the repository, two levels above this package, whether this
-// file runs as .ts or from dist/. Run from node_modules (an npm install, decided by where this file
-// is, as integrations/mcp/server.mjs decides), the verbs refuse: sigelo-contact is not published
-// (contact/package.json is private, ROADMAP D1), so its bare name would load whatever anyone
-// registers under it, and identity() below hands that code the identity secret. Elsewhere, only
-// from adapters/moadim beside a contact/ whose package.json names sigelo-contact: a copy of the build
-// two levels below a directory others can write (an npm tarball unpacked at /tmp/x/package) loaded
-// /tmp/contact/carrier.mjs, and handed it the identity secret.
+// sigelo-contact, a dependency of this package, from this package's own install only: the identity
+// secret goes to what it loads. It is looked for as Node walks for a dependency, nearest first:
+// PACKAGE/node_modules (a global install; in a clone, the link `npm ci` in adapters/moadim makes to
+// contact/: `file:../../contact`, pinned to ^<version> in the tarball by release/prepack.mjs), then,
+// installed (PACKAGE inside node_modules), each node_modules above it up to the outermost one in its
+// path (hoisted by npm, npx or pnpm). Node's own walk goes on to the root, where a node_modules may
+// be anyone's (/tmp/node_modules, above a clone in /tmp): one found only there is named, not loaded,
+// and sigelo-contact counts as absent. Then the manifest: only one named sigelo-contact at a version
+// within ^<this package's version> (the lockstep pin) loads. That proves its name and version inside
+// this package's tree, not who published it. Not installed, or one of its own dependencies missing:
+// an error with code ERR_MODULE_NOT_FOUND and no url (a file missing in a package has one).
 const HERE = dirname(fileURLToPath(import.meta.url)), PACKAGE = basename(HERE) === 'dist' ? dirname(HERE) : HERE;
-const INSTALLED = HERE.split(sep).includes('node_modules');
-const CLONE = basename(PACKAGE) === 'moadim' && basename(dirname(PACKAGE)) === 'adapters';
-const CONTACT = join(PACKAGE, '..', '..', 'contact'), LIB = `${pathToFileURL(CONTACT).href}/`;
+/** What to do when sigelo-contact is missing, for the one line that says so. */
+export const MISSING = 'need sigelo-contact, which comes with sigelo-agent: reinstall sigelo-agent (in a clone: npm ci in contact/ and in adapters/moadim)';
+export const absent = (e: unknown): boolean => { const x = e as { code?: unknown; url?: unknown } | null; return x?.code === 'ERR_MODULE_NOT_FOUND' && x.url === undefined; };
+const notFound = (message: string): Error => Object.assign(new Error(message), { code: 'ERR_MODULE_NOT_FOUND' });
+const isDir = (d: string): boolean => { try { return statSync(d).isDirectory(); } catch { return false; } };
+// v within ^base as npm reads it: at least base, below the next major (the next minor while major is 0).
+const caret = (v: unknown, base: string): boolean => {
+  const [x, b] = [v, base].map((s) => (typeof s === 'string' ? /^(\d+)\.(\d+)\.(\d+)$/.exec(s)?.slice(1).map(Number) : undefined));
+  return !!x && !!b && x[0] === b[0] && (b[0] !== 0 || x[1] === b[1]) && (x[1]! - b[1]! || x[2]! - b[2]!) >= 0;
+};
+/** sigelo-contact's directory in this package's install; else an absent error naming where it looked. */
+function contactDir(): string {
+  const homes: string[] = [];
+  for (let x = PACKAGE; ; x = dirname(x)) {
+    if (basename(x) !== 'node_modules') homes.push(join(x, 'node_modules'));
+    if (!x.split(/[\\/]/).includes('node_modules') || x === dirname(x)) break;
+  }
+  const found = homes.map((d) => join(d, 'sigelo-contact')).find(isDir);
+  if (found !== undefined) return found;
+  let outside = '';
+  try { outside = `; not loading ${dirname(fileURLToPath(import.meta.resolve('sigelo-contact/package.json')))}, outside this package`; } catch {}
+  throw notFound(`sigelo-contact is not installed in ${homes.join(' or ')}${outside}`);
+}
+export async function contactLib(): Promise<{ lib: CarrierLib; kdf: Kdf; inv: Invite }> {
+  const own = (JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8')) as { version: string }).version;
+  const dir = contactDir(), pkg = join(dir, 'package.json');
+  const m = JSON.parse(readFileSync(pkg, 'utf8')) as { name?: unknown; version?: unknown } | null;
+  if (m?.name !== 'sigelo-contact' || !caret(m.version, own)) throw new Error(`refusing ${pkg}: ${JSON.stringify(m?.name) ?? 'no name'} ${JSON.stringify(m?.version) ?? 'no version'}, not sigelo-contact ^${own}`);
+  // By path, from the directory checked: by name, Node could find another first (dist/node_modules).
+  try {
+    const [lib, kdf, inv] = await Promise.all(['carrier', 'kdf', 'invite'].map((f) => import(pathToFileURL(join(dir, `${f}.mjs`)).href))) as [CarrierLib, Kdf, Invite];
+    return { lib, kdf, inv };
+  } catch (e) {
+    if (absent(e)) throw notFound(`sigelo-contact is incomplete: ${(e as Error).message.split('\n')[0]}`);
+    throw e;
+  }
+}
 
 // JSON.stringify escapes the C0 controls but leaves DEL, the C1 controls (U+0080-U+009F, which some
 // terminals act on as CSI and OSC) and the bidi controls raw. Contacts write message content and
@@ -184,15 +221,10 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
   }
   if (args.length < spec.args[0]) return usage('an argument is missing');
   if (args.length > spec.args[1]) return usage(`unexpected argument ${JSON.stringify(args[spec.args[1]])}`);
-  if (INSTALLED) { note('the contact verbs are not in the npm release of sigelo-agent: run them from a clone of the repository (adapters/moadim, after npm ci in contact/)'); return 1; }
-  if (!CLONE) { note(`the contact verbs run from adapters/moadim of a clone of the repository, not from ${PACKAGE}`); return 1; }
   let lib: CarrierLib, kdf: Kdf, inv: Invite;
-  try {
-    const pkg = join(CONTACT, 'package.json'), named = (JSON.parse(readFileSync(pkg, 'utf8')) as { name?: unknown }).name;
-    if (named !== 'sigelo-contact') throw new Error(`${pkg} names ${JSON.stringify(named)}, not sigelo-contact`);
-    [lib, kdf, inv] = await Promise.all([import(`${LIB}carrier.mjs`), import(`${LIB}kdf.mjs`), import(`${LIB}invite.mjs`)]) as [CarrierLib, Kdf, Invite];
-  } catch (e) {
-    note(`the contact verbs need contact/ of this clone and its dependencies (npm ci in contact/): ${(e as Error).message}`);
+  try { ({ lib, kdf, inv } = await contactLib()); } catch (e) {
+    const why = (e as Error).message.split('\n')[0]!;
+    note(absent(e) ? `the contact verbs ${MISSING}: ${why}` : why);
     return 1;
   }
   try {

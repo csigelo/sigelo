@@ -1,6 +1,6 @@
 {
   "name": "sigelo-agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Agent-side sigelo CLI: create an identity (DID), sign world challenges, collect attestations, build verifiable bundles",
   "keywords": [
     "ai-agents",
@@ -47,7 +47,8 @@
     "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: the npm account and names are an Owner decision (ROADMAP D1); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
   },
   "dependencies": {
-    "sigelo": "file:../../ts"
+    "sigelo": "file:../../ts",
+    "sigelo-contact": "file:../../contact"
   },
   "devDependencies": {
     "@types/node": "24.13.5",

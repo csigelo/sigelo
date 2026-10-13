@@ -32,7 +32,7 @@ bundle` presents your attestations. Anything a world puts in `claims` is untrust
 | no REST route or MCP tool | nothing listens; contact verbs dial out to a relay |
 | non-zero exit naming the check | a failing step triggers moadim's existing failure notifications |
 
-## Line budget — 77 lines for the identity core, one dependency
+## Line budget — 77 lines for the identity core
 
 Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 
@@ -43,12 +43,12 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | **identity total** | **77** | |
 | `sigelo-agent-monero.ts` | 131 | `walletSet`, `bindMonero`, `receive`, `invoice`, `verifyInvoice` — counted separately so an identity-only install reads 77 |
 | `sigelo-agent-adopt.ts` | 55 | `adopt`, `forgetIssuer`, outside the core |
-| `sigelo-agent-contact.ts` | 177 | `invite`, `accept`, `contacts`, `send`, `inbox`, `forget`: contacts over a relay, apart; `cli.ts` dispatches to it in one line and escapes all output with its helpers |
+| `sigelo-agent-contact.ts` | 202 | `invite`, `accept`, `contacts`, `send`, `inbox`, `forget`: contacts over a relay, apart; `cli.ts` dispatches to it in one line and escapes all output with its helpers |
 | `cli.ts`, `test.ts` | — | argv/output and tests, not argued |
 
-Dependency: `"sigelo": "file:../../ts"` (build `ts/` first). `@types/node` and `typescript` are
-dev-only; node runs the `.ts` directly. The contact verbs load a clone's `contact/`, from
-`adapters/moadim` only; otherwise they say so and exit 1.
+Dependencies: `sigelo` (`file:../../ts`, build `ts/` first) for the core, `sigelo-contact`
+(`file:../../contact`) for the contact verbs, loaded only from this package's own install; tarballs
+pin both `^<v>`. `@types/node` and `typescript` are dev-only; node runs the `.ts` directly.
 
 ## Design
 

@@ -12,18 +12,16 @@ export const SECURITY_EMAIL = 'security@sigelo.io';
 // is an <angle-bracket> placeholder every generated surface omits it; site/test/run.mjs fails if it leaks.
 export const SIMPLEX = 'https://smp10.simplex.im/a#18LjfJawmkVxvFtCHFo-yyzPo8Kr3gPLNts_ovwxmZM';
 
-// The relay launch. false until https://sigelo.ai/robots.txt answers 200. Until then sigelo.io says
-// what is true today (BEFORE_LAUNCH): sigelo.ai is parked, the held domains redirect to sigelo.io
-// (sigelo.net's 301 as deployed), one repository, no link to sigelo.ai, no payment place. The launch
-// commit sets it true together with SECURITY.md (the Domains line site/build.mjs
-// securityDomainsLine gives, its reporting channel, the relay in Scope and Safe harbour) and
-// site/deploy/nginx.conf (sigelo.net and sigelo.online to sigelo.ai, in both server blocks each).
-// site/test/run.mjs fails until the three agree, and prints the Domains line it wants;
-// relay/site/build.mjs --final refuses to deploy sigelo.ai before that commit.
-// site/deploy/check.mjs fails a sigelo.io build that redirects or links to a sigelo.ai that does
-// not answer as ours: after an upload, which deploy.sh runs; before one only with --preflight,
-// which deploy.sh does not run yet, so run it by hand before the launch deploy.
-export const RELAY_LIVE = false;
+// The relay launch: true since the launch commit (2026-10-13), which set it together with SECURITY.md
+// (the Domains line site/build.mjs securityDomainsLine gives, its reporting channel, the relay in
+// Scope and Safe harbour) and site/deploy/nginx.conf (sigelo.net and sigelo.online to sigelo.ai, in
+// both server blocks each). site/test/run.mjs fails while the three disagree, and prints the Domains
+// line it wants; relay/site/build.mjs --launch refuses until they agree. Set back to false, sigelo.io
+// says BEFORE_LAUNCH again: sigelo.ai parked, the held domains to sigelo.io, one repository, no link
+// to sigelo.ai, no payment place. site/deploy/check.mjs fails a sigelo.io build that redirects or
+// links to a sigelo.ai that does not answer as ours: after an upload, which deploy.sh runs; before
+// one only with --preflight, which deploy.sh does not run yet, so run it by hand before a deploy.
+export const RELAY_LIVE = true;
 
 // Roles: 'content' serves a site; 'redirect' 301s to `to` (site/deploy/nginx.conf); 'parked' is
 // ours and serves nothing of ours. A redirect is called one only while `live`, i.e. its DNS reaches
@@ -46,11 +44,10 @@ export const DOMAINS = [
 // Hosts under those domains that serve something of their own.
 export const HOSTS = [{ name: 'relay.sigelo.ai', what: 'relay broker' }];
 export const REPOSITORIES = [REPO, 'https://github.com/csigelo/sigelo-relay'];
-// Where the relay's payment details are published: its two pay pages, and the one file per page on
-// the relay repository's default branch. Exact files, not the repository: anyone can put text under
-// its URL prefix (an issue, a pull request, a fork's commit viewed through the parent).
-export const PAYMENT_PLACES = ['https://sigelo.ai/pay-monero.html', 'https://sigelo.ai/pay-card.html',
-  `${REPOSITORIES[1]}/blob/main/site/pay-monero.md`, `${REPOSITORIES[1]}/blob/main/site/pay-card.md`];
+// Where the relay's payment details are published: its pay page (Monero only), and that page's one
+// file on the relay repository's default branch. An exact file, not the repository: anyone can put
+// text under its URL prefix (an issue, a pull request, a fork's commit viewed through the parent).
+export const PAYMENT_PLACES = ['https://sigelo.ai/pay-monero.html', `${REPOSITORIES[1]}/blob/main/site/pay-monero.md`];
 
 export const BEFORE_LAUNCH = {
   domains: [

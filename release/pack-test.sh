@@ -6,12 +6,16 @@
 #                                    (from HEAD) into a temporary directory
 #
 # In an empty temporary directory, outside the repository, with HOME pointed there too:
-#   1. `npm install` the five tarballs together. The pinned `sigelo@^<v>` that sigelo-spend,
-#      sigelo-agent, sigelo-mcp and sigelo-recovery-kit ask for is met by the sigelo tarball installed beside them,
-#      so nothing comes from the registry but the third-party dependencies (@noble/*).
-#   2. The acceptance commands of T4, as a user types them: `npx sigelo-agent init`,
+#   1. `npm install` the six tarballs together. The pinned `sigelo@^<v>` that the others ask for
+#      is met by the sigelo tarball installed beside them, and sigelo-agent's `sigelo-contact@^<v>`
+#      by that tarball, so nothing comes from the registry but the third-party dependencies
+#      (@noble/*, mqtt).
+#   2. The acceptance commands of T4, as a user types them: `npx sigelo-agent init`, the contact
+#      verbs (sigelo-contact loaded from sigelo-agent's install; without it, one line says to
+#      reinstall sigelo-agent, and one above the install is never run),
 #      `npx -p sigelo-spend sigelo-wallet balance`, the keeper installer (`sigelo-spend init`
-#      --no-systemd, then `doctor` and `licence show`), the MCP server over stdio,
+#      --no-systemd, then `doctor` and `licence show`), the MCP server over stdio (with the
+#      contact tools, and without them once sigelo-contact is gone),
 #      `sigelo-offline`, and `import … from 'sigelo'`.
 #   3. Go: `go build ./cmd/sigelo-verify` from the source archive, `--conformance` with it and
 #      with the prebuilt binary for this host, and `sha256sum -c SHA256SUMS`.
@@ -43,13 +47,15 @@ case $(uname -m) in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) 
 (cd "$dist" && if command -v sha256sum >/dev/null 2>&1; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi) > "$work/sums.log" 2>&1 \
 	|| { cat "$work/sums.log" >&2; fail "sha256sum -c SHA256SUMS"; }
 ok "SHA256SUMS: $(wc -l < "$dist/SHA256SUMS" | tr -d ' ') files verified"
-for t in sigelo sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
+for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
 	m=$(tar -xzOf "$dist/$t-$v.tgz" package/package.json)
 	printf '%s' "$m" | grep -q '"file:' && fail "$t-$v.tgz: file: dependency in the packed manifest"
 	printf '%s' "$m" | grep -q '"private": *true' && fail "$t-$v.tgz: private"
 	tar -tzf "$dist/$t-$v.tgz" | grep -qx 'package/LICENSE' || fail "$t-$v.tgz: no LICENSE"
 done
-ok "packed manifests: no file: dependency, none private, LICENSE in each"
+dep=$(tar -xzOf "$dist/sigelo-agent-$v.tgz" package/package.json | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).dependencies["sigelo-contact"]))')
+[ "$dep" = "^$v" ] || fail "sigelo-agent-$v.tgz depends on sigelo-contact $dep, not ^$v"
+ok "packed manifests: no file: dependency, none private, LICENSE in each; sigelo-agent depends on sigelo-contact ^$v"
 
 # 1. A consumer with nothing but the tarballs.
 c=$work/consumer
@@ -66,15 +72,16 @@ unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME XDG_RUNTIME_DI
 cd "$c"
 printf '{ "name": "consumer", "private": true, "type": "module" }\n' > package.json
 retry npm install --no-audit --no-fund --silent \
-	"$dist/sigelo-$v.tgz" "$dist/sigelo-spend-$v.tgz" "$dist/sigelo-agent-$v.tgz" "$dist/sigelo-mcp-$v.tgz" "$dist/sigelo-recovery-kit-$v.tgz" \
-	> "$work/install.log" 2>&1 || { cat "$work/install.log" >&2; fail "npm install of the five tarballs"; }
-for p in sigelo sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
+	"$dist/sigelo-$v.tgz" "$dist/sigelo-contact-$v.tgz" "$dist/sigelo-spend-$v.tgz" "$dist/sigelo-agent-$v.tgz" "$dist/sigelo-mcp-$v.tgz" "$dist/sigelo-recovery-kit-$v.tgz" \
+	> "$work/install.log" 2>&1 || { cat "$work/install.log" >&2; fail "npm install of the six tarballs"; }
+for p in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
 	[ -L "node_modules/$p" ] && fail "node_modules/$p is a link, not an install"
 	[ -f "node_modules/$p/package.json" ] || fail "node_modules/$p missing"
 done
-# one sigelo, the tarball's, shared by all three dependents (no nested copy from a registry)
+# one sigelo and one sigelo-contact, the tarballs', shared by their dependents (no nested copy from a registry)
 [ -z "$(find node_modules -mindepth 3 -path '*/node_modules/sigelo/package.json')" ] || fail "a nested second copy of sigelo"
-ok "npm install of the five tarballs in $c (one shared sigelo $v)"
+[ -z "$(find node_modules -mindepth 3 -path '*/node_modules/sigelo-contact/package.json')" ] || fail "a nested second copy of sigelo-contact"
+ok "npm install of the six tarballs in $c (one shared sigelo $v, one sigelo-contact)"
 
 # 2a. sigelo-agent
 out=$(npx sigelo-agent init 2>&1) && fail "init without a recovery choice succeeded"
@@ -88,6 +95,27 @@ npx sigelo-agent whoami 2>/dev/null | grep -q "$d" || fail "npx sigelo-agent who
 ok "npx sigelo-agent init --no-recovery → $d; whoami agrees"
 npx sigelo-agent bundle > "$work/bundle.json" 2>/dev/null || fail "npx sigelo-agent bundle"
 ok "npx sigelo-agent bundle"
+
+# 2a'. the contact verbs from the install: sigelo-agent loads sigelo-contact, its dependency, from it.
+#      Nothing here connects: contacts reads the local store, accept refuses the code before it does.
+set +e; out=$(npx sigelo-agent invite --help 2>&1); rc=$?; set -e
+[ $rc -eq 2 ] && printf '%s' "$out" | grep -q 'invite \[--name <n>\]' || fail "npx sigelo-agent invite --help (exit $rc): $out"
+ok "npx sigelo-agent invite --help: the contact verbs' usage, exit 2 (printed before sigelo-contact loads)"
+out=$(npx sigelo-agent contacts 2>&1) || fail "npx sigelo-agent contacts: $out"
+printf '%s' "$out" | grep -q '"contacts": \[\]' || fail "npx sigelo-agent contacts: $out"
+set +e; out=$(npx sigelo-agent accept sgl1x 2>&1); rc=$?; set -e
+[ $rc -eq 1 ] && printf '%s' "$out" | grep -q 'code_length' || fail "npx sigelo-agent accept sgl1x (exit $rc): $out"
+ok "npx sigelo-agent contacts → no contacts yet; accept sgl1x → code_length (the installed sigelo-contact ran)"
+# The same as `npm i -g sigelo-agent`: a global install into a prefix of its own, its dependencies
+# met by the sigelo and sigelo-contact tarballs installed with it.
+retry npm install -g --prefix "$work/prefix" --no-audit --no-fund --silent "$dist/sigelo-$v.tgz" "$dist/sigelo-contact-$v.tgz" "$dist/sigelo-agent-$v.tgz" \
+	> "$work/global.log" 2>&1 || { cat "$work/global.log" >&2; fail "npm install -g --prefix of sigelo-agent"; }
+g=$work/prefix/bin/sigelo-agent; [ -e "$g" ] || g=$work/prefix/sigelo-agent.cmd   # Windows puts the shims in the prefix
+set +e; out=$("$g" invite --help 2>&1); rc=$?; set -e
+[ $rc -eq 2 ] && printf '%s' "$out" | grep -q 'invite \[--name <n>\]' || fail "global sigelo-agent invite --help (exit $rc): $out"
+set +e; out=$("$g" accept sgl1x 2>&1); rc=$?; set -e
+[ $rc -eq 1 ] && printf '%s' "$out" | grep -q 'code_length' || fail "global sigelo-agent accept sgl1x (exit $rc): $out"
+ok "npm install -g --prefix: sigelo-agent invite --help prints the usage, accept sgl1x → code_length"
 
 # 2b. sigelo-wallet: no keeper configured is a plain refusal, not a stack trace
 set +e; out=$(npx -p sigelo-spend sigelo-wallet balance 2>&1); rc=$?; set -e
@@ -140,13 +168,31 @@ let s = ""; process.stdin.on("data", c => s += c).on("end", () => {
   const need = (c, m) => { if (!c) { console.error(m); process.exit(1); } };
   need(r[1]?.result?.serverInfo?.name === "sigelo", "initialize: " + JSON.stringify(r[1]));
   const names = (r[2]?.result?.tools ?? []).map(t => t.name);
-  need(names.includes("sigelo_whoami") && names.includes("sigelo_wallet_balance"), "tools/list: " + names);
+  need(names.includes("sigelo_whoami") && names.includes("sigelo_wallet_balance") && names.includes("sigelo_invite"), "tools/list: " + names);
   need(JSON.stringify(r[3]?.result ?? {}).includes(process.argv[1]), "whoami: " + JSON.stringify(r[3]));
   const w = JSON.stringify(r[4] ?? {});
   need(r[4]?.result?.structuredContent?.code === "unreachable", "wallet_balance: " + w);   // sigelo-spend ran
   console.log(names.length);
 });' "$d" > "$work/mcp.n" || { cat "$work/mcp.err" >&2; fail "sigelo-mcp stdio smoke (above)"; }
-ok "npx sigelo-mcp (stdio): initialize, $(cat "$work/mcp.n") tools, whoami = $d, wallet verb → TRY LATER unreachable (dead keeper)"
+ok "npx sigelo-mcp (stdio): initialize, $(cat "$work/mcp.n") tools (sigelo_invite among them), whoami = $d, wallet verb → TRY LATER unreachable (dead keeper)"
+
+# 2c'. sigelo-contact gone from the install (moved aside, then back), and one at the right version
+#      above it, in $work/node_modules, where Node's own walk from $c would reach it, whose code
+#      writes a marker: the verbs exit 1 saying to reinstall sigelo-agent, naming it, and the MCP
+#      server lists no contact tools and says why on stderr, once; the marker is never written.
+mv node_modules/sigelo-contact "$work/sigelo-contact.aside"
+mkdir -p "$work/node_modules/sigelo-contact" && cp "$work/sigelo-contact.aside/package.json" "$work/node_modules/sigelo-contact/"
+for f in carrier kdf invite; do printf "import { writeFileSync } from 'node:fs'; writeFileSync('%s', 'x');\n" "$work/above-ran" > "$work/node_modules/sigelo-contact/$f.mjs"; done
+set +e; out=$(npx sigelo-agent contacts 2>&1); rc=$?; set -e
+[ $rc -eq 1 ] && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 1 ] && printf '%s' "$out" | grep -q 'need sigelo-contact, which comes with sigelo-agent: reinstall sigelo-agent' \
+	&& printf '%s' "$out" | grep -q 'not loading .*node_modules.sigelo-contact, outside this package' || fail "sigelo-agent contacts without sigelo-contact (exit $rc): $out"
+out=$(printf '%s\n' "$req" | head -3 | npx sigelo-mcp 2>"$work/mcp.err") || { cat "$work/mcp.err" >&2; fail "npx sigelo-mcp without sigelo-contact"; }
+printf '%s' "$out" | grep -q '"sigelo_whoami"' && ! printf '%s' "$out" | grep -q 'sigelo_invite' || fail "sigelo-mcp without sigelo-contact: $out"
+[ "$(grep -c 'no contact tools: they need sigelo-contact' "$work/mcp.err")" = 1 ] || fail "sigelo-mcp without sigelo-contact: stderr: $(cat "$work/mcp.err")"
+[ ! -e "$work/above-ran" ] || fail "the sigelo-contact above the install ran"
+rm -r "$work/node_modules"
+mv "$work/sigelo-contact.aside" node_modules/sigelo-contact
+ok "without sigelo-contact, one above the install: sigelo-agent contacts → exit 1, one line (reinstall sigelo-agent, names it); sigelo-mcp → no contact tools, one stderr line; neither ran it"
 
 # 2d. sigelo (the library and sigelo-offline)
 npx sigelo-offline new 2>/dev/null | grep -qE "^mnemonic +([a-z]+ ){24}[a-z]+\$" || fail "npx sigelo-offline new: no 25 words"

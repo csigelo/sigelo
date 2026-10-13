@@ -3,14 +3,15 @@
 Artefacts are built from the PUBLIC tree (Go module path rewritten), never from the private one.
 `<v>` is the package version, the same in every package.json; `$S` a scratch directory.
 
-1. Private repo: CHANGELOG.md gets `## v<v> — <date>` over the entries it releases; VERSIONING.md
-   status line; ROADMAP §6 step 8; site footnotes. `node site/build.mjs && node site/test/run.mjs`
-   passes. Commit.
+1. Private repo: every package.json, lockfile and `integrations/mcp/server.json` at `<v>`;
+   CHANGELOG.md `## v<v> — <date>`; VERSIONING.md status line; ROADMAP §6 step 8; site
+   footnotes. `node site/build.mjs && node site/test/run.mjs` and `node plugins/build.mjs --check`
+   pass. Commit.
 2. Sync and push (the commands under "Sync commands").
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a` must end
-   `ALL PASS (<n> checks)`. Go binaries and the npm tarballs (gzip rewritten by
-   `release/normalize-tgz.mjs`) hash the same across hosts and node/npm versions (same Go version).
+   `ALL PASS (<n> checks)`. The artefacts hash the same across hosts and node/npm versions (same Go
+   version; `release/normalize-tgz.mjs` rewrites the gzip).
 4. Tag that commit twice, `v<v>` and `go/v<v>` (the Go module lives in go/, VERSIONING §4):
    `TZ=UTC GIT_COMMITTER_DATE="$(date -u +%s) +0000" git -c user.name=csigelo -c
    user.email=contact@sigelo.io -c gpg.format=ssh -c user.signingkey=~/.ssh/sigelo_release_signing tag -s v<v> -m '…'`.
@@ -27,20 +28,21 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    (`api.github.com/repos/csigelo/sigelo/actions/runs?event=push&branch=v<v>`) and record it in
    docs-test/PORTABILITY.md.
 
-8. npm: the tag push runs `.github/workflows/npm-publish.yml` (OIDC, no token;
+8. npm: the tag push runs `.github/workflows/npm-publish.yml` (OIDC;
    adoption/npm-trusted-publishing.md): it rebuilds the tag, waits ≤ 30 min for step 5, publishes
    only if SHA256SUMS equals the release's; idempotent. Re-run:
-   `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`. Fallback: a
-   temporary-userconfig token, `npm publish $S/a/<pkg>-<v>.tgz`.
-9. Bump `integrations/mcp/server.json` to `<v>`, sync, push, `gh workflow run mcp-registry.yml -R
-   csigelo/sigelo`; `site/deploy/mirror-release.sh v<v> sigelo-vps`, commit its SHA256SUMS, deploy.
+   `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`. No trusted publisher (a new
+   package): before step 4's push, `npm publish $S/a/<pkg>-<v>.tgz` (temporary-userconfig token;
+   `sigelo` first, `sigelo-contact` second).
+9. `gh workflow run mcp-registry.yml -R csigelo/sigelo`; `site/deploy/mirror-release.sh v<v>
+   sigelo-vps`, commit its SHA256SUMS, deploy.
 
 ## Nightly on the maintainer's host
 
 At 02:30 a user timer runs `sigelo-nightly` (outside this repository) on a clean clone of the
 private HEAD, offline: the ts, Go (with `--conformance` and `--impl` on the ts candidate), moadim,
 spend (`SIGELO_TEST_NO_LIVE=1`), mcp, world, accept and kit suites, the schema, doc budget and
-site checks, and `npm run sim`; crosscheck (no offline mode) is run by hand. About 9 minutes.
+site checks, and `npm run sim`; crosscheck (no offline mode) is run by hand.
 Each run leaves a log and a one-line summary; a failure leaves `FAILED` and at most one critical
 desktop notification a day, success none.
 

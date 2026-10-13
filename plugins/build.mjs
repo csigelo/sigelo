@@ -46,6 +46,10 @@ const resolver = {
     b.onLoad({ filter: /.*/, namespace: 'no-contact' }, () => ({ contents: 'export const load = async () => null;', loader: 'js' }));
     b.onLoad({ filter: /integrations\/mcp\/server\.mjs$/ }, (a) => {
       let src = readFileSync(a.path, 'utf8');
+      // The plugin reports the server's version: it must be the one sigelo-mcp ships at.
+      const info = src.match(/\nconst SERVER_INFO = \{ name: 'sigelo', version: '([^']+)' \};/)?.[1];
+      const version = JSON.parse(readFileSync(join(REPO, 'integrations/mcp/package.json'), 'utf8')).version;
+      if (info !== version) throw new Error(`plugins/build.mjs: server.mjs SERVER_INFO is ${info}, integrations/mcp/package.json ${version}; bump SERVER_INFO`);
       for (const [re, to] of EDITS) {
         const n = src.split(re).length - 1;
         if (n !== 1) throw new Error(`plugins/build.mjs: edit ${re} matched ${n} times in server.mjs; update EDITS`);

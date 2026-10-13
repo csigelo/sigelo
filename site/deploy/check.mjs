@@ -48,7 +48,8 @@
 //                      and check only its off-origin targets, so a build that redirects or links to a
 //                      sigelo.ai that does not answer yet is refused before it is served. deploy.sh
 //                      does not run it yet (it runs the full check after the upload): run it by hand
-//                      before the deploy that flips RELAY_LIVE
+//                      before a deploy that changes where sigelo.io sends people (RELAY_LIVE is true
+//                      since the launch commit: sigelo.net and sigelo.online to sigelo.ai)
 //   --index FILE       with --preflight: read FILE instead (site/test/run.mjs points it at its own server)
 // Every request sends User-Agent UA (below): nginx.conf logs it to access-self.log, not access.log,
 // so the project's own checks stay out of the visit statistics.
@@ -127,9 +128,9 @@ const summary = () => {
 // the relay's home page (text/html), llms.txt (text/plain) and index.json (application/json, naming
 // the relay as sigelo.io's index.json does), the official repositories and the payment places
 // (text/html). Not followed: a redirect is a FAIL, because a parked or expired domain answers 200
-// for every path after one, and then a payment place would be someone else's page. Before the
-// relay launch that is the one repository; from it, a sigelo.io that redirects or links to a
-// sigelo.ai (or names a relay repository) that does not answer as ours FAILs.
+// for every path after one, and then a payment place would be someone else's page. Since the
+// relay launch (RELAY_LIVE) that includes sigelo.ai: a sigelo.io that redirects or links to a
+// sigelo.ai (or names a relay repository or pay page) that does not answer as ours FAILs.
 const mediaType = (r) => r.type.split(';')[0].trim().toLowerCase();
 async function offOrigin(ix) {
   const of = ix?.official ?? {};
