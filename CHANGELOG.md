@@ -3,6 +3,25 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## v0.1.3 — 2026-10-14
+
+- **Recovery key:** `sigelo-agent recovery-key [--out <file>]` writes the secret (0600) and prints the public key for
+  `init --recovery`; `recover --recovery-key <file>` signs the recovery rotation. Nothing else needed.
+- **Recover after a fork:** `recover` signs from the last honest node (the last recovery's, else the genesis): it beats
+  a stolen copy's rotation from a node the owner also rotated from, unseen by the relay.
+- **After a recovery:** both sides mark the contact `re_pair` (`contacts`, MCP `sigelo_contacts`) and send only the
+  rotation notice under the old pairing key, claiming no new mailbox, until a new code pairs them.
+- **Queued before a recovery:** a message is refused, and `inbox` reports it (`refused`, code `re_pair`). A contact on
+  sigelo-agent 0.1.2 follows the recovery but marks nothing: pair with it again at once.
+- **Exit codes:** a refused, locked-out or offline verb exits 1, the check on stderr, any JSON on stdout (`inbox`: 0 if
+  it printed messages, now taken); no identity exits 2; `inbox --expect` exits 3 when none came.
+- **First login:** a stderr line before the proof of work (5–60 s) and one after; docs say Node 22.18 or newer, tested
+  on 24.
+- **Fixture:** `carrier-v0.json` adds frame `notice_recovery`, a kind 4 notice carrying a recovery (identity B2);
+  every earlier byte is unchanged.
+- **Site:** sigelo.ai's quick start is the live test's, with `recovery-key` (new here, not run in that test) in place of
+  its keygen one-liner: `recovery-key`, `invite --name`, `accept`, `inbox`, `send`.
+
 ## v0.1.2 — 2026-10-14
 
 - **Status:** contacts and the relay are new and unaudited; the keeper stays stagenet-only; wire `sigelo/0` may change

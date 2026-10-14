@@ -12,7 +12,10 @@
 // undone and reported; hostile hosts (an endless answer, a greedy proof of work, proof of work
 // asked again at every reconnection, redirects to a host inside, a 100 MB MQTT packet, a code
 // naming an address or a local name); a 502 refuses nothing and a delivered answer outlives a refusal for good; a slow packet
-// does not read as a drained queue; a thief's fork of 63 rotations loses to the owner's recovery;
+// does not read as a drained queue; a thief's fork of 63 rotations loses to the owner's recovery,
+// after which both sides hold the pairing key as burned (re_pair: only the notice goes, no new
+// mailbox is claimed) until they pair again, and a thief holding the old key claims next week's
+// mailboxes under it and gets nothing;
 // a notice whose chain ends at a key its sender does not hold is refused (notice_sig); a refused
 // first envelope gives its prekey back; 32 days with no bundle across heal without pairing again;
 // a carrier with onEvent keeps no plaintext at rest; one code accepted twice; an epoch outlives its
@@ -43,7 +46,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { connect } from 'mqtt';
-import { canonicalize, keygen, rotate, sign } from 'sigelo';
+import { canonicalize, keygen, rotate, sign, verify, verifySig } from 'sigelo';
 import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_SEARCHES, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, prekeysKey, seal, solvePow, unseal } from './carrier.mjs';
 import { MAX_ENVELOPE, header, pad } from './envelope.mjs';
 import { V as STORE_V, answerId, buildAnswer, checkAnswer, checkReply, inviteKeys, makeInvite, parseInvite } from './invite.mjs';
@@ -88,6 +91,13 @@ const report = () => {
   const ik = inviteKeys(unhex(d.invite.secret));
   ok(ik.answer_topic === d.invite.answer_topic && ik.reply_topic === d.invite.reply_topic && hexOf(ik.key) === d.invite.key, 'what the invite secret yields (invite.mjs)');
   ok(checkPrekeys(value('prekeys').prekeys, { did: B0.did, current_did: B0.did, current_key: B0.key }, d.pair.hex, F.t0 + 40).keys.length === 20, 'bob\'s bundle in the prekeys frame passes the sender\'s check');
+  {
+    // The recovery notice: its chain follows the recovery past the thief's B1 and ends at B2, whose
+    // key signs the proof. A receiver that followed B1 marks bob re_pair (the relay part below).
+    const n = value('notice_recovery'), r = verify(n.bundle, F.t0 + 300), B2 = F.identities.B2;
+    ok(r.did === B2.did && r.chain.join() === `${B0.did},${B2.did}` && F.recovery.body.reason === 'recovery' && verifySig(B2.key, n.proof.body, n.proof.sig),
+      'the recovery notice: the recovery from B0 beats the thief\'s B1, the chain ends at B2, the proof verifies under B2\'s key');
+  }
   const sd = mkdtempSync(join(tmpdir(), 'sigelo-carrier-fixture-'));
   try {
     // alice's code from the fixture's inputs: its bytes, and a nonce that hashes all of them.
@@ -171,6 +181,9 @@ const make = (a, extra = {}) => {
 const seen = (who, f) => events[who].filter(f);
 const texts = (who) => seen(who, (e) => e.type === 'message').map((e) => e.content);
 const stateOf = (a) => JSON.parse(readFileSync(pathsFor(join(dir, `${a.label}.local.json`)).state, 'utf8'));
+// The contact's re_pair as the carrier's contacts() lists it.
+const marked = (carrier, peer) => carrier.contacts().contacts.find((c) => c.did === peer.original)?.re_pair;
+const claimsOf = (a) => Object.keys(stateOf(a).relays[HOST]?.claims ?? {});
 const editState = (a, f) => { const file = pathsFor(join(dir, `${a.label}.local.json`)).state, s = JSON.parse(readFileSync(file, 'utf8')); f(s); writeFileSync(file, JSON.stringify(s)); };
 const oneTimeLeft = (holder, peer) => stateOf(holder).peers[peer.original].session.in.prekeys.oneTime.length;
 const q = (sql, ...p) => relay.db.raw.prepare(sql).all(...p);
@@ -896,13 +909,25 @@ try {
     const thief = make(T), heldBy = (x) => storeOf(x).contacts[A.original];
     ok((await thief.send('bob', say('from the thief'))).status === 'sent' && await until(() => texts('bob').includes('from the thief')), 'the thief, holding alice\'s key and files, rotates 63 times and writes to bob');
     ok(bob.contacts().contacts.find((c) => c.did === A.original).current_did === T.did && heldBy(B).rotations.length === 64, 'bob follows the thief\'s chain, 64 rotations: nothing offline can tell it from alice\'s');
+    // A message alice queued for bob before the recovery, as a send that returned `queued` leaves
+    // it: that send has exited, so only her inbox can tell her it never went.
+    const QUEUED = 'queued-before-the-recovery';
+    editState(A, (s) => s.peers[B.original].outbox.push({ id: QUEUED, label: '', content: say('queued before the recovery') }));
     recoverAgent(A);
     const recovered = A.did;
     secrets.add(recovered);
-    ok((await alice.send('bob', say('after recovery'))).status === 'sent' && await until(() => texts('bob').includes('after recovery')), 'alice recovers and writes under her recovered key');
-    ok(bob.contacts().contacts.find((c) => c.did === A.original).current_did === recovered, 'bob\'s store merged both chains: the recovery wins (SPEC §7.1)');
+    // The thief copied K with the key: after the recovery both sides hold it as burned (re_pair).
+    ok(marked(alice, B) === 'own_recovery' && storeOf(A).contacts[B.original].re_pair === 'own_recovery', 'alice recovers: her store marks bob re_pair, own_recovery, before any connection');
+    await refuses(() => alice.send('bob', 'after recovery'), 're_pair', 'and she sends him nothing under the old K');
+    const afterRecovery = (await alice.inbox()).events;
+    ok(afterRecovery.some((e) => e.type === 're_pair' && e.did === B.original && e.re_pair === 'own_recovery'), 'her next inbox says so');
+    ok(afterRecovery.some((e) => e.type === 'refused' && e.id === QUEUED && e.peer === B.original && e.code === 're_pair')
+      && stateOf(A).peers[B.original].outbox.length === 0 && seen('alice', (e) => e.type === 'refused' && e.id === QUEUED).length === 1,
+    'and that the message queued for him before the recovery was refused, unsent (a refused event, code re_pair)');
+    ok(await until(() => heldBy(B).current_did === recovered), 'her rotation notice still goes: bob\'s store merged both chains, the recovery wins (SPEC §7.1)');
     ok(heldBy(B).rotations.length === 2, `and keeps the chain followed: her first rotation and the recovery, the thief's fork gone (${heldBy(B).rotations.length})`);
-    ok(seen('bob', (e) => e.type === 'message' && e.content === 'after recovery')[0]?.current_did === recovered, 'her message is signed by the recovered key');
+    ok(marked(bob, A) === 'contact_recovery' && seen('bob', (e) => e.type === 'rotated' && e.current_did === recovered && e.re_pair === 'contact_recovery').length === 1,
+      'bob marks alice re_pair, contact_recovery, and his rotated event says so');
     // She rotates again. First a notice from whoever holds K, with a copy of that rotation whose
     // signature is not valid ahead of the real one: refused, and bob's record left as it was.
     rotateAgent(A);
@@ -917,19 +942,29 @@ try {
       ok(await until(() => seen('bob', (e) => e.type === 'dropped' && e.check === 'bundle' && /two rotations on one edge/.test(e.detail)).length === 1), 'a notice with two rotations on one edge, the first not valid: refused');
       ok(heldBy(B).current_did === recovered && heldBy(B).rotations.length === 2, 'and bob\'s record is as it was');
     }
-    ok((await alice.send('bob', say('rotated after recovery'))).status === 'sent' && await until(() => texts('bob').includes('rotated after recovery')), 'her own notice follows: her next message arrives');
-    ok(heldBy(B).current_did === A.did && heldBy(B).rotations.length === 3, 'bob follows her rotation after the recovery');
+    await alice.inbox();
+    ok(await until(() => heldBy(B).current_did === A.did) && heldBy(B).rotations.length === 3 && heldBy(B).re_pair === 'contact_recovery', 'her own notice follows: bob follows her rotation after the recovery, the mark kept');
     await refuses(() => thief.send('bob', 'thief again'), 'bundle', 'the relay, which kept alice\'s recovery, refuses the thief\'s login');
-    ok((await bob.send('alice', say('to the recovered key'))).status === 'sent', 'bob answers');
-    ok((await alice.inbox()).messages.some((m) => m.content === 'to the recovered key'), 'alice reads it: her fresh prekeys followed her notice');
+    await refuses(() => bob.send('alice', 'to the recovered key'), 're_pair', 'bob sends nothing to alice under the old K either');
   }
 
   // ================================================================ pairing again replaces K
   {
     // The thief also copied K, and with it every later mailbox topic of the pair, which it can
-    // claim first from any identity. A recovery does not change K; pairing again does: a code
-    // between two contacts keeps the contact and replaces K, and its topics with it.
-    const K0 = storeOf(A).contacts[B.original].pair_key;
+    // claim first from any identity. A recovery does not change K, so neither side claims a new
+    // mailbox under it (re_pair); pairing again does: a code between two contacts keeps the
+    // contact, replaces K, and its topics with it, and clears the mark. A week passes first.
+    const K0 = storeOf(A).contacts[B.original].pair_key, K0b = Buffer.from(K0, 'hex');
+    now += 7 * DAY;
+    await bob.sync();
+    await alice.inbox();
+    const ahead = isoWeek(now + 7 * DAY), squat = [topic(K0b, B.original, A.original, ahead), topic(K0b, A.original, B.original, ahead)];
+    ok(!squat.some((t) => claimsOf(A).includes(t) || claimsOf(B).includes(t)), 'a week after the recovery, neither has claimed next week\'s mailboxes under the burned K');
+    const squatter = await rawClient(agent('squatter')), squatted = [], takenBefore = seen('alice', (e) => e.code === 'mailbox_taken').length;
+    squatter.on('message', (t) => { if (squat.includes(t)) squatted.push(t); });
+    // The SUBACK's codes: MQTT.js hands back the topics asked, at the QoS asked, when one is refused.
+    const claim = (topics) => new Promise((resolve) => squatter.subscribe(topics, { qos: 1 }, (_err, _subs, packet) => resolve(packet?.granted ?? [])));
+    ok((await claim(squat)).join() === '1,1', 'the thief, holding K0, claims both of them first: the relay cannot tell (the live test\'s squat)');
     const code = (await alice.invite({ name: 'bob again' })).code;
     ok((await bob.accept(code, { name: 'alice again', wait: 0.3 })).status === 'waiting', 'bob answers a new code from alice, his contact already');
     const a1 = await alice.inbox();
@@ -938,9 +973,24 @@ try {
     const K1 = storeOf(A).contacts[B.original].pair_key;
     ok(K1 !== K0 && K1 === storeOf(B).contacts[A.original].pair_key, 'both hold a new K, unknown to whoever copied the old one');
     ok(alice.contacts().contacts.filter((c) => c.did === B.original).map((c) => c.name).join() === 'bob', 'one contact, its name kept');
+    ok(marked(alice, B) === null && marked(bob, A) === null, 'and neither marks the other any more: the new K is not burned');
     await alice.inbox();   // bob's prekeys for the new pairing
     ok((await alice.send('bob', say('under the new K'))).status === 'sent' && await until(() => texts('bob').includes('under the new K')), 'alice writes under the new K, bob reads it');
+    ok(seen('bob', (e) => e.type === 'message' && e.content === 'under the new K')[0]?.current_did === A.did, 'signed by her key after the recovery');
     ok((await bob.send('alice', say('back under the new K'))).status === 'sent' && (await alice.inbox()).messages.some((m) => m.content === 'back under the new K'), 'and back');
+    // Next week's mailboxes of the pair are now K1's, held ahead by the pair: a thief with K0 cannot
+    // derive them, and one that learnt them could not claim them.
+    const K1b = Buffer.from(K1, 'hex'), theirs = [topic(K1b, B.original, A.original, ahead), topic(K1b, A.original, B.original, ahead)];
+    ok(await until(() => claimsOf(A).includes(theirs[0]) && claimsOf(B).includes(theirs[1])), 'next week\'s mailboxes under the new K are already claimed, each by its reader');
+    const refused = await claim(theirs);
+    ok(refused.join() === '128,128', `claimed by anyone else: refused (mailbox_taken; SUBACK ${refused.join()})`);
+    now += 7 * DAY;
+    await alice.inbox();
+    ok((await bob.send('alice', say('next week, under the new K'))).status === 'sent' && (await alice.inbox()).messages.some((m) => m.content === 'next week, under the new K'),
+      'a week later bob writes in that week\'s mailbox and alice reads it');
+    await sleep(300);
+    squatter.end(true);
+    ok(squatted.length === 0 && seen('alice', (e) => e.code === 'mailbox_taken').length === takenBefore, `the thief's mailboxes under K0 got nothing (${squatted.length}), and alice never met mailbox_taken`);
   }
 
   // ================================================================ the MCP tools: the same verbs
@@ -1115,8 +1165,11 @@ try {
     recoverAgent(O);
     const recovered = O.did;
     secrets.add(recovered);
-    ok((await odile.send('piet', say('odile recovered'))).status === 'sent' && (await piet.inbox()).messages.some((m) => m.content === 'odile recovered' && m.current_did === recovered)
-      && storeOf(Pi).contacts[O.original].current_did === recovered, 'within that hour odile recovers: her notice, bringing the recovery, is checked all the same, and piet reads her');
+    await refuses(() => odile.send('piet', 'odile recovered'), 're_pair', 'within that hour odile recovers: she writes nothing to piet under the old K');
+    await odile.inbox();
+    await piet.inbox();
+    ok(storeOf(Pi).contacts[O.original].current_did === recovered && storeOf(Pi).contacts[O.original].re_pair === 'contact_recovery',
+      'her notice, bringing the recovery, is checked all the same: piet follows it, and marks her re_pair');
     t += 3601;
     await publish(mal, tp(), junk(NOTICE_CHECKS + 2));
     mal.end(true);

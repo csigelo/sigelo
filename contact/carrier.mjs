@@ -10,14 +10,15 @@
 //   await c.send(to, content, { label })   → { status: 'sent' | 'queued', … }, or throws the relay's code
 //   await c.sendAll(to, contents, { label }) → one result each ('refused' with its code), one login
 //   await c.inbox({ wait })                → { messages, events, dropped, offline? }: all are taken (messages: those kept)
-//   await c.forget(did)                    → { name, did, revoked: true, released }
+//   await c.forget(did)                    → { name, did, revoked: true, released, offline? }
 //   await c.start(), c.sync(), c.stop()    stay connected, reconnecting with backoff; events reach onEvent
 //
 // identity() → { secret, bundle }: the agent's current secret key and SPEC §8 bundle, read again at
 // every operation, so a rotation made by another process is seen at once. store: the contact store
 // (store.mjs); state: this file's own JSON (sessions, outbox, inbox), both 0600 and written under one
 // lock file, `<state>.lock`. pathsFor(identityFile) names both beside the identity file. onEvent(e):
-// each event as it happens, messages included. keep: messages also wait in the state file for
+// each event as it happens, messages included, and `pow` / `pow_done` around a proof-of-work search
+// (seconds to a minute on a phone: say so to the operator). keep: messages also wait in the state file for
 // inbox(), in plaintext, until taken (INBOX_MAX at most: the oldest go, counted as inbox_full); by
 // default only without onEvent, so a message onEvent took is not left at rest after the keys that
 // opened it are gone (contacts.md §3: keys stolen today must not open yesterday's messages).
@@ -93,6 +94,15 @@
 //     on reading the notice, retires the prekeys it listed and sends fresh ones. The pairing key
 //     K stays: whoever copied the store can compute and claim later mailbox topics until the two
 //     pair again (invite and accept between existing contacts replace K: `rekeyed`).
+//   - After a recovery, K is burned on both sides (re_pair, in the contact store): the recovered
+//     agent marks every contact it paired with before the recovery (`own_recovery`, #markRecovered),
+//     and a contact marks it on merging a notice that brings a recovery it had not followed
+//     (`contact_recovery`). Toward a marked contact nothing goes but the rotation notice, and no
+//     new mailbox of the pair is claimed: a thief holding K claims weeks nobody writes in. A
+//     message queued for it before the mark is refused, and noted (`refused`, code re_pair). A new
+//     invite and accept replace K and clear the mark (store.admit writes the record afresh). A
+//     contact on sigelo-contact 0.1.2 follows the recovery but marks nothing and keeps writing
+//     under K, to weeks nobody may read but a thief: the recovered side pairs again at once.
 //   - Mailboxes: an agent holds the topics of every ISO week from `retention` ago to AHEAD (7 days,
 //     or its retention if shorter) ahead. The relay drops a publish to a topic nobody claimed (and
 //     says no_reader), so next week's topic must be claimed before a contact writes in it while
@@ -512,6 +522,12 @@ async function http(url, init = {}) {
 // Text a relay writes reaches the operator, and perhaps a model, inside this client's messages:
 // quoted and cut short, so it reads as data.
 const relaySays = (s) => `the relay says ${JSON.stringify(String(s ?? '').slice(0, 200))}`;
+// A refusal's words without its check: a verb that adds to them keeps one "check: " in front.
+const reason = (e) => (e instanceof MsgError && e.message.startsWith(`${e.check}: `) ? e.message.slice(e.check.length + 2) : e.message);
+// Why nothing goes to a contact marked re_pair (the header's "After a recovery").
+const rePairWhy = (c) => (c.re_pair === 'contact_recovery'
+  ? `${c.name} recovered its identity after a theft: the pairing key may be the thief's; pair again (invite, accept) before writing`
+  : `this agent recovered its identity: the pairing key with ${c.name} may be the thief's; pair again (invite, and ${c.name}'s operator accepts the code) before writing`);
 
 // MQTT 3.1.1 says only "bad user name or password": POST /check with the same credentials names
 // the failing check (relay/auth.mjs).
@@ -627,7 +643,13 @@ export class Carrier {
     let r;
     try { r = verify(chainOf(bundle), now); } catch (e) { fail('identity', `this agent's bundle does not verify: ${e.message}`); }
     const genesis = [bundle.genesis, ...bundle.rotations.map((x) => x.next_genesis)].find((g) => didOf(g) === r.did);
-    return { did: r.chain[0], current_did: r.did, secret, genesis, bundle };
+    // The last edge of the chain followed that a recovery rotation took (-1: none): chain[recovery]
+    // is the node the owner recovered from (#markRecovered).
+    let recovery = -1;
+    for (let i = 0; i + 1 < r.chain.length; i++) {
+      if (bundle.rotations.some((x) => x.body.id === r.chain[i] && x.body.next === r.chain[i + 1] && x.body.reason === 'recovery')) recovery = i;
+    }
+    return { did: r.chain[0], current_did: r.did, secret, genesis, bundle, chain: r.chain, recovery };
   }
 
   // The state is saved before the store's held writes (store.mjs hold: a handshake's), so a crash
@@ -636,6 +658,9 @@ export class Carrier {
     return withLock(this.statePath, () => {
       const now = checkNow(this.clock()), me = this.#me(now);
       const ctx = { now, me, store: new Contacts(this.storePath, me.did), st: loadState(this.statePath, me.did) };
+      // Before anything reads the store: a recovery made by another process (sigelo-agent recover)
+      // is seen at once. The store's marks are written first; the state keeps the events.
+      if (this.#markRecovered(ctx)) saveState(this.statePath, ctx.st);
       const out = fn(ctx);
       if (write) { saveState(this.statePath, ctx.st); ctx.store.commit(); }
       return out;
@@ -643,6 +668,27 @@ export class Carrier {
   }
   #locked(fn) { return this.#with(true, fn); }
   #read(fn) { return this.#with(false, fn); }
+
+  // This agent recovered after it last told a contact of its keys (`announced`: a DID at or before
+  // the node it recovered from, or one the recovery dropped, or none known): K and the session sat
+  // in the files a thief copied with the key. The contact is marked re_pair, `own_recovery` (the
+  // header's "After a recovery"), and the next inbox says so. A contact paired after the recovery
+  // was announced a later DID: not marked.
+  #markRecovered({ now, me, store, st }) {
+    if (me.recovery < 0) return false;
+    const marked = [];
+    for (const c of Object.values(store.load().s.contacts)) {
+      if (c.revoked || !c.pair_key || c.re_pair) continue;
+      const e = st.peers[c.did];
+      if (e && me.chain.indexOf(e.announced) > me.recovery) continue;
+      c.re_pair = 'own_recovery';
+      marked.push(c);
+    }
+    if (marked.length === 0) return false;
+    store.save();
+    for (const c of marked) this.#note(st, now, { type: 're_pair', did: c.did, name: c.name, re_pair: c.re_pair });
+    return true;
+  }
 
   // announced: the current DID this agent last sent its rotation notice for, noticed: when; known:
   // the current DID of this agent's the contact last said it holds (a prekeys frame's `known`;
@@ -729,7 +775,8 @@ export class Carrier {
     const add = (x) => { if (!seen.has(x.topic)) { seen.add(x.topic); out.push(x); } };
     for (const p of Object.values(store.s.invites)) if (p.relay === relay && p.exp > now) add({ topic: inviteKeys(hexToBytes(p.secret)).answer_topic });
     for (const p of Object.values(store.s.accepts)) if (p.relay === relay && p.exp > now) add({ topic: inviteKeys(hexToBytes(p.secret)).reply_topic });
-    const contacts = this.#liveContacts(store, relay).map((c) => ({ did: c.did, K: hexToBytes(c.pair_key) }));
+    // No new mailbox under a burned K (re_pair): those held run out at their time (#refresh).
+    const contacts = this.#liveContacts(store, relay).filter((c) => !c.re_pair).map((c) => ({ did: c.did, K: hexToBytes(c.pair_key) }));
     const weeks = this.#weeks(now), at = Math.max(0, weeks.findIndex((w) => w.week === isoWeek(now)));
     for (const w of [...weeks.slice(at), ...weeks.slice(0, at).reverse()]) {
       for (const c of contacts) add({ topic: topic(c.K, c.did, me.did, w.week), peer: c.did, until: w.until });
@@ -761,15 +808,18 @@ export class Carrier {
 
   #resolve(store, to) {
     if (typeof to !== 'string' || to === '') fail('not_contact', 'name a contact: its DID or its name');
+    let c;
     if (to.startsWith('did:sigelo:')) {
-      const c = store.lookup(to) ?? fail('not_contact', `${to} is not a contact`);
+      c = store.lookup(to) ?? fail('not_contact', `${to} is not a contact`);
       if (c.revoked) fail('revoked', `${c.did} was revoked by this owner`);
-      return c;
+    } else {
+      const hits = this.#liveContacts(store).filter((x) => x.name === to);
+      if (hits.length === 0) fail('not_contact', `no contact named ${JSON.stringify(to)}`);
+      if (hits.length > 1) fail('name', `${hits.length} contacts are named ${JSON.stringify(to)}: use the DID`);
+      c = hits[0];
     }
-    const hits = this.#liveContacts(store).filter((c) => c.name === to);
-    if (hits.length === 0) fail('not_contact', `no contact named ${JSON.stringify(to)}`);
-    if (hits.length > 1) fail('name', `${hits.length} contacts are named ${JSON.stringify(to)}: use the DID`);
-    return hits[0];
+    if (c.re_pair) fail('re_pair', rePairWhy(c));
+    return c;
   }
 
   // ---- incoming
@@ -994,7 +1044,8 @@ export class Carrier {
     if (p.body.did !== r.did || p.body.pair !== pairId(K)) fail('notice_sig', 'the proof names another DID than the chain ends at, or another pairing');
     if (!verifySig(keyOf(bundle, bundle.rotations, r.did), p.body, p.sig)) fail('notice_sig', 'the proof does not verify under the key the chain ends at');
     const before = structuredClone(c);
-    const a = store.admit(bundle, r, null, { relay: c.relay, pair_key: c.pair_key }, now);
+    // A mark stays with the record through a merge (admit writes it afresh); a new pairing clears it.
+    const a = store.admit(bundle, r, null, { relay: c.relay, pair_key: c.pair_key, ...(c.re_pair && { re_pair: c.re_pair }) }, now);
     // admit writes every rotation either side held. The store keeps only those followed(); a
     // merged chain too long to keep puts the record back as it was. Held rotations come first, so
     // on an edge both hold, the one this store followed before stays. store.mjs has no verb for
@@ -1007,6 +1058,11 @@ export class Carrier {
       throw e;
     }
     merged.rotations = kept;
+    // A recovery this store had not followed: the key it superseded, and the files a thief copied
+    // with it, held K. Burned here too (the header's "After a recovery").
+    const held = new Set(before.rotations.map(canonicalize));
+    const recovered = kept.some((x) => x.body.reason === 'recovery' && !held.has(canonicalize(x)));
+    if (recovered) merged.re_pair ??= 'contact_recovery';
     store.save();
     if (a.current_did === c.current_did) return [];
     // The contact's old key, and perhaps its state with the prekeys we listed, may be a thief's:
@@ -1014,7 +1070,7 @@ export class Carrier {
     const s = this.#restore(st, store, me, c.did);
     if (s) { s.in.prekeys.retire(now); this.#persist(st, s); }
     this.#entry(st, c.did).prekeys_resend = true;
-    return [this.#note(st, now, { type: 'rotated', did: c.did, name: c.name, current_did: a.current_did })];
+    return [this.#note(st, now, { type: 'rotated', did: c.did, name: c.name, current_did: a.current_did, ...(recovered && { re_pair: merged.re_pair }) })];
   }
 
   // Alice: an answer to one of her codes. checkAnswer runs sigelo-pair's checks in its order and
@@ -1180,7 +1236,8 @@ export class Carrier {
       const ask = missing !== null && e.outbox.length > 0 && now - (e.asked ?? 0) >= DAY;
       const resync = e.renew === true || (e.resync_due === true && now - (e.resync_at ?? 0) >= RESYNC);
       const told = e.known_due === true && now - (e.prekeys_iat ?? 0) >= RESYNC;
-      const bundle = e.prekeys_resend || s.in.prekeys.due(now, me) || ask || resync || told;
+      // Under a burned K (re_pair) the notice alone goes: no bundle, no message.
+      const bundle = !c.re_pair && (e.prekeys_resend || s.in.prekeys.due(now, me) || ask || resync || told);
       // The rotation notice: after this agent's own rotation (announced), and again, at most every
       // RESYNC, while the contact has not said it holds the current DID (known): before a frame
       // signed by the current key goes (a bundle, an envelope), or when the contact's frame named
@@ -1202,6 +1259,15 @@ export class Carrier {
         e.notice_asked = false;
         return this.#queue(st, { relay, topic: t, bytes: seal(KIND_NOTICE, noticeKey(K, me.did, c.did), t, { bundle: chainOf(me.bundle), proof: { body: proof, sig: sign(me.secret, proof) } }),
           kind: KIND_NOTICE, peer: c.did, control: 'notice' });
+      }
+      if (c.re_pair) {
+        // Queued before the mark: refused here, unsealed. Noted too: the send that queued it has
+        // exited, and its agent was told it goes at a later connection.
+        for (const item of e.outbox.splice(0)) {
+          this.#results.set(item.id, { code: 're_pair', detail: rePairWhy(c), local: true });
+          this.#emit(this.#note(st, now, { type: 'refused', id: item.id, peer: c.did, name: c.name, code: 're_pair', detail: rePairWhy(c) }));
+        }
+        continue;
       }
       if (bundle) {
         // The contact refuses a bundle no newer than the one it holds (envelope.mjs acceptPrekeys),
@@ -1474,7 +1540,10 @@ export class Carrier {
         }
         at.searches = [...recent, now];
       });
-      pow = await solvePow(relay, me.did, ch.nonce, bits, Date.now() + POW_MS) ?? fail('pow', `no ${bits}-bit proof of work found within the challenge's 5 minutes on this machine: try again, or later (the relay raises it under load)`);
+      const t0 = Date.now();
+      if (bits > 0) this.#emit({ type: 'pow', relay, bits });
+      pow = await solvePow(relay, me.did, ch.nonce, bits, t0 + POW_MS) ?? fail('pow', `no ${bits}-bit proof of work found within the challenge's 5 minutes on this machine: try again, or later (the relay raises it under load)`);
+      if (bits > 0) this.#emit({ type: 'pow_done', relay, bits, ms: Date.now() - t0 });
     }
     const password = canonicalize({ v: LOGIN_V, nonce: ch.nonce, sig, bundle: loginBundle(me.bundle, relay), ...(pow !== undefined && { pow }) });
     return { username: me.current_did, clientId: clientIdOf(me.did), password, pow };
@@ -1669,7 +1738,7 @@ export class Carrier {
         return 'withdrawn';
       });
       const why = { withdrawn: 'the answer is withdrawn', queued: 'the answer stays queued: it goes at the next connection', delivered: 'the relay holds the answer: the reply is read at a later connection' }[left];
-      throw new MsgError(e.check ?? 'connect', `${e.message} (${why})`);
+      throw new MsgError(e.check ?? 'connect', `${reason(e)} (${why})`);
     }
     const h = this.#handshakes.get(id), sent = this.#results.get(entry), reply = inviteKeys(code.secret).reply_topic;
     this.#handshakes.delete(id); this.#results.delete(entry);
@@ -1685,7 +1754,8 @@ export class Carrier {
     return this.#read(({ now, store, st }) => {
       const s = store.load().s;
       return {
-        contacts: Object.values(s.contacts).map((c) => ({ name: c.name, did: c.did, current_did: c.current_did, revoked: c.revoked, relay: c.relay, queued: st.peers[c.did]?.outbox.length ?? 0 })),
+        contacts: Object.values(s.contacts).map((c) => ({ name: c.name, did: c.did, current_did: c.current_did, revoked: c.revoked, relay: c.relay, queued: st.peers[c.did]?.outbox.length ?? 0,
+          re_pair: c.re_pair ?? null })),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
       };
@@ -1715,7 +1785,7 @@ export class Carrier {
       return { ids, c };
     });
     try { await this.#session([c.relay]); } catch (e) {
-      throw new MsgError(e.check ?? 'connect', `${e.message} (${ids.length === 1 ? 'the message stays' : `the ${ids.length} messages stay`} queued for ${c.name}: they go at the next connection)`);
+      throw new MsgError(e.check ?? 'connect', `${reason(e)} (${ids.length === 1 ? 'the message stays' : `the ${ids.length} messages stay`} queued for ${c.name}: they go at the next connection)`);
     }
     return ids.map((id) => {
       const r = this.#results.get(id);
@@ -1734,7 +1804,7 @@ export class Carrier {
     const inUse = this.#relaysInUse(), relays = inUse.length > 0 ? inUse : [this.relay];
     try {
       await this.#session(relays, wait > 0 ? { max: wait * 1000, until: () => this.#read(({ st }) => st.inbox.length > 0) } : {});
-    } catch (e) { offline = `${e.check ?? 'connect'}: ${e.message}`; }
+    } catch (e) { offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
     return this.#locked(({ st }) => {
       const out = { messages: st.inbox, events: st.events, dropped: st.dropped, ...(offline && { offline }) };
       st.inbox = []; st.events = []; st.dropped = {};
@@ -1750,9 +1820,11 @@ export class Carrier {
       return c;
     });
     this.#routes = new Map();
-    try { await this.#session([c.relay]); } catch {}
+    // Revoked here whatever the relay says; offline: its mailboxes are given up at a later round.
+    let offline = null;
+    try { await this.#session([c.relay]); } catch (e) { offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
     const released = this.#read(({ st }) => !Object.values(st.relays[c.relay]?.claims ?? {}).some((x) => x.peer === c.did));
-    return { name: c.name, did: c.did, revoked: true, released };
+    return { name: c.name, did: c.did, revoked: true, released, ...(offline && { offline }) };
   }
 
   // ---- staying connected

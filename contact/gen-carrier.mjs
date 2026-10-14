@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Regenerates fixtures/carrier-v0.json, byte for byte, from the documented seeds below: the frames
-// of contract sigelo-carrier/0 (carrier.mjs header, "Frames"), kinds 1, 2, 4 and 5.
+// of contract sigelo-carrier/0 (carrier.mjs header, "Frames"), kinds 1, 2, 4 (a rotation and a
+// recovery) and 5.
 //   node contact/gen-carrier.mjs           write the file
 //   node contact/gen-carrier.mjs --check   exit 1 if the committed file differs
 // Independent of carrier.mjs, invite.mjs and prekeys.mjs on purpose: headers, keys, topics,
@@ -59,10 +60,12 @@ const frameOf = (kind, key, topic, plaintext, nonce) => concatBytes(head(kind), 
 const derive = (ikm, salt, info, n) => hkdf(sha256, ikm, salt === null ? undefined : u8(salt), u8(info), n);
 
 export function build() {
-  // Identities: alice (A0) invites, bob (B0) answers and later rotates to B1.
+  // Identities: alice (A0) invites, bob (B0) answers and later rotates to B1. Then B1 turns out to
+  // be a thief's: bob recovers from B0 to B2 with his recovery key, which beats B1 (SPEC §7.1).
   const [aRec, bRec] = ['A-recovery', 'B-recovery'].map((l) => id(l, ZERO).key);
-  const A0 = id('A0', aRec), B0 = id('B0', bRec), B1 = id('B1', bRec);
+  const A0 = id('A0', aRec), B0 = id('B0', bRec), B1 = id('B1', bRec), B2 = id('B2', bRec);
   const rB1 = rotate({ genesis: B0.genesis, next_genesis: B1.genesis, iat: T0 + 100, reason: 'voluntary', secret: B0.secret });
+  const rB2 = rotate({ genesis: B0.genesis, next_genesis: B2.genesis, iat: T0 + 200, reason: 'recovery', secret: id('B-recovery', ZERO).secret });
 
   // The invite secret, alice's code and what they yield (contact/invite.mjs, sigelo-invite/0). Code:
   // version 1 | SHA-256(JCS(A0's genesis)) | secret | exp, u32 BE | relay length | relay | checksum =
@@ -112,6 +115,8 @@ export function build() {
   const prekeysKey = derive(K, 'sigelo-prekeys/0', `${B0.did}\n${A0.did}`, 32), noticeKey = derive(K, 'sigelo-notice/0', `${B0.did}\n${A0.did}`, 32);
   const noticeBody = { v: V, typ: 'contact-notice', did: B1.did, pair };
   const notice = { bundle: chainOf(B0.genesis, [rB1]), proof: { body: noticeBody, sig: sign(B1.secret, noticeBody) } };
+  const recoveredBody = { v: V, typ: 'contact-notice', did: B2.did, pair };
+  const noticeRecovered = { bundle: chainOf(B0.genesis, [rB1, rB2]), proof: { body: recoveredBody, sig: sign(B2.secret, recoveredBody) } };
 
   const frames = [];
   const counting = Uint8Array.from({ length: 24 }, (_, i) => i + 1);
@@ -128,6 +133,8 @@ export function build() {
   frame('reply', 2, 'invite.key', derive(secret, null, 'sigelo-invite/0 key', 32), invite.reply_topic, reply, 'alice\'s invite reply, her prekeys inside, on the reply topic');
   frame('prekeys', 5, 'prekeys_key', prekeysKey, mailbox, { prekeys: bundleOf(B0, 'bob prekeys', T0 + 40), want: false, known: A0.did }, 'bob\'s prekeys, his first frame after the reply, on his mailbox to alice; known: alice\'s current DID as he holds it');
   frame('notice', 4, 'notice_key', noticeKey, mailbox, notice, 'bob\'s contact notice after his rotation B0 -> B1: his chain, a proof signed by B1');
+  frame('notice_recovery', 4, 'notice_key', noticeKey, mailbox, noticeRecovered, 'bob\'s contact notice after his recovery B0 -> B2, which beats the thief\'s B0 -> B1: '
+    + 'a proof signed by B2. Alice, who followed B1, merges a recovery she had not followed: she marks bob re_pair "contact_recovery", since K may be the thief\'s, and sends him nothing more until a new pairing');
 
   // Refusals, in unseal's order: frame, aead, padding, plaintext, the same ten for each kind, so a
   // branch of one kind cannot pass what another refuses. Each frame is read as `read_as` under the
@@ -158,12 +165,13 @@ export function build() {
       + '`refusals`: opening `hex` as kind `read_as` under the generic key on `topic` fails with `error`, the first failing check. '
       + '`derived`: what the seeds yield, each from the formula beside it.',
     layout: 'version 0x01 (1) | kind (1) | 16 zero bytes | counter 1, u32 big-endian (4) | XChaCha20-Poly1305 nonce (24) | ciphertext + tag of pad(JCS(value)); additional data = the 22-byte header ‖ UTF-8 topic; pad: 0x80 then 0x00 to the next multiple of 256',
-    kinds: { 1: 'invite answer (sigelo-invite/0), on the answer topic, key invite.key', 2: 'invite reply, on the reply topic, key invite.key', 4: 'contact notice {bundle: the chain, proof: {body: {v, typ: "contact-notice", did: the current DID, pair}, sig}}, on the mailbox topic, key notice_key', 5: 'prekeys {prekeys: a signed sigelo-msg/0 bundle, want: boolean, known: the receiver\'s current DID as the sender holds it}, on the mailbox topic, key prekeys_key' },
+    kinds: { 1: 'invite answer (sigelo-invite/0), on the answer topic, key invite.key', 2: 'invite reply, on the reply topic, key invite.key', 4: 'contact notice {bundle: the chain, proof: {body: {v, typ: "contact-notice", did: the current DID, pair}, sig}}, on the mailbox topic, key notice_key; a chain that brings a recovery the receiver had not followed burns K there (re_pair)', 5: 'prekeys {prekeys: a signed sigelo-msg/0 bundle, want: boolean, known: the receiver\'s current DID as the sender holds it}, on the mailbox topic, key prekeys_key' },
     checks: ['frame', 'aead', 'padding', 'plaintext'],
     created: CREATED, t0: T0,
-    seeds: Object.fromEntries(['A0', 'A-recovery', 'B0', 'B1', 'B-recovery', 'invite secret', 'frame key'].map((l) => [l, hex(seed(l))])),
-    identities: Object.fromEntries(Object.entries({ A0, B0, B1 }).map(([k, x]) => [k, { did: x.did, key: x.key, genesis: x.genesis }])),
+    seeds: Object.fromEntries(['A0', 'A-recovery', 'B0', 'B1', 'B2', 'B-recovery', 'invite secret', 'frame key'].map((l) => [l, hex(seed(l))])),
+    identities: Object.fromEntries(Object.entries({ A0, B0, B1, B2 }).map(([k, x]) => [k, { did: x.did, key: x.key, genesis: x.genesis }])),
     rotation: rB1,
+    recovery: rB2,
     derived: {
       invite,
       kem_pk: 'X-Wing keygen(rng("kem key") 32 bytes): the answer\'s kem_pk',

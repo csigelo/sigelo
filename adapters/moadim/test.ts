@@ -2,14 +2,15 @@
 // The full agent-side flow, end to end, in a throwaway HOME: init, whoami, challenge accepted
 // and refused, issuer + attestation, bundle, rotate, bundle again — then the emitted bundle is
 // re-verified by sigelo's Go reference verifier (go/cmd/sigelo-verify) so the two
-// implementations must agree.
+// implementations must agree. Then the recovery key from the CLI alone (recovery-key, recover),
+// a contact marked re_pair after it, a recovery after a fork, and the contact verbs' exit codes.
 //
 //   npm test                     (the Go cross-check SKIPs, loudly, when `go` is not on PATH)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attest, did, keygen, rotate, sign, verify, verifySig, type Binding, type Genesis, type Rotation } from 'sigelo';
+import { attest, commitmentOf, did, keygen, rotate, sign, verify, verifySig, type Binding, type Genesis, type Rotation } from 'sigelo';
 import { agentIdentitySeed, deriveRoot, keeperRoot, newRoot, recoveryCommitment, rootFromMnemonic } from 'sigelo/dist/keys.js';
 import { decodeAddress, subaddress } from 'sigelo/dist/monero.js';
 import { receive, verifyInvoice } from './sigelo-agent-monero.ts';
@@ -399,6 +400,100 @@ if (!existsSync(built) && !hasGo) {
     ok('go: recovered bundle, same DID and chain, thief fork not followed, attestation counted',
       gr !== null && gr.did === rv.did && JSON.stringify(gr.chain) === JSON.stringify(rv.chain) && gr.attestations[world.did]?.length === 1, g.stderr);
   }
+}
+
+// ── the recovery key from the CLI alone; re_pair; exit codes ───────────────────────────────
+// recovery-key prints the public key alone and writes the secret 0600, never over a file, so
+// `init --recovery "$(sigelo-agent recovery-key --out f)"` needs nothing else installed; recover signs
+// the recovery rotation with it. A contact paired before the recovery is marked re_pair: nothing is
+// sent to it. A contact verb with no identity exits 2; one that cannot reach the relay exits 1,
+// naming the check on stderr, with its JSON on stdout.
+{
+  const H = mkdtempSync(join(tmpdir(), 'sigelo-moadim-rk-'));
+  const env = { PATH: process.env['PATH'], HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }) };
+  const cli = (...args: string[]) => spawnSync('node', [CLI, ...args], { env, cwd: H, encoding: 'utf8' });
+  const inv = cli('invite', '--name', 'x');
+  ok('invite with no identity: exit 2, "no identity: run sigelo-agent init", no raw ENOENT', inv.status === 2 && inv.stderr.includes('no identity: run sigelo-agent init') && !inv.stderr.includes('ENOENT'), inv.stderr);
+  const rk = cli('recovery-key', '--out', 'recovery.key'), keyFile = join(H, 'recovery.key'), key = rk.stdout.trim();
+  const secret = existsSync(keyFile) ? readFileSync(keyFile, 'utf8') : '';
+  ok('recovery-key: stdout is the public key alone; the secret, 64 hex, in a 0600 file; the operator told to move it offline',
+    rk.status === 0 && /^z[1-9A-HJ-NP-Za-km-z]+\n$/.test(rk.stdout) && /^[0-9a-f]{64}\n$/.test(secret) && (!posixModes || (statSync(keyFile).mode & 0o777) === 0o600) && rk.stderr.includes('offline'), rk.stderr);
+  const again = cli('recovery-key', '--out', 'recovery.key');
+  ok('recovery-key never overwrites a key file, and says init --recovery "$(…)" around it gets no key',
+    again.status === 1 && again.stderr.includes('refusing to overwrite') && again.stderr.includes('No key printed') && readFileSync(keyFile, 'utf8') === secret, again.stderr);
+  const nodir = cli('recovery-key', '--out', join('no-such-dir', 'recovery.key'));
+  ok('recovery-key into a missing directory: exit 1, the verb and the file named, no bare ENOENT, nothing on stdout',
+    nodir.status === 1 && nodir.stdout === '' && nodir.stderr.includes(`recovery-key: cannot write ${join('no-such-dir', 'recovery.key')} (its directory does not exist)`) && !nodir.stderr.includes('ENOENT'), nodir.stderr);
+  const made = cli('init', '--recovery', key), g = JSON.parse(made.stdout || '{}') as { did: string; genesis: Genesis };
+  ok('init --recovery takes its output: the genesis commits to that key', made.status === 0 && g.genesis.recovery === commitmentOf(key), made.stderr);
+  // A contact paired before the recovery, as the carrier stores one (contact/store.mjs).
+  const peer = keygen({ recovery: 'sha256:' + '1'.repeat(64) });
+  writeFileSync(join(H, '.config', 'moadim', 'sigelo.local.contacts.json'), JSON.stringify({ v: 'sigelo-invite/0', self: g.did, invites: {}, accepts: {}, contacts: { [peer.did]: {
+    name: 'peer', did: peer.did, current_did: peer.did, current_key: peer.key, revoked: false, chain: [peer.did], rotations: [], relay: 'relay.test', pair_key: '11'.repeat(32) } } }), { mode: 0o600 });
+  ok('contacts before the recovery: no re_pair', (JSON.parse(cli('contacts').stdout) as { contacts: { re_pair: unknown }[] }).contacts[0]?.re_pair === null);
+  const missing = cli('recover', '--recovery-key', 'nope.key');
+  ok('recover with a missing key file: exit 1, "recover: nope.key not found", no bare ENOENT',
+    missing.status === 1 && missing.stderr.includes('recover: nope.key not found') && !missing.stderr.includes('ENOENT'), missing.stderr);
+  cli('recovery-key', '--out', 'other.key');
+  const wrong = cli('recover', '--recovery-key', 'other.key');
+  ok('recover refuses a key that is not this identity\'s, and writes nothing',
+    wrong.status === 1 && wrong.stderr.includes('not this identity\'s recovery key') && (JSON.parse(cli('whoami').stdout) as { chain: string[] }).chain.length === 1, wrong.stderr);
+  const rec = cli('recover', '--recovery-key', 'recovery.key'), after = JSON.parse(rec.stdout || '{}') as { did: string; chain: string[] };
+  const rb = JSON.parse(cli('bundle').stdout) as Bundle & { rotations: Rotation[] };
+  ok('recover: a recovery rotation from the last honest node (the genesis here), signed by that key; the bundle verifies to the new DID; told to pair again',
+    rec.status === 0 && JSON.stringify(after.chain) === JSON.stringify([g.did, after.did]) && rb.rotations[0]?.body.reason === 'recovery'
+      && verify(rb as never, now + 5).did === after.did && rec.stderr.includes('pair again') && rec.stderr.includes('clean machine') && !rec.stderr.includes('dropped'), rec.stderr);
+  const listed = cli('contacts');
+  ok('contacts after it: the peer is marked re_pair "own_recovery", and stderr says re-pair needed',
+    (JSON.parse(listed.stdout) as { contacts: { re_pair: unknown }[] }).contacts[0]?.re_pair === 'own_recovery' && listed.stderr.includes('re-pair needed'), listed.stderr);
+  const sent = cli('send', 'peer', 'hello');
+  ok('send to it: exit 1, re_pair named, nothing queued', sent.status === 1 && /re_pair: this agent recovered its identity/.test(sent.stderr)
+    && (JSON.parse(cli('contacts').stdout) as { contacts: { queued: number }[] }).contacts[0]?.queued === 0, sent.stderr);
+  const ib = cli('inbox', '--wait', '1');
+  ok('inbox with the relay unreachable: exit 1, "offline" and the check on stderr, the JSON on stdout',
+    ib.status === 1 && /^sigelo-agent: inbox: offline: connect: /m.test(ib.stderr) && typeof (JSON.parse(ib.stdout) as { offline?: string }).offline === 'string', ib.stderr);
+  ok('inbox --expect, unreachable: exit 1, offline comes first', cli('inbox', '--expect').status === 1);
+  // A message held from a reader that went away, then the relay unreachable: printed and taken, so
+  // exit 0 (a script that drops stdout on exit 1 would lose it), the offline still on stderr.
+  const heldFile = join(H, '.config', 'moadim', 'sigelo.local.held.json');
+  writeFileSync(heldFile, JSON.stringify({ messages: [{ from: peer.did, content: 'held one' }], events: [], dropped: {} }), { mode: 0o600 });
+  const hb = cli('inbox'), hj = JSON.parse(hb.stdout || '{}') as { messages?: { content: string }[]; offline?: string };
+  ok('inbox, unreachable, printing a held message: exit 0, the message on stdout and taken, the offline on stderr',
+    hb.status === 0 && hj.messages?.[0]?.content === 'held one' && typeof hj.offline === 'string' && !existsSync(heldFile)
+      && /^sigelo-agent: inbox: offline: connect: .*exit 0: the 1 message\(s\) on stdout are taken/m.test(hb.stderr), hb.stderr);
+  const fg = cli('forget', peer.did), fr = JSON.parse(fg.stdout || '{}') as { revoked?: boolean; released?: boolean };
+  ok('forget, unreachable: revoked here (JSON on stdout), exit 1 saying the mailboxes go later', fg.status === 1 && fr.revoked === true && fg.stderr.includes('offline'), fg.stderr);
+  rmSync(H, { recursive: true, force: true });
+}
+
+// ── recover after a fork a relay saw first ─────────────────────────────────────────────────
+// A thief copies the identity file. The owner rotates (on a schedule; no relay sees it yet), and
+// the thief rotates from the same node and reaches the relay first: the relay now holds a fork at
+// that node and refuses the owner. A recovery from the owner's head leaves that fork (SPEC §7.3);
+// one from the last honest node (the genesis here) supersedes both voluntary rotations (§7.1), so
+// a relay or contact holding the thief's rotation follows the recovery.
+{
+  const H = mkdtempSync(join(tmpdir(), 'sigelo-moadim-fork-'));
+  const env = { PATH: process.env['PATH'], HOME: H };
+  const cli = (...args: string[]) => spawnSync('node', [CLI, ...args], { env, cwd: H, encoding: 'utf8' });
+  const g = JSON.parse(cli('init', '--recovery', cli('recovery-key').stdout.trim()).stdout || '{}') as { did: string };
+  const idFile = join(H, '.config', 'moadim', 'sigelo.local.json'), stolen = join(H, 'stolen', 'sigelo.local.json');
+  mkdirSync(join(H, 'stolen'), { mode: 0o700 });
+  copyFileSync(idFile, stolen);
+  cli('rotate');
+  spawnSync('node', [CLI, 'rotate'], { env: { ...env, SIGELO_IDENTITY: stolen }, encoding: 'utf8' });
+  const thiefRotation = load(stolen).rotations[0]!;
+  // What the relay verifies: the rotations it keeps (the thief's) merged into the bundle sent.
+  const atRelay = (b: Bundle): string => { try { return verify({ ...b, rotations: [thiefRotation, ...b.rotations] } as never, now + 5).did; } catch (e) { return (e as Error).message; } };
+  const forked = atRelay(JSON.parse(cli('bundle').stdout || '{}') as Bundle);
+  ok('the owner\'s unseen rotation and the thief\'s from the same node: a fork wherever the thief\'s is held', /fork/.test(forked), forked);
+  const rec = cli('recover', '--recovery-key', 'recovery.key'), after = JSON.parse(rec.stdout || '{}') as { did: string; chain: string[] };
+  const rb = JSON.parse(cli('bundle').stdout || '{}') as Bundle & { rotations: Rotation[] };
+  const merged = atRelay(rb);
+  ok('recover after it: from the genesis, the owner\'s rotation dropped and said so; with the thief\'s merged in, the chain follows the recovery',
+    rec.status === 0 && JSON.stringify(after.chain) === JSON.stringify([g.did, after.did]) && rb.rotations.length === 1 && rb.rotations[0]?.body.id === g.did
+      && merged === after.did && rec.stderr.includes('The 1 rotation(s) after'), `${merged}; ${rec.stderr}`);
+  rmSync(H, { recursive: true, force: true });
 }
 
 console.log(failures === 0 ? `\nALL PASS (HOME was ${HOME})` : `\n${failures} FAILED`);

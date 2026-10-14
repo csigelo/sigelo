@@ -5,9 +5,9 @@
 // resolves as sigelo-agent loads it (here: npm ci in adapters/moadim and contact/); a package that
 // only takes its name's place, or one above sigelo-agent's tree, never runs. Against a loopback
 // relay (relay/ here, else SIGELO_RELAY_DIR; SKIP without one): pairing, parallel calls, an inbox
-// past one result (held across a restart), a nested message, wait bounds. `npm test` → ALL PASS or
-// exit 1.
-import { spawn } from 'node:child_process';
+// past one result (held across a restart), a nested message, wait bounds, a recovery after which
+// each side lists the other re_pair. `npm test` → ALL PASS or exit 1.
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -335,6 +335,22 @@ ${code.slice(60)}
         ok(r2.data?.messages.length === 1 && r2.data.messages[0].content === big && r2.data.more === 1, 'relay: after a restart, the next result carries the big one alone', r2.text.slice(0, 200));
         ok(r3.data?.messages.map((m) => m.content).join() === 'and bring the notes' && r3.data.more === 0 && !existsSync(heldFile), 'relay: then the rest, and nothing is held', r3.text.slice(0, 200));
         ok(r4.data?.messages.length === 0 && r4.data.more === 0, 'relay: and nothing twice', r4.text.slice(0, 200));
+        // Alice recovers with the recovery key (sigelo-agent recover): the pairing key was in the
+        // files a thief would have copied, so each side marks the other re_pair and sends nothing.
+        const keyFile = join(dir, 'recovery.key');
+        writeFileSync(keyFile, `${Buffer.from(rec.secret).toString('hex')}\n`, { mode: 0o600 });
+        const rc = spawnSync(process.execPath, [join(here, '..', '..', 'adapters', 'moadim', 'cli.ts'), 'recover', '--recovery-key', keyFile],
+          { env: { ...process.env, SIGELO_IDENTITY: join(dir, 'alice.local.json') }, encoding: 'utf8' });
+        ok(rc.status === 0, 'relay: sigelo-agent recover', rc.stderr);
+        r = await a2.call('sigelo_contacts');
+        ok(r.data?.contacts[0]?.re_pair === 'own_recovery', 'relay: alice\'s sigelo_contacts marks bob re_pair "own_recovery"', r.text);
+        r = await a2.call('sigelo_send', { to: 'bob', text: 'after the recovery' });
+        ok(r.isError && /^REFUSED: re_pair: /.test(r.text), 'relay: and her sigelo_send refuses, naming re_pair', r.text);
+        r = await a2.call('sigelo_inbox');   // her rotation notice goes
+        ok(r.data?.events.some((e) => e.type === 're_pair' && e.re_pair === 'own_recovery'), 'relay: her sigelo_inbox says so', r.text.slice(0, 300));
+        await b.call('sigelo_inbox', { wait: 2 });
+        r = await b.call('sigelo_contacts');
+        ok(r.data?.contacts[0]?.re_pair === 'contact_recovery', 'relay: bob reads her notice: his sigelo_contacts marks alice re_pair "contact_recovery"', r.text);
       } finally { a2.close(); await a2.exited; }
     } finally {
       a.close(); b.close();
@@ -351,7 +367,7 @@ ${code.slice(60)}
   mkdirSync(mcp, { recursive: true });
   mkdirSync(join(side, 'node_modules'), { recursive: true });
   for (const f of ['server.mjs', 'contact.mjs']) copyFileSync(join(here, f), join(mcp, f));
-  for (const f of ['package.json', 'sigelo-agent.ts', 'sigelo-agent-adopt.ts', 'sigelo-agent-monero.ts', 'sigelo-agent-contact.ts']) copyFileSync(join(here, '..', '..', 'adapters', 'moadim', f), join(side, f));
+  for (const f of ['package.json', 'sigelo-agent.ts', 'sigelo-agent-adopt.ts', 'sigelo-agent-monero.ts', 'sigelo-agent-contact.ts', 'sigelo-agent-recovery.ts']) copyFileSync(join(here, '..', '..', 'adapters', 'moadim', f), join(side, f));
   for (const to of [join(copy, 'ts'), join(side, 'node_modules', 'sigelo')]) symlinkSync(join(here, '..', '..', 'ts'), to, 'junction');
   const listOf = async (cl) => { await cl.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } }); return (await cl.rpc('tools/list')).result.tools.map((t) => t.name).sort().join(); };
   const c6 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));

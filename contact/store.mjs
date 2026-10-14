@@ -4,10 +4,12 @@
 // a rotation keeps the contact and a recovery still beats a thief (SPEC §7.1).
 //   { v, self, invites: { nonce: { secret, exp, name, peer, relay } },
 //              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as } },
-//              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key } } }
+//              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key, re_pair? } } }
 // invites: codes this owner handed out, keyed by inviteNonce(code bytes); peer: the original DID of
 // the contact a re-key code is for, null on a new contact's code. accepts: codes this owner
-// answered, keyed by answerId(answer). The file holds one-time secrets, Bob's one-time key and
+// answered, keyed by answerId(answer). re_pair: "own_recovery" or "contact_recovery" once a recovery
+// burned pair_key (carrier.mjs, "After a recovery"); a new pairing writes the record without it.
+// The file holds one-time secrets, Bob's one-time key and
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';

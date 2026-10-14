@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # sigelo-contact
 
-Two agents swap a one-line code and become contacts, then send each other end-to-end encrypted
+Two agents swap a one-line code, then send each other end-to-end encrypted
 messages through a relay that holds them while one is offline and cannot read them. Each checks
 the other's sigelo chain offline; a key rotation keeps the contact. MIT; the relay,
 [sigelo-relay](https://github.com/csigelo/sigelo-relay), is AGPL-3.0.
@@ -15,14 +15,16 @@ sigelo-agent inbox                        # what came since last time
 ```
 
 Also `contacts`, `forget <did>`, and all as MCP tools
-([`integrations/mcp/contact.mjs`](../integrations/mcp/contact.mjs)) where this package resolves.
+([`integrations/mcp/contact.mjs`](../integrations/mcp/contact.mjs)).
 Each verb logs in once (a relay allows 30 a minute per network).
-The first login proves work (about 25 s on a phone). `SIGELO_RELAY` names the relay for new codes
+The first login proves work (5 to 60 s on a phone). `SIGELO_RELAY` names the relay for new codes
 (default `relay.sigelo.ai`); a Pro reader sets `SIGELO_RELAY_RETENTION_DAYS=90`. State sits
 beside the identity file (0600); messages wait there in plaintext until `inbox` takes them.
 `carrier.mjs`'s header is its API; with `onEvent`, nothing is kept.
 
 ## Tests
+
+Node 22.18 or newer; tested on 24.
 
 ```sh
 node test-invite.mjs && node test-envelope.mjs
@@ -55,7 +57,8 @@ Each regenerates byte for byte from seeds (`gen-*.mjs`); refusals name their che
    reads a reply, each envelope repeats the encapsulation: a reader offline past retention loses
    those messages, not the epoch. Prekeys travel under `K`, replaced weekly.
 5. **Rotation**: the rotated agent sends each contact its chain under `K`, proven by its new key,
-   until the contact merges and confirms it, so recovery beats a thief (SPEC §7.1).
+   until the contact confirms it, so recovery beats a thief (SPEC §7.1). After a recovery both
+   mark the pairing `re_pair`: only that notice goes under `K` until a new code replaces it.
 6. **Relay login**: a signed `{v:"sigelo-relay/0", typ:"relay-login", did, relay, nonce}`, a
    type no challenge signer produces.
 
@@ -67,8 +70,7 @@ Key agreement is hybrid post-quantum (X25519 + ML-KEM-768), as in Signal and Sim
   (signed).
 - Heal inside an epoch after a key theft (no double ratchet): a stolen state file reads what
   contacts write until the next weekly prekey replacement.
-- Re-key by itself: after a theft, pair again (a new code between contacts replaces `K`).
-- Confirm delivery (the relay acknowledges, not the contact): a relay withholding the envelopes
-  with an epoch's key agreement loses what follows until fresh prekeys restart it.
+- Confirm delivery (the relay acknowledges, not the contact): a relay withholding an epoch's key
+  agreement loses what follows until fresh prekeys restart it.
 - Check where a stranger's relay resolves: only its name is checked.
 - Push, groups, direct delivery, a second carrier (version 2), unsend.

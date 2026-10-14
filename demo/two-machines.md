@@ -2,7 +2,8 @@
 # Two agents on two machines
 
 Two agents pair by code, exchange 100 messages, one goes offline for a day, then rotates its
-key. Nothing is lost, and the relay can read nothing. The whole run on one machine, with an
+key. Nothing is lost, and the relay can read nothing. Then a thief copies the other's files: she
+recovers with her recovery key, and the two pair again. The whole run on one machine, with an
 injected clock and a relay on loopback at its default login rate, with a 12-bit proof of work:
 
 ```sh
@@ -13,14 +14,22 @@ By hand on two machines, A (alice) and B (bob):
 
 ## 1. Install, on both
 
-Node ≥ 22.18, a clone of [csigelo/sigelo](https://github.com/csigelo/sigelo), then:
+Node 22.18 or newer (tested on 24), a clone of [csigelo/sigelo](https://github.com/csigelo/sigelo), then:
 
 ```sh
 (cd ts && npm ci && npx tsc) && (cd contact && npm ci) && (cd adapters/moadim && npm ci && npm run build && npm link)
 export SIGELO_RELAY=relay.sigelo.ai      # or your own: relay/README.md; both must use the code's relay
-sigelo-agent init --recovery <z…>        # the recovery public key, made offline (adapters/moadim/README.md)
+sigelo-agent init --recovery "$(sigelo-agent recovery-key --out recovery.key)"
 sigelo-agent whoami                      # your DID
 ```
+
+`recovery-key` writes the recovery key's secret to `recovery.key` (0600) and prints only its public
+half, which `init` commits to. Move the file off the machine now: it is the only way back after a
+theft, and whoever holds it can take the identity.
+
+Exit codes, for scripts: 0 done; 1 refused or offline, the reason on stderr and any JSON on
+stdout (`inbox` offline exits 0 once it printed messages: they are taken); 2 usage, or no identity
+yet; 3 `inbox --expect` when no message came.
 
 ## 2. Pair by code
 
@@ -29,6 +38,9 @@ A:
 ```sh
 sigelo-agent invite --name bob           # {"code": "sgl1…", …}: give the code to B's operator
 ```
+
+The first login of an identity proves work, 5 to 60 s on a phone: a line on stderr says so before,
+and another when it is done.
 
 The code works once and expires in 24 hours. Send it by chat, mail or QR code: whoever holds it
 can answer it, so treat it like a one-time password.
@@ -89,7 +101,28 @@ sigelo-agent send bob "got it"           # A; B reads it at his next inbox
 B's agent sends A its chain before anything signed by the new key. A merges it as pairing does: a
 recovery rotation beats a thief's (SPEC §7.1).
 
-## 5. Check that the relay is blind
+## 5. A theft, a recovery, a new pairing
+
+A thief copies A's files and rotates the key. The relay now follows the thief's chain, and A's
+agent is locked out: `inbox` exits 1, and stderr names the refusal (`bundle`) and says to recover.
+A brings `recovery.key` back for one command (on a real theft, on a clean machine with a copy of
+the identity file, never the host it was stolen from: the same recovery key stays in force):
+
+```sh
+sigelo-agent recover --recovery-key recovery.key   # A: a recovery rotation; the stolen key is retired
+sigelo-agent contacts                    # A: bob is "re_pair": "own_recovery"
+sigelo-agent inbox                       # A: tells B of the recovery; the relay follows it too
+sigelo-agent contacts                    # B, after his inbox: alice is "re_pair": "contact_recovery"
+```
+
+The thief's copy held the pairing key `K` as well, and with it every later mailbox of the pair. So
+after a recovery neither side sends on `K` (a `send` exits 1, `re_pair`) or claims a new mailbox
+under it, until a new code replaces it: A runs `invite --name bob`, B `accept`, then `inbox` on
+each side as in step 2. Both show a new pairing id, and messages flow again under A's recovered key.
+A message queued for B before the recovery is refused, and A's `inbox` reports it (`refused`,
+`re_pair`). A contact still on sigelo-agent 0.1.2 follows the recovery but marks nothing: pair with it at once.
+
+## 6. Check that the relay is blind
 
 With your own relay:
 

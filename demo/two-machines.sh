@@ -5,10 +5,14 @@
 # injected clock. alice runs sigelo-agent from its source (adapters/moadim/cli.ts), bob as step 1 of
 # demo/two-machines.md installs it (npm run build: dist/cli.js); a copy laid out as npm installs it
 # loads sigelo-contact beside it, and refuses a package that only takes that name's place. They
-# pair by code (both show the same pairing id), exchange 115 messages, one of 150,000 characters
-# and one a 500-level nested array, read through a pipe after a reader that went away; one is
-# offline for a day, then rotates its key and reads its backlog: nothing lost, nothing readable on
-# the relay. Prints DEMO PASS, or FAIL and exits 1 at the first failure.
+# make their recovery keys with sigelo-agent recovery-key, pair by code (both show the same pairing
+# id), exchange 115 messages, one of 150,000 characters and one a 500-level nested array, read
+# through a pipe after a reader that went away; one is offline for a day, then rotates its key and
+# reads its backlog: nothing lost, nothing readable on the relay. Then a thief copies alice's files
+# and rotates: alice is locked out (exit 1, named), recovers with her recovery key, both mark the
+# pairing re_pair and send nothing on it, and a new code pairs them again. Exit codes: 2 with no
+# identity, 3 for inbox --expect with no message. Prints DEMO PASS, or FAIL and exits 1 at the
+# first failure.
 #   sh demo/two-machines.sh        (needs ts/ built and npm ci in contact/, relay/, adapters/moadim/)
 # The relay: SIGELO_RELAY_DIR, else relay/ here (it is its own AGPL repository once exported).
 set -eu
@@ -26,6 +30,8 @@ echo 0 > "$W/offset"
 export DEMO_OFFSET="$W/offset"
 CLOCK='data:text/javascript,import{readFileSync}from"node:fs";const n=Date.now;Date.now=()=>n()+1000*Number(readFileSync(process.env.DEMO_OFFSET,"utf8"))'
 js() { node --import "$CLOCK" "$@"; }
+# later <seconds>: the clock moves on, for the relay too (its login brake counts a minute).
+later() { echo $(( $(cat "$W/offset") + $1 )) > "$W/offset"; }
 die() { echo "FAIL $*" >&2; exit 1; }
 step() { printf '\n== %s\n' "$*"; }
 # get <path>: one field of the JSON on stdin (a.b.0.c), strings bare.
@@ -86,6 +92,10 @@ rc=0; on npm node "$NM/sigelo-agent/dist/cli.js" contacts > /dev/null 2> "$W/npm
 cat "$W/npm.err"
 rm -r "$W/node_modules"
 ln -s "$ROOT/contact" "$NM/sigelo-contact"
+# The recovery key from the install alone, as the quick start makes it.
+on npm node "$NM/sigelo-agent/dist/cli.js" init --recovery "$(on npm node "$NM/sigelo-agent/dist/cli.js" recovery-key --out "$W/npm.recovery.key" 2> /dev/null)" > /dev/null 2> "$W/npm.err" \
+  || die "the npm copy: init --recovery \"\$(sigelo-agent recovery-key)\": $(cat "$W/npm.err")"
+echo "the npm copy: init --recovery \"\$(sigelo-agent recovery-key --out <file>)\" works from the install alone"
 rc=0; on npm node "$NM/sigelo-agent/dist/cli.js" accept sgl1x > /dev/null 2> "$W/npm.err" || rc=$?
 [ $rc = 1 ] && grep -q 'code_length' "$W/npm.err" || die "the npm copy with sigelo-contact (exit $rc): $(cat "$W/npm.err")"
 echo "the npm copy, sigelo-contact beside it: accept reads the code ($(cat "$W/npm.err"))"
@@ -96,7 +106,6 @@ agent() {
   who=$1; shift
   if [ "$who" = bob ]; then on bob js "$CLONE/adapters/moadim/dist/cli.js" "$@"; else on "$who" js "$ROOT/adapters/moadim/cli.ts" "$@"; fi
 }
-recovery() { node --input-type=module -e "import { keygen } from '$ROOT/ts/dist/sigelo.js'; console.log(keygen({ recovery: new Uint8Array(32) }).key)"; }
 # lines <prefix> <n>: "<prefix> 1" … "<prefix> n", one a line.
 lines() { n=1; while [ $n -le "$2" ]; do echo "$1 $n"; n=$((n + 1)); done; }
 # sent <file> <n>: send --lines printed n results, every one "sent".
@@ -108,9 +117,16 @@ messages() {
     if (m.join("\n") !== want.join("\n")) { console.error(`got ${m.length}: ${m.slice(0, 3).join(" | ")} …`); process.exit(1); }' "$@"
 }
 
-step "two agents, one identity each (recovery keys made offline, here thrown away)"
-agent alice init --recovery "$(recovery)" > /dev/null 2>&1
-agent bob init --recovery "$(recovery)" > /dev/null 2>&1
+step "two agents, one identity each, each recovery key made by sigelo-agent recovery-key"
+# No identity yet: a contact verb says so and exits 2.
+rc=0; agent alice invite --name bob > /dev/null 2> "$W/none.err" || rc=$?
+[ $rc = 2 ] && grep -q 'no identity: run sigelo-agent init' "$W/none.err" || die "invite with no identity (exit $rc): $(cat "$W/none.err")"
+# The secret goes to a 0600 file (offline, on a real machine); stdout is the public key alone.
+agent alice init --recovery "$(agent alice recovery-key --out "$W/alice.recovery.key" 2> /dev/null)" > /dev/null 2>&1 || die "alice's init with recovery-key"
+agent bob init --recovery "$(agent bob recovery-key --out "$W/bob.recovery.key" 2> /dev/null)" > /dev/null 2>&1 || die "bob's init with recovery-key"
+grep -qE '^[0-9a-f]{64}$' "$W/alice.recovery.key" && node -e 'process.exit((require("fs").statSync(process.argv[1]).mode & 0o777) === 0o600 ? 0 : 1)' "$W/alice.recovery.key" \
+  || die "the recovery key file is not 64 hex digits, 0600"
+agent alice whoami | get genesis.recovery | grep -qE '^sha256:[0-9a-f]{64}$' || die "alice's genesis carries no recovery commitment"
 A0=$(agent alice whoami | get did)
 B=$(agent bob whoami | get did)
 echo "alice $A0"
@@ -123,12 +139,15 @@ rc=0; agent bob inbox --wiat 30 > /dev/null 2> "$W/flag.err" || rc=$?
 [ $rc = 2 ] && grep -q -- 'inbox: unknown flag --wiat' "$W/flag.err" || die "inbox --wiat 30 (exit $rc): $(cat "$W/flag.err")"
 
 step "alice makes a code; bob accepts it while alice's agent is offline"
-CODE=$(agent alice invite --name bob | get code)
+# Her first login proves work: one line says so before, one after.
+CODE=$(agent alice invite --name bob 2> "$W/invite.err" | get code)
+grep -q 'proof of work for a new identity: 5–60 s' "$W/invite.err" && grep -q 'proof of work done in' "$W/invite.err" || die "the first invite's progress lines: $(cat "$W/invite.err")"
+cat "$W/invite.err"
 echo "code: $CODE"
 # accept names the code's DID before it connects. carol's relay cannot be reached: her answer stays
 # queued (she never connects again) and accept fails, having said whom the code names. node, not
 # agent: an assignment before a shell function may outlive the call.
-agent carol init --recovery "$(recovery)" > /dev/null 2>&1
+agent carol init --recovery "$(agent carol recovery-key --out "$W/carol.recovery.key" 2> /dev/null)" > /dev/null 2>&1
 rc=0; HOME="$W/carol" SIGELO_IDENTITY="$W/carol/.config/moadim/sigelo.local.json" SIGELO_RELAY_ENDPOINTS='{"relay.demo":{"mqtt":"mqtt://127.0.0.1:1","http":"http://127.0.0.1:1"}}' \
   node --import "$CLOCK" "$ROOT/adapters/moadim/cli.ts" accept "$CODE" --wait 1 > /dev/null 2> "$W/carol.err" || rc=$?
 [ $rc = 1 ] && grep -qF "the code names $A0" "$W/carol.err" || die "accept with the relay unreachable (exit $rc): $(cat "$W/carol.err")"
@@ -159,6 +178,10 @@ agent bob inbox > "$W/inbox.json"; messages "$W/inbox.json" "alice to bob" 50 ||
 lines "bob to alice" 50 | agent bob send alice - --lines > "$W/sent.json"; sent "$W/sent.json" 50 || die "bob's 50 sends"
 agent alice inbox > "$W/inbox.json"; messages "$W/inbox.json" "bob to alice" 50 || die "alice's inbox"
 echo "100 delivered, in order"
+# --expect: with nothing new, inbox exits 3; without it, 0.
+rc=0; agent alice inbox --expect > /dev/null 2> "$W/expect.err" || rc=$?
+[ $rc = 3 ] && grep -q 'no message came (--expect)' "$W/expect.err" || die "inbox --expect with nothing new (exit $rc): $(cat "$W/expect.err")"
+echo "inbox --expect with nothing new: exit 3"
 
 step "three more: terminal controls, 150,000 characters, a nested array; bob reads them through a pipe"
 # As an agent harness reads it: past 64 KiB, an exit before stdout drained cut the inbox, whose
@@ -229,8 +252,48 @@ agent alice send bob "got it 1" | grep -q '"status": "sent"' || die "alice's ans
 agent bob inbox > "$W/inbox.json"; messages "$W/inbox.json" "got it" 1 || die "bob's inbox after the rotation"
 echo "and alice's answer reaches his new key"
 
+step "a thief copies alice's files and rotates: alice is locked out"
+later 120
+cp -R "$W/alice" "$W/thief"
+agent thief rotate > /dev/null 2>&1
+agent thief send bob "from the thief" | grep -q '"status": "sent"' || die "the thief's send"
+rc=0; agent alice inbox --wait 1 > "$W/locked.json" 2> "$W/locked.err" || rc=$?
+[ $rc = 1 ] && grep -q '^sigelo-agent: inbox: offline: bundle: ' "$W/locked.err" && grep -q 'Locked out' "$W/locked.err" && [ -n "$(get offline < "$W/locked.json")" ] \
+  || die "alice locked out (exit $rc): $(cat "$W/locked.err")"
+cat "$W/locked.err"
+
+step "alice recovers with her recovery key; both sides stop using the stolen pairing key"
+agent alice recover --recovery-key "$W/alice.recovery.key" > "$W/recover.json" 2> "$W/recover.err" || die "recover: $(cat "$W/recover.err")"
+A1=$(get did < "$W/recover.json")
+[ "$A1" != "$A0" ] && [ "$(agent alice whoami | get did)" = "$A1" ] || die "no recovery rotation"
+echo "alice is now $A1"
+[ "$(agent alice contacts 2> /dev/null | get contacts.0.re_pair)" = own_recovery ] || die "alice's contact is not marked re_pair"
+rc=0; agent alice send bob "under the stolen key" > /dev/null 2> "$W/repair.err" || rc=$?
+[ $rc = 1 ] && grep -q 're_pair: ' "$W/repair.err" || die "a send under the burned key (exit $rc): $(cat "$W/repair.err")"
+agent alice inbox > /dev/null || die "alice's inbox after the recovery"   # her notice: the relay and bob follow the recovery
+rc=0; agent thief send bob "thief again" > /dev/null 2> "$W/thief.err" || rc=$?
+[ $rc = 1 ] && grep -q 'Locked out' "$W/thief.err" || die "the thief after the recovery (exit $rc): $(cat "$W/thief.err")"
+echo "the thief is locked out now"
+agent bob inbox > /dev/null
+[ "$(agent bob contacts 2> /dev/null | get contacts.0.current_did)" = "$A1" ] && [ "$(agent bob contacts 2> /dev/null | get contacts.0.re_pair)" = contact_recovery ] \
+  || die "bob did not follow the recovery, or does not mark alice re_pair"
+echo "bob follows the recovery and marks alice re_pair; neither sends on the old pairing key"
+
+step "a new code pairs them again"
+later 120
+CODE2=$(agent alice invite --name bob 2> /dev/null | get code)
+agent bob accept "$CODE2" --name alice --wait 1 > /dev/null 2>&1 || die "bob's second accept"
+agent alice inbox > /dev/null; agent bob inbox > /dev/null; agent alice inbox > /dev/null
+[ "$(agent alice contacts 2> /dev/null | get contacts.0.re_pair)" = null ] && [ "$(agent bob contacts 2> /dev/null | get contacts.0.re_pair)" = null ] || die "still re_pair after pairing again"
+PAIR2=$(agent alice contacts | get contacts.0.pair)
+[ "$PAIR2" != "$PAIR" ] && [ "$(agent bob contacts | get contacts.0.pair)" = "$PAIR2" ] || die "the new pairing ids"
+agent alice send bob "after the recovery 1" | grep -q '"status": "sent"' || die "send after pairing again"
+agent bob inbox --wait 5 --expect > "$W/inbox.json" || die "bob's inbox --expect after pairing again"
+messages "$W/inbox.json" "after the recovery" 1 && [ "$(get messages.0.current_did < "$W/inbox.json")" = "$A1" ] || die "bob's inbox after pairing again"
+echo "both show the new pairing id $PAIR2; alice's message reaches bob, signed by her recovered key"
+
 step "what the relay saw, over the whole run"
-blind "$W" any "$A0" "$B" "$B1" "$CODE" "$PAIR" "alice to bob" "bob to alice" "while you were away" "after the rotation" "got it" || die "the relay is not blind"
+blind "$W" any "$A0" "$A1" "$B" "$B1" "$CODE" "$CODE2" "$PAIR" "$PAIR2" "alice to bob" "bob to alice" "while you were away" "after the rotation" "got it" "from the thief" "after the recovery" || die "the relay is not blind"
 grep -qE 'did:sigelo|[mi]/[0-9a-f]{32}' "$W/relay.log" && die "the relay's log names a DID or a topic"
 echo "its log: $(grep -c '^login' "$W/relay.log") logins, addresses cut to /24, no DID, no topic"
 

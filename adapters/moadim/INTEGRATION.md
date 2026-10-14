@@ -43,12 +43,13 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | **identity total** | **77** | |
 | `sigelo-agent-monero.ts` | 131 | `walletSet`, `bindMonero`, `receive`, `invoice`, `verifyInvoice` — counted separately so an identity-only install reads 77 |
 | `sigelo-agent-adopt.ts` | 55 | `adopt`, `forgetIssuer`, outside the core |
-| `sigelo-agent-contact.ts` | 202 | `invite`, `accept`, `contacts`, `send`, `inbox`, `forget`: contacts over a relay, apart; `cli.ts` dispatches to it in one line and escapes all output with its helpers |
+| `sigelo-agent-contact.ts` | 273 | contact verbs, recovery verbs' argv, output escaping; `cli.ts` dispatches here |
+| `sigelo-agent-recovery.ts` | 42 | `recoveryKey`, `recoverWith`: the recovery key from the CLI alone |
 | `cli.ts`, `test.ts` | — | argv/output and tests, not argued |
 
 Dependencies: `sigelo` (`file:../../ts`, build `ts/` first) for the core, `sigelo-contact`
-(`file:../../contact`) for the contact verbs, loaded only from this package's own install; tarballs
-pin both `^<v>`. `@types/node` and `typescript` are dev-only; node runs the `.ts` directly.
+(`file:../../contact`, loaded only from this install) for the contact verbs; tarballs pin both
+`^<v>`. Dev-only: `@types/node`, `typescript`; node runs the `.ts` directly.
 
 ## Design
 
@@ -61,13 +62,13 @@ pin both `^<v>`. `@types/node` and `typescript` are dev-only; node runs the `.ts
 - **The Monero half cannot spend:** `wallet-set` refuses spend keys; `sig_addr` is what
   `monero-wallet-rpc sign` (view mode, (0,0)) returns, computed with no wallet; the view key is never printed.
 - **Input is parsed with sigelo's strict parser** (duplicate keys rejected).
-- **Recovery rotation is not a command here:** it needs the offline key (`rotate --recovery`
-  refuses and prints the procedure; see README "Operating it").
+- **Recovery:** `recover --recovery-key <file>` runs on a clean machine with a copy of the identity
+  file, never the robbed host (malware could take the key, which stays in force).
 
 ## Verified / not verified
 
 `npm test` (ends `ALL PASS`) runs the full flow in a throwaway `HOME`: init refusals and file
-modes, challenge signing and refusals, bundle, rotation, the Monero half (view-only accepted,
-spend keys refused, `proven` binding, subaddresses, invoices accepted and refused by name), and
-re-verifies the bundle with the Go verifier (SKIPs without `go`). Not verified: against a live
+modes, challenges, bundle, rotation, the Monero half (spend keys refused, `proven` binding,
+subaddresses, invoices), recovery, exit codes, and re-verifies the bundle with the Go verifier
+(SKIPs without `go`). Not verified: against a live
 `monero-wallet-rpc` or a live moadim daemon; the `[env]` hookup is derived from source.

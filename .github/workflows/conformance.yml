@@ -67,9 +67,10 @@ jobs:
           node docs-test/grade-verifier.mjs -- /tmp/sv > /tmp/grade-go
           diff <(grep -E '^(PASS|FAIL) ' /tmp/grade-go) <(grep -E '^(PASS|FAIL) ' /tmp/impl-go)
       # the moadim sidecar's full flow, against the freshly built library, re-verified by the
-      # Go reference; the grep proves the cross-check ran rather than skipped
+      # Go reference; the grep proves the cross-check ran rather than skipped. contact/'s
+      # dependencies first: the contact verbs load sigelo-contact through the file: link
       - run: >-
-          npm ci --ignore-scripts && npm test | tee /tmp/moadim-out && grep -q '^ALL PASS' /tmp/moadim-out && grep -q '^ok   go: same current DID$' /tmp/moadim-out
+          (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm test | tee /tmp/moadim-out && grep -q '^ALL PASS' /tmp/moadim-out && grep -q '^ok   go: same current DID$' /tmp/moadim-out
         working-directory: adapters/moadim
       # sigelo.io's world (world/test.mjs): challenge, attestation, refusals and rotation on a
       # random loopback port against the freshly built library, judged by the Go verifier (go
@@ -142,7 +143,7 @@ jobs:
           grep -q '^ALL PASS$' "$RUNNER_TEMP/ts-out"
         working-directory: ts
       - run: >-
-          npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
+          (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
         working-directory: adapters/moadim
       # OS-neutral: a random loopback port, `go run` for the judge, `sh` (Git Bash on Windows) for the allowlist
       - run: |
