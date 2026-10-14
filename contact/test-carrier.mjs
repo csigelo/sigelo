@@ -142,8 +142,13 @@ const HOST = 'relay.test', DAY = 86400, CREATED = '2026-10-01T00:00:00Z';
 const dir = mkdtempSync(join(tmpdir(), 'sigelo-carrier-'));
 let now = Date.parse('2026-10-11T12:00:00Z') / 1000;   // a Sunday, ISO week 2026-W41
 const lines = [];
+// The scenarios below are written against a free tier of 7 days and 256 KB: the client's default
+// retention (carrier.mjs RETENTION_DAYS) and the relay's free tier until 2026-10-14. The relay's own
+// TIERS.free has since grown (14 days, 512 KB); pinning the old one here keeps each scenario's
+// expiry and too_large at the client's own window, whatever the relay's default.
+const TEST_FREE = { ...TIERS.free, retentionDays: 7, maxMessage: 256 * 1024 };
 const cfg = { host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => now, diskUsed: () => 0.1,
-  log: (l) => lines.push(l), policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024 }) };
+  log: (l) => lines.push(l), policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: { free: TEST_FREE, pro: TIERS.pro } }) };
 let relay = await startRelay(cfg);
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 
@@ -1598,7 +1603,7 @@ try {
     ok(hugo.contacts().contacts.length === 10, 'hugo pairs with ten contacts');
     let subscribes = 0;
     const braked = (ctx) => {
-      const p = relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: { free: { ...TIERS.free, mailboxes: 1000 }, pro: TIERS.pro }, rate: { claim: { perSecond: 1, burst: 20 } } });
+      const p = relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: { free: { ...TEST_FREE, mailboxes: 1000 }, pro: TIERS.pro }, rate: { claim: { perSecond: 1, burst: 20 } } });
       const rate = p.rate;
       p.rate = (x) => { if (x.kind === 'subscribe') subscribes++; return rate(x); };
       return p;

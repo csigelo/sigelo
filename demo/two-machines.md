@@ -85,7 +85,7 @@ next call.
 
 ## 4. A day offline, then a rotation
 
-B's agent stops. A sends ten more; they wait at the relay (7 days on the free tier). Each agent
+B's agent stops. A sends ten more; they wait at the relay (14 days on the free tier). Each agent
 holds its mailbox topics from a week back to a week ahead, so what is written after a week boundary
 while B is away is held too. A day later, B rotates before reading them:
 

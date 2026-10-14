@@ -44,10 +44,11 @@ export const DOMAINS = [
 // Hosts under those domains that serve something of their own.
 export const HOSTS = [{ name: 'relay.sigelo.ai', what: 'relay broker' }];
 export const REPOSITORIES = [REPO, 'https://github.com/csigelo/sigelo-relay'];
-// Where the relay's payment details are published: its pay page (Monero only), and that page's one
-// file on the relay repository's default branch. An exact file, not the repository: anyone can put
+// Where the relay's payment details are published: its contact page (Monero only, by invoice over
+// SimpleX; until 2026-10-14 a pay page, /pay-monero.html), and that page's one file on the relay
+// repository's default branch. An exact file, not the repository: anyone can put
 // text under its URL prefix (an issue, a pull request, a fork's commit viewed through the parent).
-export const PAYMENT_PLACES = ['https://sigelo.ai/pay-monero.html', `${REPOSITORIES[1]}/blob/main/site/pay-monero.md`];
+export const PAYMENT_PLACES = ['https://sigelo.ai/contact.html', `${REPOSITORIES[1]}/blob/main/site/contact.md`];
 
 export const BEFORE_LAUNCH = {
   domains: [

@@ -393,8 +393,8 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     `site/src/official.mjs OFFICIAL is ${RELAY_LIVE ? 'DOMAINS (RELAY_LIVE)' : 'BEFORE_LAUNCH (RELAY_LIVE false)'}`);
   // Payment details: the exact file, never the relay repository as a whole (anyone can put text
   // under its URL: an issue, a pull request, a fork's commit viewed through it).
-  ok(PAYMENT_PLACES.join() === 'https://sigelo.ai/pay-monero.html,https://github.com/csigelo/sigelo-relay/blob/main/site/pay-monero.md',
-    'site/src/official.mjs PAYMENT_PLACES: the pay page (Monero only) and its file on the relay repository\'s default branch, not the repository');
+  ok(PAYMENT_PLACES.join() === 'https://sigelo.ai/contact.html,https://github.com/csigelo/sigelo-relay/blob/main/site/contact.md',
+    'site/src/official.mjs PAYMENT_PLACES: sigelo.ai\'s contact page (Monero only, by invoice) and its file on the relay repository\'s default branch, not the repository');
   const domains = OFFICIAL.domains;
   const redirects = (live) => Object.fromEntries(domains.filter((d) => d.role === 'redirect' && !!d.live === live).map((d) => [d.name, `https://${d.to}/`]));
   const of = ix.official ?? {};

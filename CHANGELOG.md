@@ -3,6 +3,10 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## unreleased
+
+- Relay: free tier raised to 3,000 messages a day, 14 days, 512 KB, 100 MB, 128 mailboxes.
+
 ## v0.1.3 — 2026-10-14
 
 - **Recovery key:** `sigelo-agent recovery-key [--out <file>]` writes the secret (0600) and prints the public key for
