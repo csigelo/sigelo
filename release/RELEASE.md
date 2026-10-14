@@ -3,7 +3,8 @@
 Artefacts are built from the PUBLIC tree (Go module path rewritten), never from the private one.
 `<v>` is the package version, the same in every package.json; `$S` a scratch directory.
 
-1. Private repo: every package.json, lockfile and `integrations/mcp/server.json` at `<v>`;
+1. Private repo: every package.json, lockfile and `integrations/mcp/server.json` at `<v>`; go/go.mod
+   `toolchain` at the latest Go patch (build.sh enforces it);
    CHANGELOG.md `## v<v> — <date>`; VERSIONING.md status line; ROADMAP §6 step 8; site
    footnotes. `node site/build.mjs && node site/test/run.mjs` and `node plugins/build.mjs --check`
    pass. Commit.
@@ -12,14 +13,14 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a` must end
    `ALL PASS (<n> checks)`. The artefacts hash the same across hosts and node/npm versions (same Go
    version; `release/normalize-tgz.mjs` rewrites the gzip).
-4. Tag that commit twice, `v<v>` and `go/v<v>` (the Go module lives in go/, VERSIONING §4):
+4. Tag that commit twice, `v<v>` and `go/v<v>` (VERSIONING §4):
    `TZ=UTC GIT_COMMITTER_DATE="$(date -u +%s) +0000" git -c user.name=csigelo -c
    user.email=contact@sigelo.io -c gpg.format=ssh -c user.signingkey=~/.ssh/sigelo_release_signing tag -s v<v> -m '…'`.
    `git cat-file -p v<v>` must show `+0000`. `git push origin v<v> go/v<v>`.
    Then `sh release/sign-release.sh v<v> $S/a` writes `$S/a/release.json`.
 5. `gh release create v<v> --repo csigelo/sigelo --prerelease --title 'sigelo v<v> (draft)'
    --notes-file $S/notes.md $S/a/*` — every file build.sh wrote. Notes (≤ 40 lines): status,
-   install lines, SHA256SUMS, link to the CHANGELOG heading. Drop `--prerelease` once not a draft.
+   install lines, SHA256SUMS, CHANGELOG link. Drop `--prerelease` when final.
 6. Prove it from nothing: in a scratch GOPATH/GOMODCACHE,
    `GOFLAGS=-mod=mod go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v<v>`
    (`GOPROXY=direct` if the proxy lags), then `sigelo-verify --conformance test-vectors.json` on the

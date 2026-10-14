@@ -22,9 +22,6 @@ on:
       tag:
         description: 'tag to publish, e.g. v0.1.2'
         required: true
-      go-version:
-        description: 'Go toolchain of the release build (sigelo-verify hashes depend on it)'
-        default: '1.27'
 permissions:
   id-token: write
   contents: read
@@ -89,7 +86,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
         if: env.DONE != '1'
         with:
-          go-version: ${{ inputs.go-version || '1.27' }}
+          go-version-file: go/go.mod   # the toolchain line; release/build.sh exports GOTOOLCHAIN from it
           cache: false
       - name: release/build.sh makes every tarball
         if: env.DONE != '1'
@@ -111,7 +108,7 @@ jobs:
           done
           cmp "$RUNNER_TEMP/rel/SHA256SUMS" "$OUT/SHA256SUMS" || {
             diff "$RUNNER_TEMP/rel/SHA256SUMS" "$OUT/SHA256SUMS" || true
-            echo "::error title=SHA256SUMS differ::this build of $TAG is not the released one; nothing published. Only sigelo-verify lines differ: re-run with the release's go-version"; exit 1; }
+            echo "::error title=SHA256SUMS differ::this build of $TAG is not the released one; nothing published. Only sigelo-verify lines differ: the release's go/go.mod toolchain line decides the Go version"; exit 1; }
       # trusted publishing needs npm >= 11.5.1; node 22 ships npm 10. After the build, so the build
       # runs with the same npm as conformance.yml's release-build.
       - run: npm install -g npm@11 --no-audit --no-fund && npm --version

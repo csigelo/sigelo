@@ -37,7 +37,7 @@ jobs:
       # Go too: the moadim adapter's test cross-checks its bundle with go/cmd/sigelo-verify,
       # and SKIPs that cross-check without `go` — here it must run, not skip.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
-        with: { go-version: '1.27', cache-dependency-path: go/go.sum }
+        with: { go-version-file: go/go.mod, cache-dependency-path: go/go.sum }
       - run: npm ci --ignore-scripts
         working-directory: ts
       - run: npx tsc
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
         with: { node-version: '${{ matrix.node }}' }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
-        with: { go-version: '1.27', cache-dependency-path: go/go.sum }
+        with: { go-version-file: go/go.mod, cache-dependency-path: go/go.sum }
       # .gitattributes keeps every checkout LF; this proves it where it matters (Windows): no
       # tracked file is CRLF or mixed, in the index (i/) or in this checkout (w/). A file with no
       # line ending at all (i/none w/none: empty, or one line without a final newline) cannot
@@ -170,7 +170,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
-        with: { go-version: '1.27', cache-dependency-path: go/go.sum }
+        with: { go-version-file: go/go.mod, cache-dependency-path: go/go.sum }
       - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
         working-directory: go
       - run: go vet ./...
@@ -220,7 +220,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
         with: { node-version: '22' }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
-        with: { go-version: '1.27', cache-dependency-path: go/go.sum }
+        with: { go-version-file: go/go.mod, cache-dependency-path: go/go.sum }
       - run: release/build.sh /tmp/rel1
       - run: GOCACHE=/tmp/gocache2 npm_config_cache=/tmp/npmcache2 release/build.sh /tmp/rel2 && diff /tmp/rel1/SHA256SUMS /tmp/rel2/SHA256SUMS
       # failures as annotations (the log is not public): pack-test's FAIL line and what it printed last

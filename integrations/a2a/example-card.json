@@ -1,0 +1,75 @@
+{
+  "name": "example agent",
+  "description": "d",
+  "version": "1",
+  "supportedInterfaces": [
+    {
+      "url": "https://agent.example/a2a",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "streaming": true,
+    "extensions": [
+      {
+        "uri": "https://github.com/csigelo/sigelo/tree/main/integrations/a2a",
+        "description": "sigelo identity: DID, bundle, card signature (profile draft)",
+        "required": false,
+        "params": {
+          "did": "did:sigelo:z6ievhbystpqpe2e8GcipMXPmczoYkXU7bi97RvAonFLN",
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX",
+              "recovery": "sha256:8c0cc17a04942cc4f8e0fe0b302606d3108860c126428ba2ceeb5f9ed41c2b05",
+              "created": "2026-10-14T00:00:00Z",
+              "nonce": "z8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR"
+            },
+            "rotations": [],
+            "bindings": [],
+            "attestations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "attestation",
+                  "iss": "did:sigelo:zGyv3Mt7u3eacgmWn2snf5u68xBWMQ3gyuw2ZbwxCABKq",
+                  "sub": "did:sigelo:z6ievhbystpqpe2e8GcipMXPmczoYkXU7bi97RvAonFLN",
+                  "iat": 1789999900,
+                  "exp": 1947680000,
+                  "ctx": "world.example",
+                  "admission": "open",
+                  "claims": {
+                    "tasks": 3
+                  }
+                },
+                "sig": "zKidN1BVAhsNdEMzT43j8BzxwVpCr5gbvfpuFTtvzrDq218TQk2adQTPPBiLmF4D7JWv9VmXb6pvkfQovdS1iSXp"
+              }
+            ],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkmtWtY63GQVBrpMyRJWEzsnxfsGkemu6CtMDwGTv4RYj2",
+                "recovery": "sha256:8c0cc17a04942cc4f8e0fe0b302606d3108860c126428ba2ceeb5f9ed41c2b05",
+                "created": "2026-10-14T00:00:00Z",
+                "nonce": "zQWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF"
+              }
+            ]
+          },
+          "sig": "z65Sg1yv15vw7ENKCZuDxE4tEPpha2xRGJPk8KySi5HVdhcMncqqtb5QcA58sb2Reicvvj44CChzTB1We47YuUKH9"
+        }
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": []
+}

@@ -89,6 +89,7 @@ export const PAGES = [
   { slug: 'index', src: 'site/src/index.md', type: 'SoftwareSourceCode' },
   { slug: 'adopt', src: 'site/src/adopt.md', type: 'TechArticle' },
   { slug: 'accept', src: 'site/src/accept.md', type: 'TechArticle' },
+  { slug: 'frameworks', src: 'site/src/frameworks.md', type: 'TechArticle' },
   { slug: 'spec', repo: 'SPEC.md', type: 'TechArticle', title: 'Specification',
     description: 'The sigelo specification, wire sigelo/0: signing input, genesis and DID, attestations, bindings, rotation, recovery, bundles, the verification algorithm.' },
   { slug: 'verify', src: 'site/src/verify.md', type: 'WebPage' },
@@ -545,6 +546,7 @@ ${L('Index', '/index.json', 'sha256s, versions, release files')}${RELEASE ? `\n$
 ## Optional
 
 ${L('llms-full.txt', '/llms-full.txt', kb(Buffer.byteLength(full)))}
+${L('Frameworks', '/frameworks.md', 'configs for 30 agent frameworks')}
 ${L('Test vectors', '/test-vectors.json', 'real signatures from documented seeds')}
 ${L('Privacy and terms', '/privacy.md', 'logs, retention, terms')}
 ${OPTIONAL.map((p) => L(p, `/raw/${p}`, kb(readBytes(p).length))).join('\n')}

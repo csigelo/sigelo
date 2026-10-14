@@ -62,6 +62,6 @@ Pass: exit 0 and `attestations` lists the world's DID. Attestation `claims` are 
 - Claude Code plugin, identity tools and skill: `claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo` ([plugins](https://github.com/csigelo/sigelo/tree/main/plugins)).
 - Hermes Agent: 9 lines of `config.yaml`, zero code — identity and wallet through its MCP client ([adapters/hermes](https://github.com/csigelo/sigelo/tree/main/adapters/hermes)).
 
-`sigelo-mcp` (registry name `io.github.csigelo/sigelo`) exposes the same steps as tools; configs for Claude Code, Codex, Cursor and others: [integrations](https://github.com/csigelo/sigelo/blob/main/integrations/README.md).
+`sigelo-mcp` (registry name `io.github.csigelo/sigelo`) exposes the same steps as tools; one config line for each of 30 frameworks: [Works with](/frameworks.html).
 
 [Spec](/spec.html) · [Verify your own implementation](/verify.html){{relay_link}}

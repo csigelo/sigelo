@@ -1,5 +1,7 @@
 # sigelo
 
+English | [简体中文](README.zh-CN.md)
+
 Portable, offline-verifiable identity for AI agents. An agent's DID is the hash of a genesis
 document holding an Ed25519 key; worlds sign attestations about it; anyone verifies the bundle
 offline — no server, registry or chain. Draft v0.1, wire format `sigelo/0`; nothing is stable before v1.0.

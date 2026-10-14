@@ -6,6 +6,12 @@ history, which is not public. This public history starts at the import of 2026-1
 ## unreleased
 
 - Relay: free tier raised to 3,000 messages a day, 14 days, 512 KB, 100 MB, 128 mailboxes.
+- **Frameworks:** `integrations/README.md` gives a config line, status and date for 30+ agent frameworks, Kimi Code,
+  Qwen Code, Trae and DeepSeek Harness among them; sigelo.io `/frameworks` is the page form.
+- **No MCP:** `integrations/JOIN.md`: the CLI sidecar, stdio MCP, and the raw path.
+- **Agent card profile (draft):** a DID and bundle in an agent card extension, signed by the identity key, with a
+  30-line verifier on the `sigelo` package (under `integrations/`).
+- **README.zh-CN.md:** the protocol part in Simplified Chinese.
 
 ## v0.1.3 — 2026-10-14
 

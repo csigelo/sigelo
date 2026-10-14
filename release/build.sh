@@ -41,8 +41,9 @@
 # the commit time; Go embeds no timestamps of its own, so it is used only to pin the output
 # files' mtimes (an archive of them is then reproducible too).
 #
-# The Go version is part of the input: a second builder must use the one printed here (a
-# `toolchain` line in go.mod would pin it; see ROADMAP §5.5).
+# The Go version is part of the input: go/go.mod's `toolchain` line names it, and GOTOOLCHAIN below
+# makes every builder use exactly that one (Go downloads it when it is not installed), so the
+# bytes agree across hosts. Move the line to the latest patch release at each release (RELEASE.md).
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -83,6 +84,8 @@ mkdir -p "$out"
 # Go first, while the clone is exactly the commit (the VCS stamp records "modified" otherwise;
 # node_modules/ and dist/ are gitignored, but nothing is left to chance).
 cd "$src/go"
+GOTOOLCHAIN=$(awk '$1 == "toolchain" { print $2 }' go.mod); [ -n "$GOTOOLCHAIN" ] || { echo "go/go.mod: no toolchain line" >&2; exit 1; }
+export GOTOOLCHAIN
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
 	os=${target%/*} arch=${target#*/}
 	ext=; [ "$os" = windows ] && ext=.exe

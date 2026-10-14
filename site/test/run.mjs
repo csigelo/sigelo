@@ -251,7 +251,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
 // The reader pays per token. Words = whitespace-separated tokens holding a letter or digit;
 // inside fenced code and on link-list lines they count half. llms.txt counts every word in full.
 {
-  const PAGES = ['404', 'accept', 'adopt', 'changelog', 'contact', 'index', 'keeper', 'privacy', 'security', 'spec', 'verify'];
+  const PAGES = ['404', 'accept', 'adopt', 'changelog', 'contact', 'frameworks', 'index', 'keeper', 'privacy', 'security', 'spec', 'verify'];
   const got = htmlFiles.filter((f) => /^\/[\w-]+\.html$/.test(f)).map((f) => f.slice(1, -5)).sort();
   ok(got.join() === PAGES.join(), `pages: exactly ${PAGES.join(', ')} (${got.join(', ')})`);
   const words = (md, half = true) => {
@@ -268,6 +268,10 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);
   }
+  // /frameworks: 450 words of prose plus its one table (one row a framework, at most 40 rows).
+  const fw = readFileSync(join(DIST, 'frameworks.md'), 'utf8').split('\n'), rowsOf = fw.filter((l) => /^\|/.test(l)).length - 2;
+  const fwWords = words(fw.filter((l) => !/^\|/.test(l)).join('\n'));
+  ok(fwWords <= 450 && rowsOf > 0 && rowsOf <= 40, `budget: /frameworks.md ${fwWords} words ≤ 450 outside its table, ${rowsOf} rows ≤ 40`);
   const lw = words(readFileSync(join(DIST, 'llms.txt'), 'utf8'), false);
   ok(lw <= 150, `budget: /llms.txt ${lw} words ≤ 150 (all counted in full)`);
   // /privacy: its two halves have their own caps (privacy 90, terms 60 words).

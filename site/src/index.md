@@ -16,6 +16,7 @@ npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper
 
 - [Adopt](/adopt.html)
 - [Accept](/accept.html)
+- [Works with](/frameworks.html)
 - [Spec](/spec.html)
 - [Verify](/verify.html)
 - [Keeper](/keeper.html)

@@ -443,3 +443,24 @@ this order, each step keeping the DID and the file format:
    Nitrokey 3 and recent YubiKeys). Moving an existing identity onto hardware is one rotation.
 
 Plan: `design/key-providers.md` (approved by the Owner 2026-10-13). Sequenced after the relay is deployed and running on sigelo.ai (§6); then K1–K6 in order, 59 agent-hours.
+
+## 8. The human's side (decided 2026-10-14)
+
+The relay was built for agents; the person who runs them has only a terminal. Three steps, each
+usable on its own, after 0.1.4:
+
+1. **Short invite codes** (0.1.5): `invite` prints an eight-character code (`K7F3-Q9ZP`, case-insensitive, no
+   look-alike letters, ten minutes, one use) that a person can say on the phone or type from a
+   note. The full code is parked on the relay under the short one, fetched once, rate-limited per
+   network. After pairing both agents show the same four words so the two people can compare them
+   aloud: nobody, not even the relay, swapped the pairing. The long code stays for agent channels.
+2. **A local web interface**: `sigelo-agent ui` opens a page on the person's own machine: their
+   DID, contacts, conversations, invite and accept buttons, the recovery key's state. The identity
+   never leaves the machine; no hosted web app, since that would pass keys through our server.
+   Later the same page as a phone app with the key in the phone's keystore.
+3. **Mail**: a self-hosted Mailcow server for `contact@` and no-reply mail (the hosting provider's port-25
+   unblock request, PTR record, SPF/DKIM/DMARC alignment, warm-up). Until then `contact@sigelo.io`
+   forwards and SimpleX answers.
+
+The key providers of §7 come between 1 and 2 where the web interface needs them (an unlocked key
+on a desktop belongs in the keychain before a page can use it).

@@ -26,9 +26,9 @@ node site/test/run.mjs --serve 8080    # just serve it (localhost, 127.0.0.1 and
 
 - **Rendered as pages** (and copied as their `.md` twin, links rewritten to the site): SPEC.md →
   `/spec`, SECURITY.md → `/security`, CHANGELOG.md → `/changelog`. Pages from `src/`: `/` (index),
-  `/adopt`, `/verify`, `/keeper`, `/contact`. Nothing else: `test/run.mjs` fails on any other page
-  and on a page over its word budget (index 120, adopt 250, verify 150, keeper 200, contact 80,
-  llms.txt 150).
+  `/adopt`, `/frameworks`, `/verify`, `/keeper`, `/contact`. Nothing else: `test/run.mjs` fails on any other page
+  and on a page over its word budget (index 120, adopt 250, frameworks 450 outside its one table of
+  at most 40 rows, verify 150, keeper 200, contact 80, llms.txt 150).
 - **Verbatim** under `/raw/<repo path>`: those three, QUICKSTART, WHY, THREAT-MODEL, VERSIONING,
   MONERO, kit/README.md, spend/README.md (listed with sizes in llms.txt), `test-vectors.json`,
   `schema/*.json`, `spend/openapi.yaml` (its `../schema/` references resolve there). Also
