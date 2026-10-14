@@ -53,8 +53,9 @@
 #                         it an existing file is kept, and a missing one gets a random password,
 #                         printed once
 #   --relay               the RELAY host instead (Debian/systemd; none of the sigelo.io steps), with
-#                         sigelo-relay-apply and sigelo-relay.service beside this script (deploy/ of
-#                         the relay's own repository, csigelo/sigelo-relay; backup.sh too with
+#                         sigelo-relay-apply, sigelo-relay.service, stats.sh and stats-chart.mjs
+#                         beside this script (deploy/ of the relay's own repository,
+#                         csigelo/sigelo-relay; backup.sh too with
 #                         --backup). Idempotent; each step says what it
 #                         kept or changed: packages; UTC and NTP; journald capped, the relay's
 #                         namespace 7 days (files rotated daily); users csigelo (admin, sudo with
@@ -78,7 +79,14 @@
 #                         first time, confirmed by hand from a new ssh session); sshd key only,
 #                         root off, AllowUsers csigelo sigelo — only once csigelo has a password,
 #                         is in group sudo and both users have a key; nginx Restart=on-failure and
-#                         the hourly sigelo-relay-selfcheck.timer (restarts the relay or nginx).
+#                         the hourly sigelo-relay-selfcheck.timer (restarts the relay or nginx);
+#                         the visit statistics (R16): goaccess, the /_stats/ password (user owner;
+#                         made once, kept in /root/sigelo-stats.pw, root only), and
+#                         sigelo-relay-stats.timer every 10 minutes (stats.sh: GoAccess, the
+#                         relay's chart, summary.txt and daily.log in /var/www/sigelo.ai/stats).
+#                         Run it before the first deploy of a release whose nginx.conf logs
+#                         (its helper's allowlist knows sigelo_anon and /_stats/; the old one
+#                         refuses that config, and deploy.sh then installs nothing).
 #                         Exits 1 while something is left to do, and says what.
 #     --admin-key 'ssh-ed25519 …'  with --relay: csigelo's public key (or --admin-key-file FILE)
 #     --backup AGE-RECIPIENT       with --relay: backup.sh as /usr/local/sbin/sigelo-relay-backup
@@ -198,7 +206,7 @@ if [ "$selftest" = 1 ]; then self_test; exit 0; fi
 [ "$(id -u)" = 0 ] || die "run as root"
 if [ "$relay" = 1 ]; then
   [ "$stats$guard$certs" = 000 ] && [ -z "$world$htfile" ] || die "--relay goes alone (with --key, --admin-key, --backup, --email, --test-cert, --skip-cert)"
-  need="sigelo-relay-apply sigelo-relay.service"; [ -z "$backup" ] || need="$need backup.sh"
+  need="sigelo-relay-apply sigelo-relay.service stats.sh stats-chart.mjs"; [ -z "$backup" ] || need="$need backup.sh"
 elif [ -n "$adminkey" ]; then die "--admin-key goes with --relay"
 elif [ "$stats" = 1 ]; then need="sigelo-nginx-apply stats-agents.sh"
 elif [ -n "$world" ]; then need="sigelo-nginx-apply sigelo-world-apply sigelo-world.service"
@@ -722,7 +730,7 @@ if [ "$relay" = 1 ]; then
   say "R1. packages"
   run apt-get update
   run env DEBIAN_FRONTEND=noninteractive apt-get install -y nginx certbot python3-certbot-nginx sudo logrotate fail2ban \
-      python3-systemd unattended-upgrades nftables systemd-timesyncd ca-certificates curl gnupg rsync age
+      python3-systemd unattended-upgrades nftables systemd-timesyncd ca-certificates curl gnupg rsync age goaccess openssl
 
   say "R2. time: UTC, NTP through systemd-timesyncd"
   run timedatectl set-timezone Etc/UTC
@@ -1176,6 +1184,65 @@ UNIT
   run systemctl daemon-reload
   run systemctl enable --now sigelo-relay-selfcheck.timer
   echo "nginx.service: Restart=$(systemctl show -p Restart --value nginx.service)"
+
+  say "R16. visit statistics: the /_stats/ password, sigelo-relay-stats every 10 minutes"
+  # As sigelo.io's (--stats), with one difference: the password is kept on this host, root only,
+  # so the Owner reads it over ssh (sudo cat) instead of from a line printed once. nginx reads the
+  # hash file (www-data), never the password. The page needs deploy/nginx.conf's /_stats/ location
+  # (deploy/deploy.sh installs it with the release).
+  HT=/etc/nginx/sigelo-stats.htpasswd PWF=/root/sigelo-stats.pw
+  run install -d -m 0755 -o root -g root /var/www/sigelo.ai/stats
+  if [ -f "$HT" ]; then echo "$HT exists: kept"
+  else
+    pw=$(openssl rand -base64 18 | tr -d '/+=\n')
+    [ ${#pw} -ge 20 ] || die "openssl rand gave no password"
+    ( umask 077; printf '%s\n' "$pw" > "$PWF.tmp" ) && mv "$PWF.tmp" "$PWF"
+    printf 'owner:%s\n' "$(printf '%s' "$pw" | openssl passwd -6 -stdin)" > "$HT.tmp"
+    chown root:www-data "$HT.tmp"; chmod 0640 "$HT.tmp"; mv "$HT.tmp" "$HT"
+    pw=""
+    echo "+ wrote $HT (user owner, SHA-512 crypt) and the password to $PWF (root 0600)"
+  fi
+  put /usr/local/sbin/sigelo-relay-stats 0755 < "$HERE/stats.sh"
+  put /usr/local/sbin/sigelo-relay-stats-chart.mjs 0755 < "$HERE/stats-chart.mjs"
+  run node /usr/local/sbin/sigelo-relay-stats-chart.mjs --self-test
+  put /etc/systemd/system/sigelo-relay-stats.service 0644 <<'UNIT'
+[Unit]
+Description=sigelo.ai visit statistics (GoAccess, the relay's counts, summary)
+After=nginx.service sigelo-relay.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sigelo-relay-stats
+Nice=10
+IOSchedulingClass=idle
+ProtectSystem=strict
+ReadWritePaths=/var/www/sigelo.ai/stats
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+# GET /stats from the relay on 127.0.0.1:8791, nothing else
+IPAddressDeny=any
+IPAddressAllow=localhost
+UNIT
+  put /etc/systemd/system/sigelo-relay-stats.timer 0644 <<'UNIT'
+[Unit]
+Description=sigelo.ai visit statistics every 10 minutes
+
+[Timer]
+OnBootSec=3min
+OnCalendar=*:0/10
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+  run systemctl daemon-reload
+  run systemctl enable --now sigelo-relay-stats.timer
+  run systemctl start sigelo-relay-stats.service || later "sigelo-relay-stats failed: journalctl -u sigelo-relay-stats"
+  echo "/_stats/: https://sigelo.ai/_stats/ (and relay.html, api.html, summary.txt, daily.log), user owner;"
+  echo "  the password: ssh -t $ADMIN@<this host> sudo cat $PWF"
 
   if [ -n "$todo" ]; then
     say "not done yet:$todo"

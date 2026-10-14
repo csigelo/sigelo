@@ -408,6 +408,7 @@ else
     run "relay: nginx allowlist (self-test, deploy/nginx.conf)" sh -c "cd '$t' && sh deploy/sigelo-relay-apply --self-test >/dev/null && sh deploy/sigelo-relay-apply --check deploy/nginx.conf >/dev/null"
     run "relay: deploy.sh against a stubbed host (lockfile pins, rollback on a code sha256 mismatch)" sh -c "cd '$t' && sh deploy/test-deploy.sh 2>&1 | tail -1 | grep -q '^ALL PASS'"
     run "relay: the backup's extract holds no mailbox (deploy/backup.sh --self-test)" sh -c "cd '$t' && sh deploy/backup.sh --self-test >/dev/null"
+    run "relay: the stats chart escapes what it draws, no script (deploy/stats-chart.mjs --self-test)" sh -c "cd '$t' && node deploy/stats-chart.mjs --self-test >/dev/null"
     run "relay: front page build + tests" sh -c "cd '$t' && node site/build.mjs >/dev/null && node site/test.mjs 2>&1 | tail -1 | grep -q '^ALL PASS'"
   else
     run "ts: install + build + vectors + tests" sh -c "cd '$t/ts' && npm ci --ignore-scripts --silent && npx tsc && node dist/gen_vectors.js > '$work/vectors.json' && diff -q ../test-vectors.json '$work/vectors.json' && node dist/test.js | tail -1 | grep -q '^ALL PASS'"

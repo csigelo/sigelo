@@ -12,6 +12,9 @@ history, which is not public. This public history starts at the import of 2026-1
 - **Agent card profile (draft):** a DID and bundle in an agent card extension, signed by the identity key, with a
   30-line verifier on the `sigelo` package (under `integrations/`).
 - **README.zh-CN.md:** the protocol part in Simplified Chinese.
+- **Relay stats:** `GET https://relay.sigelo.ai/stats`, the relay's counts, no identifier, 30 days of daily totals.
+- **Visit counts:** sigelo.ai keeps a web access log, addresses cut to /24 or /48, no query string, 7 days (privacy
+  page updated); statistics behind a password at `/_stats/`. Still no cookies and no scripts.
 
 ## v0.1.3 — 2026-10-14
 
