@@ -3,7 +3,7 @@
 // peer's ORIGINAL DID with every rotation seen, as accept/node/sigelo-pair.mjs keeps pairings, so
 // a rotation keeps the contact and a recovery still beats a thief (SPEC §7.1).
 //   { v, self, invites: { nonce: { secret, exp, name, peer, relay } },
-//              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as } },
+//              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as, named? } },
 //              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key, re_pair? } } }
 // invites: codes this owner handed out, keyed by inviteNonce(code bytes); peer: the original DID of
 // the contact a re-key code is for, null on a new contact's code. accepts: codes this owner
@@ -97,9 +97,10 @@ export class Contacts {
    * exactly as long as the pending answer: first reply, revoke, or expiry (at the next add or take).
    * as: the current DID his answer's chain ends at, which the inviter files him under; he may
    * rotate before the reply comes, and must then tell her (the carrier's rotation notice).
+   * named: he chose the name (accept --name), so a re-pair renames the known contact (the carrier).
    */
-  addAccept(code, id, name, now, kem_sk = null, as = null) {
-    return this.#add('accepts', id, { secret: hex(code.secret), code_did: code.did, exp: code.exp, name, relay: code.relay, kem_sk, as }, now, TTL_MAX + SKEW);
+  addAccept(code, id, name, now, kem_sk = null, as = null, named = false) {
+    return this.#add('accepts', id, { secret: hex(code.secret), code_did: code.did, exp: code.exp, name, relay: code.relay, kem_sk, as, ...(named && { named: true }) }, now, TTL_MAX + SKEW);
   }
 
   /** Single use: the entry is deleted, and the file saved, before any check runs on the message naming it. */

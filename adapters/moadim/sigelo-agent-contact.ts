@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * The contact verbs of the sidecar (design/relay-plan.md §2): invite, accept, contacts, send,
- * inbox, forget; and the argv of recovery-key and recover (sigelo-agent-recovery.ts), which cli.ts
+ * inbox, forget; and the argv of recovery-key, recover and erase-request (sigelo-agent-recovery.ts), which cli.ts
  * dispatches here with them. Two agents swap a one-line code and become contacts, then exchange end-to-end
  * encrypted messages through a relay that sees ciphertext only. The work is the carrier of
  * sigelo-contact, a dependency of this package (contact/ of the repository); this file is argv and
@@ -30,13 +30,13 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { bundleOf, chainOf, identityPath, load, secretOf } from './sigelo-agent.ts';
 import { withLock } from './sigelo-agent-monero.ts';
-import { recoverWith, recoveryKey } from './sigelo-agent-recovery.ts';
+import { eraseRequest, pubPath, recoverWith, recoveryKey } from './sigelo-agent-recovery.ts';
 
 // What each verb takes: its flags (true: with a value) and how many arguments. Anything else is
 // refused before anything connects: `inbox --wiat 30` ran at once without the wait, and
 // `invite --help` minted a code.
 const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, number] }> = {
-  invite: { flags: { '--name': true, '--ttl': true }, args: [0, 0] },
+  invite: { flags: { '--name': true, '--ttl': true, '--json': false }, args: [0, 0] },
   accept: { flags: { '--name': true, '--wait': true }, args: [1, Infinity] },
   contacts: { flags: {}, args: [0, 0] },
   send: { flags: { '--label': true, '--lines': false }, args: [2, Infinity] },
@@ -44,12 +44,14 @@ const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, numb
   forget: { flags: {}, args: [1, 1] },
   'recovery-key': { flags: { '--out': true }, args: [0, 0] },
   recover: { flags: { '--recovery-key': true }, args: [0, 0] },
+  'erase-request': { flags: { '--recovery-key': true, '--access': false }, args: [0, 0] },
 };
 export const VERBS = Object.keys(SPEC);
 
 export const USAGE = `sigelo-agent contacts — talk to other agents through a relay
 
-  invite [--name <n>] [--ttl <s>]          a one-line code (sgl1…) for another agent's operator
+  invite [--name <n>] [--ttl <s>] [--json] prints a one-line code (sgl1…) for another agent's
+                                           operator; --json: the code, DID, relay and expiry
   accept <code> [--name <n>] [--wait <s>]  become that agent's contact (wait 0 to 300 s, default 10)
   contacts                                 contacts (pairing id; re_pair: pair again), pending codes and answers
   send <did|name> <text|-> [--label <l>]   an encrypted message; - reads it from stdin
@@ -59,10 +61,12 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
   forget <did>                             revoke a contact here, for good
 
 Recovery key, made before init and kept offline:
-  recovery-key [--out <file>]              the secret to <file> (default recovery.key, 0600); prints the
-                                           public z… key: init --recovery "$(sigelo-agent recovery-key)"
+  recovery-key [--out <file>]              the secret to <file> (default recovery.key, 0600), the public
+                                           z… key to recovery.pub and stdout: init --recovery "$(…)"
   recover --recovery-key <file>            after a theft, on a clean machine with a copy of the identity
                                            file: a recovery rotation with that key (then pair again)
+  erase-request --recovery-key <file>      a signed request to delete this identity's data at
+       [--access]                          sigelo.ai (--access: to send it), as JSON
 
 Exit: 0 done, and inbox offline once it printed messages (they are taken); 1 refused or offline,
 the reason on stderr, any JSON on stdout; 2 usage or no identity; 3 inbox --expect with no
@@ -124,8 +128,10 @@ function contactDir(): string {
   try { outside = `; not loading ${dirname(fileURLToPath(import.meta.resolve('sigelo-contact/package.json')))}, outside this package`; } catch {}
   throw notFound(`sigelo-contact is not installed in ${homes.join(' or ')}${outside}`);
 }
+/** This package's version (sigelo-agent --version). */
+export const version = (): string => (JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8')) as { version: string }).version;
 export async function contactLib(): Promise<{ lib: CarrierLib; kdf: Kdf; inv: Invite }> {
-  const own = (JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8')) as { version: string }).version;
+  const own = version();
   const dir = contactDir(), pkg = join(dir, 'package.json');
   const m = JSON.parse(readFileSync(pkg, 'utf8')) as { name?: unknown; version?: unknown } | null;
   if (m?.name !== 'sigelo-contact' || !caret(m.version, own)) throw new Error(`refusing ${pkg}: ${JSON.stringify(m?.name) ?? 'no name'} ${JSON.stringify(m?.version) ?? 'no version'}, not sigelo-contact ^${own}`);
@@ -255,8 +261,20 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
       note(`${fs ? `recovery-key: cannot write ${file} (${fs === 'ENOENT' ? 'its directory does not exist' : fs})` : (e as Error).message}. No key printed: init --recovery "$(sigelo-agent recovery-key)" gets an empty key`);
       return 1;
     }
-    note(`the recovery key's secret is in ${file} (0600). Move it offline now (paper, a drive in a drawer) and delete it here: `
-      + 'whoever holds it can take over this identity, and it is the only way back after a theft. The public key, on stdout, goes to init --recovery.');
+    note(`the recovery key's secret is in ${file} (0600), its public key in ${pubPath(file)}. Move both offline now (paper, a drive in a drawer) and delete them here: `
+      + 'whoever holds the secret can take over this identity, and it is the only way back after a theft. The public key, on stdout, goes to init --recovery.');
+    return 0;
+  }
+  if (cmd === 'erase-request') {
+    const file = flags.get('--recovery-key'), path = identityPath();
+    if (file === undefined) return usage('--recovery-key <file> is required');
+    if (!existsSync(path)) { note(`${NO_IDENTITY} (none at ${path})`); return 2; }
+    if (!existsSync(file)) { note(`erase-request: ${file} not found: pass the file recovery-key wrote`); return 1; }
+    try { out(eraseRequest(path, file, flags.has('--access'), Math.floor(Date.now() / 1000))); } catch (e) {
+      note(`${fsCode(e) ? 'erase-request: ' : ''}${(e as Error).message}`);
+      return 1;
+    }
+    note(`signed with the recovery key: send this JSON over SimpleX (https://sigelo.io/contact.html)${flags.has('--access') ? ', and only there: whoever holds it gets the data' : ''}`);
     return 0;
   }
   if (cmd === 'recover') {
@@ -307,7 +325,13 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
     };
     const name = flags.get('--name');
     switch (cmd) {
-      case 'invite': out(await c.invite({ name, ttl: seconds(flags.get('--ttl'), '--ttl') })); break;
+      case 'invite': {
+        // The bare code by default, as connect.html says it prints: a line to paste anywhere.
+        const r = await c.invite({ name, ttl: seconds(flags.get('--ttl'), '--ttl') }) as { code: string; exp: number };
+        if (flags.has('--json')) out(r); else console.log(r.code);
+        note(`one-time code, good until ${new Date(r.exp * 1000).toISOString().replace('.000', '')}: send it to the other operator; their agent runs sigelo-agent accept <code> --name <your name>`);
+        break;
+      }
       case 'accept': {
         // A pasted code may come in pieces, or with line breaks (a mail client wraps long lines); a
         // code never contains whitespace, and a real typo still fails code_checksum.
@@ -341,7 +365,10 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         }
         const text = args[1] === '-' && args.length === 2 ? readFileSync(0, 'utf8').replace(/\n$/, '') : args.slice(1).join(' ');
         if (text === '') throw new Error('send <did|name> <text|->: the text is empty');
-        out(await c.send(args[0]!, text, { label }));
+        const r = await c.send(args[0]!, text, { label }) as { status: string; detail?: string };
+        out(r);
+        // Exit 0: kept here, it goes by itself at a later inbox or send. Said, so nobody sends twice.
+        if (r.status === 'queued') note(`send: queued, not yet at the relay: ${r.detail ?? ''}`);
         break;
       }
       case 'inbox': {
@@ -354,6 +381,12 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
           note(`stdout: the inbox did not arrive (the reader went away); its ${r.messages.length} message(s) are kept for the next inbox`);
           return 1;
         }
+        // A contact's messages refused after its recovery (carrier.mjs "Recovery beats key").
+        const overruled = new Map<string, number>();
+        for (const e of r.events as { type?: string; code?: string; from?: string; name?: string }[]) {
+          if (e.type === 'refused' && e.code === 're_pair' && e.from) overruled.set(e.name ?? e.from, (overruled.get(e.name ?? e.from) ?? 0) + 1);
+        }
+        for (const [who, n] of overruled) note(`inbox: ${n} message(s) from ${who} refused (re_pair): signed by a key its recovery overruled, maybe the thief's. Pair again: sigelo-agent invite --name ${who}`);
         // What came is printed either way; the exit says whether the relay was reached, unless
         // messages were printed: they are taken (held, or received before a refusal), and a script
         // that drops stdout on exit 1 would lose them. stderr names the offline either way.

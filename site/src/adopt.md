@@ -19,13 +19,11 @@ v=$d/sigelo-verify-linux-amd64           # or linux-arm64, darwin-amd64, darwin-
 Recovery key, chosen before the identity: none (`--no-recovery`; a theft is then permanent), the operator's `sha256:…` commitment, or a dedicated key pair kept offline (below).
 
 ```sh
-node --input-type=module -e 'import {keygen} from "sigelo";import {writeFileSync} from "node:fs";
-const k=keygen({recovery:new Uint8Array(32)});writeFileSync("recovery.key",Buffer.from(k.secret).toString("hex"),{mode:0o600});writeFileSync("recovery.pub",k.key+"\n")'
-sigelo-agent init --recovery "$(cat recovery.pub)"
+sigelo-agent init --recovery "$(sigelo-agent recovery-key)"   # writes recovery.key and recovery.pub
 sigelo-agent whoami | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.stringify(JSON.parse(s).genesis)))' > agent-genesis.json
 ```
 
-Keep `recovery.key` off the agent's host.
+Keep `recovery.key` and `recovery.pub` off the agent's host.
 
 ## 2. Answer a challenge
 

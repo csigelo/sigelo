@@ -103,15 +103,32 @@
 //     invite and accept replace K and clear the mark (store.admit writes the record afresh). A
 //     contact on sigelo-contact 0.1.2 follows the recovery but marks nothing and keeps writing
 //     under K, to weeks nobody may read but a thief: the recovered side pairs again at once.
+//   - Recovery beats key, for messages too: a contact's envelope signed by a DID that a recovery
+//     this agent follows has overruled (any DID of the contact's chain up to the node recovered
+//     from, or on a fork the recovery left) is refused, and noted (`refused`, code re_pair, `from`
+//     the contact): it may be the thief's. The relay delivers in the order written, so a thief's
+//     messages written before the owner recovered arrive before the recovery's notice, and were
+//     taken as the contact's. So a notice that brings a recovery checks again every message of
+//     that contact still waiting for inbox() against the chain it ends at (the recovery is not
+//     taken first: the relay alone decides what comes when), and one that arrives after it fails
+//     `from`, reported as re_pair. A message signed by the recovered-from key before the theft
+//     cannot be told from the thief's: refused alike; the owner writes again once paired again.
+//     What an earlier inbox() returned, or onEvent got, cannot be taken back: the `rotated` event
+//     of such a notice lists the DIDs it overruled (`overruled`).
 //   - Mailboxes: an agent holds the topics of every ISO week from `retention` ago to AHEAD (7 days,
 //     or its retention if shorter) ahead. The relay drops a publish to a topic nobody claimed (and
 //     says no_reader), so next week's topic must be claimed before a contact writes in it while
-//     this agent is offline. A no_reader refuses that message, and everything else to that contact
-//     until the next round, unsealed: no epoch is begun, and no prekey spent, for a contact away
-//     that long. Free tier: 7 days, 3 weeks (4 within 5 minutes of Monday 00:00 UTC), so 3 or 4
-//     mailboxes per contact; Pro's 90 days: 14 or 15 (relay/allowance.mjs counts 15). A Pro
-//     reader away longer than a week is told nothing of contacts writing in a week it did not
-//     claim: they get no_reader and send later. A Pro reader must say its 90 days
+//     this agent is offline. An invitee's mailbox cannot be claimed before it reads the inviter's
+//     reply (the topic needs K, which the reply carries), so the inviter's first frames to it meet
+//     no_reader until the invitee next connects. A no_reader never loses a message: it stays queued
+//     here, unsealed (its epoch restarted when it began one, its prekey given back), with
+//     everything else to that contact until the next round, and goes at the next connection that
+//     finds the mailbox held (`queued`, the reason in its detail). Free tier: 14 days, 4 weeks
+//     (5 within 5 minutes of Monday 00:00 UTC), so 4 or 5 mailboxes per contact; Pro's 90 days:
+//     14 or 15 (relay/allowance.mjs counts 15). A reader away longer than a week is told nothing of
+//     contacts writing in a week it did not claim: their messages wait on their side (no_reader).
+//     The retention: the constructor's, else relay.json's free tier at this agent's own relay
+//     (read once, at the first login), else RETENTION_DAYS. A Pro reader must say its 90 days
 //     (SIGELO_RELAY_RETENTION_DAYS): nothing tells the carrier its tier. A claim past its time is
 //     given up only once deliveries have stopped, so what is queued on it is read first. The relay
 //     brakes new claims (relay/allowance.mjs RATE.claim: 128 at once per identity, then 2 a second):
@@ -140,7 +157,8 @@ export const LABEL_PREKEYS = 'sigelo-msg/0 prekeys', KIND_NOTICE = 4, KIND_PREKE
 // type of its own, never a SPEC §5.2 challenge: a world that passed the relay's nonce on as its own
 // challenge would get the agent's relay login back from sign-challenge.
 export const LOGIN_V = 'sigelo-relay/0', TYP_LOGIN = 'relay-login';
-export const RETENTION_DAYS = 7, RETENTION_MAX_DAYS = 90, DAY = 86400, SKEW = 300, AHEAD = 7 * DAY;
+// RETENTION_DAYS: the relay's free tier (relay/allowance.mjs TIERS.free), when relay.json says nothing.
+export const RETENTION_DAYS = 14, RETENTION_MAX_DAYS = 90, DAY = 86400, SKEW = 300, AHEAD = 7 * DAY;
 // The relay closes a connection whose SUBSCRIBE holds more topics (relay/mailbox.mjs MAX_TOPICS).
 const MAX_TOPICS = 128;
 // An invite topic holds 4 messages and 64 KB (relay/mailbox.mjs INVITE_BYTES); a bundle at most 64
@@ -281,6 +299,14 @@ export function publicRelay(relay) {
   return host.includes('.') && !IPV4_LIKE.test(host) && !LOCAL_NAME.test(host);
 }
 
+const retentionOk = (n) => Number.isSafeInteger(n) && n >= 1 && n <= RETENTION_MAX_DAYS;
+
+/** The free tier's retention in days that a relay's relay.json states (limits.free.retention_days), or null. */
+export function retentionOf(info) {
+  const n = info?.limits?.free?.retention_days;
+  return retentionOk(n) ? n : null;
+}
+
 /** SIGELO_RELAY (the relay new invites name), SIGELO_RELAY_ENDPOINTS (JSON, as endpointOf), SIGELO_RELAY_RETENTION_DAYS. */
 export function optionsFromEnv(env = process.env) {
   const o = {};
@@ -290,7 +316,7 @@ export function optionsFromEnv(env = process.env) {
   }
   if (env.SIGELO_RELAY_RETENTION_DAYS) {
     const n = Number(env.SIGELO_RELAY_RETENTION_DAYS);
-    if (!Number.isSafeInteger(n) || n < 1 || n > RETENTION_MAX_DAYS) fail('relay', `SIGELO_RELAY_RETENTION_DAYS: whole days, 1 to ${RETENTION_MAX_DAYS} (the reader's tier)`);
+    if (!retentionOk(n)) fail('relay', `SIGELO_RELAY_RETENTION_DAYS: whole days, 1 to ${RETENTION_MAX_DAYS} (the reader's tier)`);
     o.retentionDays = n;
   }
   return o;
@@ -529,6 +555,18 @@ const rePairWhy = (c) => (c.re_pair === 'contact_recovery'
   ? `${c.name} recovered its identity after a theft: the pairing key may be the thief's; pair again (invite, accept) before writing`
   : `this agent recovered its identity: the pairing key with ${c.name} may be the thief's; pair again (invite, and ${c.name}'s operator accepts the code) before writing`);
 
+// A re-pair keeps a known contact's name (store.admit), unless the owner named the answer
+// (`accept --name`): then that name. The inviter's `invite --name` names a new contact only: the
+// code may be answered by anyone, and a re-key code's name is the contact's own. → the contact.
+function renamed(store, c, entry) {
+  if (entry.named === true && c.name !== entry.name) { c.name = entry.name; store.save(); }
+  return c;
+}
+
+// Why messages to a contact wait after a no_reader (the header's "Mailboxes"): its agent has not
+// claimed the mailbox they go to, not this one.
+const noReader = (name) => `${name}'s agent does not hold its mailbox for this pairing yet (it has not run inbox since the pairing, or has been away longer than a week): kept here, it goes at your next inbox or send once ${name}'s agent has connected`;
+
 // MQTT 3.1.1 says only "bad user name or password": POST /check with the same credentials names
 // the failing check (relay/auth.mjs).
 async function named(ep, creds, err) {
@@ -622,13 +660,16 @@ class Link {
 export class Carrier {
   #links = new Map(); #work = Promise.resolve(); #busy = 0; #lastWork = 0; #routes = new Map(); #results = new Map();
   #claimed = new Set(); #refusedTopics = new Map(); #handshakes = new Map(); #soon = new Set();
-  #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map();
+  #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #ask = false;
 
-  constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays = RETENTION_DAYS, clock = () => Math.floor(Date.now() / 1000),
+  constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
     onEvent, keep, backoff = BACKOFF, tick = TICK }) {
     if (typeof identity !== 'function') throw new TypeError('identity: a function returning { secret, bundle }');
     if (typeof store !== 'string' || typeof state !== 'string') throw new TypeError('store, state: file paths (pathsFor(identityFile))');
-    if (!Number.isSafeInteger(retentionDays) || retentionDays < 1 || retentionDays > RETENTION_MAX_DAYS) throw new TypeError(`retentionDays: 1 to ${RETENTION_MAX_DAYS}`);
+    if (retentionDays !== undefined && !retentionOk(retentionDays)) throw new TypeError(`retentionDays: 1 to ${RETENTION_MAX_DAYS}`);
+    // Not given: relay.json's at the first login to this agent's own relay may set it (#relayInfo).
+    this.#ask = retentionDays === undefined;
+    retentionDays ??= RETENTION_DAYS;
     if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('onEvent: a function');
     if (keep !== undefined && typeof keep !== 'boolean') throw new TypeError('keep: true or false');
     Object.assign(this, { identity, storePath: store, statePath: state, relay, endpoints, retention: retentionDays * DAY, clock, onEvent: onEvent ?? (() => {}),
@@ -917,7 +958,18 @@ export class Carrier {
     const s = this.#restore(st, store, me, did) ?? fail('not_contact', 'no live pairing with the writer of this topic');
     // Bytes 2 to 18 are the epoch id (envelope.mjs "Layout"); a frame too short fails open() below.
     const begins = !s.in.epochs.has(hex(bytes.subarray(2, 18)));
-    const r = open(s, bytes, t, now);   // checks by name; the session is unchanged when one fails
+    let r;
+    try { r = open(s, bytes, t, now); } catch (e) {   // checks by name; the session is unchanged when one fails
+      // Not signed as the contact's current DID, after a recovery of the contact's this agent
+      // followed: a key the recovery overruled, maybe the thief's (the header's "Recovery beats
+      // key"). Refused and noted, and no bundle is owed for it (`from`'s known_due): nothing goes
+      // under this K. The claimed DID is unverified: not echoed.
+      if (e instanceof MsgError && e.check === 'from' && s.peer.re_pair === 'contact_recovery') {
+        return [this.#note(st, now, { type: 'refused', from: s.peer.did, name: s.peer.name, code: 're_pair',
+          detail: `a message not signed by ${s.peer.name}'s key after its recovery: maybe the thief's, not delivered` })];
+      }
+      throw e;
+    }
     const c = s.peer, events = [];
     // The writer's epochs begin here again: a bundle owed for one that could not (RESYNC) is not.
     if (begins) this.#entry(st, did).resync_due = false;
@@ -1064,13 +1116,31 @@ export class Carrier {
     const recovered = kept.some((x) => x.body.reason === 'recovery' && !held.has(canonicalize(x)));
     if (recovered) merged.re_pair ??= 'contact_recovery';
     store.save();
+    const overruled = recovered ? this.#overrule(st, now, merged, kept, before.chain) : [];
     if (a.current_did === c.current_did) return [];
     // The contact's old key, and perhaps its state with the prekeys we listed, may be a thief's:
     // list fresh ones only. retire() keeps the old secrets until they expire, for epochs begun.
     const s = this.#restore(st, store, me, c.did);
     if (s) { s.in.prekeys.retire(now); this.#persist(st, s); }
     this.#entry(st, c.did).prekeys_resend = true;
-    return [this.#note(st, now, { type: 'rotated', did: c.did, name: c.name, current_did: a.current_did, ...(recovered && { re_pair: merged.re_pair }) })];
+    return [this.#note(st, now, { type: 'rotated', did: c.did, name: c.name, current_did: a.current_did, ...(recovered && { re_pair: merged.re_pair, overruled }) })];
+  }
+
+  // A recovery of contact c was merged (kept: the rotation followed on each edge of c.chain). The
+  // DIDs it overrules: those of the chain up to the last recovery's node, and those of the chain
+  // held before that it left. Messages of c's still waiting for inbox() signed by one of them are
+  // taken out and noted refused (the header's "Recovery beats key"). → the DIDs overruled.
+  #overrule(st, now, c, kept, before) {
+    const last = kept.findLastIndex((x) => x.body.reason === 'recovery'), honest = new Set(c.chain.slice(last + 1));
+    const overruled = [...new Set([...c.chain, ...before])].filter((d) => !honest.has(d));
+    const out = st.inbox.filter((m) => m.from === c.did && !honest.has(m.current_did));
+    if (out.length === 0) return overruled;
+    st.inbox = st.inbox.filter((m) => !out.includes(m));
+    for (const m of out) {
+      this.#note(st, now, { type: 'refused', from: c.did, name: c.name, current_did: m.current_did, iat: m.iat, code: 're_pair',
+        detail: `signed by ${m.current_did}, a key ${c.name}'s recovery overruled: maybe the thief's, not delivered` });
+    }
+    return overruled;
   }
 
   // Alice: an answer to one of her codes. checkAnswer runs sigelo-pair's checks in its order and
@@ -1182,8 +1252,8 @@ export class Carrier {
     }
     spend(id);
     // An entry written before `as` was kept: unknown, so the notice goes (#next `first`).
-    const held = waiting.find(([x]) => x === id)[1].as ?? null;
-    const c = store.lookup(res.did);
+    const answered = waiting.find(([x]) => x === id)[1], held = answered.as ?? null;
+    const c = renamed(store, store.lookup(res.did), answered);
     const s = session({ me: { did: me.did, current_did: me.current_did, secret: me.secret }, peer: c, K: hexToBytes(res.pair_key) });
     const events = [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed })];
     try { acceptPrekeys(s, reply.prekeys, now); } catch (e) {
@@ -1210,8 +1280,8 @@ export class Carrier {
     }
     st.pending = st.pending.filter((p) => p.exp === undefined || p.exp > now);
     // Nothing goes to a contact whose mailbox nobody held at this round's last publish to it
-    // (no_reader): it would be refused alike. Its control frames wait for the next round; its
-    // messages are refused here, unsealed, so no epoch is begun (and no prekey spent) for nothing.
+    // (no_reader): it would be refused alike. Its frames wait for the next round, its messages
+    // unsealed in its outbox, so no epoch is begun (and no prekey spent) for nothing.
     const absent = (did) => did !== undefined && link.absent.has(did);
     const queued = st.pending.find((p) => p.relay === link.relay && (p.control === 'reply' || !absent(p.peer)) && (p.needs ?? []).every((t) => link.subscribed.has(t)));
     if (queued) return queued;
@@ -1220,11 +1290,10 @@ export class Carrier {
       const e = st.peers[c.did];
       if (!e) continue;
       if (absent(c.did)) {
-        const detail = `nobody holds ${c.name}'s mailbox now: it has been away longer than it claims ahead, or no longer reads this pairing; send again later`;
-        for (const item of e.outbox.splice(0)) {
-          this.#results.set(item.id, { code: 'no_reader', detail, local: true });
-          this.#emit({ type: 'refused', id: item.id, peer: c.did, code: 'no_reader', detail });
-        }
+        const detail = noReader(c.name);
+        for (const item of e.outbox) this.#results.set(item.id, { code: null, queued: detail });
+        // Said once while it lasts (a CLI agent reads it in inbox()).
+        if (e.outbox.length > 0 && e.waiting !== detail) { e.waiting = detail; this.#emit(this.#note(st, now, { type: 'waiting', did: c.did, name: c.name, detail })); }
         continue;
       }
       const K = hexToBytes(c.pair_key), t = topic(K, me.did, c.did, isoWeek(now));
@@ -1291,8 +1360,11 @@ export class Carrier {
         try {
           const m = send(s, { label: item.label, content: item.content }, now);
           e.outbox.shift();
+          if (e.waiting === noReader(c.name)) e.waiting = null;
           this.#persist(st, s);
-          return this.#queue(st, { id: item.id, relay, topic: m.topic, bytes: m.bytes, kind: KIND.message, n: m.n, peer: c.did });
+          // item: put back in the outbox if the relay says no_reader (#refused). Plaintext at rest
+          // only as long as the outbox already kept it, until the PUBACK.
+          return this.#queue(st, { id: item.id, relay, topic: m.topic, bytes: m.bytes, kind: KIND.message, n: m.n, peer: c.did, item });
         } catch (err) {
           if (!(err instanceof MsgError)) throw err;
           if (err.check === 'prekeys') {
@@ -1338,8 +1410,15 @@ export class Carrier {
       const s = this.#restore(st, store, me, e.peer);
       if (s) { restartEpoch(s, unb64(e.bytes)); this.#persist(st, s); }
     }
+    // Nobody holds the contact's mailbox: the message goes back to the front of its outbox, to be
+    // sealed again for the week it then goes in (the header's "Mailboxes"). Sealed bytes kept for
+    // later could name a week whose mailbox the reader never claims again. An entry written by an
+    // earlier version has no item: refused, as it was.
+    if (e.kind === KIND.message && r.code === 'no_reader' && e.item) p.outbox.unshift(e.item);
     return false;
   }
+
+  #nameOf(did) { try { return this.#read(({ store }) => store.lookup(did)?.name) ?? 'the contact'; } catch { return 'the contact'; } }
 
   async #throttle(link) {
     for (;;) {
@@ -1380,8 +1459,11 @@ export class Carrier {
       this.#locked((ctx) => { if (!(r && this.#refused(ctx, e, r))) ctx.st.pending = ctx.st.pending.filter((p) => p.id !== e.id); });
       if (r?.code === 'pow') { link.pow = true; link.closing = true; link.client.end(true); return; }   // log in again, with the proof (#connect, #closed)
       if (r?.code === 'no_reader' && e.peer !== undefined && e.control !== 'reply') link.absent.add(e.peer);
-      if (e.control === undefined || e.control === 'answer') this.#results.set(e.id, r ?? { code: null });   // what a verb waits for
-      this.#emit(r ? { type: 'refused', id: e.id, peer: e.peer, control: e.control, code: r.code, detail: r.detail } : { type: 'sent', id: e.id, peer: e.peer, control: e.control });
+      // A message the relay had no reader for is back in its outbox (#refused): queued, not refused.
+      const back = r?.code === 'no_reader' && e.kind === KIND.message && e.item !== undefined;
+      if (e.control === undefined || e.control === 'answer') this.#results.set(e.id, back ? { code: null, queued: noReader(this.#nameOf(e.peer)) } : r ?? { code: null });   // what a verb waits for
+      this.#emit(back ? { type: 'queued', id: e.id, peer: e.peer, code: r.code, detail: r.detail }
+        : r ? { type: 'refused', id: e.id, peer: e.peer, control: e.control, code: r.code, detail: r.detail } : { type: 'sent', id: e.id, peer: e.peer, control: e.control });
       // A refusal stops this round: what follows would be refused alike (a quota, the rate brake),
       // and a control frame would be queued again at once. The next round retries. A mailbox
       // nobody holds stops only what goes to that contact (absent, #next).
@@ -1549,8 +1631,26 @@ export class Carrier {
     return { username: me.current_did, clientId: clientIdOf(me.did), password, pow };
   }
 
+  // How long this agent's own relay keeps a message on the free tier (relay.json, plan §11), when
+  // the constructor was not told: asked once, beside the first login's challenge. Any failure (no
+  // such file, a relay on loopback, a value out of range) keeps RETENTION_DAYS. Before the first
+  // claim, so the weeks claimed behind (#weeks) follow it.
+  async #relayInfo(ep) {
+    this.#ask = false;
+    try {
+      const r = await http(`${ep.http}/relay.json`);
+      const n = r.status === 200 ? retentionOf(r.body) : null;
+      if (n !== null) this.retention = n * DAY;
+    } catch {}
+  }
+
+  get retentionDays() { return this.retention / DAY; }
+
   async #dial(relay) {
-    const ep = endpointOf(relay, this.endpoints), link = new Link(relay, relay === this.relay), creds = await this.#credentials(relay, ep);
+    const ep = endpointOf(relay, this.endpoints), link = new Link(relay, relay === this.relay);
+    const info = link.own && this.#ask ? this.#relayInfo(ep) : null;
+    const creds = await this.#credentials(relay, ep);
+    await info;
     // A cut connection is this client's own refusal: no POST /check may rename it.
     try { await mqttConnect(ep.mqtt, creds, link, (packet) => this.#onPacket(link, packet)); } catch (e) { throw link.cut ?? await named(ep, creds, e); }
     // A close right after CONNACK (a cut in the same read) reached no listener of this connection.
@@ -1713,7 +1813,9 @@ export class Carrier {
         // Checked before anything is stored: the relay would refuse it (quota_storage).
         if (frame.length > INVITE_BYTES) fail('too_large', `the answer is ${frame.length} bytes, more than an invite topic holds (${INVITE_BYTES}): this agent's chain is too long`);
         const id = answerId(answer);
-        store.addAccept(code, id, name ?? `contact-${code.did.slice(-8)}`, now, hex(k.secretKey), me.current_did);
+        // Unnamed: the code's DID's first digits ("z5esAbCd"), as operators shorten a DID. Named, the
+        // name also replaces a known contact's on a re-pair (#onReply).
+        store.addAccept(code, id, name ?? code.did.slice('did:sigelo:'.length, 'did:sigelo:'.length + 8), now, hex(k.secretKey), me.current_did, name !== undefined);
         const entry = this.#queue(st, { relay: code.relay, topic: keys.answer_topic, bytes: frame, kind: KIND.invite_answer, control: 'answer', needs: [keys.reply_topic], exp: code.exp });
         return { code, id, entry: entry.id };
       } finally { k.secretKey.fill(0); }
@@ -1723,7 +1825,11 @@ export class Carrier {
       this.#locked(({ now, store, st }) => { st.pending = st.pending.filter((p) => p.id !== entry); store.take('accepts', id, now); });
       fail(check, why);
     };
-    try { await this.#session([code.relay], { max: wait * 1000, until: () => this.#handshakes.has(id) }); } catch (e) {
+    // Done early too once the reply topic or the answer is refused (a code answered before:
+    // mailbox_taken), not after the whole wait.
+    const reply = inviteKeys(code.secret).reply_topic;
+    const settled = () => this.#handshakes.has(id) || this.#refusedTopics.has(reply) || Boolean(this.#results.get(entry)?.code);
+    try { await this.#session([code.relay], { max: wait * 1000, until: settled }); } catch (e) {
       // A relay other than this agent's own that refuses it for good would be dialled again at
       // every connection, until the code expires, for an answer it never takes: and a stranger's
       // code names it. Withdrawn only while it waits to go: an answer the relay holds keeps its
@@ -1740,7 +1846,7 @@ export class Carrier {
       const why = { withdrawn: 'the answer is withdrawn', queued: 'the answer stays queued: it goes at the next connection', delivered: 'the relay holds the answer: the reply is read at a later connection' }[left];
       throw new MsgError(e.check ?? 'connect', `${reason(e)} (${why})`);
     }
-    const h = this.#handshakes.get(id), sent = this.#results.get(entry), reply = inviteKeys(code.secret).reply_topic;
+    const h = this.#handshakes.get(id), sent = this.#results.get(entry);
     this.#handshakes.delete(id); this.#results.delete(entry);
     if (h?.check) fail(h.check, h.detail);
     if (h) return { status: 'connected', contact: h.contact };
@@ -1778,6 +1884,22 @@ export class Carrier {
     for (const content of contents) {
       if (content === undefined) fail('body', 'content is required');
       try { canonicalize({ label, content }); } catch (e) { fail('body', `content is not canonical JSON (no floats): ${e.message}`); }
+    }
+    // An answer of ours to `to`'s code waits for its reply (accept said `waiting`): the reply may be
+    // at the relay now. One session reads it first, so `send` right after `accept` pairs (or, to a
+    // contact already, re-pairs) and goes under the key the reply brings.
+    const answered = this.#read(({ now, store }) => [...new Set(Object.values(store.load().s.accepts)
+      .filter((p) => p.exp > now && (p.name === to || p.code_did === to)).map((p) => p.relay))]);
+    if (answered.length > 0) {
+      try { await this.#session(answered); } catch {}
+      this.#routes = new Map();
+      this.#read(({ now, store }) => {
+        const s = store.load().s;
+        if (!Object.values(s.contacts).some((c) => !c.revoked && c.pair_key && (c.name === to || c.chain.includes(to)))
+          && Object.values(s.accepts).some((p) => p.exp > now && (p.name === to || p.code_did === to))) {
+          fail('not_paired', `${JSON.stringify(to)} is not paired yet: your answer to its code waits for the inviter's agent to connect and reply; send again once inbox reports "paired"`);
+        }
+      });
     }
     const { ids, c } = this.#locked(({ store, st }) => {
       const c = this.#resolve(store, to), outbox = this.#entry(st, c.did).outbox;

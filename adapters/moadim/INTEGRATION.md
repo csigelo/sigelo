@@ -43,8 +43,9 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | **identity total** | **77** | |
 | `sigelo-agent-monero.ts` | 131 | `walletSet`, `bindMonero`, `receive`, `invoice`, `verifyInvoice` — counted separately so an identity-only install reads 77 |
 | `sigelo-agent-adopt.ts` | 55 | `adopt`, `forgetIssuer`, outside the core |
-| `sigelo-agent-contact.ts` | 273 | contact verbs, recovery verbs' argv, output escaping; `cli.ts` dispatches here |
-| `sigelo-agent-recovery.ts` | 42 | `recoveryKey`, `recoverWith`: the recovery key from the CLI alone |
+| `sigelo-agent-contact.ts` | 302 | contact verbs, recovery verbs' argv, output escaping; `cli.ts` dispatches here |
+| `sigelo-agent-recovery.ts` | 54 | `recoveryKey`, `recoverWith`, `eraseRequest` |
+| `node-check.ts` | 9 | Node.js 22.18+, checked first |
 | `cli.ts`, `test.ts` | — | argv/output and tests, not argued |
 
 Dependencies: `sigelo` (`file:../../ts`, build `ts/` first) for the core, `sigelo-contact`

@@ -47,7 +47,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { connect } from 'mqtt';
 import { canonicalize, keygen, rotate, sign, verify, verifySig } from 'sigelo';
-import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_SEARCHES, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, prekeysKey, seal, solvePow, unseal } from './carrier.mjs';
+import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_SEARCHES, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, prekeysKey, retentionOf, seal, solvePow, unseal } from './carrier.mjs';
 import { MAX_ENVELOPE, header, pad } from './envelope.mjs';
 import { V as STORE_V, answerId, buildAnswer, checkAnswer, checkReply, inviteKeys, makeInvite, parseInvite } from './invite.mjs';
 import { isoWeek, pairId, topic } from './kdf.mjs';
@@ -143,9 +143,9 @@ const dir = mkdtempSync(join(tmpdir(), 'sigelo-carrier-'));
 let now = Date.parse('2026-10-11T12:00:00Z') / 1000;   // a Sunday, ISO week 2026-W41
 const lines = [];
 // The scenarios below are written against a free tier of 7 days and 256 KB: the client's default
-// retention (carrier.mjs RETENTION_DAYS) and the relay's free tier until 2026-10-14. The relay's own
-// TIERS.free has since grown (14 days, 512 KB); pinning the old one here keeps each scenario's
-// expiry and too_large at the client's own window, whatever the relay's default.
+// retention (carrier.mjs RETENTION_DAYS) and the relay's free tier until 2026-10-14. Both have since
+// grown (14 days, 512 KB); pinning the old ones here (TEST_FREE, and make's retentionDays) keeps
+// each scenario's expiry and too_large at the client's own window, whatever the defaults.
 const TEST_FREE = { ...TIERS.free, retentionDays: 7, maxMessage: 256 * 1024 };
 const cfg = { host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => now, diskUsed: () => 0.1,
   log: (l) => lines.push(l), policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: { free: TEST_FREE, pro: TIERS.pro } }) };
@@ -181,7 +181,7 @@ const events = {};
 const make = (a, extra = {}) => {
   events[a.label] = [];
   return new Carrier({ identity: () => ({ secret: a.secret, bundle: a.bundle }), ...pathsFor(join(dir, `${a.label}.local.json`)), relay: HOST, endpoints,
-    clock: () => now, onEvent: (e) => events[a.label].push(e), keep: true, backoff: [100, 400], ...extra });
+    clock: () => now, onEvent: (e) => events[a.label].push(e), keep: true, backoff: [100, 400], retentionDays: 7, ...extra });
 };
 const seen = (who, f) => events[who].filter(f);
 const texts = (who) => seen(who, (e) => e.type === 'message').map((e) => e.content);
@@ -971,7 +971,7 @@ try {
     const claim = (topics) => new Promise((resolve) => squatter.subscribe(topics, { qos: 1 }, (_err, _subs, packet) => resolve(packet?.granted ?? [])));
     ok((await claim(squat)).join() === '1,1', 'the thief, holding K0, claims both of them first: the relay cannot tell (the live test\'s squat)');
     const code = (await alice.invite({ name: 'bob again' })).code;
-    ok((await bob.accept(code, { name: 'alice again', wait: 0.3 })).status === 'waiting', 'bob answers a new code from alice, his contact already');
+    ok((await bob.accept(code, { name: 'alice', wait: 0.3 })).status === 'waiting', 'bob answers a new code from alice, his contact already');
     const a1 = await alice.inbox();
     ok(a1.events.some((e) => e.type === 'paired' && e.did === B.original && e.rekeyed === true), 'alice: the same contact, re-keyed');
     ok(await until(() => seen('bob', (e) => e.type === 'paired' && e.did === A.original && e.rekeyed === true).length === 1), 'bob: the same, on reading her reply');
@@ -1109,7 +1109,7 @@ try {
     // A re-key, the store's write failing after the state's: the reply the state kept names the
     // code's reply topic, and is put back before the answer runs again; its K never goes out.
     const K0 = storeOf(Ro).contacts[Sa.original].pair_key;
-    ok((await saul.accept((await rosa.invite({ name: 'saul again' })).code, { name: 'rosa again', wait: 0.3 })).status === 'waiting', 'saul answers a fresh code of hers: a re-key');
+    ok((await saul.accept((await rosa.invite({ name: 'saul again' })).code, { name: 'rosa', wait: 0.3 })).status === 'waiting', 'saul answers a fresh code of hers: a re-key');
     f = failRenameOnce(files(Ro).store, (x) => { const c = JSON.parse(x).contacts[Sa.original]; return Boolean(c) && c.pair_key !== K0; });
     await rosa.inbox();
     f.restore();
@@ -1195,16 +1195,20 @@ try {
     await quill.inbox(); await rhea.inbox(); await quill.inbox();
     ok((await quill.send('rhea', 'hello')).status === 'sent' && (await rhea.inbox()).messages.length === 1, 'quill and rhea pair and talk');
     // Day 15: quill's epoch is past 7 days, so this message begins one, in an ISO week rhea, away
-    // since day 0, never claimed. The relay drops it, and now says so: before, quill was told
-    // "sent", and every later message of that epoch failed epoch_unknown at rhea.
+    // since day 0, never claimed. The relay drops it, and says so: before, quill was told "sent",
+    // and every later message of that epoch failed epoch_unknown at rhea. Then it was refused,
+    // lost; now it stays queued at quill's, unsealed, and goes once rhea is back.
     t += 15 * DAY;
-    await refuses(() => quill.send('rhea', 'day 15'), 'no_reader', 'day 15, to a mailbox rhea has not claimed: refused no_reader, not "sent"');
+    const d15 = await quill.send('rhea', 'day 15');
+    ok(d15.status === 'queued' && /does not hold its mailbox/.test(d15.detail) && stateOf(Q).peers[Rh.original].outbox.map((x) => x.content).join() === 'day 15',
+      `day 15, to a mailbox rhea has not claimed: queued, kept in quill's outbox, not "sent" and not lost (${d15.status}: ${d15.detail})`);
     t += DAY;
     await rhea.inbox();   // back: she claims the weeks around now
     const st5 = [];
     for (let i = 0; i < 5; i++) { t += 3600; st5.push((await quill.send('rhea', `after return ${i}`)).status); }
     const box3 = await rhea.inbox();
-    ok(st5.every((x) => x === 'sent') && box3.messages.length === 5 && !box3.dropped.epoch_unknown, `the next five begin a new epoch and arrive (${st5.join()}; ${box3.messages.length} read, dropped ${JSON.stringify(box3.dropped)})`);
+    ok(st5.every((x) => x === 'sent') && box3.messages.map((m) => m.content).join() === 'day 15,after return 0,after return 1,after return 2,after return 3,after return 4' && !box3.dropped.epoch_unknown,
+      `the kept one goes first, then the next five, in a new epoch (${st5.join()}; ${box3.messages.length} read, dropped ${JSON.stringify(box3.dropped)})`);
     const contents = (box) => box.messages.map((m) => m.content).join();
     const carrying = () => stateOf(Q).peers[Rh.original].session.out.epoch.carry;
     // A relay that acknowledges an epoch's first envelope and throws it away: the next carries the
@@ -1275,21 +1279,22 @@ try {
     ok(JSON.parse(ottoFile()).inbox.length === 0 && !ottoFile().includes('hello otto'), 'otto took it by onEvent: his state file holds no message, in plaintext or otherwise');
     // otto is away 22 days, longer than he claims ahead: each of piper's sends begins an epoch the
     // relay refuses (no_reader). Before, each burned one of otto's one-time prekeys for good: after
-    // twenty, every epoch began on his last-resort key.
+    // twenty, every epoch began on his last-resort key. Each message stays queued in her outbox.
     t += 22 * DAY;
     // Her own weekly bundle went just before (state edited): else it goes first, is refused
-    // no_reader as well, and her messages are refused unsealed, beginning no epoch at all.
+    // no_reader as well, and her messages wait unsealed, beginning no epoch at all.
     editState(Pi, (x) => { x.peers[O.original].session.in.prekeys.replaced = t; });
     const used0 = outOf().used.length, refusals = [];
-    for (let i = 0; i < 3; i++) { t += 600; refusals.push(await piper.send('otto', `try ${i}`).then(() => 'sent', (e) => e.check)); }
+    for (let i = 0; i < 3; i++) { t += 600; refusals.push(await piper.send('otto', `try ${i}`).then((r) => r.status, (e) => e.check)); }
     const out = outOf();
-    ok(refusals.join() === 'no_reader,no_reader,no_reader' && out.used.length === used0 && out.returned.length === 1,
-      `three sends refused no_reader: no prekey burned, the one each began on put back (${refusals.join()}; used ${used0} → ${out.used.length}, returned ${out.returned.length})`);
+    ok(refusals.join() === 'queued,queued,queued' && out.used.length === used0 && out.returned.length === 1 && stateOf(Pi).peers[O.original].outbox.length === 3,
+      `three sends to a mailbox nobody holds: queued, kept unsealed; no prekey burned, the one the first began on put back (${refusals.join()}; used ${used0} → ${out.used.length}, returned ${out.returned.length})`);
     t += 600;
     await otto.inbox(); await piper.inbox();
+    ok(stateOf(Pi).peers[O.original].outbox.length === 0, 'otto back: piper\'s next inbox sends the three');
     const back = texts('otto').length;
-    ok((await piper.send('otto', 'after return')).status === 'sent' && (await otto.inbox()) && texts('otto').length === back + 1
-      && seen('otto', (e) => e.type === 'message' && e.content === 'after return')[0]?.last_resort === false, 'otto back: piper\'s next message begins an epoch on that one-time key, not the last-resort one');
+    ok((await piper.send('otto', 'after return')).status === 'sent' && (await otto.inbox()) && texts('otto').slice(back).join() === 'try 0,try 1,try 2,after return'
+      && seen('otto', (e) => e.type === 'message' && e.content === 'try 0')[0]?.last_resort === false, `otto reads them in order: they begin an epoch on that one-time key, not the last-resort one (${texts('otto').slice(back).join()})`);
     // 32 days in which neither runs: both bundles held are past their 31 days. Before, neither side
     // could send its fresh bundle (it went inside an envelope, which needs an epoch, which needs
     // the other's bundle): every send answered "queued" for good. Now bundles travel in frames.
@@ -1634,12 +1639,119 @@ try {
     await relay12.close();
   }
 
+  // ================================================================ the 0.1.3 live re-test (2026-10-14)
+  {
+    // Its own relay and clock. connect.html's order: ines invites, jon accepts while she is offline
+    // (waiting), ines runs inbox (paired), then send. Jon's mailbox for the pairing needs K, which
+    // only her reply carries: until jon's agent reads it, nobody holds that mailbox (no_reader).
+    let t = now;
+    const relayL = await startRelay({ ...cfg, db: join(dir, 'live.db'), tcpPort: 0, httpPort: 0, clock: () => t, log: () => {} });
+    const epL = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relayL.ports.tcp}`, http: `http://127.0.0.1:${relayL.ports.http}` } };
+    const In = agent('isla'), Jo = agent('jude'), ines = make(In, { endpoints: epL, clock: () => t }), jon = make(Jo, { endpoints: epL, clock: () => t });
+    const code1 = (await ines.invite({ name: 'jon' })).code, prefix = In.original.slice('did:sigelo:'.length, 'did:sigelo:'.length + 8);
+    ok((await jon.accept(code1, { wait: 0.3 })).status === 'waiting' && jon.contacts().answers[0]?.name === prefix,
+      `L1: accept without --name names the inviter by its DID's first digits (${jon.contacts().answers[0]?.name})`);
+    ok((await ines.inbox()).events.some((e) => e.type === 'paired' && e.name === 'jon'), 'M1: ines\'s inbox pairs');
+    const hello = await ines.send('jon', say('hello jon'));
+    ok(hello.status === 'queued' && /jon's agent does not hold its mailbox for this pairing yet/.test(hello.detail) && stateOf(In).peers[Jo.original].outbox.length === 1,
+      `M1: her first send is queued, kept in her outbox, and says why: jon's agent, not hers (${hello.status}: ${hello.detail})`);
+    const hi = await jon.send(prefix, say('hi ines'));
+    ok(hi.status === 'sent' && jon.contacts().contacts.map((c) => c.name).join() === prefix, `M1: jon's first send after accept reads her reply first, pairs and goes (${hi.status})`);
+    const ib = await ines.inbox();
+    ok(ib.messages.map((m) => m.content).join() === 'hi ines' && stateOf(In).peers[Jo.original].outbox.length === 0, 'M1: ines\'s next inbox reads him and sends her kept message');
+    ok((await jon.inbox()).messages.map((m) => m.content).join() === 'hello jon', 'M1: jon reads it');
+    await refuses(() => make(agent('noor'), { endpoints: epL, clock: () => t }).send('nobody', 'x'), 'not_contact', 'a name nobody answered stays not_contact');
+
+    // L1: on a re-pair, the name accept is given wins over the name kept.
+    const code2 = (await ines.invite({ name: 'jonny' })).code;
+    ok((await jon.accept(code2, { name: 'ines', wait: 0.3 })).status === 'waiting', 'L1: jon answers a new code of ines\'s, naming her');
+    await refuses(() => jon.send('ines', 'too soon'), 'not_paired', 'M1: a send to the name of an answer the inviter has not read yet says so, by name');
+    await ines.inbox();
+    const jp = await jon.send('ines', say('re-paired'));
+    ok(jp.status === 'sent' && jon.contacts().contacts.map((c) => c.name).join() === 'ines', `L1: once paired again, she is "ines" on his side (${jon.contacts().contacts.map((c) => c.name).join()})`);
+    ok((await ines.inbox()).messages.some((m) => m.content === 're-paired') && ines.contacts().contacts.map((c) => c.name).join() === 'jon', 'L1: on hers he keeps his name: invite --name names new contacts only');
+
+    // L4: a code answered before is refused at once, not after the whole wait.
+    const Ka = agent('kai'), kai = make(Ka, { endpoints: epL, clock: () => t }), t0 = Date.now();
+    await refuses(() => kai.accept(code1, { wait: 10 }), 'mailbox_taken', 'L4: a replayed code');
+    ok(Date.now() - t0 < 6000, `L4: refused in ${Date.now() - t0} ms, not after the 10 s wait`);
+
+    // H1: a thief copies phone's identity and files, writes to vps (an MCP agent), rotates, writes
+    // twice more; the relay holds the last back. Then phone recovers from its genesis.
+    const mcp = await import(pathToFileURL(join(HERE, '..', 'integrations', 'mcp', 'contact.mjs')).href);
+    const id = await import(pathToFileURL(join(HERE, '..', 'adapters', 'moadim', 'sigelo-agent.ts')).href);
+    const tools = await mcp.load({ installed: false, id, env: { SIGELO_RELAY: HOST, SIGELO_RELAY_ENDPOINTS: JSON.stringify(epL) }, clock: () => t });
+    const vFile = join(dir, 'vps.local.json');
+    id.init(vFile, keygen({ seed: seed('vps recovery'), recovery: 'sha256:' + '0'.repeat(64) }).key);
+    const vDid = id.chainOf(id.load(vFile))[0], h = tools.handlers, vInbox = async () => JSON.parse((await h.sigelo_inbox({}, vFile)).text);
+    secrets.add(vDid);
+    const Ph = agent('phone'), phone = make(Ph, { endpoints: epL, clock: () => t });
+    await h.sigelo_accept({ code: (await phone.invite({ name: 'vps' })).code, name: 'phone', wait: 1 }, vFile);
+    await phone.inbox(); await vInbox(); await phone.inbox();
+    ok((await phone.send('vps', say('from the phone'))).status === 'sent' && (await vInbox()).messages.some((m) => m.content === 'from the phone'), 'H1: phone and vps (MCP) pair and talk');
+    const T = { ...Ph, label: 'phone thief', bundle: structuredClone(Ph.bundle) };
+    for (const k of ['store', 'state']) copyFileSync(pathsFor(join(dir, 'phone.local.json'))[k], pathsFor(join(dir, 'phone thief.local.json'))[k]);
+    const thief = make(T, { endpoints: epL, clock: () => t });
+    ok((await thief.send('vps', say('THIEF before recovery'))).status === 'sent', 'H1: the thief writes under the copied key');
+    rotateAgent(T);
+    secrets.add(T.did);
+    ok((await thief.send('vps', say('THIEF after rotating'))).status === 'sent', 'H1: rotates, and writes again under its own key');
+    ok((await thief.send('vps', say('THIEF late'))).status === 'sent', 'H1: and once more');
+    const late = relayL.db.raw.prepare('SELECT id, topic, payload FROM messages WHERE account = ? ORDER BY seq DESC LIMIT 1').get(accountOf(vDid));
+    relayL.db.raw.prepare('DELETE FROM messages WHERE id = ?').run(late.id);
+    const R = keygen({ seed: seed('phone recovered'), recovery: Ph.bundle.genesis.recovery, created: CREATED, nonce: seed('phone recovered nonce').slice(0, 16) });
+    Ph.bundle.rotations = [rotate({ genesis: Ph.bundle.genesis, next_genesis: R.genesis, iat: t - 60, reason: 'recovery', secret: seed('phone recovery') })];
+    Ph.secret = R.secret; Ph.did = R.did;
+    secrets.add(R.did);
+    await phone.inbox();   // the recovered chain logs in; its notice goes to vps
+    const vb = await vInbox();
+    ok(!vb.messages.some((m) => /THIEF/.test(m.content)), `H1: vps, in one sigelo_inbox after the recovery, delivers none of the thief's messages (${vb.messages.map((m) => m.content).join() || 'none'})`);
+    const refusedNow = vb.events.filter((e) => e.type === 'refused' && e.code === 're_pair' && e.from === Ph.original).map((e) => e.current_did);
+    ok(refusedNow.length === 2 && refusedNow.includes(Ph.original) && refusedNow.includes(T.did),
+      `H1: both are reported refused, re_pair, with the key each was signed by: the recovered-from key and the thief's (${refusedNow.join()})`);
+    const rot = vb.events.find((e) => e.type === 'rotated' && e.re_pair === 'contact_recovery');
+    ok(rot?.current_did === R.did && rot.overruled.includes(Ph.original) && rot.overruled.includes(T.did) && !rot.overruled.includes(R.did),
+      'H1: the recovery\'s rotated event names the DIDs it overruled');
+    const mal = await rawClient(agent('mallory'), epL);
+    await publish(mal, late.topic, late.payload);
+    mal.end(true);
+    const vb2 = await vInbox();
+    ok(vb2.messages.length === 0 && vb2.events.some((e) => e.type === 'refused' && e.code === 're_pair' && e.from === Ph.original && e.current_did === undefined) && !vb2.dropped.from,
+      `H1: the one the relay held back, delivered after the recovery: refused re_pair too, not dropped as "from" (${JSON.stringify(vb2.events.map((e) => e.type + ':' + (e.code ?? '')))})`);
+
+    // The retention: relay.json's at the agent's own relay, unless told; 14 when it says nothing.
+    ok(retentionOf({ limits: { free: { retention_days: 14 } } }) === 14 && retentionOf({ limits: { free: { retention_days: 91 } } }) === null && retentionOf({ limits: { free: { retention_days: '14' } } }) === null && retentionOf(null) === null,
+      'retentionOf: whole days, 1 to 90, else nothing');
+    const info = createServer(async (req, res) => {
+      if (req.url === '/relay.json') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ limits: { free: { retention_days: 21 } } })); return; }
+      const r = await fetch(`${epL[HOST].http}${req.url}`);
+      res.writeHead(r.status, { 'content-type': 'application/json' });
+      res.end(Buffer.from(await r.arrayBuffer()));
+    });
+    await new Promise((r) => info.listen(0, '127.0.0.1', r));
+    const epI = { [HOST]: { mqtt: epL[HOST].mqtt, http: `http://127.0.0.1:${info.address().port}` } };
+    const asked = make(agent('luz'), { endpoints: epI, clock: () => t, retentionDays: undefined });
+    ok(asked.retentionDays === 14, `the default before any login: 14 days (${asked.retentionDays})`);
+    await asked.inbox();
+    ok(asked.retentionDays === 21, `after its first login: relay.json's 21 (${asked.retentionDays})`);
+    const told = make(agent('mia'), { endpoints: epI, clock: () => t, retentionDays: 7 });
+    await told.inbox();
+    const none = make(agent('ned'), { endpoints: epL, clock: () => t, retentionDays: undefined });
+    await none.inbox();
+    ok(told.retentionDays === 7 && none.retentionDays === 14, `told 7 (SIGELO_RELAY_RETENTION_DAYS): 7 (${told.retentionDays}); a relay with no relay.json: 14 (${none.retentionDays})`);
+    info.closeAllConnections();
+    await new Promise((r) => info.close(r));
+    await relayL.close();
+  }
+
   // ================================================================ forget
   const claimsBefore = q('SELECT count(*) AS n FROM claims WHERE account = ? AND topic LIKE ?', accountOf(B.original), 'm/%')[0].n;
   const f = await bob.forget(A.original);
   ok(f.revoked === true && f.released === true && f.did === A.original, 'bob forgets alice: revoked, and his mailboxes for her given up');
   ok(q('SELECT count(*) AS n FROM claims WHERE account = ? AND topic LIKE ?', accountOf(B.original), 'm/%')[0].n < claimsBefore, 'the relay holds fewer of bob\'s mailboxes');
-  await refuses(() => alice.send('bob', say('after forget')), 'no_reader', 'alice writes on: the relay tells her nobody holds that mailbox now');
+  const af = await alice.send('bob', say('after forget'));
+  ok(af.status === 'queued' && /bob's agent does not hold its mailbox/.test(af.detail) && alice.contacts().contacts.find((c) => c.did === B.original).queued === 1,
+    `alice writes on: nobody holds that mailbox now, so it stays queued with her, and contacts says so (${af.status})`);
   await sleep(500);
   ok(!texts('bob').includes('after forget') && q('SELECT count(*) AS n FROM messages WHERE account = ?', accountOf(B.original))[0].n === 0, 'nobody reads it, and nothing is queued for bob');
   await refuses(() => bob.send('alice', 'x'), 'not_contact', 'bob cannot write to a forgotten contact by name');

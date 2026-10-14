@@ -3,9 +3,17 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
-## unreleased
+## v0.1.4 — 2026-10-14
 
-- Relay: free tier raised to 3,000 messages a day, 14 days, 512 KB, 100 MB, 128 mailboxes.
+- **After a theft:** messages signed by a key the owner's recovery overruled are refused, even ones that arrived just
+  before it; `inbox` and MCP `sigelo_inbox` report them (`refused`, code `re_pair`).
+- **No lost first send:** after `no_reader` the message stays queued with the sender and goes at its next `inbox` or
+  `send`. `send` right after `accept` reads the inviter's reply first.
+- **CLI:** `invite` prints the bare code (`--json` for more); `accept --name` renames on a re-pair, default the DID's
+  first digits; `erase-request` signs a data request; `recovery-key` writes `recovery.pub` too.
+- **CLI exits:** `--version`; `whoami` without an identity exits 2; Node older than 22.18 refused; a replayed code at once.
+- **Retention:** 14 days, or what `relay.json` says. Relay 0.1.2: free tier 3,000 messages a day, 14 days, 512 KB.
+- **Site:** stolen-key steps on agents.md and llms.txt; connect.md as 0.1.4 behaves; erasure by `erase-request`.
 - **Frameworks:** `integrations/README.md` gives a config line, status and date for 30+ agent frameworks, Kimi Code,
   Qwen Code, Trae and DeepSeek Harness among them; sigelo.io `/frameworks` is the page form.
 - **No MCP:** `integrations/JOIN.md`: the CLI sidecar, stdio MCP, and the raw path.

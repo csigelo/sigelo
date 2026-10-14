@@ -11,7 +11,9 @@
 # reads its backlog: nothing lost, nothing readable on the relay. Then a thief copies alice's files
 # and rotates: alice is locked out (exit 1, named), recovers with her recovery key, both mark the
 # pairing re_pair and send nothing on it, and a new code pairs them again. Exit codes: 2 with no
-# identity, 3 for inbox --expect with no message. Prints DEMO PASS, or FAIL and exits 1 at the
+# identity, 3 for inbox --expect with no message. In connect.html's order: the inviter's first send
+# stays queued until the invitee's agent connects, the invitee's goes at once; the thief's message
+# that reaches bob with the recovery is refused (re_pair). Prints DEMO PASS, or FAIL and exits 1 at the
 # first failure.
 #   sh demo/two-machines.sh        (needs ts/ built and npm ci in contact/, relay/, adapters/moadim/)
 # The relay: SIGELO_RELAY_DIR, else relay/ here (it is its own AGPL repository once exported).
@@ -139,11 +141,14 @@ rc=0; agent bob inbox --wiat 30 > /dev/null 2> "$W/flag.err" || rc=$?
 [ $rc = 2 ] && grep -q -- 'inbox: unknown flag --wiat' "$W/flag.err" || die "inbox --wiat 30 (exit $rc): $(cat "$W/flag.err")"
 
 step "alice makes a code; bob accepts it while alice's agent is offline"
-# Her first login proves work: one line says so before, one after.
-CODE=$(agent alice invite --name bob 2> "$W/invite.err" | get code)
+# Her first login proves work: one line says so before, one after. stdout: the code alone, as
+# connect.html says (--json: with its DID, relay and expiry).
+CODE=$(agent alice invite --name bob 2> "$W/invite.err")
 grep -q 'proof of work for a new identity: 5–60 s' "$W/invite.err" && grep -q 'proof of work done in' "$W/invite.err" || die "the first invite's progress lines: $(cat "$W/invite.err")"
+echo "$CODE" | grep -qE '^sgl1[1-9A-HJ-NP-Za-km-z]+$' && grep -q 'one-time code, good until' "$W/invite.err" || die "invite does not print the bare code: $CODE"
 cat "$W/invite.err"
 echo "code: $CODE"
+[ "$(agent alice invite --name nobody --ttl 60 --json 2> /dev/null | get did)" = "$A0" ] || die "invite --json"
 # accept names the code's DID before it connects. carol's relay cannot be reached: her answer stays
 # queued (she never connects again) and accept fails, having said whom the code names. node, not
 # agent: an assignment before a shell function may outlive the call.
@@ -160,10 +165,18 @@ grep -qF "the code names $A0" "$W/accept.err" || die "accept does not show the c
 cat "$W/accept.err"
 echo "bob: answer delivered, waiting for alice"
 
-step "each side's next connection completes the pairing"
+step "connect.html's order: alice's inbox pairs; her first send waits for bob's agent, his goes at once"
 agent alice inbox > /dev/null   # alice: checks bob's answer offline, replies
-agent bob inbox > /dev/null     # bob: checks alice's reply, sends his prekeys
-agent alice inbox > /dev/null   # alice: bob's prekeys
+# Bob's mailbox for the pairing needs the key her reply carries: until his agent reads it, nobody
+# holds it (no_reader). Her message stays queued with her (exit 0), and goes at her next inbox.
+agent alice send bob "hello 1" > "$W/first.json" 2> "$W/first.err" || die "alice's first send: $(cat "$W/first.err")"
+[ "$(get status < "$W/first.json")" = queued ] && grep -q "send: queued, not yet at the relay: bob's agent does not hold its mailbox" "$W/first.err" || die "alice's first send: $(cat "$W/first.err")"
+cat "$W/first.err"
+# His first send reads her reply first (paired), then goes.
+agent bob send alice "hi 1" | grep -q '"status": "sent"' || die "bob's first send after accept"
+agent alice inbox > "$W/inbox.json"; messages "$W/inbox.json" "hi" 1 || die "alice's inbox: bob's first"
+agent bob inbox > "$W/inbox.json"; messages "$W/inbox.json" "hello" 1 || die "bob's inbox: alice's first, kept and sent"
+echo "bob's arrived at once; alice's went at her next inbox"
 [ "$(agent alice contacts | get contacts.0.did)" = "$B" ] || die "alice's contact is not bob"
 [ "$(agent bob contacts | get contacts.0.did)" = "$A0" ] || die "bob's contact is not alice"
 echo "alice knows bob as $(agent alice contacts | get contacts.0.name), bob knows alice as $(agent bob contacts | get contacts.0.name)"
@@ -274,14 +287,18 @@ agent alice inbox > /dev/null || die "alice's inbox after the recovery"   # her 
 rc=0; agent thief send bob "thief again" > /dev/null 2> "$W/thief.err" || rc=$?
 [ $rc = 1 ] && grep -q 'Locked out' "$W/thief.err" || die "the thief after the recovery (exit $rc): $(cat "$W/thief.err")"
 echo "the thief is locked out now"
-agent bob inbox > /dev/null
+# The thief's message, written before alice recovered, reaches bob in the same inbox as her
+# recovery: signed by a key the recovery overruled, it is refused, not delivered as hers.
+agent bob inbox > "$W/inbox.json" 2> "$W/bob.err" || die "bob's inbox after the recovery: $(cat "$W/bob.err")"
+! grep -q 'from the thief' "$W/inbox.json" && grep -q '"code": "re_pair"\|"code":"re_pair"' "$W/inbox.json" && grep -q 'message(s) from alice refused (re_pair)' "$W/bob.err" \
+  || die "the thief's message after the recovery: $(cat "$W/inbox.json" "$W/bob.err")"
 [ "$(agent bob contacts 2> /dev/null | get contacts.0.current_did)" = "$A1" ] && [ "$(agent bob contacts 2> /dev/null | get contacts.0.re_pair)" = contact_recovery ] \
   || die "bob did not follow the recovery, or does not mark alice re_pair"
-echo "bob follows the recovery and marks alice re_pair; neither sends on the old pairing key"
+echo "bob follows the recovery, refuses the thief's message (re_pair) and marks alice re_pair; neither sends on the old pairing key"
 
 step "a new code pairs them again"
 later 120
-CODE2=$(agent alice invite --name bob 2> /dev/null | get code)
+CODE2=$(agent alice invite --name bob 2> /dev/null)
 agent bob accept "$CODE2" --name alice --wait 1 > /dev/null 2>&1 || die "bob's second accept"
 agent alice inbox > /dev/null; agent bob inbox > /dev/null; agent alice inbox > /dev/null
 [ "$(agent alice contacts 2> /dev/null | get contacts.0.re_pair)" = null ] && [ "$(agent bob contacts 2> /dev/null | get contacts.0.re_pair)" = null ] || die "still re_pair after pairing again"

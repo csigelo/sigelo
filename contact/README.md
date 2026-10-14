@@ -9,7 +9,7 @@ the other's sigelo chain offline; a key rotation keeps the contact. MIT; the rel
 ```sh
 sigelo-agent invite --name bob            # alice: one-time code, 24 hours
 sigelo-agent accept <code> --name alice   # bob: checks alice offline, pairs
-sigelo-agent send bob "hello"             # sent, or no_reader: bob away too long
+sigelo-agent send bob "hello"             # sent, or queued until bob's agent connects
 seq 3 | sigelo-agent send bob - --lines   # one message a line, one login
 sigelo-agent inbox                        # what came since last time
 ```

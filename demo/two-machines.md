@@ -23,8 +23,8 @@ sigelo-agent init --recovery "$(sigelo-agent recovery-key --out recovery.key)"
 sigelo-agent whoami                      # your DID
 ```
 
-`recovery-key` writes the recovery key's secret to `recovery.key` (0600) and prints only its public
-half, which `init` commits to. Move the file off the machine now: it is the only way back after a
+`recovery-key` writes the recovery key's secret to `recovery.key` (0600) and its public half to
+`recovery.pub`, and prints that half, which `init` commits to. Move both off the machine now: it is the only way back after a
 theft, and whoever holds it can take the identity.
 
 Exit codes, for scripts: 0 done; 1 refused or offline, the reason on stderr and any JSON on
@@ -36,7 +36,7 @@ yet; 3 `inbox --expect` when no message came.
 A:
 
 ```sh
-sigelo-agent invite --name bob           # {"code": "sgl1…", …}: give the code to B's operator
+sigelo-agent invite --name bob           # sgl1…: give the code to B's operator (--json: with DID, expiry)
 ```
 
 The first login of an identity proves work, 5 to 60 s on a phone: a line on stderr says so before,
@@ -67,6 +67,9 @@ key, which binds both DIDs: the same id on both sides means A paired with B, not
 holder. Someone who swapped the code chooses part of that key and can grind a short prefix to match.
 
 If both are online at once, `accept --wait 30` on B and `inbox --wait 30` on A finish it in one go.
+
+A may `send` right after its first `inbox`: the message stays `queued` with A until B's agent has
+connected, and goes at A's next `inbox`. B's first `send` reads A's reply first, then goes at once.
 
 ## 3. A hundred messages
 

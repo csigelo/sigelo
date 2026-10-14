@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 // CLI plumbing for sigelo-agent.ts: argv, stdin, JSON out, exit codes. All of the identity
 // logic — and everything a world integrator needs to read — is in sigelo-agent.ts.
+import './node-check.ts';   // first: it exits on a Node.js too old, before the rest loads
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { did, parse, parseBytes, SigeloError } from 'sigelo';
@@ -10,7 +11,9 @@ import * as adopt from './sigelo-agent-adopt.ts';
 import * as xmr from './sigelo-agent-monero.ts';
 import * as contact from './sigelo-agent-contact.ts';
 
-const USAGE = `sigelo-agent — portable sigelo/0 identity for a moadim-run agent
+const USAGE = `sigelo-agent — a portable sigelo/0 identity for an AI agent, and its contacts
+
+  --version                              print the version
 
   init --recovery <z…> | --no-recovery   create the identity (once, on first run)
   adopt <json|file|-> [--force]          take a key made elsewhere: { identity_seed_hex, genesis }
@@ -36,15 +39,12 @@ Identity file: $SIGELO_IDENTITY, else ~/.config/moadim/sigelo.local.json (0600).
 This process never holds a Monero spend key: wallet-set refuses one.`;
 
 const OFFLINE_KEYGEN = `
-Generate the recovery key OFFLINE and keep it off this machine (THREAT-MODEL §5). In a
-checkout of sigelo/ts (npm ci && npx tsc) on an air-gapped box:
+Make the recovery key first, and keep it off this machine (THREAT-MODEL §5):
 
-  node --input-type=module -e 'import {keygen} from "./dist/sigelo.js";import {writeFileSync} from "node:fs";
-  const k = keygen({ recovery: new Uint8Array(32) });      // this keypair IS the recovery key
-  writeFileSync("recovery.key", Buffer.from(k.secret).toString("hex"), { mode: 0o600 });
-  console.log(k.key);'
+  sigelo-agent init --recovery "$(sigelo-agent recovery-key)"
 
-Pass the printed z… key as --recovery. Only its hash reaches this machine (SPEC §4).`;
+recovery-key writes the secret to recovery.key (0600) and the public key to recovery.pub, and
+prints the public key: move both files offline. Only the key's hash reaches the identity (SPEC §4).`;
 
 const OFFLINE_RECOVERY = `
 A recovery rotation is signed by the offline recovery key and MUST NOT run in an agent
@@ -68,12 +68,20 @@ const input = (v: string | undefined): unknown => v === undefined || v === '-' ?
   : /^\s*[{["]/.test(v) || !existsSync(v) ? parse(v) : parseBytes(readFileSync(v));
 
 const [cmd, ...rest] = process.argv.slice(2);
+if (cmd === '--version' || cmd === '-v') { console.log(contact.version()); process.exit(0); }
 // The contact verbs live apart from the identity core (INTEGRATION.md) and need nothing below.
 // contact.exit never resolves: it exits once stdout has drained.
 if (contact.VERBS.includes(cmd ?? '')) await contact.exit(await contact.main(cmd!, rest));
 const flag = (name: string): string | undefined => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
 const path = id.identityPath();
 const now = Math.floor(Date.now() / 1000);
+// The verbs that read the identity: with none, "run init" and exit 2, as the contact verbs say
+// it (a bare "load: no identity" exited 1).
+const READS = ['whoami', 'sign-challenge', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
+if (READS.includes(cmd ?? '') && !existsSync(path)) {
+  note(`no identity: run sigelo-agent init (none at ${path})`);
+  process.exit(2);
+}
 /** Every load → change → save holds the one lock `receive` takes. A command that saves a store
  *  it loaded before another command's save undoes that save: a reissued subaddress index
  *  (two payers who can link each other, MONERO.md §3), a lost attestation, a lost rotation. */
@@ -91,7 +99,9 @@ try {
       }
       const store = id.init(path, recovery ?? null);
       note(`identity written to ${path} (0600)`);
-      out({ did: did(store.genesis), genesis: store.genesis });
+      // The recovery public key, when given as one: the identity keeps only its hash (SPEC §4), and
+      // a data request needs the key (erase-request derives it from the secret file).
+      out({ did: did(store.genesis), genesis: store.genesis, ...(recovery?.startsWith('z') && { recovery_key: recovery }) });
       break;
     }
     case 'adopt': {

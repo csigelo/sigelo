@@ -3,7 +3,7 @@
 // and refused, issuer + attestation, bundle, rotate, bundle again — then the emitted bundle is
 // re-verified by sigelo's Go reference verifier (go/cmd/sigelo-verify) so the two
 // implementations must agree. Then the recovery key from the CLI alone (recovery-key, recover),
-// a contact marked re_pair after it, a recovery after a fork, and the contact verbs' exit codes.
+// a contact marked re_pair after it, erase-request, a recovery after a fork, and the exit codes.
 //
 //   npm test                     (the Go cross-check SKIPs, loudly, when `go` is not on PATH)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -414,18 +414,35 @@ if (!existsSync(built) && !hasGo) {
   const cli = (...args: string[]) => spawnSync('node', [CLI, ...args], { env, cwd: H, encoding: 'utf8' });
   const inv = cli('invite', '--name', 'x');
   ok('invite with no identity: exit 2, "no identity: run sigelo-agent init", no raw ENOENT', inv.status === 2 && inv.stderr.includes('no identity: run sigelo-agent init') && !inv.stderr.includes('ENOENT'), inv.stderr);
+  const who = cli('whoami');
+  ok('whoami with no identity: exit 2 and "run sigelo-agent init", as the contact verbs', who.status === 2 && who.stderr.includes('no identity: run sigelo-agent init') && who.stdout === '', who.stderr);
+  const ver = cli('--version'), pkgVersion = (JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8')) as { version: string }).version;
+  ok('--version: the package version, exit 0', ver.status === 0 && ver.stdout === `${pkgVersion}\n`, `${ver.status} ${ver.stdout}${ver.stderr}`);
+  const { tooOld } = await import('./node-check.ts');
+  ok('node-check: 22.18 and newer pass, older refused', !tooOld('22.18.0') && !tooOld('24.18.1') && !tooOld('23.0.0') && tooOld('22.17.9') && tooOld('20.19.2') && tooOld('18.0.0'));
   const rk = cli('recovery-key', '--out', 'recovery.key'), keyFile = join(H, 'recovery.key'), key = rk.stdout.trim();
   const secret = existsSync(keyFile) ? readFileSync(keyFile, 'utf8') : '';
-  ok('recovery-key: stdout is the public key alone; the secret, 64 hex, in a 0600 file; the operator told to move it offline',
-    rk.status === 0 && /^z[1-9A-HJ-NP-Za-km-z]+\n$/.test(rk.stdout) && /^[0-9a-f]{64}\n$/.test(secret) && (!posixModes || (statSync(keyFile).mode & 0o777) === 0o600) && rk.stderr.includes('offline'), rk.stderr);
+  ok('recovery-key: stdout is the public key alone; the secret, 64 hex, in a 0600 file, the public key in recovery.pub; the operator told to move both offline',
+    rk.status === 0 && /^z[1-9A-HJ-NP-Za-km-z]+\n$/.test(rk.stdout) && /^[0-9a-f]{64}\n$/.test(secret) && (!posixModes || (statSync(keyFile).mode & 0o777) === 0o600) && rk.stderr.includes('offline')
+      && readFileSync(join(H, 'recovery.pub'), 'utf8') === rk.stdout && rk.stderr.includes('recovery.pub'), rk.stderr);
   const again = cli('recovery-key', '--out', 'recovery.key');
   ok('recovery-key never overwrites a key file, and says init --recovery "$(…)" around it gets no key',
     again.status === 1 && again.stderr.includes('refusing to overwrite') && again.stderr.includes('No key printed') && readFileSync(keyFile, 'utf8') === secret, again.stderr);
   const nodir = cli('recovery-key', '--out', join('no-such-dir', 'recovery.key'));
   ok('recovery-key into a missing directory: exit 1, the verb and the file named, no bare ENOENT, nothing on stdout',
     nodir.status === 1 && nodir.stdout === '' && nodir.stderr.includes(`recovery-key: cannot write ${join('no-such-dir', 'recovery.key')} (its directory does not exist)`) && !nodir.stderr.includes('ENOENT'), nodir.stderr);
-  const made = cli('init', '--recovery', key), g = JSON.parse(made.stdout || '{}') as { did: string; genesis: Genesis };
-  ok('init --recovery takes its output: the genesis commits to that key', made.status === 0 && g.genesis.recovery === commitmentOf(key), made.stderr);
+  const made = cli('init', '--recovery', key), g = JSON.parse(made.stdout || '{}') as { did: string; genesis: Genesis; recovery_key?: string };
+  ok('init --recovery takes its output: the genesis commits to that key, and init prints the key', made.status === 0 && g.genesis.recovery === commitmentOf(key) && g.recovery_key === key, made.stderr);
+  // A data request for sigelo.ai (relay/site/agents.md "Erasure"), signed by the recovery key.
+  const er = cli('erase-request', '--recovery-key', 'recovery.key'), req = JSON.parse(er.stdout || '{}') as { body: Record<string, string>; recovery_key: string; sig: string; bundle: Bundle };
+  ok('erase-request: a challenge for the original DID, ctx sigelo.ai/erase, nonce today\'s UTC date, signed by the recovery key, with the key and the chain',
+    er.status === 0 && req.body?.typ === 'challenge' && req.body.did === g.did && req.body.ctx === 'sigelo.ai/erase' && req.body.nonce === new Date().toISOString().slice(0, 10)
+      && req.recovery_key === key && verifySig(key, req.body, req.sig) && verify(req.bundle as never, now + 5).did === g.did && er.stderr.includes('SimpleX'), er.stderr);
+  const ea = cli('erase-request', '--recovery-key', 'recovery.key', '--access');
+  ok('erase-request --access: ctx sigelo.ai/access', ea.status === 0 && (JSON.parse(ea.stdout) as { body: { ctx: string } }).body.ctx === 'sigelo.ai/access', ea.stderr);
+  cli('recovery-key', '--out', 'stranger.key');
+  const es = cli('erase-request', '--recovery-key', 'stranger.key');
+  ok('erase-request with another key: exit 1, "not this identity\'s recovery key", nothing on stdout', es.status === 1 && es.stdout === '' && es.stderr.includes('not this identity\'s recovery key'), es.stderr);
   // A contact paired before the recovery, as the carrier stores one (contact/store.mjs).
   const peer = keygen({ recovery: 'sha256:' + '1'.repeat(64) });
   writeFileSync(join(H, '.config', 'moadim', 'sigelo.local.contacts.json'), JSON.stringify({ v: 'sigelo-invite/0', self: g.did, invites: {}, accepts: {}, contacts: { [peer.did]: {
