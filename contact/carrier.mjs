@@ -4,9 +4,11 @@
 // sees random topics and ciphertext; everything here that decides who someone is runs offline.
 //
 //   const c = new Carrier({ identity, store, state, relay, endpoints, retentionDays, clock, onEvent, keep })
-//   await c.invite({ name, ttl })          → { code, did, relay, exp }   the answer topic is claimed first
-//   await c.accept(code, { name, wait })   → { status: 'connected' | 'waiting' | 'pending', … }
-//   c.contacts()                           → { contacts, invites, answers }
+//   await c.invite({ name, ttl, short })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first;
+//                                            short: the long code is also parked at the relay under a short one
+//   await c.unpark(short)                  → the long code parked under a short one, taken from the relay (one use)
+//   await c.accept(code, { name, wait })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
+//   c.contacts()                           → { contacts, invites, answers }   each contact with its four words (fingerprint)
 //   await c.send(to, content, { label })   → { status: 'sent' | 'queued', … }, or throws the relay's code
 //   await c.sendAll(to, contents, { label }) → one result each ('refused' with its code), one login
 //   await c.inbox({ wait })                → { messages, events, dropped, offline? }: all are taken (messages: those kept)
@@ -149,6 +151,7 @@ import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, inviteKeys,
 import { MsgError, checkNow, fail, hex, isoWeek, pairId, topic } from './kdf.mjs';
 import { Prekeys, exact, kemDecapsulate, kemEncapsulate, kemKey } from './prekeys.mjs';
 import { Contacts } from './store.mjs';
+import { SHORT_TTL, codeHash, fingerprint, formatShort, isShort, makeShort } from './short.mjs';
 
 export const V = 'sigelo-carrier/0';
 export const DEFAULT_RELAY = 'relay.sigelo.ai', MQTT_PORT = 8883, NOTICE = '$sigelo/notice';
@@ -256,6 +259,10 @@ const b64 = (b) => Buffer.from(b).toString('base64');
 const unb64 = (s) => new Uint8Array(Buffer.from(s, 'base64'));
 const randomId = () => hex(randomBytes(8));
 const clientIdOf = (original) => 's' + createHash('sha256').update(original, 'utf8').digest('hex').slice(0, 24);
+// The four words of a pairing (short.mjs), from its pairing key as the store holds it (hex), or null.
+const wordsOf = (pairKey) => (typeof pairKey === 'string' ? fingerprint(pairId(hexToBytes(pairKey))) : null);
+// The refusals of POST /park this client names (relay/park.mjs, and the login's: auth.mjs).
+const PARK_CHECKS = new Set(['park', 'park_taken', 'park_full', 'pow', ...LOGIN_CHECKS]);
 
 // ---------------------------------------------------------------- configuration
 
@@ -1190,7 +1197,7 @@ export class Carrier {
     st.peers[c.did] = { session: dumpSession(s), announced: me.current_did, known: me.current_did, outbox: st.peers[c.did]?.outbox ?? [], prekeys_resend: false, prekeys_iat: now };
     this.#queue(st, { ...entry, bytes: frame });
     this.#routes = new Map();
-    return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed })];
+    return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key) })];
   }
 
   // Alice: her reply will never reach the answerer (refused, too large, or its code expired while
@@ -1255,13 +1262,13 @@ export class Carrier {
     const answered = waiting.find(([x]) => x === id)[1], held = answered.as ?? null;
     const c = renamed(store, store.lookup(res.did), answered);
     const s = session({ me: { did: me.did, current_did: me.current_did, secret: me.secret }, peer: c, K: hexToBytes(res.pair_key) });
-    const events = [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed })];
+    const events = [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key) })];
     try { acceptPrekeys(s, reply.prekeys, now); } catch (e) {
       if (!(e instanceof MsgError)) throw e;
       events.push({ type: 'dropped', check: e.check, detail: `the reply's prekeys: ${e.message}` });
     }
     st.peers[c.did] = { session: dumpSession(s), announced: held, known: held, outbox: st.peers[c.did]?.outbox ?? [], prekeys_resend: false, prekeys_iat: 0 };
-    for (const [x] of waiting) this.#handshakes.set(x, { contact: { name: c.name, did: c.did, current_did: c.current_did } });
+    for (const [x] of waiting) this.#handshakes.set(x, { contact: { name: c.name, did: c.did, current_did: c.current_did, fingerprint: wordsOf(res.pair_key) } });
     this.#routes = new Map();
     return events;
   }
@@ -1778,7 +1785,10 @@ export class Carrier {
 
   // ---- the verbs
 
-  async invite({ name, ttl } = {}) {
+  // short: the long code is parked at the relay (POST /park, relay/park.mjs) under a short code
+  // (short.mjs) for SHORT_TTL seconds, one fetch; refused, the invite is withdrawn as when its topic
+  // is. A login of its own: the relay checks that the parked code is this agent's.
+  async invite({ name, ttl, short = false } = {}) {
     const code = this.#locked(({ now, me, store }) => {
       const code = makeInvite({ did: me.current_did, relay: this.relay, now, ...(ttl !== undefined && { ttl }) });
       store.addInvite(code, name ?? `invite-${code.nonce.slice(1, 9)}`, now);
@@ -1792,14 +1802,39 @@ export class Carrier {
         const r = this.#refusedTopics.get(t);
         fail(r?.code ?? 'subscribe', `the relay did not let this agent claim the invite's topic${r ? ` (${relaySays(r.detail)})` : ''}`);
       }
+      if (!short) return { code: code.text, did: code.did, relay: code.relay, exp: code.exp };
+      const s = makeShort(), exp = Math.min(checkNow(this.clock()) + SHORT_TTL, code.exp), ep = endpointOf(code.relay, this.endpoints);
+      const creds = await this.#credentials(code.relay, ep);
+      const r = await http(`${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: codeHash(s), invite: code.text, exp }) });
+      const check = typeof r.body?.check === 'string' ? r.body.check : null;
+      if (r.status === 429) fail('rate', `POST /park: ${relaySays(r.body?.detail)}`);
+      if ((r.status === 404 || r.status === 405) && check === null) fail('park', `${code.relay} takes no short codes: use the long code (invite --long)`);
+      if (r.status !== 200) fail('connect', `POST /park answered ${r.status}`);
+      if (r.body?.ok !== true) fail(PARK_CHECKS.has(check) ? check : 'park', `the relay refused the short code (${relaySays(`${check}: ${r.body?.detail}`)})`);
+      return { code: code.text, did: code.did, relay: code.relay, exp: code.exp, short: formatShort(s), short_exp: exp };
     } catch (e) {
       try { this.#locked(({ store }) => store.cancelInvite(code.nonce)); } catch {}
       throw e;
     }
-    return { code: code.text, did: code.did, relay: code.relay, exp: code.exp };
+  }
+
+  // The long code parked under a short one, at this agent's own relay (a short code names none):
+  // GET /park/<code hash>, which the relay answers once. Whatever it answers is a code to parse
+  // like any other (accept); the four words show whether the pairing is the inviter's.
+  async unpark(text) {
+    const ep = endpointOf(this.relay, this.endpoints);
+    const r = await http(`${ep.http}/park/${codeHash(text)}`);
+    if (r.status === 429) fail('rate', `GET /park: ${relaySays(r.body?.detail)}`);
+    if (r.status === 404 && r.body?.check === 'park_unknown') {
+      fail('park_unknown', `no invite waits under this short code at ${this.relay}: mistyped, used already, or older than 10 minutes. Ask for a new one (a code made at another relay works only as the long code: invite --long)`);
+    }
+    if (r.status === 404 || r.status === 405) fail('park', `${this.relay} takes no short codes: ask for the long code (invite --long)`);
+    if (r.status !== 200 || r.body?.ok !== true || typeof r.body.invite !== 'string') fail('connect', `GET /park answered ${r.status}`);
+    return r.body.invite;
   }
 
   async accept(text, { name, wait = 10 } = {}) {
+    if (isShort(text)) text = await this.unpark(text);
     const { code, id, entry } = this.#locked(({ now, me, store, st }) => {
       const code = parseInvite(text, now);
       // This agent's own relay, and those its operator configured, are the operator's choice.
@@ -1861,7 +1896,7 @@ export class Carrier {
       const s = store.load().s;
       return {
         contacts: Object.values(s.contacts).map((c) => ({ name: c.name, did: c.did, current_did: c.current_did, revoked: c.revoked, relay: c.relay, queued: st.peers[c.did]?.outbox.length ?? 0,
-          re_pair: c.re_pair ?? null })),
+          re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key) })),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
       };

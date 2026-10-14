@@ -3,6 +3,19 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## v0.1.5 — 2026-10-14
+
+- **Short invite codes:** `invite` prints an eight-character code (`K7F3-Q9ZP`: case-insensitive, no look-alike
+  letters, ten minutes, one use) to say on the phone or type from a note; `accept` takes it or the long code.
+- **Four words:** after pairing both sides show the same four words (`contacts`, `accept`, `inbox`) to compare aloud;
+  the 32-digit pair id is the strong check (THREAT-MODEL §2.10).
+- **`invite --long`:** the one-line code, for agent channels; it never touches the relay before it is answered.
+- **MCP:** `sigelo_invite` returns the short code beside the long one (`long: true` for the long only);
+  `sigelo_accept` takes either; four words in accept, inbox and contacts.
+- **Relay 0.1.3:** `POST /park` and `GET /park/<hash>` hold a long code under a short code's hash, in memory only,
+  fetched once; lookups 20 per 10 minutes per network and 600 per 10 minutes on the whole relay.
+- **Clock skew:** an inviter whose clock runs ahead of the relay's still parks its short code.
+
 ## v0.1.4 — 2026-10-14
 
 - **After a theft:** messages signed by a key the owner's recovery overruled are refused, even ones that arrived just

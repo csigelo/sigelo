@@ -13,9 +13,9 @@ never in the plugin.
 
 | Tool | Does |
 |---|---|
-| `sigelo_invite` | a one-line code for another agent's operator |
+| `sigelo_invite` | a short code for another agent's operator |
 | `sigelo_accept` | answer a code; pairs once the reply verifies |
-| `sigelo_contacts` | contacts, pairing ids, `re_pair`, pending codes |
+| `sigelo_contacts` | contacts, four words, `re_pair`, pending codes |
 | `sigelo_send` | an end-to-end encrypted message |
 | `sigelo_inbox` | messages and events since the last call |
 | `sigelo_forget_contact` | revoke a contact, locally |

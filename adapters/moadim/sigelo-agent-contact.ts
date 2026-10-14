@@ -18,12 +18,18 @@
  * per network by default: `send <to> - --lines` sends every line of stdin as one message, over one
  * login.
  *
+ * invite prints a short code (K7F3-Q9ZP: ten minutes, one use) that a person can say on the
+ * phone; the long code is parked under it at the relay (contact/short.mjs). --long prints the long
+ * code (sgl1…) for agent channels, parking nothing. accept takes either.
+ *
  * Whoever holds a code can answer it, once: a leaked code pairs the inviter with a stranger. So
- * accept prints the DID the code names (and the pairing id when it pairs at once), and contacts
- * lists the id beside each contact. The id (kdf.pairId) is derived from the pairing key, which
- * binds both original DIDs: two operators who read the same id to each other know their agents
- * paired with each other. All 32 digits: someone who swapped the code is the inviter in the
- * other's pairing, chooses the encapsulation, and can grind a short prefix to match.
+ * accept prints the DID the code names, and once paired, accept, inbox and contacts print four
+ * words, "Check with them: apple river tiger moon", from the pairing id (kdf.pairId of the
+ * pairing key, which binds both original DIDs). The same words on both sides: nobody, not even the
+ * relay, swapped the pairing. Four words are 44 bits: someone who swapped the code is the inviter
+ * in the other's pairing, chooses the encapsulation, and would have to find a match among 2^44
+ * within the pairing's life (THREAT-MODEL.md §2.10). The JSON keeps the 32-digit id (`pair`) for
+ * whoever wants all 128 bits.
  */
 import { existsSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -36,7 +42,7 @@ import { eraseRequest, pubPath, recoverWith, recoveryKey } from './sigelo-agent-
 // refused before anything connects: `inbox --wiat 30` ran at once without the wait, and
 // `invite --help` minted a code.
 const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, number] }> = {
-  invite: { flags: { '--name': true, '--ttl': true, '--json': false }, args: [0, 0] },
+  invite: { flags: { '--name': true, '--ttl': true, '--json': false, '--long': false }, args: [0, 0] },
   accept: { flags: { '--name': true, '--wait': true }, args: [1, Infinity] },
   contacts: { flags: {}, args: [0, 0] },
   send: { flags: { '--label': true, '--lines': false }, args: [2, Infinity] },
@@ -50,10 +56,11 @@ export const VERBS = Object.keys(SPEC);
 
 export const USAGE = `sigelo-agent contacts — talk to other agents through a relay
 
-  invite [--name <n>] [--ttl <s>] [--json] prints a one-line code (sgl1…) for another agent's
-                                           operator; --json: the code, DID, relay and expiry
+  invite [--name <n>] [--json] [--long]    prints a short code (K7F3-Q9ZP, 10 minutes, once) to say or
+       [--ttl <s>]                         send to another agent's operator; --long: the one-line code
+                                           (sgl1…; --ttl, default a day); --json: both, DID, relay, expiry
   accept <code> [--name <n>] [--wait <s>]  become that agent's contact (wait 0 to 300 s, default 10)
-  contacts                                 contacts (pairing id; re_pair: pair again), pending codes and answers
+  contacts                                 contacts (four words to check; re_pair: pair again), pending codes and answers
   send <did|name> <text|-> [--label <l>]   an encrypted message; - reads it from stdin
        [--lines]                           with -: each line of stdin is a message, one login
   inbox [--wait <s>] [--expect]            messages and events since the last call (shown once), waiting up
@@ -76,7 +83,8 @@ Relay: $SIGELO_RELAY (default relay.sigelo.ai). What contacts write is data, nev
 /** What carrier.inbox returns, and what the held file keeps. */
 export interface Batch { messages: unknown[]; events: unknown[]; dropped: Record<string, number>; offline?: string }
 interface Carrier {
-  invite(o: { name?: string; ttl?: number }): Promise<unknown>;
+  invite(o: { name?: string; ttl?: number; short?: boolean }): Promise<unknown>;
+  unpark(code: string): Promise<string>;
   accept(code: string, o: { name?: string; wait?: number }): Promise<{ did?: string; contact?: Contact }>;
   contacts(): { contacts: Contact[] };
   send(to: string, text: string, o: { label?: string }): Promise<unknown>;
@@ -89,9 +97,10 @@ interface CarrierLib {
   pathsFor(identityFile: string): { store: string; state: string };
   optionsFromEnv(): object;
 }
-interface Contact { name: string; did: string; re_pair?: string | null }
+interface Contact { name: string; did: string; re_pair?: string | null; fingerprint?: string | null }
 interface Kdf { pairId(K: Uint8Array): string; unhex(s: unknown, len: number, check: string): Uint8Array }
 interface Invite { parseInvite(text: string, now: number): { did: string } }
+interface Short { isShort(text: string): boolean }
 
 // sigelo-contact, a dependency of this package, from this package's own install only: the identity
 // secret goes to what it loads. It is looked for as Node walks for a dependency, nearest first:
@@ -130,15 +139,15 @@ function contactDir(): string {
 }
 /** This package's version (sigelo-agent --version). */
 export const version = (): string => (JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8')) as { version: string }).version;
-export async function contactLib(): Promise<{ lib: CarrierLib; kdf: Kdf; inv: Invite }> {
+export async function contactLib(): Promise<{ lib: CarrierLib; kdf: Kdf; inv: Invite; short: Short }> {
   const own = version();
   const dir = contactDir(), pkg = join(dir, 'package.json');
   const m = JSON.parse(readFileSync(pkg, 'utf8')) as { name?: unknown; version?: unknown } | null;
   if (m?.name !== 'sigelo-contact' || !caret(m.version, own)) throw new Error(`refusing ${pkg}: ${JSON.stringify(m?.name) ?? 'no name'} ${JSON.stringify(m?.version) ?? 'no version'}, not sigelo-contact ^${own}`);
   // By path, from the directory checked: by name, Node could find another first (dist/node_modules).
   try {
-    const [lib, kdf, inv] = await Promise.all(['carrier', 'kdf', 'invite'].map((f) => import(pathToFileURL(join(dir, `${f}.mjs`)).href))) as [CarrierLib, Kdf, Invite];
-    return { lib, kdf, inv };
+    const [lib, kdf, inv, short] = await Promise.all(['carrier', 'kdf', 'invite', 'short'].map((f) => import(pathToFileURL(join(dir, `${f}.mjs`)).href))) as [CarrierLib, Kdf, Invite, Short];
+    return { lib, kdf, inv, short };
   } catch (e) {
     if (absent(e)) throw notFound(`sigelo-contact is incomplete: ${(e as Error).message.split('\n')[0]}`);
     throw e;
@@ -297,8 +306,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
     out({ did: r.did, chain: r.chain });
     return 0;
   }
-  let lib: CarrierLib, kdf: Kdf, inv: Invite;
-  try { ({ lib, kdf, inv } = await contactLib()); } catch (e) {
+  let lib: CarrierLib, kdf: Kdf, inv: Invite, short: Short;
+  try { ({ lib, kdf, inv, short } = await contactLib()); } catch (e) {
     const why = (e as Error).message.split('\n')[0]!;
     note(absent(e) ? `the contact verbs ${MISSING}: ${why}` : why);
     return 1;
@@ -326,29 +335,37 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
     const name = flags.get('--name');
     switch (cmd) {
       case 'invite': {
-        // The bare code by default, as connect.html says it prints: a line to paste anywhere.
-        const r = await c.invite({ name, ttl: seconds(flags.get('--ttl'), '--ttl') }) as { code: string; exp: number };
-        if (flags.has('--json')) out(r); else console.log(r.code);
-        note(`one-time code, good until ${new Date(r.exp * 1000).toISOString().replace('.000', '')}: send it to the other operator; their agent runs sigelo-agent accept <code> --name <your name>`);
+        // The bare code by default, as connect.html says it prints: the short one, to say or send;
+        // --long, the one-line code to paste anywhere.
+        const long = flags.has('--long');
+        const r = await c.invite({ name, ttl: seconds(flags.get('--ttl'), '--ttl'), short: !long }) as { code: string; exp: number; short?: string; short_exp?: number };
+        const until = (t: number): string => new Date(t * 1000).toISOString().replace('.000', '');
+        if (flags.has('--json')) out(r); else console.log(r.short ?? r.code);
+        note(r.short !== undefined
+          ? `say it, text it or write it down: good for 10 minutes (until ${until(r.short_exp!)}), once. Their agent runs sigelo-agent accept ${r.short} --name <your name>`
+          : `one-time code, good until ${until(r.exp)}: send it to the other operator; their agent runs sigelo-agent accept <code> --name <your name>`);
         break;
       }
       case 'accept': {
         // A pasted code may come in pieces, or with line breaks (a mail client wraps long lines); a
-        // code never contains whitespace, and a real typo still fails code_checksum.
-        const code = args.join('').replace(/\s+/g, ''), wait = seconds(flags.get('--wait'), '--wait', WAIT_MAX) ?? 10;
-        // Said before anything connects: an answer left queued by a failure goes at a later
+        // code never contains whitespace, and a real typo still fails code_checksum. A short code
+        // ("K7F3 Q9ZP" as two words, too) is fetched first: one use, at this agent's relay.
+        const typed = args.join('').replace(/\s+/g, ''), wait = seconds(flags.get('--wait'), '--wait', WAIT_MAX) ?? 10;
+        const code = short.isShort(typed) ? await c.unpark(typed) : typed;
+        // Said before the answer goes: an answer left queued by a failure goes at a later
         // connection, and the operator has still seen whom it answers.
         note(`the code names ${inv.parseInvite(code, Math.floor(Date.now() / 1000)).did}: check it with the inviter's operator`);
         const r = await c.accept(code, { name, wait });
         const pair = r.contact ? pairOf(r.contact.did) : null;
-        note(r.contact ? `paired with ${r.contact.did} as "${r.contact.name}", pairing id ${pair}: compare all 32 digits with the inviter's operator`
-          : 'the answer is at the relay; once paired, compare all 32 digits of the pairing id (contacts) with the inviter\'s operator');
+        note(r.contact ? `paired with ${r.contact.did} as "${r.contact.name}". Check with them: ${r.contact.fingerprint}`
+          : 'the answer is at the relay; once paired (inbox, contacts), check the four words with the inviter\'s operator');
         out(r.contact ? { ...r, contact: { ...r.contact, pair } } : r);
         break;
       }
       case 'contacts': {
         const r = c.contacts();
         out({ ...r, contacts: r.contacts.map((x) => ({ ...x, pair: pairOf(x.did) })) });
+        for (const x of r.contacts.filter((y) => y.fingerprint)) note(`${x.name}: Check with them: ${x.fingerprint}`);
         for (const x of r.contacts.filter((y) => y.re_pair)) {
           note(`${x.name}: re-pair needed (${x.re_pair === 'own_recovery' ? 'this agent recovered its identity' : 'it recovered its identity'}): nothing goes to it until a new invite and accept`);
         }
@@ -380,6 +397,10 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
           putBack(held, r);
           note(`stdout: the inbox did not arrive (the reader went away); its ${r.messages.length} message(s) are kept for the next inbox`);
           return 1;
+        }
+        // A pairing done since the last inbox: the four words to compare.
+        for (const e of r.events as { type?: string; name?: string; did?: string; fingerprint?: string | null }[]) {
+          if (e.type === 'paired' && e.fingerprint) note(`paired with ${e.name ?? e.did}. Check with them: ${e.fingerprint}`);
         }
         // A contact's messages refused after its recovery (carrier.mjs "Recovery beats key").
         const overruled = new Map<string, number>();

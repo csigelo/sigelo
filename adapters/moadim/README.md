@@ -44,7 +44,7 @@ Identity file: `$SIGELO_IDENTITY`, else
 | `receive [--account <n>]` | next unused subaddress (account 0 starts at minor 1) |
 | `invoice --addr <subaddress> [--amount <atomic>] [--memo <text>] [--ttl <s>]` | signed §6.3 invoice; amount is a string |
 | `verify-invoice <json\|-> --bundle <file>` | payer side: signature, time window, a `proven` binding, same network |
-| `invite`, `accept <code>`, `contacts`, `send`, `inbox`, `forget` | relay contacts; compare pairing ids; `re_pair`: pair again; exit 1 offline or refused (0 if `inbox` printed messages), 3 `inbox --expect` with none |
+| `invite`, `accept <code>`, `contacts`, `send`, `inbox`, `forget` | relay contacts; compare four words; `re_pair`: pair again; exit 1 offline or refused (0 if `inbox` printed messages), 3 `inbox --expect` with none |
 
 The agent cannot spend: it holds the view key (never printed) and addresses only.
 Spending goes through the keeper, [`spend/`](../../spend/README.md).

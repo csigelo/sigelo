@@ -448,6 +448,16 @@ if (!existsSync(built) && !hasGo) {
   writeFileSync(join(H, '.config', 'moadim', 'sigelo.local.contacts.json'), JSON.stringify({ v: 'sigelo-invite/0', self: g.did, invites: {}, accepts: {}, contacts: { [peer.did]: {
     name: 'peer', did: peer.did, current_did: peer.did, current_key: peer.key, revoked: false, chain: [peer.did], rotations: [], relay: 'relay.test', pair_key: '11'.repeat(32) } } }), { mode: 0o600 });
   ok('contacts before the recovery: no re_pair', (JSON.parse(cli('contacts').stdout) as { contacts: { re_pair: unknown }[] }).contacts[0]?.re_pair === null);
+  // The four words of a pairing (contact/short.mjs), on stderr beside each live contact and in the JSON.
+  const cl = cli('contacts'), words = (JSON.parse(cl.stdout) as { contacts: { fingerprint?: string }[] }).contacts[0]?.fingerprint ?? '';
+  ok('contacts: "Check with them:" and four words per live contact, the same words in the JSON (fingerprint)',
+    /^[a-z]+ [a-z]+ [a-z]+ [a-z]+$/.test(words) && cl.stderr.includes(`sigelo-agent: peer: Check with them: ${words}\n`), cl.stderr);
+  // A short code is recognised by its shape, typed in two pieces, and fetched first: the relay is unreachable here.
+  const sa = cli('accept', 'k7f3', 'q9zp');
+  ok('accept K7F3-Q9ZP typed as "k7f3 q9zp", relay unreachable: exit 1 naming connect, no code_checksum, no answer stored',
+    sa.status === 1 && /^sigelo-agent: connect: /m.test(sa.stderr) && !sa.stderr.includes('code_checksum') && (JSON.parse(cli('contacts').stdout) as { answers: unknown[] }).answers.length === 0, sa.stderr);
+  const nu = cli('accept', 'K7F3-Q9ZU');
+  ok('accept with a U where a digit goes: not a short code, read as a long code: code_checksum, exit 1', nu.status === 1 && nu.stderr.includes('code_checksum'), nu.stderr);
   const missing = cli('recover', '--recovery-key', 'nope.key');
   ok('recover with a missing key file: exit 1, "recover: nope.key not found", no bare ENOENT',
     missing.status === 1 && missing.stderr.includes('recover: nope.key not found') && !missing.stderr.includes('ENOENT'), missing.stderr);

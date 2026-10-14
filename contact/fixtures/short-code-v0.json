@@ -1,0 +1,167 @@
+{
+  "contract": "sigelo-park/0",
+  "alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "rules": {
+    "code": "8 characters of the alphabet from 5 random bytes, 5 bits each, most significant first; shown as XXXX-XXXX; lives 600 s, one fetch",
+    "normalise": "drop whitespace and dashes (U+002D, U+2010 to U+2015, U+2212); uppercase; I and L → 1, O → 0; then exactly 8 characters of the alphabet, else short_code",
+    "code_hash": "hex(SHA-256(UTF-8 \"sigelo-park/0\" ‖ UTF-8 normalised code))",
+    "fingerprint": "HKDF-SHA256(16 bytes of the pair id, salt \"sigelo-fingerprint/0\", empty info, 6 bytes); the first 44 bits, 11 at a time, index the BIP-39 English list (sha256 of the list one word a line: 2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda)",
+    "rng": "rng(label) = first 5 bytes of SHA-256(UTF-8 \"sigelo-park/0 \" + label)"
+  },
+  "codes": [
+    {
+      "label": "a",
+      "rng": "7c330786cc",
+      "code": "FGSG-F1PC",
+      "normalised": "FGSGF1PC",
+      "code_hash": "629f5c50434574b583aae6fa4664a7ace329e2a0a62ef29140dcbdc21424a443"
+    },
+    {
+      "label": "b",
+      "rng": "ebac845f43",
+      "code": "XEP8-8QT3",
+      "normalised": "XEP88QT3",
+      "code_hash": "0778a95c3785446e88f6df877abcc6793787a6d53825af7f01fac2d6b23da66a"
+    },
+    {
+      "label": "c",
+      "rng": "29efe35974",
+      "code": "57QY-6PBM",
+      "normalised": "57QY6PBM",
+      "code_hash": "f31675864983beeadd2f46fe62891864f87071011d5a5c719208d241a027f263"
+    },
+    {
+      "label": "d",
+      "rng": "3b9f02b509",
+      "code": "7EFG-5D89",
+      "normalised": "7EFG5D89",
+      "code_hash": "529f4d2fe1fcacf4e51f84b6859a668dadf2dff69ff107a159e794000642af2d"
+    },
+    {
+      "label": "zeros",
+      "rng": "0000000000",
+      "code": "0000-0000",
+      "normalised": "00000000",
+      "code_hash": "e90299d03e123d1c92eb28b8e5ca42b7a719fe6b2cd25503fd94eba3a67511ee"
+    },
+    {
+      "label": "ones",
+      "rng": "ffffffffff",
+      "code": "ZZZZ-ZZZZ",
+      "normalised": "ZZZZZZZZ",
+      "code_hash": "d64ebd4f29ed60b23dc016c34c92a9ad0dd43f134ae3578206d6e06894938898"
+    }
+  ],
+  "normalise": [
+    {
+      "case": "as shown",
+      "input": "FGSG-F1PC",
+      "normalised": "FGSGF1PC"
+    },
+    {
+      "case": "without the dash",
+      "input": "FGSGF1PC",
+      "normalised": "FGSGF1PC"
+    },
+    {
+      "case": "lowercase",
+      "input": "fgsg-f1pc",
+      "normalised": "FGSGF1PC"
+    },
+    {
+      "case": "spoken in groups",
+      "input": " fg sg f1 pc ",
+      "normalised": "FGSGF1PC"
+    },
+    {
+      "case": "an en dash from a phone",
+      "input": "FGSG–F1PC",
+      "normalised": "FGSGF1PC"
+    },
+    {
+      "case": "I, i, L and l read as 1",
+      "input": "IiLl-2345",
+      "normalised": "11112345"
+    },
+    {
+      "case": "O and o read as 0",
+      "input": "Oo00-ABCD",
+      "normalised": "0000ABCD"
+    },
+    {
+      "case": "U is no digit",
+      "input": "U000-0000",
+      "error": "short_code"
+    },
+    {
+      "case": "seven characters",
+      "input": "FGSG-F1P",
+      "error": "short_code"
+    },
+    {
+      "case": "nine characters",
+      "input": "FGSGF1PC0",
+      "error": "short_code"
+    },
+    {
+      "case": "a symbol",
+      "input": "K7F3_Q9ZP",
+      "error": "short_code"
+    },
+    {
+      "case": "a long code",
+      "input": "sgl122222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222",
+      "error": "short_code"
+    }
+  ],
+  "fingerprints": [
+    {
+      "case": "carrier-v0.json derived.pair",
+      "pair": "a2cf45bd3d6aee6d6e3f14ffd2751924",
+      "okm": "d6a99a189c6c",
+      "indices": [
+        1717,
+        614,
+        1073,
+        454
+      ],
+      "words": "stove error mail decide"
+    },
+    {
+      "case": "zero pair",
+      "pair": "00000000000000000000000000000000",
+      "okm": "06cbb8ea02e1",
+      "indices": [
+        54,
+        750,
+        468,
+        46
+      ],
+      "words": "almost fruit dentist alarm"
+    },
+    {
+      "case": "ones pair",
+      "pair": "ffffffffffffffffffffffffffffffff",
+      "okm": "a11ec15d70ec",
+      "indices": [
+        1288,
+        1968,
+        698,
+        1806
+      ],
+      "words": "patient voyage firm tide"
+    },
+    {
+      "case": "pair of rng(\"pair\")",
+      "pair": "41068cf691662c20931f820952ac3ddf",
+      "okm": "3f11eb6818b3",
+      "indices": [
+        504,
+        1146,
+        1744,
+        395
+      ],
+      "words": "disease monster sure cousin"
+    }
+  ]
+}

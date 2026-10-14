@@ -36,19 +36,20 @@ yet; 3 `inbox --expect` when no message came.
 A:
 
 ```sh
-sigelo-agent invite --name bob           # sgl1…: give the code to B's operator (--json: with DID, expiry)
+sigelo-agent invite --name bob           # K7F3-Q9ZP: say it to B's operator (--long: sgl1…; --json: both)
 ```
 
 The first login of an identity proves work, 5 to 60 s on a phone: a line on stderr says so before,
 and another when it is done.
 
-The code works once and expires in 24 hours. Send it by chat, mail or QR code: whoever holds it
-can answer it, so treat it like a one-time password.
+The short code works once and for 10 minutes: say it, text it, write it down. Case, dashes and I/L/O
+for 1/1/0 do not matter. `--long` prints the one-line code instead (24 hours; for agent channels).
+Whoever holds either can answer it, so treat it like a one-time password.
 
 B:
 
 ```sh
-sigelo-agent accept sgl1… --name alice   # "waiting": the answer is at the relay
+sigelo-agent accept K7F3-Q9ZP --name alice   # "waiting": the answer is at the relay
 ```
 
 `accept` prints the DID the code names, for B's operator to check with A's. So far B's agent has
@@ -59,12 +60,12 @@ replies; the next time B's connects it checks A's reply against the code's DID:
 sigelo-agent inbox                       # A: replies
 sigelo-agent inbox                       # B: paired; sends his prekeys
 sigelo-agent inbox                       # A: has B's prekeys
-sigelo-agent contacts                    # each: the other's original DID, name, relay, pairing id
+sigelo-agent contacts                    # each: the other's DID, name, relay, "Check with them: …"
 ```
 
-The operators read the pairing id (`pair`) to each other, all 32 digits. It comes from the pairing
-key, which binds both DIDs: the same id on both sides means A paired with B, not with another code
-holder. Someone who swapped the code chooses part of that key and can grind a short prefix to match.
+The operators say the four words to each other. They come from the pairing key, which binds both
+DIDs: the same words on both sides mean A paired with B, not with another code holder, the relay
+included. 44 bits: for all 128, compare the pairing id (`pair`, 32 digits).
 
 If both are online at once, `accept --wait 30` on B and `inbox --wait 30` on A finish it in one go.
 
@@ -121,7 +122,7 @@ sigelo-agent contacts                    # B, after his inbox: alice is "re_pair
 The thief's copy held the pairing key `K` as well, and with it every later mailbox of the pair. So
 after a recovery neither side sends on `K` (a `send` exits 1, `re_pair`) or claims a new mailbox
 under it, until a new code replaces it: A runs `invite --name bob`, B `accept`, then `inbox` on
-each side as in step 2. Both show a new pairing id, and messages flow again under A's recovered key.
+each side as in step 2. Both show new words, and messages flow again under A's recovered key.
 A message queued for B before the recovery is refused, and A's `inbox` reports it (`refused`,
 `re_pair`). A contact still on sigelo-agent 0.1.2 follows the recovery but marks nothing: pair with it at once.
 

@@ -5,12 +5,13 @@
 # injected clock. alice runs sigelo-agent from its source (adapters/moadim/cli.ts), bob as step 1 of
 # demo/two-machines.md installs it (npm run build: dist/cli.js); a copy laid out as npm installs it
 # loads sigelo-contact beside it, and refuses a package that only takes that name's place. They
-# make their recovery keys with sigelo-agent recovery-key, pair by code (both show the same pairing
-# id), exchange 115 messages, one of 150,000 characters and one a 500-level nested array, read
+# make their recovery keys with sigelo-agent recovery-key, pair by the long code (both show the same
+# pairing id and the same four words), exchange 115 messages, one of 150,000 characters and one a 500-level nested array, read
 # through a pipe after a reader that went away; one is offline for a day, then rotates its key and
 # reads its backlog: nothing lost, nothing readable on the relay. Then a thief copies alice's files
 # and rotates: alice is locked out (exit 1, named), recovers with her recovery key, both mark the
-# pairing re_pair and send nothing on it, and a new code pairs them again. Exit codes: 2 with no
+# pairing re_pair and send nothing on it, and a short code (K7F3-Q9ZP), typed as heard, pairs them
+# again: the same four words on both sides, the code good once. Exit codes: 2 with no
 # identity, 3 for inbox --expect with no message. In connect.html's order: the inviter's first send
 # stays queued until the invitee's agent connects, the invitee's goes at once; the thief's message
 # that reaches bob with the recovery is refused (re_pair). Prints DEMO PASS, or FAIL and exits 1 at the
@@ -81,7 +82,7 @@ mkdir -p "$NM/sigelo-agent" "$NM/sigelo-contact"
 cp -R "$CLONE/adapters/moadim/dist" "$CLONE/adapters/moadim/package.json" "$NM/sigelo-agent/"
 ln -s "$ROOT/ts" "$NM/sigelo"
 echo '{"name":"sigelo-contact","type":"module"}' > "$NM/sigelo-contact/package.json"
-for f in carrier kdf invite; do echo "import{writeFileSync}from'node:fs';writeFileSync('$W/squatter-ran','x');" > "$NM/sigelo-contact/$f.mjs"; done
+for f in carrier kdf invite short; do echo "import{writeFileSync}from'node:fs';writeFileSync('$W/squatter-ran','x');" > "$NM/sigelo-contact/$f.mjs"; done
 rc=0; on npm node "$NM/sigelo-agent/dist/cli.js" contacts > /dev/null 2> "$W/npm.err" || rc=$?
 [ $rc = 1 ] && grep -q 'refusing .*sigelo-contact/package.json: "sigelo-contact" no version, not sigelo-contact ^' "$W/npm.err" && [ ! -e "$W/squatter-ran" ] || die "a package in sigelo-contact's place (exit $rc): $(cat "$W/npm.err")"
 cat "$W/npm.err"
@@ -140,15 +141,17 @@ rc=0; agent bob inbox --wait 301 > /dev/null 2> "$W/wait.err" || rc=$?
 rc=0; agent bob inbox --wiat 30 > /dev/null 2> "$W/flag.err" || rc=$?
 [ $rc = 2 ] && grep -q -- 'inbox: unknown flag --wiat' "$W/flag.err" || die "inbox --wiat 30 (exit $rc): $(cat "$W/flag.err")"
 
-step "alice makes a code; bob accepts it while alice's agent is offline"
-# Her first login proves work: one line says so before, one after. stdout: the code alone, as
-# connect.html says (--json: with its DID, relay and expiry).
-CODE=$(agent alice invite --name bob 2> "$W/invite.err")
+step "alice makes a long code; bob accepts it while alice's agent is offline"
+# Her first login proves work: one line says so before, one after. stdout: the code alone (--long:
+# the one-line code for agent channels; --json: both codes, its DID, relay and expiry).
+CODE=$(agent alice invite --long --name bob 2> "$W/invite.err")
 grep -q 'proof of work for a new identity: 5–60 s' "$W/invite.err" && grep -q 'proof of work done in' "$W/invite.err" || die "the first invite's progress lines: $(cat "$W/invite.err")"
 echo "$CODE" | grep -qE '^sgl1[1-9A-HJ-NP-Za-km-z]+$' && grep -q 'one-time code, good until' "$W/invite.err" || die "invite does not print the bare code: $CODE"
 cat "$W/invite.err"
 echo "code: $CODE"
-[ "$(agent alice invite --name nobody --ttl 60 --json 2> /dev/null | get did)" = "$A0" ] || die "invite --json"
+agent alice invite --name nobody --ttl 60 --json > "$W/invite.json" 2> /dev/null || die "invite --json"
+[ "$(get did < "$W/invite.json")" = "$A0" ] && get short < "$W/invite.json" | grep -qE '^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$' && get code < "$W/invite.json" | grep -q '^sgl1' \
+  || die "invite --json: $(cat "$W/invite.json")"
 # accept names the code's DID before it connects. carol's relay cannot be reached: her answer stays
 # queued (she never connects again) and accept fails, having said whom the code names. node, not
 # agent: an assignment before a shell function may outlive the call.
@@ -184,6 +187,10 @@ echo "alice knows bob as $(agent alice contacts | get contacts.0.name), bob know
 PAIR=$(agent alice contacts | get contacts.0.pair)
 echo "$PAIR" | grep -qE '^[0-9a-f]{32}$' && [ "$(agent bob contacts | get contacts.0.pair)" = "$PAIR" ] || die "the pairing ids differ"
 echo "both show pairing id $PAIR"
+WORDS=$(agent alice contacts 2> /dev/null | get contacts.0.fingerprint)
+echo "$WORDS" | grep -qE '^[a-z]+ [a-z]+ [a-z]+ [a-z]+$' && [ "$(agent bob contacts 2> /dev/null | get contacts.0.fingerprint)" = "$WORDS" ] || die "the four words differ"
+agent bob contacts 2>&1 > /dev/null | grep -qF "alice: Check with them: $WORDS" || die "contacts does not say the four words"
+echo "both say: Check with them: $WORDS"
 
 step "50 messages from alice to bob, 50 back"
 lines "alice to bob" 50 | agent alice send bob - --lines > "$W/sent.json"; sent "$W/sent.json" 50 || die "alice's 50 sends"
@@ -296,21 +303,36 @@ agent bob inbox > "$W/inbox.json" 2> "$W/bob.err" || die "bob's inbox after the 
   || die "bob did not follow the recovery, or does not mark alice re_pair"
 echo "bob follows the recovery, refuses the thief's message (re_pair) and marks alice re_pair; neither sends on the old pairing key"
 
-step "a new code pairs them again"
+step "a short code, said on the phone, pairs them again"
 later 120
-CODE2=$(agent alice invite --name bob 2> /dev/null)
-agent bob accept "$CODE2" --name alice --wait 1 > /dev/null 2>&1 || die "bob's second accept"
-agent alice inbox > /dev/null; agent bob inbox > /dev/null; agent alice inbox > /dev/null
+# The default: a short code, 10 minutes, once. Bob's operator types it as heard: lowercase, a space
+# for the dash, O for zero.
+SHORT=$(agent alice invite --name bob 2> "$W/invite.err")
+echo "$SHORT" | grep -qE '^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$' && grep -q "say it, text it or write it down: good for 10 minutes" "$W/invite.err" || die "invite does not print a short code: $SHORT $(cat "$W/invite.err")"
+cat "$W/invite.err"
+HEARD=$(echo "$SHORT" | tr 'A-Z0-' 'a-zo ')
+agent bob accept $HEARD --name alice --wait 1 > /dev/null 2> "$W/accept.err" || die "bob's accept of the short code \"$HEARD\": $(cat "$W/accept.err")"
+grep -qF "the code names $A1" "$W/accept.err" || die "accept of the short code does not show alice's DID: $(cat "$W/accept.err")"
+echo "bob typed \"$HEARD\": $(head -1 "$W/accept.err")"
+rc=0; agent carol accept "$SHORT" --wait 1 > /dev/null 2> "$W/carol.err" || rc=$?
+[ $rc = 1 ] && grep -q 'park_unknown' "$W/carol.err" || die "the short code a second time (exit $rc): $(cat "$W/carol.err")"
+echo "the same code again: $(cat "$W/carol.err")"
+agent alice inbox > /dev/null 2> "$W/alice.err"; agent bob inbox > /dev/null; agent alice inbox > /dev/null
+WORDS2=$(agent bob contacts 2> /dev/null | get contacts.0.fingerprint)
+grep -qF "paired with bob. Check with them: $WORDS2" "$W/alice.err" && [ "$(agent alice contacts 2> /dev/null | get contacts.0.fingerprint)" = "$WORDS2" ] && [ "$WORDS2" != "$WORDS" ] \
+  || die "the four words after the short code: $WORDS2; $(cat "$W/alice.err")"
+echo "alice's inbox: $(cat "$W/alice.err")"
+CODE2=$(echo "$SHORT" | tr -d -)
 [ "$(agent alice contacts 2> /dev/null | get contacts.0.re_pair)" = null ] && [ "$(agent bob contacts 2> /dev/null | get contacts.0.re_pair)" = null ] || die "still re_pair after pairing again"
 PAIR2=$(agent alice contacts | get contacts.0.pair)
 [ "$PAIR2" != "$PAIR" ] && [ "$(agent bob contacts | get contacts.0.pair)" = "$PAIR2" ] || die "the new pairing ids"
 agent alice send bob "after the recovery 1" | grep -q '"status": "sent"' || die "send after pairing again"
 agent bob inbox --wait 5 --expect > "$W/inbox.json" || die "bob's inbox --expect after pairing again"
 messages "$W/inbox.json" "after the recovery" 1 && [ "$(get messages.0.current_did < "$W/inbox.json")" = "$A1" ] || die "bob's inbox after pairing again"
-echo "both show the new pairing id $PAIR2; alice's message reaches bob, signed by her recovered key"
+echo "both show the new pairing id $PAIR2 and the same four words; alice's message reaches bob, signed by her recovered key"
 
 step "what the relay saw, over the whole run"
-blind "$W" any "$A0" "$A1" "$B" "$B1" "$CODE" "$CODE2" "$PAIR" "$PAIR2" "alice to bob" "bob to alice" "while you were away" "after the rotation" "got it" "from the thief" "after the recovery" || die "the relay is not blind"
+blind "$W" any "$A0" "$A1" "$B" "$B1" "$CODE" "$SHORT" "$CODE2" "$PAIR" "$PAIR2" "alice to bob" "bob to alice" "while you were away" "after the rotation" "got it" "from the thief" "after the recovery" || die "the relay is not blind"
 grep -qE 'did:sigelo|[mi]/[0-9a-f]{32}' "$W/relay.log" && die "the relay's log names a DID or a topic"
 echo "its log: $(grep -c '^login' "$W/relay.log") logins, addresses cut to /24, no DID, no topic"
 

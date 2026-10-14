@@ -1,6 +1,6 @@
 {
   "name": "sigelo-contact",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": false,
   "description": "Agent contacts for sigelo identities: invite codes, a contact store, end-to-end encrypted envelopes with hybrid post-quantum key agreement, and an MQTT carrier. Client code (MIT); the relay server is csigelo/sigelo-relay (AGPL-3.0).",
   "keywords": [
@@ -40,32 +40,39 @@
     "./envelope.mjs": "./envelope.mjs",
     "./prekeys": "./prekeys.mjs",
     "./prekeys.mjs": "./prekeys.mjs",
+    "./short": "./short.mjs",
+    "./short.mjs": "./short.mjs",
     "./package.json": "./package.json"
   },
   "files": [
     "README.md",
+    "bip39-english.mjs",
     "carrier.mjs",
     "envelope.mjs",
     "invite.mjs",
     "kdf.mjs",
     "prekeys.mjs",
+    "short.mjs",
     "store.mjs",
     "fixtures/carrier-v0.json",
     "fixtures/envelope-v0.json",
     "fixtures/invite-v0.json",
+    "fixtures/short-code-v0.json",
     "gen-carrier.mjs",
     "gen-envelope.mjs",
     "gen-invite.mjs",
+    "gen-short.mjs",
     "test-carrier.mjs",
     "test-envelope.mjs",
-    "test-invite.mjs"
+    "test-invite.mjs",
+    "test-short.mjs"
   ],
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs",
-    "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs",
+    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-short.mjs",
+    "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs && node gen-short.mjs",
     "prepack": "node ../release/prepack.mjs pre",
     "postpack": "node ../release/prepack.mjs post",
     "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publish the release tarball (release/RELEASE.md) with SIGELO_PUBLISH=1');process.exit(1)}\""

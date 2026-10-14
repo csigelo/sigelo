@@ -269,8 +269,13 @@ ${code.slice(60)}
         r = await b.call('sigelo_inbox', { wait });
         ok(r.isError && /^REFUSED: wait: whole seconds, 0 to 300$/.test(r.text), `relay: sigelo_inbox refuses wait ${JSON.stringify(wait)}`, r.text);
       }
-      const code = (await a.call('sigelo_invite', { name: 'bob' })).data?.code;
-      ok(/^sgl1/.test(code ?? ''), 'relay: sigelo_invite');
+      // A short code by default, the long one beside it; bob's operator says it to bob's agent.
+      const invited = (await a.call('sigelo_invite', { name: 'bob' })).data, code = invited?.short;
+      ok(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(code ?? '') && /^sgl1/.test(invited?.code ?? '') && invited.short_exp > 0, 'relay: sigelo_invite: a short code (K7F3-Q9ZP) and the long one', JSON.stringify(invited));
+      const longOnly = (await a.call('sigelo_invite', { name: 'x', long: true })).data;
+      ok(/^sgl1/.test(longOnly?.code ?? '') && longOnly.short === undefined, 'relay: sigelo_invite long: true: the long code only, nothing parked');
+      r = await a.call('sigelo_invite', { long: 'yes' });
+      ok(r.isError && /^REFUSED: long: true or false$/.test(r.text), 'relay: sigelo_invite refuses long: "yes"', r.text);
       const t0 = Date.now();
       r = await b.call('sigelo_accept', { code, wait: 1e12 });
       ok(r.isError && /^REFUSED: wait:/.test(r.text) && Date.now() - t0 < 5000, 'relay: sigelo_accept refuses wait 1e12 at once', r.text);
@@ -278,13 +283,17 @@ ${code.slice(60)}
       // Both online: alice's inbox is connected while bob accepts, so accept answers connected,
       // with the pairing id of a live contact.
       const aw = a.call('sigelo_inbox', { wait: 8 });
-      r = await b.call('sigelo_accept', { code, name: 'alice', wait: 30 });
-      ok(!r.isError && r.data.status === 'connected' && r.data.contact.did === aDid && /^[0-9a-f]{32}$/.test(r.data.contact.pair ?? ''), 'relay: sigelo_accept with the inviter online: connected, with the pairing id', r.text);
-      const pair = r.data?.contact?.pair;
+      r = await b.call('sigelo_accept', { code: code.toLowerCase().replace('-', ' '), name: 'alice', wait: 30 });
+      ok(!r.isError && r.data.status === 'connected' && r.data.contact.did === aDid && /^[0-9a-f]{32}$/.test(r.data.contact.pair ?? '') && /^[a-z]+ [a-z]+ [a-z]+ [a-z]+$/.test(r.data.contact.fingerprint ?? ''),
+        'relay: sigelo_accept of the short code, typed lowercase with a space, the inviter online: connected, with the pairing id and four words', r.text);
+      const pair = r.data?.contact?.pair, words = r.data?.contact?.fingerprint;
       r = await aw;
-      ok(!r.isError && r.data.events.some((e) => e.type === 'paired' && e.did === bDid) && r.data.more === 0, 'relay: alice\'s sigelo_inbox reports the pairing', r.text);
+      ok(!r.isError && r.data.events.some((e) => e.type === 'paired' && e.did === bDid && e.fingerprint === words) && r.data.more === 0, 'relay: alice\'s sigelo_inbox reports the pairing, with the same four words', r.text);
       await a.call('sigelo_inbox', { wait: 1 });   // bob's prekeys, if they came after
-      ok((await a.call('sigelo_contacts')).data?.contacts[0]?.pair === pair && (await b.call('sigelo_contacts')).data?.contacts[0]?.pair === pair, 'relay: both sides list the same pairing id');
+      const [ac, bc] = [(await a.call('sigelo_contacts')).data?.contacts[0], (await b.call('sigelo_contacts')).data?.contacts[0]];
+      ok(ac?.pair === pair && bc?.pair === pair && ac?.fingerprint === words && bc?.fingerprint === words, 'relay: both sides list the same pairing id and the same four words');
+      r = await b.call('sigelo_accept', { code });
+      ok(r.isError && /^REFUSED: park_unknown/.test(r.text), 'relay: the short code a second time: park_unknown (one use)', r.text);
 
       // Parallel tool calls on one server, as a client issues them: one at a time per identity, so
       // no call takes the relay connection from another.

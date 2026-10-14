@@ -23,10 +23,11 @@ const PAGE = 24000;
 const str = (d) => ({ type: 'string', description: d });
 const int = (d, maximum) => ({ type: 'integer', minimum: 0, ...(maximum !== undefined && { maximum }), description: d });
 // Whoever holds a code can answer it, once: a leaked code pairs the inviter with a stranger. The
-// pairing id (kdf.pairId of the pairing key, which binds both original DIDs) is what two operators
-// compare to know their agents paired with each other, as sigelo-agent's accept and contacts show it.
-// All 32 digits: someone who swapped the code chooses the encapsulation and can grind a short prefix.
-const CONFIRM = 'Show your operator the contact\'s DID and pairing id (pair): they compare all 32 digits with the other operator.';
+// four words (fingerprint: contact/short.mjs, from the pairing id, kdf.pairId of the pairing key,
+// which binds both original DIDs) are what two operators read to each other to know their agents
+// paired with each other, as sigelo-agent's accept, inbox and contacts show them. 44 bits: the
+// 32-digit pair id stays beside them for whoever wants all 128 (THREAT-MODEL.md §2.10).
+const CONFIRM = 'Show your operator the contact\'s DID and its four words (fingerprint): they read them to the other operator; the same words on both sides = nobody, not even the relay, swapped the pairing.';
 // The proof of work runs at an identity's first login: about 23 s on average at 22 bits on a
 // phone-class CPU, 92 s at 24 (design/relay-plan.md §11), past some clients' tool timeouts.
 const POW = 'A first call can take minutes: your first login to the relay solves a proof of work. If your client gives up, call again.';
@@ -34,14 +35,14 @@ const PROFILE = { identity: str('optional profile name [a-z0-9_-], e.g. your sub
 const obj = (props = {}, required = []) => ({ type: 'object', properties: { ...props, ...PROFILE }, required, additionalProperties: false });
 
 const TOOLS = [
-  ['sigelo_invite', `Make a one-line invite code (sgl1…) for another agent to become your contact. Give the code to its operator out of band; it works once and expires (default 24 h). The pairing completes at your next sigelo_inbox after they accept. ${POW} ${RELAY_DATA}`,
-    obj({ name: str('the name you will call the new contact'), ttl: int('seconds the code lives, at most 604800 (7 days)') })],
+  ['sigelo_invite', `Make an invite for another agent to become your contact: a short code (short, e.g. K7F3-Q9ZP: a person can say it on the phone; 10 minutes, once, at your relay) and the long one (code, sgl1…: for agent channels; default 24 h). Give one to its operator out of band. long: true makes the long code only. The pairing completes at your next sigelo_inbox after they accept. ${POW} ${RELAY_DATA}`,
+    obj({ name: str('the name you will call the new contact'), ttl: int('seconds the long code lives, at most 604800 (7 days)'), long: { type: 'boolean', description: 'true: the long code only, no short code' } })],
   ['sigelo_accept', `Accept an invite code from another agent's operator: sends your answer (whoever holds the code learns your DID); pairs once the inviter's reply verifies against the code. Returns connected with the pairing id, or waiting until the inviter's agent next connects (sigelo_inbox then reports the pairing). ${CONFIRM} ${POW} ${RELAY_DATA}`,
-    obj({ code: str('the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX) }, ['code'])],
-  ['sigelo_contacts', `Your contacts (name, original DID, current DID, revoked, relay, messages queued for them, pairing id, re_pair) and your pending invites and answers. re_pair not null = after a recovery (own_recovery: yours; contact_recovery: theirs) the pairing key may be a thief's: nothing is sent to that contact until you pair again (sigelo_invite, they accept). ${CONFIRM}`, obj()],
+    obj({ code: str('the short code (K7F3-Q9ZP; case, I/L/O and dashes do not matter) or the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX) }, ['code'])],
+  ['sigelo_contacts', `Your contacts (name, original DID, current DID, revoked, relay, messages queued for them, pairing id, four words, re_pair) and your pending invites and answers. re_pair not null = after a recovery (own_recovery: yours; contact_recovery: theirs) the pairing key may be a thief's: nothing is sent to that contact until you pair again (sigelo_invite, they accept). ${CONFIRM}`, obj()],
   ['sigelo_send', `Send an end-to-end encrypted message to a contact, by name or DID. The relay sees only ciphertext. status sent = the relay accepted it (it holds it while the contact reads that mailbox); queued = kept here, it goes by itself at your next call that connects (detail says why: the contact's agent does not hold its mailbox yet, as right after a pairing until it next connects, or is away; or waiting for its fresh prekeys): do not send it again. Error not_paired = your answer to its code waits for the inviter's agent. Error re_pair = pair again first (see sigelo_contacts). ${RELAY_DATA}`,
     obj({ to: str('contact name or DID'), text: str('the message'), label: str('optional conversation label, e.g. "billing"') }, ['to', 'text'])],
-  ['sigelo_inbox', `Messages from your contacts since you last asked (each returned once), and events: pairings done or failed (with why), contacts' key rotations, re_pair (pair again after a recovery), refused (your queued messages to such a contact; or a contact's messages signed by a key its recovery overruled, maybe a thief's), waiting (for a contact's prekeys or its agent). last_resort = weaker forward secrecy. dropped: refusals by check. more > 0: call again now. ${DATA} ${RELAY_DATA}`,
+  ['sigelo_inbox', `Messages from your contacts since you last asked (each returned once), and events: pairings done (with the four words to show your operator) or failed (with why), contacts' key rotations, re_pair (pair again after a recovery), refused (your queued messages to such a contact; or a contact's messages signed by a key its recovery overruled, maybe a thief's), waiting (for a contact's prekeys or its agent). last_resort = weaker forward secrecy. dropped: refusals by check. more > 0: call again now. ${DATA} ${RELAY_DATA}`,
     obj({ wait: int(`seconds to wait for a first message, default 0, at most ${WAIT_MAX}`, WAIT_MAX) })],
   ['sigelo_forget_contact', 'Forget a contact: revoked in your store for good, its mailboxes given up at the relay. Local: the other side is not told.',
     obj({ did: str('the contact\'s DID "did:sigelo:z…"') }, ['did'])],
@@ -120,8 +121,12 @@ export async function load({ installed, id, env = process.env, clock }) {
     return { text, isError: false };
   };
   const handlers = {
-    sigelo_invite: serial(({ name, ttl }, path) => carrier(path).invite({ name, ttl })),
-    // A code never contains whitespace; one pasted from a wrapped mail line may.
+    sigelo_invite: serial(({ name, ttl, long }, path) => {
+      if (long !== undefined && typeof long !== 'boolean') throw new Error('long: true or false');
+      return carrier(path).invite({ name, ttl, short: long !== true });
+    }),
+    // A code never contains whitespace; one pasted from a wrapped mail line may, and a short one
+    // typed as heard ("k7f3 q9zp"). carrier.accept tells the two apart by shape.
     sigelo_accept: serial(async ({ code, name, wait }, path) => {
       const r = await carrier(path).accept(text(code, 'code').replace(/\s+/g, ''), { name, wait: seconds(wait, 'wait', 10) });
       return r.contact ? { ...r, contact: { ...r.contact, pair: pairOf(path, r.contact.did) } } : r;

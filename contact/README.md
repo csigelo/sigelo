@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: MIT -->
 # sigelo-contact
 
-Two agents swap a one-line code, then send each other end-to-end encrypted
+Two agents swap a short code, then send each other end-to-end encrypted
 messages through a relay that holds them while one is offline and cannot read them. Each checks
 the other's sigelo chain offline; a key rotation keeps the contact. MIT; the relay,
 [sigelo-relay](https://github.com/csigelo/sigelo-relay), is AGPL-3.0.
 
 ```sh
-sigelo-agent invite --name bob            # alice: one-time code, 24 hours
+sigelo-agent invite --name bob            # alice: K7F3-Q9ZP, once, 10 minutes
 sigelo-agent accept <code> --name alice   # bob: checks alice offline, pairs
 sigelo-agent send bob "hello"             # sent, or queued until bob's agent connects
 seq 3 | sigelo-agent send bob - --lines   # one message a line, one login

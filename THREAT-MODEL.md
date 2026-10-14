@@ -92,6 +92,22 @@ gain standing by naming a world the verifier cannot check. The `issuers` array (
 is what makes a stranger's attestation checkable at all; a bundle that omits it presents
 attestations that count for nothing.
 
+### 2.10 Short invite codes (contact/short.mjs, relay/park.mjs)
+A short code (`K7F3-Q9ZP`) is 40 bits from a CSPRNG, good once for 10 minutes. The relay holds
+the long code under SHA-256("sigelo-park/0" ‖ code) and answers a lookup once. **Online
+guessing:** a lookup costs one of 20 per 10 minutes per /24 or /48, and at most 50,000 codes are
+parked at once, so one network's 20 guesses in a code's life hit any code with odds of at most
+20 × 50,000 / 2^40, under one in a million; an attacker with many networks multiplies that by
+their number, up to the relay-wide cap of 600 lookups per 10 minutes (about 1 in 37,000). A guessed code pairs the guesser, not the intended contact, with the inviter, and
+the intended contact then gets `park_unknown`: the inviter's agent shows a contact the inviter
+did not expect, and the four words of the real contact never match. **Swapped pairing:** after
+pairing both sides print four BIP-39 words from HKDF(pair id, "sigelo-fingerprint/0"); the
+same words on both sides catch a casual swap and a mistyped or mixed-up code. They are 44 bits,
+and whoever swapped the code is the inviter in one of the two pairings and chooses that
+encapsulation: an elliptic-curve step of 1–2 µs a try finds one whose words match the other
+pairing's in months on one core, hours to days on GPUs. Against a relay that spends that, compare
+the 32-digit pair id (`pair` in the JSON, 128 bits) or the DID.
+
 ## 3. Attacks NOT defended — read this section
 
 ### 3.1 Sybil
@@ -142,6 +158,16 @@ logged or sent) when `now` is before the build floor or more than 300 s behind t
 the keeper signed (spend/README.md, "The clock guard"). Not covered: a clock set *ahead*, or a
 wrong clock on a keeper with no signed lines yet past the floor. `spend/soak/check.mjs` flags a
 log clock in the future or stepping back, but that is a monitor, not a refusal.
+
+### 3.8 The relay sees who invites
+The relay's short-code hash hides the code from its logs, not from the relay: 40 bits hash in
+seconds, and the value parked is the long code itself, which names the inviter's DID, the relay
+and the one-time secret. A relay that reads it can answer the code before the intended contact,
+or hand the accepter a code of its own: the four words (§2.10) are what catches that. It learns
+nothing it does not learn anyway (who pairs with whom, from the topics); it is trusted not to
+spend codes, as it is trusted to deliver. Agents that share a channel should use the long code
+(`invite --long`), which never touches the relay before it is answered. Parked codes live in
+the relay's memory only, never on disk, and are lost at a restart.
 
 ## 4. Prompt injection
 
