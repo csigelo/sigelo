@@ -5,7 +5,7 @@
 import './node-check.ts';   // first: it exits on a Node.js too old, before the rest loads
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { did, parse, parseBytes, SigeloError } from 'sigelo';
+import { did, parse, parseBytes } from 'sigelo';
 import * as id from './sigelo-agent.ts';
 import * as adopt from './sigelo-agent-adopt.ts';
 import * as xmr from './sigelo-agent-monero.ts';
@@ -64,8 +64,14 @@ const note = (s: string): void => console.error(`sigelo-agent: ${contact.safeTex
 /** Read one JSON argument, a file holding it, or stdin for `-`/nothing. sigelo's parser, so
  *  duplicate keys are rejected rather than silently resolved (SPEC §3, THREAT-MODEL §2.8), and
  *  bytes are decoded fatally: invalid UTF-8 rejects the document, as the Go verifier does. */
-const input = (v: string | undefined): unknown => v === undefined || v === '-' ? parseBytes(readFileSync(0))
-  : /^\s*[{["]/.test(v) || !existsSync(v) ? parse(v) : parseBytes(readFileSync(v));
+const input = (v: string | undefined): unknown => {
+  const from = v === undefined || v === '-' ? 'stdin' : /^\s*[{["]/.test(v) ? 'the argument' : existsSync(v) ? v : null;
+  // A refusal names what was read: a bare "unexpected token" named neither the argument nor the file.
+  if (from === null) throw new Error(`${cmd}: ${JSON.stringify(v!.slice(0, 40))} is neither a file nor JSON: pass inline JSON, a file holding it, or - for stdin`);
+  try { return from === 'stdin' ? parseBytes(readFileSync(0)) : from === 'the argument' ? parse(v!) : parseBytes(readFileSync(v!)); } catch (e) {
+    throw new Error(`${cmd}: ${from} is not strict JSON (${(e as Error).message})`, { cause: e });
+  }
+};
 
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === '--version' || cmd === '-v') { console.log(contact.version()); process.exit(0); }
@@ -78,15 +84,23 @@ const now = Math.floor(Date.now() / 1000);
 // The verbs that read the identity: with none, "run init" and exit 2, as the contact verbs say
 // it (a bare "load: no identity" exited 1).
 const READS = ['whoami', 'sign-challenge', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
-if (READS.includes(cmd ?? '') && !existsSync(path)) {
-  note(`no identity: run sigelo-agent init (none at ${path})`);
+// adopt --rotation changes an identity: with none, it took the lock in a missing directory, a raw ENOENT.
+if ((READS.includes(cmd ?? '') || (cmd === 'adopt' && rest.includes('--rotation'))) && !existsSync(path)) {
+  note(contact.noIdentity(path));
   process.exit(2);
 }
+/** A command line missing what it needs: exit 2, as an unknown command (USAGE). */
+function usage(why: string): never { note(why); process.exit(2); }
+/** The identity, or one line naming the file that does not load (it may be corrupt, or another file). */
+const load = (): id.Store => {
+  if (!existsSync(path)) { note(contact.noIdentity(path)); process.exit(2); }
+  try { return id.load(path); } catch (e) { throw contact.unreadable(path, e); }
+};
 /** Every load → change → save holds the one lock `receive` takes. A command that saves a store
  *  it loaded before another command's save undoes that save: a reissued subaddress index
  *  (two payers who can link each other, MONERO.md §3), a lost attestation, a lost rotation. */
 const update = <T>(fn: (s: id.Store) => { store: id.Store; result: T }): T =>
-  xmr.withLock(path, () => { const { store, result } = fn(id.load(path)); id.save(path, store); return result; });
+  xmr.withLock(path, () => { const { store, result } = fn(load()); id.save(path, store); return result; });
 
 try {
   switch (cmd) {
@@ -95,7 +109,7 @@ try {
       // A null recovery commitment must be a decision, never a default: it means theft of the
       // identity key is terminal (SPEC §4). keygen prints the warning itself.
       if (recovery === undefined && !rest.includes('--no-recovery')) {
-        throw new SigeloError(`init: pass --recovery <multibase pubkey>, or --no-recovery to accept that theft of this key is PERMANENT and unrecoverable.\n${OFFLINE_KEYGEN}`);
+        usage(`init: pass --recovery <multibase pubkey>, or --no-recovery to accept that theft of this key is PERMANENT and unrecoverable.\n${OFFLINE_KEYGEN}`);
       }
       const store = id.init(path, recovery ?? null);
       note(`identity written to ${path} (0600)`);
@@ -123,12 +137,12 @@ try {
       break;
     }
     case 'whoami': {
-      const store = id.load(path);
+      const store = load();
       out({ did: did(id.head(store)), genesis: id.head(store), chain: id.chainOf(store), attestations: store.attestations.length });
       break;
     }
     case 'sign-challenge':
-      out(id.signChallenge(id.load(path), input(rest[0]) as Record<string, unknown>));
+      out(id.signChallenge(load(), input(rest[0]) as Record<string, unknown>));
       break;
     case 'add-issuer': {
       const g = input(rest[0]) as never;
@@ -146,7 +160,7 @@ try {
       break;
     }
     case 'bundle': {
-      const { bundle, result } = id.bundle(id.load(path), now);
+      const { bundle, result } = id.bundle(load(), now);
       if (result.rejected.attestations > 0) note(`${result.rejected.attestations} stored attestation(s) do not verify at ${now} (expired, or the issuer genesis is missing) and count for nothing`);
       if (result.rejected.bindings > 0) note(`${result.rejected.bindings} stored binding(s) do not verify at ${now} (expired, or minted under a DID this chain does not have) — re-run \`bind\``);
       out(bundle);
@@ -175,18 +189,18 @@ try {
     }
     case 'invoice': {
       const addr = flag('--addr');
-      if (addr === undefined) throw new SigeloError('invoice: --addr <subaddress> is required — take one from `sigelo-agent receive`');
-      out(xmr.invoice(id.load(path), { addr, amount: flag('--amount'), memo: flag('--memo'), ttl: Number(flag('--ttl') ?? 86400) }, now));
+      if (addr === undefined) usage('invoice: --addr <subaddress> is required — take one from `sigelo-agent receive`');
+      out(xmr.invoice(load(), { addr, amount: flag('--amount'), memo: flag('--memo'), ttl: Number(flag('--ttl') ?? 86400) }, now));
       break;
     }
     case 'verify-invoice': {
       const file = flag('--bundle');
-      if (file === undefined) throw new SigeloError('verify-invoice: --bundle <file> is required — an invoice means nothing without the bundle whose binding anchors it (SPEC §6.3)');
+      if (file === undefined) usage('verify-invoice: --bundle <file> is required — an invoice means nothing without the bundle whose binding anchors it (SPEC §6.3)');
       out(xmr.verifyInvoice(input(rest[0]?.startsWith('--') ? '-' : rest[0]), parseBytes(readFileSync(file)) as never, now));
       break;
     }
     case 'rotate': {
-      if (rest.includes('--recovery')) throw new SigeloError(`rotate: this command does voluntary rotations only.${OFFLINE_RECOVERY}`);
+      if (rest.includes('--recovery')) usage(`rotate: this command does voluntary rotations only.${OFFLINE_RECOVERY}`);
       const store = update((s) => { const r = id.rotateKey(s, now); return { store: r, result: r }; });
       note('rotated; the previous key is retired. Ask each world to reissue its attestation to the new DID.');
       out({ did: did(id.head(store)), chain: id.chainOf(store) });
@@ -198,5 +212,6 @@ try {
   }
 } catch (e) {
   note(e instanceof Error ? e.message : String(e));
+  contact.debug(e, { identity: path });
   process.exit(1);
 }

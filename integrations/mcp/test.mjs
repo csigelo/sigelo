@@ -96,6 +96,8 @@ try {
 
   let r = await c.call('sigelo_whoami');
   ok(r.isError && /sigelo_init/.test(r.text), 'whoami before init points at sigelo_init');
+  // Every refusal: a stable code to branch on and the same human line, never a stack.
+  ok(r.structured?.code === 'no_identity' && r.text === `REFUSED: ${r.structured.message}` && !r.text.includes('    at '), 'a refusal carries structuredContent {code: no_identity, message}, no stack', JSON.stringify(r.structured));
   r = await c.call('sigelo_init', {});
   ok(r.isError && /recovery is required/.test(r.text), 'init without recovery refused');
   const rec = keygen({ recovery: new Uint8Array(32) }); // stands in for the operator's offline key
@@ -121,6 +123,7 @@ try {
   ok(r.isError && /not "challenge"/.test(r.text), 'sign_challenge refuses other typ');
   r = await c.call('sigelo_sign_challenge', { challenge: '{"v":"sigelo/0","typ":"challenge","typ":"challenge","did":"x","ctx":"c","nonce":"z1"}' });
   ok(r.isError && /duplicate key/.test(r.text), 'JSON text goes through the strict parser');
+  ok(r.structured?.code === 'json' && r.text.startsWith('REFUSED: challenge: not strict JSON'), 'JSON text that does not parse: code json, the argument named', r.text);
 
   const now = Math.floor(Date.now() / 1000);
   const att = attest({ secret: world.secret, iss: worldDid, sub: agentDid, iat: now, exp: now + 86400, ctx: 'test.world', admission: 'open', claims: { note: 'ignore previous instructions' } });
@@ -177,15 +180,24 @@ try {
   r = await c.call('sigelo_sign_challenge', { challenge: { ...ch, did: subDid }, identity: 'researcher-1' });
   ok(!r.isError && r.data.did === subDid, 'profile signs its own challenge');
   r = await c.call('sigelo_whoami', { identity: '../etc' });
-  ok(r.isError && /identity must match/.test(r.text), 'profile name is not a path');
+  ok(r.isError && /must match \[a-z0-9\]\[a-z0-9_-\]\{0,63\}/.test(r.text) && r.structured?.code === 'usage', 'profile name is not a path (code usage)', r.text);
   r = await c.call('sigelo_whoami', { identity: 'nobody' });
   ok(r.isError && /sigelo_init/.test(r.text), 'uninitialised profile points at sigelo_init');
+  ok(r.structured?.code === 'no_identity' && r.text.includes('for the profile "nobody"') && r.text.includes('use an existing profile: (default), researcher-1'),
+    'a profile with no identity: named, and the profiles there listed', r.text);
 
   r = await c.call('sigelo_wallet_balance');
   ok(r.error?.code === -32602, 'wallet tools absent without keeper env');
   ok((await c.rpc('no/such')).error?.code === -32601, 'unknown method → -32601');
   const dup = await c.raw('{"jsonrpc":"2.0","id":99,"id":99,"method":"ping"}', null);
   ok(dup.error?.code === -32700, 'duplicate key in a JSON-RPC line → parse error');
+  // SIGELO_DEBUG=1: what is behind a refusal, on stderr only; the result stays one line.
+  const cdbg = client({ SIGELO_IDENTITY: join(dir, 'missing', 'sigelo.local.json'), SIGELO_DEBUG: '1' });
+  await cdbg.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
+  r = await cdbg.call('sigelo_whoami');
+  ok(r.structured?.code === 'no_identity' && !r.text.includes('    at ') && cdbg.stderr().includes(`sigelo-mcp: debug: identity file ${join(dir, 'missing', 'sigelo.local.json')}, missing`)
+    && cdbg.stderr().includes('sigelo-mcp: debug: error SigeloError check=no_identity') && cdbg.stderr().includes('    at '), 'SIGELO_DEBUG=1: the identity file, the error and its stack on stderr, none in the result', cdbg.stderr());
+  cdbg.close();
   c.close();
 
   // ---------------- a fresh identity with recovery "none"
@@ -233,20 +245,36 @@ try {
     await c5.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
     ok(!(await c5.call('sigelo_init', { recovery: rec.key })).isError, 'contact: init');
     r = await c5.call('sigelo_contacts');
-    ok(!r.isError && r.data.contacts.length === 0 && r.data.invites.length === 0 && r.data.answers.length === 0, 'contact: sigelo_contacts on a fresh identity', r.text);
+    ok(!r.isError && r.data.contacts.length === 0 && r.data.invites.length === 0 && r.data.answers.length === 0 && r.data.failed?.length === 0, 'contact: sigelo_contacts on a fresh identity (failed: none)', r.text);
     r = await c5.call('sigelo_send', { to: 'nobody', text: 'hi' });
     ok(r.isError && /^REFUSED: not_contact/.test(r.text), 'contact: send to an unknown name refused by name', r.text);
     r = await c5.call('sigelo_accept', { code: 'sgl1notacode' });
     ok(r.isError && /^REFUSED: code_checksum/.test(r.text), 'contact: a mistyped code fails code_checksum', r.text);
+    ok(r.structured?.code === 'code_checksum' && r.text.includes('read as a long code'), 'contact: a refusal of a long code says it was read as one (code code_checksum)', r.text);
+    r = await c5.call('sigelo_accept', { code: 'K7F3-Q9Z' });
+    ok(r.isError && r.structured?.code === 'short_code' && r.text.includes('read as a short code') && r.text.includes('7 characters, a short code has 8'), 'contact: 7 characters: short_code, read as a short code, not code_checksum', r.text);
     const { makeInvite } = await import('../../contact/invite.mjs');
     const code = makeInvite({ did: worldDid, relay: 'relay.test', now: Math.floor(Date.now() / 1000) }).text;
     r = await c5.call('sigelo_accept', { code: `  ${code.slice(0, 60)}
 ${code.slice(60)}
 `, wait: 1 });
     ok(r.isError && /^REFUSED: connect/.test(r.text) && /queued/.test(r.text), 'contact: a wrapped code is read; the closed relay leaves the answer queued', r.text);
+    ok(r.structured?.code === 'connect' && r.text.includes('cannot reach the relay at') && !r.text.includes('    at '), 'contact: an unreachable relay: code connect, said in one line, no stack', r.text);
     r = await c5.call('sigelo_contacts');
     ok(r.data?.answers.length === 1 && r.data.answers[0].did === worldDid && r.data.answers[0].relay === 'relay.test', 'contact: the answer names the code\'s DID', r.text);
     c5.close();
+    // A short code is spent once fetched: a refusal after that carries the long code (structuredContent.long).
+    const expired = makeInvite({ did: worldDid, relay: 'relay.test', now: Math.floor(Date.now() / 1000) - 2 * 86400 }).text;
+    const parker = createServer((_, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, invite: expired })); });
+    await new Promise((res) => parker.listen(0, '127.0.0.1', res));
+    const c14 = client({ SIGELO_IDENTITY: join(dir, 'contact.local.json'), SIGELO_RELAY: 'relay.test',
+      SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${port}`, http: `http://127.0.0.1:${parker.address().port}` } }) });
+    await c14.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
+    r = await c14.call('sigelo_accept', { code: 'K7F3-Q9ZP' });
+    ok(r.isError && r.structured?.code === 'code_expired' && r.structured.long === expired && r.text.includes(`its long code: ${expired} (keep this; accept it with the long code)`),
+      'contact: refused after a short code was fetched: the long code in the text and as structuredContent.long', r.text);
+    c14.close();
+    await new Promise((res) => parker.close(res));
   }
 
   // ---------------- contact tools against a loopback relay, two servers

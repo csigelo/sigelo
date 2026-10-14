@@ -8,11 +8,14 @@
 //                                            short: the long code is also parked at the relay under a short one
 //   await c.unpark(short)                  → the long code parked under a short one, taken from the relay (one use)
 //   await c.accept(code, { name, wait })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
-//   c.contacts()                           → { contacts, invites, answers }   each contact with its four words (fingerprint)
+//                                            (refused after a short code was fetched: .long, keepLong)
+//   c.contacts()                           → { contacts, invites, answers, failed }   each contact with its four words (fingerprint);
+//                                            failed: pairing_failed events (code_expired: an answer that outlived its code) until inbox
 //   await c.send(to, content, { label })   → { status: 'sent' | 'queued', … }, or throws the relay's code
 //   await c.sendAll(to, contents, { label }) → one result each ('refused' with its code), one login
 //   await c.inbox({ wait })                → { messages, events, dropped, offline? }: all are taken (messages: those kept)
 //   await c.forget(did)                    → { name, did, revoked: true, released, offline? }
+//   c.lastError                            the error behind the last offline of inbox or forget (SIGELO_DEBUG)
 //   await c.start(), c.sync(), c.stop()    stay connected, reconnecting with backoff; events reach onEvent
 //
 // identity() → { secret, bundle }: the agent's current secret key and SPEC §8 bundle, read again at
@@ -151,7 +154,7 @@ import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, inviteKeys,
 import { MsgError, checkNow, fail, hex, isoWeek, pairId, topic } from './kdf.mjs';
 import { Prekeys, exact, kemDecapsulate, kemEncapsulate, kemKey } from './prekeys.mjs';
 import { Contacts } from './store.mjs';
-import { SHORT_TTL, codeHash, fingerprint, formatShort, isShort, makeShort } from './short.mjs';
+import { SHORT_TTL, codeHash, codeKind, fingerprint, formatShort, makeShort, normaliseShort } from './short.mjs';
 
 export const V = 'sigelo-carrier/0';
 export const DEFAULT_RELAY = 'relay.sigelo.ai', MQTT_PORT = 8883, NOTICE = '$sigelo/notice';
@@ -319,7 +322,7 @@ export function optionsFromEnv(env = process.env) {
   const o = {};
   if (env.SIGELO_RELAY) o.relay = env.SIGELO_RELAY;
   if (env.SIGELO_RELAY_ENDPOINTS) {
-    try { o.endpoints = JSON.parse(env.SIGELO_RELAY_ENDPOINTS); } catch { fail('relay', 'SIGELO_RELAY_ENDPOINTS is not JSON'); }
+    try { o.endpoints = JSON.parse(env.SIGELO_RELAY_ENDPOINTS); } catch { fail('relay', 'SIGELO_RELAY_ENDPOINTS is not JSON: want {"<relay>": {"mqtt": "mqtts://…", "http": "https://…"}}'); }
   }
   if (env.SIGELO_RELAY_RETENTION_DAYS) {
     const n = Number(env.SIGELO_RELAY_RETENTION_DAYS);
@@ -528,28 +531,70 @@ export async function solvePow(host, original, nonce, bits, deadline = Infinity)
 // past publicRelay's check on the code's host. A relay never needs one: `connect`.
 async function http(url, init = {}) {
   let res;
-  try { res = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(HTTP_MS) }); } catch (e) { fail('connect', `${url}: ${e.cause?.code ?? e.message}`); }
+  const at = where(url), http = { url, method: init.method ?? 'GET' };
+  try { res = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(HTTP_MS) }); } catch (e) {
+    const why = e.name === 'TimeoutError' ? `no answer within ${HTTP_MS / 1000} s` : e.cause?.code ?? e.cause?.message ?? e.message;
+    fail('connect', `cannot reach the relay at ${at} (${why}): check the network and SIGELO_RELAY / SIGELO_RELAY_ENDPOINTS, then try again`, { cause: e, http });
+  }
+  http.status = res.status;
   if ((res.status >= 300 && res.status < 400) || res.type === 'opaqueredirect') {
     try { await res.body?.cancel(); } catch {}
-    fail('connect', `${url}: answered ${res.status}, a redirect, which this client does not follow`);
+    fail('connect', `${at}: answered ${res.status}, a redirect, which this client does not follow`, { http });
   }
-  if (Number(res.headers.get('content-length') ?? 0) > HTTP_MAX) fail('connect', `${url}: answer over ${HTTP_MAX} bytes`);
+  if (Number(res.headers.get('content-length') ?? 0) > HTTP_MAX) fail('connect', `${at}: answer over ${HTTP_MAX} bytes`, { http });
   const chunks = [];
   let n = 0;
   try {
     // Leaving the loop by a throw cancels the stream: nothing more is read.
     for await (const chunk of res.body ?? []) {
       n += chunk.length;
-      if (n > HTTP_MAX) fail('connect', `${url}: answer over ${HTTP_MAX} bytes`);
+      if (n > HTTP_MAX) fail('connect', `${at}: answer over ${HTTP_MAX} bytes`, { http });
       chunks.push(chunk);
     }
   } catch (e) {
     if (e instanceof MsgError) throw e;
-    fail('connect', `${url}: ${e.cause?.code ?? e.message}`);
+    fail('connect', `${at}: the answer broke off (${e.cause?.code ?? e.message}): try again`, { cause: e, http });
   }
   let body = null;
-  try { body = parseBytes(concatBytes(...chunks)); } catch {}
-  return { status: res.status, body };
+  const raw = concatBytes(...chunks);
+  try { body = parseBytes(raw); } catch {}
+  // Seconds the relay asks to wait (Retry-After), when it says.
+  const after = Number(res.headers.get('retry-after'));
+  // What a refusal carries for SIGELO_DEBUG: the status and the start of the body as received.
+  http.body = new TextDecoder().decode(raw.subarray(0, 512));
+  return { status: res.status, body, retryAfter: Number.isSafeInteger(after) && after > 0 ? after : null, http };
+}
+
+// A URL as a refusal shows it: no query (it carries the DID), no code hash.
+function where(url) {
+  try { const u = new URL(url); return u.origin + u.pathname.replace(/\/[0-9a-f]{64}$/, '/<code hash>'); } catch { return String(url); }
+}
+// A refusal of a relay's HTTP answer r, with the answer kept for SIGELO_DEBUG.
+const refuse = (check, why, r) => fail(check, why, { http: r.http });
+// When to try again after a 429: the relay's Retry-After, else the window its brake counts in.
+const retryIn = (r, window) => (r.retryAfter ? `wait ${r.retryAfter} s` : `wait ${window}`);
+// A status no answer about this agent: the relay is down, restarting, or behind a proxy that is.
+const statusWhy = (r, what) => `the relay answered ${r.status} to ${what}${r.status >= 500 ? ': it is down or restarting; try again in a few minutes' : ': try again later; SIGELO_DEBUG=1 shows the answer'}`;
+/** A long code (or one fetched by a short one: parked) read with parseInvite; a malformed one
+ *  is refused saying how the input was read, so a mistyped short code never reads "does not
+ *  start with sgl1". */
+export function readCode(text, now, how = 'long') {
+  try { return parseInvite(text, now); } catch (e) {
+    if (!(e instanceof MsgError) || !['code_checksum', 'code_length', 'code_version'].includes(e.check)) throw e;
+    const as = how === 'parked' ? 'the long code the relay holds for this short code does not parse; ask the inviter for a new one'
+      : `read as a long code (it starts sgl1, or has more than 12 characters; a short code has 8, like K7F3-Q9ZP): ${reason(e)}`;
+    throw new MsgError(e.check, how === 'parked' ? `${as} (${reason(e)})` : as, { cause: e });
+  }
+}
+
+// A short code is spent once fetched (unpark): a refusal after that would lose the long code it
+// stood for, so the refusal carries it (.long, and in its words). Not when the answer it made
+// still stands (queued, or held by the relay: .kept) nor when the code was answered already.
+export function keepLong(e, long) {
+  if (e?.kept || e?.check === 'mailbox_taken') return e;
+  const k = new MsgError(e instanceof MsgError ? e.check : 'error', `${e instanceof Error ? reason(e) : String(e)}. The short code is used up; its long code: ${long} (keep this; accept it with the long code)`, { cause: e, http: e?.http });
+  k.long = long;
+  return k;
 }
 
 // Text a relay writes reaches the operator, and perhaps a model, inside this client's messages:
@@ -580,11 +625,20 @@ async function named(ep, creds, err) {
   try {
     const r = await http(`${ep.http}/check`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password }) });
     if (r.body?.ok === false && typeof r.body.check === 'string') {
-      return new MsgError(LOGIN_CHECKS.has(r.body.check) ? r.body.check : 'connect', `the relay refused the login (${relaySays(`${r.body.check}: ${r.body.detail}`)})`);
+      const check = LOGIN_CHECKS.has(r.body.check) ? r.body.check : 'connect';
+      return new MsgError(check, `the relay refused the login (${relaySays(`${r.body.check}: ${r.body.detail}`)})${LOGIN_NEXT[check] ? `: ${LOGIN_NEXT[check]}` : ''}`, { cause: err, http: r.http });
     }
   } catch {}
-  return err instanceof MsgError ? err : new MsgError('connect', err.message);
+  return err instanceof MsgError ? err : new MsgError('connect', `the relay at ${ep.mqtt} did not take the connection (${err.message}): check the network and SIGELO_RELAY / SIGELO_RELAY_ENDPOINTS, then try again`, { cause: err });
 }
+// What to do after a login refusal, by its check (relay/auth.mjs). bundle: sigelo-agent adds the lockout.
+const LOGIN_NEXT = {
+  rate: 'too many logins from this network: wait a minute, then try again',
+  relay_full: 'the relay is full: try again later',
+  challenge_expired: 'the login took longer than its challenge lives (a slow proof of work): try again',
+  challenge_unknown: 'try again',
+  connect: 'try again later',
+};
 
 /**
  * Reads each MQTT packet's fixed header (a type byte, then its length in 1 to 4 bytes of 7 bits,
@@ -709,12 +763,26 @@ export class Carrier {
       // Before anything reads the store: a recovery made by another process (sigelo-agent recover)
       // is seen at once. The store's marks are written first; the state keeps the events.
       if (this.#markRecovered(ctx)) saveState(this.statePath, ctx.st);
+      if (this.#lapse(ctx)) saveState(this.statePath, ctx.st);
       const out = fn(ctx);
+      // Answers that fn's adds and takes found expired.
+      if (this.#lapse(ctx) && !write) saveState(this.statePath, ctx.st);
       if (write) { saveState(this.statePath, ctx.st); ctx.store.commit(); }
       return out;
     });
   }
   #locked(fn) { return this.#with(true, fn); }
+
+  // An answer that expired before the inviter's reply came: the accept said "waiting", so the next
+  // inbox (and contacts until then) says it failed, rather than nothing at all.
+  #lapse({ now, store, st }) {
+    const gone = store.lapsed(now);
+    for (const p of gone) {
+      this.#emit(this.#note(st, now, { type: 'pairing_failed', did: p.code_did, name: p.name, code: 'code_expired',
+        detail: `the code from ${p.name} expired at ${new Date(p.exp * 1000).toISOString().replace('.000', '')} before the inviter's agent replied: ask the inviter for a new code` }));
+    }
+    return gone.length > 0;
+  }
   #read(fn) { return this.#with(false, fn); }
 
   // This agent recovered after it last told a contact of its keys (`announced`: a DID at or before
@@ -862,7 +930,7 @@ export class Carrier {
       if (c.revoked) fail('revoked', `${c.did} was revoked by this owner`);
     } else {
       const hits = this.#liveContacts(store).filter((x) => x.name === to);
-      if (hits.length === 0) fail('not_contact', `no contact named ${JSON.stringify(to)}`);
+      if (hits.length === 0) fail('not_contact', `no contact named ${JSON.stringify(to)}: contacts lists them; a contact comes from an invite and its accept`);
       if (hits.length > 1) fail('name', `${hits.length} contacts are named ${JSON.stringify(to)}: use the DID`);
       c = hits[0];
     }
@@ -1591,11 +1659,11 @@ export class Carrier {
     const { me, proven } = this.#read(({ me, st }) => ({ me, proven: st.relays[relay]?.proven === true }));
     const powMax = relay === this.relay ? POW_MAX : POW_MAX_OTHER;
     const r = await http(`${ep.http}/challenge?did=${encodeURIComponent(me.current_did)}`);
-    if (r.status === 429) fail('rate', `GET /challenge: too many challenges from this network (${relaySays(r.body?.error)})`);
+    if (r.status === 429) refuse('rate', `the relay ${relay} turned the login away: too many logins from this network (${relaySays(r.body?.error ?? r.body?.detail)}): ${retryIn(r, 'a minute')}, then try again`, r);
     // Any other status is no answer about this agent (nginx says 502 while the relay restarts):
     // `connect`, retried. `challenge`, which no retry fixes, is a 200 that is not this relay's
     // challenge for this agent.
-    if (r.status !== 200) fail('connect', `GET /challenge answered ${r.status}`);
+    if (r.status !== 200) refuse('connect', `${relay}: ${statusWhy(r, 'GET /challenge')}`, r);
     const ch = r.body?.challenge;
     if (!exact(ch, ['v', 'typ', 'did', 'relay', 'nonce']) || ch.v !== LOGIN_V || ch.typ !== TYP_LOGIN || typeof ch.nonce !== 'string' || ch.nonce.length > 128) {
       fail('challenge', `GET /challenge did not answer a login body {v: "${LOGIN_V}", typ: "${TYP_LOGIN}", did, relay, nonce}`);
@@ -1807,11 +1875,16 @@ export class Carrier {
       const creds = await this.#credentials(code.relay, ep);
       const r = await http(`${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: codeHash(s), invite: code.text, exp }) });
       const check = typeof r.body?.check === 'string' ? r.body.check : null;
-      if (r.status === 429) fail('rate', `POST /park: ${relaySays(r.body?.detail)}`);
-      if ((r.status === 404 || r.status === 405) && check === null) fail('park', `${code.relay} takes no short codes: use the long code (invite --long)`);
-      if (r.status !== 200) fail('connect', `POST /park answered ${r.status}`);
-      if (r.body?.ok !== true) fail(PARK_CHECKS.has(check) ? check : 'park', `the relay refused the short code (${relaySays(`${check}: ${r.body?.detail}`)})`);
-      return { code: code.text, did: code.did, relay: code.relay, exp: code.exp, short: formatShort(s), short_exp: exp };
+      if (r.status === 429) refuse('rate', `the relay ${code.relay} parks no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to an hour')}, or use the long code (invite --long)`, r);
+      if ((r.status === 404 || r.status === 405) && check === null) refuse('park', `the relay ${code.relay} takes no short codes: use the long code (invite --long)`, r);
+      if (r.status !== 200) refuse('connect', `${code.relay}: ${statusWhy(r, 'POST /park')}`, r);
+      // exp is this machine's clock: one far off the relay's is refused (relay/park.mjs PARK_SKEW).
+      const clock = typeof r.body?.detail === 'string' && r.body.detail.startsWith('exp:') ? ': this machine\'s clock may be off (date -u), or use the long code (invite --long)' : '';
+      if (r.body?.ok !== true) refuse(PARK_CHECKS.has(check) ? check : 'park', `the relay refused the short code (${relaySays(`${check}: ${r.body?.detail}`)})${clock}`, r);
+      // The relay keeps the code until its own exp (park.mjs: at most SHORT_TTL by its clock), not
+      // this machine's: that is the one shown. This machine's only when the relay names none.
+      const held = Number.isSafeInteger(r.body.exp) && r.body.exp > 0 ? r.body.exp : exp;
+      return { code: code.text, did: code.did, relay: code.relay, exp: code.exp, short: formatShort(s), short_exp: held };
     } catch (e) {
       try { this.#locked(({ store }) => store.cancelInvite(code.nonce)); } catch {}
       throw e;
@@ -1822,21 +1895,29 @@ export class Carrier {
   // GET /park/<code hash>, which the relay answers once. Whatever it answers is a code to parse
   // like any other (accept); the four words show whether the pairing is the inviter's.
   async unpark(text) {
-    const ep = endpointOf(this.relay, this.endpoints);
+    const shown = formatShort(normaliseShort(text)), ep = endpointOf(this.relay, this.endpoints);
     const r = await http(`${ep.http}/park/${codeHash(text)}`);
-    if (r.status === 429) fail('rate', `GET /park: ${relaySays(r.body?.detail)}`);
+    if (r.status === 429) refuse('rate', `the relay ${this.relay} looks up no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to 10 minutes')}, or ask for the long code (invite --long)`, r);
     if (r.status === 404 && r.body?.check === 'park_unknown') {
-      fail('park_unknown', `no invite waits under this short code at ${this.relay}: mistyped, used already, or older than 10 minutes. Ask for a new one (a code made at another relay works only as the long code: invite --long)`);
+      refuse('park_unknown', `short code ${shown}: no invite waits under it at ${this.relay}. It expired (a short code lives 10 minutes), was used already (once only), or is mistyped; ask the inviter for a new one. If the inviter's agent uses another relay than ${this.relay} (SIGELO_RELAY), ask for the long code (invite --long)`, r);
     }
-    if (r.status === 404 || r.status === 405) fail('park', `${this.relay} takes no short codes: ask for the long code (invite --long)`);
-    if (r.status !== 200 || r.body?.ok !== true || typeof r.body.invite !== 'string') fail('connect', `GET /park answered ${r.status}`);
+    if (r.status === 404 || r.status === 405) refuse('park', `the relay ${this.relay} takes no short codes: ask the inviter for the long code (invite --long)`, r);
+    if (r.status !== 200) refuse('connect', `${this.relay}: ${statusWhy(r, 'GET /park')}`, r);
+    if (r.body?.ok !== true || typeof r.body.invite !== 'string') refuse('connect', `${this.relay}: GET /park answered 200 without a parked code: try again later; SIGELO_DEBUG=1 shows the answer`, r);
     return r.body.invite;
   }
 
-  async accept(text, { name, wait = 10 } = {}) {
-    if (isShort(text)) text = await this.unpark(text);
+  async accept(text, opts = {}) {
+    // Short or long by the input's shape, before either parser runs (short.mjs codeKind).
+    const how = codeKind(text) === 'short' ? 'parked' : 'long';
+    if (how !== 'parked') return this.#answer(text, how, opts);
+    const long = await this.unpark(text);
+    try { return await this.#answer(long, how, opts); } catch (e) { throw keepLong(e, long); }
+  }
+
+  async #answer(text, how, { name, wait = 10 } = {}) {
     const { code, id, entry } = this.#locked(({ now, me, store, st }) => {
-      const code = parseInvite(text, now);
+      const code = readCode(text, now, how);
       // This agent's own relay, and those its operator configured, are the operator's choice.
       if (code.relay !== this.relay && !Object.hasOwn(this.endpoints ?? {}, code.relay) && !publicRelay(code.relay)) {
         fail('code_relay', `the code names ${code.relay}, an address or a local name, not a public relay: allow it in SIGELO_RELAY_ENDPOINTS if it is yours`);
@@ -1879,13 +1960,20 @@ export class Carrier {
         return 'withdrawn';
       });
       const why = { withdrawn: 'the answer is withdrawn', queued: 'the answer stays queued: it goes at the next connection', delivered: 'the relay holds the answer: the reply is read at a later connection' }[left];
-      throw new MsgError(e.check ?? 'connect', `${reason(e)} (${why})`);
+      const err = new MsgError(e.check ?? 'connect', `${reason(e)} (${why})`, { cause: e, http: e.http });
+      if (left !== 'withdrawn') err.kept = true;
+      throw err;
     }
     const h = this.#handshakes.get(id), sent = this.#results.get(entry);
     this.#handshakes.delete(id); this.#results.delete(entry);
     if (h?.check) fail(h.check, h.detail);
     if (h) return { status: 'connected', contact: h.contact };
-    if (this.#refusedTopics.has(reply)) { const r = this.#refusedTopics.get(reply); drop(r.code, `the relay did not let this agent claim the reply topic (${relaySays(r.detail)})`); }
+    if (this.#refusedTopics.has(reply)) {
+      const r = this.#refusedTopics.get(reply);
+      // The reply topic is the code's: held by another identity, someone answered the code first.
+      drop(r.code, r.code === 'mailbox_taken' ? `this code was answered already, by another agent (a code works once): ask the inviter for a new one (${relaySays(r.detail)})`
+        : `the relay did not let this agent claim the reply topic (${relaySays(r.detail)})`);
+    }
     if (sent?.code) drop(sent.code, `the relay refused the answer (${relaySays(sent.detail)})`);
     if (!sent) return { status: 'pending', did: code.did, relay: code.relay, detail: 'the answer has not reached the relay yet: it goes at the next connection' };
     return { status: 'waiting', did: code.did, relay: code.relay, detail: 'answer delivered; the pairing completes when the inviter\'s agent next connects' };
@@ -1899,6 +1987,8 @@ export class Carrier {
           re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key) })),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
+        // Pairings that failed since the last inbox, which takes them as events.
+        failed: st.events.filter((e) => e.type === 'pairing_failed').map(({ name, did, code, detail, at }) => ({ name, did, code, detail, at })),
       };
     });
   }
@@ -1942,7 +2032,7 @@ export class Carrier {
       return { ids, c };
     });
     try { await this.#session([c.relay]); } catch (e) {
-      throw new MsgError(e.check ?? 'connect', `${reason(e)} (${ids.length === 1 ? 'the message stays' : `the ${ids.length} messages stay`} queued for ${c.name}: they go at the next connection)`);
+      throw new MsgError(e.check ?? 'connect', `${reason(e)} (${ids.length === 1 ? 'the message stays' : `the ${ids.length} messages stay`} queued for ${c.name}: they go at the next connection)`, { cause: e, http: e.http });
     }
     return ids.map((id) => {
       const r = this.#results.get(id);
@@ -1961,7 +2051,7 @@ export class Carrier {
     const inUse = this.#relaysInUse(), relays = inUse.length > 0 ? inUse : [this.relay];
     try {
       await this.#session(relays, wait > 0 ? { max: wait * 1000, until: () => this.#read(({ st }) => st.inbox.length > 0) } : {});
-    } catch (e) { offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
+    } catch (e) { this.lastError = e; offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
     return this.#locked(({ st }) => {
       const out = { messages: st.inbox, events: st.events, dropped: st.dropped, ...(offline && { offline }) };
       st.inbox = []; st.events = []; st.dropped = {};
@@ -1979,7 +2069,7 @@ export class Carrier {
     this.#routes = new Map();
     // Revoked here whatever the relay says; offline: its mailboxes are given up at a later round.
     let offline = null;
-    try { await this.#session([c.relay]); } catch (e) { offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
+    try { await this.#session([c.relay]); } catch (e) { this.lastError = e; offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
     const released = this.#read(({ st }) => !Object.values(st.relays[c.relay]?.claims ?? {}).some((x) => x.peer === c.did));
     return { name: c.name, did: c.did, revoked: true, released, ...(offline && { offline }) };
   }

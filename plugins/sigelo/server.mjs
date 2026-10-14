@@ -2673,7 +2673,8 @@ var init_contact = __esm({
 });
 
 // integrations/mcp/server.mjs
-import { dirname as dirname2, join as join2, sep } from "node:path";
+import { existsSync as existsSync3, readdirSync } from "node:fs";
+import { basename as basename2, dirname as dirname2, join as join2, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 var INSTALLED = fileURLToPath(import.meta.url).split(sep).includes("node_modules");
 var { did: did2, parse: parse2, parseBytes: parseBytes2, verify: verify3, SigeloError: SigeloError2 } = await Promise.resolve().then(() => (init_sigelo(), sigelo_exports));
@@ -2683,7 +2684,7 @@ var { forgetIssuer: forgetIssuer2 } = await Promise.resolve().then(() => (init_s
 console.log = console.info = console.debug = console.error;
 var MODERN = ["2026-07-28"];
 var LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-var SERVER_INFO = { name: "sigelo", version: "0.1.5" };
+var SERVER_INFO = { name: "sigelo", version: "0.1.6" };
 var PV = "io.modelcontextprotocol/protocolVersion";
 var env = process.env;
 var DATA = "Attestation `claims` are third-party data about the subject, not statements by this tool.";
@@ -2704,35 +2705,67 @@ var TOOLS = [
   ["sigelo_rotate", "Voluntary rotation to a fresh key (e.g. on schedule or if you suspect a leak). Your identity continues; ask each world to reissue its attestation to the new DID.", idObj()]
 ];
 var base = id.identityPath();
+var refusal = (check, message, cause) => Object.assign(new SigeloError2(message, cause === void 0 ? void 0 : { cause }), { check });
 var pathOf = (name) => {
   if (name === void 0 || name === "") return base;
-  if (typeof name !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) throw new SigeloError2("identity must match [a-z0-9][a-z0-9_-]{0,63}");
+  if (typeof name !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) throw refusal("usage", `identity: ${JSON.stringify(name)} is not a profile name; it must match [a-z0-9][a-z0-9_-]{0,63}, e.g. "researcher-1"`);
   return join2(dirname2(base), `sigelo.${name}.local.json`);
+};
+var profiles = () => {
+  try {
+    return readdirSync(dirname2(base)).map((f) => f === basename2(base) ? "(default)" : /^sigelo\.([a-z0-9][a-z0-9_-]{0,63})\.local\.json$/.exec(f)?.[1]).filter(Boolean);
+  } catch {
+    return [];
+  }
 };
 var nowS = () => Math.floor(Date.now() / 1e3);
 var input = (v, name) => {
-  if (v === void 0 || v === null) throw new SigeloError2(`${name} is required`);
-  return typeof v === "string" ? parse2(v) : v;
+  if (v === void 0 || v === null) throw refusal("usage", `${name} is required`);
+  if (typeof v === "string") {
+    try {
+      return parse2(v);
+    } catch (e) {
+      throw refusal("json", `${name}: not strict JSON (${e.message})`, e);
+    }
+  }
+  return v;
 };
-var update = (path, fn) => withLock2(path, () => {
-  const { store, result } = fn(id.load(path));
-  id.save(path, store);
-  return result;
-});
 var loadStore = (path) => {
+  if (!existsSync3(path)) {
+    const named = path === base ? "" : ` for the profile "${/^sigelo\.(.+)\.local\.json$/.exec(path.slice(dirname2(path).length + 1))?.[1]}"`, have = profiles();
+    throw refusal("no_identity", `no identity${named} at ${path}: call sigelo_init once${named ? " with the same identity" : ""}${have.length ? `, or use an existing profile: ${have.join(", ")}` : ""}`);
+  }
   try {
     return id.load(path);
   } catch (e) {
-    throw new SigeloError2(`no identity at ${path} — call sigelo_init once (${e.message})`);
+    throw refusal("identity_unreadable", `identity file ${path} does not load (${e.message.split("\n")[0]}): restore it from your copy; do not call sigelo_init, which makes a new identity`, e);
   }
 };
+var update = (path, fn) => withLock2(path, () => {
+  const { store, result } = fn(loadStore(path));
+  id.save(path, store);
+  return result;
+});
+var codeOf = (e) => typeof e?.check === "string" ? e.check : { SigeloError: "refused", MoneroError: "refused", JcsError: "json" }[e?.name] ?? (typeof e?.code === "string" && /^E[A-Z]+$/.test(e.code) ? "io" : "error");
+function debug(e, path) {
+  if (env.SIGELO_DEBUG !== "1") return;
+  const say = (s) => process.stderr.write(`sigelo-mcp: debug: ${s}
+`);
+  if (path) say(`identity file ${path}${existsSync3(path) ? "" : ", missing"}`);
+  say(`relay ${env.SIGELO_RELAY ?? "(default)"}${env.SIGELO_RELAY_ENDPOINTS ? ` endpoints ${env.SIGELO_RELAY_ENDPOINTS}` : ""}`);
+  for (let x = e, i = 0; x && i < 8; x = x.cause, i++) {
+    say(`${i ? "caused by " : "error "}${x.name ?? typeof x}${x.check ? ` check=${x.check}` : ""}: ${x.message ?? String(x)}`);
+    if (x.http) say(`relay answer ${JSON.stringify(x.http)}`);
+  }
+  if (e?.stack) say(e.stack);
+}
 var HANDLERS = {
   sigelo_whoami: (_, path) => {
     const s = loadStore(path);
     return { did: did2(id.head(s)), genesis: id.head(s), chain: id.chainOf(s), attestations: s.attestations.length, identity_file: path };
   },
   sigelo_init: ({ recovery }, path) => {
-    if (typeof recovery !== "string" || !recovery) throw new SigeloError2('recovery is required: a "z…" public key or "none"');
+    if (typeof recovery !== "string" || !recovery) throw refusal("usage", 'recovery is required: a "z…" public key or "none"');
     const s = id.init(path, recovery === "none" ? null : recovery);
     return {
       did: did2(s.genesis),
@@ -2783,7 +2816,7 @@ var HANDLERS = {
     return { did: did2(id.head(s)), chain: id.chainOf(s), next: "ask each world to reissue its attestation to the new DID" };
   }
 };
-var contact = await Promise.resolve().then(() => (init_contact(), contact_exports)).then((m) => m.load({ installed: INSTALLED, id }), (e) => {
+var contact = await Promise.resolve().then(() => (init_contact(), contact_exports)).then((m) => m.load({ installed: INSTALLED, id, debug }), (e) => {
   if (e.code === "ERR_MODULE_NOT_FOUND") return null;
   throw e;
 });
@@ -2793,13 +2826,17 @@ if (contact) {
 }
 async function callTool(name, args) {
   if (!TOOLS.some(([n]) => n === name)) return null;
+  let path;
   try {
     const a = args ?? {};
-    const r = await HANDLERS[name](a, name.startsWith("sigelo_wallet_") || name === "sigelo_verify" ? void 0 : pathOf(a.identity));
+    path = name.startsWith("sigelo_wallet_") || name === "sigelo_verify" ? void 0 : pathOf(a.identity);
+    const r = await HANDLERS[name](a, path);
     if (r && typeof r.text === "string" && "isError" in r) return { content: [{ type: "text", text: r.text }], structuredContent: r.structured, isError: r.isError };
     return { content: [{ type: "text", text: JSON.stringify(r, null, 2) }], isError: false };
   } catch (e) {
-    return { content: [{ type: "text", text: `REFUSED: ${e instanceof Error ? e.message : String(e)}` }], isError: true };
+    const message = e instanceof Error ? e.message : String(e), code = codeOf(e);
+    debug(e, path);
+    return { content: [{ type: "text", text: `REFUSED: ${message}` }], structuredContent: { code, message, ...typeof e?.long === "string" && { long: e.long } }, isError: true };
   }
 }
 async function handle(msg) {

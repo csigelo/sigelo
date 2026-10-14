@@ -45,6 +45,9 @@ const isTime = (t) => Number.isSafeInteger(t) && t >= 0;
 // `now` comes from the caller, never from a peer, but NaN or a string would make every expiry
 // comparison false: fail open. Checked at every entry point.
 export const checkTime = (now) => { if (!isTime(now)) fail('now', 'must be Unix seconds'); };
+// For people reading a refusal: an instant, and a span, as words.
+const iso = (t) => new Date(t * 1000).toISOString().replace('.000', '');
+const ago = (s) => (s < 120 ? `${s} s` : s < 7200 ? `${Math.round(s / 60)} minutes` : s < 172800 ? `${Math.round(s / 3600)} hours` : `${Math.round(s / 86400)} days`);
 
 // ---------------------------------------------------------------- the code
 
@@ -128,26 +131,30 @@ export function parseInvite(text, now) {
   // Only another version's prefix is a version error. Any other start ("sgI1", "Sgl1", a lost
   // first character) is a typo, and reads as one, like a typo among the digits.
   if (typeof text === 'string' && /^sgl[02-9]/.test(text)) fail('code_version', `a ${text.slice(0, 4)} code; this library reads ${PREFIX}`);
-  if (typeof text !== 'string' || !text.startsWith(PREFIX)) fail('code_checksum', `does not start with ${PREFIX}: a typo, or not the whole code`);
+  if (typeof text !== 'string' || !text.startsWith(PREFIX)) fail('code_checksum', `it does not start with ${PREFIX}: paste the whole code, from ${PREFIX} to its last character`);
   const digits = text.slice(PREFIX.length);
-  if (digits.length === 0 || digits.length > MAX_DIGITS) fail('code_length', `${digits.length} digits, at most ${MAX_DIGITS}`);
-  for (const ch of digits) if (!B58.includes(ch)) fail('code_checksum', `${JSON.stringify(ch)} is not a base58 digit: a typo`);
+  if (digits.length === 0 || digits.length > MAX_DIGITS) fail('code_length', `${digits.length} characters after ${PREFIX}, ${digits.length === 0 ? 'none' : `at most ${MAX_DIGITS}`}: not the whole code, or two codes run together`);
+  let at = PREFIX.length;
+  for (const ch of digits) {
+    at++;
+    if (!B58.includes(ch)) fail('code_checksum', `character ${at} ${JSON.stringify(ch)} is not in a long code (base58: no 0, O, I or l): a typo; copy the code, do not retype it`);
+  }
   const b = b58decode(digits);
-  if (b.length < 5) fail('code_length', `${b.length} bytes`);
+  if (b.length < 5) fail('code_length', `${b.length} bytes, too short for a code: not the whole code`);
   // The checksum first: it sits at the end whatever the layout, so a typo reads as a typo even
   // when it hits the version or the length byte.
   const sum = sha256(b.subarray(0, b.length - 4));
-  for (let i = 0; i < 4; i++) if (sum[i] !== b[b.length - 4 + i]) fail('code_checksum', 'does not match: a typo, or not the whole code');
+  for (let i = 0; i < 4; i++) if (sum[i] !== b[b.length - 4 + i]) fail('code_checksum', 'its checksum does not match: a character is wrong, missing or extra; copy the whole code again, do not retype it');
   if (b[0] !== VERSION) fail('code_version', `version ${b[0]}, this library reads ${VERSION}`);
   const n = b.length > AT_RLEN ? b[AT_RLEN] : 0;
-  if (n < 1 || n > RELAY_MAX || b.length !== FIXED + n) fail('code_length', `${b.length} bytes with a relay length of ${n}`);
+  if (n < 1 || n > RELAY_MAX || b.length !== FIXED + n) fail('code_length', `${b.length} bytes with a relay length of ${n}: not a code this library makes`);
   const relay = String.fromCharCode(...b.subarray(AT_RELAY, AT_RELAY + n));
   checkRelay(relay);
   const exp = new DataView(b.buffer, b.byteOffset).getUint32(AT_EXP);
-  if (now >= exp) fail('code_expired', `expired at ${exp}`);
+  if (now >= exp) fail('code_expired', `it expired at ${iso(exp)}, ${ago(now - exp)} ago by this machine's clock (${iso(now)}): ask for a new code; if it was made just now, this clock is wrong (date -u)`);
   // No inviter makes a code for longer than 7 days. A longer one would keep Bob's one-time secret
   // and key in his store for as long as it says.
-  if (exp - now > TTL_MAX + SKEW) fail('code_ttl', `expires ${exp - now} seconds from now; an invite lives at most ${TTL_MAX}`);
+  if (exp - now > TTL_MAX + SKEW) fail('code_ttl', `it expires at ${iso(exp)}, ${ago(exp - now)} from now by this machine's clock (${iso(now)}), and a code lives at most 7 days: this clock is behind (date -u), or the code was not made by sigelo`);
   const secret = b.slice(AT_SECRET, AT_EXP);
   return { did: 'did:sigelo:' + multibase(b.slice(AT_DID, AT_SECRET)), secret, exp, relay, bytes: b, text, nonce: inviteNonce(b) };
 }

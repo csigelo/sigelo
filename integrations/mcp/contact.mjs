@@ -27,7 +27,7 @@ const int = (d, maximum) => ({ type: 'integer', minimum: 0, ...(maximum !== unde
 // which binds both original DIDs) are what two operators read to each other to know their agents
 // paired with each other, as sigelo-agent's accept, inbox and contacts show them. 44 bits: the
 // 32-digit pair id stays beside them for whoever wants all 128 (THREAT-MODEL.md §2.10).
-const CONFIRM = 'Show your operator the contact\'s DID and its four words (fingerprint): they read them to the other operator; the same words on both sides = nobody, not even the relay, swapped the pairing.';
+const CONFIRM = 'Show your operator the contact\'s DID and four words (fingerprint) to read to the other side. Same words = no mix-up or casual swap; a relay spending GPU time is caught by pair (32 digits).';
 // The proof of work runs at an identity's first login: about 23 s on average at 22 bits on a
 // phone-class CPU, 92 s at 24 (design/relay-plan.md §11), past some clients' tool timeouts.
 const POW = 'A first call can take minutes: your first login to the relay solves a proof of work. If your client gives up, call again.';
@@ -39,7 +39,7 @@ const TOOLS = [
     obj({ name: str('the name you will call the new contact'), ttl: int('seconds the long code lives, at most 604800 (7 days)'), long: { type: 'boolean', description: 'true: the long code only, no short code' } })],
   ['sigelo_accept', `Accept an invite code from another agent's operator: sends your answer (whoever holds the code learns your DID); pairs once the inviter's reply verifies against the code. Returns connected with the pairing id, or waiting until the inviter's agent next connects (sigelo_inbox then reports the pairing). ${CONFIRM} ${POW} ${RELAY_DATA}`,
     obj({ code: str('the short code (K7F3-Q9ZP; case, I/L/O and dashes do not matter) or the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX) }, ['code'])],
-  ['sigelo_contacts', `Your contacts (name, original DID, current DID, revoked, relay, messages queued for them, pairing id, four words, re_pair) and your pending invites and answers. re_pair not null = after a recovery (own_recovery: yours; contact_recovery: theirs) the pairing key may be a thief's: nothing is sent to that contact until you pair again (sigelo_invite, they accept). ${CONFIRM}`, obj()],
+  ['sigelo_contacts', `Your contacts (name, original DID, current DID, revoked, relay, messages queued for them, pairing id, four words, re_pair), your pending invites and answers, and failed pairings (code_expired: ask for a new code). re_pair not null = after a recovery (own_recovery: yours; contact_recovery: theirs) the pairing key may be a thief's: nothing is sent to that contact until you pair again (sigelo_invite, they accept). ${CONFIRM}`, obj()],
   ['sigelo_send', `Send an end-to-end encrypted message to a contact, by name or DID. The relay sees only ciphertext. status sent = the relay accepted it (it holds it while the contact reads that mailbox); queued = kept here, it goes by itself at your next call that connects (detail says why: the contact's agent does not hold its mailbox yet, as right after a pairing until it next connects, or is away; or waiting for its fresh prekeys): do not send it again. Error not_paired = your answer to its code waits for the inviter's agent. Error re_pair = pair again first (see sigelo_contacts). ${RELAY_DATA}`,
     obj({ to: str('contact name or DID'), text: str('the message'), label: str('optional conversation label, e.g. "billing"') }, ['to', 'text'])],
   ['sigelo_inbox', `Messages from your contacts since you last asked (each returned once), and events: pairings done (with the four words to show your operator) or failed (with why), contacts' key rotations, re_pair (pair again after a recovery), refused (your queued messages to such a contact; or a contact's messages signed by a key its recovery overruled, maybe a thief's), waiting (for a contact's prekeys or its agent). last_resort = weaker forward secrecy. dropped: refusals by check. more > 0: call again now. ${DATA} ${RELAY_DATA}`,
@@ -56,7 +56,7 @@ const TOOLS = [
 // keeps the held inbox. → null, with one line on stderr, when sigelo-contact (in that install) or
 // one of its dependencies is not installed. Anything else (a refused package, a file missing in
 // one, a syntax error) throws: a broken install must not pass for an absent one.
-export async function load({ installed, id, env = process.env, clock }) {
+export async function load({ installed, id, env = process.env, clock, debug = () => {} }) {
   const held = await import(installed ? 'sigelo-agent/dist/sigelo-agent-contact.js' : '../../adapters/moadim/sigelo-agent-contact.ts');
   let lib, kdf;
   try { ({ lib, kdf } = await held.contactLib()); } catch (e) {
@@ -86,10 +86,12 @@ export async function load({ installed, id, env = process.env, clock }) {
     queues.set(path, run.catch(() => {}));
     return run;
   };
-  const text = (v, name) => { if (typeof v !== 'string' || v === '') throw new Error(`${name} is required`); return v; };
+  // A refusal of the call's arguments: code usage (server.mjs codeOf reads .check).
+  const usage = (why) => Object.assign(new Error(why), { check: 'usage' });
+  const text = (v, name) => { if (typeof v !== 'string' || v === '') throw usage(`${name} is required`); return v; };
   const seconds = (v, name, dflt) => {
     if (v === undefined) return dflt;
-    if (!Number.isSafeInteger(v) || v < 0 || v > WAIT_MAX) throw new Error(`${name}: whole seconds, 0 to ${WAIT_MAX}`);
+    if (!Number.isSafeInteger(v) || v < 0 || v > WAIT_MAX) throw usage(`${name}: whole seconds, 0 to ${WAIT_MAX}`);
     return v;
   };
   // The pairing id of a live contact, from the pairing key in the contact store (store.mjs); null
@@ -116,13 +118,14 @@ export async function load({ installed, id, env = process.env, clock }) {
   const inbox = async ({ wait }, path) => {
     const w = seconds(wait, 'wait', 0), file = held.heldPath(path);
     const fresh = held.peekHeld(file).messages.length > 0 ? { messages: [], events: [], dropped: {} } : await carrier(path).inbox({ wait: w });
+    if (fresh.offline !== undefined) debug(carrier(path).lastError, path);
     const { text, rest } = page(held.merge(held.takeHeld(file), fresh));
     held.putBack(file, { messages: rest, events: [], dropped: {} });
     return { text, isError: false };
   };
   const handlers = {
     sigelo_invite: serial(({ name, ttl, long }, path) => {
-      if (long !== undefined && typeof long !== 'boolean') throw new Error('long: true or false');
+      if (long !== undefined && typeof long !== 'boolean') throw usage('long: true or false');
       return carrier(path).invite({ name, ttl, short: long !== true });
     }),
     // A code never contains whitespace; one pasted from a wrapped mail line may, and a short one
@@ -134,7 +137,11 @@ export async function load({ installed, id, env = process.env, clock }) {
     sigelo_contacts: (_, path) => { const r = carrier(path).contacts(); return { ...r, contacts: r.contacts.map((c) => ({ ...c, pair: pairOf(path, c.did) })) }; },
     sigelo_send: serial(({ to, text: t, label }, path) => carrier(path).send(text(to, 'to'), text(t, 'text'), { label: label ?? '' })),
     sigelo_inbox: serial(inbox),
-    sigelo_forget_contact: serial(({ did }, path) => carrier(path).forget(text(did, 'did'))),
+    sigelo_forget_contact: serial(async ({ did }, path) => {
+      const r = await carrier(path).forget(text(did, 'did'));
+      if (r.offline !== undefined) debug(carrier(path).lastError, path);
+      return r;
+    }),
   };
   return { tools: TOOLS, handlers };
 }

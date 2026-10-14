@@ -1,6 +1,6 @@
 {
   "name": "sigelo-contact",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": false,
   "description": "Agent contacts for sigelo identities: invite codes, a contact store, end-to-end encrypted envelopes with hybrid post-quantum key agreement, and an MQTT carrier. Client code (MIT); the relay server is csigelo/sigelo-relay (AGPL-3.0).",
   "keywords": [

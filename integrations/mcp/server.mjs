@@ -5,7 +5,8 @@
 // over the agent-side library in adapters/moadim and, when a keeper is configured, the
 // `sigelo-wallet` client in spend/. Zero dependencies of its own: no crypto here, only calls.
 // Transport: one JSON-RPC message per line on stdin/stdout; logs go to stderr only.
-import { dirname, join, sep } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
+import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // Installed (npm), the libraries are the packages sigelo, sigelo-agent and sigelo-spend; run
 // from a clone of the repository, they are the sibling directories, and the agent library runs
@@ -25,7 +26,7 @@ console.log = console.info = console.debug = console.error;
 
 const MODERN = ['2026-07-28'];                                            // per-request _meta era
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];  // initialize era
-const SERVER_INFO = { name: 'sigelo', version: '0.1.5' };
+const SERVER_INFO = { name: 'sigelo', version: '0.1.6' };
 const PV = 'io.modelcontextprotocol/protocolVersion';
 const env = process.env;
 const WALLET = Boolean(env.SIGELO_WALLET_URL && env.SIGELO_WALLET_TOKEN);
@@ -61,20 +62,52 @@ if (WALLET) TOOLS.push(
 );
 
 const base = id.identityPath();
+// A refusal the framework can branch on: .check is its stable code (the contact library's MsgError
+// carries one already), the message its one human line.
+const refusal = (check, message, cause) => Object.assign(new SigeloError(message, cause === undefined ? undefined : { cause }), { check });
 const pathOf = (name) => {
   if (name === undefined || name === '') return base;
-  if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) throw new SigeloError('identity must match [a-z0-9][a-z0-9_-]{0,63}');
+  if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) throw refusal('usage', `identity: ${JSON.stringify(name)} is not a profile name; it must match [a-z0-9][a-z0-9_-]{0,63}, e.g. "researcher-1"`);
   return join(dirname(base), `sigelo.${name}.local.json`);
+};
+// The profiles beside the default identity file, for a refusal naming one that is not there.
+const profiles = () => {
+  try {
+    return readdirSync(dirname(base)).map((f) => (f === basename(base) ? '(default)' : /^sigelo\.([a-z0-9][a-z0-9_-]{0,63})\.local\.json$/.exec(f)?.[1])).filter(Boolean);
+  } catch { return []; }
 };
 const nowS = () => Math.floor(Date.now() / 1000);
 const input = (v, name) => {
-  if (v === undefined || v === null) throw new SigeloError(`${name} is required`);
-  return typeof v === 'string' ? parse(v) : v; // text goes through sigelo's strict parser (dup keys rejected)
+  if (v === undefined || v === null) throw refusal('usage', `${name} is required`);
+  // text goes through sigelo's strict parser (dup keys rejected)
+  if (typeof v === 'string') { try { return parse(v); } catch (e) { throw refusal('json', `${name}: not strict JSON (${e.message})`, e); } }
+  return v;
 };
-const update = (path, fn) => withLock(path, () => { const { store, result } = fn(id.load(path)); id.save(path, store); return result; });
 const loadStore = (path) => {
-  try { return id.load(path); } catch (e) { throw new SigeloError(`no identity at ${path} — call sigelo_init once (${e.message})`); }
+  if (!existsSync(path)) {
+    const named = path === base ? '' : ` for the profile "${/^sigelo\.(.+)\.local\.json$/.exec(path.slice(dirname(path).length + 1))?.[1]}"`, have = profiles();
+    throw refusal('no_identity', `no identity${named} at ${path}: call sigelo_init once${named ? ' with the same identity' : ''}${have.length ? `, or use an existing profile: ${have.join(', ')}` : ''}`);
+  }
+  // There, but not loading: never "call sigelo_init", which would make another identity.
+  try { return id.load(path); } catch (e) { throw refusal('identity_unreadable', `identity file ${path} does not load (${e.message.split('\n')[0]}): restore it from your copy; do not call sigelo_init, which makes a new identity`, e); }
 };
+const update = (path, fn) => withLock(path, () => { const { store, result } = fn(loadStore(path)); id.save(path, store); return result; });
+// The stable code of any error a tool throws: its check, else by its class.
+const codeOf = (e) => (typeof e?.check === 'string' ? e.check
+  : { SigeloError: 'refused', MoneroError: 'refused', JcsError: 'json' }[e?.name] ?? (typeof e?.code === 'string' && /^E[A-Z]+$/.test(e.code) ? 'io' : 'error'));
+/** SIGELO_DEBUG=1: what is behind a refusal, on stderr (stdout is the protocol): the identity file,
+ *  the relay settings, the cause chain with the relay's HTTP answers, the stack. */
+function debug(e, path) {
+  if (env.SIGELO_DEBUG !== '1') return;
+  const say = (s) => process.stderr.write(`sigelo-mcp: debug: ${s}\n`);
+  if (path) say(`identity file ${path}${existsSync(path) ? '' : ', missing'}`);
+  say(`relay ${env.SIGELO_RELAY ?? '(default)'}${env.SIGELO_RELAY_ENDPOINTS ? ` endpoints ${env.SIGELO_RELAY_ENDPOINTS}` : ''}`);
+  for (let x = e, i = 0; x && i < 8; x = x.cause, i++) {
+    say(`${i ? 'caused by ' : 'error '}${x.name ?? typeof x}${x.check ? ` check=${x.check}` : ''}: ${x.message ?? String(x)}`);
+    if (x.http) say(`relay answer ${JSON.stringify(x.http)}`);
+  }
+  if (e?.stack) say(e.stack);
+}
 
 async function wallet(argv) {
   const w = await lib('sigelo-spend/dist/wallet.js', '../../spend/dist/wallet.js');
@@ -85,7 +118,7 @@ async function wallet(argv) {
 const HANDLERS = {
   sigelo_whoami: (_, path) => { const s = loadStore(path); return { did: did(id.head(s)), genesis: id.head(s), chain: id.chainOf(s), attestations: s.attestations.length, identity_file: path }; },
   sigelo_init: ({ recovery }, path) => {
-    if (typeof recovery !== 'string' || !recovery) throw new SigeloError('recovery is required: a "z…" public key or "none"');
+    if (typeof recovery !== 'string' || !recovery) throw refusal('usage', 'recovery is required: a "z…" public key or "none"');
     const s = id.init(path, recovery === 'none' ? null : recovery);
     return { did: did(s.genesis), genesis: s.genesis, identity_file: path,
       ...(recovery === 'none' && { warning: 'NO recovery key: if this key is stolen the identity is lost permanently.' }) };
@@ -117,18 +150,24 @@ const HANDLERS = {
 // otherwise, with one line on stderr, and a package that ships no contact.mjs gets null too. This
 // server never depends on them. Anything else wrong in them stops it: a broken install must not
 // pass for an absent one.
-const contact = await import('./contact.mjs').then((m) => m.load({ installed: INSTALLED, id }), (e) => { if (e.code === 'ERR_MODULE_NOT_FOUND') return null; throw e; });
+const contact = await import('./contact.mjs').then((m) => m.load({ installed: INSTALLED, id, debug }), (e) => { if (e.code === 'ERR_MODULE_NOT_FOUND') return null; throw e; });
 if (contact) { TOOLS.push(...contact.tools); Object.assign(HANDLERS, contact.handlers); }
 
 async function callTool(name, args) {
   if (!TOOLS.some(([n]) => n === name)) return null;
+  let path;
   try {
     const a = args ?? {};
-    const r = await HANDLERS[name](a, name.startsWith('sigelo_wallet_') || name === 'sigelo_verify' ? undefined : pathOf(a.identity));
+    path = name.startsWith('sigelo_wallet_') || name === 'sigelo_verify' ? undefined : pathOf(a.identity);
+    const r = await HANDLERS[name](a, path);
     if (r && typeof r.text === 'string' && 'isError' in r) return { content: [{ type: 'text', text: r.text }], structuredContent: r.structured, isError: r.isError };
     return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }], isError: false };
   } catch (e) {
-    return { content: [{ type: 'text', text: `REFUSED: ${e instanceof Error ? e.message : String(e)}` }], isError: true };
+    // The message, never the stack (SIGELO_DEBUG=1 puts that on stderr); code: stable, to branch on.
+    const message = e instanceof Error ? e.message : String(e), code = codeOf(e);
+    debug(e, path);
+    // long: the long code a spent short code stood for (contact/carrier.mjs keepLong): keep it.
+    return { content: [{ type: 'text', text: `REFUSED: ${message}` }], structuredContent: { code, message, ...(typeof e?.long === 'string' && { long: e.long }) }, isError: true };
   }
 }
 

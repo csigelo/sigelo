@@ -10,8 +10,16 @@ export const MSG_V = 'sigelo-msg/0';
 
 // Every refusal in contact/ names its check, as accept/node/sigelo-pair.mjs's PairingError does:
 // one class for invite, envelope, prekeys and carrier, so a caller catches MsgError and reads .check.
-export class MsgError extends Error { constructor(check, why) { super(`${check}: ${why}`); this.check = check; } }
-export const fail = (check, why) => { throw new MsgError(check, why); };
+// extra, for whoever debugs (SIGELO_DEBUG=1 prints it): cause, the error underneath; http, the
+// relay's answer ({ url, status, body }).
+export class MsgError extends Error {
+  constructor(check, why, extra) {
+    super(`${check}: ${why}`, extra?.cause === undefined ? undefined : { cause: extra.cause });
+    this.check = check;
+    if (extra?.http) this.http = extra.http;
+  }
+}
+export const fail = (check, why, extra) => { throw new MsgError(check, why, extra); };
 
 export const hex = (b) => bytesToHex(b);
 export function unhex(s, len, check) {

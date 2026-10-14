@@ -134,9 +134,9 @@ A0=$(agent alice whoami | get did)
 B=$(agent bob whoami | get did)
 echo "alice $A0"
 echo "bob   $B"
-# --wait bounds a session, refused by name before anything connects.
+# --wait bounds a session, refused by name before anything connects (exit 2: usage).
 rc=0; agent bob inbox --wait 301 > /dev/null 2> "$W/wait.err" || rc=$?
-[ $rc = 1 ] && grep -q -- '--wait: whole seconds, 0 to 300' "$W/wait.err" || die "inbox --wait 301 (exit $rc): $(cat "$W/wait.err")"
+[ $rc = 2 ] && grep -q -- '--wait: whole seconds, 0 to 300' "$W/wait.err" || die "inbox --wait 301 (exit $rc): $(cat "$W/wait.err")"
 # So is a flag the verb does not take (usage, exit 2): a mistyped --wiat must not run inbox at once.
 rc=0; agent bob inbox --wiat 30 > /dev/null 2> "$W/flag.err" || rc=$?
 [ $rc = 2 ] && grep -q -- 'inbox: unknown flag --wiat' "$W/flag.err" || die "inbox --wiat 30 (exit $rc): $(cat "$W/flag.err")"
@@ -173,7 +173,7 @@ agent alice inbox > /dev/null   # alice: checks bob's answer offline, replies
 # Bob's mailbox for the pairing needs the key her reply carries: until his agent reads it, nobody
 # holds it (no_reader). Her message stays queued with her (exit 0), and goes at her next inbox.
 agent alice send bob "hello 1" > "$W/first.json" 2> "$W/first.err" || die "alice's first send: $(cat "$W/first.err")"
-[ "$(get status < "$W/first.json")" = queued ] && grep -q "send: queued, not yet at the relay: bob's agent does not hold its mailbox" "$W/first.err" || die "alice's first send: $(cat "$W/first.err")"
+[ "$(get status < "$W/first.json")" = queued ] && grep -q "send: queued, not delivered yet (exit 0; do not send it again): bob's agent does not hold its mailbox" "$W/first.err" || die "alice's first send: $(cat "$W/first.err")"
 cat "$W/first.err"
 # His first send reads her reply first (paired), then goes.
 agent bob send alice "hi 1" | grep -q '"status": "sent"' || die "bob's first send after accept"

@@ -1045,7 +1045,10 @@ try {
     const code = (await hana.invite({ name: 'ivan' })).code;
     ok((await ivan.accept(code, { name: 'hana', wait: 0.3 })).status === 'waiting', 'ivan answers the code of hana, whose bundle holds 30 KB of attestations');
     const hb = await hana.inbox();
-    ok(kinds(hb) === 'paired' && seen('hana', (e) => e.type === 'refused').length === 0, `hana pairs and the relay takes her reply, which carries her chain only (${kinds(hb)})`);
+    // Her two answers to the hop codes above (queued, never delivered) expired meanwhile: said once each.
+    const lapsed = hb.events.filter((e) => e.code === 'code_expired');
+    ok(kinds({ events: hb.events.filter((e) => e.code !== 'code_expired') }) === 'paired' && lapsed.length === 2 && lapsed.every((e) => e.type === 'pairing_failed' && e.did === lapsed[0].did)
+      && seen('hana', (e) => e.type === 'refused').length === 0, `hana pairs and the relay takes her reply, which carries her chain only; her two hop answers reported expired (${kinds(hb)})`);
     ok((await ivan.inbox()).events.some((e) => e.type === 'paired' && e.did === H.original), 'ivan pairs');
   }
   {

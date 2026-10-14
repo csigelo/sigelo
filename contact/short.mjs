@@ -18,7 +18,8 @@
 // The four words: once a pairing completes, both sides derive them from `pair` (kdf.pairId, which
 // binds the pairing key K and so both original DIDs): HKDF-SHA256(pair's 16 bytes, salt
 // "sigelo-fingerprint/0", empty info, 6 bytes); the first 44 bits, 11 at a time, index the BIP-39
-// English list. The same words on both sides = nobody, not even the relay, swapped the pairing.
+// English list. The same words on both sides = no mix-up and no casual swap; a relay that invests
+// GPU time in one is caught by the pair id (THREAT-MODEL.md §2.10).
 import { randomBytes } from 'node:crypto';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -32,16 +33,40 @@ export const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 export const SHORT_TTL = 600, SHORT_LENGTH = 8;
 const FOLD = { I: '1', L: '1', O: '0' };
 // Whitespace, and the hyphen with every dash a phone or a word processor puts in its place.
-const SEPARATORS = /[\s\-‐-―−]+/g;
+const SEPARATORS = /[\s\-\u2010-\u2015\u2212]+/g, SEPARATOR = /^[\s\-\u2010-\u2015\u2212]$/;
 // Longer input is no short code: refused before any work.
 const MAX_INPUT = 64;
+// Short or long is decided on the input's shape, before either parser runs: a short code mistyped
+// (7 characters, a U, a full stop after it) read as a long code was refused as "does not start
+// with sgl1", which tells the person nothing. A long code is about 126 characters and starts sgl1.
+export const SHORT_MAX = 12;
+/** 'short' when `text`, without spaces and dashes, is at most SHORT_MAX characters and does not
+ *  start with sgl1; else 'long'. Says how the code is read, not whether it is good. */
+export function codeKind(text) {
+  const s = typeof text === 'string' ? text.replace(SEPARATORS, '') : '';
+  return s.length <= SHORT_MAX && !/^sgl1/i.test(s) ? 'short' : 'long';
+}
+const READ = 'read as a short code (12 characters or fewer, no sgl1)';
+const AGAIN = 'check it with whoever gave it to you';
 
-/** The canonical form of a short code ("K7F3Q9ZP"), or throws short_code. */
+/** The canonical form of a short code ("K7F3Q9ZP"), or throws short_code naming the character at fault. */
 export function normaliseShort(text) {
   if (typeof text !== 'string' || text.length > MAX_INPUT) fail('short_code', 'not a short code');
+  const shown = JSON.stringify(text.trim());
+  // Positions count the characters a person typed, separators left out: "character 5" of K7F3-U9ZP is the U.
+  let at = 0;
+  for (const c of text) {
+    if (SEPARATOR.test(c)) continue;
+    at++;
+    const u = c.toUpperCase();
+    if (!ALPHABET.includes(FOLD[u] ?? u)) {
+      fail('short_code', `${shown} ${READ}: character ${at} ${JSON.stringify(c)} is not in the alphabet; a short code uses 0-9 and A-Z without I, L, O, U${u === 'U' ? ' (a V?)' : ''}: ${AGAIN}`);
+    }
+  }
   const s = text.replace(SEPARATORS, '').toUpperCase().replace(/[ILO]/g, (c) => FOLD[c]);
-  if (s.length !== SHORT_LENGTH) fail('short_code', `${s.length} characters, a short code has ${SHORT_LENGTH}`);
-  for (const ch of s) if (!ALPHABET.includes(ch)) fail('short_code', `${JSON.stringify(ch)} is not in a short code${ch === 'U' ? ' (no U: a typo?)' : ''}`);
+  if (s.length !== SHORT_LENGTH) {
+    fail('short_code', `${shown} ${READ}: ${s.length} characters, a short code has ${SHORT_LENGTH} (like K7F3-Q9ZP): ${Math.abs(SHORT_LENGTH - s.length)} ${s.length < SHORT_LENGTH ? 'missing' : 'too many'}; ${AGAIN}`);
+  }
   return s;
 }
 

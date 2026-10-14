@@ -416,6 +416,8 @@ if (!existsSync(built) && !hasGo) {
   ok('invite with no identity: exit 2, "no identity: run sigelo-agent init", no raw ENOENT', inv.status === 2 && inv.stderr.includes('no identity: run sigelo-agent init') && !inv.stderr.includes('ENOENT'), inv.stderr);
   const who = cli('whoami');
   ok('whoami with no identity: exit 2 and "run sigelo-agent init", as the contact verbs', who.status === 2 && who.stderr.includes('no identity: run sigelo-agent init') && who.stdout === '', who.stderr);
+  const ad = cli('adopt', '--rotation', '{}');
+  ok('adopt --rotation with no identity: exit 2, "no identity", not "does not load"', ad.status === 2 && ad.stderr.includes('no identity: run sigelo-agent init') && !ad.stderr.includes('does not load'), ad.stderr);
   const ver = cli('--version'), pkgVersion = (JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8')) as { version: string }).version;
   ok('--version: the package version, exit 0', ver.status === 0 && ver.stdout === `${pkgVersion}\n`, `${ver.status} ${ver.stdout}${ver.stderr}`);
   const { tooOld } = await import('./node-check.ts');
@@ -456,8 +458,36 @@ if (!existsSync(built) && !hasGo) {
   const sa = cli('accept', 'k7f3', 'q9zp');
   ok('accept K7F3-Q9ZP typed as "k7f3 q9zp", relay unreachable: exit 1 naming connect, no code_checksum, no answer stored',
     sa.status === 1 && /^sigelo-agent: connect: /m.test(sa.stderr) && !sa.stderr.includes('code_checksum') && (JSON.parse(cli('contacts').stdout) as { answers: unknown[] }).answers.length === 0, sa.stderr);
+  ok('accept short, relay unreachable: says it cannot reach the relay, names the place, what to check, no raw "fetch failed"',
+    sa.stderr.includes('cannot reach the relay at http://127.0.0.1:1/park/<code hash>') && sa.stderr.includes('SIGELO_RELAY') && !sa.stderr.includes('fetch failed'), sa.stderr);
+  // Short or long by the input's shape (12 characters or fewer, no sgl1: short), before any parser:
+  // a mistyped short code is never refused as "does not start with sgl1".
   const nu = cli('accept', 'K7F3-Q9ZU');
-  ok('accept with a U where a digit goes: not a short code, read as a long code: code_checksum, exit 1', nu.status === 1 && nu.stderr.includes('code_checksum'), nu.stderr);
+  ok('accept with a U: read as a short code, character 8 "U" named, the alphabet said, exit 1, no code_checksum',
+    nu.status === 1 && nu.stderr.includes('short_code: "K7F3-Q9ZU" read as a short code') && nu.stderr.includes('character 8 "U" is not in the alphabet; a short code uses 0-9 and A-Z without I, L, O, U')
+      && !nu.stderr.includes('code_checksum') && !nu.stderr.includes('sgl1:'), nu.stderr);
+  const seven = cli('accept', 'K7F3-Q9Z');
+  ok('accept with 7 characters: "7 characters, a short code has 8", exit 1', seven.status === 1 && seven.stderr.includes('7 characters, a short code has 8') && !seven.stderr.includes('code_checksum'), seven.stderr);
+  const dot = cli('accept', 'K7F3-Q9ZP.');
+  ok('accept with a leftover character: character 9 "." named, exit 1', dot.status === 1 && dot.stderr.includes('character 9 "." is not in the alphabet'), dot.stderr);
+  const lg = cli('accept', 'hello-world-this-is-long');
+  ok('accept of something long without sgl1: read as a long code, says so and how to paste it, exit 1',
+    lg.status === 1 && lg.stderr.includes('code_checksum: read as a long code (it starts sgl1, or has more than 12 characters') && lg.stderr.includes('paste the whole code'), lg.stderr);
+  const wt = cli('inbox', '--wait', '999');
+  ok('inbox --wait 999: exit 2, the bound and the value said', wt.status === 2 && wt.stderr.includes('--wait: whole seconds, 0 to 300, not "999"'), wt.stderr);
+  const noArg = cli('accept');
+  ok('accept with no code: exit 2, the missing argument named', noArg.status === 2 && noArg.stderr.includes('an argument is missing: accept <code>'), noArg.stderr);
+  // Exit 2 for a command line missing what it needs, as for an unknown flag.
+  ok('invoice without --addr: exit 2', cli('invoice').status === 2);
+  ok('verify-invoice without --bundle: exit 2', cli('verify-invoice', '{}').status === 2);
+  ok('init with neither --recovery nor --no-recovery: exit 2', cli('init').status === 2);
+  const badJson = cli('sign-challenge', '{"typ":"x"');
+  ok('sign-challenge with broken JSON: exit 1, says the argument is not strict JSON', badJson.status === 1 && badJson.stderr.includes('sign-challenge: the argument is not strict JSON'), badJson.stderr);
+  const notFile = cli('add-issuer', 'genesis.json');
+  ok('add-issuer naming no file: "neither a file nor JSON", exit 1', notFile.status === 1 && notFile.stderr.includes('"genesis.json" is neither a file nor JSON'), notFile.stderr);
+  // The profile: SIGELO_IDENTITY naming no file is said, so a mistyped profile is not taken for a lost identity.
+  const prof = spawnSync('node', [CLI, 'whoami'], { env: { ...env, SIGELO_IDENTITY: join(H, 'sigelo.typo.local.json') }, cwd: H, encoding: 'utf8' });
+  ok('whoami with SIGELO_IDENTITY naming no file: exit 2, the path and SIGELO_IDENTITY named', prof.status === 2 && prof.stderr.includes('sigelo.typo.local.json') && prof.stderr.includes('from SIGELO_IDENTITY'), prof.stderr);
   const missing = cli('recover', '--recovery-key', 'nope.key');
   ok('recover with a missing key file: exit 1, "recover: nope.key not found", no bare ENOENT',
     missing.status === 1 && missing.stderr.includes('recover: nope.key not found') && !missing.stderr.includes('ENOENT'), missing.stderr);
@@ -480,6 +510,11 @@ if (!existsSync(built) && !hasGo) {
   ok('inbox with the relay unreachable: exit 1, "offline" and the check on stderr, the JSON on stdout',
     ib.status === 1 && /^sigelo-agent: inbox: offline: connect: /m.test(ib.stderr) && typeof (JSON.parse(ib.stdout) as { offline?: string }).offline === 'string', ib.stderr);
   ok('inbox --expect, unreachable: exit 1, offline comes first', cli('inbox', '--expect').status === 1);
+  ok('inbox, unreachable: one line, no stack, without SIGELO_DEBUG', !ib.stderr.includes('    at ') && !ib.stderr.includes('debug:'), ib.stderr);
+  const dbg = spawnSync('node', [CLI, 'inbox'], { env: { ...env, SIGELO_DEBUG: '1' }, cwd: H, encoding: 'utf8' });
+  ok('inbox, unreachable, SIGELO_DEBUG=1: the identity file, the relay and its endpoints, the cause chain and the stack on stderr',
+    dbg.status === 1 && dbg.stderr.includes(`debug: identity file ${join(H, '.config', 'moadim', 'sigelo.local.json')}`) && dbg.stderr.includes('debug: relay relay.test at {"mqtt":"mqtt://127.0.0.1:1"')
+      && dbg.stderr.includes('debug: error Error check=connect') && dbg.stderr.includes('debug: caused by TypeError') && dbg.stderr.includes('    at '), dbg.stderr);
   // A message held from a reader that went away, then the relay unreachable: printed and taken, so
   // exit 0 (a script that drops stdout on exit 1 would lose it), the offline still on stderr.
   const heldFile = join(H, '.config', 'moadim', 'sigelo.local.held.json');
@@ -490,6 +525,48 @@ if (!existsSync(built) && !hasGo) {
       && /^sigelo-agent: inbox: offline: connect: .*exit 0: the 1 message\(s\) on stdout are taken/m.test(hb.stderr), hb.stderr);
   const fg = cli('forget', peer.did), fr = JSON.parse(fg.stdout || '{}') as { revoked?: boolean; released?: boolean };
   ok('forget, unreachable: revoked here (JSON on stdout), exit 1 saying the mailboxes go later', fg.status === 1 && fr.revoked === true && fg.stderr.includes('offline'), fg.stderr);
+  // An identity file that does not parse: named, and never "run init" (that makes another identity).
+  writeFileSync(join(H, '.config', 'moadim', 'sigelo.local.json'), 'garbage\n', { mode: 0o600 });
+  for (const verb of ['whoami', 'contacts']) {
+    const bad = cli(verb);
+    ok(`${verb} with an identity file that does not parse: exit 1, the file named, "do not run init"`,
+      bad.status === 1 && bad.stderr.includes(`identity file ${join(H, '.config', 'moadim', 'sigelo.local.json')} does not load`) && bad.stderr.includes('do not run init'), bad.stderr);
+  }
+  rmSync(H, { recursive: true, force: true });
+}
+
+// ── a short code fetched, then refused: the long code it stood for is printed ───────────────
+// GET /park answers once (the short code is spent); the long code it gives here has expired, so the
+// accept fails after the fetch. The refusal names the long code, to keep and accept instead.
+{
+  const H = mkdtempSync(join(tmpdir(), 'sigelo-moadim-keep-'));
+  const { createServer } = await import('node:http');
+  const { pathToFileURL } = await import('node:url');
+  const { makeInvite } = await import(pathToFileURL(join(ROOT, 'contact', 'invite.mjs')).href) as { makeInvite(o: object): { text: string } };
+  const long = makeInvite({ did: keygen({ recovery: 'sha256:' + '2'.repeat(64) }).did, relay: 'relay.test', now: Math.floor(Date.now() / 1000) - 2 * 86400 }).text;
+  const srv = createServer((_, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, invite: long })); });
+  await new Promise<void>((r) => { srv.listen(0, '127.0.0.1', () => r()); });
+  const port = (srv.address() as { port: number }).port;
+  const env = { PATH: process.env['PATH'], HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: `http://127.0.0.1:${port}` } }) };
+  const cli = (...args: string[]) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+    const c = spawn('node', [CLI, ...args], { env, cwd: H });
+    let stdout = '', stderr = '';
+    c.stdout.on('data', (d) => { stdout += d; }); c.stderr.on('data', (d) => { stderr += d; });
+    c.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+  await cli('init', '--no-recovery');
+  const k = await cli('accept', 'K7F3-Q9ZP');
+  ok('accept of a short code whose long code then fails: exit 1, the check, and the long code to keep and accept instead',
+    k.status === 1 && k.stderr.includes('code_expired') && k.stderr.includes(`its long code: ${long} (keep this; accept it with the long code)`), k.stderr);
+  // An answer that outlived its code (as the carrier stores one, contact/store.mjs): contacts says the pairing failed, in one line.
+  const me = (JSON.parse((await cli('whoami')).stdout) as { did: string }).did, peer = keygen({ recovery: 'sha256:' + '3'.repeat(64) }).did, exp = Math.floor(Date.now() / 1000) - 60;
+  writeFileSync(join(H, '.config', 'moadim', 'sigelo.local.contacts.json'), JSON.stringify({ v: 'sigelo-invite/0', self: me, invites: {}, contacts: {},
+    accepts: { ['a'.repeat(64)]: { secret: '00'.repeat(32), code_did: peer, exp, name: 'alice', relay: 'relay.test', kem_sk: null, as: me } } }), { mode: 0o600 });
+  const lc = await cli('contacts'), lj = JSON.parse(lc.stdout || '{}') as { answers?: unknown[]; failed?: { code: string; did: string }[] };
+  ok('contacts after an answer outlived its code: failed lists it (code_expired), and one stderr line says the pairing failed and what to do',
+    lc.status === 0 && lj.answers?.length === 0 && lj.failed?.[0]?.code === 'code_expired' && lj.failed[0].did === peer
+      && lc.stderr.includes(`pairing with alice failed: code_expired: the code from alice expired at ${new Date(exp * 1000).toISOString().replace('.000', '')} before the inviter's agent replied: ask the inviter for a new code`), lc.stderr);
+  srv.close();
   rmSync(H, { recursive: true, force: true });
 }
 

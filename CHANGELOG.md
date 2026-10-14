@@ -3,6 +3,25 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## v0.1.6 — 2026-10-14
+
+- **Refusals:** each says what failed and what to do next, and how a code was read (short or long) and where it broke;
+  `SIGELO_DEBUG=1` adds the identity file, relay, cause chain and stack.
+- **CLI exits:** 0 done, 1 refused or offline, 2 usage or no identity, 3 `inbox --expect` with none; `adopt --rotation`
+  without an identity no longer crashes.
+- **Corrupt identity file:** named, with "restore it from your copy"; no longer told to run `init`, which makes a new
+  identity.
+- **MCP:** every refusal carries `structuredContent` `{code, message}`: a stable code beside its one line, never a
+  stack.
+- **Short codes:** `short_exp` is the relay's expiry, not this clock's; a short code spent and then refused prints its
+  long code to keep and accept (MCP `long`).
+- **Expired answers:** an answer whose code ran out before the inviter replied is reported: `pairing_failed`
+  `code_expired` in `inbox`, in `contacts` (`failed`) and in MCP.
+- **Relay 0.1.4:** every 429 sends `Retry-After`, the seconds until its window frees; the client names that wait.
+- **Four words:** the same words mean no mix-up and no casual swap; a relay spending GPU time on a swap is caught by the
+  32-digit pair id (THREAT-MODEL §2.10).
+- **Site:** Monero only, "Contact us for a quote" (terms §6, Pro, For agents); no euro invoice.
+
 ## v0.1.5 — 2026-10-14
 
 - **Short invite codes:** `invite` prints an eight-character code (`K7F3-Q9ZP`: case-insensitive, no look-alike

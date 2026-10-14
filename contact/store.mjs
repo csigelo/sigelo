@@ -58,10 +58,27 @@ export class Contacts {
 
   // Expired invites and answers go, with the one-time secret and kem_sk they hold, whenever an
   // entry is added or taken, as sigelo-pair's issue() drops expired challenges. Returns how many.
+  // An expired answer is a pairing that never completed: kept, without its secrets, for lapsed().
   #purge(now) {
     let n = 0;
-    for (const k of ['invites', 'accepts']) for (const [nonce, p] of Object.entries(this.s[k])) if (p.exp <= now) { delete this.s[k][nonce]; n++; }
+    for (const k of ['invites', 'accepts']) {
+      for (const [nonce, p] of Object.entries(this.s[k])) {
+        if (p.exp > now) continue;
+        if (k === 'accepts') (this.gone ??= []).push({ id: nonce, code_did: p.code_did, name: p.name, exp: p.exp, relay: p.relay });
+        delete this.s[k][nonce]; n++;
+      }
+    }
     return n;
+  }
+
+  /** The answers that expired unanswered, purged now or at an add or take since the last call: once each. */
+  lapsed(now) {
+    checkTime(now);
+    this.load();
+    if (this.#purge(now)) this.save();
+    const g = this.gone ?? [];
+    this.gone = [];
+    return g;
   }
 
   // max: TTL_MAX for the owner's own codes. The code does not say when it was made, so on the
