@@ -432,7 +432,7 @@ ${code.slice(60)}
   // A sigelo-contact at the right version but broken stops the server too: it must not pass for an
   // absent one. No carrier.mjs, a syntax error, a file missing inside it.
   writeFileSync(join(nmc, 'package.json'), JSON.stringify({ name: 'sigelo-contact', version: own, type: 'module' }));
-  for (const f of ['kdf.mjs', 'invite.mjs']) writeFileSync(join(nmc, f), '\n');
+  for (const f of ['kdf.mjs', 'invite.mjs', 'short.mjs']) writeFileSync(join(nmc, f), '\n');
   rmSync(join(nmc, 'carrier.mjs'), { force: true });
   const c12 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
   c12.close();
