@@ -509,7 +509,9 @@ ${code.slice(60)}
   // the name's place there must not run. Only sigelo-contact at a version within ^<sigelo-agent's>
   // (the lockstep pin) is loaded; anything else is refused, which stops the server.
   mkdirSync(nmc);
-  for (const f of ['carrier.mjs', 'kdf.mjs', 'invite.mjs']) writeFileSync(join(nmc, f), squat);
+  // Every file sigelo-agent-contact.ts imports beside carrier.mjs (its Promise.all): a missing one
+  // rejects first on Node 22 (ERR_MODULE_NOT_FOUND), before carrier's own error, and c10 then hangs.
+  for (const f of ['carrier.mjs', 'kdf.mjs', 'invite.mjs', 'short.mjs', 'enrol.mjs']) writeFileSync(join(nmc, f), squat);
   for (const [manifest, what] of [[{ name: 'sigelo-kontakt', version: own }, 'another name'], [{ name: 'sigelo-contact' }, 'no version'],
     [{ name: 'sigelo-contact', version: `${maj}.${min + 1}.0` }, 'the next minor'], [{ name: 'sigelo-contact', version: `${own}-x` }, 'a prerelease'],
     ...(pat > 0 ? [[{ name: 'sigelo-contact', version: `${maj}.${min}.${pat - 1}` }, 'an older patch']] : [])]) {
@@ -530,7 +532,7 @@ ${code.slice(60)}
   // A sigelo-contact at the right version but broken stops the server too: it must not pass for an
   // absent one. No carrier.mjs, a syntax error, a file missing inside it.
   writeFileSync(join(nmc, 'package.json'), JSON.stringify({ name: 'sigelo-contact', version: own, type: 'module' }));
-  for (const f of ['kdf.mjs', 'invite.mjs', 'short.mjs']) writeFileSync(join(nmc, f), '\n');
+  for (const f of ['kdf.mjs', 'invite.mjs', 'short.mjs', 'enrol.mjs']) writeFileSync(join(nmc, f), '\n');
   rmSync(join(nmc, 'carrier.mjs'), { force: true });
   const c12 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
   c12.close();
