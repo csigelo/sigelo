@@ -217,6 +217,26 @@ try {
   ok(lb.events.filter((e) => e.type === 'pairing_failed' && e.code === 'code_expired' && e.did === alice.did).length === 1, `the next inbox reports it once (${JSON.stringify(lb.events)})`);
   ok(cf.contacts().failed.length === 0 && (await cf.inbox({ wait: 0 })).events.every((e) => e.type !== 'pairing_failed'), 'and then neither contacts nor inbox again');
   await cf.stop();
+  // The code expires during accept --wait: refused code_expired then, not "waiting" at the wait's end;
+  // onEvent said pairing_failed once, the next inbox not again.
+  const gina = agent('gina'), cg = make(gina), brief3 = await ca.invite({ name: 'gina', ttl: 120, short: false });
+  const tick = setTimeout(() => { now += 121; }, 1500), t1 = Date.now();
+  const gw = await failure(() => cg.accept(brief3.code, { name: 'alice', wait: 60 }));
+  clearTimeout(tick);
+  const gAt = new Date(brief3.exp * 1000).toISOString().replace('.000', '');
+  ok(gw.check === 'code_expired' && gw.lapsed === true && gw.message === `code_expired: the code from alice expired at ${gAt} before the inviter's agent replied: ask the inviter for a new code`
+    && Date.now() - t1 < 30000, `the code expired during accept --wait 60: code_expired at once, the time, what to do (${gw.message}, ${Date.now() - t1} ms)`);
+  ok(events.gina.filter((e) => e.type === 'pairing_failed' && e.code === 'code_expired').length === 1 && cg.contacts().answers.length === 0 && cg.contacts().failed.length === 0
+    && (await cg.inbox({ wait: 0 })).events.every((e) => e.type !== 'pairing_failed'), 'onEvent: one pairing_failed; contacts and the next inbox do not say it again');
+  // inbox --wait ends on a pairing that failed, rather than at its timeout.
+  const brief4 = await ca.invite({ name: 'gina', ttl: 120, short: false });
+  ok((await cg.accept(brief4.code, { name: 'alice', wait: 1 })).status === 'waiting', 'accept, the inviter offline: waiting');
+  const tick2 = setTimeout(() => { now += 121; }, 1500), t2 = Date.now();
+  const gb = await cg.inbox({ wait: 60 });
+  clearTimeout(tick2);
+  ok(gb.events.filter((e) => e.type === 'pairing_failed' && e.code === 'code_expired').length === 1 && Date.now() - t2 < 30000,
+    `inbox --wait 60 ends when the answer expires, and says so (${JSON.stringify(gb.events)}, ${Date.now() - t2} ms)`);
+  await cg.stop();
   // The database holds no short code and no long code (memory only).
   const dump = readFileSync(join(dir, 'relay.db')).toString('latin1') + (existsSync(join(dir, 'relay.db-wal')) ? readFileSync(join(dir, 'relay.db-wal')).toString('latin1') : '');
   ok(![inv.short, normaliseShort(inv.short), codeHash(inv.short), inv.code, late.code].some((s) => dump.includes(s)), 'the relay\'s database files hold no code, no hash, no parked invite');

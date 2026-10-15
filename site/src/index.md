@@ -25,7 +25,7 @@ npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # run the keeper
 - [Contact](/contact.html)
 - [Privacy](/privacy.html)
 
-Status: draft, wire `sigelo/0` may change until v0.2; keeper stagenet-only, unaudited.
+Status: experimental, wire `sigelo/0` not frozen yet; keeper stagenet-only, unaudited.
 
 {{official_line}}
 

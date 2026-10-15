@@ -108,6 +108,45 @@ encapsulation: an elliptic-curve step of 1–2 µs a try finds one whose words m
 pairing's in months on one core, hours to days on GPUs. Against a relay that spends that, compare
 the 32-digit pair id (`pair` in the JSON, 128 bits) or the DID.
 
+### 2.11 Enrolment: worker i from the operator's seed (contact/enrol.mjs, adapters/moadim/ENROL.md)
+An enrolled agent is worker i of the operator's keeper root K (`agentIdentitySeed(K, i, n)`), so the
+25 words restore it. **K is hot, S is not:** K sits beside the operator identity (0600, outside the
+agents' directory); whoever reads it derives every worker under it, never the vault, other keepers
+or the recovery key, which stay with S. The operator identity is hot too and S-derived
+(`identitySeed(S, n)`): HKDF is one-way, so its key reveals nothing of S. A worker's key on a
+server reveals that worker only; the operator places rotation n+1, or recovers offline from the
+words if a thief rotated first. **The key
+travels once, end to end:** the server pairs as a throwaway identity through a short code (§2.10),
+then the operator sends the worker's key inside a sigelo-msg/0 envelope on that pairing. It is never
+parked on the relay and never encrypted under the code, which is 40 bits. **The code is the
+credential:** whoever fetches it first and proves it (HMAC of the invite secret over its pair id)
+gets worker i's key and the operator attestation. The real server then sees `park_unknown`, and the
+operator's `enrol` names the DID it sent to: abandon index i (enrol the next one), `forget` the
+contact, and the attestation lapses in at most 90 days (no revocation, SPEC §5). Say the code only
+to the machine it is for. **One worker per code:** the relay hands the code out once, and the
+operator sends to the first DID that proves it (a second is `enrol_used`). **The server** takes an
+identity only from the DID it paired with through its code, signed by that contact's current key,
+whose secret matches the chain's head and whose invite names the operator. **The relay** holds the
+long code (§3.8) and can answer it itself, receiving the worker's key. The four words do not differ
+until after the key went: compare them, and the operator DID `init --enrol` prints with the
+operator's `whoami`; on a mismatch treat index i as burnt, as above.
+
+### 2.12 Operator hints: own agents find each other (contact/carrier.mjs, `sigelo-operator/0`)
+**Claim:** a contact becomes `own` only by an unexpired `sigelo-relay/operator` attestation, from me
+or my operator, on its own chain; own messages reach the operator in full (`watch --on-message`),
+so own is worth forging. **Hints** are HMAC(K, kind ‖ sender's original DID ‖ operator DID) inside
+envelopes: the relay sees nothing, an echo or another pairing's copy matches nothing, and the
+envelope layer drops replays. **Attack, fixed:** a proof is a bundle, and a rotation is signed by
+the key it leaves, so a contact could rotate its genesis into a sibling's public one and carry the
+sibling's attestation (SPEC §9 counts an attestation whose `sub` is any DID of the chain): it was
+filed own. Now `observe` refuses a chain that ends anywhere but the contact's current DID as held
+(`current_did`), a proof is taken only after our asks, at most 4 an hour, at most 64 rotations, 8
+attestations and 8 issuers; `send` refuses the label. **Residual:** a contact can test any operator
+DID it guesses against the hints, and on a right guess gets the attestation it names (a public
+credential): it learns who operates the agent. An agent before 0.1.7 shows the hints, opaque hex,
+as a message labelled `sigelo-operator/0`, once per pairing and renewal; there is no version on the
+wire to gate on, and adding one to the prekeys frame would break those agents.
+
 ## 3. Attacks NOT defended — read this section
 
 ### 3.1 Sybil
@@ -168,6 +207,12 @@ nothing it does not learn anyway (who pairs with whom, from the topics); it is t
 spend codes, as it is trusted to deliver. Agents that share a channel should use the long code
 (`invite --long`), which never touches the relay before it is answered. Parked codes live in
 the relay's memory only, never on disk, and are lost at a restart.
+
+### 3.9 The page's history at rest (adapters/moadim/sigelo-agent-ui.ts)
+`sigelo-agent ui` keeps every message and pairing event in `me.local.history.jsonl` and its tags,
+checked words and read marks in `me.local.ui.json`, in plaintext (0600) until §7's keychain unlock
+(K2): whoever reads the user's files reads them, and "clear" (`POST /api/history/clear`) is the only
+mitigation.
 
 ## 4. Prompt injection
 

@@ -29,7 +29,7 @@ bundle` presents your attestations. Anything a world puts in `claims` is untrust
 | `$XDG_CONFIG_HOME` (if absolute) else `$HOME/.config` | same resolution as `src/paths/mod.rs:56-70` |
 | 0600 file, 0700 directory, atomic rename | moadim's secret-file contract (`src/utils/atomic.rs`, `src/utils/fs_perms.rs`) |
 | `[env]`, not `agents/<name>.toml` | agent entries have no env table (`src/routines/agents/mod.rs:47-70`) |
-| no REST route or MCP tool | nothing listens; contact verbs dial out to a relay |
+| no REST route or MCP tool | contact verbs dial out; `ui` listens on 127.0.0.1 only |
 | non-zero exit naming the check | a failing step triggers moadim's existing failure notifications |
 
 ## Line budget — 77 lines for the identity core
@@ -41,12 +41,14 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | `routine.local.toml` `[env]` | **2** | the hookup |
 | `sigelo-agent.ts` | **75** | identity store, `init`, `signChallenge`, `addIssuer`, `addAttestation`, `bundle`, `rotateKey` |
 | **identity total** | **77** | |
-| `sigelo-agent-monero.ts` | 131 | `walletSet`, `bindMonero`, `receive`, `invoice`, `verifyInvoice` — counted separately so an identity-only install reads 77 |
+| `sigelo-agent-monero.ts` | 131 | the Monero verbs, apart: an identity-only install reads 77 |
 | `sigelo-agent-adopt.ts` | 55 | `adopt`, `forgetIssuer`, outside the core |
-| `sigelo-agent-contact.ts` | 302 | contact verbs, recovery verbs' argv, output escaping; `cli.ts` dispatches here |
+| `sigelo-agent-contact.ts`, `-watch.ts` | 403, 155 | contact verbs, `watch`, recovery verbs' argv, output escaping |
+| `sigelo-agent-enrol.ts` | 409 | `keeper`, `enrol`, `init --enrol`: your identity and worker i from your seed ([ENROL.md](ENROL.md)) |
 | `sigelo-agent-recovery.ts` | 54 | `recoveryKey`, `recoverWith`, `eraseRequest` |
+| `sigelo-agent-ui.ts` | 473 | `ui` page ([UI-API.md](UI-API.md)) |
 | `node-check.ts` | 9 | Node.js 22.18+, checked first |
-| `cli.ts`, `test.ts` | — | argv/output and tests, not argued |
+| `cli.ts`, `test-*.ts` | — | argv/output and tests, not argued |
 
 Dependencies: `sigelo` (`file:../../ts`, build `ts/` first) for the core, `sigelo-contact`
 (`file:../../contact`, loaded only from this install) for the contact verbs; tarballs pin both
@@ -54,22 +56,25 @@ Dependencies: `sigelo` (`file:../../ts`, build `ts/` first) for the core, `sigel
 
 ## Design
 
-- **The recovery public key is never stored**, only its commitment; `rotate` carries the
-  commitment forward and the library re-checks it (SPEC §7).
-- **Rotation is one atomic write** of the new rotation and the new secret.
+- **The recovery public key is never stored**, only its commitment; `rotate` carries it forward,
+  re-checked (SPEC §7).
+- **Rotation is one atomic write** of rotation and secret.
+- **`watch`** hands each message on by tier: [WATCH.md](WATCH.md).
 - **Narrow signing:** `sign-challenge` signs only `typ: "challenge"` with our exact DID, the contact
   verbs only their own body types, so no input makes the hot key sign a rotation, binding or
   attestation (SPEC §3, §5.2).
 - **The Monero half cannot spend:** `wallet-set` refuses spend keys; `sig_addr` is what
   `monero-wallet-rpc sign` (view mode, (0,0)) returns, computed with no wallet; the view key is never printed.
 - **Input is parsed with sigelo's strict parser** (duplicate keys rejected).
+- **Own agents:** worker i, derived from the operator's keeper root: placed by a one-time code or `--here`, restored
+  from the 25 words ([ENROL.md](ENROL.md), THREAT-MODEL §2.11).
 - **Recovery:** `recover --recovery-key <file>` runs on a clean machine with a copy of the identity
   file, never the robbed host (malware could take the key, which stays in force).
 
 ## Verified / not verified
 
-`npm test` (ends `ALL PASS`) runs the full flow in a throwaway `HOME`: init refusals and file
+`npm test` (`test-all.ts`: one `ALL PASS <file>` line per `test-*.ts`, then `ALL PASS`) runs the full flow in throwaway `HOME`s: init refusals and file
 modes, challenges, bundle, rotation, the Monero half (spend keys refused, `proven` binding,
 subaddresses, invoices), recovery, exit codes, and re-verifies the bundle with the Go verifier
-(SKIPs without `go`). Not verified: against a live
-`monero-wallet-rpc` or a live moadim daemon; the `[env]` hookup is derived from source.
+(SKIPs without `go`). Not verified: live
+`monero-wallet-rpc` or moadim daemon; the `[env]` hookup is derived from source.

@@ -10,6 +10,9 @@ import * as id from './sigelo-agent.ts';
 import * as adopt from './sigelo-agent-adopt.ts';
 import * as xmr from './sigelo-agent-monero.ts';
 import * as contact from './sigelo-agent-contact.ts';
+import * as ui from './sigelo-agent-ui.ts';
+import * as enrol from './sigelo-agent-enrol.ts';
+import * as watch from './sigelo-agent-watch.ts';
 
 const USAGE = `sigelo-agent — a portable sigelo/0 identity for an AI agent, and its contacts
 
@@ -25,7 +28,7 @@ const USAGE = `sigelo-agent — a portable sigelo/0 identity for an AI agent, an
   add-attestation <{body,sig} json|->    store a world's attestation about us
   forget-issuer <did>                    drop a retired issuer's attestations and genesis
   bundle                                 verify, then print the SPEC §8 bundle
-  rotate                                 voluntary rotation to a fresh key
+  rotate                                 voluntary rotation to a fresh key (not on a key from your words)
 
 Monero (MONERO.md §2-§3, SPEC §6):
   wallet-set <json|->                    install the treasury's VIEW-ONLY keys
@@ -33,6 +36,14 @@ Monero (MONERO.md §2-§3, SPEC §6):
   receive [--account <n>]                next unused receive subaddress
   invoice --addr <subaddress> [--amount <atomic>] [--memo <text>] [--ttl <s>]
   verify-invoice <json|-> --bundle <f>   the payer's side: check one invoice
+
+The human's page (UI-API.md):
+  ui [--no-open]                         a page on 127.0.0.1 for your own DID: contacts, codes, the four
+                                         words, messages, your agents; $SIGELO_HUMAN, else
+                                         ~/.config/sigelo/me.local.json (made by keeper --from-words)
+
+Staying connected (WATCH.md):
+  ${watch.USAGE.replaceAll('\n', '\n  ')}
 
 A <json|-> argument may also be a file holding the JSON.
 Identity file: $SIGELO_IDENTITY, else ~/.config/moadim/sigelo.local.json (0600).
@@ -77,7 +88,12 @@ const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === '--version' || cmd === '-v') { console.log(contact.version()); process.exit(0); }
 // The contact verbs live apart from the identity core (INTEGRATION.md) and need nothing below.
 // contact.exit never resolves: it exits once stdout has drained.
+// A page or a watcher on the identity file holds its relay session: contact.main refuses a second login.
 if (contact.VERBS.includes(cmd ?? '')) await contact.exit(await contact.main(cmd!, rest));
+if (cmd === 'ui') await contact.exit(await ui.main(rest));
+if (cmd === 'enrol') await contact.exit(await enrol.main(rest));
+if (cmd === 'keeper') await contact.exit(await enrol.keeperMain(rest));
+if (cmd === 'watch') await contact.exit(await watch.main(rest));
 const flag = (name: string): string | undefined => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
 const path = id.identityPath();
 const now = Math.floor(Date.now() / 1000);
@@ -89,6 +105,8 @@ if ((READS.includes(cmd ?? '') || (cmd === 'adopt' && rest.includes('--rotation'
   note(contact.noIdentity(path));
   process.exit(2);
 }
+/** The operator identity made by `keeper --from-words` (sigelo-agent-enrol.ts): seed-derived, no S in it. */
+type Derived = { derived?: { path: string; n: number } };
 /** A command line missing what it needs: exit 2, as an unknown command (USAGE). */
 function usage(why: string): never { note(why); process.exit(2); }
 /** The identity, or one line naming the file that does not load (it may be corrupt, or another file). */
@@ -105,6 +123,14 @@ const update = <T>(fn: (s: id.Store) => { store: id.Store; result: T }): T =>
 try {
   switch (cmd) {
     case 'init': {
+      // An agent on another machine, enrolled by its operator's code: it becomes the operator's
+      // worker, whose recovery is the operator's seed (sigelo-agent-enrol.ts), so no --recovery here.
+      if (rest.includes('--enrol')) {
+        const code = flag('--enrol');
+        if (code === undefined || code.startsWith('--')) usage('init: --enrol needs the code the operator\'s sigelo-agent enrol printed (K7F3-Q9ZP)');
+        if (rest.includes('--recovery') || rest.includes('--no-recovery')) usage('init --enrol: no --recovery: the worker this machine becomes commits to the operator\'s seed\'s recovery key');
+        await contact.exit(await enrol.initEnrol(path, code, rest));
+      }
       const recovery = flag('--recovery');
       // A null recovery commitment must be a decision, never a default: it means theft of the
       // identity key is terminal (SPEC §4). keygen prints the warning itself.
@@ -122,7 +148,8 @@ try {
       const file = flag('--rotation');
       if (file !== undefined) {
         const r = input(file);
-        const { store, dropped } = update((s) => { const x = adopt.applyRotation(s, r, now); return { store: x.store, result: x }; });
+        // A recovered key is not the pinned derivation `keeper --rotate-me` makes: the marker goes.
+        const { store, dropped } = update((s) => { const x = adopt.applyRotation(s, r, now); delete (x.store as Derived).derived; return { store: x.store, result: x }; });
         if (dropped > 0) note(`dropped ${dropped} rotation(s) after ${store.rotations.at(-1)!.body.id}: the recovery supersedes them (SPEC §7.1)`);
         note('rotation applied; the previous key is retired. Shred the file you adopted from: it holds the new key.');
         out({ did: did(id.head(store)), chain: id.chainOf(store) });
@@ -201,13 +228,17 @@ try {
     }
     case 'rotate': {
       if (rest.includes('--recovery')) usage(`rotate: this command does voluntary rotations only.${OFFLINE_RECOVERY}`);
-      const store = update((s) => { const r = id.rotateKey(s, now); return { store: r, result: r }; });
+      const store = update((s) => {
+        const d = (s as Derived).derived;
+        if (d) throw new Error(`rotate: this identity comes from your 25 words (${d.path}): a random key would not. Its next key is rotation ${d.n + 1} of them: sigelo-agent keeper --from-words --rotate-me`);
+        const r = id.rotateKey(s, now); return { store: r, result: r };
+      });
       note('rotated; the previous key is retired. Ask each world to reissue its attestation to the new DID.');
       out({ did: did(id.head(store)), chain: id.chainOf(store) });
       break;
     }
     default:
-      console.error(`${USAGE}\n\n${contact.USAGE}`);
+      console.error(`${USAGE}\n\n${contact.USAGE}\n\n${enrol.USAGE}`);
       process.exit(2);
   }
 } catch (e) {

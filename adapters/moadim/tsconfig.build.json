@@ -7,5 +7,5 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["cli.ts", "sigelo-agent.ts", "sigelo-agent-adopt.ts", "sigelo-agent-monero.ts"]
+  "include": ["cli.ts", "sigelo-agent.ts", "sigelo-agent-adopt.ts", "sigelo-agent-monero.ts", "sigelo-agent-ui.ts"]
 }

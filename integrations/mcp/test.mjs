@@ -8,6 +8,7 @@
 // past one result (held across a restart), a nested message, wait bounds, a recovery after which
 // each side lists the other re_pair. `npm test` → ALL PASS or exit 1.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,7 +59,7 @@ await new Promise((r) => keeper.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${keeper.address().port}`;
 
 const IDENTITY_TOOLS = ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'];
-const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_forget_contact', 'sigelo_inbox', 'sigelo_invite', 'sigelo_send'];
+const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_forget_contact', 'sigelo_inbox', 'sigelo_invite', 'sigelo_send', 'sigelo_send_file', 'sigelo_set_tier'];
 // Present here only if sigelo-contact resolves, as the server decides it (contact.mjs load).
 const sidecar = await import('../../adapters/moadim/sigelo-agent-contact.ts');
 const HAS_CONTACT = await sidecar.contactLib().then(() => true, (e) => { if (sidecar.absent(e)) return false; throw e; });
@@ -248,6 +249,16 @@ try {
     ok(!r.isError && r.data.contacts.length === 0 && r.data.invites.length === 0 && r.data.answers.length === 0 && r.data.failed?.length === 0, 'contact: sigelo_contacts on a fresh identity (failed: none)', r.text);
     r = await c5.call('sigelo_send', { to: 'nobody', text: 'hi' });
     ok(r.isError && /^REFUSED: not_contact/.test(r.text), 'contact: send to an unknown name refused by name', r.text);
+    // sigelo_send_file: refused by name before anything connects.
+    r = await c5.call('sigelo_send_file', { to: 'nobody' });
+    ok(r.isError && r.structured?.code === 'usage' && r.structured.message === 'path is required', 'contact: sigelo_send_file with no path: usage', r.text);
+    r = await c5.call('sigelo_send_file', { to: 'nobody', path: join(dir, 'no-such.bin') });
+    ok(r.isError && r.structured?.code === 'file' && r.text === `REFUSED: file: cannot read ${join(dir, 'no-such.bin')}: no such file`, 'contact: sigelo_send_file of a missing file: code file, one line', r.text);
+    r = await c5.call('sigelo_send_file', { to: 'nobody', path: join(dir, 'contact.local.json') });
+    ok(r.isError && r.structured?.code === 'file' && r.text.includes('identity files'), 'contact: sigelo_send_file of the identity file: refused', r.text);
+    writeFileSync(join(dir, 'big.bin'), Buffer.alloc(8 * 1024 * 1024 + 1));
+    r = await c5.call('sigelo_send_file', { to: 'nobody', path: join(dir, 'big.bin') });
+    ok(r.isError && r.structured?.code === 'file_too_large', 'contact: sigelo_send_file past 8 MiB: file_too_large', r.text);
     r = await c5.call('sigelo_accept', { code: 'sgl1notacode' });
     ok(r.isError && /^REFUSED: code_checksum/.test(r.text), 'contact: a mistyped code fails code_checksum', r.text);
     ok(r.structured?.code === 'code_checksum' && r.text.includes('read as a long code'), 'contact: a refusal of a long code says it was read as one (code code_checksum)', r.text);
@@ -320,6 +331,54 @@ ${code.slice(60)}
       await a.call('sigelo_inbox', { wait: 1 });   // bob's prekeys, if they came after
       const [ac, bc] = [(await a.call('sigelo_contacts')).data?.contacts[0], (await b.call('sigelo_contacts')).data?.contacts[0]];
       ok(ac?.pair === pair && bc?.pair === pair && ac?.fingerprint === words && bc?.fingerprint === words, 'relay: both sides list the same pairing id and the same four words');
+
+      // Tiers: friend by default; sigelo_set_tier; sigelo_inbox by tiers; sigelo_accept's tier.
+      ok(ac?.tier === 'friend' && bc?.tier === 'friend', 'relay: sigelo_contacts lists tier, friend by default', JSON.stringify([ac, bc]));
+      r = await a.call('sigelo_set_tier', { contact: 'bob', tier: 'quiet' });
+      ok(!r.isError && JSON.stringify(r.data) === JSON.stringify({ did: bDid, name: 'bob', tier: 'quiet' }), 'relay: sigelo_set_tier {contact: name, tier: quiet} → {did, name, tier}', r.text);
+      r = await a.call('sigelo_set_tier', { contact: 'bob', tier: 'vip' });
+      ok(r.isError && r.structured?.code === 'usage', 'relay: sigelo_set_tier to an unknown tier: usage', r.text);
+      r = await a.call('sigelo_set_tier', { contact: 'nobody', tier: 'own' });
+      ok(r.isError && r.structured?.code === 'not_contact', 'relay: sigelo_set_tier of no contact: not_contact', r.text);
+      r = await a.call('sigelo_inbox', { tiers: ['vip'] });
+      ok(r.isError && r.structured?.code === 'usage', 'relay: sigelo_inbox with an unknown tier: usage', r.text);
+      r = await b.call('sigelo_accept', { code: 'K7F3-Q9ZP', tier: 'own' });
+      ok(r.isError && r.structured?.code === 'usage' && r.text.includes('own is detected'), 'relay: sigelo_accept with tier own: usage (own is detected)', r.text);
+      ok((await b.call('sigelo_send', { to: 'alice', text: 'from a quiet contact' })).data?.status === 'sent', 'relay: bob writes');
+      r = await a.call('sigelo_inbox', { wait: 2, tiers: ['own', 'friend'] });
+      ok(!r.isError && r.data.messages.length === 0, 'relay: sigelo_inbox {tiers: [own, friend]}: not the quiet contact\'s', r.text);
+      r = await a.call('sigelo_inbox', { tiers: ['quiet'] });
+      ok(r.data?.messages.map((m) => m.content).join() === 'from a quiet contact', 'relay: sigelo_inbox {tiers: [quiet]}: it waited', r.text);
+      ok((await a.call('sigelo_set_tier', { contact: bDid, tier: 'friend' })).data?.tier === 'friend', 'relay: sigelo_set_tier by DID, back to friend');
+      // Beside a watcher (its lock, "<pid> watch"): sigelo_inbox reads the state, no session.
+      const { lockPath } = await import('../../adapters/moadim/sigelo-agent-contact.ts');
+      writeFileSync(lockPath(join(dir, 'alice.local.json')), `${process.pid} watch`);
+      ok((await b.call('sigelo_send', { to: 'alice', text: 'while watched' })).data?.status === 'sent', 'relay: bob writes while a watcher holds alice\'s file');
+      r = await a.call('sigelo_inbox', { wait: 1 });
+      ok(!r.isError && r.data.messages.length === 0 && r.data.offline === undefined, 'relay: sigelo_inbox beside a watcher: no login, so nothing from the relay (the watcher would have it)', r.text);
+      // The single-owner rule (WATCH.md): sigelo_send queues for the watcher and touches its kick file; the
+      // other tools that log in are refused, busy, before anything changes.
+      const { kickPath } = await import('../../adapters/moadim/sigelo-agent-contact.ts'), kicks = kickPath(join(dir, 'alice.local.json'));
+      r = await a.call('sigelo_send', { to: 'bob', text: 'queued while watched' });
+      ok(!r.isError && r.data.status === 'queued' && existsSync(kicks) && (await a.call('sigelo_contacts')).data?.contacts[0]?.queued === 1,
+        'relay: sigelo_send beside a watcher: queued for it (no login), its kick file touched', r.text);
+      for (const [tool, args] of [['sigelo_invite', {}], ['sigelo_accept', { code: 'K7F3-Q9ZP' }], ['sigelo_forget_contact', { did: bDid }]]) {
+        r = await a.call(tool, args);
+        ok(r.isError && r.structured?.code === 'busy' && r.text.includes(`is watched by sigelo-agent watch (pid ${process.pid})`), `relay: ${tool} beside a watcher: busy`, r.text);
+      }
+      ok((await a.call('sigelo_contacts')).data?.contacts[0]?.revoked === false, 'relay: the refused sigelo_forget_contact changed nothing');
+      rmSync(kicks);
+      // Beside a page ("<pid>"): every tool that logs in is refused, sigelo_inbox and sigelo_send too.
+      writeFileSync(lockPath(join(dir, 'alice.local.json')), `${process.pid}`);
+      for (const [tool, args] of [['sigelo_inbox', {}], ['sigelo_send', { to: 'bob', text: 'x' }], ['sigelo_send_file', { to: 'bob', path: join(dir, 'nope') }]]) {
+        r = await a.call(tool, args);
+        ok(r.isError && r.structured?.code === 'busy' && r.text.includes('is open in sigelo-agent ui'), `relay: ${tool} beside a page: busy`, r.text);
+      }
+      rmSync(lockPath(join(dir, 'alice.local.json')));
+      r = await a.call('sigelo_inbox', { wait: 2 });
+      ok(r.data?.messages.map((m) => m.content).join() === 'while watched', 'relay: without it, the next sigelo_inbox logs in and gets it', r.text);
+      r = await b.call('sigelo_inbox', { wait: 5 });
+      ok(r.data?.messages.map((m) => m.content).join() === 'queued while watched', 'relay: and sends what was queued beside the watcher: bob gets it', r.text);
       r = await b.call('sigelo_accept', { code });
       ok(r.isError && /^REFUSED: park_unknown/.test(r.text), 'relay: the short code a second time: park_unknown (one use)', r.text);
 
@@ -351,6 +410,17 @@ ${code.slice(60)}
       r = await a.call('sigelo_inbox', { wait: 2 });
       ok(r.data?.messages.length === 3 && r.data.messages[0].content === 'important 1' && JSON.stringify(r.data.messages[1].content) === JSON.stringify(nested)
         && r.data.messages[2].content === 'important 2' && r.data.more === 0 && r.text.length < 3000, 'relay: one result carries all three, its text compact', `${r.text.length} characters`);
+
+      // A file: bob's server sends it, alice's inbox returns one item with where it is saved.
+      const fileBytes = createHash('sha256').update('sigelo-mcp-test file').digest().toString('hex').repeat(3000);
+      writeFileSync(join(dir, 'notes.txt'), fileBytes);
+      r = await b.call('sigelo_send_file', { to: 'alice', path: join(dir, 'notes.txt') });
+      ok(!r.isError && r.data.status === 'sent' && r.data.file.name === 'notes.txt' && r.data.file.size === fileBytes.length, 'relay: sigelo_send_file sent', r.text);
+      r = await a.call('sigelo_inbox', { wait: 2 });
+      const fi = r.data?.messages?.[0];
+      ok(r.data?.messages.length === 1 && fi.type === 'file' && fi.name === 'notes.txt' && fi.size === fileBytes.length && fi.sha256 === createHash('sha256').update(fileBytes).digest('hex')
+        && fi.path === join(dir, 'alice.local.files', 'bob', `${fi.sha256.slice(0, 8)}-notes.txt`) && readFileSync(fi.path, 'utf8') === fileBytes && (statSync(fi.path).mode & 0o777) === 0o600,
+        'relay: sigelo_inbox returns {type: file, name, size, sha256, path}; the file is there, byte-exact, 0600', r.text.slice(0, 400));
 
       // An inbox past one result: a contact's 150,000-character message must not take the other
       // messages of the batch with it. The first result stops before it; the next carries it alone.

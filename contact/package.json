@@ -1,6 +1,6 @@
 {
   "name": "sigelo-contact",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": false,
   "description": "Agent contacts for sigelo identities: invite codes, a contact store, end-to-end encrypted envelopes with hybrid post-quantum key agreement, and an MQTT carrier. Client code (MIT); the relay server is csigelo/sigelo-relay (AGPL-3.0).",
   "keywords": [
@@ -40,15 +40,21 @@
     "./envelope.mjs": "./envelope.mjs",
     "./prekeys": "./prekeys.mjs",
     "./prekeys.mjs": "./prekeys.mjs",
+    "./file": "./file.mjs",
+    "./file.mjs": "./file.mjs",
     "./short": "./short.mjs",
     "./short.mjs": "./short.mjs",
+    "./enrol": "./enrol.mjs",
+    "./enrol.mjs": "./enrol.mjs",
     "./package.json": "./package.json"
   },
   "files": [
     "README.md",
     "bip39-english.mjs",
     "carrier.mjs",
+    "enrol.mjs",
     "envelope.mjs",
+    "file.mjs",
     "invite.mjs",
     "kdf.mjs",
     "prekeys.mjs",
@@ -63,7 +69,10 @@
     "gen-invite.mjs",
     "gen-short.mjs",
     "test-carrier.mjs",
+    "test-enrol.mjs",
     "test-envelope.mjs",
+    "test-file.mjs",
+    "test-tier.mjs",
     "test-invite.mjs",
     "test-short.mjs"
   ],
@@ -71,7 +80,7 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-short.mjs",
+    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-short.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs",
     "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs && node gen-short.mjs",
     "prepack": "node ../release/prepack.mjs pre",
     "postpack": "node ../release/prepack.mjs post",

@@ -56,6 +56,7 @@ k(R, path) = HKDF-SHA256(ikm = R, salt = "", info = path)   → 32 bytes    R = 
 
 On S — derived by the ceremony, which then forgets S:
   root identity   Ed25519 seed  k(S, "sigelo/v1/identity/ed25519/<n>")     n = rotation counter   built
+                  = the operator's own identity (`sigelo-agent keeper --from-words`, genesis pinned, ENROL.md)
   recovery        Ed25519 seed  k(S, "sigelo/v1/recovery/ed25519")                                built
   wallet(w)       b = sc_reduce32(k(S, "sigelo/v1/monero/<w>"))   w ∈ {treasury, allowance}         built
   keeper root     K_j = k(S, "sigelo/v1/keeper/<j>")                        j = keeper index       built (G4)

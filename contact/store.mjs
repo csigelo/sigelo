@@ -3,12 +3,22 @@
 // peer's ORIGINAL DID with every rotation seen, as accept/node/sigelo-pair.mjs keeps pairings, so
 // a rotation keeps the contact and a recovery still beats a thief (SPEC §7.1).
 //   { v, self, invites: { nonce: { secret, exp, name, peer, relay } },
-//              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as, named? } },
-//              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key, re_pair? } } }
+//              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as, named?, tier? } },
+//              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key, re_pair?,
+//                                          tier, tier_by, operator_exp? } } }
 // invites: codes this owner handed out, keyed by inviteNonce(code bytes); peer: the original DID of
 // the contact a re-key code is for, null on a new contact's code. accepts: codes this owner
 // answered, keyed by answerId(answer). re_pair: "own_recovery" or "contact_recovery" once a recovery
 // burned pair_key (carrier.mjs, "After a recovery"); a new pairing writes the record without it.
+// Tiers (TIERS): tier, what the owner's tools do with the contact's messages: "own" (the owner's
+// own agents: pushed in full), "friend" (a notice, the content pulled), "quiet" (nothing, pulled).
+// tier_by "owner": chosen (setTier, accept --tier) and kept; "auto": computed, as tierOf does, on
+// every write. Own is automatic while the contact carries an unexpired operator attestation
+// (OPERATOR_CTX) from a DID of `mine` (this identity's chain, or an operator attesting this
+// identity: operator_exp, from observe), or is one of those operators, or another writer set tier
+// "own" without tier_by. Else friend. The attestation is the mark of an own agent (an enrolled
+// worker included, enrol.mjs): no flag beside it. A re-pair,
+// a merge and a rename keep all of it.
 // The file holds one-time secrets, Bob's one-time key and
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
 import { randomBytes } from 'node:crypto';
@@ -17,11 +27,112 @@ import { basename, dirname, join } from 'node:path';
 import { canonicalize, verify } from 'sigelo';
 import { SKEW, TTL_MAX, V, attempt, checkTime, fail, hex, keyOf } from './invite.mjs';
 
+export const TIERS = ['own', 'friend', 'quiet'];
+export const OPERATOR_CTX = 'sigelo-relay/operator';
+// The longest name rename() gives a contact, in characters.
+export const NAME_MAX = 64;
+// What a record keeps of its tier through admit (a re-pair, a merged notice).
+const TIER_KEYS = ['tier', 'tier_by', 'operator_exp'];
+
 export class Contacts {
-  /** self: the owner's ORIGINAL DID. A store belongs to one identity; K is derived from it. */
-  constructor(path, self) {
+  /**
+   * self: the owner's ORIGINAL DID. A store belongs to one identity; K is derived from it.
+   * mine: () → { chain, operators }: this identity's DIDs and those of the operators attesting it
+   * (the carrier's, from its bundle), for tiers; without it nobody is own by attestation.
+   */
+  constructor(path, self, { mine } = {}) {
     if (typeof self !== 'string' || !self.startsWith('did:sigelo:z')) throw new TypeError('Contacts: self must be the owner\'s original DID');
-    this.path = path; this.self = self; this.load();
+    this.path = path; this.self = self; this.mine = mine ?? null; this.load();
+  }
+
+  // ---- tiers (the header)
+
+  #auto(c, now) {
+    if ((c.operator_exp ?? 0) > now) return 'own';
+    const ops = this.mine?.().operators ?? [];
+    return c.chain.some((d) => ops.includes(d)) ? 'own' : 'friend';
+  }
+
+  /** The tier of record c now: the owner's choice, another writer's own, else computed. */
+  tierOf(c, now) {
+    if (c.tier_by === 'owner' && TIERS.includes(c.tier)) return c.tier;
+    if (c.tier_by === undefined && c.tier === 'own') return 'own';
+    return this.#auto(c, now);
+  }
+
+  // c.tier written for readers of the file (the UI's), unless chosen or set by another writer.
+  #settle(c, now) {
+    if ((c.tier_by === 'owner' && TIERS.includes(c.tier)) || (c.tier_by === undefined && c.tier === 'own')) return;
+    c.tier = this.#auto(c, now); c.tier_by = 'auto';
+  }
+
+  /** original DID → tier, every contact, one read. */
+  tiers(now) {
+    return new Map(Object.values(this.load().s.contacts).map((c) => [c.did, this.tierOf(c, now)]));
+  }
+
+  // A live contact by name or any DID of its chain, for the owner's verbs.
+  #find(who) {
+    if (typeof who !== 'string' || who === '') fail('not_contact', 'name a contact, by name or DID');
+    this.load();
+    let c = who.startsWith('did:') ? this.lookup(who) : null;
+    if (!c) {
+      const named = Object.values(this.s.contacts).filter((x) => !x.revoked && x.name === who);
+      if (named.length > 1) fail('name', `${named.length} contacts are called ${JSON.stringify(who)}: use the DID`);
+      c = named[0] ?? fail('not_contact', `${JSON.stringify(who)} is not a contact`);
+    }
+    if (c.revoked) fail('revoked', `${c.did} was revoked by this owner`);
+    return c;
+  }
+
+  /** The owner's choice for a contact (a name or any DID of its chain): kept until changed. */
+  setTier(who, tier, now) {
+    if (!TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
+    const c = this.#find(who);
+    c.tier = tier; c.tier_by = 'owner';
+    this.save();
+    return { did: c.did, name: c.name, tier: this.tierOf(c, now) };
+  }
+
+  /**
+   * The owner's name for a contact (who: a name or any DID of its chain): 1 to NAME_MAX characters,
+   * trimmed, no control characters, and no other live contact's (name_taken: a name two contacts
+   * share is refused by every verb that takes a name). Kept through a re-pair. → { did, name }.
+   */
+  rename(who, name) {
+    if (typeof name !== 'string' || name.trim() === '' || [...name.trim()].length > NAME_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(name)) {
+      fail('name', `a name is 1 to ${NAME_MAX} characters, no control characters`);
+    }
+    const c = this.#find(who), to = name.trim();
+    if (Object.values(this.s.contacts).some((x) => !x.revoked && x.did !== c.did && x.name === to)) fail('name_taken', `another contact is called ${JSON.stringify(to)}`);
+    c.name = to;
+    this.save();
+    return { did: c.did, name: to };
+  }
+
+  // The last expiry of the operator attestations from a DID of mine() in r (verify's), or 0.
+  #attested(r, now) {
+    const m = this.mine?.(), by = new Set([...(m?.chain ?? []), ...(m?.operators ?? [])]);
+    let exp = 0;
+    for (const [iss, bodies] of Object.entries(r.attestations ?? {})) {
+      if (by.has(iss)) for (const b of bodies) if (b.ctx === OPERATOR_CTX && b.exp > now && b.exp > exp) exp = b.exp;
+    }
+    return exp;
+  }
+
+  /**
+   * The contact's bundle seen (r: verify of it, by the caller): its unexpired operator
+   * attestations from a DID of mine() make it own until the last expires. → its tier.
+   */
+  observe(did, r, now) {
+    const c = this.lookup(did) ?? fail('not_contact', `${did} is not a contact`);
+    if (!r.chain.includes(c.did)) fail('original_did', `the bundle is not ${c.did}'s chain`);
+    // Ending anywhere else, the chain may rotate into a third party's public genesis (a rotation is
+    // signed by the key it leaves) and bring that party's attestations (THREAT-MODEL §2.12).
+    if (r.did !== c.current_did) fail('current_did', `the bundle ends at ${r.did}; this store holds ${c.did} at ${c.current_did}`);
+    const exp = this.#attested(r, now);
+    if (exp > (c.operator_exp ?? 0)) { c.operator_exp = exp; this.#settle(c, now); this.save(); }
+    return this.tierOf(c, now);
   }
 
   // Every operation re-reads the file: another process (the owner's revoke) may have written it.
@@ -115,9 +226,11 @@ export class Contacts {
    * as: the current DID his answer's chain ends at, which the inviter files him under; he may
    * rotate before the reply comes, and must then tell her (the carrier's rotation notice).
    * named: he chose the name (accept --name), so a re-pair renames the known contact (the carrier).
+   * tier: he chose the tier (accept --tier): the contact is filed with it (invite.mjs checkReply).
    */
-  addAccept(code, id, name, now, kem_sk = null, as = null, named = false) {
-    return this.#add('accepts', id, { secret: hex(code.secret), code_did: code.did, exp: code.exp, name, relay: code.relay, kem_sk, as, ...(named && { named: true }) }, now, TTL_MAX + SKEW);
+  addAccept(code, id, name, now, kem_sk = null, as = null, named = false, tier = null) {
+    if (tier !== null && !TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
+    return this.#add('accepts', id, { secret: hex(code.secret), code_did: code.did, exp: code.exp, name, relay: code.relay, kem_sk, as, ...(named && { named: true }), ...(tier && { tier }) }, now, TTL_MAX + SKEW);
   }
 
   /** Single use: the entry is deleted, and the file saved, before any check runs on the message naming it. */
@@ -184,8 +297,15 @@ export class Contacts {
     const heldNow = this.#holders(r.chain);
     if (heldNow.some((c) => c.revoked)) fail('revoked', `${r.chain[0]} was revoked during this pairing`);
     if (heldNow.some((c) => c.did !== old?.did)) fail('original_did', `another contact took ${r.chain[0]}'s chain during this pairing`);
-    const c = { name: old?.name ?? name, did: r.chain[0], current_did: r.did, current_key: keyOf(bundle, rotations, r.did), revoked: false, chain: r.chain, rotations, ...fields };
-    this.s.contacts[c.did] = c; this.save();
+    const kept = old ? Object.fromEntries(TIER_KEYS.filter((k) => Object.hasOwn(old, k)).map((k) => [k, old[k]])) : {};
+    const c = { name: old?.name ?? name, did: r.chain[0], current_did: r.did, current_key: keyOf(bundle, rotations, r.did), revoked: false, chain: r.chain, rotations, ...kept, ...fields };
+    if (fields.tier !== undefined && !TIERS.includes(fields.tier)) fail('tier', `a tier is ${TIERS.join(', ')}`);
+    this.s.contacts[c.did] = c;
+    // Attestations the bundle carried (none at a pairing today: chains only), then the tier.
+    const exp = this.#attested(r, now);
+    if (exp > (c.operator_exp ?? 0)) c.operator_exp = exp;
+    this.#settle(c, now);
+    this.save();
     return { did: c.did, current_did: c.current_did, current_key: c.current_key, attestations: r.attestations, rejected: r.rejected, rekeyed: Boolean(old) };
   }
 }

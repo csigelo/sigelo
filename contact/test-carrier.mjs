@@ -592,11 +592,20 @@ try {
   const first = await alice.inbox();
   ok(seen('alice', (e) => e.type === 'paired' && e.did === B.original && e.name === 'bob').length === 1, 'alice, back online, checks bob\'s answer and stores him under his original DID');
   ok(first.events.some((e) => e.type === 'paired' && e.did === B.original && e.name === 'bob'), 'and her inbox says so: an agent without onEvent sees the pairing');
+  const early = alice.contacts().contacts[0];
+  ok(early.prekeys === false && early.waiting === null && /^[0-9a-f]{32}$/.test(early.pair) && early.chain.join() === B.original && early.tier_by === 'auto',
+    `contacts: bob's prekeys not here yet (prekeys false), the pair id, his chain, tier_by (${JSON.stringify(early)})`);
+  const skew = Math.round(Date.now() / 1000 - now), clk = alice.clockOffset();
+  ok(clk?.relay === HOST && Math.abs(clk.offset - skew) <= 2 && clk.checked === now, `clockOffset: the relay's Date less this clock, from the login (${JSON.stringify(clk)}, expected about ${skew})`);
+  const clk2 = await alice.checkClock();
+  ok(Math.abs(clk2?.offset - skew) <= 2 && make(agent('nobody yet')).clockOffset() === null, 'checkClock measures it again (GET /relay.json); a carrier that never asked: null');
   await bob.inbox();
   ok(seen('bob', (e) => e.type === 'paired' && e.did === A.original && e.name === 'alice').length === 1, 'bob, back online, checks alice\'s reply and stores her under her original DID');
   ok(seen('bob', (e) => e.type === 'sent' && e.control === 'prekeys').length === 1, 'bob sends his prekeys as his first message');
   await alice.inbox();
   ok(seen('alice', (e) => e.type === 'prekeys' && e.did === B.original).length === 1, 'alice holds bob\'s prekeys: both can begin epochs');
+  ok(alice.contacts().contacts[0].prekeys === true && bob.contacts().contacts[0].prekeys === true && alice.contacts().contacts[0].pair === bob.contacts().contacts[0].pair,
+    'and contacts says so on both sides (prekeys true), one pair id');
   const [ab] = alice.contacts().contacts, [ba] = bob.contacts().contacts;
   ok(ab.did === B.original && ab.current_did === B.did && !ab.revoked && ab.relay === HOST, 'alice\'s contact: bob, original DID, the code\'s relay');
   ok(ba.did === A.original && ba.current_did === A.did, 'bob\'s contact: alice');
@@ -624,6 +633,24 @@ try {
     const ub = await uma.inbox();
     ok(!ub.offline && ub.events.some((e) => e.type === 'paired' && e.did === Te.original) && uma.contacts().answers.length === 0,
       `uma reads the reply: paired, and both answers are spent, the reply topic having died with it (${ub.offline ?? 'online'})`);
+  }
+
+  // ================================================================ the owner's verbs: cancel an invite, rename a contact
+  {
+    const V = agent('vera'), vera = make(V);
+    const code = (await alice.invite({ name: 'gone' })).code;
+    const c = await alice.cancelInvite(code);
+    ok(c.cancelled === true && c.name === 'gone' && !alice.contacts().invites.some((x) => x.name === 'gone'), 'cancelInvite: the code withdrawn, no longer pending');
+    await refuses(() => alice.cancelInvite(code), 'challenge_unknown', 'cancelling it again');
+    await vera.accept(code, { name: 'alice', wait: 0.3 }).catch(() => {});
+    await alice.inbox();
+    ok(!alice.contacts().contacts.some((x) => x.did === V.original), 'an answer to the withdrawn code pairs nobody');
+    ok(JSON.stringify(alice.rename('bob', 'Bob B')) === JSON.stringify({ did: B.original, name: 'Bob B' }) && alice.contacts().contacts[0].name === 'Bob B', 'rename by name → {did, name}');
+    ok(alice.rename(B.did, ' bob ').name === 'bob', 'rename by DID, trimmed');
+    await refuses(async () => alice.rename('bob', ''), 'name', 'rename to an empty name');
+    await refuses(async () => alice.rename('bob', 'a\u0007b'), 'name', 'rename to a name with a control character');
+    await refuses(async () => alice.rename('nobody', 'x'), 'not_contact', 'rename of no contact');
+    await vera.stop();
   }
 
   // ================================================================ messages, both agents one-shot
@@ -1004,7 +1031,7 @@ try {
     const id = await import(pathToFileURL(join(HERE, '..', 'adapters', 'moadim', 'sigelo-agent.ts')).href);
     const env = { SIGELO_RELAY: HOST, SIGELO_RELAY_ENDPOINTS: JSON.stringify(endpoints) };
     const tools = await mcp.load({ installed: false, id, env, clock: () => now });
-    ok(tools && tools.tools.map(([n]) => n).join() === 'sigelo_invite,sigelo_accept,sigelo_contacts,sigelo_send,sigelo_inbox,sigelo_forget_contact', 'the MCP module lists the six tools');
+    ok(tools && tools.tools.map(([n]) => n).join() === 'sigelo_invite,sigelo_accept,sigelo_contacts,sigelo_set_tier,sigelo_send,sigelo_send_file,sigelo_inbox,sigelo_forget_contact', 'the MCP module lists the eight tools');
     ok(tools.tools.every(([, d, s]) => typeof d === 'string' && s.type === 'object' && s.additionalProperties === false && s.properties.identity), 'each with a closed schema and the profile argument');
     const daveFile = join(dir, 'dave.local.json');
     id.init(daveFile, keygen({ seed: seed('dave recovery'), recovery: 'sha256:' + '0'.repeat(64) }).key);

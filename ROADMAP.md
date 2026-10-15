@@ -379,7 +379,7 @@ Rough agent-hours (AH). "Owner" marks blockers. Status as of 2026-09-29 at `d265
 | 5 | `docs-test/` harness and round 3, Claude plus three non-Claude families (T5, T11) | 8 + API cost | **harness landed** (`a64d9c1`); Claude datapoints are in (`cf855c8`, `2a616a1`). **Non-Claude families not run**, and no from-spec verifier run | an Owner API key for non-Claude models |
 | 6 | `adopt.md`, llms.txt, llms-full.txt, robots.txt, JSON-LD, OpenAPI, static site | 8 | **landed 2026-10-01** in `0a4381f` (`site/`, `node site/test/run.mjs` 242 checks; `site/test/TASK-site.md` written, not yet run on a model); OpenAPI served as `spend/openapi.yaml`. Not built: `/openapi.json` (no YAML converter without a dependency), `/v0/spec.md` (nothing is frozen), the A2A card and remote MCP endpoint (step 7). **Not deployed** | the `security@sigelo.io` mailbox; hosting and DNS |
 | 7 | `sigelo-mcp` (stdio plus verify-only remote), `server.json`, registry listings | 10 | **stdio server landed** (`2077ce6`, `93b96a3`, harness configs `2bb27e1`); **`server.json` written** (`0a4381f`, `integrations/mcp/server.json`, namespace `io.github.csigelo/sigelo`, proved by `mcp-publisher login github` as csigelo, so no domain proof; `"mcpName"` added to `integrations/mcp/package.json`, checked equal by `site/test/run.mjs`; registry fields otherwise unverified). Remote endpoint and listings not started | `sigelo-mcp` on npm (step 8); step 3 |
-| 8 | Project identity ceremony, first push, npm publish, first signed release | 4 | **first push done 2026-10-01**: `bca5b16` (fresh single-commit export of private `13e3b12`, §5.1, `release/publish.sh`); later syncs are one commit each via its update mode. **v0.1.0 tagged 2026-10-02** (`v0.1.0` + `go/v0.1.0` on one public commit): a GitHub pre-release (draft) with every `release/build.sh` artefact and `SHA256SUMS`, built twice from the public tree with identical sums (`release/RELEASE.md`). **v0.1.1 tagged 2026-10-04**: SSH-signed tags and a `release.json` by the release identity (`release/RELEASE.md` § Signing); built twice from the public tree, sums identical; the five packages published to npm at 0.1.1, byte-identical to the release tarballs. **v0.1.2 tagged 2026-10-14**: the same procedure; `sigelo-contact` joins the npm packages (six, at 0.1.2). **v0.1.3 tagged 2026-10-14**: the same procedure, six packages at 0.1.3. **v0.1.4 tagged 2026-10-14**: the same, six packages at 0.1.4. **v0.1.5 tagged 2026-10-14**: the same, six packages at 0.1.5 (short invite codes). **v0.1.6 tagged 2026-10-14**: the same, six packages at 0.1.6 (refusals that say what to do). Remaining: no project ceremony has been run (the release key is a voluntary rotation to come) | the rest of D1 (security mailbox, age recipient, `DEVICE_STRINGS` secret); Owner runs or witnesses the project ceremony |
+| 8 | Project identity ceremony, first push, npm publish, first signed release | 4 | **first push done 2026-10-01**: `bca5b16` (fresh single-commit export of private `13e3b12`, §5.1, `release/publish.sh`); later syncs are one commit each via its update mode. **v0.1.0 tagged 2026-10-02** (`v0.1.0` + `go/v0.1.0` on one public commit): a GitHub pre-release (draft) with every `release/build.sh` artefact and `SHA256SUMS`, built twice from the public tree with identical sums (`release/RELEASE.md`). **v0.1.1 tagged 2026-10-04**: SSH-signed tags and a `release.json` by the release identity (`release/RELEASE.md` § Signing); built twice from the public tree, sums identical; the five packages published to npm at 0.1.1, byte-identical to the release tarballs. **v0.1.2 tagged 2026-10-14**: the same procedure; `sigelo-contact` joins the npm packages (six, at 0.1.2). **v0.1.3 tagged 2026-10-14**: the same procedure, six packages at 0.1.3. **v0.1.4 tagged 2026-10-14**: the same, six packages at 0.1.4. **v0.1.5 tagged 2026-10-14**: the same, six packages at 0.1.5 (short invite codes). **v0.1.6 tagged 2026-10-14**: the same, six packages at 0.1.6 (refusals that say what to do). **v0.1.7 prepared 2026-10-15** (RELEASE.md step 1: six packages at 0.1.7; the page, `watch`, tiers, files and enrolment experimental; wire `sigelo/0` unchanged), not yet tagged. Remaining: no project ceremony has been run (the release key is a voluntary rotation to come) | the rest of D1 (security mailbox, age recipient, `DEVICE_STRINGS` secret); Owner runs or witnesses the project ceremony |
 | 9 | Paper draft (§4) and a DID-method registration PR | 20 | not started | Owner: arXiv endorsement (the author is `csigelo` unless a display name is chosen) |
 | 10 | Keeper soak on stagenet with scripted agents, incident rehearsal (T6, T14) | 6 + 2 weeks wall | **running**: day 6 of ≥ 14 (started `41076a6`, 2026-09-23), incidents #1–#4 (spend/soak/README.md). The live `app/` lacks the #4 fixes. T14 is due at day 7, and only its step 0 has run (`efa9f33`) | — |
 | 11 | External review (§5.4), fixes, then 30 days with no wire change | weeks | not started. The 30-day count can start no earlier than the last wire change, 2026-09-24 (R6) | D3 |
@@ -464,3 +464,56 @@ usable on its own, after 0.1.4:
 
 The key providers of §7 come between 1 and 2 where the web interface needs them (an unlocked key
 on a desktop belongs in the keychain before a page can use it).
+
+### 8.1 Where step 2 stands (2026-10-14, master `9086c4b`, private, unreleased)
+
+Built in five parallel branches and merged, every suite green (contact 692 checks, adapters, MCP 141,
+relay 278): `sigelo-agent ui` (16 routes, `UI-API.md`), contact tiers `own | friend | quiet` with
+`tier`, `accept --tier`, `inbox --tier`, `sigelo_set_tier`, `sigelo-agent watch` with the three hooks
+(`WATCH.md`), files up to 8 MiB (`sigelo-file/0`, `send-file`, `sigelo_send_file`), and the §3
+pairing defects. Enrolment, rebuilt the same evening (Owner: "something just signed is not
+recoverable"): **done** on branch `enrol-derived`. An enrolled agent is worker i derived from the
+operator's keeper root (`keeper --from-words`, K beside the operator identity), placed by a one-time
+code (the server pairs like any contact, then its temporary DID is replaced by worker i, sent once end
+to end) or `--here` for sub-agents, restored with `enrol --restore i [--rotate]`
+(`adapters/moadim/ENROL.md`, THREAT-MODEL §2.11).
+
+Owner, 2026-10-14 evening: **not released; consolidate first**, the debt below is the next sigelo work, then 0.2.0 with the page labelled experimental (decision 6 of the plan stands:
+no page in a public release before §7's keychain unlock unless the Owner lifts it).
+
+**Debt to clear, in order (one Opus pass, about a day):**
+
+1. ~~The page works around the carrier~~ **done** (`consolidate-a`): `rename`, `cancelInvite`,
+   `clockOffset`/`checkClock`, and `contacts()` `prekeys`/`waiting` are carrier API; the page calls them
+   and takes messages and events through `inbox()`, so nothing piles up in the carrier's state.
+2. ~~"Mine" has three spellings~~ **done** (`enrol-derived`): the `enrolled` flag is gone; the operator
+   attestation is the mark (`tier: "own"` by detection, or chosen by the owner).
+3. ~~`watch` and the CLI evict each other's relay session; the MCP server ignores the pid lock~~ **done**
+   (`consolidate-b`): one owner per identity file (WATCH.md). Beside `watch`, CLI and MCP sends queue for it
+   and `inbox` reads what it got; every other login, and all beside `ui`, is refused `busy`.
+4. ~~The `sigelo-operator/0` exchange was never read against THREAT-MODEL~~ **done** (`consolidate-a`):
+   a contact could file itself own with a chain rotated into a sibling's genesis; fixed, and
+   THREAT-MODEL §2.12 (no version gate: nothing on the wire to gate on).
+5. ~~A queued file sits base64 in the state file~~ **done** (`consolidate-a`): chunks spool to
+   `<identity>.files/.out/` (dot: a contact's directory never starts with one), the outbox keeps pointers.
+6. ~~`adapters/moadim/test.ts` is ~1,000 lines in one script~~ **done** (`consolidate-b`): split by verb into `test-identity`,
+   `test-contact`, `test-ui`, `test-watch` and `test-enrol.ts` over `test-helpers.ts`; `npm test` (`test-all.ts`) prints one `ALL PASS` line per file.
+7. ~~History and `ui.json` are plaintext 0600 until K2 (§7)~~ **documented, waits for §7** (`consolidate-a`):
+   THREAT-MODEL §3.9 and UI-API.md say so; the "clear" button stays the mitigation.
+8. ~~The page's "make mine" attests a random-key local agent~~ **done** (`seed-me`): the page's Enrol
+   places a derived worker, and the operator identity itself is the root identity of the words
+   (`keeper --from-words`): nothing of the Owner's is a random key.
+
+Every item of the debt list is done (7 waits on §7 by design).
+
+**Decided 2026-10-15 (Owner):** all of it ships as **v0.1.7** now; **v0.2.0** is the wire-freeze tag, on or after 2026-10-29 (VERSIONING §1, 30 days after the last wire change on 2026-09-29).
+
+**Then:** `you.md` ("For people", ≤ 120 words) and the `connect.md` link; release 0.2.0 by
+`release/RELEASE.md`; the Owner's enrolment test against a real VPS agent; phone app (§6 of the plan).
+
+**Clarified 2026-10-14, revised the same evening (Owner):** an enrolled agent IS derived: worker i
+of the operator's keeper root (`agentIdentitySeed(K, i, n)`), its own full identity on the wire, so
+the 25 words restore it; "mine" is the operator attestation, verifiable offline. A sub-agent that runs
+inside its parent's process (a Claude Code subagent with the sigelo plugin loaded) acts under the
+parent's DID unless it is given a pooled worker file (`enrol --here`, SIGELO_IDENTITY): that is the
+provenance gate's problem (§7, "next product line").

@@ -135,7 +135,7 @@ md_links() {
   ' "$@"
 }
 # Internal or separately published: never in the main export, whatever SIGELO_EXCLUDE says.
-DEFAULT_EXCLUDE="RISKS.md JOURNAL.md commercial relay design/relay-plan.md"
+DEFAULT_EXCLUDE="RISKS.md JOURNAL.md commercial relay design/relay-plan.md design/human-ui-plan.md"
 fresh=0 rewrite_ok=0 relay=0
 while [ $# -gt 0 ]; do
   case $1 in
@@ -414,8 +414,9 @@ else
     run "ts: install + build + vectors + tests" sh -c "cd '$t/ts' && npm ci --ignore-scripts --silent && npx tsc && node dist/gen_vectors.js > '$work/vectors.json' && diff -q ../test-vectors.json '$work/vectors.json' && node dist/test.js | tail -1 | grep -q '^ALL PASS'"
     run "go: vet + tests + static build" sh -c "cd '$t/go' && go vet ./... && go test ./... 2>&1 | tail -2 | grep -q '^ok' && CGO_ENABLED=0 go build ./cmd/sigelo-verify && rm -f sigelo-verify"
     # test-carrier.mjs runs its fixture part only: the export carries no relay/ (it SKIPs the rest); before moadim, whose contact verbs load it by package name
-    run "contact: install + tests + fixtures" sh -c "cd '$t/contact' && npm ci --ignore-scripts --silent && node test-invite.mjs | tail -1 | grep -q '^ALL PASS' && node test-envelope.mjs | tail -1 | grep -q '^ALL PASS' && node test-carrier.mjs | tail -1 | grep -q '^ALL PASS' && node test-short.mjs | tail -1 | grep -q '^ALL PASS' && node gen-invite.mjs --check >/dev/null && node gen-envelope.mjs --check >/dev/null && node gen-carrier.mjs --check >/dev/null && node gen-short.mjs --check >/dev/null"
-    run "moadim adapter" sh -c "cd '$t/adapters/moadim' && npm ci --ignore-scripts --silent && npm test 2>&1 | grep -q '^ALL PASS'"
+    run "contact: install + tests + fixtures" sh -c "cd '$t/contact' && npm ci --ignore-scripts --silent && node test-invite.mjs | tail -1 | grep -q '^ALL PASS' && node test-envelope.mjs | tail -1 | grep -q '^ALL PASS' && node test-carrier.mjs | tail -1 | grep -q '^ALL PASS' && node test-short.mjs | tail -1 | grep -q '^ALL PASS' && node test-file.mjs | tail -1 | grep -q '^ALL PASS' && node test-enrol.mjs | tail -1 | grep -q '^ALL PASS' && node test-tier.mjs | tail -1 | grep -q '^ALL PASS' && node gen-invite.mjs --check >/dev/null && node gen-envelope.mjs --check >/dev/null && node gen-carrier.mjs --check >/dev/null && node gen-short.mjs --check >/dev/null"
+    # npm test runs test-all.ts: one ALL PASS line per file, then ALL PASS for the lot
+    run "moadim adapter" sh -c "cd '$t/adapters/moadim' && npm ci --ignore-scripts --silent && npm test > '$work/moadim.out' 2>&1; for f in identity contact ui watch enrol; do grep -q \"^ALL PASS test-\$f.ts \" '$work/moadim.out' || exit 1; done; tail -1 '$work/moadim.out' | grep -q '^ALL PASS'"
     run "spend keeper" sh -c "cd '$t/spend' && npm ci --ignore-scripts --silent && npm test 2>&1 | grep -q '^ALL PASS'"
     run "mcp server" sh -c "cd '$t/integrations/mcp' && npm test 2>&1 | grep -q 'ALL PASS'"
     run "schemas" sh -c "cd '$t' && node schema/check.mjs | grep -q '^ALL PASS'"

@@ -3,6 +3,53 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## v0.1.7 — 2026-10-15
+
+- **Status:** new and experimental: the page (`sigelo-agent ui`), `watch`, tiers, files, enrolment and the
+  seed-derived operator identity. Wire `sigelo/0` unchanged; keeper stagenet-only; all unaudited.
+- **Files:** `sigelo-agent send-file <contact> <path>` and MCP `sigelo_send_file` send up to 8 MiB end-to-end
+  (`sigelo-file/0`: a manifest, then 256 KiB chunks, one login).
+- **Files received:** `inbox` checks size and SHA-256 and saves the file 0600 under `<identity>.files/<contact>/`,
+  never opened.
+- **Files queued:** wait in `<identity>.files/.out/` (0600), not in the state file; removed once sent, refused or
+  the contact forgotten.
+- **Expired answers, while waiting:** a code that expires during `accept --wait` is refused then (`code_expired`),
+  not reported `waiting`; `inbox --wait` ends on a `pairing_failed`.
+- **`sigelo-agent ui`:** a page on 127.0.0.1 for your own DID: contacts (Mine, Contacts, tags), short codes with the
+  four words, messages, your agents enrolled and paired (`adapters/moadim/UI-API.md`).
+- **Own agents, derived from your seed:** `enrol --name <n>` makes worker i of your keeper root
+  (`agentIdentitySeed(K, i, n)`, 90-day attestation) and prints a one-time code (`adapters/moadim/ENROL.md`).
+- **Enrolment on the server:** `init --enrol <code>` pairs like any contact, then its identity is replaced with
+  worker i, sent once end to end (THREAT-MODEL §2.11).
+- **Enrol options:** `--here` puts the worker in the agents' directory for a sub-agent; `--restore i [--rotate]`
+  places it again from the words. The `enrolled` contact flag is gone.
+- **Your identity from your words:** `sigelo-agent keeper --from-words` writes the keeper root and the operator
+  identity, the root identity of the 25 words (`identitySeed(S, n)`), so they restore the same DID.
+- **Derived identity guards:** a random identity in the way is refused (`--replace-me` sets it aside);
+  `--rotate-me` derives the next key and `rotate` refuses a derived one.
+- **`ui --recovery`/`--no-recovery` are gone:** run `keeper --from-words` once (`adapters/moadim/ENROL.md`).
+- **The page's Enrol replaces "Make mine":** `POST /api/agents/enrol` makes a local agent worker i (old files set
+  aside, its contacts warned) or renews a worker; `POST /api/agents/mine` is gone.
+- **Contact tiers:** each contact is `own` (detected: an operator attestation from you or your operator), `friend`
+  (default) or `quiet`; `sigelo-agent tier <contact> own|friend|quiet`.
+- **Tiers elsewhere:** `accept --tier friend|quiet`, `inbox --tier own,friend [--quiet-too]`; MCP `sigelo_set_tier`,
+  `tier`/`tiers` on accept and inbox; the page asks friend or quiet and groups Mine by tier.
+- **Operator hints (`sigelo-operator/0`):** agents of one operator, and the operator, find each other own through
+  blinded hints; other contacts learn only operator DIDs they guess (THREAT-MODEL §2.12).
+- **Operator proofs:** taken only when asked for and only for the sender's current DID (a chain rotated into a
+  sibling's genesis is refused); a renewed attestation is proved again; `send` refuses the label.
+- **Older agents:** one on an earlier version shows operator hints as messages labelled `sigelo-operator/0`.
+- **sigelo-contact API:** `cancelInvite(code)`, `rename(who, name)`, `clockOffset()`/`checkClock()`; `contacts()`
+  adds `pair`, `chain`, `tier_by`, `prekeys` and `waiting`.
+- **The page reads `inbox()`:** its carrier state no longer piles up 1,000 events; a file received shows as a
+  message.
+- **`sigelo-agent watch`:** stays connected, so an invite completes by itself when accepted; own messages go to
+  `--on-message`, friends' as a notice to `--on-notice`, quiet ones wait.
+- **`watch` hooks:** `--on-pairing` too (`adapters/moadim/WATCH.md`). Beside a watcher, `inbox` reads without
+  logging in.
+- **One owner per identity:** beside `watch`, CLI and MCP `send`/`send-file` queue for it and `inbox` reads what it
+  got; other relay verbs, and all beside `ui`, refuse `busy`. No more 10 s session fights.
+
 ## v0.1.6 — 2026-10-14
 
 - **Refusals:** each says what failed and what to do next, and how a code was read (short or long) and where it broke;

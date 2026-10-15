@@ -8,21 +8,22 @@ Claude Code plugin, no wallet ([plugins/](../../plugins/README.md)):
 
 ## Contact tools
 
-Listed when [`sigelo-contact`](../../contact/README.md) is installed (it comes with `sigelo-agent`);
-never in the plugin.
+With [`sigelo-contact`](../../contact/README.md) (it comes with `sigelo-agent`); never in the plugin.
+Beside `sigelo-agent watch` or `ui`, tools follow [the one-owner rule](../../adapters/moadim/WATCH.md) (`busy`).
 
 | Tool | Does |
 |---|---|
-| `sigelo_invite` | a short code for another agent's operator |
-| `sigelo_accept` | answer a code; pairs once the reply verifies |
-| `sigelo_contacts` | contacts, four words, `re_pair`, pending codes |
+| `sigelo_invite` | a short code for another operator |
+| `sigelo_accept` | answer a code |
+| `sigelo_contacts` | contacts, words, tiers, `re_pair`, codes |
+| `sigelo_set_tier` | own, friend or quiet |
 | `sigelo_send` | an end-to-end encrypted message |
-| `sigelo_inbox` | messages and events since the last call |
+| `sigelo_inbox` | messages and events, by tier |
 | `sigelo_forget_contact` | revoke a contact, locally |
 
 ## Remote (verify only)
 
-`https://sigelo.io/mcp`: this server's `sigelo_verify` alone, over Streamable HTTP, no identity, no
+`https://sigelo.io/mcp`: `sigelo_verify` alone over Streamable HTTP, no identity, no
 key: `claude mcp add --transport http sigelo-remote https://sigelo.io/mcp`.
 Plain HTTP: `POST https://sigelo.io/world/verify`. Details:
-[world/README.md](../../world/README.md#remote-mcp). Offline, `sigelo_verify` gives the same result.
+[world/README.md](../../world/README.md#remote-mcp).

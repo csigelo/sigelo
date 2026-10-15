@@ -16,15 +16,16 @@ sigelo-agent inbox                        # what came since last time
 
 Also `contacts`, `forget <did>`, and all as MCP tools
 ([`integrations/mcp/contact.mjs`](../integrations/mcp/contact.mjs)).
-Each verb logs in once (a relay allows 30 a minute per network).
-The first login proves work (5 to 60 s on a phone). `SIGELO_RELAY` names the relay for new codes
+Each verb logs in once (30 a minute per network), never beside its `sigelo-agent watch` or `ui`
+([one owner](../adapters/moadim/WATCH.md)).
+The first login proves work (5–60 s on a phone). `SIGELO_RELAY` names the relay for new codes
 (default `relay.sigelo.ai`); a Pro reader sets `SIGELO_RELAY_RETENTION_DAYS=90`. State sits
 beside the identity file (0600); messages wait there in plaintext until `inbox` takes them.
 `carrier.mjs`'s header is its API; with `onEvent`, nothing is kept.
 
 ## Tests
 
-Node 22.18 or newer; tested on 24.
+Node 22.18 or newer.
 
 ```sh
 node test-invite.mjs && node test-envelope.mjs
@@ -66,8 +67,7 @@ Key agreement is hybrid post-quantum (X25519 + ML-KEM-768), as in Signal and Sim
 
 ## What it does not do
 
-- Find anyone (codes travel out of band), hide who talks to whom from the relay, or deny
-  (signed).
+- Find anyone (codes travel out of band), hide who talks to whom from the relay, or deny.
 - Heal inside an epoch after a key theft (no double ratchet): a stolen state file reads what
   contacts write until the next weekly prekey replacement.
 - Confirm delivery (the relay acknowledges, not the contact): a relay withholding an epoch's key

@@ -299,6 +299,6 @@ export function checkReply(reply, store, now, agree) {
   if (!r.chain.includes(p.code_did)) fail('code_did', `the code names ${p.code_did}, which is not in the replier's chain`);  // pair: challenge_did's place
   checkProof(reply, { v: V, typ: TYP_REPLY, did: r.did, nonce: p.nonce }, LABELS.reply, r);    // pair: challenge_body, sig
   const pair_key = agreed(agree, reply.kem_ct, p.secret, store, r, p.kem_sk);                   // own: self, kem
-  const a = store.admit(reply.bundle, r, p.name, { relay: p.relay, pair_key }, now);          // pair: revoked … revoked
+  const a = store.admit(reply.bundle, r, p.name, { relay: p.relay, pair_key, ...(p.tier && { tier: p.tier, tier_by: 'owner' }) }, now);  // pair: revoked … revoked
   return { ...a, pair_key };
 }

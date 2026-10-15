@@ -113,7 +113,7 @@ const OPTIONAL = ['QUICKSTART.md', 'WHY.md', 'THREAT-MODEL.md', 'INCIDENT.md', '
 export const RAW = ['SPEC.md', 'SECURITY.md', 'CHANGELOG.md', ...OPTIONAL, 'test-vectors.json', ...SCHEMAS, 'spend/openapi.yaml'];
 const repoToPage = Object.fromEntries(PAGES.filter((p) => p.repo).map((p) => [p.repo, p.slug]));
 
-const STATUS_MD = 'Status: draft, wire `sigelo/0` may change until v0.2; keeper stagenet-only, unaudited.';
+const STATUS_MD = 'Status: experimental, wire `sigelo/0` not frozen yet; keeper stagenet-only, unaudited.';
 
 // ---------------------------------------------------------------------------------------------
 // Markdown → HTML. CommonMark-ish subset the repository uses: ATX headings, paragraphs, fenced
@@ -526,7 +526,7 @@ export function build() {
   const L = (name, url, desc) => `- [${name}](${ORIGIN}${url})${desc ? `: ${desc}` : ''}`;
   put('llms.txt', `# sigelo
 
-> Portable, offline-verifiable identity for AI agents: a DID hashed from a genesis holding an Ed25519 key, attestations signed by worlds, bundles verified offline; MCP server sigelo-mcp. Draft: wire sigelo/0 may change until v0.2.
+> Portable, offline-verifiable identity for AI agents: a DID hashed from a genesis holding an Ed25519 key, attestations signed by worlds, bundles verified offline; MCP server sigelo-mcp. Experimental: wire sigelo/0 not frozen yet.
 
 ## Docs
 

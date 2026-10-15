@@ -9,13 +9,32 @@
 //   await c.unpark(short)                  → the long code parked under a short one, taken from the relay (one use)
 //   await c.accept(code, { name, wait })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
 //                                            (refused after a short code was fetched: .long, keepLong)
-//   c.contacts()                           → { contacts, invites, answers, failed }   each contact with its four words (fingerprint);
+//   await c.cancelInvite(code)             → { cancelled, name }: an unanswered invite of this agent's withdrawn
+//   c.rename(who, name)                    the owner's name for a contact (store.mjs rename) → { did, name }
+//   c.contacts()                           → { contacts, invites, answers, failed }   each contact with its four words (fingerprint),
+//                                            pair id, chain, tier (store.mjs: own, friend, quiet) and tier_by, prekeys: its
+//                                            bundle is here (false: messages wait for it), waiting: why they wait, or null;
 //                                            failed: pairing_failed events (code_expired: an answer that outlived its code) until inbox
-//   await c.send(to, content, { label })   → { status: 'sent' | 'queued', … }, or throws the relay's code
-//   await c.sendAll(to, contents, { label }) → one result each ('refused' with its code), one login
-//   await c.inbox({ wait })                → { messages, events, dropped, offline? }: all are taken (messages: those kept)
+//   await c.send(to, content, { label, local }) → { status: 'sent' | 'queued', … }, or throws the relay's code
+//   await c.sendAll(to, contents, { label, local }) → one result each ('refused' with its code), one login
+//   await c.sendFile(to, path, { local })  → { status, to, name, file: {id, name, size, sha256, chunks} }: a file of at most
+//                                            8 MiB as FILE_LABEL messages (file.mjs), one login; throws as send does. Chunks
+//                                            queued wait in files/.out (0600), the state names them; gone once sent or refused.
+//                                            local (all three): no session, queued in the state file for a started carrier
+//                                            of the same identity elsewhere (a watcher), which sends it at its next sync()
+//   await c.inbox({ wait, tiers, local, paired }) → { messages, events, dropped, offline? }: all are taken (messages: those kept;
+//                                            tiers: only those from contacts of these tiers, the rest stay); local: no
+//                                            session, the state file only (a started carrier elsewhere is connected);
+//                                            paired: the wait also ends at a pairing (enrol.mjs)
+//   c.peek(), c.take(pick)                 the messages kept for inbox(), each with its sender's tier: read, or those
+//                                            pick(message, tier) chooses taken; no session (a started carrier's owner)
+//   c.setTier(who, tier)                   the owner's tier for a contact (store.mjs setTier) → { did, name, tier }
+//   c.observe(bundle)                      a contact's full bundle seen: its operator attestations (store.mjs observe)
+//                                            a file received whole is one item {type: "file", from, contact, name, size,
+//                                            sha256, path, …}, saved under `files` (pathsFor), never opened
 //   await c.forget(did)                    → { name, did, revoked: true, released, offline? }
 //   c.lastError                            the error behind the last offline of inbox or forget (SIGELO_DEBUG)
+//   c.clockOffset(), await c.checkClock()  → { relay, offset, checked } | null: the relay's clock less this one's, seconds
 //   await c.start(), c.sync(), c.stop()    stay connected, reconnecting with backoff; events reach onEvent
 //
 // identity() → { secret, bundle }: the agent's current secret key and SPEC §8 bundle, read again at
@@ -28,8 +47,9 @@
 // default only without onEvent, so a message onEvent took is not left at rest after the keys that
 // opened it are gone (contacts.md §3: keys stolen today must not open yesterday's messages).
 // One connected carrier per identity: every process logs in with the identity's one MQTT client
-// id, so a CLI verb run beside a started carrier takes the session from it (the files stay sound
-// under the lock; the started one reconnects with backoff).
+// id, so a second login takes the session from a started carrier (the files stay sound under the
+// lock; the started one reconnects with backoff). Beside one, use inbox and send with local: the
+// state file only (sigelo-agent's one-owner rule, adapters/moadim/WATCH.md).
 //
 // What this adds to the wire, beside the envelope (envelope.mjs) and the invite (invite.mjs); the
 // bytes are pinned in fixtures/carrier-v0.json (gen-carrier.mjs --check):
@@ -120,6 +140,18 @@
 //     cannot be told from the thief's: refused alike; the owner writes again once paired again.
 //     What an earlier inbox() returned, or onEvent got, cannot be taken back: the `rotated` event
 //     of such a notice lists the DIDs it overruled (`overruled`).
+//   - Operator hints (label OPERATOR_LABEL, a message like any other): an agent attested by
+//     operators (sigelo-relay/operator) tells each contact {hints: HMAC-SHA256(K, "sigelo-operator/0
+//     hint\n" ‖ its original DID ‖ "\n" ‖ operator DID)}, once per pairing and set of operators. A
+//     contact run by the same operator, or that operator itself, recognises one and answers {asks}
+//     (the same with "ask" and its own DID: it knows the operator's DID, an echo does not), and only
+//     then the agent sends {proof}: its chain with those attestations and their issuers, which the
+//     contact verifies (SPEC §9) and files (store.mjs observe): the contact's tier becomes own. A
+//     proof is taken only after asks of ours, at most NOTICE_CHECKS an hour, and only if its chain
+//     ends at the sender's current DID as held (store.mjs current_did). A renewed attestation is
+//     hinted and proved again; asks for the same operators go at most every RESYNC. A contact
+//     learns from the hints only which operator DIDs it guesses right (THREAT-MODEL §2.12). An
+//     agent on an older version gets the hints as messages with that label. send refuses the label.
 //   - Mailboxes: an agent holds the topics of every ISO week from `retention` ago to AHEAD (7 days,
 //     or its retention if shorter) ahead. The relay drops a publish to a topic nobody claimed (and
 //     says no_reader), so next week's topic must be claimed before a contact writes in it while
@@ -141,10 +173,11 @@
 //     round, so topics are asked in the order they matter (#want). A refused topic is asked again
 //     at the next hourly round (ASK_AGAIN).
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
+import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { connect } from 'mqtt';
@@ -153,12 +186,14 @@ import { KIND, acceptPrekeys, expire, header, open, pad, prekeysMissing, restart
 import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, inviteKeys, keyOf, makeInvite, parseInvite } from './invite.mjs';
 import { MsgError, checkNow, fail, hex, isoWeek, pairId, topic } from './kdf.mjs';
 import { Prekeys, exact, kemDecapsulate, kemEncapsulate, kemKey } from './prekeys.mjs';
-import { Contacts } from './store.mjs';
+import { Contacts, OPERATOR_CTX, TIERS } from './store.mjs';
 import { SHORT_TTL, codeHash, codeKind, fingerprint, formatShort, makeShort, normaliseShort } from './short.mjs';
+import { FILE_LABEL, MAX_FILE, assemble, checkChunk, checkManifest, chunkHead, isManifest, safeName, splitFile } from './file.mjs';
 
 export const V = 'sigelo-carrier/0';
 export const DEFAULT_RELAY = 'relay.sigelo.ai', MQTT_PORT = 8883, NOTICE = '$sigelo/notice';
 export const LABEL_PREKEYS = 'sigelo-msg/0 prekeys', KIND_NOTICE = 4, KIND_PREKEYS = 5, TYP_NOTICE = 'contact-notice';
+export const OPERATOR_LABEL = 'sigelo-operator/0';
 // The relay login (relay-plan §3 "Login"): the body GET /challenge answers and the agent signs. A
 // type of its own, never a SPEC §5.2 challenge: a world that passed the relay's nonce on as its own
 // challenge would get the agent's relay login back from sign-challenge.
@@ -193,6 +228,8 @@ const POISON_TRIES = 3;
 // Events kept for the next inbox(): pairings, rotations, failed pairings. The oldest go first.
 // Messages kept for it (keep), likewise.
 const EVENTS_MAX = 1000, INBOX_MAX = 1000;
+// Files arriving at once from one contact (#onFile): each holds up to 8 MiB of parts here.
+const FILES_OPEN = 8;
 // Half the relay's publish brake (20 a second, 200 at once): past it the relay refuses publishes
 // ("rate"), and closes the connection after 500 refusals in a minute (every refused publish
 // counts, a no_reader too).
@@ -262,6 +299,14 @@ const b64 = (b) => Buffer.from(b).toString('base64');
 const unb64 = (s) => new Uint8Array(Buffer.from(s, 'base64'));
 const randomId = () => hex(randomBytes(8));
 const clientIdOf = (original) => 's' + createHash('sha256').update(original, 'utf8').digest('hex').slice(0, 24);
+// Operators as hinted and proved: each with its attestation's expiry, so a renewal goes again.
+const opKey = (mine, ops) => [...ops].sort().map((d) => `${d} ${mine.exp.get(d)}`).join();
+// Whether a session as the state holds it (dumpSession) has a prekey bundle of contact c's that an
+// epoch can begin on (envelope.mjs prekeysMissing): of this pairing, signed as c's current DID, unexpired.
+const theirPrekeys = (c, d, pair, now) => {
+  const p = d?.pair === pair ? d.out.prekeys : null;
+  return Boolean(p) && p.did === c.current_did && now < p.exp;
+};
 // The four words of a pairing (short.mjs), from its pairing key as the store holds it (hex), or null.
 const wordsOf = (pairKey) => (typeof pairKey === 'string' ? fingerprint(pairId(hexToBytes(pairKey))) : null);
 // The refusals of POST /park this client names (relay/park.mjs, and the login's: auth.mjs).
@@ -269,10 +314,10 @@ const PARK_CHECKS = new Set(['park', 'park_taken', 'park_full', 'pow', ...LOGIN_
 
 // ---------------------------------------------------------------- configuration
 
-/** The contact store and this carrier's state, beside the identity file: x.json → x.contacts.json, x.carrier.json. */
+/** The contact store, this carrier's state and the files received, beside the identity file: x.json → x.contacts.json, x.carrier.json, x.files/. */
 export function pathsFor(identityFile) {
   const base = identityFile.replace(/\.json$/, '');
-  return { store: `${base}.contacts.json`, state: `${base}.carrier.json` };
+  return { store: `${base}.contacts.json`, state: `${base}.carrier.json`, files: `${base}.files` };
 }
 
 /**
@@ -421,6 +466,8 @@ function loadSession(s, d) {
 
 const ZERO_EPOCH = new Uint8Array(16), FRAME_HEAD = 22, NONCE = 24;
 /** The contact notice's key: HKDF-SHA256(K, salt "sigelo-notice/0", info = from ‖ "\n" ‖ to), original DIDs. */
+// The header's "Operator hints": what `from` (an original DID) shows of operator `op`, as hex.
+export const operatorHint = (K, kind, from, op) => hex(hmac(sha256, K, utf8ToBytes(`${OPERATOR_LABEL} ${kind}\n${from}\n${op}`)));
 export const noticeKey = (K, from, to) => hkdf(sha256, K, utf8ToBytes('sigelo-notice/0'), utf8ToBytes(`${from}\n${to}`), 32);
 /** The prekeys frame's key: HKDF-SHA256(K, salt "sigelo-prekeys/0", info = from ‖ "\n" ‖ to), original DIDs. */
 export const prekeysKey = (K, from, to) => hkdf(sha256, K, utf8ToBytes('sigelo-prekeys/0'), utf8ToBytes(`${from}\n${to}`), 32);
@@ -532,11 +579,14 @@ export async function solvePow(host, original, nonce, bits, deadline = Infinity)
 async function http(url, init = {}) {
   let res;
   const at = where(url), http = { url, method: init.method ?? 'GET' };
+  const t0 = Date.now();
   try { res = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(HTTP_MS) }); } catch (e) {
     const why = e.name === 'TimeoutError' ? `no answer within ${HTTP_MS / 1000} s` : e.cause?.code ?? e.cause?.message ?? e.message;
     fail('connect', `cannot reach the relay at ${at} (${why}): check the network and SIGELO_RELAY / SIGELO_RELAY_ENDPOINTS, then try again`, { cause: e, http });
   }
   http.status = res.status;
+  // The relay's clock (Date, whole seconds) and the round trip to it, for clockOffset.
+  const rtt = Date.now() - t0, date = Date.parse(res.headers.get('date') ?? '');
   if ((res.status >= 300 && res.status < 400) || res.type === 'opaqueredirect') {
     try { await res.body?.cancel(); } catch {}
     fail('connect', `${at}: answered ${res.status}, a redirect, which this client does not follow`, { http });
@@ -562,7 +612,7 @@ async function http(url, init = {}) {
   const after = Number(res.headers.get('retry-after'));
   // What a refusal carries for SIGELO_DEBUG: the status and the start of the body as received.
   http.body = new TextDecoder().decode(raw.subarray(0, 512));
-  return { status: res.status, body, retryAfter: Number.isSafeInteger(after) && after > 0 ? after : null, http };
+  return { status: res.status, body, retryAfter: Number.isSafeInteger(after) && after > 0 ? after : null, http, date: Number.isNaN(date) ? null : date, rtt };
 }
 
 // A URL as a refusal shows it: no query (it carries the DID), no code hash.
@@ -591,7 +641,7 @@ export function readCode(text, now, how = 'long') {
 // stood for, so the refusal carries it (.long, and in its words). Not when the answer it made
 // still stands (queued, or held by the relay: .kept) nor when the code was answered already.
 export function keepLong(e, long) {
-  if (e?.kept || e?.check === 'mailbox_taken') return e;
+  if (e?.kept || e?.lapsed || e?.check === 'mailbox_taken') return e;
   const k = new MsgError(e instanceof MsgError ? e.check : 'error', `${e instanceof Error ? reason(e) : String(e)}. The short code is used up; its long code: ${long} (keep this; accept it with the long code)`, { cause: e, http: e?.http });
   k.long = long;
   return k;
@@ -722,9 +772,10 @@ export class Carrier {
   #links = new Map(); #work = Promise.resolve(); #busy = 0; #lastWork = 0; #routes = new Map(); #results = new Map();
   #claimed = new Set(); #refusedTopics = new Map(); #handshakes = new Map(); #soon = new Set();
   #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #ask = false;
+  #mineMemo = null; #clocks = new Map();
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
-    onEvent, keep, backoff = BACKOFF, tick = TICK }) {
+    onEvent, keep, backoff = BACKOFF, tick = TICK, files }) {
     if (typeof identity !== 'function') throw new TypeError('identity: a function returning { secret, bundle }');
     if (typeof store !== 'string' || typeof state !== 'string') throw new TypeError('store, state: file paths (pathsFor(identityFile))');
     if (retentionDays !== undefined && !retentionOk(retentionDays)) throw new TypeError(`retentionDays: 1 to ${RETENTION_MAX_DAYS}`);
@@ -735,6 +786,9 @@ export class Carrier {
     if (keep !== undefined && typeof keep !== 'boolean') throw new TypeError('keep: true or false');
     Object.assign(this, { identity, storePath: store, statePath: state, relay, endpoints, retention: retentionDays * DAY, clock, onEvent: onEvent ?? (() => {}),
       keep: keep ?? onEvent === undefined, backoff, tick });
+    // Files received (#onFile): files, else beside the state as pathsFor names it (x.carrier.json → x.files).
+    if (files !== undefined && typeof files !== 'string') throw new TypeError('files: a directory path (pathsFor(identityFile))');
+    this.filesDir = resolve(files ?? state.replace(/(\.carrier)?\.json$/, '') + '.files');
   }
 
   // ---- files, under the lock
@@ -759,7 +813,7 @@ export class Carrier {
   #with(write, fn) {
     return withLock(this.statePath, () => {
       const now = checkNow(this.clock()), me = this.#me(now);
-      const ctx = { now, me, store: new Contacts(this.storePath, me.did), st: loadState(this.statePath, me.did) };
+      const ctx = { now, me, store: new Contacts(this.storePath, me.did, { mine: () => this.#mine(me, now) }), st: loadState(this.statePath, me.did) };
       // Before anything reads the store: a recovery made by another process (sigelo-agent recover)
       // is seen at once. The store's marks are written first; the state keeps the events.
       if (this.#markRecovered(ctx)) saveState(this.statePath, ctx.st);
@@ -772,6 +826,24 @@ export class Carrier {
     });
   }
   #locked(fn) { return this.#with(true, fn); }
+
+  // For tiers (store.mjs): this agent's chain, and its operators: the issuers of the unexpired
+  // sigelo-relay/operator attestations its bundle carries that verify (operator DID → exp). Kept
+  // until the bundle changes or one of them expires.
+  #mine(me, now) {
+    const key = JSON.stringify([me.chain, me.bundle.attestations ?? [], me.bundle.issuers ?? []]), m = this.#mineMemo;
+    if (m && m.key === key && now < m.until) return m.value;
+    const operators = new Map();
+    try {
+      const r = verify({ ...me.bundle, bindings: [] }, now);
+      for (const [iss, bodies] of Object.entries(r.attestations)) {
+        for (const b of bodies) if (b.ctx === OPERATOR_CTX && !me.chain.includes(iss)) operators.set(iss, Math.max(operators.get(iss) ?? 0, b.exp));
+      }
+    } catch {}
+    const value = { chain: me.chain, operators: [...operators.keys()], exp: operators };
+    this.#mineMemo = { key, until: Math.min(Infinity, ...operators.values()), value };
+    return value;
+  }
 
   // An answer that expired before the inviter's reply came: the accept said "waiting", so the next
   // inbox (and contacts until then) says it failed, rather than nothing at all.
@@ -1060,6 +1132,16 @@ export class Carrier {
         st.dropped[e.check] = (st.dropped[e.check] ?? 0) + 1;
         events.push({ type: 'dropped', check: e.check, detail: e.message });
       }
+    } else if (r.body.label === FILE_LABEL) {
+      // A file's manifest or chunk (file.mjs): kept apart until the file is whole (#onFile).
+      events.push(...this.#onFile(ctx, c, r, now));
+    } else if (r.body.label === OPERATOR_LABEL) {
+      // Operator hints, asks and proofs (the header): taken here, never an inbox message. One refused is counted.
+      try { events.push(...this.#onOperator(ctx, c, r.body.content)); } catch (e) {
+        if (!(e instanceof MsgError)) throw e;
+        st.dropped[e.check] = (st.dropped[e.check] ?? 0) + 1;
+        events.push({ type: 'dropped', check: e.check, detail: e.message });
+      }
     } else {
       // last_resort: the epoch began on the last-resort prekey, which may serve many epochs: weaker
       // forward secrecy (plan §3 "Prekeys"), and routine for a while after a rotation (#next).
@@ -1073,6 +1155,170 @@ export class Carrier {
     }
     this.#persist(st, s);
     return events;
+  }
+
+  // The header's "Operator hints". Hints of contact c's operators: those this agent knows (its own
+  // operators, or itself) are asked for, once per set. Asks: proofs of this agent's operators the
+  // contact showed it knows, once per set. A proof: c's chain with operator attestations, filed.
+  // Answers go first in c's outbox. → events: `tier` when c's tier changed.
+  #onOperator({ now, me, store, st }, c, v) {
+    const K = hexToBytes(c.pair_key), e = this.#entry(st, c.did), mine = this.#mine(me, now);
+    const list = (x) => (Array.isArray(x) && x.length <= 8 && x.every((h) => typeof h === 'string') ? x : fail('operator', 'hints and asks: at most 8 strings'));
+    if (v?.hints !== undefined) {
+      const hints = list(v.hints), known = [...mine.operators, ...mine.chain].filter((d) => hints.includes(operatorHint(K, 'hint', c.did, d))).sort();
+      // Again for the same operators at most every RESYNC: the contact hints anew once their
+      // attestations are renewed (#next), and its proof must come again before the old one lapses.
+      if (known.length > 0 && (e.op_asked !== known.join() || now - (e.op_asked_at ?? 0) >= RESYNC)) {
+        e.op_asked = known.join(); e.op_asked_at = now;
+        e.outbox.unshift({ id: randomId(), label: OPERATOR_LABEL, content: { asks: known.map((d) => operatorHint(K, 'ask', me.did, d)) } });
+      }
+      return [];
+    }
+    if (v?.asks !== undefined) {
+      // Proved again once an attestation shown is renewed (its expiry is in the key).
+      const asks = list(v.asks), shown = mine.operators.filter((d) => asks.includes(operatorHint(K, 'ask', c.did, d))).sort(), key = opKey(mine, shown);
+      if (shown.length > 0 && e.op_proved !== key) {
+        e.op_proved = key;
+        const b = me.bundle, iss = new Set(shown);
+        const proof = { v: b.v, typ: 'bundle', genesis: b.genesis, rotations: b.rotations, bindings: [],
+          attestations: (b.attestations ?? []).filter((a) => a?.body?.ctx === OPERATOR_CTX && iss.has(a.body.iss)), issuers: (b.issuers ?? []).filter((g) => iss.has(didOf(g))) };
+        e.outbox.unshift({ id: randomId(), label: OPERATOR_LABEL, content: { proof } });
+      }
+      return [];
+    }
+    if (v?.proof !== undefined) {
+      // Only in answer to asks of ours, and so many an hour: each costs SPEC §9 (THREAT-MODEL §2.12).
+      if (!e.op_asked) fail('operator', 'an operator proof nobody asked for');
+      const recent = (e.op_checks ?? []).filter((x) => x > now - RESYNC);
+      if (recent.length >= NOTICE_CHECKS) fail('operator_rate', `${recent.length} operator proofs of this contact checked within ${RESYNC} s, the most`);
+      e.op_checks = [...recent, now];
+      const p = v.proof;
+      if (![p?.rotations, p?.attestations, p?.issuers].every(Array.isArray) || p.rotations.length > MAX_ROTATIONS || p.attestations.length > 8 || p.issuers.length > 8) {
+        fail('operator', `an operator proof is a bundle of at most ${MAX_ROTATIONS} rotations, 8 attestations and 8 issuers`);
+      }
+      let r;
+      try { r = verify(p, now); } catch (err) { fail('operator', `the contact's operator proof does not verify: ${err.message}`); }
+      if (r.chain[0] !== c.did) fail('operator', 'the operator proof is not the chain of the contact that sent it');
+      // store.observe refuses a chain that ends anywhere but the contact's current DID (current_did).
+      const before = store.tierOf(c, now), after = store.observe(c.did, r, now);
+      return after === before ? [] : [{ type: 'tier', did: c.did, name: c.name, tier: after }];
+    }
+    fail('operator', 'an operator message is {hints}, {asks} or {proof}');
+  }
+
+  // ---- files (file.mjs; design/human-ui-plan.md §4)
+
+  // A FILE_LABEL message from contact c, opened (r). The manifest is kept in the state (files,
+  // under a key of the contact and the file's id), each chunk under filesDir/.partial/<key>/<i>
+  // (0600, directories 0700); once all have come, the file is checked (size, SHA-256), saved as
+  // filesDir/<contact>/<sha256[0..8]>-<name> (0600), and given to inbox() as one item of type
+  // "file". Never opened, never made executable. Anything wrong with the message is counted in
+  // dropped by its check, as a refused bundle is above; the envelope stays opened either way.
+  // A chunk before its manifest (none: the sender sends the manifest first, in one login) is
+  // dropped, file_chunk. The disk is written before the state: a crash between them leaves a
+  // chunk that the delivery, unacknowledged, writes again.
+  #onFile(ctx, c, r, now) {
+    const { st } = ctx, content = r.body.content;
+    st.files ??= {};
+    const drop = (e) => {
+      if (!(e instanceof MsgError)) throw e;
+      st.dropped[e.check] = (st.dropped[e.check] ?? 0) + 1;
+      return [{ type: 'dropped', check: e.check, detail: `a file from ${c.name}: ${e.message}` }];
+    };
+    const keyOf = (id) => hex(sha256(utf8ToBytes(`${c.did}\n${id}`)).subarray(0, 16));
+    let key, p;
+    try {
+      if (isManifest(content)) {
+        const m = checkManifest(content);
+        key = keyOf(m.id);
+        const had = st.files[key];
+        if (had) {
+          if (had.sha256 !== m.sha256 || had.size !== m.size) fail('file', 'a second manifest for one file id, with another content');
+          return [];
+        }
+        // At most FILES_OPEN files arriving at once per contact: each holds up to 8 MiB here.
+        if (Object.values(st.files).filter((x) => x.from === c.did).length >= FILES_OPEN) fail('file_busy', `${FILES_OPEN} files from this contact are incomplete already`);
+        p = st.files[key] = { from: c.did, ...m, got: [], first: now };
+      } else {
+        const h = chunkHead(content);
+        key = keyOf(h.id);
+        p = st.files[key] ?? fail('file_chunk', 'a chunk of a file whose manifest has not come');
+        const bytes = checkChunk(content, p);
+        if (!p.got.includes(h.i)) {
+          const dir = this.#partDir(key);
+          mkdirSync(dir, { recursive: true, mode: 0o700 });
+          writeFileSync(join(dir, String(h.i)), bytes, { mode: 0o600 });
+          p.got.push(h.i);
+        }
+      }
+    } catch (e) { return drop(e); }
+    if (p.got.length < p.chunks) return [];
+    // Whole: checked, saved, and the parts gone whatever the check said.
+    let bytes;
+    try {
+      bytes = assemble(p, Array.from({ length: p.chunks }, (_, i) => readFileSync(join(this.#partDir(key), String(i)))));
+    } catch (e) {
+      delete st.files[key];
+      rmSync(this.#partDir(key), { recursive: true, force: true });
+      return drop(e);
+    }
+    const dir = join(this.filesDir, safeName(c.name || c.did));
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(this.filesDir, 0o700); chmodSync(dir, 0o700);
+    const path = join(dir, `${p.sha256.slice(0, 8)}-${p.name}`), tmp = join(dir, `.${randomId()}.tmp`);
+    writeFileSync(tmp, bytes, { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, path);
+    delete st.files[key];
+    rmSync(this.#partDir(key), { recursive: true, force: true });
+    const item = { type: 'file', from: c.did, contact: c.name, current_did: r.body.from, label: FILE_LABEL, name: p.name, size: p.size, sha256: p.sha256, path,
+      iat: r.body.iat, received: now, last_resort: r.last_resort };
+    // Kept for inbox() as a message is (#onPeer), and so many at most.
+    if (this.keep) {
+      st.inbox.push(item);
+      if (st.inbox.length > INBOX_MAX) { const n = st.inbox.length - INBOX_MAX; st.inbox.splice(0, n); st.dropped.inbox_full = (st.dropped.inbox_full ?? 0) + n; }
+    }
+    return [item];
+  }
+
+  #partDir(key) { return join(this.filesDir, '.partial', key); }
+
+  // A file's chunks wait in filesDir/.out/<item id>.json (0600, directory 0700), not in the state:
+  // base64 in an outbox item, 8 MiB were rewritten with the state at every chunk sent. The outbox
+  // item keeps { id, label, spool: true }. A contact's name never starts with a dot (safeName), so
+  // .out is no contact's directory. Written under the lock with the items that name them.
+  #spoolDir() { return join(this.filesDir, '.out'); }
+  #spool(id, content) {
+    const dir = this.#spoolDir();
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(this.filesDir, 0o700); chmodSync(dir, 0o700);
+    writeFileSync(join(dir, `${id}.json`), JSON.stringify(content), { mode: 0o600, flag: 'wx' });
+  }
+  #spooled(id) {
+    try { return JSON.parse(readFileSync(join(this.#spoolDir(), `${id}.json`), 'utf8')); } catch (e) {
+      fail('file', `a queued part of a file is gone from ${this.#spoolDir()} (${e.code ?? e.message}): send the file again`);
+    }
+  }
+  // Spooled parts no outbox or pending entry names any more (sent, refused, forgotten): removed.
+  #sweepSpool(st) {
+    let names;
+    try { names = readdirSync(this.#spoolDir()); } catch { return; }
+    const held = new Set();
+    for (const e of Object.values(st.peers)) for (const x of e.outbox ?? []) if (x.spool) held.add(x.id);
+    for (const p of st.pending) if (p.item?.spool) held.add(p.item.id);
+    for (const n of names) if (/^[0-9a-f]{16}\.json$/.test(n) && !held.has(n.slice(0, -5))) rmSync(join(this.#spoolDir(), n), { force: true });
+  }
+
+  // Files still incomplete after the retention (the relay has dropped whatever of them was left to
+  // come): their parts go, counted file_incomplete, and inbox() says which.
+  #sweepFiles(st, now) {
+    for (const [key, p] of Object.entries(st.files ?? {})) {
+      if (p.first + this.retention > now) continue;
+      rmSync(this.#partDir(key), { recursive: true, force: true });
+      delete st.files[key];
+      st.dropped.file_incomplete = (st.dropped.file_incomplete ?? 0) + 1;
+      this.#emit(this.#note(st, now, { type: 'dropped', check: 'file_incomplete', from: p.from,
+        detail: `${p.name} (${p.size} bytes): ${p.got.length} of ${p.chunks} parts came within the retention; the rest will not: ask for it again` }));
+    }
   }
 
   // A bundle from the contact was accepted into s (acceptPrekeys). want: it asked for ours, which
@@ -1430,10 +1676,16 @@ export class Carrier {
         if (missing !== null) e.asked = now;
         return this.#queue(st, { relay, topic: t, bytes: frame, kind: KIND_PREKEYS, peer: c.did, control: 'prekeys' });
       }
+      // This agent's operator hints, once per pairing and set of operators (#onOperator).
+      const mine = this.#mine(me, now), ops = mine.operators, hinted = opKey(mine, ops);
+      if (ops.length > 0 && e.op_hinted !== hinted) {
+        e.op_hinted = hinted;
+        e.outbox.unshift({ id: randomId(), label: OPERATOR_LABEL, content: { hints: [...ops].sort().map((d) => operatorHint(K, 'hint', me.did, d)) } });
+      }
       while (e.outbox.length > 0) {
         const item = e.outbox[0];
         try {
-          const m = send(s, { label: item.label, content: item.content }, now);
+          const m = send(s, { label: item.label, content: item.spool ? this.#spooled(item.id) : item.content }, now);
           e.outbox.shift();
           if (e.waiting === noReader(c.name)) e.waiting = null;
           this.#persist(st, s);
@@ -1520,6 +1772,10 @@ export class Carrier {
   }
 
   async #flush(link) {
+    try { await this.#flushing(link); } finally { try { this.#locked(({ st }) => this.#sweepSpool(st)); } catch {} }
+  }
+
+  async #flushing(link) {
     for (;;) {
       if (!link.up) return;
       const e = this.#locked((ctx) => this.#next(ctx, link));
@@ -1659,6 +1915,7 @@ export class Carrier {
     const { me, proven } = this.#read(({ me, st }) => ({ me, proven: st.relays[relay]?.proven === true }));
     const powMax = relay === this.relay ? POW_MAX : POW_MAX_OTHER;
     const r = await http(`${ep.http}/challenge?did=${encodeURIComponent(me.current_did)}`);
+    this.#clockFrom(relay, r);
     if (r.status === 429) refuse('rate', `the relay ${relay} turned the login away: too many logins from this network (${relaySays(r.body?.error ?? r.body?.detail)}): ${retryIn(r, 'a minute')}, then try again`, r);
     // Any other status is no answer about this agent (nginx says 502 while the relay restarts):
     // `connect`, retried. `challenge`, which no retry fixes, is a 200 that is not this relay's
@@ -1714,12 +1971,33 @@ export class Carrier {
     this.#ask = false;
     try {
       const r = await http(`${ep.http}/relay.json`);
+      this.#clockFrom(this.relay, r);
       const n = r.status === 200 ? retentionOf(r.body) : null;
       if (n !== null) this.retention = n * DAY;
     } catch {}
   }
 
   get retentionDays() { return this.retention / DAY; }
+
+  // The relay's clock less this agent's (this.clock), in seconds, from an answer r of relay: its
+  // Date header (whole seconds, so +0.5) taken as of the middle of the round trip.
+  #clockFrom(relay, r) {
+    if (r?.date == null) return;
+    const now = this.clock();
+    this.#clocks.set(relay, { offset: Math.round((r.date + 500 - r.rtt / 2) / 1000 - now), checked: now });
+  }
+
+  /** { relay, offset, checked } as last measured at relay (a login, relay.json, a short code), or null. offset: seconds, relay minus local. */
+  clockOffset(relay = this.relay) {
+    const c = this.#clocks.get(relay);
+    return c ? { relay, ...c } : null;
+  }
+
+  /** Measures the offset now at this agent's own relay (GET /relay.json). → clockOffset(); throws as a relay that does not answer does. */
+  async checkClock() {
+    this.#clockFrom(this.relay, await http(`${endpointOf(this.relay, this.endpoints).http}/relay.json`));
+    return this.clockOffset();
+  }
 
   async #dial(relay) {
     const ep = endpointOf(relay, this.endpoints), link = new Link(relay, relay === this.relay);
@@ -1915,7 +2193,8 @@ export class Carrier {
     try { return await this.#answer(long, how, opts); } catch (e) { throw keepLong(e, long); }
   }
 
-  async #answer(text, how, { name, wait = 10 } = {}) {
+  async #answer(text, how, { name, wait = 10, tier } = {}) {
+    if (tier !== undefined && !TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
     const { code, id, entry } = this.#locked(({ now, me, store, st }) => {
       const code = readCode(text, now, how);
       // This agent's own relay, and those its operator configured, are the operator's choice.
@@ -1931,7 +2210,7 @@ export class Carrier {
         const id = answerId(answer);
         // Unnamed: the code's DID's first digits ("z5esAbCd"), as operators shorten a DID. Named, the
         // name also replaces a known contact's on a re-pair (#onReply).
-        store.addAccept(code, id, name ?? code.did.slice('did:sigelo:'.length, 'did:sigelo:'.length + 8), now, hex(k.secretKey), me.current_did, name !== undefined);
+        store.addAccept(code, id, name ?? code.did.slice('did:sigelo:'.length, 'did:sigelo:'.length + 8), now, hex(k.secretKey), me.current_did, name !== undefined, tier ?? null);
         const entry = this.#queue(st, { relay: code.relay, topic: keys.answer_topic, bytes: frame, kind: KIND.invite_answer, control: 'answer', needs: [keys.reply_topic], exp: code.exp });
         return { code, id, entry: entry.id };
       } finally { k.secretKey.fill(0); }
@@ -1944,7 +2223,8 @@ export class Carrier {
     // Done early too once the reply topic or the answer is refused (a code answered before:
     // mailbox_taken), not after the whole wait.
     const reply = inviteKeys(code.secret).reply_topic;
-    const settled = () => this.#handshakes.has(id) || this.#refusedTopics.has(reply) || Boolean(this.#results.get(entry)?.code);
+    // And once the code expires (#lapse): the answer is dead, so --wait does not run out first.
+    const settled = () => this.#handshakes.has(id) || this.#refusedTopics.has(reply) || Boolean(this.#results.get(entry)?.code) || this.clock() >= code.exp;
     try { await this.#session([code.relay], { max: wait * 1000, until: settled }); } catch (e) {
       // A relay other than this agent's own that refuses it for good would be dialled again at
       // every connection, until the code expires, for an answer it never takes: and a stranger's
@@ -1975,16 +2255,47 @@ export class Carrier {
         : `the relay did not let this agent claim the reply topic (${relaySays(r.detail)})`);
     }
     if (sent?.code) drop(sent.code, `the relay refused the answer (${relaySays(sent.detail)})`);
+    // The code expired during the wait: #lapse emitted pairing_failed (onEvent); the refusal says
+    // it here, so the next inbox does not say it again. No long code to keep (keepLong): it is dead.
+    const lapsed = this.#locked(({ now, store, st }) => {
+      if (now < code.exp) return null;
+      st.pending = st.pending.filter((p) => p.id !== entry); store.take('accepts', id, now);
+      const at = new Date(code.exp * 1000).toISOString().replace('.000', '');
+      const i = st.events.findIndex((e) => e.type === 'pairing_failed' && e.code === 'code_expired' && e.did === code.did && e.detail?.includes(at));
+      return i >= 0 ? st.events.splice(i, 1)[0].detail : `the code expired at ${at} before the inviter's agent replied: ask the inviter for a new code`;
+    });
+    if (lapsed) throw Object.assign(new MsgError('code_expired', lapsed), { lapsed: true });
     if (!sent) return { status: 'pending', did: code.did, relay: code.relay, detail: 'the answer has not reached the relay yet: it goes at the next connection' };
     return { status: 'waiting', did: code.did, relay: code.relay, detail: 'answer delivered; the pairing completes when the inviter\'s agent next connects' };
   }
+
+  // An invite this agent made and nobody has answered, withdrawn: code, its long code (invite's
+  // `code`). Its answer topic is given up at the next round; a short code parked for it leads to
+  // nothing. → { cancelled: true, name }.
+  async cancelInvite(code) {
+    const { relay, name } = this.#locked(({ now, store }) => {
+      const c = readCode(code, now), p = store.load().s.invites[c.nonce];
+      store.cancelInvite(c.nonce);
+      return { relay: c.relay, name: p.name };
+    });
+    this.#routes = new Map();
+    if (this.#links.get(relay)?.up) this.#refreshSoon(relay);
+    return { cancelled: true, name };
+  }
+
+  /** The owner renames a contact (a name or any DID of its chain; store.mjs rename) → { did, name }. */
+  rename(who, name) { return this.#locked(({ store }) => store.rename(who, name)); }
 
   contacts() {
     return this.#read(({ now, store, st }) => {
       const s = store.load().s;
       return {
-        contacts: Object.values(s.contacts).map((c) => ({ name: c.name, did: c.did, current_did: c.current_did, revoked: c.revoked, relay: c.relay, queued: st.peers[c.did]?.outbox.length ?? 0,
-          re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key) })),
+        contacts: Object.values(s.contacts).map((c) => {
+          const e = st.peers[c.did], pair = c.revoked || !c.pair_key ? null : pairId(hexToBytes(c.pair_key));
+          return { name: c.name, did: c.did, current_did: c.current_did, chain: c.chain, revoked: c.revoked, relay: c.relay, queued: e?.outbox.length ?? 0,
+            re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key), pair, tier: store.tierOf(c, now), tier_by: c.tier_by ?? null,
+            prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null };
+        }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
         // Pairings that failed since the last inbox, which takes them as events.
@@ -1993,8 +2304,8 @@ export class Carrier {
     });
   }
 
-  async send(to, content, { label = '' } = {}) {
-    const [r] = await this.sendAll(to, [content], { label });
+  async send(to, content, { label = '', local = false } = {}) {
+    const [r] = await this.sendAll(to, [content], { label, local });
     if (r.status === 'refused') fail(r.code, `refused (${r.detail})`);
     return r;
   }
@@ -2002,9 +2313,13 @@ export class Carrier {
   // Several messages to one contact in one session: one login, where `send` costs one each (the
   // relay allows 30 logins a minute per network). sent: the relay accepted it, and holds it for
   // the contact's claim on the topic; queued: it goes at the next connection.
-  async sendAll(to, contents, { label = '' } = {}) {
+  async sendAll(to, contents, { label = '', local = false } = {}) { return this.#sendAll(to, contents, label, false, local); }
+
+  // spool: every content after the first waits on disk (#spool), as a file's chunks do. local: queued
+  // only, for the started carrier of this identity in another process (inbox's local, for sending).
+  async #sendAll(to, contents, label, spool, local = false) {
     if (typeof label !== 'string') fail('body', 'label must be a string');
-    if (label === LABEL_PREKEYS) fail('body', `the label ${JSON.stringify(LABEL_PREKEYS)} is the carrier's own`);
+    if (label === LABEL_PREKEYS || label === OPERATOR_LABEL) fail('body', `the label ${JSON.stringify(label)} is the carrier's own`);
     if (!Array.isArray(contents) || contents.length === 0) fail('body', 'at least one message');
     for (const content of contents) {
       if (content === undefined) fail('body', 'content is required');
@@ -2015,7 +2330,7 @@ export class Carrier {
     // contact already, re-pairs) and goes under the key the reply brings.
     const answered = this.#read(({ now, store }) => [...new Set(Object.values(store.load().s.accepts)
       .filter((p) => p.exp > now && (p.name === to || p.code_did === to)).map((p) => p.relay))]);
-    if (answered.length > 0) {
+    if (answered.length > 0 && !local) {
       try { await this.#session(answered); } catch {}
       this.#routes = new Map();
       this.#read(({ now, store }) => {
@@ -2028,9 +2343,14 @@ export class Carrier {
     }
     const { ids, c } = this.#locked(({ store, st }) => {
       const c = this.#resolve(store, to), outbox = this.#entry(st, c.did).outbox;
-      const ids = contents.map((content) => { const id = randomId(); outbox.push({ id, label, content }); return id; });
+      const ids = contents.map((content, i) => {
+        const id = randomId();
+        if (spool && i > 0) { this.#spool(id, content); outbox.push({ id, label, spool: true }); } else outbox.push({ id, label, content });
+        return id;
+      });
       return { ids, c };
     });
+    if (local) return ids.map((id) => ({ status: 'queued', id, to: c.did, name: c.name, detail: 'kept for the process that holds this identity\'s relay session: it sends it' }));
     try { await this.#session([c.relay]); } catch (e) {
       throw new MsgError(e.check ?? 'connect', `${reason(e)} (${ids.length === 1 ? 'the message stays' : `the ${ids.length} messages stay`} queued for ${c.name}: they go at the next connection)`, { cause: e, http: e.http });
     }
@@ -2044,18 +2364,95 @@ export class Carrier {
     });
   }
 
-  async inbox({ wait = 0 } = {}) {
-    let offline = null;
-    // With nothing in use anywhere, this agent's own relay: an operator with no contacts logs in by
-    // `inbox` before uploading its licence (relay/site/pro.md step 2), and proves its work there.
-    const inUse = this.#relaysInUse(), relays = inUse.length > 0 ? inUse : [this.relay];
+  // A file to a contact (file.mjs): its manifest and chunks in one sendAll, so one login. Read whole
+  // first (at most MAX_FILE); this identity's own files (key, contacts, state, files received) are
+  // refused, so a confused or misled agent cannot send its key. A refusal of any part throws as
+  // send does: the contact gets no file, and what came of it there goes at its retention.
+  async sendFile(to, path, { local = false } = {}) {
+    if (typeof path !== 'string' || path === '') fail('file', 'a file path is required');
+    let real, bytes;
     try {
-      await this.#session(relays, wait > 0 ? { max: wait * 1000, until: () => this.#read(({ st }) => st.inbox.length > 0) } : {});
-    } catch (e) { this.lastError = e; offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
-    return this.#locked(({ st }) => {
-      const out = { messages: st.inbox, events: st.events, dropped: st.dropped, ...(offline && { offline }) };
-      st.inbox = []; st.events = []; st.dropped = {};
+      real = realpathSync(path);
+      const s = statSync(real);
+      if (!s.isFile()) fail('file', `${path} is not a regular file`);
+      if (s.size > MAX_FILE) fail('file_too_large', `${path} is ${s.size} bytes, at most ${MAX_FILE} (8 MiB) a file`);
+    } catch (e) {
+      if (e instanceof MsgError) throw e;
+      fail('file', `cannot read ${path}: ${e.code === 'ENOENT' ? 'no such file' : e.code ?? e.message}`, { cause: e });
+    }
+    // Beside the identity: its own files (x.*) and any profile's (*.local.*, sigelo-agent's pattern).
+    const own = resolve(this.statePath.replace(/(\.carrier)?\.json$/, '')), files = (() => { try { return realpathSync(this.filesDir); } catch { return this.filesDir; } })();
+    let ownDir;
+    try { ownDir = realpathSync(dirname(own)); } catch { ownDir = dirname(own); }
+    const leaf = basename(real);
+    if (real.startsWith(files + sep) || (dirname(real) === ownDir && (leaf.startsWith(`${basename(own)}.`) || leaf.includes('.local.')))) {
+      fail('file', `${path} is one of this agent's identity files (key, contacts, state, files received): not sent`);
+    }
+    try { bytes = readFileSync(real); } catch (e) { fail('file', `cannot read ${path}: ${e.code ?? e.message}`, { cause: e }); }
+    if (bytes.length > MAX_FILE) fail('file_too_large', `${path} is ${bytes.length} bytes, at most ${MAX_FILE} (8 MiB) a file`);
+    const { manifest, chunks } = splitFile(bytes, basename(real));
+    const results = await this.#sendAll(to, [manifest, ...chunks], FILE_LABEL, true, local);
+    const refused = results.find((x) => x.status === 'refused'), queued = results.find((x) => x.status === 'queued');
+    if (refused) fail(refused.code, `refused (${refused.detail}): ${manifest.name} did not go whole; send it again once that is settled`);
+    const { id, name, size, sha256: sum, chunks: n } = manifest;
+    return { status: queued ? 'queued' : 'sent', to: results[0].to, name: results[0].name, file: { id, name, size, sha256: sum, chunks: n },
+      ...(queued && { detail: queued.detail }) };
+  }
+
+  // tiers: only messages from contacts of these tiers are taken (and waited for); the rest stay for a
+  // later inbox. Events are all taken. local: no session: what the state file holds, waited for by
+  // reading it again, for a reader beside a started carrier of the same identity (a watcher), which
+  // a session here would disconnect.
+  async inbox({ wait = 0, tiers, local = false, paired = false } = {}) {
+    const want = tiers === undefined ? null : new Set(tiers);
+    if (want && ![...want].every((t) => TIERS.includes(t))) fail('tier', `tiers: some of ${TIERS.join(', ')}`);
+    const picks = (store, now) => { const t = want && store.tiers(now); return (m) => !want || want.has(t.get(m.from) ?? 'friend'); };
+    const ready = () => this.#read(({ now, store, st }) => st.inbox.some(picks(store, now)) || st.events.some((e) => e.type === 'pairing_failed' || (paired && e.type === 'paired')));
+    let offline = null;
+    if (local) {
+      for (const end = Date.now() + wait * 1000; Date.now() < end && !ready();) await sleep(250);
+    } else {
+      // With nothing in use anywhere, this agent's own relay: an operator with no contacts logs in by
+      // `inbox` before uploading its licence (relay/site/pro.md step 2), and proves its work there.
+      const inUse = this.#relaysInUse(), relays = inUse.length > 0 ? inUse : [this.relay];
+      try {
+        await this.#session(relays, wait > 0 ? { max: wait * 1000, until: ready } : {});
+      } catch (e) { this.lastError = e; offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
+    }
+    return this.#locked(({ now, store, st }) => {
+      this.#sweepFiles(st, now);
+      const pick = picks(store, now), messages = st.inbox.filter(pick);
+      const out = { messages, events: st.events, dropped: st.dropped, ...(offline && { offline }) };
+      st.inbox = st.inbox.filter((m) => !pick(m)); st.events = []; st.dropped = {};
       return out;
+    });
+  }
+
+  peek() {
+    return this.#read(({ now, store, st }) => { const t = store.tiers(now); return st.inbox.map((m) => ({ ...m, tier: t.get(m.from) ?? 'friend' })); });
+  }
+
+  take(pick) {
+    if (typeof pick !== 'function') throw new TypeError('take: a function (message, tier) → boolean');
+    return this.#locked(({ now, store, st }) => {
+      const t = store.tiers(now), out = [], keep = [];
+      for (const m of st.inbox) (pick(m, t.get(m.from) ?? 'friend') ? out : keep).push(m);
+      st.inbox = keep;
+      return out;
+    });
+  }
+
+  setTier(who, tier) { return this.#locked(({ now, store }) => store.setTier(who, tier, now)); }
+
+  // A contact's full bundle, from wherever it came (the UI reads its local agents' files): verified
+  // here; → { did, tier }, or null when it is no contact's.
+  observe(bundle) {
+    return this.#locked(({ now, store }) => {
+      let r;
+      try { r = verify(bundle, now); } catch (e) { fail('bundle', `REJECT: ${e.message}`); }
+      const c = store.lookup(r.chain[0]);
+      if (!c || c.revoked || c.did !== r.chain[0]) return null;
+      return { did: c.did, tier: store.observe(c.did, r, now) };
     });
   }
 
@@ -2064,6 +2461,7 @@ export class Carrier {
       const c = store.revoke(did);
       delete st.peers[c.did];
       st.pending = st.pending.filter((p) => p.peer !== c.did);
+      this.#sweepSpool(st);
       return c;
     });
     this.#routes = new Map();
