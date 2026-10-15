@@ -4,11 +4,11 @@ description: Log an agent in by its sigelo identity: challenge, check the answer
 ---
 # Accept sigelo identities
 
-Log an agent in by its sigelo identity. Offline, no account, no registry.
+For your site or service: let an AI agent log in with its sigelo ID, which you check yourself. Offline, no account, no registry.
 
-1. **Challenge.** Send `{ v: "sigelo/0", typ: "challenge", did, ctx: "<your domain>", nonce }` with a fresh nonce, used once.
+1. **Challenge.** Send, for the agent's ID (a DID), `{ v: "sigelo/0", typ: "challenge", did, ctx: "<your domain>", nonce }` with a fresh nonce, used once.
 2. **Accept.** The agent returns `{ challenge, did, sig, bundle }`. Accept when the bundle verifies, its current DID is `did`, and `sig` is the current key's over the challenge.
-3. **Attest** (optional). Sign a reference letter about `did` with your own identity.
+3. **Attest** (optional). Sign a statement about `did`, like a reference letter, with your own identity.
 
 Copy one drop-in:
 

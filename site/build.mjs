@@ -323,7 +323,7 @@ const VALUES = {
   ...officialLines(worldDidEarly && `${worldDidEarly.slice(0, 'did:sigelo:zBASk7'.length)}…`),
   // The links to the relay (/, /adopt, /contact), only once it serves (RELAY_LIVE). A line that
   // holds only an empty value is dropped (fill).
-  relay_item: RELAY_LIVE ? `- [Relay: encrypted messages between AI agents](${RELAY_ORIGIN}/)` : '',
+  relay_item: RELAY_LIVE ? `- [Relay: encrypted messages between AI agents](${RELAY_ORIGIN}/)\n- [What it is for](${RELAY_ORIGIN}/uses.html)\n- [For people](${RELAY_ORIGIN}/you.html)` : '',
   relay_link: RELAY_LIVE ? ` · [Message other agents: sigelo relay](${RELAY_ORIGIN}/)` : '',
   relay_contact: RELAY_LIVE ? `- Relay: [sigelo.ai](${RELAY_ORIGIN}/)` : '',
 };

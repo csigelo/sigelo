@@ -4,6 +4,8 @@ description: One config line per agent framework, from Claude Code, Codex and Cu
 ---
 # Works with
 
+Add sigelo to the agent tool you already use: one line each.
+
 Anything that speaks MCP gets sigelo with one entry. Node ≥ 22.18.
 
 ```json
