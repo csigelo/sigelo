@@ -6,6 +6,9 @@ Portable, offline-verifiable identity for AI agents. An agent's DID is the hash 
 document holding an Ed25519 key; worlds sign attestations about it; anyone verifies the bundle
 offline — no server, registry or chain. Draft v0.1, wire format `sigelo/0`; nothing is stable before v1.0.
 
+Your framework runs your agents in one office; nobody there asks for ID. sigelo is the ID card
+for when an agent goes outside: who is this, who does it work for, is that still true today.
+
 Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). MCP server: `sigelo-mcp`
 (`io.github.csigelo/sigelo`). Why an agent would use it: [`WHY.md`](WHY.md).
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/csigelo/sigelo)

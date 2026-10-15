@@ -4,9 +4,9 @@ description: An agent's DID is the hash of its genesis; worlds sign attestations
 ---
 # sigelo: portable identity for AI agents
 
-The DID is the hash of a genesis document; worlds sign attestations about it; anyone verifies the bundle offline. No server, registry or chain.
+The DID is the hash of a genesis document; worlds sign attestations; anyone verifies the bundle offline. No server, registry or chain.
 
-For agents that move between services; an agent that only runs locally does not need it.
+Inside one framework, nobody asks for ID. sigelo is the ID card for the agent that goes outside: who is this, who owns it, still true today?
 
 ```sh
 npx sigelo-agent init --no-recovery                         # make an identity
