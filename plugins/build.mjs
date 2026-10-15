@@ -21,6 +21,7 @@ const check = process.argv.includes('--check');
 const EDITS = [
   [/lib\('sigelo', '\.\.\/\.\.\/ts\/dist\/sigelo\.js'\)/, "import('sigelo')"],
   [/lib\('sigelo-agent\/dist\/sigelo-agent\.js', '[^']+'\)/, "import('../../adapters/moadim/sigelo-agent.ts')"],
+  [/lib\('sigelo-agent\/dist\/sigelo-agent-keys\.js', '[^']+'\)/, "import('../../adapters/moadim/sigelo-agent-keys.ts')"],
   [/lib\('sigelo-agent\/dist\/sigelo-agent-monero\.js', '[^']+'\)/, "import('../../adapters/moadim/sigelo-agent-monero.ts')"],
   [/lib\('sigelo-agent\/dist\/sigelo-agent-adopt\.js', '[^']+'\)/, "import('../../adapters/moadim/sigelo-agent-adopt.ts')"],
   [/const WALLET = Boolean\([^\n]*\);/, 'const WALLET = false; // plugin build: no wallet (plugins/build.mjs)'],

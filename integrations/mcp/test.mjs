@@ -474,7 +474,7 @@ ${code.slice(60)}
   mkdirSync(mcp, { recursive: true });
   mkdirSync(join(side, 'node_modules'), { recursive: true });
   for (const f of ['server.mjs', 'contact.mjs']) copyFileSync(join(here, f), join(mcp, f));
-  for (const f of ['package.json', 'sigelo-agent.ts', 'sigelo-agent-adopt.ts', 'sigelo-agent-monero.ts', 'sigelo-agent-contact.ts', 'sigelo-agent-recovery.ts']) copyFileSync(join(here, '..', '..', 'adapters', 'moadim', f), join(side, f));
+  for (const f of ['package.json', 'sigelo-agent.ts', 'sigelo-agent-keys.ts', 'sigelo-agent-keychain.ts', 'sigelo-agent-keyclient.ts', 'sigelo-agent-adopt.ts', 'sigelo-agent-monero.ts', 'sigelo-agent-contact.ts', 'sigelo-agent-recovery.ts']) copyFileSync(join(here, '..', '..', 'adapters', 'moadim', f), join(side, f));
   for (const to of [join(copy, 'ts'), join(side, 'node_modules', 'sigelo')]) symlinkSync(join(here, '..', '..', 'ts'), to, 'junction');
   const listOf = async (cl) => { await cl.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } }); return (await cl.rpc('tools/list')).result.tools.map((t) => t.name).sort().join(); };
   const c6 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));

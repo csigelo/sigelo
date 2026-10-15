@@ -34,7 +34,8 @@
 import { existsSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { bundleOf, chainOf, identityPath, load, secretOf } from './sigelo-agent.ts';
+import { bundleOf, chainOf, identityPath, load } from './sigelo-agent.ts';
+import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import { eraseRequest, pubPath, recoverWith, recoveryKey } from './sigelo-agent-recovery.ts';
 
@@ -50,6 +51,7 @@ const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, numb
   'send-file': { flags: {}, args: [2, 2] },
   inbox: { flags: { '--wait': true, '--expect': false, '--tier': true, '--quiet-too': false }, args: [0, 0] },
   forget: { flags: {}, args: [1, 1] },
+  pro: { flags: {}, args: [2, 4] },
   'recovery-key': { flags: { '--out': true }, args: [0, 0] },
   recover: { flags: { '--recovery-key': true }, args: [0, 0] },
   'erase-request': { flags: { '--recovery-key': true, '--access': false }, args: [0, 0] },
@@ -74,6 +76,8 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
        [--tier own,friend] [--quiet-too]   to 0 to 300 s for a message; --expect: exit 3 if none came;
                                            --tier: only from those tiers, the rest stay; --quiet-too: and quiet
   forget <did>                             revoke a contact here, for good
+  pro redeem <PRO-XXXX-XXXX>               a gift code: this identity's pool is Pro for its months; run it
+                                           with the operator's identity file (prints the new Pro expiry)
 
 Recovery key, made before init and kept offline:
   recovery-key [--out <file>]              the secret to <file> (default recovery.key, 0600), the public
@@ -106,6 +110,7 @@ interface Carrier {
   sendFile(to: string, path: string, o?: { local?: boolean }): Promise<{ status: string; name: string; detail?: string; file: FileSent }>;
   inbox(o: { wait?: number; tiers?: string[]; local?: boolean }): Promise<Batch>;
   forget(did: string): Promise<unknown>;
+  redeemGift(code: string): Promise<{ exp: number; months: number }>;
 }
 interface CarrierLib {
   Carrier: new (o: object) => Carrier;
@@ -273,7 +278,7 @@ export function holderFor(identity: string, what: string, through = false): { pi
   throw Object.assign(new Error(busyText(identity, h, what)), { check: 'busy' });
 }
 // The contact verbs that log in, and those of them that go through a watcher.
-const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'inbox', 'forget'], THROUGH = ['send', 'send-file', 'inbox'];
+const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'inbox', 'forget', 'pro'], THROUGH = ['send', 'send-file', 'inbox'];
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch (e) { return (e as { code?: string }).code === 'EPERM'; } };
 /** The live process holding the lock on this identity file, or null. */
 export function lockHolder(identity: string): { pid: number; kind: 'ui' | 'watch' } | null {
@@ -346,6 +351,7 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
   }
   if (args.length < spec.args[0]) return usage(`an argument is missing: ${USAGE.split('\n').find((l) => l.startsWith(`  ${cmd} `))?.trim().split(/\s{2,}/)[0] ?? cmd}`);
   if (args.length > spec.args[1]) return usage(`unexpected argument ${JSON.stringify(args[spec.args[1]])}`);
+  if (cmd === 'pro' && args[0] !== 'redeem') return usage(`pro redeem <PRO-XXXX-XXXX>: not ${JSON.stringify(args[0])}`);
   // The recovery verbs need neither the relay nor sigelo-contact. A file-system error names the
   // verb and the file (a bare "ENOENT: … open 'nope.key'" named neither verb nor flag).
   const fsCode = (e: unknown): string | undefined => { const c = (e as { code?: unknown } | null)?.code; return typeof c === 'string' ? c : undefined; };
@@ -421,7 +427,7 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
   try {
     const paths = lib.pathsFor(path);
     const c = carrier = new lib.Carrier({
-      identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { secret: secretOf(s), bundle: bundleOf(s) }; },
+      identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: bundleOf(s) }; },
       ...paths, ...lib.optionsFromEnv(),
       // The first login proves work, silently for up to a minute on a phone: say so. keep, as without
       // onEvent: messages wait in the state file for inbox.
@@ -564,6 +570,16 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         }
         if (flags.has('--expect') && r.messages.length === 0) { note(`inbox: no message came${wait ? ` within ${wait} s` : ''} (--expect)`); return 3; }
         return 0;
+      }
+      case 'pro': {
+        // pro redeem: a gift code at this identity's relay (relay/gifts.mjs); the identity becomes
+        // the operator whose pool is Pro, as a licence's sub does. The code goes as its hash only;
+        // typed in pieces (PRO K7F3 Q9ZP) it is one code.
+        const r = await c.redeemGift(args.slice(1).join(' ')), operator = chainOf(load(path))[0]!;
+        const until = new Date(r.exp * 1000).toISOString().replace('.000', '');
+        out({ relay: c.relay, operator, months: r.months, pro_until: until });
+        note(`Pro until ${until} at ${c.relay} for the pool of ${operator} (${r.months} month${r.months === 1 ? '' : 's'} added): its agents pool with an operator attestation from it (https://sigelo.ai/agents.html#pro, step 5)`);
+        break;
       }
       case 'forget': {
         const r = await c.forget(args[0]!) as { offline?: string };

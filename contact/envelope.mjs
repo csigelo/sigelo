@@ -2,7 +2,7 @@
 // sigelo-msg/0 envelopes (design/relay-plan.md §3 "Envelope", §11 "Epoch recovery"): one
 // end-to-end encrypted, signed message between two contacts, as the binary MQTT payload the relay
 // stores. No network code.
-//   const s = session({ me, peer, K, hold }) me: { did, current_did, secret }; peer: the store's contact record;
+//   const s = session({ me, peer, K, hold }) me: { did, current_did, sign } (or secret: kdf.mjs signAs); peer: the store's contact record;
 //                                           hold: the longest the relay keeps an envelope for this reader
 //   acceptPrekeys(s, signedBundle, now)     the contact's prekeys, checked (prekeys.mjs)
 //   send(s, { label, content }, now)        → { bytes, topic, epoch, n, prekey, last_resort }
@@ -74,8 +74,8 @@
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { ml_kem768_x25519 as xwing } from '@noble/post-quantum/hybrid.js';
 import { concatBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { canonicalize, parseBytes, sign, verifySig } from 'sigelo';
-import { MSG_V, checkDid, checkNow, epochId, epochKey, fail, hex, isoWeek, pairId, step, topic, unhex } from './kdf.mjs';
+import { canonicalize, parseBytes, verifySig } from 'sigelo';
+import { MSG_V, checkDid, checkNow, epochId, epochKey, fail, hex, isoWeek, pairId, signAs, step, topic, unhex } from './kdf.mjs';
 import { Prekeys, SKEW, checkPrekeys, exact } from './prekeys.mjs';
 
 export const KIND = { message: 0, invite_answer: 1, invite_reply: 2, group: 3 };
@@ -311,7 +311,7 @@ export function send(s, { label, content }, now, rng = randomBytes) {
   const slot = nextSlot(s, now, rng);
   try {
     const body = { v: MSG_V, typ: 'message', from: s.me.current_did, to: s.peer.did, pair: s.pair, epoch: hex(slot.epoch), n: slot.n, iat: now, label, content };
-    const r = seal(s, slot, { body, sig: sign(s.me.secret, body) }, now, rng);
+    const r = seal(s, slot, { body, sig: signAs(s.me, body) }, now, rng);
     slot.commit();
     return r;
   } catch (e) { slot.discard(); throw e; }

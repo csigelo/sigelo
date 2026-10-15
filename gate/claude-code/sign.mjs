@@ -14,7 +14,9 @@
 // agent's own identity file is never picked up. Run it where the agent cannot read that file.
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
-import { attest, did, parseBytes } from '../../ts/dist/sigelo.js';
+import { did, parseBytes, structure, VERSION } from '../../ts/dist/sigelo.js';
+// The key through its provider (design/key-providers.md): plain file today, keychain or key agent later.
+import { signer } from '../../adapters/moadim/sigelo-agent-keys.ts';
 import { CTX, LINE, rtrim } from './gate.mjs';
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i < 0 ? undefined : process.argv[i + 1]; };
@@ -37,8 +39,12 @@ const text = rtrim(readFileSync(0, 'utf8'));
 if (!text) die('empty prompt on stdin');
 if (text.includes('\t')) process.stderr.write('sign: warning: the text has tabs; the interactive TUI turns pasted tabs into spaces, so it will verify only through claude -p\n');
 const iat = Math.floor(Date.now() / 1000);
-const a = attest({
-  secret: Uint8Array.from(Buffer.from(s.secret, 'hex')), iss: did(head), sub: to, iat, exp: iat + ttl, ctx: CTX, admission: 'open',
+// The body sigelo's attest() builds, signed by the operator's signer.
+const body = {
+  v: VERSION, typ: 'attestation', iss: did(head), sub: to, iat, exp: iat + ttl, ctx: CTX, admission: 'open',
   claims: { text_sha256: createHash('sha256').update(text, 'utf8').digest('hex'), nonce: randomBytes(16).toString('base64url'), ...(tools && { tools: tools.split(',') }), ...(taintOk !== undefined && { taint_ok: taintOk }), ...(process.argv.includes('--background-ok') && { background_ok: true }) },
-});
+};
+structure(body, 'attestation');
+let a;
+try { a = { body, sig: signer(process.env.SIGELO_OPERATOR_IDENTITY, s).sign(body) }; } catch (e) { die(e.message); }
 process.stdout.write(`${text}\n\n${LINE}${Buffer.from(JSON.stringify(a)).toString('base64url')}\n`);

@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { keygen } from 'sigelo';
 import { BIP39_SHA256, WORDS } from './bip39-english.mjs';
 import { makeInvite } from './invite.mjs';
-import { ALPHABET, SHORT_TTL, codeHash, codeKind, fingerprint, formatShort, isShort, makeShort, normaliseShort } from './short.mjs';
+import { ALPHABET, GIFT_V, SHORT_TTL, codeHash, codeKind, fingerprint, formatGift, formatShort, giftHash, isShort, makeShort, normaliseGift, normaliseShort } from './short.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let count = 0;
@@ -86,6 +86,26 @@ const report = () => {
   ok(skew.startsWith('code_ttl:') && skew.includes('this clock is behind (date -u)'), `a code living past 7 days by this clock: clock skew said (${skew})`);
   const parked = messageOf(() => readCode('sgl1abc', t0, 'parked'));
   ok(parked.startsWith('code_length: the long code the relay holds for this short code does not parse'), `a parked code that does not parse: blamed on what the relay holds (${parked})`);
+}
+
+// ================================================================ gift codes (sigelo-gift/0)
+// A short code's 8 characters, alphabet and folding, shown PRO-K7F3-Q9ZP; hashed under a label of
+// its own, never the park label.
+{
+  ok(GIFT_V === 'sigelo-gift/0' && formatGift('K7F3Q9ZP') === 'PRO-K7F3-Q9ZP', 'a gift code is shown PRO-K7F3-Q9ZP; its label is sigelo-gift/0');
+  const forms = ['PRO-K7F3-Q9ZP', 'pro-k7f3-q9zp', 'PROK7F3Q9ZP', 'pro k7f3 q9zp', 'PR0-K7F3-Q9ZP', 'K7F3-Q9ZP', 'k7f3q9zp', 'PRO\u2013K7F3\u2013Q9ZP', 'PRO-K7F3-Q9Z0'.replace('0', 'P')];
+  ok(forms.every((f) => normaliseGift(f) === 'K7F3Q9ZP'), `normaliseGift: any case, with or without dashes, spaces or the PRO prefix (its O typed 0 too) → K7F3Q9ZP`);
+  ok(normaliseGift('PRO-K7F3-Q9Z0') === 'K7F3Q9Z0' && normaliseGift('PRO-1L0I-OOOO') === '11010000', 'normaliseGift folds I and L to 1, O to 0, as a short code does');
+  const want = createHash('sha256').update('sigelo-gift/0K7F3Q9ZP').digest('hex');
+  ok(giftHash('PRO-K7F3-Q9ZP') === want && giftHash('k7f3 q9zp') === want && giftHash('PRO-K7F3-Q9ZP') !== codeHash('K7F3-Q9ZP'),
+    `giftHash = hex SHA-256("sigelo-gift/0" ‖ the 8 characters) (${want.slice(0, 16)}…), never the park hash of the same characters`);
+  for (const [t, why] of [['PRO-AB12-U9ZP', 'character 5 "U" is not in the alphabet'], ['PRO-AB12-CD3', '7 characters, a gift code has 8 after PRO: 1 missing'], ['PRO-AB12-CD34X', '1 too many'], ['sgl1abc', 'not a gift code'], [undefined, 'not a gift code']]) {
+    const m = messageOf(() => normaliseGift(t));
+    ok(checkOf(() => normaliseGift(t)) === 'gift_code' && m.includes(why) && (t === undefined || !m.includes(t)), `normaliseGift ${JSON.stringify(t)}: gift_code, ${why}, the input not quoted (${m})`);
+  }
+  // makeShort makes gift codes too (commercial/gift-codes.mjs): any of its codes reads back.
+  const g = makeShort();
+  ok(normaliseGift(formatGift(g)) === g, 'a code from makeShort, shown as a gift code, reads back');
 }
 
 const RELAY_DIR = process.env.SIGELO_RELAY_DIR ?? join(HERE, '..', 'relay');
@@ -237,6 +257,17 @@ try {
   ok(gb.events.filter((e) => e.type === 'pairing_failed' && e.code === 'code_expired').length === 1 && Date.now() - t2 < 30000,
     `inbox --wait 60 ends when the answer expires, and says so (${JSON.stringify(gb.events)}, ${Date.now() - t2} ms)`);
   await cg.stop();
+  // A gift code (relay/gifts.mjs), redeemed by carol as the operator: the relay gets its hash only.
+  const gift = makeShort(), shown = formatGift(gift);
+  relay.db.raw.prepare('INSERT INTO gift_campaigns (campaign, issued) VALUES (?, 1)').run('test');
+  relay.db.raw.prepare('INSERT INTO gifts (code_hash, campaign, months, expires) VALUES (?, ?, ?, ?)').run(giftHash(shown), 'test', 1, Math.floor(now / 86400) * 86400 + 30 * 86400);
+  const gr = await cc.redeemGift(shown.toLowerCase());
+  ok(gr.months === 1 && gr.exp > now + 27 * 86400 && gr.exp % 86400 === 0, `redeemGift: a fresh identity (proof of work in the same login) redeems 1 month, Pro to the start of a UTC day (${JSON.stringify(gr)})`);
+  const g2 = await failure(() => cc.redeemGift(shown));
+  ok(g2.check === 'gift' && !g2.message.includes(gift) && !g2.message.includes(giftHash(shown)), `redeemGift twice: refused "gift", the code not quoted (${g2.message})`);
+  const g3 = await failure(() => cc.redeemGift('PRO-K7F3-U9ZP'));
+  ok(g3.check === 'gift_code', 'redeemGift of a malformed code: gift_code, refused before any login');
+  ok(!lines.some((l) => l.includes(gift) || l.includes(giftHash(shown))), 'the relay log holds neither the gift code nor its hash');
   // The database holds no short code and no long code (memory only).
   const dump = readFileSync(join(dir, 'relay.db')).toString('latin1') + (existsSync(join(dir, 'relay.db-wal')) ? readFileSync(join(dir, 'relay.db-wal')).toString('latin1') : '');
   ok(![inv.short, normaliseShort(inv.short), codeHash(inv.short), inv.code, late.code].some((s) => dump.includes(s)), 'the relay\'s database files hold no code, no hash, no parked invite');

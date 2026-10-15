@@ -70,6 +70,8 @@ const TOOLS = [
 // one, a syntax error) throws: a broken install must not pass for an absent one.
 export async function load({ installed, id, env = process.env, clock, debug = () => {} }) {
   const held = await import(installed ? 'sigelo-agent/dist/sigelo-agent-contact.js' : '../../adapters/moadim/sigelo-agent-contact.ts');
+  // The carrier signs through the identity's key provider, never with a key read here.
+  const keys = await import(installed ? 'sigelo-agent/dist/sigelo-agent-keys.js' : '../../adapters/moadim/sigelo-agent-keys.ts');
   let lib, kdf;
   try { ({ lib, kdf } = await held.contactLib()); } catch (e) {
     if (!held.absent(e)) throw e;
@@ -82,7 +84,7 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
   const carrier = (path) => {
     if (!carriers.has(path)) {
       carriers.set(path, new lib.Carrier({
-        identity: () => { const s = id.load(path); return { secret: id.secretOf(s), bundle: id.bundleOf(s) }; },
+        identity: () => { const s = id.load(path); return { sign: keys.signer(path, s, env).sign, bundle: id.bundleOf(s) }; },
         ...lib.pathsFor(path), ...options, ...(clock && { clock }),
       }));
     }

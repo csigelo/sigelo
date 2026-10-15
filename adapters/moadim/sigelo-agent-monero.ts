@@ -21,10 +21,11 @@
 import { randomBytes } from 'node:crypto';
 import { closeSync, openSync, rmSync } from 'node:fs';
 import type { Binding, Bundle, Genesis, Proof } from 'sigelo';
-import { bind, did, sign, SigeloError, structure, verify, verifySig, VERSION } from 'sigelo';
+import { did, SigeloError, structure, verify, verifySig, VERSION } from 'sigelo';
 import type { Net } from 'sigelo/dist/monero.js';
 import { decodeAddress, sigeloMoneroSigAddr, subaddress, verifySigeloMoneroSigAddr } from 'sigelo/dist/monero.js';
-import { head, secretOf, type Store } from './sigelo-agent.ts';
+import { head, type Store } from './sigelo-agent.ts';
+import type { Signer } from './sigelo-agent-keys.ts';
 
 /** The view-only treasury, as it sits in the identity file. `next_minor` is per account. */
 export interface MoneroWallet { net: Net; a: string; B: string; address: string; next_minor: Record<string, number> }
@@ -92,13 +93,15 @@ export function walletSet(s: Store, input: unknown): Store {
 
 /**
  * SPEC §6 binding for the CURRENT DID, cross-signed: `sig_id` by the identity key, `sig_addr`
- * by the view key over the identical §3 signing input. `bind()` mints the body (nonce and
- * `sig_id`); the wallet signature goes over that same body, which is why the nonce is passed
- * in rather than letting a second call randomise it.
+ * by the view key over the identical §3 signing input. The body is built here as sigelo's
+ * `bind()` builds it, because `sig_id` comes from `me`, the identity's signer
+ * (sigelo-agent-keys.ts), whatever holds the key; the wallet signature goes over that same body.
  */
-export function bindMonero(s: Store, now: number): Binding {
+export function bindMonero(s: Store, now: number, me: Signer): Binding {
   const w = wallet(s);
-  const b = bind({ secret: secretOf(s), id: did(head(s)), method: 'monero', addr: w.address, iat: now, exp: now + BINDING_TTL, nonce: randomBytes(16) });
+  const body: Binding['body'] = { v: VERSION, typ: 'binding', id: did(head(s)), method: 'monero', addr: w.address, iat: now, exp: now + BINDING_TTL, nonce: nonce16() };
+  structure(body, 'binding');
+  const b = { body, sig_id: me.sign(body) };
   const sig_addr = sigeloMoneroSigAddr(b.body, { mode: 'view', secret: hex(w.a), spendPub: hex(w.B), viewPub: decodeAddress(w.address).view });
   if (!verifySigeloMoneroSigAddr(b.body, w.address, sig_addr).good) throw new SigeloError('bind: the sig_addr we just made does not verify against addr — the stored view key does not belong to this address');
   const binding: Binding = { ...b, sig_addr };
@@ -168,7 +171,7 @@ function issued(w: MoneroWallet, addr: string): boolean {
  * subaddress belongs to the bound wallet — that would need the view key — so the signature is
  * the claim and the binding is its anchor.
  */
-export function invoice(s: Store, o: { addr: string; amount?: string; memo?: string; ttl: number }, now: number): Invoice {
+export function invoice(s: Store, o: { addr: string; amount?: string; memo?: string; ttl: number }, now: number, me: Signer): Invoice {
   const w = wallet(s);
   const d = decodeAddress(o.addr);
   if (d.kind !== 'subaddress') throw new SigeloError(`invoice: addr is a ${d.kind} address — invoice a fresh subaddress from \`receive\`, never the base address (MONERO.md §3)`);
@@ -186,7 +189,7 @@ export function invoice(s: Store, o: { addr: string; amount?: string; memo?: str
     ...(o.amount !== undefined && { amount: o.amount }), ...(o.memo !== undefined && { memo: o.memo }),
   };
   structure(body, 'invoice'); // §3.1, and the canonicalizer's float check with it
-  return { body, sig: sign(secretOf(s), body) }; // the hot key's fourth and last job
+  return { body, sig: me.sign(body) }; // the hot key's fourth and last job
 }
 
 /**

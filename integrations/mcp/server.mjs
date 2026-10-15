@@ -17,6 +17,8 @@ const INSTALLED = fileURLToPath(import.meta.url).split(sep).includes('node_modul
 const lib = (pkg, repo) => import(INSTALLED ? pkg : repo);
 const { did, parse, parseBytes, verify, SigeloError } = await lib('sigelo', '../../ts/dist/sigelo.js');
 const id = await lib('sigelo-agent/dist/sigelo-agent.js', '../../adapters/moadim/sigelo-agent.ts');
+// Every signature goes through the identity's key provider (design/key-providers.md): no handler reads a key.
+const keys = await lib('sigelo-agent/dist/sigelo-agent-keys.js', '../../adapters/moadim/sigelo-agent-keys.ts');
 const { withLock } = await lib('sigelo-agent/dist/sigelo-agent-monero.js', '../../adapters/moadim/sigelo-agent-monero.ts');
 const { forgetIssuer } = await lib('sigelo-agent/dist/sigelo-agent-adopt.js', '../../adapters/moadim/sigelo-agent-adopt.ts');
 
@@ -119,11 +121,11 @@ const HANDLERS = {
   sigelo_whoami: (_, path) => { const s = loadStore(path); return { did: did(id.head(s)), genesis: id.head(s), chain: id.chainOf(s), attestations: s.attestations.length, identity_file: path }; },
   sigelo_init: ({ recovery }, path) => {
     if (typeof recovery !== 'string' || !recovery) throw refusal('usage', 'recovery is required: a "z…" public key or "none"');
-    const s = id.init(path, recovery === 'none' ? null : recovery);
+    const s = keys.init(path, recovery === 'none' ? null : recovery, env.SIGELO_KEY_PROVIDER);
     return { did: did(s.genesis), genesis: s.genesis, identity_file: path,
       ...(recovery === 'none' && { warning: 'NO recovery key: if this key is stolen the identity is lost permanently.' }) };
   },
-  sigelo_sign_challenge: ({ challenge }, path) => id.signChallenge(loadStore(path), input(challenge, 'challenge')),
+  sigelo_sign_challenge: ({ challenge }, path) => keys.signChallenge(path, loadStore(path), input(challenge, 'challenge')),
   sigelo_add_issuer: ({ genesis }, path) => { const g = input(genesis, 'genesis'); loadStore(path); return update(path, (s) => { const store = id.addIssuer(s, g); return { store, result: { issuers: store.issuers.map(did) } }; }); },
   sigelo_add_attestation: ({ attestation, issuer }, path) => {
     const a = input(attestation, 'attestation'), g = issuer === undefined ? undefined : input(issuer, 'issuer');
@@ -139,7 +141,7 @@ const HANDLERS = {
     return { bundle, did: result.did, ...(notes.length && { notes }) };
   },
   sigelo_verify: ({ bundle, now }) => verify(input(bundle, 'bundle'), Number.isSafeInteger(now) ? now : nowS()),
-  sigelo_rotate: (_, path) => { loadStore(path); const s = update(path, (st) => { const r = id.rotateKey(st, nowS()); return { store: r, result: r }; }); return { did: did(id.head(s)), chain: id.chainOf(s), next: 'ask each world to reissue its attestation to the new DID' }; },
+  sigelo_rotate: (_, path) => { loadStore(path); const s = update(path, (st) => { const r = keys.rotate(path, st, nowS()); return { store: r, result: r }; }); return { did: did(id.head(s)), chain: id.chainOf(s), next: 'ask each world to reissue its attestation to the new DID' }; },
   sigelo_wallet_balance: () => wallet(['balance']),
   sigelo_wallet_receive: ({ note }) => wallet(['receive', ...(note ? [String(note)] : [])]),
   sigelo_wallet_pay: ({ to, amount, purpose, ref }) => wallet(['pay', String(to ?? ''), String(amount ?? ''), String(purpose ?? ''), ...(ref ? ['--ref', String(ref)] : [])]),

@@ -19,7 +19,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { did, keygen, parseBytes, VERSION } from 'sigelo';
 import { keeperRoot, parseRoot, recoveryCommitment } from 'sigelo/dist/keys.js';
-import { bundleOf, head, identityPath, load, save, secretOf, type Store } from './sigelo-agent.ts';
+import { bundleOf, head, identityPath, load, save, type Store } from './sigelo-agent.ts';
+import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import { absent, contactLib, debug, heldPath, holderFor, lockHolder, MISSING, putBack, safeJson, safeText, unreadable, type Batch } from './sigelo-agent-contact.ts';
 
@@ -99,7 +100,7 @@ async function libs(): Promise<Libs> {
 }
 function carrierFor(lib: Libs['lib'], path: string): Carrier {
   return new lib.Carrier({
-    identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { secret: secretOf(s), bundle: bundleOf(s) }; },
+    identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: bundleOf(s) }; },
     ...lib.pathsFor(path), ...lib.optionsFromEnv(), keep: true,
     onEvent: (e: { type?: string; ms?: number }) => {
       if (e.type === 'pow') note('proof of work for a new identity: 5–60 s');
@@ -250,7 +251,7 @@ export function workersOf(op: string): Map<string, number> | null {
 export async function enrolInto(op: string, file: string, name: string, relay: string): Promise<{ worker: number; n: number; did: string; original: string; old: string; exp: number; contacts: number }> {
   const k = readKeeper(op), { K, recovery } = rootOf(k), { lib, enrol } = await libs(), t = nowS();
   const used = Object.keys(k.workers).map(Number), i = used.length ? Math.max(...used) + 1 : 0, w = enrol.workerChain(K, i, 0, recovery);
-  const me = load(op), attestation = enrol.operatorAttestation({ secret: secretOf(me), iss: did(head(me)), sub: w.original, relay, now: t });
+  const me = load(op), attestation = enrol.operatorAttestation({ sign: signer(op, me).sign, iss: did(head(me)), sub: w.original, relay, now: t });
   const id = enrol.workerIdentity({ K, i, n: 0, recovery, attestation, issuer: head(me) });
   let old = '', contacts = 0;
   withLock(file, () => {
@@ -331,7 +332,7 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
   if (restore) note(`worker ${i}: ${n > (k.workers[i]?.n ?? 0) ? `rotation ${n}, its next key (the previous one retires), ` : ''}the same DID ${w.original}; ${restored(w.original)}`);
   if (here) {
     const file = join(agentsDir(), `sigelo.${name}.local.json`), s = load(opPath), relay = lib.optionsFromEnv().relay ?? lib.DEFAULT_RELAY, t = nowS();
-    const attestation = enrol.operatorAttestation({ secret: secretOf(s), iss: did(head(s)), sub: w.original, relay, now: t });
+    const attestation = enrol.operatorAttestation({ sign: signer(opPath, s).sign, iss: did(head(s)), sub: w.original, relay, now: t });
     const id = enrol.workerIdentity({ K, i, n, recovery, attestation, issuer: head(s) });
     mkdirSync(agentsDir(), { recursive: true, mode: 0o700 });
     withLock(file, () => {

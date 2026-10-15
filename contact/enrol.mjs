@@ -49,10 +49,10 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { attest, canonicalize, decodeKey, did as didOf, keygen, rotate, sign, structure, verify, verifySig } from 'sigelo';
+import { canonicalize, decodeKey, did as didOf, keygen, rotate, sign, structure, verify, verifySig } from 'sigelo';
 import { agentIdentitySeed, identitySeed, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { keepLong, readCode } from './carrier.mjs';
-import { MsgError, checkNow, fail, pairId, unhex } from './kdf.mjs';
+import { MsgError, checkNow, fail, pairId, signAs, unhex } from './kdf.mjs';
 import { codeKind } from './short.mjs';
 
 export const ENROL_V = 'sigelo-enrol/1';
@@ -100,10 +100,14 @@ export function operatorIdentity(S, n) {
   return { v: 'sigelo/0', secret: bytesToHex(c.secret), genesis: c.genesis, rotations: c.rotations, attestations: [], issuers: [], derived: { path: `${IDENTITY_PATH}/${n}`, n } };
 }
 /** The operator attestation for a worker (relay/operator.mjs's shape), sub its ORIGINAL DID. */
-export function operatorAttestation({ secret, iss, sub, relay, now, days = OPERATOR_DAYS }) {
+// Signed by sign (the operator's signer, sigelo-agent-keys.ts) or secret (kdf.mjs signAs); the body
+// is the one sigelo's attest() builds.
+export function operatorAttestation({ sign: signer, secret, iss, sub, relay, now, days = OPERATOR_DAYS }) {
   checkNow(now);
   if (!Number.isSafeInteger(days) || days < 1 || days > OPERATOR_DAYS) fail('enrol', `days: 1 to ${OPERATOR_DAYS}`);
-  return attest({ secret, iss, sub, iat: now, exp: now + days * DAY, ctx: OPERATOR_CTX, admission: 'invite', admission_by: iss, claims: { relay } });
+  const body = { v: 'sigelo/0', typ: 'attestation', iss, sub, iat: now, exp: now + days * DAY, ctx: OPERATOR_CTX, admission: 'invite', claims: { relay }, admission_by: iss };
+  structure(body, 'attestation');
+  return { body, sig: signAs({ sign: signer, secret }, body) };
 }
 
 /** The identity file of worker i, rotation n, carrying the operator's attestation and genesis. */
@@ -218,12 +222,12 @@ const isObject = (x) => typeof x === 'object' && x !== null && !Array.isArray(x)
 const nowOf = (carrier) => checkNow(carrier.clock());
 const readStore = (carrier) => (existsSync(carrier.storePath) ? JSON.parse(readFileSync(carrier.storePath, 'utf8')) : { contacts: {} });
 const pairOf = (c) => pairId(unhex(c.pair_key, 32, 'store'));
-// The carrier's identity, verified: original DID, current DID and its genesis, the secret.
+// The carrier's identity, verified: original DID, current DID and its genesis, and sign(body).
 function self(carrier, now) {
-  const { secret, bundle } = carrier.identity();
+  const id = carrier.identity(), { bundle } = id;
   const r = verify({ v: 'sigelo/0', typ: 'bundle', genesis: bundle.genesis, rotations: bundle.rotations, bindings: [], attestations: [], issuers: [] }, now);
   const genesis = [bundle.genesis, ...bundle.rotations.map((x) => x.next_genesis)].find((g) => didOf(g) === r.did);
-  return { original: r.chain[0], did: r.did, genesis, secret };
+  return { original: r.chain[0], did: r.did, genesis, sign: (body) => signAs(id, body) };
 }
 // The contact store record holding `did` in its chain, live and paired only.
 const liveHolding = (carrier, did) => Object.values(readStore(carrier).contacts).find((c) => !c.revoked && c.pair_key && c.chain.includes(did)) ?? null;
@@ -243,7 +247,7 @@ export async function issue({ carrier, file, i, n, name, keeper }) {
   // The temporary identity's contact, named apart from the worker's (forgotten once it has paired).
   const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true });
   const now = nowOf(carrier), code = readCode(r.code, now), me = self(carrier, now);
-  const attestation = operatorAttestation({ secret: me.secret, iss: me.did, sub: w.original, relay: code.relay, now });
+  const attestation = operatorAttestation({ sign: me.sign, iss: me.did, sub: w.original, relay: code.relay, now });
   const old = liveHolding(carrier, w.original);
   pending(file, now, (s) => {
     s.issued[code.nonce] = { key: bytesToHex(enrolKey(code.secret)), i, n, name: name ?? null, did: w.did, original: w.original, old_pair: old ? pairOf(old) : null,

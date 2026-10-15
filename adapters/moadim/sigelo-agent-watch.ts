@@ -23,6 +23,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, rmSync, unwatchFile, watchFile } from 'node:fs';
 import { resolve } from 'node:path';
 import * as id from './sigelo-agent.ts';
+import { signer } from './sigelo-agent-keys.ts';
 import { contactLib, debug, kickPath, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
 import { takeLock } from './sigelo-agent-ui.ts';
 
@@ -143,7 +144,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
       }
     };
     carrier = new lib.Carrier({
-      identity: () => { let s; try { s = id.load(path); } catch (e) { throw unreadable(path, e); } return { secret: id.secretOf(s), bundle: id.bundleOf(s) }; },
+      identity: () => { let s; try { s = id.load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: id.bundleOf(s) }; },
       ...lib.pathsFor(path), ...lib.optionsFromEnv(), backoff: WATCH_BACKOFF, ...o.carrier, keep: true, onEvent,
     }) as unknown as Car;
     // What waited before this start: own pushed, one notice per friend.

@@ -10,8 +10,8 @@ import { randomBytes } from 'node:crypto';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, concatBytes, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { canonicalize, did as didOf, multibase, sign, verify, verifySig } from 'sigelo';
-import { MsgError, pairKey } from './kdf.mjs';
+import { canonicalize, did as didOf, multibase, verify, verifySig } from 'sigelo';
+import { MsgError, pairKey, signAs } from './kdf.mjs';
 
 export const V = 'sigelo-invite/0';
 // Each side proves its key with a signed body of its own type, never a SPEC §5.2 challenge: an
@@ -180,13 +180,13 @@ function canonicalBundle(bundle) {
 // { body: { v, typ, did: the signer's CURRENT DID, nonce, transcript }, sig }, signed "sigelo\n" ‖ JCS(body).
 function prove(identity, typ, nonce, label, rest) {
   const body = { v: V, typ, did: didOf(identity.genesis), nonce, transcript: attempt('card', () => digest(label, rest)) };
-  const sig = sign(identity.secret, body);
+  const sig = signAs(identity, body);
   if (!verifySig(identity.genesis.key, body, sig)) fail('identity', 'the secret does not match genesis.key');
   return { body, sig };
 }
 
 /**
- * Bob: the answer to a parsed code. identity = his CURRENT { secret, genesis }; bundle = his bundle;
+ * Bob: the answer to a parsed code. identity = his CURRENT { sign, genesis } (or secret: kdf.mjs signAs); bundle = his bundle;
  * kem_pk = his one-time hybrid public key, prekeys = his signed prekeys: both opaque here (M2).
  * His proof binds the whole code (its nonce: the inviter it names, relay, expiry, secret) and every
  * other member of the answer (transcript).

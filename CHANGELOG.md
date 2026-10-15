@@ -3,6 +3,13 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## unreleased
+
+- **Key providers (K1):** every signature goes through one signer (`sigelo-agent-keys.ts`);
+  `keys status`; an optional `"provider": "file"` in the identity file; other forms refused by name. Files, DIDs unchanged.
+- **Pro gift codes:** `sigelo-agent pro redeem PRO-K7F3-Q9ZP` makes the operator's pool Pro for 1, 6 or 12 months
+  (`POST /gift`); the relay holds each code's hash only, totals on `/stats`.
+
 ## v0.1.7 — 2026-10-15
 
 - **Status:** new and experimental: the page (`sigelo-agent ui`), `watch`, tiers, files, enrolment and the

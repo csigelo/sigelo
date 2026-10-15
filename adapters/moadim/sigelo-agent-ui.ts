@@ -27,8 +27,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { attest, did, verify, type Genesis } from 'sigelo';
+import { did, verify, VERSION, type Attestation, type Genesis } from 'sigelo';
 import * as id from './sigelo-agent.ts';
+import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import { enrolInto, keeperPath, workersOf } from './sigelo-agent-enrol.ts';
 import { busyText, contactLib, lockHolder, lockPath, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
@@ -227,7 +228,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     } catch (err) { live.error = `history: ${(err as Error).message}`; }
   };
   const carrier = new lib.Carrier({
-    identity: () => { const s = loadMe(); return { secret: id.secretOf(s), bundle: id.bundleOf(s) }; },
+    identity: () => { const s = loadMe(); return { sign: signer(path, s).sign, bundle: id.bundleOf(s) }; },
     ...paths, ...opts, keep: true, onEvent,
   }) as unknown as Car;
   const me = (): { store: id.Store; did: string; original: string; chain: string[]; geneses: Record<string, Genesis> } => {
@@ -426,7 +427,9 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       if (holder !== null) refuse(409, 'busy', `${a.file} is open in sigelo-agent ${holder.kind} (pid ${holder.pid}): stop it first`);
       const worker = workers!.get(a.did!);
       if (worker !== undefined) {
-        const att = attest({ secret: id.secretOf(m.store), iss: m.did, sub: a.did!, iat: t, exp: t + OPERATOR_DAYS * DAY, ctx: OPERATOR_CTX, admission: 'invite', admission_by: m.did, claims: { relay: carrier.relay } });
+        // The body sigelo's attest() builds, signed through the key provider (sigelo-agent-keys.ts).
+        const body: Attestation['body'] = { v: VERSION, typ: 'attestation', iss: m.did, sub: a.did!, iat: t, exp: t + OPERATOR_DAYS * DAY, ctx: OPERATOR_CTX, admission: 'invite', claims: { relay: carrier.relay }, admission_by: m.did };
+        const att = { body, sig: signer(path, m.store).sign(body) };
         withLock(a.file, () => { const s = id.load(a.file); id.addIssuer(s, id.head(m.store)); id.addAttestation(s, att); id.save(a.file, s); });
         agentCache.delete(a.file);
         return { agent: a.name, worker, renewed: true, did: did(id.head(id.load(a.file))), exp: att.body.exp, days_left: OPERATOR_DAYS };
@@ -442,7 +445,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       if (holder !== null) refuse(409, 'busy', busy(a.file, holder, 'pairing here'));
       // Both sides in this process: my code, the agent's carrier answers it, mine replies.
       const inv = await carrier.invite({ name: a.name === 'default' ? 'agent' : a.name, short: false });
-      const other = new lib.Carrier({ identity: () => { const s = id.load(a.file); return { secret: id.secretOf(s), bundle: id.bundleOf(s) }; }, ...lib.pathsFor(a.file), ...opts }) as unknown as Car;
+      const other = new lib.Carrier({ identity: () => { const s = id.load(a.file); return { sign: signer(a.file, s).sign, bundle: id.bundleOf(s) }; }, ...lib.pathsFor(a.file), ...opts }) as unknown as Car;
       let r;
       try { r = await other.accept(inv.code, { name: 'operator', wait: 30 }); } finally { await other.stop(); }
       if (!r.contact) return { status: r.status, detail: r.detail ?? null };

@@ -5,6 +5,7 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, concatBytes, utf8ToBytes } from '@noble/hashes/utils.js';
+import { sign } from 'sigelo';
 
 export const MSG_V = 'sigelo-msg/0';
 
@@ -20,6 +21,11 @@ export class MsgError extends Error {
   }
 }
 export const fail = (check, why, extra) => { throw new MsgError(check, why, extra); };
+
+// The identity's signature over a body ("sigelo\n" ‖ JCS(body), SPEC §3). me.sign is the signer the
+// caller hands in (sigelo-agent-keys.ts: a plain file, a keychain, a key agent), so these modules
+// never see where the key rests; me.secret, the seed itself, is what callers of 0.1.7 pass.
+export const signAs = (me, body) => (typeof me.sign === 'function' ? me.sign(body) : sign(me.secret, body));
 
 export const hex = (b) => bytesToHex(b);
 export function unhex(s, len, check) {

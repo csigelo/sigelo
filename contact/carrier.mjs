@@ -7,6 +7,8 @@
 //   await c.invite({ name, ttl, short })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first;
 //                                            short: the long code is also parked at the relay under a short one
 //   await c.unpark(short)                  → the long code parked under a short one, taken from the relay (one use)
+//   await c.redeemGift(code)               → { exp, months }: a gift code (PRO-K7F3-Q9ZP) redeemed at this agent's relay;
+//                                            this identity is the operator whose pool is Pro until exp (relay/gifts.mjs)
 //   await c.accept(code, { name, wait })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
 //                                            (refused after a short code was fetched: .long, keepLong)
 //   await c.cancelInvite(code)             → { cancelled, name }: an unanswered invite of this agent's withdrawn
@@ -37,8 +39,9 @@
 //   c.clockOffset(), await c.checkClock()  → { relay, offset, checked } | null: the relay's clock less this one's, seconds
 //   await c.start(), c.sync(), c.stop()    stay connected, reconnecting with backoff; events reach onEvent
 //
-// identity() → { secret, bundle }: the agent's current secret key and SPEC §8 bundle, read again at
-// every operation, so a rotation made by another process is seen at once. store: the contact store
+// identity() → { sign, bundle }: the agent's signer for its current key (sign(body) → the SPEC §3
+// signature; sigelo-agent-keys.ts) and its SPEC §8 bundle, read again at every operation, so a
+// rotation made by another process is seen at once. { secret, bundle }, the seed itself, still works. store: the contact store
 // (store.mjs); state: this file's own JSON (sessions, outbox, inbox), both 0600 and written under one
 // lock file, `<state>.lock`. pathsFor(identityFile) names both beside the identity file. onEvent(e):
 // each event as it happens, messages included, and `pow` / `pow_done` around a proof-of-work search
@@ -181,13 +184,13 @@ import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { connect } from 'mqtt';
-import { canonicalize, commitmentOf, did as didOf, parseBytes, sign, verify, verifySig } from 'sigelo';
+import { canonicalize, commitmentOf, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
 import { KIND, acceptPrekeys, expire, header, open, pad, prekeysMissing, restartEpoch, send, session, unpad } from './envelope.mjs';
 import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, inviteKeys, keyOf, makeInvite, parseInvite } from './invite.mjs';
-import { MsgError, checkNow, fail, hex, isoWeek, pairId, topic } from './kdf.mjs';
+import { MsgError, checkNow, fail, hex, isoWeek, pairId, signAs, topic } from './kdf.mjs';
 import { Prekeys, exact, kemDecapsulate, kemEncapsulate, kemKey } from './prekeys.mjs';
 import { Contacts, OPERATOR_CTX, TIERS } from './store.mjs';
-import { SHORT_TTL, codeHash, codeKind, fingerprint, formatShort, makeShort, normaliseShort } from './short.mjs';
+import { SHORT_TTL, codeHash, codeKind, fingerprint, formatShort, giftHash, makeShort, normaliseShort } from './short.mjs';
 import { FILE_LABEL, MAX_FILE, assemble, checkChunk, checkManifest, chunkHead, isManifest, safeName, splitFile } from './file.mjs';
 
 export const V = 'sigelo-carrier/0';
@@ -311,6 +314,8 @@ const theirPrekeys = (c, d, pair, now) => {
 const wordsOf = (pairKey) => (typeof pairKey === 'string' ? fingerprint(pairId(hexToBytes(pairKey))) : null);
 // The refusals of POST /park this client names (relay/park.mjs, and the login's: auth.mjs).
 const PARK_CHECKS = new Set(['park', 'park_taken', 'park_full', 'pow', ...LOGIN_CHECKS]);
+// The refusals of POST /gift this client names (relay/gifts.mjs, allowance.mjs, operator.mjs, and the login's).
+const GIFT_CHECKS = new Set(['gift', 'gift_member', 'gift_term', 'pow', ...LOGIN_CHECKS]);
 
 // ---------------------------------------------------------------- configuration
 
@@ -776,7 +781,7 @@ export class Carrier {
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
     onEvent, keep, backoff = BACKOFF, tick = TICK, files }) {
-    if (typeof identity !== 'function') throw new TypeError('identity: a function returning { secret, bundle }');
+    if (typeof identity !== 'function') throw new TypeError('identity: a function returning { sign, bundle }');
     if (typeof store !== 'string' || typeof state !== 'string') throw new TypeError('store, state: file paths (pathsFor(identityFile))');
     if (retentionDays !== undefined && !retentionOk(retentionDays)) throw new TypeError(`retentionDays: 1 to ${RETENTION_MAX_DAYS}`);
     // Not given: relay.json's at the first login to this agent's own relay may set it (#relayInfo).
@@ -793,9 +798,10 @@ export class Carrier {
 
   // ---- files, under the lock
 
-  // The identity as of now: original and current DID, the current genesis and secret.
+  // The identity as of now: original and current DID, the current genesis, and sign(body), the
+  // only way anything here signs as it.
   #me(now) {
-    const { secret, bundle } = this.identity();
+    const id = this.identity(), { bundle } = id, sign = (body) => signAs(id, body);
     let r;
     try { r = verify(chainOf(bundle), now); } catch (e) { fail('identity', `this agent's bundle does not verify: ${e.message}`); }
     const genesis = [bundle.genesis, ...bundle.rotations.map((x) => x.next_genesis)].find((g) => didOf(g) === r.did);
@@ -805,7 +811,7 @@ export class Carrier {
     for (let i = 0; i + 1 < r.chain.length; i++) {
       if (bundle.rotations.some((x) => x.body.id === r.chain[i] && x.body.next === r.chain[i + 1] && x.body.reason === 'recovery')) recovery = i;
     }
-    return { did: r.chain[0], current_did: r.did, secret, genesis, bundle, chain: r.chain, recovery };
+    return { did: r.chain[0], current_did: r.did, sign, genesis, bundle, chain: r.chain, recovery };
   }
 
   // The state is saved before the store's held writes (store.mjs hold: a handshake's), so a crash
@@ -896,7 +902,7 @@ export class Carrier {
   #restore(st, store, me, did) {
     const c = store.lookup(did);
     if (!c || c.revoked || !c.pair_key) return null;
-    const s = session({ me: { did: me.did, current_did: me.current_did, secret: me.secret }, peer: c, K: hexToBytes(c.pair_key), hold: this.retention });
+    const s = session({ me: { did: me.did, current_did: me.current_did, sign: me.sign }, peer: c, K: hexToBytes(c.pair_key), hold: this.retention });
     const d = st.peers[c.did]?.session;
     // A session of an earlier pairing key belongs to a pairing that was replaced: start afresh.
     if (d && d.pair === s.pair) loadSession(s, d);
@@ -1499,9 +1505,9 @@ export class Carrier {
     const c = store.lookup(res.did), K = hexToBytes(res.pair_key);
     // What checkAnswer replaced, put back if the reply cannot reach the answerer (#unpair).
     const undo = { contact: before[c.did] ?? null, peer: st.peers[c.did] ?? null };
-    const s = session({ me: { did: me.did, current_did: me.current_did, secret: me.secret }, peer: c, K });
-    const prekeys = s.in.prekeys.issue({ current_did: me.current_did, secret: me.secret }, s.pair, now);
-    const reply = buildReply({ answer_id: res.answer_id, identity: { secret: me.secret, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_ct: ct, prekeys });
+    const s = session({ me: { did: me.did, current_did: me.current_did, sign: me.sign }, peer: c, K });
+    const prekeys = s.in.prekeys.issue({ current_did: me.current_did, sign: me.sign }, s.pair, now);
+    const reply = buildReply({ answer_id: res.answer_id, identity: { sign: me.sign, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_ct: ct, prekeys });
     const frame = seal(KIND.invite_reply, keys.key, keys.reply_topic, reply);
     const entry = { relay: p.relay, topic: keys.reply_topic, kind: KIND.invite_reply, control: 'reply', peer: c.did, undo,
       needs: [topic(K, c.did, me.did, isoWeek(now))], exp: p.exp };
@@ -1575,7 +1581,7 @@ export class Carrier {
     // An entry written before `as` was kept: unknown, so the notice goes (#next `first`).
     const answered = waiting.find(([x]) => x === id)[1], held = answered.as ?? null;
     const c = renamed(store, store.lookup(res.did), answered);
-    const s = session({ me: { did: me.did, current_did: me.current_did, secret: me.secret }, peer: c, K: hexToBytes(res.pair_key) });
+    const s = session({ me: { did: me.did, current_did: me.current_did, sign: me.sign }, peer: c, K: hexToBytes(res.pair_key) });
     const events = [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key) })];
     try { acceptPrekeys(s, reply.prekeys, now); } catch (e) {
       if (!(e instanceof MsgError)) throw e;
@@ -1647,7 +1653,7 @@ export class Carrier {
         e.announced = me.current_did;
         e.noticed = now;
         e.notice_asked = false;
-        return this.#queue(st, { relay, topic: t, bytes: seal(KIND_NOTICE, noticeKey(K, me.did, c.did), t, { bundle: chainOf(me.bundle), proof: { body: proof, sig: sign(me.secret, proof) } }),
+        return this.#queue(st, { relay, topic: t, bytes: seal(KIND_NOTICE, noticeKey(K, me.did, c.did), t, { bundle: chainOf(me.bundle), proof: { body: proof, sig: me.sign(proof) } }),
           kind: KIND_NOTICE, peer: c.did, control: 'notice' });
       }
       if (c.re_pair) {
@@ -1931,7 +1937,7 @@ export class Carrier {
     if (ch.relay !== relay) fail('challenge', `relay ${JSON.stringify(ch.relay)} is not this relay's name, ${relay}`);
     // Signed as built here, never as received; its typ is one no challenge signer produces (a SPEC
     // §5.2 challenge for this relay, got by a world from sign-challenge, logs in nobody).
-    const body = { v: LOGIN_V, typ: TYP_LOGIN, did: me.current_did, relay, nonce: ch.nonce }, sig = sign(me.secret, body);
+    const body = { v: LOGIN_V, typ: TYP_LOGIN, did: me.current_did, relay, nonce: ch.nonce }, sig = me.sign(body);
     if (!verifySig(me.genesis.key, body, sig)) fail('identity', 'this agent\'s secret does not match its current genesis key');
     if (canonicalize(body) !== canonicalize(ch)) fail('challenge', 'not the login body this agent signs');
     let pow;
@@ -2185,6 +2191,25 @@ export class Carrier {
     return r.body.invite;
   }
 
+  // A gift code redeemed at this agent's own relay (POST /gift, relay/gifts.mjs): the relay gets the
+  // code's hash (short.mjs giftHash), never the code, with a login of its own; the identity logged
+  // in becomes the operator whose pool is Pro. A malformed code is refused here, before any login.
+  async redeemGift(text) {
+    const hash = giftHash(text), ep = endpointOf(this.relay, this.endpoints);
+    const creds = await this.#credentials(this.relay, ep);
+    const r = await http(`${ep.http}/gift`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: hash }) });
+    this.#clockFrom(this.relay, r);
+    const check = typeof r.body?.check === 'string' ? r.body.check : null;
+    if (r.status === 429) refuse('rate', `the relay ${this.relay} takes no more gift codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to an hour')}`, r);
+    if ((r.status === 404 || r.status === 405) && check === null) refuse('gift', `the relay ${this.relay} takes no gift codes`, r);
+    if (r.status !== 200) refuse('connect', `${this.relay}: ${statusWhy(r, 'POST /gift')}`, r);
+    if (r.body?.ok !== true) refuse(GIFT_CHECKS.has(check) ? check : 'gift', `the relay refused the gift code (${relaySays(`${check}: ${r.body?.detail}`)})`, r);
+    // A proof sent with this login was taken: the identity is stored there now, as after a session.
+    if (creds.pow !== undefined) this.#locked(({ st }) => { (st.relays[this.relay] ??= { proven: false, claims: {} }).proven = true; });
+    if (!Number.isSafeInteger(r.body.exp) || !Number.isSafeInteger(r.body.months)) refuse('connect', `${this.relay}: POST /gift answered ok without the new expiry: SIGELO_DEBUG=1 shows the answer`, r);
+    return { exp: r.body.exp, months: r.body.months };
+  }
+
   async accept(text, opts = {}) {
     // Short or long by the input's shape, before either parser runs (short.mjs codeKind).
     const how = codeKind(text) === 'short' ? 'parked' : 'long';
@@ -2203,7 +2228,7 @@ export class Carrier {
       }
       const k = kemKey();
       try {
-        const answer = buildAnswer({ code, identity: { secret: me.secret, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_pk: k.pk, prekeys: null });
+        const answer = buildAnswer({ code, identity: { sign: me.sign, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_pk: k.pk, prekeys: null });
         const keys = inviteKeys(code.secret), frame = seal(KIND.invite_answer, keys.key, keys.answer_topic, answer);
         // Checked before anything is stored: the relay would refuse it (quota_storage).
         if (frame.length > INVITE_BYTES) fail('too_large', `the answer is ${frame.length} bytes, more than an invite topic holds (${INVITE_BYTES}): this agent's chain is too long`);

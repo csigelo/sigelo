@@ -92,6 +92,29 @@ export function makeShort(rng = randomBytes) {
 /** The key the relay parks under: hex SHA-256("sigelo-park/0" ‖ the normalised code). */
 export const codeHash = (text) => bytesToHex(sha256(concatBytes(utf8ToBytes(PARK_V), utf8ToBytes(normaliseShort(text)))));
 
+// Gift codes (sigelo-gift/0): Pro months for an operator, sold or handed out by the vendor
+// (commercial/gift-codes.mjs makes them offline; relay/gifts.mjs redeems them, POST /gift). The
+// same 8 characters, alphabet and folding as a short code, shown with a prefix of their own,
+// PRO-K7F3-Q9ZP, so a person cannot take one for an invite. Typed in any case, with or without
+// dashes or the PRO prefix. Hashed under a label of their own: a gift's hash is never a parked
+// code's. The relay holds the hash only (code_hash), and a code is in no log or error text.
+export const GIFT_V = 'sigelo-gift/0', GIFT_PREFIX = 'PRO';
+/** The canonical 8 characters of a gift code ("K7F3Q9ZP"), or throws gift_code. */
+export function normaliseGift(text) {
+  if (typeof text !== 'string' || text.length > MAX_INPUT) fail('gift_code', 'not a gift code');
+  const bare = text.replace(SEPARATORS, '');
+  // The prefix, its O folded as a code's is, on anything longer than a code.
+  const rest = bare.length > SHORT_LENGTH && bare.slice(0, GIFT_PREFIX.length).toUpperCase().replace('0', 'O') === GIFT_PREFIX ? bare.slice(GIFT_PREFIX.length) : bare;
+  try { return normaliseShort(rest); } catch (e) {
+    // The short code's reason (the character at fault, the count), without the input it quotes.
+    fail('gift_code', `not a gift code (like PRO-K7F3-Q9ZP: PRO, then 8 characters of 0-9 and A-Z without I, L, O, U): ${e.message.replace(/^short_code: (?:"[^"]*" read as a short code \([^)]*\): )?/, '').replaceAll('a short code', 'a gift code').replace('(like K7F3-Q9ZP)', 'after PRO')}`);
+  }
+}
+/** "K7F3Q9ZP" → "PRO-K7F3-Q9ZP", how a gift code is shown. */
+export const formatGift = (norm) => `${GIFT_PREFIX}-${formatShort(norm)}`;
+/** The key the relay holds a gift under: hex SHA-256("sigelo-gift/0" ‖ the normalised code). */
+export const giftHash = (text) => bytesToHex(sha256(concatBytes(utf8ToBytes(GIFT_V), utf8ToBytes(normaliseGift(text)))));
+
 /** The four words of a pairing, from its pair id (32 lowercase hex digits, kdf.pairId). */
 export function fingerprint(pair) {
   const b = hkdf(sha256, unhex(pair, 16, 'pair'), utf8ToBytes(FINGERPRINT_LABEL), new Uint8Array(0), 6);

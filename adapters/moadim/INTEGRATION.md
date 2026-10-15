@@ -41,12 +41,13 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | `routine.local.toml` `[env]` | **2** | the hookup |
 | `sigelo-agent.ts` | **75** | identity store, `init`, `signChallenge`, `addIssuer`, `addAttestation`, `bundle`, `rotateKey` |
 | **identity total** | **77** | |
-| `sigelo-agent-monero.ts` | 131 | the Monero verbs, apart: an identity-only install reads 77 |
+| `sigelo-agent-keys.ts`, `-keychain.ts`, `-keyclient.ts` | 86, 10, 4 | every signature ([key providers](../../design/key-providers.md)); stubs until K2, K3 |
+| `sigelo-agent-monero.ts` | 134 | the Monero verbs, apart: an identity-only install reads 77 |
 | `sigelo-agent-adopt.ts` | 55 | `adopt`, `forgetIssuer`, outside the core |
-| `sigelo-agent-contact.ts`, `-watch.ts` | 403, 155 | contact verbs, `watch`, recovery verbs' argv, output escaping |
-| `sigelo-agent-enrol.ts` | 409 | `keeper`, `enrol`, `init --enrol`: your identity and worker i from your seed ([ENROL.md](ENROL.md)) |
+| `sigelo-agent-contact.ts`, `-watch.ts` | 425, 160 | contact verbs, `watch`, recovery verbs' argv, output escaping |
+| `sigelo-agent-enrol.ts` | 413 | `keeper`, `enrol`, `init --enrol`: your identity and worker i from your seed ([ENROL.md](ENROL.md)) |
 | `sigelo-agent-recovery.ts` | 54 | `recoveryKey`, `recoverWith`, `eraseRequest` |
-| `sigelo-agent-ui.ts` | 473 | `ui` page ([UI-API.md](UI-API.md)) |
+| `sigelo-agent-ui.ts` | 489 | `ui` page ([UI-API.md](UI-API.md)) |
 | `node-check.ts` | 9 | Node.js 22.18+, checked first |
 | `cli.ts`, `test-*.ts` | — | argv/output and tests, not argued |
 
@@ -73,7 +74,7 @@ Dependencies: `sigelo` (`file:../../ts`, build `ts/` first) for the core, `sigel
 
 ## Verified / not verified
 
-`npm test` (`test-all.ts`: one `ALL PASS <file>` line per `test-*.ts`, then `ALL PASS`) runs the full flow in throwaway `HOME`s: init refusals and file
+`npm test` (`test-all.ts`) runs the full flow in throwaway `HOME`s: init refusals and file
 modes, challenges, bundle, rotation, the Monero half (spend keys refused, `proven` binding,
 subaddresses, invoices), recovery, exit codes, and re-verifies the bundle with the Go verifier
 (SKIPs without `go`). Not verified: live

@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { did, parse, parseBytes } from 'sigelo';
 import * as id from './sigelo-agent.ts';
+import * as keys from './sigelo-agent-keys.ts';
 import * as adopt from './sigelo-agent-adopt.ts';
 import * as xmr from './sigelo-agent-monero.ts';
 import * as contact from './sigelo-agent-contact.ts';
@@ -36,6 +37,8 @@ Monero (MONERO.md §2-§3, SPEC §6):
   receive [--account <n>]                next unused receive subaddress
   invoice --addr <subaddress> [--amount <atomic>] [--memo <text>] [--ttl <s>]
   verify-invoice <json|-> --bundle <f>   the payer's side: check one invoice
+
+${keys.USAGE}
 
 The human's page (UI-API.md):
   ui [--no-open]                         a page on 127.0.0.1 for your own DID: contacts, codes, the four
@@ -99,7 +102,7 @@ const path = id.identityPath();
 const now = Math.floor(Date.now() / 1000);
 // The verbs that read the identity: with none, "run init" and exit 2, as the contact verbs say
 // it (a bare "load: no identity" exited 1).
-const READS = ['whoami', 'sign-challenge', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
+const READS = ['whoami', 'keys', 'sign-challenge', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
 // adopt --rotation changes an identity: with none, it took the lock in a missing directory, a raw ENOENT.
 if ((READS.includes(cmd ?? '') || (cmd === 'adopt' && rest.includes('--rotation'))) && !existsSync(path)) {
   note(contact.noIdentity(path));
@@ -137,7 +140,7 @@ try {
       if (recovery === undefined && !rest.includes('--no-recovery')) {
         usage(`init: pass --recovery <multibase pubkey>, or --no-recovery to accept that theft of this key is PERMANENT and unrecoverable.\n${OFFLINE_KEYGEN}`);
       }
-      const store = id.init(path, recovery ?? null);
+      const store = keys.init(path, recovery ?? null, process.env['SIGELO_KEY_PROVIDER']);
       note(`identity written to ${path} (0600)`);
       // The recovery public key, when given as one: the identity keeps only its hash (SPEC §4), and
       // a data request needs the key (erase-request derives it from the secret file).
@@ -169,8 +172,14 @@ try {
       break;
     }
     case 'sign-challenge':
-      out(id.signChallenge(load(), input(rest[0]) as Record<string, unknown>));
+      out(keys.signChallenge(path, load(), input(rest[0]) as Record<string, unknown>));
       break;
+    case 'keys': {
+      const r = keys.main(rest, path, load());
+      if (r === null) usage(`keys: ${JSON.stringify(rest[0] ?? '')} is not a verb\n${keys.USAGE}`);
+      out(r);
+      break;
+    }
     case 'add-issuer': {
       const g = input(rest[0]) as never;
       out(update((s) => { const store = id.addIssuer(s, g); return { store, result: { issuers: store.issuers.map(did) } }; }));
@@ -201,7 +210,7 @@ try {
       break;
     }
     case 'bind': {
-      const binding = update((store) => ({ store, result: xmr.bindMonero(store, now) }));
+      const binding = update((store) => ({ store, result: xmr.bindMonero(store, now, keys.signer(path, store)) }));
       // Same bytes as `monero-wallet-rpc sign { signature_type: "view", account_index: 0,
       // address_index: 0 }` over the §3 signing input — made here, with no wallet running.
       note('sig_addr signed in VIEW mode with the treasury view key (SPEC §6.2)');
@@ -217,7 +226,8 @@ try {
     case 'invoice': {
       const addr = flag('--addr');
       if (addr === undefined) usage('invoice: --addr <subaddress> is required — take one from `sigelo-agent receive`');
-      out(xmr.invoice(load(), { addr, amount: flag('--amount'), memo: flag('--memo'), ttl: Number(flag('--ttl') ?? 86400) }, now));
+      const s = load();
+      out(xmr.invoice(s, { addr, amount: flag('--amount'), memo: flag('--memo'), ttl: Number(flag('--ttl') ?? 86400) }, now, keys.signer(path, s)));
       break;
     }
     case 'verify-invoice': {
@@ -228,11 +238,8 @@ try {
     }
     case 'rotate': {
       if (rest.includes('--recovery')) usage(`rotate: this command does voluntary rotations only.${OFFLINE_RECOVERY}`);
-      const store = update((s) => {
-        const d = (s as Derived).derived;
-        if (d) throw new Error(`rotate: this identity comes from your 25 words (${d.path}): a random key would not. Its next key is rotation ${d.n + 1} of them: sigelo-agent keeper --from-words --rotate-me`);
-        const r = id.rotateKey(s, now); return { store: r, result: r };
-      });
+      // A derived identity (keeper --from-words) is refused there: its next key is rotation n + 1 of the words.
+      const store = update((s) => { const r = keys.rotate(path, s, now); return { store: r, result: r }; });
       note('rotated; the previous key is retired. Ask each world to reissue its attestation to the new DID.');
       out({ did: did(id.head(store)), chain: id.chainOf(store) });
       break;

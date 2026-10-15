@@ -29,9 +29,11 @@ import type { Attestation, Binding, Bundle, Genesis, Rotation, VerifyResult } fr
 import type { MoneroWallet } from './sigelo-agent-monero.ts';
 import { did, keygen, parseBytes, rotate, sign, SigeloError, structure, verify, VERSION } from 'sigelo';
 
-/** The whole persistent identity. One file, 0600, written atomically. */
+/** The whole persistent identity. One file, 0600, written atomically. `secret` is the plain seed
+ *  (hex) or, wrapped or held by a key agent, an object naming its provider: only
+ *  `sigelo-agent-keys.ts` reads those, and every path here refuses them (design/key-providers.md §2.2). */
 export interface Store {
-  v: string; secret: string; genesis: Genesis;
+  v: string; provider?: string; secret: string | { provider: string }; genesis: Genesis;
   rotations: Rotation[]; attestations: Attestation[]; issuers: Genesis[];
   /** Written only by sigelo-agent-monero.ts; absent in an identity-only install. */
   bindings?: Binding[]; monero?: MoneroWallet;
@@ -51,7 +53,8 @@ export function identityPath(env: Record<string, string | undefined> = process.e
   return join(root, 'moadim', 'sigelo.local.json');
 }
 
-export const secretOf = (s: Store): Uint8Array => Uint8Array.from(Buffer.from(s.secret, 'hex'));
+/** The plain seed. A wrapped or agent-held key is refused by name, never misread as hex. */
+export const secretOf = (s: Store): Uint8Array => { if (typeof s.secret !== 'string' || (s.provider ?? 'file') !== 'file') throw Object.assign(new SigeloError('key_provider_required: this identity\'s key is not a plain file (provider "file"), and this path signs with a plain key only'), { check: 'key_provider_required' }); return Uint8Array.from(Buffer.from(s.secret, 'hex')); };
 /** Every DID this identity has had, oldest first — what attestations may name as `sub` (§7.3). */
 export const chainOf = (s: Store): string[] => [did(s.genesis), ...s.rotations.map((r) => did(r.next_genesis))];
 /** The genesis the CURRENT secret belongs to: the last rotation's, else the original. */
@@ -86,11 +89,12 @@ export function init(path: string, recovery: string | null): Store {
 }
 
 /**
- * Sign a world's challenge — `{ v, typ: "challenge", did, ctx, nonce }`, SPEC §5.2. `typ` is inside the signed bytes (SPEC §3), so these two checks are
+ * Check a world's challenge — `{ v, typ: "challenge", did, ctx, nonce }`, SPEC §5.2 — and return our DID it names. `typ` is inside the signed bytes (SPEC §3), so these two checks are
  * what keep the hot key from ever signing a rotation, binding or attestation by accident: a
- * caller who can choose the body could otherwise have it sign away the identity.
+ * caller who can choose the body could otherwise have it sign away the identity. Every key
+ * provider signs a challenge only after these checks (sigelo-agent-keys.ts).
  */
-export function signChallenge(s: Store, body: Record<string, unknown>): { did: string; sig: string } {
+export function challengeDid(s: Store, body: Record<string, unknown>): string {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new SigeloError('sign-challenge: body is not a JSON object');
   if (body['typ'] !== 'challenge') throw new SigeloError(`sign-challenge: typ is ${JSON.stringify(body['typ'])}, not "challenge" — this key signs challenges and nothing else`);
   // §5.2: five fields and no others. `typ` already keeps the signature out of every bundle
@@ -98,10 +102,11 @@ export function signChallenge(s: Store, body: Record<string, unknown>): { did: s
   const extra = Object.keys(body).filter((k) => !['v', 'typ', 'did', 'ctx', 'nonce'].includes(k));
   if (extra.length) throw new SigeloError(`sign-challenge: a challenge has exactly v, typ, did, ctx, nonce — refusing extra field(s) ${extra.join(', ')}`);
   structure(body, 'challenge');
-  const d = did(head(s));
-  if (body['did'] !== d) throw new SigeloError(`sign-challenge: body.did is ${JSON.stringify(body['did'])}, not this identity's ${d} (DIDs compare in full, SPEC §9 step 1)`);
-  return { did: d, sig: sign(secretOf(s), body) };
+  if (body['did'] !== did(head(s))) throw new SigeloError(`sign-challenge: body.did is ${JSON.stringify(body['did'])}, not this identity's ${did(head(s))} (DIDs compare in full, SPEC §9 step 1)`);
+  return body['did'] as string;
 }
+/** The plain-file path: sign a challenge `challengeDid` accepts. */
+export const signChallenge = (s: Store, body: Record<string, unknown>): { did: string; sig: string } => ({ did: challengeDid(s, body), sig: sign(secretOf(s), body) });
 
 /** Store a world's attestation. Opaque here — structure only, no judgement (SPEC §9.8). */
 export function addAttestation(s: Store, a: Attestation): Store {

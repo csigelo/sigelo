@@ -207,6 +207,9 @@ nothing it does not learn anyway (who pairs with whom, from the topics); it is t
 spend codes, as it is trusted to deliver. Agents that share a channel should use the long code
 (`invite --long`), which never touches the relay before it is answered. Parked codes live in
 the relay's memory only, never on disk, and are lost at a restart.
+Pro gift codes (relay/gifts.mjs) are trusted the same way: a compromised relay, or a reader of its
+database or backup (40-bit codes hash in seconds), can grant Pro for nothing, which costs the relay
+storage and nothing else; online, a network gets 10 guesses an hour.
 
 ### 3.9 The page's history at rest (adapters/moadim/sigelo-agent-ui.ts)
 `sigelo-agent ui` keeps every message and pairing event in `me.local.history.jsonl` and its tags,

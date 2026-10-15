@@ -1313,8 +1313,8 @@ function one(value, out, todo) {
   const obj3 = value;
   out.push("{");
   todo.push(new Lit("}"));
-  const keys = Object.keys(obj3).sort();
-  for (let n = keys.length - 1; n >= 0; n--) todo.push(obj3[keys[n]], new Key(keys[n], n === 0));
+  const keys2 = Object.keys(obj3).sort();
+  for (let n = keys2.length - 1; n >= 0; n--) todo.push(obj3[keys2[n]], new Key(keys2[n], n === 0));
   return true;
 }
 function canonicalize(value) {
@@ -1324,30 +1324,30 @@ function canonicalize(value) {
 }
 function parse(text) {
   let i = 0;
-  const fail = (msg) => {
+  const fail2 = (msg) => {
     throw new JcsError(`${msg} at offset ${i}`);
   };
   const ws = () => {
     while (i < text.length && " 	\n\r".includes(text[i])) i++;
   };
-  const lit = (word, value) => text.startsWith(word, i) ? (i += word.length, value) : fail(`unexpected token ${JSON.stringify(text[i] ?? "<end>")}`);
+  const lit = (word, value) => text.startsWith(word, i) ? (i += word.length, value) : fail2(`unexpected token ${JSON.stringify(text[i] ?? "<end>")}`);
   function string() {
-    if (text[i] !== '"') fail("expected string");
+    if (text[i] !== '"') fail2("expected string");
     const start = i++;
     let s = "";
     for (; ; ) {
       const c = text[i];
-      if (c === void 0) fail("unterminated string");
+      if (c === void 0) fail2("unterminated string");
       if (c === '"') {
         const nc = noncharIn(s);
         if (nc !== void 0) {
           i = start;
-          fail(`noncharacter ${nc} in string`);
+          fail2(`noncharacter ${nc} in string`);
         }
         return i++, s;
       }
       if (c !== "\\") {
-        if (c.charCodeAt(0) < 32) fail("unescaped control character in string");
+        if (c.charCodeAt(0) < 32) fail2("unescaped control character in string");
         s += c;
         i++;
         continue;
@@ -1355,13 +1355,13 @@ function parse(text) {
       const e = text[++i];
       if (e === "u") {
         const hex2 = text.slice(i + 1, i + 5);
-        if (!/^[0-9a-fA-F]{4}$/.test(hex2)) fail("bad \\u escape");
+        if (!/^[0-9a-fA-F]{4}$/.test(hex2)) fail2("bad \\u escape");
         s += String.fromCharCode(parseInt(hex2, 16));
         i += 5;
       } else if (e !== void 0 && e in ESC) {
         s += ESC[e];
         i++;
-      } else fail(`bad escape \\${e ?? "<end>"}`);
+      } else fail2(`bad escape \\${e ?? "<end>"}`);
     }
   }
   function num() {
@@ -1373,18 +1373,18 @@ function parse(text) {
     };
     if (text[i] === "-") i++;
     if (text[i] === "0") i++;
-    else if (!(text[i] >= "1" && text[i] <= "9" && digits())) fail("expected number");
+    else if (!(text[i] >= "1" && text[i] <= "9" && digits())) fail2("expected number");
     let integer = true;
     if (text[i] === ".") {
       i++;
       integer = false;
-      if (!digits()) fail("expected digit");
+      if (!digits()) fail2("expected digit");
     }
     if (text[i] === "e" || text[i] === "E") {
       i++;
       integer = false;
       if (text[i] === "+" || text[i] === "-") i++;
-      if (!digits()) fail("expected digit");
+      if (!digits()) fail2("expected digit");
     }
     const lex = text.slice(start, i);
     const n = Number(lex);
@@ -1393,11 +1393,11 @@ function parse(text) {
   function key(o) {
     ws();
     const k = string();
-    if (o.seen.has(k)) fail(`duplicate key ${JSON.stringify(k)}`);
-    if (k === "__proto__") fail('forbidden key "__proto__"');
+    if (o.seen.has(k)) fail2(`duplicate key ${JSON.stringify(k)}`);
+    if (k === "__proto__") fail2('forbidden key "__proto__"');
     o.seen.add(k);
     ws();
-    if (text[i] !== ":") fail('expected ":"');
+    if (text[i] !== ":") fail2('expected ":"');
     i++;
     o.k = k;
   }
@@ -1407,7 +1407,7 @@ function parse(text) {
     const c = text[i];
     let v;
     if (c === "{" || c === "[") {
-      if (stack.length === MAX_DEPTH) fail(`nesting deeper than ${MAX_DEPTH}`);
+      if (stack.length === MAX_DEPTH) fail2(`nesting deeper than ${MAX_DEPTH}`);
       i++;
       ws();
       if (text[i] === (c === "{" ? "}" : "]")) {
@@ -1427,19 +1427,19 @@ function parse(text) {
     else if (c === "t") v = lit("true", true);
     else if (c === "f") v = lit("false", false);
     else if (c === "n") v = lit("null", null);
-    else fail(c === void 0 ? "unexpected end of input" : `unexpected token ${JSON.stringify(c)}`);
+    else fail2(c === void 0 ? "unexpected end of input" : `unexpected token ${JSON.stringify(c)}`);
     for (; ; ) {
       const top = stack[stack.length - 1];
       if (top === void 0) {
         ws();
-        if (i !== text.length) fail("trailing content");
+        if (i !== text.length) fail2("trailing content");
         return v;
       }
       if ("arr" in top) top.arr.push(v);
       else Object.defineProperty(top.obj, top.k, { value: v, enumerable: true, writable: true, configurable: true });
       ws();
       const d = text[i];
-      if (d !== "," && d !== ("arr" in top ? "]" : "}")) fail("arr" in top ? 'expected "," or "]"' : 'expected "," or "}"');
+      if (d !== "," && d !== ("arr" in top ? "]" : "}")) fail2("arr" in top ? 'expected "," or "]"' : 'expected "," or "}"');
       i++;
       if (d === ",") {
         if (!("arr" in top)) key(top);
@@ -2340,6 +2340,7 @@ __export(sigelo_agent_exports, {
   bundle: () => bundle,
   bundleOf: () => bundleOf,
   chainOf: () => chainOf,
+  challengeDid: () => challengeDid,
   head: () => head,
   identityPath: () => identityPath,
   init: () => init,
@@ -2376,15 +2377,14 @@ function init(path, recovery) {
   save(path, store);
   return store;
 }
-function signChallenge(s, body) {
+function challengeDid(s, body) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) throw new SigeloError("sign-challenge: body is not a JSON object");
   if (body["typ"] !== "challenge") throw new SigeloError(`sign-challenge: typ is ${JSON.stringify(body["typ"])}, not "challenge" — this key signs challenges and nothing else`);
   const extra = Object.keys(body).filter((k) => !["v", "typ", "did", "ctx", "nonce"].includes(k));
   if (extra.length) throw new SigeloError(`sign-challenge: a challenge has exactly v, typ, did, ctx, nonce — refusing extra field(s) ${extra.join(", ")}`);
   structure(body, "challenge");
-  const d = did(head(s));
-  if (body["did"] !== d) throw new SigeloError(`sign-challenge: body.did is ${JSON.stringify(body["did"])}, not this identity's ${d} (DIDs compare in full, SPEC §9 step 1)`);
-  return { did: d, sig: sign2(secretOf(s), body) };
+  if (body["did"] !== did(head(s))) throw new SigeloError(`sign-challenge: body.did is ${JSON.stringify(body["did"])}, not this identity's ${did(head(s))} (DIDs compare in full, SPEC §9 step 1)`);
+  return body["did"];
 }
 function addAttestation(s, a) {
   structure(a?.body, "attestation");
@@ -2409,14 +2409,18 @@ function rotateKey(s, now) {
   s.secret = Buffer.from(fresh.secret).toString("hex");
   return s;
 }
-var secretOf, chainOf, head, bundleOf;
+var secretOf, chainOf, head, signChallenge, bundleOf;
 var init_sigelo_agent = __esm({
   "adapters/moadim/sigelo-agent.ts"() {
     "use strict";
     init_sigelo();
-    secretOf = (s) => Uint8Array.from(Buffer.from(s.secret, "hex"));
+    secretOf = (s) => {
+      if (typeof s.secret !== "string" || (s.provider ?? "file") !== "file") throw Object.assign(new SigeloError(`key_provider_required: this identity's key is not a plain file (provider "file"), and this path signs with a plain key only`), { check: "key_provider_required" });
+      return Uint8Array.from(Buffer.from(s.secret, "hex"));
+    };
     chainOf = (s) => [did(s.genesis), ...s.rotations.map((r) => did(r.next_genesis))];
     head = (s) => s.rotations.at(-1)?.next_genesis ?? s.genesis;
+    signChallenge = (s, body) => ({ did: challengeDid(s, body), sig: sign2(secretOf(s), body) });
     bundleOf = (s) => ({
       v: VERSION,
       typ: "bundle",
@@ -2426,6 +2430,151 @@ var init_sigelo_agent = __esm({
       attestations: s.attestations,
       issuers: s.issuers
     });
+  }
+});
+
+// adapters/moadim/sigelo-agent-keychain.ts
+function wrap(_seed, _s, _kc) {
+  return unbuilt("wrap");
+}
+function unwrap(_s, _kc) {
+  return unbuilt("unwrap");
+}
+var unbuilt;
+var init_sigelo_agent_keychain = __esm({
+  "adapters/moadim/sigelo-agent-keychain.ts"() {
+    "use strict";
+    init_sigelo();
+    unbuilt = (what) => {
+      throw Object.assign(new SigeloError(`key_provider_unbuilt: ${what}: the keychain provider arrives with milestone K2; use a plain file (provider "file") until then`), { check: "key_provider_unbuilt" });
+    };
+  }
+});
+
+// adapters/moadim/sigelo-agent-keyclient.ts
+function request(_req, _env = process.env) {
+  throw Object.assign(new SigeloError('key_provider_unbuilt: the key agent arrives with milestone K3; use a plain file (provider "file") until then'), { check: "key_provider_unbuilt" });
+}
+var init_sigelo_agent_keyclient = __esm({
+  "adapters/moadim/sigelo-agent-keyclient.ts"() {
+    "use strict";
+    init_sigelo();
+  }
+});
+
+// adapters/moadim/sigelo-agent-keys.ts
+var sigelo_agent_keys_exports = {};
+__export(sigelo_agent_keys_exports, {
+  USAGE: () => USAGE,
+  fail: () => fail,
+  init: () => init2,
+  main: () => main,
+  providerOf: () => providerOf,
+  rotate: () => rotate2,
+  signChallenge: () => signChallenge2,
+  signer: () => signer
+});
+import { existsSync as existsSync2 } from "node:fs";
+function fail(code, detail) {
+  throw Object.assign(new SigeloError(`${code}: ${detail}`), { check: code });
+}
+function providerOf(s) {
+  const p = typeof s.secret === "string" ? "file" : s.secret?.provider;
+  if (typeof p !== "string" || !PROVIDERS.includes(p)) fail("key_provider_unknown", `the identity file's secret names provider ${JSON.stringify(p)}; this sigelo-agent knows ${PROVIDERS.join(", ")}`);
+  if (s.provider !== void 0 && s.provider !== p) fail("key_provider_unknown", `the identity file says provider ${JSON.stringify(s.provider)} but holds a ${p} key`);
+  return p;
+}
+function using(path, s, env2) {
+  const p = providerOf(s);
+  if (env2["SIGELO_KEY_AGENT"] && p !== "agent") fail("key_agent_mismatch", `SIGELO_KEY_AGENT is set but ${path} still holds the key (${p}): move it (sigelo-agent keys to-agent), or unset SIGELO_KEY_AGENT`);
+  return p;
+}
+function withSeed(s, fn) {
+  const seed = providerOf(s) === "file" ? secretOf(s) : unwrap(s);
+  try {
+    return fn(seed);
+  } finally {
+    seed.fill(0);
+  }
+}
+function signer(path, s, env2 = process.env) {
+  const p = using(path, s, env2), g = head(s), d = did(g);
+  const raw = p === "agent" ? (body) => request({ op: "sign", did: d, body }, env2)["sig"] : (body) => withSeed(s, (seed) => sign2(seed, body));
+  return { did: d, key: g.key, sign: (body) => {
+    const sig = raw(body);
+    if (typeof sig !== "string" || !verifySig(g.key, body, sig)) fail("key_mismatch", `the ${p} key of ${path} does not sign for ${d}, its head genesis key: the file or its key store was changed`);
+    return sig;
+  } };
+}
+function init2(path, recovery, provider, env2 = process.env) {
+  if (provider !== void 0 && !PROVIDERS.includes(provider)) fail("key_provider_unknown", `SIGELO_KEY_PROVIDER is ${JSON.stringify(provider)}; use ${PROVIDERS.join(", ")}`);
+  if (provider === void 0) return init(path, recovery);
+  if (existsSync2(path)) throw new SigeloError(`init: ${path} already holds an identity — refusing to overwrite it`);
+  let store;
+  if (provider === "agent") {
+    const genesis = request({ op: "create", recovery }, env2)["genesis"];
+    store = { v: VERSION, provider, secret: { provider }, genesis, rotations: [], attestations: [], issuers: [] };
+  } else {
+    const id2 = keygen({ recovery });
+    store = { v: VERSION, provider, secret: "", genesis: id2.genesis, rotations: [], attestations: [], issuers: [] };
+    try {
+      store.secret = provider === "file" ? Buffer.from(id2.secret).toString("hex") : wrap(id2.secret, store);
+    } finally {
+      id2.secret.fill(0);
+    }
+  }
+  save(path, store);
+  return store;
+}
+function rotate2(path, s, now, env2 = process.env) {
+  const d = s.derived;
+  if (d) throw new SigeloError(`rotate: this identity comes from your 25 words (${d.path}): a random key would not. Its next key is rotation ${d.n + 1} of them: sigelo-agent keeper --from-words --rotate-me`);
+  const p = using(path, s, env2);
+  if (p === "file") return rotateKey(s, now);
+  if (p === "agent") {
+    s.rotations.push(request({ op: "rotate", did: did(head(s)), to: "software" }, env2)["rotation"]);
+    return s;
+  }
+  const cur = head(s), fresh = keygen({ recovery: cur.recovery });
+  try {
+    s.rotations.push(withSeed(s, (secret) => rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: "voluntary", secret })));
+    s.secret = wrap(fresh.secret, s);
+  } finally {
+    fresh.secret.fill(0);
+  }
+  return s;
+}
+function main(args, path, s, env2 = process.env) {
+  const verb = args[0];
+  if (verb === "status" || verb === "show") {
+    const p = providerOf(s), d = did(head(s));
+    let code = "ok";
+    try {
+      signer(path, s, env2).sign({ v: "sigelo-keys/0", typ: "probe", did: d });
+    } catch (e) {
+      code = e.check ?? "error";
+    }
+    return { did: d, provider: p, file: path, key_agent: env2["SIGELO_KEY_AGENT"] ?? null, signs: code === "ok", ...code !== "ok" && { code } };
+  }
+  if (verb === "wrap" || verb === "unwrap") fail("key_provider_unbuilt", `keys ${verb}: keychain wrapping arrives with milestone K2; the identity file is unchanged`);
+  if (verb === "to-agent") fail("key_provider_unbuilt", "keys to-agent: the key agent arrives with milestone K3; the identity file is unchanged");
+  return null;
+}
+var PROVIDERS, signChallenge2, USAGE;
+var init_sigelo_agent_keys = __esm({
+  "adapters/moadim/sigelo-agent-keys.ts"() {
+    "use strict";
+    init_sigelo();
+    init_sigelo_agent();
+    init_sigelo_agent_keychain();
+    init_sigelo_agent_keyclient();
+    PROVIDERS = ["file", "keychain", "agent"];
+    signChallenge2 = (path, s, body, env2 = process.env) => ({ did: challengeDid(s, body), sig: signer(path, s, env2).sign(body) });
+    USAGE = `Where the identity key rests (identity file field "provider"):
+  keys status                            the key's form, and whether it signs for the current DID;
+                                         never prints key material
+  keys wrap | keys unwrap --plain        file <-> OS keychain: milestone K2, not built yet
+  keys to-agent                          move the key into sigelo-key-agent: milestone K3, not built yet`;
   }
 });
 
@@ -2476,9 +2625,11 @@ function walletSet(s, input2) {
   s.monero = { net, a: a.toLowerCase(), B: B2.toLowerCase(), address, next_minor: s.monero?.address === address ? s.monero.next_minor : {} };
   return s;
 }
-function bindMonero(s, now) {
+function bindMonero(s, now, me) {
   const w = wallet(s);
-  const b = bind({ secret: secretOf(s), id: did(head(s)), method: "monero", addr: w.address, iat: now, exp: now + BINDING_TTL, nonce: randomBytes3(16) });
+  const body = { v: VERSION, typ: "binding", id: did(head(s)), method: "monero", addr: w.address, iat: now, exp: now + BINDING_TTL, nonce: nonce16() };
+  structure(body, "binding");
+  const b = { body, sig_id: me.sign(body) };
   const sig_addr = sigeloMoneroSigAddr(b.body, { mode: "view", secret: hex(w.a), spendPub: hex(w.B), viewPub: decodeAddress(w.address).view });
   if (!verifySigeloMoneroSigAddr(b.body, w.address, sig_addr).good) throw new SigeloError("bind: the sig_addr we just made does not verify against addr — the stored view key does not belong to this address");
   const binding = { ...b, sig_addr };
@@ -2520,7 +2671,7 @@ function issued(w, addr) {
   }
   return false;
 }
-function invoice(s, o, now) {
+function invoice(s, o, now, me) {
   const w = wallet(s);
   const d = decodeAddress(o.addr);
   if (d.kind !== "subaddress") throw new SigeloError(`invoice: addr is a ${d.kind} address — invoice a fresh subaddress from \`receive\`, never the base address (MONERO.md §3)`);
@@ -2541,7 +2692,7 @@ function invoice(s, o, now) {
     ...o.memo !== void 0 && { memo: o.memo }
   };
   structure(body, "invoice");
-  return { body, sig: sign2(secretOf(s), body) };
+  return { body, sig: me.sign(body) };
 }
 function verifyInvoice(inv, bundle2, now) {
   const env2 = inv;
@@ -2597,7 +2748,7 @@ __export(sigelo_agent_adopt_exports, {
   applyRotation: () => applyRotation,
   forgetIssuer: () => forgetIssuer
 });
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync3 } from "node:fs";
 function seedFor(what, hex2, key) {
   if (typeof hex2 !== "string" || !HEX32.test(hex2)) throw new SigeloError(`${what}: identity_seed_hex is not 64 lowercase hex characters`);
   const probe = { typ: "sigelo-agent-adopt-probe", key };
@@ -2612,7 +2763,7 @@ function adopt(path, input2, force) {
   const genesis = i["genesis"];
   if (i["did"] !== void 0 && i["did"] !== did(genesis)) throw new SigeloError(`adopt: did ${JSON.stringify(i["did"])} is not the DID of the genesis given (${did(genesis)})`);
   const secret = seedFor("adopt", i["identity_seed_hex"], genesis.key);
-  if (existsSync2(path) && !force) throw new SigeloError(`adopt: ${path} already holds an identity — refusing to overwrite it (--force replaces it, and loses its attestations)`);
+  if (existsSync3(path) && !force) throw new SigeloError(`adopt: ${path} already holds an identity — refusing to overwrite it (--force replaces it, and loses its attestations)`);
   const store = { v: VERSION, secret, genesis, rotations: [], attestations: [], issuers: [] };
   save(path, store);
   return store;
@@ -2673,12 +2824,13 @@ var init_contact = __esm({
 });
 
 // integrations/mcp/server.mjs
-import { existsSync as existsSync3, readdirSync } from "node:fs";
+import { existsSync as existsSync4, readdirSync } from "node:fs";
 import { basename as basename2, dirname as dirname2, join as join2, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 var INSTALLED = fileURLToPath(import.meta.url).split(sep).includes("node_modules");
 var { did: did2, parse: parse2, parseBytes: parseBytes2, verify: verify3, SigeloError: SigeloError2 } = await Promise.resolve().then(() => (init_sigelo(), sigelo_exports));
 var id = await Promise.resolve().then(() => (init_sigelo_agent(), sigelo_agent_exports));
+var keys = await Promise.resolve().then(() => (init_sigelo_agent_keys(), sigelo_agent_keys_exports));
 var { withLock: withLock2 } = await Promise.resolve().then(() => (init_sigelo_agent_monero(), sigelo_agent_monero_exports));
 var { forgetIssuer: forgetIssuer2 } = await Promise.resolve().then(() => (init_sigelo_agent_adopt(), sigelo_agent_adopt_exports));
 console.log = console.info = console.debug = console.error;
@@ -2731,7 +2883,7 @@ var input = (v, name) => {
   return v;
 };
 var loadStore = (path) => {
-  if (!existsSync3(path)) {
+  if (!existsSync4(path)) {
     const named = path === base ? "" : ` for the profile "${/^sigelo\.(.+)\.local\.json$/.exec(path.slice(dirname2(path).length + 1))?.[1]}"`, have = profiles();
     throw refusal("no_identity", `no identity${named} at ${path}: call sigelo_init once${named ? " with the same identity" : ""}${have.length ? `, or use an existing profile: ${have.join(", ")}` : ""}`);
   }
@@ -2751,7 +2903,7 @@ function debug(e, path) {
   if (env.SIGELO_DEBUG !== "1") return;
   const say = (s) => process.stderr.write(`sigelo-mcp: debug: ${s}
 `);
-  if (path) say(`identity file ${path}${existsSync3(path) ? "" : ", missing"}`);
+  if (path) say(`identity file ${path}${existsSync4(path) ? "" : ", missing"}`);
   say(`relay ${env.SIGELO_RELAY ?? "(default)"}${env.SIGELO_RELAY_ENDPOINTS ? ` endpoints ${env.SIGELO_RELAY_ENDPOINTS}` : ""}`);
   for (let x = e, i = 0; x && i < 8; x = x.cause, i++) {
     say(`${i ? "caused by " : "error "}${x.name ?? typeof x}${x.check ? ` check=${x.check}` : ""}: ${x.message ?? String(x)}`);
@@ -2766,7 +2918,7 @@ var HANDLERS = {
   },
   sigelo_init: ({ recovery }, path) => {
     if (typeof recovery !== "string" || !recovery) throw refusal("usage", 'recovery is required: a "z…" public key or "none"');
-    const s = id.init(path, recovery === "none" ? null : recovery);
+    const s = keys.init(path, recovery === "none" ? null : recovery, env.SIGELO_KEY_PROVIDER);
     return {
       did: did2(s.genesis),
       genesis: s.genesis,
@@ -2774,7 +2926,7 @@ var HANDLERS = {
       ...recovery === "none" && { warning: "NO recovery key: if this key is stolen the identity is lost permanently." }
     };
   },
-  sigelo_sign_challenge: ({ challenge: challenge2 }, path) => id.signChallenge(loadStore(path), input(challenge2, "challenge")),
+  sigelo_sign_challenge: ({ challenge: challenge2 }, path) => keys.signChallenge(path, loadStore(path), input(challenge2, "challenge")),
   sigelo_add_issuer: ({ genesis }, path) => {
     const g = input(genesis, "genesis");
     loadStore(path);
@@ -2810,7 +2962,7 @@ var HANDLERS = {
   sigelo_rotate: (_, path) => {
     loadStore(path);
     const s = update(path, (st) => {
-      const r = id.rotateKey(st, nowS());
+      const r = keys.rotate(path, st, nowS());
       return { store: r, result: r };
     });
     return { did: did2(id.head(s)), chain: id.chainOf(s), next: "ask each world to reissue its attestation to the new DID" };

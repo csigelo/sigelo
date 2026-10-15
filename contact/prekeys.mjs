@@ -21,8 +21,8 @@
 // kept, the oldest going first.
 import { ml_kem768_x25519 as xwing } from '@noble/post-quantum/hybrid.js';
 import { randomBytes } from '@noble/hashes/utils.js';
-import { canonicalize, sign, verifySig } from 'sigelo';
-import { MSG_V, checkNow, fail, hex } from './kdf.mjs';
+import { canonicalize, verifySig } from 'sigelo';
+import { MSG_V, checkNow, fail, hex, signAs } from './kdf.mjs';
 
 export const ONE_TIME = 20, REPLENISH_BELOW = 5, LAST_RESORT_DAYS = 30, TTL = 31 * 86400, SKEW = 300;
 export const REPLACE_DAYS = 7, REISSUE = 3600, RETIRED_MAX = 8 * ONE_TIME, USED_MAX = 1024;
@@ -115,7 +115,7 @@ export class Prekeys {
   // Replaces every one-time key listed once they are REPLACE_DAYS old, else tops them up to
   // twenty, rotates the last-resort key if due, and returns a bundle signed by the identity key
   // ("sigelo\n" + JCS(body), SPEC §3). The bundle lists EVERY unused key and replaces the previous
-  // one at the contact. me: { current_did, secret }.
+  // one at the contact. me: { current_did, sign } (or secret: kdf.mjs signAs).
   // rng order, for reproducible fixtures: per new one-time key id (16) then keygen seed (32); then
   // the same for a new last-resort key.
   issue(me, pair, now, rng = randomBytes) {
@@ -142,7 +142,7 @@ export class Prekeys {
     const lr = this.lastResort[0];
     const body = { v: MSG_V, typ: 'prekeys', did: me.current_did, pair, iat: now, exp: now + TTL,
       keys: [...this.oneTime].map(([id, k]) => ({ id, pk: b64u(k.publicKey) })), last_resort: { id: lr.id, pk: b64u(lr.publicKey) } };
-    return { body, sig: sign(me.secret, body) };
+    return { body, sig: signAs(me, body) };
   }
 
   // For the envelope that begins an epoch; nothing is consumed until it has passed every check

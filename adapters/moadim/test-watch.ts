@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 // sigelo-agent watch and the tiers (WATCH.md, contact/store.mjs).
 //   node test-watch.ts   (SKIPs without relay/ and its node_modules)
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CLI, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
+import { pathToFileURL } from 'node:url';
+import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
 
 // ── tiers and watch (contact/store.mjs tiers, sigelo-agent-watch.ts, WATCH.md) ───────────────
 // Against the in-process relay: alice makes three codes, then runs `watch` with no hook; three
@@ -107,7 +108,7 @@ import { CLI, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } fro
         got.push(...(JSON.parse((await cli('pal', 'inbox', '--wait', '5')).stdout || '{"messages":[]}') as { messages: typeof got }).messages);
       }
       ok('the watcher sent both, well before its 60 s round: pal gets the message and the file', got.some((m) => m.content === 'reply while watched') && got.some((m) => m.type === 'file' && m.name === 'note.txt'), JSON.stringify(got));
-      for (const args of [['invite'], ['accept', 'K7F3-Q9ZP'], ['forget', D.pal]]) {
+      for (const args of [['invite'], ['accept', 'K7F3-Q9ZP'], ['forget', D.pal], ['pro', 'redeem', 'PRO-K7F3-Q9ZP']]) {
         const b = await cli('alice', ...args);
         ok(`${args[0]} beside the watcher: exit 1, busy, saying who holds the session`, b.status === 1 && b.stderr.includes(`is watched by sigelo-agent watch (pid ${w2.c.pid})`), b.stderr);
       }
@@ -123,6 +124,23 @@ import { CLI, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } fro
       const qt = await cli('alice', 'inbox', '--tier', 'friend', '--quiet-too');
       ok('inbox --tier friend --quiet-too: the quiet contact\'s two', (JSON.parse(qt.stdout) as { messages: { content: string }[] }).messages.map((m) => m.content).join() === 'hello from hotel,again from hotel', qt.stdout);
       ok('inbox: then nothing', (JSON.parse((await cli('alice', 'inbox')).stdout) as { messages: unknown[] }).messages.length === 0);
+      // pro redeem: a gift code (contact/short.mjs giftHash), loaded as the runbook loads one
+      // (node relay/gifts.mjs load), redeemed by alice as the operator; once only.
+      const { giftHash } = await import(pathToFileURL(join(ROOT, 'contact', 'short.mjs')).href) as { giftHash(t: string): string };
+      const exp = Math.floor(Date.now() / 86400000) * 86400 + 30 * 86400;
+      writeFileSync(join(H, 'gifts.jsonl'), `${JSON.stringify({ code_hash: giftHash('PRO-K7F3-Q9ZP'), months: 6, expires: exp, campaign: 'test' })}\n`);
+      const load = spawnSync('node', [join(RELAY, 'gifts.mjs'), 'load', join(H, 'gifts.jsonl')], { env: { ...process.env, RELAY_DB: join(H, 'relay.db') }, encoding: 'utf8' });
+      ok('pro redeem: a gift code loaded into the test relay', load.status === 0 && load.stdout.includes('1 codes loaded'), load.stderr);
+      const pr = await cli('alice', 'pro', 'redeem', 'pro', 'k7f3', 'q9zp'), pj = JSON.parse(pr.stdout || '{}') as { operator?: string; months?: number; pro_until?: string; relay?: string };
+      const aliceDid = await didOf('alice');
+      ok('pro redeem, typed in lowercase, in three pieces: exit 0, the operator (alice\'s original DID), 6 months, the Pro expiry on stdout and stderr',
+        pr.status === 0 && pj.operator === aliceDid && pj.months === 6 && pj.relay === 'relay.test' && /^\d{4}-\d\d-\d\dT00:00:00Z$/.test(pj.pro_until ?? '')
+        && pr.stderr.includes(`Pro until ${pj.pro_until} at relay.test for the pool of ${aliceDid} (6 months added)`), pr.stdout + pr.stderr);
+      const again = await cli('alice', 'pro', 'redeem', 'PRO-K7F3-Q9ZP');
+      ok('pro redeem, the same code again: exit 1, "gift", and no code in the relay\'s words', again.status === 1 && again.stderr.includes('gift: the relay refused the gift code') && !/K7F3/i.test(again.stderr.replace(/redeem PRO-K7F3-Q9ZP/g, '')), again.stderr);
+      const typo = await cli('alice', 'pro', 'redeem', 'PRO-K7F3-U9ZP');
+      ok('pro redeem, a code with a U: exit 1, gift_code, before any login', typo.status === 1 && typo.stderr.includes('gift_code: not a gift code') && typo.stderr.includes('character 5'), typo.stderr);
+      ok('pro <anything but redeem>: exit 2, usage', (await cli('alice', 'pro', 'renew', 'PRO-K7F3-Q9ZP')).status === 2);
     } finally {
       w1?.c.kill('SIGTERM'); w2?.c.kill('SIGTERM');
       await relay.close?.();
