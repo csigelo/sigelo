@@ -101,7 +101,11 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
     kp.status === 0 && existsSync(made) && first?.did !== undefined && meRes?.status === 200 && (JSON.parse(meRes.body) as { did: string }).did === first.did, `${kp.stderr}\n${out}\n${err}`);
   const exited = new Promise<number | null>((r) => cli.on('close', r));
   cli.kill('SIGTERM');
-  ok('ui (CLI): SIGTERM stops it, exit 0, lock gone', (await exited) === 0 && !existsSync(ui.lockPath(made)));
+  const code = await exited;
+  // Windows has no SIGTERM: kill() ends the process at once, no handler runs and the lock file
+  // stays; a dead pid in it holds nothing (lockHolder checks the pid), so the next ui starts.
+  ok('ui (CLI): SIGTERM stops it, exit 0, lock gone (Windows: ended at once, the stale lock holds nothing)',
+    posixModes ? code === 0 && !existsSync(ui.lockPath(made)) : code !== 0 && ui.uiHolder(made) === null);
 
   // End to end against the relay the contact tests use, in this process.
   if (!hasRelay()) console.log(`SKIP ui end to end: ${NO_RELAY}`);
