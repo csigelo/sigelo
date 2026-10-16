@@ -5,6 +5,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **HTTPS-only networks:** `SIGELO_RELAY_TRANSPORT=auto` falls back from 8883 to MQTT over WebSocket on 443;
+  `HTTPS_PROXY`, `NO_PROXY` apply. A contact over quota is named as such (`side: "reader"`).
+- **Relay:** MQTT over WebSocket at `/mqtt` behind nginx, counted by `X-Real-IP`; `quota_storage` says
+  whose quota (`side`); relay.json `endpoints`. New dependency: `ws`.
 - ceremony `--human` screen: a 12-letter word ("verification") ran into the next number; the column is one wider.
 - **AgentCard operator:** the card profile's `params.operator` carries the operator attestation and chain under `sig`;
   verify reports `{did, exp}` or refuses by name; signing goes through the key providers.

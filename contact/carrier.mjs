@@ -3,7 +3,7 @@
 // invite answers and replies and sigelo-msg/0 envelopes between contacts through a relay. The relay
 // sees random topics and ciphertext; everything here that decides who someone is runs offline.
 //
-//   const c = new Carrier({ identity, store, state, relay, endpoints, retentionDays, clock, onEvent, keep })
+//   const c = new Carrier({ identity, store, state, relay, endpoints, retentionDays, clock, onEvent, keep, transport })
 //   await c.invite({ name, ttl, short })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first;
 //                                            short: the long code is also parked at the relay under a short one
 //   await c.unpark(short)                  → the long code parked under a short one, taken from the relay (one use)
@@ -53,6 +53,14 @@
 // id, so a second login takes the session from a started carrier (the files stay sound under the
 // lock; the started one reconnects with backoff). Beside one, use inbox and send with local: the
 // state file only (sigelo-agent's one-owner rule, adapters/moadim/WATCH.md).
+//
+// Transport (transport, or SIGELO_RELAY_TRANSPORT): "mqtts" (the default), MQTT over TLS on 8883;
+// "wss", MQTT over WebSocket on 443 (wss://host/mqtt, or relay.json's endpoints.mqtt_ws on the same
+// host); "auto", 8883 for PROBE_MS, then 443 for the rest of the process. For networks that let only
+// HTTPS out. Both are TLS. HTTPS_PROXY (or https_proxy), an http:// proxy, carries the HTTPS calls
+// and the WebSocket dial by HTTP CONNECT, unless NO_PROXY (or no_proxy) names the host (proxyFor);
+// MQTT on 8883 never goes through it. Certificates are checked as without a proxy, so
+// NODE_EXTRA_CA_CERTS works the same. The event { type: "transport" } says when auto fell back.
 //
 // What this adds to the wire, beside the envelope (envelope.mjs) and the invite (invite.mjs); the
 // bytes are pinned in fixtures/carrier-v0.json (gen-carrier.mjs --check):
@@ -176,6 +184,9 @@
 //     round, so topics are asked in the order they matter (#want). A refused topic is asked again
 //     at the next hourly round (ASK_AGAIN).
 import { createHash } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
+import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
+import { connect as tlsConnect } from 'node:tls';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
@@ -239,6 +250,13 @@ const FILES_OPEN = 8;
 const RATE = { perSecond: 10, burst: 100 };
 // Milliseconds. QUIET: no delivery for this long after connecting = the relay's queue is drained.
 const QUIET = 400, DRAIN = 4000, ACK_MS = 15000, CONNECT_MS = 15000, HTTP_MS = 15000, HTTP_MAX = 65536;
+// transport "auto": MQTT over TLS gets this long to answer the CONNECT before the dial goes to MQTT
+// over WebSocket on 443. A network that lets only HTTPS out drops 8883 rather than refusing it.
+export const PROBE_MS = 5000;
+export const TRANSPORTS = ['mqtts', 'wss', 'auto'];
+// The WebSocket endpoint, as relay.json names it (relay/server.mjs WS_PATH) and as a relay with
+// none is reached: on its HTTPS host.
+export const WS_PATH = '/mqtt';
 // MQTT.js buffers a packet whole before handing it over, up to MQTT's 256 MB (its own size check
 // applies only to protocol version 5), and a code can name any host: a packet longer than the
 // largest a relay forwards (relay/server.mjs MAX_FRAME: a 1 MB message and its header) cuts the
@@ -326,22 +344,84 @@ export function pathsFor(identityFile) {
 }
 
 /**
- * Where relay "host[:port]" is reached: MQTT over TLS on port (8883), HTTPS on 443. endpoints:
- * { [relay]: { mqtt, http } } overrides, e.g. a relay on loopback; plain mqtt:// and http:// only
- * to a loopback address, so nothing leaves the machine in clear.
+ * Where relay "host[:port]" is reached: MQTT over TLS on port (8883), HTTPS on 443, MQTT over
+ * WebSocket at wss://host/mqtt. endpoints: { [relay]: { mqtt, http, ws? } } overrides, e.g. a relay
+ * on loopback: mqtt may be mqtts:// or wss://, ws wss:// (by default the http origin at /mqtt);
+ * plain mqtt://, ws:// and http:// only to a loopback address, so nothing leaves the machine in clear.
  */
 export function endpointOf(relay, endpoints = {}) {
   const o = endpoints && Object.hasOwn(endpoints, relay) ? endpoints[relay] : null;
   if (!o) {
     const [host, port] = relay.split(':');
-    return { mqtt: `mqtts://${host}:${port ?? MQTT_PORT}`, http: `https://${host}` };
+    return { mqtt: `mqtts://${host}:${port ?? MQTT_PORT}`, http: `https://${host}`, ws: `wss://${host}${WS_PATH}` };
   }
-  for (const [k, secure, plain] of [['mqtt', 'mqtts:', 'mqtt:'], ['http', 'https:', 'http:']]) {
+  const check = (k, ok) => {
     let u;
     try { u = new URL(o[k]); } catch { fail('relay', `${relay}: endpoints.${k} is not a URL`); }
-    if (u.protocol !== secure && !(u.protocol === plain && LOOPBACK.has(u.hostname))) fail('relay', `${relay}: endpoints.${k} must be ${secure}// (${plain}// only to a loopback address)`);
+    const [secure, plain] = ok.find(([sec, pl]) => u.protocol === sec || u.protocol === pl) ?? ok[0];
+    if (u.protocol !== secure && !(u.protocol === plain && LOOPBACK.has(u.hostname))) fail('relay', `${relay}: endpoints.${k} must be ${ok.map(([x]) => `${x}//`).join(' or ')} (${ok.map(([, x]) => `${x}//`).join(' or ')} only to a loopback address)`);
+  };
+  check('mqtt', [['mqtts:', 'mqtt:'], ['wss:', 'ws:']]);
+  check('http', [['https:', 'http:']]);
+  const http = o.http.replace(/\/+$/, '');
+  if (o.ws !== undefined) check('ws', [['wss:', 'ws:']]);
+  return { mqtt: o.mqtt, http, ws: o.ws ?? http.replace(/^http/, 'ws') + WS_PATH };
+}
+
+/**
+ * The HTTP CONNECT proxy for url (https: or wss:), from HTTPS_PROXY or https_proxy, unless NO_PROXY
+ * (or no_proxy) names its host: "*", a name (its subdomains too; a leading "." or "*." the same), an
+ * address, each with an optional :port. → a URL, or null. Only an http:// proxy; TLS to the relay
+ * runs inside the tunnel, verified as without one (NODE_EXTRA_CA_CERTS included).
+ */
+export function proxyFor(url, env = process.env) {
+  const u = new URL(url);
+  const raw = env.HTTPS_PROXY || env.https_proxy;
+  if ((u.protocol !== 'https:' && u.protocol !== 'wss:') || !raw) return null;
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase(), port = u.port || '443';
+  for (const e of String(env.NO_PROXY || env.no_proxy || '').toLowerCase().split(/[\s,]+/).filter(Boolean)) {
+    if (e === '*') return null;
+    const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(e) ?? (e.split(':').length === 2 ? /^([^:]+):(\d+)$/.exec(e) : null);
+    const name = (m ? m[1] : e).replace(/^\*?\./, '.'), p = m?.[2];
+    if (p && p !== port) continue;
+    if (name.startsWith('.') ? host.endsWith(name) || host === name.slice(1) : host === name || host.endsWith(`.${name}`)) return null;
   }
-  return { mqtt: o.mqtt, http: o.http.replace(/\/+$/, '') };
+  let p;
+  try { p = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`); } catch { fail('connect', 'HTTPS_PROXY is not a URL: want http://host:port'); }
+  if (p.protocol !== 'http:') fail('connect', `HTTPS_PROXY: ${p.protocol}// proxies are not supported; want http://host:port (HTTP CONNECT)`);
+  return p;
+}
+
+// An https.Agent whose every connection is a tunnel through proxy (HTTP CONNECT host:port), with
+// TLS to the relay inside it: for the HTTP calls (http) and for MQTT over WebSocket (ws's agent).
+class Tunnel extends HttpsAgent {
+  constructor(proxy) { super({ keepAlive: false }); this.proxy = proxy; }
+  createConnection(options, cb) {
+    const p = this.proxy, host = options.host.includes(':') ? `[${options.host}]` : options.host, target = `${host}:${options.port || 443}`;
+    const auth = p.username ? { 'proxy-authorization': `Basic ${Buffer.from(`${decodeURIComponent(p.username)}:${decodeURIComponent(p.password)}`).toString('base64')}` } : {};
+    const req = httpRequest({ host: p.hostname.replace(/^\[|\]$/g, ''), port: p.port || 80, method: 'CONNECT', path: target, agent: false, headers: { host: target, ...auth } });
+    req.setTimeout(HTTP_MS, () => req.destroy(new Error(`no answer within ${HTTP_MS / 1000} s`)));
+    req.once('connect', (res, sock) => {
+      req.setTimeout(0);
+      if (res.statusCode !== 200) { sock.destroy(); return cb(new Error(`the proxy ${p.host} answered ${res.statusCode} to CONNECT ${target}`)); }
+      cb(null, tlsConnect({ ...options, socket: sock, servername: options.servername || options.host }));
+    });
+    req.once('error', (e) => cb(new Error(`the proxy ${p.host}: ${e.code ?? e.message}`)));
+    req.end();
+  }
+}
+const tunnelFor = (url) => { const p = proxyFor(url); return p ? new Tunnel(p) : null; };
+
+// An HTTPS request through a tunnel, answered in the shape of fetch's Response as http() reads it.
+function viaTunnel(url, init, agent) {
+  return new Promise((resolve, reject) => {
+    const body = init.body === undefined ? undefined : Buffer.from(init.body);
+    const req = httpsRequest(url, { method: init.method ?? 'GET', agent, signal: init.signal, headers: body ? { 'content-type': 'text/plain;charset=UTF-8', 'content-length': body.length } : {} }, (res) => {
+      resolve({ status: res.statusCode, type: 'basic', body: res, headers: { get: (k) => { const v = res.headers[k.toLowerCase()]; return v === undefined ? null : String(v); } } });
+    });
+    req.once('error', (e) => reject(Object.assign(new Error(e.message), { cause: e })));
+    req.end(body);
+  });
 }
 
 /**
@@ -367,7 +447,7 @@ export function retentionOf(info) {
   return retentionOk(n) ? n : null;
 }
 
-/** SIGELO_RELAY (the relay new invites name), SIGELO_RELAY_ENDPOINTS (JSON, as endpointOf), SIGELO_RELAY_RETENTION_DAYS. */
+/** SIGELO_RELAY (the relay new invites name), SIGELO_RELAY_ENDPOINTS (JSON, as endpointOf), SIGELO_RELAY_RETENTION_DAYS, SIGELO_RELAY_TRANSPORT. */
 export function optionsFromEnv(env = process.env) {
   const o = {};
   if (env.SIGELO_RELAY) o.relay = env.SIGELO_RELAY;
@@ -378,6 +458,10 @@ export function optionsFromEnv(env = process.env) {
     const n = Number(env.SIGELO_RELAY_RETENTION_DAYS);
     if (!retentionOk(n)) fail('relay', `SIGELO_RELAY_RETENTION_DAYS: whole days, 1 to ${RETENTION_MAX_DAYS} (the reader's tier)`);
     o.retentionDays = n;
+  }
+  if (env.SIGELO_RELAY_TRANSPORT) {
+    if (!TRANSPORTS.includes(env.SIGELO_RELAY_TRANSPORT)) fail('relay', `SIGELO_RELAY_TRANSPORT: ${TRANSPORTS.join(', ')} (MQTT over TLS on 8883, over WebSocket on 443, or the first then the second)`);
+    o.transport = env.SIGELO_RELAY_TRANSPORT;
   }
   return o;
 }
@@ -585,7 +669,10 @@ async function http(url, init = {}) {
   let res;
   const at = where(url), http = { url, method: init.method ?? 'GET' };
   const t0 = Date.now();
-  try { res = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(HTTP_MS) }); } catch (e) {
+  try {
+    const agent = tunnelFor(url);
+    res = agent ? await viaTunnel(url, { ...init, signal: AbortSignal.timeout(HTTP_MS) }, agent) : await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(HTTP_MS) });
+  } catch (e) {
     const why = e.name === 'TimeoutError' ? `no answer within ${HTTP_MS / 1000} s` : e.cause?.code ?? e.cause?.message ?? e.message;
     fail('connect', `cannot reach the relay at ${at} (${why}): check the network and SIGELO_RELAY / SIGELO_RELAY_ENDPOINTS, then try again`, { cause: e, http });
   }
@@ -593,7 +680,7 @@ async function http(url, init = {}) {
   // The relay's clock (Date, whole seconds) and the round trip to it, for clockOffset.
   const rtt = Date.now() - t0, date = Date.parse(res.headers.get('date') ?? '');
   if ((res.status >= 300 && res.status < 400) || res.type === 'opaqueredirect') {
-    try { await res.body?.cancel(); } catch {}
+    try { await (res.body?.cancel?.() ?? res.body?.destroy?.()); } catch {}
     fail('connect', `${at}: answered ${res.status}, a redirect, which this client does not follow`, { http });
   }
   if (Number(res.headers.get('content-length') ?? 0) > HTTP_MAX) fail('connect', `${at}: answer over ${HTTP_MAX} bytes`, { http });
@@ -652,6 +739,12 @@ export function keepLong(e, long) {
   return k;
 }
 
+// Whose quota a quota_storage refusal is (relay/allowance.mjs `side`), in this client's words: a
+// contact whose own queue is full, or whose operator's Pro lapsed, must not read as a broken relay.
+const QUOTA_SIDES = new Set(['reader', 'sender', 'relay']);
+const quotaWhy = (r, name) => (r.code !== 'quota_storage' ? null
+  : r.side === 'reader' ? `${name}'s side is over its storage quota (its queue is full, or its operator's Pro lapsed): nothing is wrong with your relay or your allowance; send again once ${name}'s agent has collected its messages (${relaySays(r.detail)})`
+    : r.side === 'sender' ? `your network has used its share of this relay's free storage: send again once messages are collected or expire (${relaySays(r.detail)})` : null);
 // Text a relay writes reaches the operator, and perhaps a model, inside this client's messages:
 // quoted and cut short, so it reads as data.
 const relaySays = (s) => `the relay says ${JSON.stringify(String(s ?? '').slice(0, 200))}`;
@@ -725,10 +818,13 @@ export function limitPackets(stream, max, cut) {
   });
 }
 
-function mqttConnect(url, creds, link, onPacket) {
+// url: mqtts://, or wss:// (MQTT over WebSocket: through the HTTPS proxy when one applies, proxyFor;
+// a frame over the largest packet, its fixed header included, refused by ws before it is held).
+function mqttConnect(url, creds, link, onPacket, timeout = CONNECT_MS) {
   return new Promise((resolve, reject) => {
+    const agent = /^wss?:/.test(url) ? tunnelFor(url) : null;
     const client = connect(url, { protocolVersion: 4, clean: false, clientId: creds.clientId, username: creds.username, password: Buffer.from(creds.password, 'utf8'),
-      reconnectPeriod: 0, connectTimeout: CONNECT_MS, keepalive: 60, resubscribe: false });
+      reconnectPeriod: 0, connectTimeout: timeout, keepalive: 60, resubscribe: false, wsOptions: { maxPayload: MAX_PACKET + 5, perMessageDeflate: false, ...(agent && { agent }) } });
     link.client = client;
     // connect() has built the socket and nothing has arrived yet. The cut is permanent at a relay
     // other than this agent's own (#retry, accept): it would send the same packet again.
@@ -746,6 +842,25 @@ function mqttConnect(url, creds, link, onPacket) {
     const closed = () => no(link.cut ?? new Error('the relay closed the connection'));
     client.once('connect', ok); client.once('error', no); client.once('close', closed);
   });
+}
+
+// transport "auto": the WebSocket endpoint each MQTT endpoint fell back to, for the process lifetime,
+// so a reconnection does not wait on 8883 first.
+const FELL_BACK = new Map();
+// The WebSocket endpoint of ep: relay.json's endpoints.mqtt_ws when it names the same host as ep.http
+// over wss:// (ws:// only to loopback), else ep.ws. A relay that could name any host would send the
+// login to it. Asked once per process and relay.
+const WS_INFO = new Map();
+async function wsEndpoint(ep) {
+  if (!WS_INFO.has(ep.http)) {
+    let url = ep.ws;
+    try {
+      const r = await http(`${ep.http}/relay.json`), w = new URL(r.body?.endpoints?.mqtt_ws), h = new URL(ep.http);
+      if (r.status === 200 && w.hostname === h.hostname && (w.protocol === 'wss:' || (w.protocol === 'ws:' && LOOPBACK.has(w.hostname)))) url = w.href;
+    } catch {}
+    WS_INFO.set(ep.http, url);
+  }
+  return WS_INFO.get(ep.http);
 }
 
 class Link {
@@ -780,7 +895,9 @@ export class Carrier {
   #mineMemo = null; #clocks = new Map();
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
-    onEvent, keep, backoff = BACKOFF, tick = TICK, files }) {
+    onEvent, keep, backoff = BACKOFF, tick = TICK, files, transport = 'mqtts' }) {
+    if (!TRANSPORTS.includes(transport)) throw new TypeError(`transport: ${TRANSPORTS.join(', ')}`);
+    this.transport = transport;
     if (typeof identity !== 'function') throw new TypeError('identity: a function returning { sign, bundle }');
     if (typeof store !== 'string' || typeof state !== 'string') throw new TypeError('store, state: file paths (pathsFor(identityFile))');
     if (retentionDays !== undefined && !retentionOk(retentionDays)) throw new TypeError(`retentionDays: 1 to ${RETENTION_MAX_DAYS}`);
@@ -1097,7 +1214,7 @@ export class Carrier {
     let n;
     try { n = parseBytes(bytes); } catch { return; }
     if (n === null || typeof n !== 'object' || typeof n.code !== 'string') return;
-    const note = { code: n.code.slice(0, 64), detail: typeof n.detail === 'string' ? n.detail.slice(0, 200) : '' };
+    const note = { code: n.code.slice(0, 64), detail: typeof n.detail === 'string' ? n.detail.slice(0, 200) : '', ...(QUOTA_SIDES.has(n.side) && { side: n.side }) };
     // id: the packet id of the PUBLISH a refusal names (#publish), kept out of events.
     if (link.collect) link.collect.push(Number.isSafeInteger(n.id) ? { ...note, id: n.id } : note);
     else this.#emit({ type: 'notice', relay: link.relay, ...note });
@@ -1800,7 +1917,7 @@ export class Carrier {
       const back = r?.code === 'no_reader' && e.kind === KIND.message && e.item !== undefined;
       if (e.control === undefined || e.control === 'answer') this.#results.set(e.id, back ? { code: null, queued: noReader(this.#nameOf(e.peer)) } : r ?? { code: null });   // what a verb waits for
       this.#emit(back ? { type: 'queued', id: e.id, peer: e.peer, code: r.code, detail: r.detail }
-        : r ? { type: 'refused', id: e.id, peer: e.peer, control: e.control, code: r.code, detail: r.detail } : { type: 'sent', id: e.id, peer: e.peer, control: e.control });
+        : r ? { type: 'refused', id: e.id, peer: e.peer, control: e.control, code: r.code, ...(r.side && { side: r.side }), detail: r.detail } : { type: 'sent', id: e.id, peer: e.peer, control: e.control });
       // A refusal stops this round: what follows would be refused alike (a quota, the rate brake),
       // and a control frame would be queued again at once. The next round retries. A mailbox
       // nobody holds stops only what goes to that contact (absent, #next).
@@ -2010,8 +2127,21 @@ export class Carrier {
     const info = link.own && this.#ask ? this.#relayInfo(ep) : null;
     const creds = await this.#credentials(relay, ep);
     await info;
+    // The transport (the header's "Transport"): auto tries ep.mqtt for PROBE_MS, then the WebSocket
+    // endpoint, and keeps to it for the rest of the process (FELL_BACK). Only a dial that got no
+    // CONNACK at all falls back: a refusal by name (its return code) is the relay's answer, on
+    // either transport. Both are TLS; nothing falls back to a plain connection.
+    const onPacket = (packet) => this.#onPacket(link, packet);
+    const probe = this.transport === 'auto' && !FELL_BACK.has(ep.mqtt) && /^mqtts?:/.test(ep.mqtt);
+    let url = this.transport === 'wss' ? await wsEndpoint(ep) : this.transport === 'auto' ? FELL_BACK.get(ep.mqtt) ?? ep.mqtt : ep.mqtt;
     // A cut connection is this client's own refusal: no POST /check may rename it.
-    try { await mqttConnect(ep.mqtt, creds, link, (packet) => this.#onPacket(link, packet)); } catch (e) { throw link.cut ?? await named(ep, creds, e); }
+    try { await mqttConnect(url, creds, link, onPacket, probe ? PROBE_MS : CONNECT_MS); } catch (e) {
+      if (!probe || link.cut || typeof e.code === 'number') throw link.cut ?? await named(ep, creds, e);
+      url = await wsEndpoint(ep);
+      try { await mqttConnect(url, creds, link, onPacket); } catch (e2) { throw link.cut ?? await named(ep, creds, e2); }
+      FELL_BACK.set(ep.mqtt, url);
+      this.#emit({ type: 'transport', relay, transport: 'wss', detail: `${ep.mqtt} gave no CONNACK within ${PROBE_MS / 1000} s (${e.message}): MQTT over WebSocket at ${url} for the rest of this process` });
+    }
     // A close right after CONNACK (a cut in the same read) reached no listener of this connection.
     if (!link.client.connected) throw link.cut ?? new MsgError('connect', 'the relay closed the connection');
     // Deliveries are counted from here (quiet), not from before the login: a proof-of-work search
@@ -2331,7 +2461,8 @@ export class Carrier {
 
   async send(to, content, { label = '', local = false } = {}) {
     const [r] = await this.sendAll(to, [content], { label, local });
-    if (r.status === 'refused') fail(r.code, `refused (${r.detail})`);
+    // side: whose quota a quota_storage is (relay/allowance.mjs), on the error too.
+    if (r.status === 'refused') throw Object.assign(new MsgError(r.code, `refused (${r.detail})`), r.side && { side: r.side });
     return r;
   }
 
@@ -2383,7 +2514,7 @@ export class Carrier {
       const r = this.#results.get(id);
       this.#results.delete(id);
       // detail: the carrier's own words when it refused the message itself, else the relay's, quoted.
-      if (r?.code) return { status: 'refused', id, to: c.did, name: c.name, code: r.code, detail: r.local ? r.detail : relaySays(r.detail) };
+      if (r?.code) return { status: 'refused', id, to: c.did, name: c.name, code: r.code, ...(r.side && { side: r.side }), detail: r.local ? r.detail : quotaWhy(r, c.name) ?? relaySays(r.detail) };
       if (!r || r.queued) return { status: 'queued', id, to: c.did, name: c.name, detail: r?.queued ?? 'waiting for the relay\'s acknowledgement: it goes at the next connection' };
       return { status: 'sent', id, to: c.did, name: c.name };
     });

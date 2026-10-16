@@ -73,6 +73,7 @@
     "test-envelope.mjs",
     "test-file.mjs",
     "test-tier.mjs",
+    "test-ws.mjs",
     "test-invite.mjs",
     "test-short.mjs"
   ],
@@ -80,7 +81,7 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-short.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs",
+    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-ws.mjs && node test-short.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs",
     "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs && node gen-short.mjs",
     "prepack": "node ../release/prepack.mjs pre",
     "postpack": "node ../release/prepack.mjs post",
