@@ -12,7 +12,8 @@ verify, nothing that must be running):
 
 Plus [`AGENTS.md`](AGENTS.md) (paste into AGENTS.md / CLAUDE.md / GEMINI.md / rules), skills in
 [`claude-code/skills/`](claude-code/skills/sigelo/SKILL.md) (MCP) and
-[`skills-cli/`](skills-cli/sigelo/SKILL.md) (CLI), and an A2A AgentCard profile draft in [`a2a/`](a2a/README.md).
+[`skills-cli/`](skills-cli/sigelo/SKILL.md) (CLI),, an A2A AgentCard profile draft in [`a2a/`](a2a/README.md),
+and a PAP identity method draft (a DID as `client_id`, checked offline) in [`pap/`](pap/README.md).
 Env: `SIGELO_IDENTITY=<file>` in the client's env slot gives each agent its own identity.
 
 ## Compatibility

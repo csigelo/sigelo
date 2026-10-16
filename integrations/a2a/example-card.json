@@ -60,7 +60,42 @@
               }
             ]
           },
-          "sig": "z65Sg1yv15vw7ENKCZuDxE4tEPpha2xRGJPk8KySi5HVdhcMncqqtb5QcA58sb2Reicvvj44CChzTB1We47YuUKH9"
+          "operator": {
+            "attestation": {
+              "body": {
+                "v": "sigelo/0",
+                "typ": "attestation",
+                "iss": "did:sigelo:z3bHrEiwkqAfTEqYNhT8tPSGHfNLJTuHeLUe7Zduyi4nr",
+                "sub": "did:sigelo:z6ievhbystpqpe2e8GcipMXPmczoYkXU7bi97RvAonFLN",
+                "iat": 1789999900,
+                "exp": 1797776000,
+                "ctx": "sigelo-relay/operator",
+                "admission": "invite",
+                "claims": {
+                  "relay": "relay.test"
+                },
+                "admission_by": "did:sigelo:z3bHrEiwkqAfTEqYNhT8tPSGHfNLJTuHeLUe7Zduyi4nr"
+              },
+              "sig": "zuUN3AjHk1UbDKFz8gNTnM2sBsn6XBdtYmg56Tu7VHL5FSopAzy7MzPQuXYbrdyew1XCmk3ZHmoKQZ82VdxDEEJz"
+            },
+            "bundle": {
+              "v": "sigelo/0",
+              "typ": "bundle",
+              "genesis": {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX",
+                "recovery": "sha256:23d80081d9366bf46cc350aae99f6aa12214e60aeb4c0a264aa321a1e80980cb",
+                "created": "2026-10-14T00:00:00Z",
+                "nonce": "zp2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV"
+              },
+              "rotations": [],
+              "bindings": [],
+              "attestations": [],
+              "issuers": []
+            }
+          },
+          "sig": "zf4KBGxC52tzCGDXVZL4aWXG7LwMV57czuczYKhdzLupspFuNGRaKq1LATzkuuwWYtkAuDhgWnRvEhgDMRGTzwaN"
         }
       }
     ]

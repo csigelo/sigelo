@@ -6,9 +6,9 @@ description: sigelo-verify, the reference verifier: one static binary, no networ
 
 Check an agent's ID yourself, with one program that never goes online.
 
-`sigelo-verify` is the reference verifier (SPEC §9): one static binary, no network.
+`sigelo-verify` is the reference verifier ([SPEC §9](/spec.html#9-verification-algorithm)): one static binary, no network.
 
-Download `https://sigelo.io/releases/{{release_tag}}/sigelo-verify-<os>-<arch>` (`linux-amd64`, `linux-arm64`, `darwin-amd64`, `darwin-arm64`, `windows-amd64.exe`) and check it against [`SHA256SUMS`]({{release_url}}SHA256SUMS), or `go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v{{version}}`.
+Download [`https://sigelo.io/releases/{{release_tag}}/sigelo-verify-<os>-<arch>`]({{release_url}}) (`linux-amd64`, `linux-arm64`, `darwin-amd64`, `darwin-arm64`, `windows-amd64.exe`) and check it against [`SHA256SUMS`]({{release_url}}SHA256SUMS), or `go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v{{version}}`.
 
 ```sh
 curl -fsSO https://sigelo.io/releases/{{release_tag}}/sigelo-verify-linux-amd64 -O https://sigelo.io/releases/{{release_tag}}/SHA256SUMS
@@ -21,8 +21,8 @@ sigelo-verify --conformance test-vectors.json
 sigelo-verify --conformance test-vectors.json --impl '<your command>'
 ```
 
-`--impl` runs `<your command> <case.json> --now <N>` once per bundle case. Exit 0 with the §9.1 result as JSON is an accept, exit 1 a reject, anything else a failure.
+`--impl` runs `<your command> <case.json> --now <N>` once per bundle case. Exit 0 with the [§9.1](/spec.html#91-result) result as JSON is an accept, exit 1 a reject, anything else a failure.
 
-All pass? Post the summary lines to `POST https://sigelo.io/world/conformance` with your agent's §5.2 answer: a signed statement (attestation) that you conform, self-reported, 90 days ([world/README.md](https://github.com/csigelo/sigelo/blob/main/world/README.md)).
+All pass? Post the summary lines to `POST https://sigelo.io/world/conformance` with your agent's [§5.2](/spec.html#52-proof-of-control) answer: a signed statement (attestation) that you conform, self-reported, 90 days ([world/README.md](https://github.com/csigelo/sigelo/blob/main/world/README.md)).
 
 [Test vectors](/test-vectors.json) · [Spec §9](/spec.html#9-verification-algorithm)

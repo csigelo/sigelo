@@ -24,5 +24,6 @@
   "design/key-providers.md": 5800,
   "integrations/JOIN.md": 400,
   "integrations/a2a/README.md": 400,
-  "keyagent/README.md": 400
+  "keyagent/README.md": 400,
+  "integrations/pap/README.md": 500
 }

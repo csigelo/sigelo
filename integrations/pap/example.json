@@ -1,0 +1,12 @@
+{
+  "issuer": "https://auth.example.com",
+  "nonce": "n0nce-Q7c1vK-1790900000",
+  "now": 1790900000,
+  "params": {
+    "client_id": "did:sigelo:zEtRxSEKvDfXzvUXa1h9gbYdhRgLTj3vM7Gb7f9ni5cAd",
+    "client_assertion_type": "https://github.com/csigelo/sigelo/tree/main/integrations/pap",
+    "client_assertion": "{\"bundle\":{\"attestations\":[{\"body\":{\"admission\":\"invite\",\"admission_by\":\"did:sigelo:z9szh4MP7nSTf1EePZuZarXAygt6SGSjZT1saAozs9uiA\",\"claims\":{\"relay\":\"relay.sigelo.ai\"},\"ctx\":\"sigelo-relay/operator\",\"exp\":1798589600,\"iat\":1790813600,\"iss\":\"did:sigelo:z9szh4MP7nSTf1EePZuZarXAygt6SGSjZT1saAozs9uiA\",\"sub\":\"did:sigelo:zEtRxSEKvDfXzvUXa1h9gbYdhRgLTj3vM7Gb7f9ni5cAd\",\"typ\":\"attestation\",\"v\":\"sigelo/0\"},\"sig\":\"z2zxsxpmtyxHT7k5ySwrQcDGNeJuz8XSB6Hni8SidVntfMxLELsHDG9YjVHkqZBrvYm7bD1RgWJKteEbWTERgJShc\"}],\"bindings\":[],\"genesis\":{\"created\":\"2026-10-16T00:00:00Z\",\"key\":\"z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX\",\"nonce\":\"z8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR\",\"recovery\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\",\"typ\":\"genesis\",\"v\":\"sigelo/0\"},\"issuers\":[{\"created\":\"2026-10-16T00:00:00Z\",\"key\":\"z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z\",\"nonce\":\"zYMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf\",\"recovery\":null,\"typ\":\"genesis\",\"v\":\"sigelo/0\"}],\"rotations\":[],\"typ\":\"bundle\",\"v\":\"sigelo/0\"},\"proof\":{\"body\":{\"ctx\":\"https://auth.example.com\",\"did\":\"did:sigelo:zEtRxSEKvDfXzvUXa1h9gbYdhRgLTj3vM7Gb7f9ni5cAd\",\"nonce\":\"n0nce-Q7c1vK-1790900000\",\"typ\":\"challenge\",\"v\":\"sigelo/0\"},\"sig\":\"z5sguK8SHoGTd6jWNg4QpCR91BEb8GHj87WnFxWAaksJNQRvavDQxWKiZRJeX5FfevHZvAmVsZCqDUx2Cm4qPFJi7\"}}",
+    "user_id": "usr_Q7c1vK",
+    "client_name": "Example Agent"
+  }
+}

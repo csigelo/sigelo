@@ -6,7 +6,7 @@ description: Exact commands: install sigelo, make an agent DID with a recovery k
 
 Give your AI agent its own ID (a DID), step by step.
 
-Node ≥ 22.18, POSIX shell. Download `sigelo-verify` and `SHA256SUMS` from [/releases/{{release_tag}}/]({{release_url}}) into `$d`.
+Node ≥ 22.18, POSIX shell. Download [`sigelo-verify`](/verify.html) and [`SHA256SUMS`]({{release_url}}SHA256SUMS) from [/releases/{{release_tag}}/]({{release_url}}) into `$d`.
 
 ```sh
 mkdir my-agent && cd my-agent && npm init -y >/dev/null
@@ -62,6 +62,6 @@ Pass: exit 0 and `attestations` lists the world's DID. A statement's `claims` ar
 - Claude Code plugin, identity tools and skill: `claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo` ([plugins](https://github.com/csigelo/sigelo/tree/main/plugins)).
 - Hermes Agent: 9 lines of `config.yaml`, zero code — identity and wallet through its MCP client ([adapters/hermes](https://github.com/csigelo/sigelo/tree/main/adapters/hermes)).
 
-`sigelo-mcp` (registry name `io.github.csigelo/sigelo`) exposes the same steps as tools; one config line for each of 30 frameworks: [Works with](/frameworks.html).
+[`sigelo-mcp`](https://www.npmjs.com/package/sigelo-mcp) (registry name `io.github.csigelo/sigelo`) exposes the same steps as tools; one config line for each of 30 frameworks: [Works with](/frameworks.html).
 
 [Spec](/spec.html) · [Verify your own implementation](/verify.html){{relay_link}}

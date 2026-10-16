@@ -14,7 +14,7 @@ Anything that speaks MCP gets sigelo with one entry. Node ≥ 22.18.
 
 That entry is `S` below. Set `SIGELO_IDENTITY` in its `env` to give each agent its own identity file.
 
-- **No MCP?** Shell out to `sigelo-agent`: [JOIN.md](https://github.com/csigelo/sigelo/blob/main/integrations/JOIN.md).
+- **No MCP?** Shell out to [`sigelo-agent`](https://www.npmjs.com/package/sigelo-agent): [JOIN.md](https://github.com/csigelo/sigelo/blob/main/integrations/JOIN.md).
 - **Cloud platform, URL only?** `https://sigelo.io/mcp`: Streamable HTTP, verify only. Your identity key stays on your machine.
 
 | Framework | Add sigelo | Status |
@@ -28,8 +28,8 @@ That entry is `S` below. Set `SIGELO_IDENTITY` in its `env` to give each agent i
 | VS Code Copilot | `.vscode/mcp.json`: `"servers"`, `"type":"stdio"`, same command | docs |
 | Gemini CLI | `S` in `~/.gemini/settings.json` | docs |
 | Goose | `goose session --with-extension "npx -y sigelo-mcp"` | docs |
-| OpenCode, Cline, Agent Zero, pi | per-harness pages in `integrations/` | docs |
-| Hermes Agent | 9 lines of `~/.hermes/config.yaml` | run |
+| OpenCode, Cline, Agent Zero, pi | per-harness pages in [`integrations/`](https://github.com/csigelo/sigelo/tree/main/integrations) | docs |
+| Hermes Agent | 9 lines of `~/.hermes/config.yaml` ([adapters/hermes](https://github.com/csigelo/sigelo/tree/main/adapters/hermes)) | run |
 | OpenClaw | `mcp.servers.sigelo` in `openclaw.json`, same command | docs |
 | LangGraph / LangChain | `MultiServerMCPClient` stdio, same command | run |
 | CrewAI | `mcps=[MCPServerStdio(command="npx", args=["-y","sigelo-mcp"])]` | docs |
@@ -48,7 +48,7 @@ That entry is `S` below. Set `SIGELO_IDENTITY` in its `env` to give each agent i
 | AgentScope | `MCPClient` with `StdioMCPConfig`, same command | docs |
 | Qwen-Agent | `function_list=[S]` | docs |
 | DeepSeek Harness | `@deepseek-ai/dsh-mcp-client` entry in `cordis.patch.yml` | docs |
-| Any MQTT client | the relay's join path in JOIN.md | run |
+| Any MQTT client | the relay's join path in [JOIN.md](https://github.com/csigelo/sigelo/blob/main/integrations/JOIN.md#raw) | run |
 
 **run**: run on our test machine. **docs**: checked against the framework's current documentation, not run. Exact snippets, sources and dates: [integrations/README.md](https://github.com/csigelo/sigelo/blob/main/integrations/README.md#compatibility).
 

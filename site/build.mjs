@@ -323,7 +323,7 @@ const VALUES = {
   ...officialLines(worldDidEarly && `${worldDidEarly.slice(0, 'did:sigelo:zBASk7'.length)}…`),
   // The links to the relay (/, /adopt, /contact), only once it serves (RELAY_LIVE). A line that
   // holds only an empty value is dropped (fill).
-  relay_item: RELAY_LIVE ? `- [Relay: encrypted messages between AI agents](${RELAY_ORIGIN}/)\n- [What it is for](${RELAY_ORIGIN}/uses.html)\n- [For people](${RELAY_ORIGIN}/you.html)` : '',
+  relay_item: RELAY_LIVE ? `- [Relay: encrypted messages between AI agents](${RELAY_ORIGIN}/)\n- [What it is for](${RELAY_ORIGIN}/examples.html)\n- [For people](${RELAY_ORIGIN}/about.html)` : '',
   relay_link: RELAY_LIVE ? ` · [Message other agents: sigelo relay](${RELAY_ORIGIN}/)` : '',
   relay_contact: RELAY_LIVE ? `- Relay: [sigelo.ai](${RELAY_ORIGIN}/)` : '',
 };
@@ -367,11 +367,18 @@ export function securityDomainsLine(official) {
 // repository); /contact gives every domain its role, in one sentence. site/test/run.mjs checks both.
 function officialLines(issuerShort) {
   const bare = (u) => u.replace(/^https:\/\//, '');
-  const tail = [...OFFICIAL.repositories.map(bare), ...(issuerShort ? [`issuer \`${issuerShort}\``] : [])].join(' · ');
+  const tail = [...OFFICIAL.repositories.map((u) => `[${bare(u)}](${u})`), ...(issuerShort ? [`issuer \`${issuerShort}\``] : [])].join(' · ');
   const head = '[Official](/security.html#official-channels):';
+  // The content domains are links (each answers as ours: site/deploy/check.mjs); a redirect, parked
+  // domain or the broker host stays plain. On /contact the link takes the "(what)" with it, so the
+  // clause still reads `name (what)` in the text site/test/run.mjs compares.
+  const site = Object.fromEntries(OFFICIAL.domains.filter((d) => d.role === 'content').map((d) => [d.name, d.name === 'sigelo.io' ? '/' : `https://${d.name}/`]));
+  const linked = (name, text = name) => (site[name] ? `[${text}](${site[name]})` : text);
+  const [serves, ...others] = domainClauses(OFFICIAL);
+  const servesLinked = serves.split(', ').map((c) => linked(c.split(' ')[0], c)).join(', ');
   return {
-    official_line: `${head} ${[...CONTENT_HOSTS, tail].join(' · ')} — anything else is not us.`,
-    official_contact: `${head} ${domainClauses(OFFICIAL).join('; ')} · ${tail} — anything else is not us.`,
+    official_line: `${head} ${[...CONTENT_HOSTS.map((h) => linked(h)), tail].join(' · ')} — anything else is not us.`,
+    official_contact: `${head} ${[servesLinked, ...others].join('; ')} · ${tail} — anything else is not us.`,
   };
 }
 function fill(md, where) {

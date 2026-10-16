@@ -6,7 +6,7 @@ description: The sigelo keeper (sigelo-spend) lets an agent pay in Monero throug
 
 Let your agent pay in Monero while the key stays with you.
 
-`sigelo-spend` lets an agent pay in Monero without holding a key.
+[`sigelo-spend`](https://www.npmjs.com/package/sigelo-spend) lets an agent pay in Monero without holding a key.
 It runs on your host, over your `monero-wallet-rpc`.
 Each agent gets a URL, a token, caps and an allowlist.
 
@@ -34,6 +34,6 @@ sigelo-wallet history
 
 The licence is a signed statement (an attestation) to your keeper's ID (a DID), checked offline.
 
-Recovery ceremony kit: [/raw/kit/README.md](/raw/kit/README.md); price not set yet.
+[Recovery ceremony kit](/raw/kit/README.md); price not set yet.
 
 Reference: [spend/README.md](/raw/spend/README.md) · [OpenAPI](/raw/spend/openapi.yaml)

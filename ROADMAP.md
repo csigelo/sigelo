@@ -14,6 +14,24 @@ review so far was by Claude models. Since then (to 2026-09-29): the wire changed
 been in a stagenet soak since 2026-09-23 with four incidents; every review is still by Claude
 models.
 
+## 0. Done and open, as of 2026-10-16 (master `4b1043b`)
+
+Kept so what is accomplished can be checked against the sections below. Commits name the merge.
+
+| Item | Section | State |
+|---|---|---|
+| Public repos, sites, CI, signed releases v0.1.0 → v0.1.7 (2026-10-15), six npm packages | §6 steps 6–8 | **done** |
+| One seed: operator identity, keeper, workers, recovery all from the 25 words | §2, §8.1 | **done** (v0.1.7) |
+| Relay on sigelo.ai, short codes, the page (`ui`), `watch`, files, enrolment | §8 steps 1–2 | **done** (v0.1.7) |
+| Relay Pro: pages, licences, gift codes (`POST /gift`, `pro redeem`), storage 5 GB | §8, commercial/ | **done** 2026-10-16 (`da86178`, `6c48675`); on sale after the vendor ceremony (Owner) |
+| Key providers K1 interface, K2 keychain, K3 key agent | §7 | **done** 2026-10-16 (`ed5412e`, `55d04cf`, `20311b3`); Mac/Windows checklists open (Owner) |
+| Key providers K4 FIDO2, K5 OpenPGP card, K6 docs | §7 | open; K4/K5 wait for the Nitrokey (Owner) |
+| Adapters: A2A operator attestation, PAP identity method | §10 | **done** 2026-10-16 (`1a4267f`, `4b1043b`) |
+| Adapter: Web Bot Auth; sigelo.ai About/Examples + languages | §10, sites | building 2026-10-16 |
+| Company relays: closed relay, relay per invite, 12-char codes, registry | §9 | decided, not started |
+| v0.2.0 wire freeze | VERSIONING §1 | on or after 2026-10-29 (Owner says go) |
+| Non-Claude docs-test (step 5), external review (step 11), paper + DID method (step 9), Mailcow (§8.3) | §6 | open; each waits on an Owner item (commercial/OWNER-TODO.md) |
+
 ## 1. Readiness bar for agent adoption
 
 Assume a Haiku-class agent with a shell and no human in the loop. Each item below says what
@@ -444,6 +462,8 @@ this order, each step keeping the DID and the file format:
 
 Plan: `design/key-providers.md` (approved by the Owner 2026-10-13). Sequenced after the relay is deployed and running on sigelo.ai (§6); then K1–K6 in order, 59 agent-hours.
 
+**Status 2026-10-16:** K1 landed (`ed5412e`: one signer, `keys status`, `provider` field), K2 landed (`55d04cf`: keychain-wrapped file, `keys wrap|unwrap`, vector `fixtures/wrap-v1.json`, default `init` = keychain where a store answers; Mac/Windows checklist in `adapters/moadim/KEYCHAIN.md` open), K3 landed (`20311b3`: `keyagent/`, `keys to-agent`, `SIGELO_KEY_AGENT`; Windows pipe ACL check open). K4, K5 wait for the Nitrokey 3; K6 after them.
+
 ## 8. The human's side (decided 2026-10-14)
 
 The relay was built for agents; the person who runs them has only a terminal. Three steps, each
@@ -517,3 +537,48 @@ the 25 words restore it; "mine" is the operator attestation, verifiable offline.
 inside its parent's process (a Claude Code subagent with the sigelo plugin loaded) acts under the
 parent's DID unless it is given a pooled worker file (`enrol --here`, SIGELO_IDENTITY): that is the
 provenance gate's problem (§7, "next product line").
+## 9. Company relays (decided 2026-10-16)
+
+A company that runs its own relay (enterprise.md "your own relay") gets, today, one relay for every
+new code (`SIGELO_RELAY`), an open relay anyone with the address can make an account on, and short
+codes that resolve only at the accepter's own default relay. Three pieces close that, after §7's K-wave:
+
+1. **Closed relay**: a relay that admits only identities carrying its operator's attestation (and
+   nothing else: no proof-of-work accounts for strangers). Outsiders are never on it.
+2. **Relay per invite**: `invite --relay <host>` (default `SIGELO_RELAY`); internal codes name the
+   company relay, codes for outsiders the public relay. The carrier already holds one link per relay.
+3. **Short codes carry the relay when it is not the public one** (Owner, 2026-10-16): a code made on
+   relay.sigelo.ai stays eight characters; a code made on another relay is twelve, the extra four a
+   relay tag (20 bits of the same alphabet: the first 20 bits of SHA-256 of the relay's host name
+   under its own label, so a tag is computable without anyone's permission). The long code already
+   names the relay.
+4. **A relay registry** (Owner, 2026-10-16): a public list, tag → host, served from sigelo.ai
+   (`/relays.json`, signed by the release identity, cached by clients, mirrored like releases). A
+   relay joins by serving `/.well-known/sigelo-relay.json` signed by its own relay identity, naming
+   its host; the registry fetches it, checks the tag matches, and lists it; first host for a tag
+   keeps it, a collision is refused and the newcomer picks a different host name. Listing is free
+   and optional. Resolution order in the client: relays it already knows (contacts, operator
+   attestation, local table), then the cached registry, then ask the person once. Nothing in pairing
+   by long code or in verification touches the registry: offline stays offline. Also the natural
+   place for the relays we run for Enterprise customers.
+
+No relay-to-relay protocol: the client is the federation point. About three agent-days.
+
+## 10. Adoption: the identity inside their protocols (decided 2026-10-16)
+
+The companies that could use sigelo (commercial/research-customer-agents.md, private) are all
+adopting a protocol right now, and each protocol has an identity hole. sigelo does not compete with
+them; it plugs into each. No outreach messages (the Owner: "indistinguishable from spam"); adoption =
+the adapters available, documented and findable, plus at most one post per upstream thread, then
+humans. The company's name stays out of everything until the Owner links it (delayed as long as
+possible); no alliance memberships or partner listings before that.
+
+| Adapter | Where | Status |
+|---|---|---|
+| Personal Agent Protocol (Sierra + Meta, draft 0.1): a sigelo identity method, one DID per business (`--pairwise`); one feedback post drafted, not posted | `integrations/pap/`, `adoption/pap-issue-draft.md` | **landed** 2026-10-16 (`4b1043b`); fit limits in its README (browser flow needs a domain; businesses must opt in) |
+| Web Bot Auth (Cloudflare, RFC 9421 Ed25519 request signatures, signature directory) | `integrations/web-bot-auth/` | building 2026-10-16 |
+| A2A AgentCard: operator attestation in the card, signing through the key providers | `integrations/a2a/` | **landed** 2026-10-16 (`1a4267f`) |
+
+After: a demo where a sigelo agent signs in to a sample business; a sigelo.io page listing the
+three; the PAP post after the v0.2.0 freeze (2026-10-29). Payment networks last: central
+registries, they will not route through us until sigelo agents exist in numbers.

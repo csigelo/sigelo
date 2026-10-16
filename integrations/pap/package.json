@@ -1,0 +1,10 @@
+{
+  "name": "sigelo-pap-profile",
+  "private": true,
+  "description": "Profile draft: a sigelo identity as the Personal Agent identification step of PAP 0.1, verified offline",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": { "test": "node test.mjs" },
+  "dependencies": { "sigelo": "file:../../ts" }
+}
