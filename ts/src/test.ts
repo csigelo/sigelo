@@ -1184,27 +1184,56 @@ try {
   // --human needs a terminal, and the two checks below need a session without one and a pty.
   // util-linux `setsid -w` and `script -qec` provide them on Linux; macOS has no setsid and a BSD
   // `script` with no -c (it would leave the output files unwritten), so there a python3 helper
-  // does the same (os.setsid, os.forkpty). Windows has neither os.forkpty nor a /dev/tty: SKIP.
+  // does the same (os.setsid, os.openpty + os.fork). Windows has neither os.fork nor a /dev/tty: SKIP.
   // SIGELO_TEST_PTY=python forces the helper on Linux, to exercise the macOS path.
   const forcePy = process.env['SIGELO_TEST_PTY'] === 'python';
-  const pyProbe = spawnSync('python3', ['-c', 'import os, sys; os.forkpty; os.setsid; print(sys.executable)']);
+  const pyProbe = spawnSync('python3', ['-c', 'import os, sys, select; os.openpty; os.fork; os.setsid; print(sys.executable)']);
   const python = pyProbe.status === 0 ? pyProbe.stdout.toString().trim() : undefined;
   const PY_SETSID = 'import os, sys\nos.setsid()\nos.execv(sys.argv[1], sys.argv[1:])\n';
+  // The parent holds the slave end open until the child has exited and the master has been idle
+  // for 0.5 s. With os.forkpty it did not: on macOS the master reads EOF/EIO as soon as the last
+  // slave fd closes and drops output still queued (the BSD ptcread returns nothing once the slave
+  // is not open), so the tail of the screen could be lost; Linux keeps it readable, so only macOS
+  // failed (run 38821853884). login_tty (Python 3.11+) or setsid + TIOCSCTTY makes the slave the
+  // child's controlling terminal, which /dev/tty needs.
   const PY_PTY = [
-    'import os, sys',
-    'pid, fd = os.forkpty()',
+    'import os, sys, select',
+    'm, s = os.openpty()',
+    'pid = os.fork()',
     'if pid == 0:',
+    '    os.close(m)',
+    '    if hasattr(os, "login_tty"):',
+    '        os.login_tty(s)',
+    '    else:',
+    '        import fcntl, termios',
+    '        os.setsid()',
+    '        fcntl.ioctl(s, termios.TIOCSCTTY, 0)',
+    '        for i in (0, 1, 2):',
+    '            os.dup2(s, i)',
+    '        if s > 2:',
+    '            os.close(s)',
     '    os.execv("/bin/sh", ["/bin/sh", "-c", sys.argv[1]])',
     'chunks = []',
-    'while True:',
+    'def read(timeout):',
+    '    r, _, _ = select.select([m], [], [], timeout)',
+    '    if not r:',
+    '        return False',
     '    try:',
-    '        b = os.read(fd, 65536)',
+    '        b = os.read(m, 65536)',
     '    except OSError:',
-    '        break',
-    '    if not b:',
-    '        break',
+    '        return False',
     '    chunks.append(b)',
-    '_, st = os.waitpid(pid, 0)',
+    '    return len(b) > 0',
+    'st = None',
+    'while st is None:',
+    '    if not read(0.05):',
+    '        done, w = os.waitpid(pid, os.WNOHANG)',
+    '        if done:',
+    '            st = w',
+    'while read(0.5):',
+    '    pass',
+    'os.close(s)',
+    'os.close(m)',
     'sys.stdout.buffer.write(b"".join(chunks))',
     'sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 1)',
   ].join('\n') + '\n';
@@ -1224,7 +1253,7 @@ try {
 
   // --human on a real pseudo-terminal: stdout and stderr go to files, so what the pty shows is
   // exactly what reached /dev/tty.
-  if (!utilScript && python === undefined) console.log(`SKIP ceremony CLI --human on a pty (no util-linux \`script\` and no python3 with os.forkpty on PATH${scriptV.error === undefined ? '; the `script` here is not util-linux (BSD script has no -c)' : ''}; the injected-sink checks above still ran)`);
+  if (!utilScript && python === undefined) console.log(`SKIP ceremony CLI --human on a pty (no util-linux \`script\` and no python3 with os.openpty and os.fork on PATH${scriptV.error === undefined ? '; the `script` here is not util-linux (BSD script has no -c)' : ''}; the injected-sink checks above still ran)`);
   else {
     const q = (x: string): string => `'${x.replace(/'/g, `'\\''`)}'`;
     const onPty = (dir: string, extra: string[]) => {
@@ -1234,21 +1263,41 @@ try {
       const read = (f: string): string => { try { return readFileSync(join(cerTmp, f), 'utf-8'); } catch { return `(${f} was not written: the pty helper did not run the command; status ${r.status}, ${r.stderr?.toString().trim()})`; } };
       return { code: r.status, tty: r.stdout?.toString() ?? '', out: read(dir + '.out'), err: read(dir + '.err') };
     };
-    console.log(`ceremony CLI --human on a pty via ${utilScript ? 'util-linux script' : 'python3 os.forkpty'}`);
+    console.log(`ceremony CLI --human on a pty via ${utilScript ? 'util-linux script' : 'python3 os.openpty'}`);
     // Baseline: the same imported root without --human. Its wordlist tokens are the fixed messages' own.
     const base = onPty('pty0', ['--import', wordsFile, COLD]);
     const hum = onPty('pty1', ['--import', wordsFile, COLD, '--human']);
     const allowed = new Set([...wordTokens(base.out + base.err), ...wordTokens('The 25 words went to /dev/tty and nowhere else')]);
-    t('ceremony CLI --human on a pty: all 25 words reach /dev/tty, in order, with "vault only, never a hot wallet"',
-      hum.code === 0 && numbered(hum.tty) === scWords && hum.tty.includes('Vault only, never a hot wallet') && base.tty.trim() === '');
-    t('ceremony CLI --human on a pty: stdout and stderr carry no wordlist word beyond the fixed messages\' own, no two consecutive words, and stdout is the same JSON',
-      hum.err.includes('went to /dev/tty') && [...wordTokens(hum.out + hum.err)].every((w) => allowed.has(w)) && !pairLeak(hum.out + hum.err, scWords) &&
-      !leaks(hum.out + hum.err, SChex, scWords, recHex) && same(JSON.parse(hum.out).public, JSON.parse(base.out).public));
+    // On FAIL, one line says why: exit status, byte counts, and where the tty's words first differ.
+    type Pty = ReturnType<typeof onPty>;
+    const ptyDiag = (r: Pty, want: string, extra: Record<string, boolean> = {}): string => {
+      const got = numbered(r.tty).split(' ').filter(Boolean), exp = want.split(' ');
+      const i = exp.findIndex((w, k) => got[k] !== w);
+      const at = i < 0 ? (got.length > exp.length ? `${got.length - exp.length} extra` : 'none') : `word ${i + 1} (got ${got[i] === undefined ? 'nothing' : got[i]!.length + ' letters'})`;
+      return `  detail: exit ${r.code}, tty ${r.tty.length} bytes (ends ${JSON.stringify(r.tty.slice(-24).replace(/[a-z]/g, 'x'))}), ` +
+        `${got.length}/${exp.length} numbered words, first mismatch: ${at}, stdout ${r.out.length} bytes, stderr ${r.err.length} bytes` +
+        Object.entries(extra).map(([k, v]) => `, ${k} ${v}`).join('');
+    };
+    const tp = (name: string, cond: boolean, detail: () => string): void => { t(name, cond); if (!cond) console.log(detail()); };
+    tp('ceremony CLI --human on a pty: all 25 words reach /dev/tty, in order, with "vault only, never a hot wallet"',
+      hum.code === 0 && numbered(hum.tty) === scWords && hum.tty.includes('Vault only, never a hot wallet') && base.tty.trim() === '',
+      () => ptyDiag(hum, scWords, { 'vault-only line': hum.tty.includes('Vault only, never a hot wallet'), 'baseline tty empty': base.tty.trim() === '' }));
+    let sameJson = false;
+    try { sameJson = same(JSON.parse(hum.out).public, JSON.parse(base.out).public); } catch { /* not JSON: FAIL below */ }
+    const humTokensOk = [...wordTokens(hum.out + hum.err)].every((w) => allowed.has(w));
+    tp('ceremony CLI --human on a pty: stdout and stderr carry no wordlist word beyond the fixed messages\' own, no two consecutive words, and stdout is the same JSON',
+      hum.err.includes('went to /dev/tty') && humTokensOk && !pairLeak(hum.out + hum.err, scWords) && !leaks(hum.out + hum.err, SChex, scWords, recHex) && sameJson,
+      () => ptyDiag(hum, scWords, { 'says /dev/tty': hum.err.includes('went to /dev/tty'), 'tokens ok': humTokensOk, 'pair leak': pairLeak(hum.out + hum.err, scWords),
+        'leak': leaks(hum.out + hum.err, SChex, scWords, recHex), 'same JSON': sameJson }));
     const rnd = onPty('pty2', ['--human']);
-    const rndWords: string = rnd.code === 0 ? fakePlain(join(cerTmp, 'pty2')).mnemonic : '(no backup.age: the pty run failed)';
-    t('ceremony CLI --human, fresh root: the words on the tty are the ones in backup.age, and nowhere in stdout/stderr',
-      rnd.code === 0 && numbered(rnd.tty) === rndWords && !pairLeak(rnd.out + rnd.err, rndWords) &&
-      !leaks(rnd.out + rnd.err, bytesToHex(rootFromMnemonic(rndWords)), rndWords, bytesToHex(recoverySeed(rootFromMnemonic(rndWords)))));
+    let rndWords = '(no backup.age: the pty run failed)';
+    try { if (rnd.code === 0) rndWords = fakePlain(join(cerTmp, 'pty2')).mnemonic; } catch { /* unreadable backup.age: FAIL below */ }
+    const rndPair = pairLeak(rnd.out + rnd.err, rndWords);
+    let rndLeak = true;
+    try { rndLeak = leaks(rnd.out + rnd.err, bytesToHex(rootFromMnemonic(rndWords)), rndWords, bytesToHex(recoverySeed(rootFromMnemonic(rndWords)))); } catch { /* no valid mnemonic: FAIL */ }
+    tp('ceremony CLI --human, fresh root: the words on the tty are the ones in backup.age, and nowhere in stdout/stderr',
+      rnd.code === 0 && numbered(rnd.tty) === rndWords && !rndPair && !rndLeak,
+      () => ptyDiag(rnd, rndWords, { 'pair leak': rndPair, 'leak': rndLeak }));
   }
 
   // restore: the 25 words by file or stdin reproduce restore --backup, byte for byte.
