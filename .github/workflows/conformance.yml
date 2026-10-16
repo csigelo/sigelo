@@ -102,7 +102,7 @@ jobs:
           grep -q '^ALL PASS$' /tmp/spend-out
         working-directory: spend
 
-  # The same suites on every system the Owner targets (docs-test/PORTABILITY.md): Linux, macOS
+  # The same suites on every supported system: Linux, macOS
   # (arm64) and Windows, Node 22 LTS and 24, plus current Node on Linux. bash on every runner
   # (Git Bash on Windows), and $RUNNER_TEMP instead of /tmp, because a Windows node does not see
   # Git Bash's /tmp. Nothing here needs a wallet: spend's live section and the monero-wallet-rpc

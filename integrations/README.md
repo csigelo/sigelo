@@ -37,7 +37,7 @@ config matched against the current docs (sources below), not run.
 | OpenCode, Cline, Agent Zero | MCP stdio | [opencode.md](opencode.md), [others.md](others.md), [agent-zero.md](agent-zero.md) (configs use the checkout path) | doc-checked | 2026-09-24 |
 | pi | CLI sidecar (no MCP by design) | [agent-pi.md](agent-pi.md) | doc-checked | 2026-09-24 |
 | Hermes Agent | MCP stdio + skill | 9 lines of `~/.hermes/config.yaml` ([adapters/hermes](../adapters/hermes/INTEGRATION.md)) | run here (unmodified `hermes -z`, scripted model, 12 checks) | 2026-10-03 |
-| OpenClaw | MCP stdio | `openclaw.json`: `{ mcp: { servers: { sigelo: { command: "npx", args: ["-y","sigelo-mcp"] } } } }`; set `SIGELO_IDENTITY` in the gateway's env. A2A peer gate: [proposal](../adoption/proposal-openclaw.md) | doc-checked; gate planned | 2026-10-14 |
+| OpenClaw | MCP stdio | `openclaw.json`: `{ mcp: { servers: { sigelo: { command: "npx", args: ["-y","sigelo-mcp"] } } } }`; set `SIGELO_IDENTITY` in the gateway's env. | doc-checked; gate planned | 2026-10-14 |
 | LangGraph / LangChain | MCP stdio | `MultiServerMCPClient({"sigelo":{"transport":"stdio","command":"npx","args":["-y","sigelo-mcp"]}})` | run here (langchain-mcp-adapters 0.3.2: 15 tools, init→bundle→verify; remote lists `sigelo_verify`) | 2026-10-14 |
 | CrewAI | MCP stdio | `Agent(..., mcps=[MCPServerStdio(command="npx", args=["-y","sigelo-mcp"])])` (`from crewai.mcp import MCPServerStdio`) | doc-checked | 2026-10-14 |
 | AutoGen (maintenance) | MCP stdio | `McpWorkbench(StdioServerParams(command="npx", args=["-y","sigelo-mcp"]))` | doc-checked | 2026-10-14 |

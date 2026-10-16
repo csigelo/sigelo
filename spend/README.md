@@ -178,7 +178,7 @@ commercial terms; it is not DRM and hides nothing from the operator, who holds e
 issues a licence with sigelo's own `attest({secret, iss: <vendor DID>, sub: <keeper DID>, iat, exp,
 ctx: "sigelo-spend", admission: "payment", claims: {tier: "pro", seats: N}})`, signed by its current
 key, and sends `{attestation, issuer: <vendor genesis>, rotations: <vendor rotations>}`
-(commercial/issue-licence.mjs); nothing about it involves the customer's keys or money.
+(by the offline issuer); nothing about it involves the customer's keys or money.
 
 ## Policy file
 

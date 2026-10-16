@@ -74,5 +74,5 @@ SIGELO_AUTHOR="$A" sh release/publish.sh --relay ../sigelo-relay-public
 GIT_SSH_COMMAND='ssh -i ~/.ssh/sigelo_ed25519 -o IdentitiesOnly=yes' git -C ../sigelo-public push
 ```
 
-Never exported: `RISKS.md`, `JOURNAL.md`, `commercial/`, `relay/`, `design/relay-plan.md`;
+Never exported: planning, journal and commercial files.
 `--relay` exports `relay/` alone (csigelo/sigelo-relay), pushed the same way.

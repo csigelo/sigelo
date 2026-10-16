@@ -47,7 +47,7 @@
     "test": "node test-all.ts",
     "prepack": "tsc -p tsconfig.build.json && node -e \"for(const f of ['ui.html','ui.js','ui.css'])require('fs').copyFileSync(f,'dist/'+f)\" && node ../../release/prepack.mjs pre",
     "postpack": "node ../../release/prepack.mjs post",
-    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: the npm account and names are an Owner decision (ROADMAP D1); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publishing is a release step (release/RELEASE.md); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
   },
   "dependencies": {
     "sigelo": "file:../../ts",

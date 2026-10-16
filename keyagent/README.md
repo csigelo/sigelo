@@ -2,8 +2,8 @@
 # sigelo-key-agent
 
 Holds sigelo identity keys and signs known sigelo bodies over a local socket, as ssh-agent does.
-The model and the MCP server then hold a socket path, never the key. Design:
-[key providers §4](../design/key-providers.md).
+The model and the MCP server then hold a socket path, never the key.
+
 
 ```sh
 node keyagent/agent.mjs start                     # prints SIGELO_KEY_AGENT=<socket>

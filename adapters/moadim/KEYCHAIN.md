@@ -3,7 +3,7 @@
 
 The automated half is `node test-keychain.ts`: the wrap vector, refusals by name and a spawn spy
 over all three adapters, against an emulated store. This checklist is the other half: the real
-store on each system ([design/key-providers.md](../../design/key-providers.md) §3, §6, §7). Run it
+store on each system (the three providers). Run it
 with a throwaway identity, never your own:
 
 ```sh

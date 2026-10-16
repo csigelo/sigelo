@@ -381,7 +381,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   // The official names: index.json `official`, SECURITY.md "Official channels", one line on / and
   // /contact, all following site/src/official.mjs OFFICIAL: DOMAINS from the relay launch
   // (RELAY_LIVE), BEFORE_LAUNCH until then. Both tables are pinned here to the decided roles
-  // (design/relay-plan.md §1; sigelo.dev's row waits for the Owner's answer, site/src/official.mjs):
+  // (site/src/official.mjs):
   // changing a role is a decision, not a refactor.
   const role = (d) => (d.role === 'redirect' ? `redirect ${d.to}${d.live ? '' : ' (DNS pending)'}` : d.role === 'content' ? `content: ${d.what}` : d.role);
   const tableOf = (domains) => domains.map((d) => `${d.name} ${role(d)}`).join('; ');

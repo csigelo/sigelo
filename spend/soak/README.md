@@ -329,7 +329,7 @@ wallet-rpc's 30 s refresh-retry window); the agent could not tell "no network" f
 and stores the wallet after every transfer; `agent.mjs` waits 90 s for a snapshot and logs outage
 ticks as `outage`/`abandoned_offline`; `check.mjs` goes UNHEALTHY without a payment in 2 h, on a
 stuck height or on a log clock in the future or stepping back. The host fix — a network connection that re-establishes itself
-unattended — is the Owner's call. Rent 13–14 and 20 refused `per_tx_max` are the carol margin problem above
+unattended — is an operator choice. Rent 13–14 and 20 refused `per_tx_max` are the carol margin problem above
 (the live `app/` still pays 0.00045), not this outage. *Closed by* (repo, 2026-09-29): the host now
 notices — `check.mjs --notify` under `sigelo-soak-check.timer` logs to `soak-alerts.log` and raises
 a critical `notify-send` notification within the hour of UNHEALTHY (with the rules above, by the 04:15Z 09-28 run

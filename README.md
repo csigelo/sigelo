@@ -26,7 +26,7 @@ Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhU
   check yours with `sigelo-verify --conformance test-vectors.json --impl <your command>` ([`go/`](go/README.md)).
 
 Requirements: Node ≥ 22.18, Go ≥ 1.27; optional `age` (root ceremony) and `monero-wallet-rpc`
-(keeper). Linux, macOS, Windows on x86_64 and arm64 ([`docs-test/PORTABILITY.md`](docs-test/PORTABILITY.md));
+(keeper). Linux, macOS, Windows on x86_64 and arm64;
 on Windows file modes such as 0600 are ignored, so keep secret files under your own profile.
 
 ## Build and test

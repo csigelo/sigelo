@@ -31,7 +31,7 @@ export const RELAY_LIVE = true;
 //
 // DOMAINS, HOSTS, REPOSITORIES: the table of design/relay-plan.md §1, what sigelo.ai says
 // (relay/site/build.mjs keeps a copy; relay/site/test.mjs compares the two) and what sigelo.io says
-// once RELAY_LIVE. One row differs from §1 and waits for the Owner's answer: §1 has sigelo.dev
+// once RELAY_LIVE. One row differs: the plan has sigelo.dev
 // parked, the site brief a redirect to sigelo.io.
 export const DOMAINS = [
   { name: 'sigelo.io', role: 'content', what: 'protocol' },

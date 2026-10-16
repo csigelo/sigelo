@@ -46,7 +46,7 @@
     "gen": "tsc && node dist/gen_vectors.js ../test-vectors.json",
     "prepack": "tsc && node ../release/prepack.mjs pre",
     "postpack": "node ../release/prepack.mjs post",
-    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: the npm account and names are an Owner decision (ROADMAP D1); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publishing is a release step (release/RELEASE.md); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
   },
   "dependencies": {
     "@noble/ed25519": "3.2.0",

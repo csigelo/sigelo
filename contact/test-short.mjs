@@ -103,7 +103,7 @@ const report = () => {
     const m = messageOf(() => normaliseGift(t));
     ok(checkOf(() => normaliseGift(t)) === 'gift_code' && m.includes(why) && (t === undefined || !m.includes(t)), `normaliseGift ${JSON.stringify(t)}: gift_code, ${why}, the input not quoted (${m})`);
   }
-  // makeShort makes gift codes too (commercial/gift-codes.mjs): any of its codes reads back.
+  // makeShort makes gift codes too (made offline by the issuer): any of its codes reads back.
   const g = makeShort();
   ok(normaliseGift(formatGift(g)) === g, 'a code from makeShort, shown as a gift code, reads back');
 }

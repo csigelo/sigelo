@@ -212,7 +212,7 @@ site/deploy/deploy.sh sigelo@sigelo.io --os debian    # or alpine
 The first deploys sent `Strict-Transport-Security: max-age=300`, so a TLS mistake on day one could
 not lock visitors out for a year; nginx.conf sends `max-age=31536000` since `check.mjs` passed
 against the live site (it prints a `note` while max-age is below a year). No `includeSubDomains`
-or `preload`: both bind every future subdomain, the Owner's call.
+or `preload`: both bind every future subdomain: a deployment choice.
 
 ## The check
 
@@ -418,7 +418,7 @@ fails, and the last ten installed configs are in `/var/backups/sigelo-nginx/`.
   whatever the logs say: the provider's billing records, the registrar's WHOIS data (use its
   privacy service), and the server's IP addresses. Which account, provider and jurisdiction —
   and whether GitHub Pages (no server, no IP linkage, but no headers or negotiation;
-  site/README.md) is the primary instead — is the Owner's decision.
+  site/README.md) is the primary instead — is a deployment choice.
 - **The build commit is public.** `index.json`, the page footers and `llms-full.txt` name the
   commit the site was built from; deployed from the private tree, that is a private-history hash
   that resolves nowhere public. Deploy from the public export to publish a hash readers can find.

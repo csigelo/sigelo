@@ -93,7 +93,7 @@ export function makeShort(rng = randomBytes) {
 export const codeHash = (text) => bytesToHex(sha256(concatBytes(utf8ToBytes(PARK_V), utf8ToBytes(normaliseShort(text)))));
 
 // Gift codes (sigelo-gift/0): Pro months for an operator, sold or handed out by the vendor
-// (commercial/gift-codes.mjs makes them offline; relay/gifts.mjs redeems them, POST /gift). The
+// (the issuer makes them offline; relay/gifts.mjs redeems them, POST /gift). The
 // same 8 characters, alphabet and folding as a short code, shown with a prefix of their own,
 // PRO-K7F3-Q9ZP, so a person cannot take one for an invite. Typed in any case, with or without
 // dashes or the PRO prefix. Hashed under a label of their own: a gift's hash is never a parked

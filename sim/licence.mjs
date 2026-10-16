@@ -2,7 +2,7 @@
 // sim/licence.mjs — a scratch keeper's licence (spend/licence.ts), so the sims run the paid verbs
 // (/delegate, /fund, /approve, pays above approval_above) as a pro customer would.
 //
-// The way spend/soak/gen-keys.mjs `licence` and commercial/issue-licence.mjs do it, offline: a
+// The way spend/soak/gen-keys.mjs `licence` does it, offline: a
 // throwaway TEST VENDOR identity is minted from the caller's seeded bytes, and sigelo's own
 // `attest` issues {tier: "pro", seats} to the keeper's DID in the chain-carrying format
 // {attestation, issuer, rotations}. The keeper accepts it only because SIGELO_VENDOR_DID names the

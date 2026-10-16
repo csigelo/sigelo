@@ -47,7 +47,7 @@ export const LICENCE_FILE = 'licence.json';
 /** The keeper's record of the longest valid vendor chain it has seen (beside licence.json). */
 export const CHAIN_FILE = 'vendor-chain.json';
 const SEATS_MAX = 10_000;
-/** The longest term sold (commercial/issue-licence.mjs DAYS_MAX): a longer `exp - iat` is refused. */
+/** The longest term sold (DAYS_MAX of the issuer): a longer `exp - iat` is refused. */
 export const TERM_MAX_DAYS = 3 * 366;
 /** How far in the future an `iat` may be (a vendor clock a little ahead): service.ts CLOCK_SKEW. */
 export const LICENCE_SKEW = 300;

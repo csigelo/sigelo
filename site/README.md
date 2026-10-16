@@ -142,10 +142,7 @@ DID ceremony, prices and hours, hosting and DNS.
 
 ### `server.json`, `robots.txt`, discoverability
 
-`server.json` validates against the registry schema `2025-12-11`, and the robots.txt crawler
-tokens were checked against their operators' pages on 2026-10-02: sources, the Owner's steps
-(registry, Search Console, Bing, IndexNow, topics, directories) and what was rejected are in
-[`SEO.md`](SEO.md).
+`server.json` validates against the registry schema `2025-12-11`; the robots.txt crawler tokens were checked against their operators' pages on 2026-10-02.
 
 ## Running TASK-site
 
