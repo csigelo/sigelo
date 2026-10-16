@@ -23,7 +23,7 @@ Kept so what is accomplished can be checked against the sections below. Commits 
 | Public repos, sites, CI, signed releases v0.1.0 → v0.1.7 (2026-10-15), six npm packages | §6 steps 6–8 | **done** |
 | One seed: operator identity, keeper, workers, recovery all from the 25 words | §2, §8.1 | **done** (v0.1.7) |
 | Relay on sigelo.ai, short codes, the page (`ui`), `watch`, files, enrolment | §8 steps 1–2 | **done** (v0.1.7) |
-| Relay Pro: pages, licences, gift codes (`POST /gift`, `pro redeem`), storage 5 GB | §8, commercial/ | **done** 2026-10-16 (`da86178`, `6c48675`); on sale after the vendor ceremony (Owner) |
+| Relay Pro: pages, licences, gift codes (`POST /gift`, `pro redeem`), storage 5 GB | §8 | **done** 2026-10-16 (`da86178`, `6c48675`); on sale after the vendor ceremony (Owner) |
 | Key providers K1 interface, K2 keychain, K3 key agent | §7 | **done** 2026-10-16 (`ed5412e`, `55d04cf`, `20311b3`); Mac/Windows checklists open (Owner) |
 | Key providers K4 FIDO2, K5 OpenPGP card, K6 docs | §7 | open; K4/K5 wait for the Nitrokey (Owner) |
 | Adapters: A2A operator attestation, PAP identity method | §10 | **done** 2026-10-16 (`1a4267f`, `4b1043b`) |
@@ -31,7 +31,7 @@ Kept so what is accomplished can be checked against the sections below. Commits 
 | sigelo.ai: About and Examples pages, one footer language control, 30 languages with hreflang, Arabic right-to-left, stale translations fall back to English | sites | **live** 2026-10-16 (relay `38b755b`); sigelo.io references linked (`80bfa9b`) |
 | Company relays: closed relay, relay per invite, 12-char codes, registry | §9 | decided, not started |
 | v0.2.0 wire freeze | VERSIONING §1 | on or after 2026-10-29 (Owner says go) |
-| Non-Claude docs-test (step 5), external review (step 11), paper + DID method (step 9), Mailcow (§8.3) | §6 | open; each waits on an Owner item (commercial/OWNER-TODO.md) |
+| Non-Claude docs-test (step 5), external review (step 11), paper + DID method (step 9), Mailcow (§8.3) | §6 | open; each waits on an Owner item |
 
 ## 1. Readiness bar for agent adoption
 
@@ -567,12 +567,11 @@ No relay-to-relay protocol: the client is the federation point. About three agen
 
 ## 10. Adoption: the identity inside their protocols (decided 2026-10-16)
 
-The companies that could use sigelo (commercial/research-customer-agents.md, private) are all
-adopting a protocol right now, and each protocol has an identity hole. sigelo does not compete with
-them; it plugs into each. No outreach messages (the Owner: "indistinguishable from spam"); adoption =
-the adapters available, documented and findable, plus at most one post per upstream thread, then
-humans. The company's name stays out of everything until the Owner links it (delayed as long as
-possible); no alliance memberships or partner listings before that.
+The customer-facing agent platforms, payment networks and commerce alliances are each adopting an
+agent protocol right now, and each protocol leaves the agent's identity to a domain, a registry or
+nothing. sigelo does not compete with them; it plugs into each as the identity. No outreach: the
+adapters are available, documented and findable, plus at most one post per upstream thread, then
+humans decide.
 
 | Adapter | Where | Status |
 |---|---|---|
