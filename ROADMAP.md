@@ -14,7 +14,7 @@ review so far was by Claude models. Since then (to 2026-09-29): the wire changed
 been in a stagenet soak since 2026-09-23 with four incidents; every review is still by Claude
 models.
 
-## 0. Done and open, as of 2026-10-16 (master `4b1043b`)
+## 0. Done and open, as of 2026-10-16 (master `9f130f5`)
 
 Kept so what is accomplished can be checked against the sections below. Commits name the merge.
 
@@ -27,7 +27,8 @@ Kept so what is accomplished can be checked against the sections below. Commits 
 | Key providers K1 interface, K2 keychain, K3 key agent | §7 | **done** 2026-10-16 (`ed5412e`, `55d04cf`, `20311b3`); Mac/Windows checklists open (Owner) |
 | Key providers K4 FIDO2, K5 OpenPGP card, K6 docs | §7 | open; K4/K5 wait for the Nitrokey (Owner) |
 | Adapters: A2A operator attestation, PAP identity method | §10 | **done** 2026-10-16 (`1a4267f`, `4b1043b`) |
-| Adapter: Web Bot Auth; sigelo.ai About/Examples + languages | §10, sites | building 2026-10-16 |
+| Adapter: Web Bot Auth (RFC 9421, Cloudflare's vectors reproduced) | §10 | **done** 2026-10-16 (`42b21c1`) |
+| sigelo.ai: About and Examples pages, one footer language control, languages with hreflang (8 live, 22 more building) | sites | **live** 2026-10-16 (relay `4024d55`); sigelo.io references linked (`80bfa9b`) |
 | Company relays: closed relay, relay per invite, 12-char codes, registry | §9 | decided, not started |
 | v0.2.0 wire freeze | VERSIONING §1 | on or after 2026-10-29 (Owner says go) |
 | Non-Claude docs-test (step 5), external review (step 11), paper + DID method (step 9), Mailcow (§8.3) | §6 | open; each waits on an Owner item (commercial/OWNER-TODO.md) |
@@ -576,7 +577,7 @@ possible); no alliance memberships or partner listings before that.
 | Adapter | Where | Status |
 |---|---|---|
 | Personal Agent Protocol (Sierra + Meta, draft 0.1): a sigelo identity method, one DID per business (`--pairwise`); one feedback post drafted, not posted | `integrations/pap/`, `adoption/pap-issue-draft.md` | **landed** 2026-10-16 (`4b1043b`); fit limits in its README (browser flow needs a domain; businesses must opt in) |
-| Web Bot Auth (Cloudflare, RFC 9421 Ed25519 request signatures, signature directory) | `integrations/web-bot-auth/` | building 2026-10-16 |
+| Web Bot Auth (Cloudflare, RFC 9421 Ed25519 request signatures, signed key directory with the bundle; `sigelo-agent sign-http`; the key agent refuses HTTP bases) | `integrations/web-bot-auth/` | **landed** 2026-10-16 (`42b21c1`); open: the draft says not to reuse a signing key (a derived HTTP sub-identity later) |
 | A2A AgentCard: operator attestation in the card, signing through the key providers | `integrations/a2a/` | **landed** 2026-10-16 (`1a4267f`) |
 
 After: a demo where a sigelo agent signs in to a sample business; a sigelo.io page listing the

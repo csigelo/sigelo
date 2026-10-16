@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/http-message-signatures-directory+json",
+    "cache-control": "max-age=3600",
+    "content-digest": "sha-256=:WtNhKQVRuxVniAaCskoEdzLJvajijk77kX/8yOrt/qg=:",
+    "signature-input": "binding0=(\"@authority\";req \"content-digest\");created=1790000000;keyid=\"UDDReOZl1ipXAfp9wYsm13sDBMK5og--QWdBjzuf6o4\";alg=\"ed25519\";expires=1947680000;tag=\"http-message-signatures-directory\"",
+    "signature": "binding0=:cE3m466dRrNh4nxypoQZQ00FjAWmBPRCGqxWsKPbqtPm6M4+ZTIIVNsHhEmoV6hFJQ+cfBZ82RsoKX052nzgBA==:"
+  },
+  "body": "{\"keys\":[{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"x\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w\",\"kid\":\"UDDReOZl1ipXAfp9wYsm13sDBMK5og--QWdBjzuf6o4\",\"use\":\"sig\"}],\"sigelo\":{\"did\":\"did:sigelo:zGK1DNxzoeQiyCZg247FDLQg9r6aTXJkoXtCn1X6wtuSb\",\"bundle\":{\"v\":\"sigelo/0\",\"typ\":\"bundle\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX\",\"recovery\":\"sha256:8c0cc17a04942cc4f8e0fe0b302606d3108860c126428ba2ceeb5f9ed41c2b05\",\"created\":\"2026-10-16T00:00:00Z\",\"nonce\":\"z8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR\"},\"rotations\":[],\"bindings\":[],\"attestations\":[{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"attestation\",\"iss\":\"did:sigelo:zHNPpgQ1XaxiW5cZJnAQmnjjUrKJkfC232gUa79DnhmiL\",\"sub\":\"did:sigelo:zGK1DNxzoeQiyCZg247FDLQg9r6aTXJkoXtCn1X6wtuSb\",\"iat\":1789999900,\"exp\":1797776000,\"ctx\":\"sigelo-relay/operator\",\"admission\":\"invite\",\"claims\":{\"role\":\"crawler\"},\"admission_by\":\"did:sigelo:zHNPpgQ1XaxiW5cZJnAQmnjjUrKJkfC232gUa79DnhmiL\"},\"sig\":\"z3fGrmDdVW2eBFgqvoCkwd6nfESXeJkebKs7niaden9PqMh8AjEz1QXKdbooBRthMzgiNRZkv56Q4nRfFxpwWhdJH\"}],\"issuers\":[{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkmtWtY63GQVBrpMyRJWEzsnxfsGkemu6CtMDwGTv4RYj2\",\"recovery\":\"sha256:8c0cc17a04942cc4f8e0fe0b302606d3108860c126428ba2ceeb5f9ed41c2b05\",\"created\":\"2026-10-16T00:00:00Z\",\"nonce\":\"zQWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF\"}]}}}"
+}

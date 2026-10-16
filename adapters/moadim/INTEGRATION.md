@@ -41,7 +41,7 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | `routine.local.toml` `[env]` | **2** | the hookup |
 | `sigelo-agent.ts` | **75** | identity store, `init`, `signChallenge`, `addIssuer`, `addAttestation`, `bundle`, `rotateKey` |
 | **identity total** | **77** | |
-| `sigelo-agent-keys.ts`, `-keychain.ts`, `-keyclient.ts` | 98, 122, 49 | every signature ([key providers](../../design/key-providers.md)); OS keychain; key agent client |
+| `sigelo-agent-keys.ts`, `-keychain.ts`, `-keyclient.ts` | 117, 122, 49 | every signature ([key providers](../../design/key-providers.md)), Web Bot Auth bases (`signHttp`); OS keychain; key agent client |
 | `keyagent/` `agent.mjs`, `protocol.mjs`, `policy.mjs`, `store.mjs` | 163, 40, 27, 69 | the key agent, its own package |
 | `sigelo-agent-monero.ts` | 134 | the Monero verbs, apart: an identity-only install reads 77 |
 | `sigelo-agent-adopt.ts` | 56 | `adopt`, `forgetIssuer`, outside the core |

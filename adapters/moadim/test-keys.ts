@@ -8,9 +8,10 @@
 // keyagent/test.mjs. Nothing here touches this machine's real keychain.
 //   node test-keys.ts
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createPublicKey, verify as edVerify } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { did, sign, verifySig, VERSION, type Genesis } from 'sigelo';
+import { decodeKey, did, sign, verifySig, VERSION, type Genesis } from 'sigelo';
 import * as keys from './sigelo-agent-keys.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
 import { request } from './sigelo-agent-keyclient.ts';
@@ -47,6 +48,24 @@ const file = (name: string, s: object): string => { const p = join(HOME, name); 
   ok('keys <unknown verb> is usage (exit 2)', cli(q, {}, 'keys', 'frob').status === 2);
   const s = keys.signer(q, plain({ provider: 'file' }));
   ok('Signer carries the head DID and key', s.did === did(V.vectors.genesis.doc) && s.key === V.vectors.genesis.doc.key);
+}
+
+// ── signHttp: RFC 9421 bases for Web Bot Auth only (integrations/web-bot-auth) ────────────
+{
+  const p = file('http.json', plain()), s = keys.signer(p, plain());
+  const base = '"@authority": example.com\n"signature-agent": "https://agent.example"\n"@signature-params": ("@authority" "signature-agent");created=1;keyid="k";alg="ed25519";expires=2;tag="web-bot-auth"';
+  const pub = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), decodeKey(V.vectors.genesis.doc.key)]), format: 'der', type: 'spki' });
+  const sig = s.signHttp(base);
+  ok('signHttp: Ed25519 over the base bytes, under the head key', edVerify(null, Buffer.from(base), pub, Buffer.from(sig, 'base64')));
+  const r = cli(p, {}, 'sign-http', base);
+  ok('CLI sign-http: the same signature, did and key', r.status === 0 && (JSON.parse(r.stdout) as { sig: string }).sig === sig, r.stderr);
+  ok('signHttp refuses a sigelo signing input', code(() => s.signHttp(`sigelo\n${JSON.stringify(vec.body)}`)) === 'http_base');
+  ok('signHttp refuses a base not tagged web-bot-auth', code(() => s.signHttp(base.replace('web-bot-auth', 'other'))) === 'http_base');
+  ok('signHttp refuses non-ASCII and CR', code(() => s.signHttp(base.replace('example.com', 'exämple.com'))) === 'http_base' && code(() => s.signHttp(base.replace('\n', '\r\n'))) === 'http_base');
+  const other = plain(); other.secret = V.seeds['world']!;
+  ok('signHttp with a seed that is not the head key: key_mismatch', code(() => keys.signer('x', other).signHttp(base)) === 'key_mismatch');
+  const agent = plain(); agent.secret = { provider: 'agent' };
+  ok('signHttp on an agent key: key_provider_unbuilt, before any request', code(() => keys.signer('x', agent, { SIGELO_KEY_AGENT: '/nonexistent/a.sock' }).signHttp(base)) === 'key_provider_unbuilt');
 }
 
 // ── refusals by name, nothing written ─────────────────────────────────────────────────────

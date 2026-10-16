@@ -43,6 +43,7 @@ the file then says `{"provider":"agent"}` and signatures go over `SIGELO_KEY_AGE
 | `keys status`, `wrap`, `unwrap --plain` | key form, whether it signs (never the key); to keychain; back to hex |
 | `keys to-agent` | the key into the key agent; the file keeps none |
 | `sign-challenge <json\|->` | sign only `{ v, typ: "challenge", did, ctx, nonce }` naming our DID |
+| `sign-http <base\|->` | sign only an RFC 9421 base for [Web Bot Auth](../../integrations/web-bot-auth/README.md) |
 | `add-issuer <genesis json\|->` | store a world's genesis |
 | `add-attestation <{body,sig} json\|->` | store a world's attestation (one per `iss` + `ctx`) |
 | `forget-issuer <did>` | drop a retired issuer's attestations and genesis |

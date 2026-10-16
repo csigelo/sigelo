@@ -14,8 +14,9 @@
  * key before it leaves (`key_mismatch`).
  */
 import { existsSync } from 'node:fs';
+import { createPrivateKey, createPublicKey, sign as edSign, verify as edVerify } from 'node:crypto';
 import type { Genesis, Rotation } from 'sigelo';
-import { did, keygen, rotate as rotation, sign, SigeloError, verifySig, VERSION } from 'sigelo';
+import { decodeKey, did, keygen, rotate as rotation, sign, SigeloError, verifySig, VERSION } from 'sigelo';
 import { challengeDid, head, load, rotateKey, save, secretOf, type Store } from './sigelo-agent.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
@@ -23,8 +24,12 @@ import { request, socketPath } from './sigelo-agent-keyclient.ts';
 
 export type Env = Record<string, string | undefined>;
 export type Provider = 'file' | 'keychain' | 'agent';
-/** One identity's signing side. `sign` takes a BODY and builds "sigelo\n" ‖ JCS(body) itself (SPEC §3): nothing signs raw bytes. */
-export interface Signer { did: string; key: string; sign(body: object): string }
+/**
+ * One identity's signing side. `sign` takes a BODY and builds "sigelo\n" ‖ JCS(body) itself (SPEC §3).
+ * `signHttp` is the one other input: an RFC 9421 signature base for Web Bot Auth
+ * (integrations/web-bot-auth), checked by `httpBase` first; it returns base64.
+ */
+export interface Signer { did: string; key: string; sign(body: object): string; signHttp(base: string): string }
 const PROVIDERS: string[] = ['file', 'keychain', 'agent'];
 /** The operator identity `keeper --from-words` makes (sigelo-agent-enrol.ts): seed-derived. */
 type Derived = { derived?: { path: string; n: number } };
@@ -55,13 +60,38 @@ function withSeed<T>(s: Store, fn: (seed: Uint8Array) => T): T {
   try { return fn(seed); } finally { seed.fill(0); }
 }
 
+/**
+ * The only raw bytes this key signs: an RFC 9421 signature base (§2.5) whose last line is the
+ * `"@signature-params"` tagged `web-bot-auth` or `http-message-signatures-directory`. Every line of
+ * such a base starts with `"` (0x22), a sigelo signing input with `s` (0x73, SPEC §3), so no input
+ * of one kind is ever an input of the other. Printable ASCII and LF only.
+ */
+export function httpBase(base: string): Buffer {
+  const last = base.slice(base.lastIndexOf('\n') + 1);
+  if (!/^"[\x20-\x7e\n]*$/.test(base) || !last.startsWith('"@signature-params": (') || !/;tag="(web-bot-auth|http-message-signatures-directory)"(;|$)/.test(last))
+    fail('http_base', 'not an RFC 9421 signature base tagged web-bot-auth or http-message-signatures-directory: refusing to sign it');
+  return Buffer.from(base, 'ascii');
+}
+const PKCS8 = Buffer.from('302e020100300506032b657004220420', 'hex'), SPKI = Buffer.from('302a300506032b6570032100', 'hex');
+const edRaw = (seed: Uint8Array, msg: Buffer): string => {
+  const der = Buffer.concat([PKCS8, seed]);
+  try { return edSign(null, msg, createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })).toString('base64'); } finally { der.fill(0); }
+};
+
 /** The signer for the identity `s`, read from `path`. */
 export function signer(path: string, s: Store, env: Env = process.env): Signer {
   const p = using(path, s, env), g = head(s), d = did(g);
   const raw = p === 'agent' ? (body: object) => request({ op: 'sign', did: d, body }, env)['sig'] : (body: object) => withSeed(s, (seed) => sign(seed, body));
+  const mismatch = (): never => fail('key_mismatch', `the ${p} key of ${path} does not sign for ${d}, its head genesis key: the file or its key store was changed`);
   return { did: d, key: g.key, sign: (body) => {
     const sig = raw(body);
-    if (typeof sig !== 'string' || !verifySig(g.key, body, sig)) fail('key_mismatch', `the ${p} key of ${path} does not sign for ${d}, its head genesis key: the file or its key store was changed`);
+    if (typeof sig !== 'string' || !verifySig(g.key, body, sig)) return mismatch();
+    return sig;
+  }, signHttp: (base) => {
+    const msg = httpBase(base);
+    if (p === 'agent') fail('key_provider_unbuilt', 'the key agent signs sigelo bodies only: sign-http needs a file or keychain key');
+    const sig = withSeed(s, (seed) => edRaw(seed, msg));
+    if (!edVerify(null, msg, createPublicKey({ key: Buffer.concat([SPKI, decodeKey(g.key)]), format: 'der', type: 'spki' }), Buffer.from(sig, 'base64'))) return mismatch();
     return sig;
   } };
 }

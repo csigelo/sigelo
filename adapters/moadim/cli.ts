@@ -25,6 +25,7 @@ const USAGE = `sigelo-agent — a portable sigelo/0 identity for an AI agent, an
   adopt --rotation <json|file|->         apply sigelo-offline recover's { rotation, identity_seed_hex }
   whoami                                 current DID + genesis
   sign-challenge <json|->                sign a world's { typ: "challenge", … } body
+  sign-http <base|->                     sign an RFC 9421 base for Web Bot Auth (integrations/web-bot-auth)
   add-issuer <genesis json|->            store a world's genesis document
   add-attestation <{body,sig} json|->    store a world's attestation about us
   forget-issuer <did>                    drop a retired issuer's attestations and genesis
@@ -102,7 +103,7 @@ const path = id.identityPath();
 const now = Math.floor(Date.now() / 1000);
 // The verbs that read the identity: with none, "run init" and exit 2, as the contact verbs say
 // it (a bare "load: no identity" exited 1).
-const READS = ['whoami', 'keys', 'sign-challenge', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
+const READS = ['whoami', 'keys', 'sign-challenge', 'sign-http', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
 // adopt --rotation changes an identity: with none, it took the lock in a missing directory, a raw ENOENT.
 if ((READS.includes(cmd ?? '') || (cmd === 'adopt' && rest.includes('--rotation'))) && !existsSync(path)) {
   note(contact.noIdentity(path));
@@ -174,6 +175,11 @@ try {
     case 'sign-challenge':
       out(keys.signChallenge(path, load(), input(rest[0]) as Record<string, unknown>));
       break;
+    case 'sign-http': {
+      const s = load(), signer = keys.signer(path, s);
+      out({ did: signer.did, key: signer.key, sig: signer.signHttp(rest[0] && rest[0] !== '-' ? rest[0] : readFileSync(0, 'utf8')) });
+      break;
+    }
     case 'keys': {
       const r = keys.main(rest, path, load());
       if (r === null) usage(`keys: ${JSON.stringify(rest[0] ?? '')} is not a verb\n${keys.USAGE}`);

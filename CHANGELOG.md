@@ -8,6 +8,7 @@ history, which is not public. This public history starts at the import of 2026-1
 - **AgentCard operator:** the card profile's `params.operator` carries the operator attestation and chain under `sig`;
   verify reports `{did, exp}` or refuses by name; signing goes through the key providers.
 - **PAP profile draft:** `integrations/pap/`: a DID as PAP 0.1's `client_id`, bundle + §5.2 answer as `client_assertion`, checked offline; `--pairwise`: one DID per business. Issue drafted, not posted.
+- **Web Bot Auth:** `integrations/web-bot-auth/` signs HTTP requests (RFC 9421) with the identity key via `sigelo-agent sign-http`, serves the key directory with the bundle, verifies offline. Cloudflare's vectors pass.
 - **Key agent (K3):** `sigelo-key-agent` (`keyagent/`) holds identity keys and signs known bodies over a
   0700 socket; `keys to-agent`, `SIGELO_KEY_AGENT`; no rotation through `sign`.
 - **Key providers (K1):** every signature goes through one signer (`sigelo-agent-keys.ts`);

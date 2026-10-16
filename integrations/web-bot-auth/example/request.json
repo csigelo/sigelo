@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "url": "https://shop.example/catalog",
+  "headers": {
+    "user-agent": "example-agent/1.0",
+    "signature-agent": "\"https://agent.example\"",
+    "signature-input": "sig1=(\"@authority\" \"signature-agent\");created=1790000000;keyid=\"UDDReOZl1ipXAfp9wYsm13sDBMK5og--QWdBjzuf6o4\";alg=\"ed25519\";expires=1947680000;nonce=\"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw==\";tag=\"web-bot-auth\"",
+    "signature": "sig1=:t4qs1xvEk8zKEaTXaxOh7H6IVqBF3c8vRZRp6WfkKmXTP3egO5b9tdd2c16QaGKbyEBl3fDHSFJ2k+fJN72uDQ==:"
+  }
+}

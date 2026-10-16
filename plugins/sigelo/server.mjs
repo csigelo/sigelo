@@ -2790,13 +2790,13 @@ ${head(s).key}`, "utf8");
 
 // adapters/moadim/sigelo-agent-keyclient.ts
 import { tmpdir, userInfo } from "node:os";
-import { join as join2 } from "node:path";
+import { posix } from "node:path";
 import { MessageChannel, receiveMessageOnPort, Worker } from "node:worker_threads";
 function socketPath(env2 = process.env, platform = process.platform) {
   if (env2["SIGELO_KEY_AGENT"]) return env2["SIGELO_KEY_AGENT"];
   if (platform === "win32") return `\\\\.\\pipe\\sigelo-agent-${userInfo().username}`;
-  if (platform === "darwin") return join2(env2["TMPDIR"] || tmpdir(), "sigelo", "agent.sock");
-  return env2["XDG_RUNTIME_DIR"] ? join2(env2["XDG_RUNTIME_DIR"], "sigelo", "agent.sock") : join2(tmpdir(), `sigelo-${userInfo().uid}`, "agent.sock");
+  if (platform === "darwin") return posix.join(env2["TMPDIR"] || tmpdir(), "sigelo", "agent.sock");
+  return env2["XDG_RUNTIME_DIR"] ? posix.join(env2["XDG_RUNTIME_DIR"], "sigelo", "agent.sock") : posix.join(tmpdir(), `sigelo-${userInfo().uid}`, "agent.sock");
 }
 function channel() {
   if (chan) return chan;
@@ -2855,6 +2855,7 @@ __export(sigelo_agent_keys_exports, {
   USAGE: () => USAGE,
   commit: () => commit,
   fail: () => fail2,
+  httpBase: () => httpBase,
   init: () => init2,
   main: () => main,
   providerOf: () => providerOf,
@@ -2863,6 +2864,7 @@ __export(sigelo_agent_keys_exports, {
   signer: () => signer
 });
 import { existsSync as existsSync2 } from "node:fs";
+import { createPrivateKey, createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 function fail2(code, detail) {
   throw Object.assign(new SigeloError(`${code}: ${detail}`), { check: code });
 }
@@ -2885,12 +2887,25 @@ function withSeed(s, fn) {
     seed.fill(0);
   }
 }
+function httpBase(base2) {
+  const last = base2.slice(base2.lastIndexOf("\n") + 1);
+  if (!/^"[\x20-\x7e\n]*$/.test(base2) || !last.startsWith('"@signature-params": (') || !/;tag="(web-bot-auth|http-message-signatures-directory)"(;|$)/.test(last))
+    fail2("http_base", "not an RFC 9421 signature base tagged web-bot-auth or http-message-signatures-directory: refusing to sign it");
+  return Buffer.from(base2, "ascii");
+}
 function signer(path, s, env2 = process.env) {
   const p = using(path, s, env2), g = head(s), d = did(g);
   const raw = p === "agent" ? (body) => request({ op: "sign", did: d, body }, env2)["sig"] : (body) => withSeed(s, (seed) => sign2(seed, body));
+  const mismatch = () => fail2("key_mismatch", `the ${p} key of ${path} does not sign for ${d}, its head genesis key: the file or its key store was changed`);
   return { did: d, key: g.key, sign: (body) => {
     const sig = raw(body);
-    if (typeof sig !== "string" || !verifySig(g.key, body, sig)) fail2("key_mismatch", `the ${p} key of ${path} does not sign for ${d}, its head genesis key: the file or its key store was changed`);
+    if (typeof sig !== "string" || !verifySig(g.key, body, sig)) return mismatch();
+    return sig;
+  }, signHttp: (base2) => {
+    const msg = httpBase(base2);
+    if (p === "agent") fail2("key_provider_unbuilt", "the key agent signs sigelo bodies only: sign-http needs a file or keychain key");
+    const sig = withSeed(s, (seed) => edRaw(seed, msg));
+    if (!edVerify(null, msg, createPublicKey({ key: Buffer.concat([SPKI, decodeKey(g.key)]), format: "der", type: "spki" }), Buffer.from(sig, "base64"))) return mismatch();
     return sig;
   } };
 }
@@ -2949,7 +2964,7 @@ function main(args, path, s, env2 = process.env) {
   if (verb === "to-agent") return toAgent(path, env2);
   return null;
 }
-var PROVIDERS, signChallenge2, commit, toAgent, USAGE;
+var PROVIDERS, PKCS8, SPKI, edRaw, signChallenge2, commit, toAgent, USAGE;
 var init_sigelo_agent_keys = __esm({
   "adapters/moadim/sigelo-agent-keys.ts"() {
     "use strict";
@@ -2959,6 +2974,16 @@ var init_sigelo_agent_keys = __esm({
     init_sigelo_agent_keychain();
     init_sigelo_agent_keyclient();
     PROVIDERS = ["file", "keychain", "agent"];
+    PKCS8 = Buffer.from("302e020100300506032b657004220420", "hex");
+    SPKI = Buffer.from("302a300506032b6570032100", "hex");
+    edRaw = (seed, msg) => {
+      const der = Buffer.concat([PKCS8, seed]);
+      try {
+        return edSign(null, msg, createPrivateKey({ key: der, format: "der", type: "pkcs8" })).toString("base64");
+      } finally {
+        der.fill(0);
+      }
+    };
     signChallenge2 = (path, s, body, env2 = process.env) => ({ did: challengeDid(s, body), sig: signer(path, s, env2).sign(body) });
     commit = (s, env2 = process.env) => {
       try {
@@ -3075,7 +3100,7 @@ var init_contact = __esm({
 
 // integrations/mcp/server.mjs
 import { existsSync as existsSync4, readdirSync } from "node:fs";
-import { basename as basename2, dirname as dirname2, join as join3, sep } from "node:path";
+import { basename as basename2, dirname as dirname2, join as join2, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 var INSTALLED = fileURLToPath(import.meta.url).split(sep).includes("node_modules");
 var { did: did2, parse: parse2, parseBytes: parseBytes2, verify: verify3, SigeloError: SigeloError2 } = await Promise.resolve().then(() => (init_sigelo(), sigelo_exports));
@@ -3111,7 +3136,7 @@ var refusal = (check, message, cause) => Object.assign(new SigeloError2(message,
 var pathOf = (name) => {
   if (name === void 0 || name === "") return base;
   if (typeof name !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) throw refusal("usage", `identity: ${JSON.stringify(name)} is not a profile name; it must match [a-z0-9][a-z0-9_-]{0,63}, e.g. "researcher-1"`);
-  return join3(dirname2(base), `sigelo.${name}.local.json`);
+  return join2(dirname2(base), `sigelo.${name}.local.json`);
 };
 var profiles = () => {
   try {

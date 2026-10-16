@@ -194,6 +194,28 @@ jobs:
           grep -q '^ALL PASS keyagent' "$RUNNER_TEMP/keyagent-out"
         working-directory: keyagent
 
+  # The protocol profiles (integrations/a2a, pap, web-bot-auth): each a zero-dependency package on the
+  # ts library (file dep), tests offline; the moadim sidecar for the CLI routes.
+  integrations:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
+        with: { node-version: '24' }
+      - run: npm ci --ignore-scripts && npx tsc
+        working-directory: ts
+      - run: (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm run build
+        working-directory: adapters/moadim
+      - run: |
+          for d in a2a pap web-bot-auth; do
+            (cd "$d" && npm ci --ignore-scripts && node test.mjs 2>&1 | tee "$RUNNER_TEMP/int-$d" || true)
+            grep -q '^ALL PASS' "$RUNNER_TEMP/int-$d" || { { grep '^FAIL ' "$RUNNER_TEMP/int-$d" | head -n 7; tail -n 3 "$RUNNER_TEMP/int-$d"; } | cut -c1-900 | sed "s/%/%25/g; s/^/::error title=integrations $d::/"; exit 1; }
+          done
+        working-directory: integrations
+
   # The reference verifier.
   go:
     runs-on: ubuntu-latest

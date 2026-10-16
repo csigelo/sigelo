@@ -10,7 +10,7 @@
  *   <the agent's code>     a refusal (policy_typ, policy_did, policy_rotation, key_unknown, …)
  */
 import { tmpdir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { posix } from 'node:path';
 import { MessageChannel, type MessagePort, receiveMessageOnPort, Worker } from 'node:worker_threads';
 import { parseBytes, SigeloError } from 'sigelo';
 
@@ -22,8 +22,9 @@ const fail = (code: string, detail: string): never => { throw Object.assign(new 
 export function socketPath(env: Env = process.env, platform: string = process.platform): string {
   if (env['SIGELO_KEY_AGENT']) return env['SIGELO_KEY_AGENT'];
   if (platform === 'win32') return `\\\\.\\pipe\\sigelo-agent-${userInfo().username}`;
-  if (platform === 'darwin') return join(env['TMPDIR'] || tmpdir(), 'sigelo', 'agent.sock');
-  return env['XDG_RUNTIME_DIR'] ? join(env['XDG_RUNTIME_DIR'], 'sigelo', 'agent.sock') : join(tmpdir(), `sigelo-${userInfo().uid}`, 'agent.sock');
+  // A POSIX socket path, joined the POSIX way even when asked from Windows (install-unit's text).
+  if (platform === 'darwin') return posix.join(env['TMPDIR'] || tmpdir(), 'sigelo', 'agent.sock');
+  return env['XDG_RUNTIME_DIR'] ? posix.join(env['XDG_RUNTIME_DIR'], 'sigelo', 'agent.sock') : posix.join(tmpdir(), `sigelo-${userInfo().uid}`, 'agent.sock');
 }
 
 // One request per message: connect (2 s), write the line, read to the first newline (60 s). The

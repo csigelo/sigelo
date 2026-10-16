@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { check } from './policy.mjs';
 import { encode, keychain, keyclient, MAX_LINE, parseRequest, refuse, refusalOf, ROTATE_TO, S } from './protocol.mjs';
@@ -158,7 +158,8 @@ export function unit(platform, f, env = process.env) {
   const tpl = readFileSync(join(HERE, 'units', platform === 'linux' ? 'sigelo-key-agent.service' : 'io.sigelo.key-agent.plist'), 'utf8');
   const xml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const args = platform === 'linux' ? argv.map((a) => `"${a.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%')}"`).join(' ') : argv.map((a) => `\t\t<string>${xml(a)}</string>`).join('\n');
-  return { path: platform === 'linux' ? join(env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'systemd', 'user', 'sigelo-key-agent.service') : join(homedir(), 'Library', 'LaunchAgents', 'io.sigelo.key-agent.plist'), text: tpl.replace('@ARGS@', args) };
+  // The unit is for a POSIX host, so its path is joined the POSIX way even when generated elsewhere.
+  return { path: platform === 'linux' ? posix.join(env.XDG_CONFIG_HOME || posix.join(homedir(), '.config'), 'systemd', 'user', 'sigelo-key-agent.service') : posix.join(homedir(), 'Library', 'LaunchAgents', 'io.sigelo.key-agent.plist'), text: tpl.replace('@ARGS@', args) };
 }
 
 async function main(argv) {

@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { attest, canonicalize, keygen, parse, rotate, sign } from 'sigelo';
 import { OPERATOR_CTX, URI, verifyPresentation } from './verify.mjs';
 import { pairwise, present } from './present.mjs';
@@ -95,7 +96,7 @@ const [verb, body] = process.argv.slice(2);
 console.log(verb === 'bundle' ? readFileSync(${JSON.stringify(join(dir, 'b.json'))}, 'utf8') : JSON.stringify({ sig: sign(new Uint8Array(32).fill(1), JSON.parse(body)) }));
 `, { mode: 0o755 });
 try {
-  const out = parse(execFileSync(process.execPath, [new URL('./present.mjs', import.meta.url).pathname, ISSUER, NONCE, USER], { env: { ...process.env, SIGELO_AGENT: fake }, encoding: 'utf8' }));
+  const out = parse(execFileSync(process.execPath, [fileURLToPath(new URL('./present.mjs', import.meta.url)), ISSUER, NONCE, USER], { env: { ...process.env, SIGELO_AGENT: fake }, encoding: 'utf8' }));
   ok(verifyPresentation(out, { issuer: ISSUER, nonce: NONCE }).did === a.did, 'CLI: signs through sigelo-agent sign-challenge, verifies');
 } catch (e) { ok(false, `CLI: ${e.message}`); } finally { rmSync(dir, { recursive: true }); }
 

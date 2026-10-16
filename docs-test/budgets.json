@@ -25,5 +25,6 @@
   "integrations/JOIN.md": 400,
   "integrations/a2a/README.md": 400,
   "keyagent/README.md": 400,
-  "integrations/pap/README.md": 500
+  "integrations/pap/README.md": 500,
+  "integrations/web-bot-auth/README.md": 500
 }
