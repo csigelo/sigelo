@@ -17,7 +17,7 @@ import { CLI, ROOT, done, now, ok, posixModes, tmpHome, type Bundle } from './te
 const HOME = tmpHome('id');
 const CTX = 'moadim.test';
 const run = (...args: string[]): string =>
-  execFileSync('node', [CLI, ...args], { env: { PATH: process.env['PATH'], HOME }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  execFileSync('node', [CLI, ...args], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 const fails = (...args: string[]): string => {
   try {
     run(...args);
@@ -147,14 +147,14 @@ ok('receive on another account starts at 0', (JSON.parse(run('receive', '--accou
 const bumped = JSON.parse(readFileSync(path, 'utf8')) as { monero: { next_minor: Record<string, number> } };
 bumped.monero.next_minor['0'] = 201;
 writeFileSync(path, JSON.stringify(bumped));
-const past = spawnSync('node', [CLI, 'receive'], { env: { PATH: process.env['PATH'], HOME }, encoding: 'utf8' });
+const past = spawnSync('node', [CLI, 'receive'], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME }, encoding: 'utf8' });
 ok('receive warns past the 200 lookahead but still hands out the address',
   past.status === 0 && past.stderr.includes('lookahead') && (JSON.parse(past.stdout) as { index: number }).index === 201);
 // `load -> receive -> save` is a read-modify-write of one counter, and moadim runs its sidecar
 // as a CLI it may invoke more than once at a time. Two payers handed ONE subaddress can link
 // each other (MONERO.md §3), so the four racing runs below must get four different indices.
 const racing = await Promise.all([0, 1, 2, 3].map(() => new Promise<string>((resolve) => {
-  const child = spawn('node', [CLI, 'receive', '--account', '2'], { env: { PATH: process.env['PATH'], HOME } });
+  const child = spawn('node', [CLI, 'receive', '--account', '2'], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME } });
   let stdout = '';
   child.stdout.on('data', (c: Buffer) => { stdout += String(c); });
   child.on('close', () => { resolve(stdout); });
@@ -172,7 +172,7 @@ ok('four concurrent receives hand out four distinct subaddresses',
   const lock = `${path}.lock`;
   writeFileSync(lock, '', { flag: 'wx' });
   const start = (...args: string[]): { exited: () => boolean; done: Promise<number | null> } => {
-    const c = spawn('node', [CLI, ...args], { env: { PATH: process.env['PATH'], HOME }, stdio: 'ignore' });
+    const c = spawn('node', [CLI, ...args], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME }, stdio: 'ignore' });
     return { exited: () => c.exitCode !== null, done: new Promise((r) => { c.on('close', r); }) };
   };
   const racers = [start('bind'), start('wallet-set', JSON.stringify(view)), start('add-issuer', JSON.stringify(world.genesis))];
@@ -322,9 +322,9 @@ if (!existsSync(built) && !hasGo) {
 {
   const idFile = join(HOME, 'delegate.local.json');
   const at2 = (...args: string[]): string => execFileSync('node', [CLI, ...args],
-    { env: { PATH: process.env['PATH'], HOME, SIGELO_IDENTITY: idFile }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME, SIGELO_IDENTITY: idFile }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   const at2In = (input: string, ...args: string[]): string => execFileSync('node', [CLI, ...args],
-    { env: { PATH: process.env['PATH'], HOME, SIGELO_IDENTITY: idFile }, encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'] });
+    { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME, SIGELO_IDENTITY: idFile }, encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'] });
   const at2Fails = (input: string, ...args: string[]): string => { try { at2In(input, ...args); return ''; } catch (e) { return String((e as { stderr?: string }).stderr ?? ''); } };
   const words = newRoot(), S = rootFromMnemonic(words), K0 = keeperRoot(S, 0);
   const seed = agentIdentitySeed(K0, 3, 0), hex = (b: Uint8Array): string => Buffer.from(b).toString('hex');

@@ -25,7 +25,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   const human = join(humanDir, 'me.local.json');
   const unreachable = { relay: 'relay.test', endpoints: { 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } } };
   // The human's identity: the root identity of their words (keeper --from-words, sigelo-agent-enrol.ts).
-  const fromWords = (file: string, words = newRoot()) => spawnSync('node', [CLI, 'keeper', '--from-words', '--identity', file], { env: { PATH: process.env['PATH'], HOME: H }, input: words, encoding: 'utf8' });
+  const fromWords = (file: string, words = newRoot()) => spawnSync('node', [CLI, 'keeper', '--from-words', '--identity', file], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H }, input: words, encoding: 'utf8' });
   fromWords(human);
   type Res = { status: number; headers: Record<string, string | string[] | undefined>; body: string };
   const http = (port: number, method: string, path: string, headers: Record<string, string>, body?: unknown): Promise<Res> => new Promise((resolve, reject) => {
@@ -64,12 +64,12 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   let second = '';
   try { await ui.startUi({ identity: human, agents: agentsDir, carrier: unreachable }); } catch (e) { second = (e as Error).message; }
   ok('ui: a second page on the same file is refused (pid lock)', second.includes(`is open in sigelo-agent ui (pid ${process.pid})`), second);
-  const inbox = spawnSync('node', [CLI, 'inbox'], { env: { PATH: process.env['PATH'], HOME: H, SIGELO_IDENTITY: human }, encoding: 'utf8' });
+  const inbox = spawnSync('node', [CLI, 'inbox'], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: human }, encoding: 'utf8' });
   ok('ui: a CLI inbox on the page\'s file is refused, exit 1, saying why', inbox.status === 1 && inbox.stderr.includes('a CLI inbox would take its relay session and its messages'), inbox.stderr);
-  const pageEnv = { PATH: process.env['PATH'], HOME: H, SIGELO_IDENTITY: human };
+  const pageEnv = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: human };
   const sendBusy = spawnSync('node', [CLI, 'send', 'bob', 'hi'], { env: pageEnv, encoding: 'utf8' });
   ok('ui: a CLI send on the page\'s file is refused too (no queue beside a page), exit 1', sendBusy.status === 1 && sendBusy.stderr.includes('a CLI send would take its relay session'), sendBusy.stderr);
-  const enrolBusy = spawnSync('node', [CLI, 'enrol', '--name', 'w', '--identity', human], { env: { PATH: process.env['PATH'], HOME: H }, encoding: 'utf8' });
+  const enrolBusy = spawnSync('node', [CLI, 'enrol', '--name', 'w', '--identity', human], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H }, encoding: 'utf8' });
   ok('ui: a CLI enrol by code as the page\'s identity is refused, exit 1, use the page; no worker in the roster',
     enrolBusy.status === 1 && enrolBusy.stderr.includes('enrol would take its relay session') && enrolBusy.stderr.includes('Use the page')
       && !readFileSync(human.replace(/\.json$/, '.keeper.json'), 'utf8').includes('"w"'), enrolBusy.stderr);
@@ -80,7 +80,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui: closing removes the pid lock', !existsSync(ui.lockPath(human)));
 
   // The CLI: no identity → keeper --from-words, once; then the page, for the DID of the words.
-  const env = { PATH: process.env['PATH'], HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify(unreachable.endpoints) };
+  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify(unreachable.endpoints) };
   const bare = spawnSync('node', [CLI, 'ui', '--no-open'], { env, encoding: 'utf8' });
   ok('ui (CLI), first run with no identity: exit 2, points to keeper --from-words', bare.status === 2 && bare.stderr.includes('sigelo-agent keeper --from-words'), bare.stderr);
   const oldFlag = spawnSync('node', [CLI, 'ui', '--no-recovery', '--no-open'], { env, encoding: 'utf8' });
@@ -176,7 +176,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       // An agent on A's machine with a random key and one contact: Enrol makes it worker 0 of A's
       // keeper root (its old files set aside, the contact warned of), then it is paired in-process.
       const bot = join(A.dir, 'agents', 'sigelo.bot.local.json');
-      spawnSync('node', [CLI, 'init', '--no-recovery'], { env: { PATH: process.env['PATH'], HOME: H, SIGELO_IDENTITY: bot } });
+      spawnSync('node', [CLI, 'init', '--no-recovery'], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: bot } });
       const botOld = did(load(bot).genesis);
       writeFileSync(join(A.dir, 'agents', 'sigelo.bot.local.contacts.json'), JSON.stringify({ contacts: { 'did:sigelo:zSomeone': { did: 'did:sigelo:zSomeone', revoked: false } } }));
       const listed = ((await A.call('GET', '/api/agents')) as unknown as { 0: { name: string; worker: number | null; mine: unknown; contacts: number } })[0];
@@ -196,7 +196,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       const listed2 = ((await A.call('GET', '/api/agents')) as unknown as { 0: { worker: number; mine: { days_left: number }; renew: boolean } })[0];
       ok('ui e2e: Enrol on a worker only renews: the same DID, renewed; listed worker 0, mine, no renew due', renew['renewed'] === true && renew['did'] === en['did'] && renew['worker'] === 0
         && listed2.worker === 0 && listed2.mine?.days_left >= 89 && listed2.renew === false, JSON.stringify(renew));
-      spawnSync('node', [CLI, 'init', '--no-recovery'], { env: { PATH: process.env['PATH'], HOME: H, SIGELO_IDENTITY: join(B.dir, 'agents', 'sigelo.x.local.json') } });
+      spawnSync('node', [CLI, 'init', '--no-recovery'], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(B.dir, 'agents', 'sigelo.x.local.json') } });
       const bk = join(B.dir, 'me.local.keeper.json');
       renameSync(bk, `${bk}.away`);
       const noK = await B.call('POST', '/api/agents/enrol', { agent: 'x' });

@@ -71,8 +71,9 @@ export function applyRotation(s: Store, input: unknown, now: number): { store: S
   if (at < chain.length - 1 && r.body.reason !== 'recovery') throw new SigeloError(`adopt --rotation: a voluntary rotation from ${r.body.id}, which is not the head, is a fork (SPEC §7.3) — only a recovery rotation may start from an earlier node`);
   const dropped = s.rotations.length - at;
   const kept = new Set(chain.slice(0, at + 1).concat(r.body.next));
+  const { provider: _held, ...plain } = s; // the new key is a plain seed, whatever held the old one (a key agent's: keys to-agent again)
   const next: Store = {
-    ...s, secret, rotations: s.rotations.slice(0, at).concat(r),
+    ...plain, secret, rotations: s.rotations.slice(0, at).concat(r),
     attestations: s.attestations.filter((a) => kept.has(a.body.sub)),
     ...(s.bindings ? { bindings: s.bindings.filter((b) => kept.has(b.body.id)) } : {}),
   };

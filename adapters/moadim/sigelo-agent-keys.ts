@@ -6,7 +6,7 @@
  * path, so an identity-only install still reads 75 lines. Counted apart in INTEGRATION.md.
  *
  *   file      `secret` is the hex seed, as in every version (a top-level `"provider": "file"` may say so)
- *   keychain  `secret` is the seed sealed under a key in the OS store (sigelo-agent-keychain.ts, K2)
+ *   keychain  `secret` is the seed sealed under a key in the OS store (sigelo-agent-keychain.ts)
  *   agent     `secret` is `{ "provider": "agent" }`: sigelo-key-agent holds it (sigelo-agent-keyclient.ts, K3)
  *
  * Fail closed, by name (§2.5): no provider falls back to another, an unknown one is refused
@@ -16,9 +16,10 @@
 import { existsSync } from 'node:fs';
 import type { Genesis, Rotation } from 'sigelo';
 import { did, keygen, rotate as rotation, sign, SigeloError, verifySig, VERSION } from 'sigelo';
-import { challengeDid, head, init as initFile, rotateKey, save, secretOf, type Store } from './sigelo-agent.ts';
+import { challengeDid, head, load, rotateKey, save, secretOf, type Store } from './sigelo-agent.ts';
+import { withLock } from './sigelo-agent-monero.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
-import { request } from './sigelo-agent-keyclient.ts';
+import { request, socketPath } from './sigelo-agent-keyclient.ts';
 
 export type Env = Record<string, string | undefined>;
 export type Provider = 'file' | 'keychain' | 'agent';
@@ -71,12 +72,13 @@ export const signChallenge = (path: string, s: Store, body: Record<string, unkno
 
 /**
  * A new identity in the form `provider` names (SIGELO_KEY_PROVIDER), checked before anything is
- * written. Unset: today's plain file, unchanged, until the Owner picks the default (plan §8).
+ * written. Unset (plan §8.3, decided): `keychain` where an OS store answers, else `file` with
+ * `"provider": "file"` and one warning line; `keychain` named outright fails closed without one.
  */
 export function init(path: string, recovery: string | null, provider?: string, env: Env = process.env): Store {
   if (provider !== undefined && !PROVIDERS.includes(provider)) fail('key_provider_unknown', `SIGELO_KEY_PROVIDER is ${JSON.stringify(provider)}; use ${PROVIDERS.join(', ')}`);
-  if (provider === undefined) return initFile(path, recovery);
   if (existsSync(path)) throw new SigeloError(`init: ${path} already holds an identity — refusing to overwrite it`);
+  provider ??= keychain.answers(keychain.systemKeychain(env)) ? 'keychain' : (console.error('sigelo-agent: no OS keychain answers here, so the key is a plain file ("provider": "file"); see `sigelo-agent keys wrap`'), 'file');
   let store: Store;
   if (provider === 'agent') {
     const genesis = request({ op: 'create', recovery }, env)['genesis'] as Genesis;
@@ -84,7 +86,7 @@ export function init(path: string, recovery: string | null, provider?: string, e
   } else {
     const id = keygen({ recovery });
     store = { v: VERSION, provider, secret: '', genesis: id.genesis, rotations: [], attestations: [], issuers: [] };
-    try { store.secret = provider === 'file' ? Buffer.from(id.secret).toString('hex') : keychain.wrap(id.secret, store); } finally { id.secret.fill(0); }
+    try { store.secret = provider === 'file' ? Buffer.from(id.secret).toString('hex') : keychain.wrap(id.secret, store, keychain.systemKeychain(env)); } finally { id.secret.fill(0); }
   }
   save(path, store);
   return store;
@@ -105,22 +107,39 @@ export function rotate(path: string, s: Store, now: number, env: Env = process.e
   return s;
 }
 
+/** After the caller wrote an agent rotation: the agent drops the old key (§4.4). Best effort: the rotation
+ *  is written, and the next request naming the new DID commits it anyway; an error here must not
+ *  read as a failed rotation, which a retry would turn into a second one. */
+export const commit = (s: Store, env: Env = process.env): void => { try { if (providerOf(s) === 'agent') request({ op: 'commit', did: did(head(s)) }, env); } catch { /* above */ } };
+
+/** `keys to-agent`: the seed into the agent (a retry finds it held), checked there, then the file says `{"provider":"agent"}`. */
+const toAgent = (path: string, env: Env): object => withLock(path, () => {
+  const s = load(path), p = providerOf(s), g = head(s), d = did(g);
+  if (p === 'agent') fail('key_provider_required', `keys to-agent: ${path} holds no key: the agent has it already`);
+  withSeed(s, (seed) => { try { request({ op: 'import', genesis: g, seed: Buffer.from(seed).toString('hex') }, env); } catch (e) { if ((e as { check?: string }).check !== 'key_held') throw e; } });
+  if (request({ op: 'pubkey', did: d }, env)['key'] !== g.key) fail('key_mismatch', `the key agent holds another key for ${d}; ${path} is unchanged`);
+  save(path, Object.assign(s, { provider: 'agent', secret: { provider: 'agent' } }));
+  return { did: d, provider: 'agent', file: path, key_agent: socketPath(env), note: 'older copies of the file (backups, sync folders) still hold the key: rotate if one may have leaked' };
+});
+
 export const USAGE = `Where the identity key rests (identity file field "provider"):
   keys status                            the key's form, and whether it signs for the current DID;
                                          never prints key material
-  keys wrap | keys unwrap --plain        file <-> OS keychain: milestone K2, not built yet
-  keys to-agent                          move the key into sigelo-key-agent: milestone K3, not built yet`;
+  keys wrap | keys unwrap --plain        seal the key under a key in the OS store (macOS keychain,
+                                         Secret Service, DPAPI) | write it back as plain hex
+  keys to-agent                          move the key into sigelo-key-agent (SIGELO_KEY_AGENT, else its
+                                         default socket); the file then says {"provider":"agent"}`;
 
 /** `sigelo-agent keys <verb>`. null: no such verb (usage, exit 2). */
 export function main(args: string[], path: string, s: Store, env: Env = process.env): object | null {
   const verb = args[0];
   if (verb === 'status' || verb === 'show') {
     const p = providerOf(s), d = did(head(s));
-    let code = 'ok';
-    try { signer(path, s, env).sign({ v: 'sigelo-keys/0', typ: 'probe', did: d }); } catch (e) { code = (e as { check?: string }).check ?? 'error'; }
+    let code = 'ok';   // an agent signs no probe body (§4.3): its key for this DID must be the head key
+    try { if (p !== 'agent') signer(path, s, env).sign({ v: 'sigelo-keys/0', typ: 'probe', did: d }); else if (request({ op: 'pubkey', did: d }, env)['key'] !== head(s).key) fail('key_mismatch', d); } catch (e) { code = (e as { check?: string }).check ?? 'error'; }
     return { did: d, provider: p, file: path, key_agent: env['SIGELO_KEY_AGENT'] ?? null, signs: code === 'ok', ...(code !== 'ok' && { code }) };
   }
-  if (verb === 'wrap' || verb === 'unwrap') fail('key_provider_unbuilt', `keys ${verb}: keychain wrapping arrives with milestone K2; the identity file is unchanged`);
-  if (verb === 'to-agent') fail('key_provider_unbuilt', 'keys to-agent: the key agent arrives with milestone K3; the identity file is unchanged');
+  if (verb === 'wrap' || verb === 'unwrap') return keychain.move(path, verb, args.includes('--plain'), keychain.systemKeychain(env));
+  if (verb === 'to-agent') return toAgent(path, env);
   return null;
 }

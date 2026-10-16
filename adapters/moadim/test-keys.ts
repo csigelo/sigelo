@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Key providers, milestone K1 (design/key-providers.md §2, §7): the provider interface over the
 // plain file. A file from the test seeds signs byte for byte as before; "provider": "file" and no
-// provider both work; an unknown provider, the K2/K3 stubs and the core's plain-key path refuse by
-// name and write nothing; a derived identity still refuses `rotate`. Then the pre-K1 CLI (0.1.7,
-// from git; SKIP without the commit) reads files the new code writes.
+// provider both work; an unknown provider, provider keychain with no store answering, provider
+// agent with no agent answering and the core's plain-key path refuse by name and write nothing; a
+// derived identity still refuses `rotate`. Then the pre-K1 CLI (0.1.7, from git; SKIP without the
+// commit) reads files the new code writes. K2: test-keychain.ts; the key agent itself (K3):
+// keyagent/test.mjs. Nothing here touches this machine's real keychain.
 //   node test-keys.ts
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -25,7 +27,7 @@ const plain = (extra: object = {}): Store => ({ v: VERSION, ...extra, secret: V.
 /** The refusal's code (`.check`), or null when nothing was thrown. */
 const code = (fn: () => unknown): string | null => { try { fn(); return null; } catch (e) { return (e as { check?: string }).check ?? (e as Error).message; } };
 const cli = (file: string, env: Record<string, string> = {}, ...args: string[]) =>
-  spawnSync('node', [CLI, ...args], { env: { PATH: process.env['PATH'], HOME, SIGELO_IDENTITY: file, ...env }, encoding: 'utf8' });
+  spawnSync('node', [CLI, ...args], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME, SIGELO_IDENTITY: file, ...env }, encoding: 'utf8' });
 const file = (name: string, s: object): string => { const p = join(HOME, name); writeFileSync(p, JSON.stringify(s, null, 2) + '\n', { mode: 0o600 }); return p; };
 
 // ── the plain file: byte for byte ─────────────────────────────────────────────────────────
@@ -67,28 +69,40 @@ const file = (name: string, s: object): string => { const p = join(HOME, name); 
   ok('SIGELO_KEY_AGENT with a key in the file: key_agent_mismatch', code(() => keys.signer('x', plain(), { SIGELO_KEY_AGENT: '/run/x.sock' })) === 'key_agent_mismatch');
 }
 
-// ── the K2 and K3 stubs ───────────────────────────────────────────────────────────────────
+// ── no store answering (K2), no agent answering (K3: keyagent/test.mjs runs one) ─────────
 {
-  const wrapped = plain(); wrapped.secret = { provider: 'keychain' };
   const agent = plain(); agent.secret = { provider: 'agent' };
-  ok('keychain.wrap: key_provider_unbuilt', code(() => keychain.wrap(new Uint8Array(32), plain())) === 'key_provider_unbuilt');
-  ok('keychain.unwrap: key_provider_unbuilt', code(() => keychain.unwrap(wrapped)) === 'key_provider_unbuilt');
-  ok('keychain.systemKeychain: key_provider_unbuilt', code(() => keychain.systemKeychain()) === 'key_provider_unbuilt');
-  ok('keyclient.request: key_provider_unbuilt', code(() => request({ op: 'list' })) === 'key_provider_unbuilt');
-  ok('a keychain file signs nothing: key_provider_unbuilt', code(() => keys.signer('x', wrapped).sign(vec.body)) === 'key_provider_unbuilt');
-  ok('an agent file signs nothing: key_provider_unbuilt', code(() => keys.signer('x', agent).sign(vec.body)) === 'key_provider_unbuilt');
-  ok('an agent file does not rotate: key_provider_unbuilt', code(() => keys.rotate('x', agent, 1)) === 'key_provider_unbuilt' && agent.rotations.length === 0);
-  for (const prov of ['keychain', 'agent']) {
+  const NONE = { SIGELO_KEY_AGENT: join(HOME, 'no-agent', 'agent.sock') };
+  // An in-memory store to wrap with, then one that does not answer: the real keychain module, never the host's store.
+  const items = new Map<string, Buffer>();
+  const mem: keychain.Keychain = { store: 'secret-service', read: (a) => Uint8Array.from(items.get(a) ?? keys.fail('keychain_missing', a)), write: (a, k) => { items.set(a, Buffer.from(k)); return undefined; }, remove: (a) => { items.delete(a); } };
+  const down: keychain.Keychain = { store: 'secret-service', read: () => keys.fail('keychain_unavailable', 'test: no store'), write: () => keys.fail('keychain_unavailable', 'test: no store'), remove: () => keys.fail('keychain_unavailable', 'test: no store') };
+  const wrapped = plain(); wrapped.secret = keychain.wrap(Buffer.from(V.seeds['agent']!, 'hex'), plain(), mem);
+  ok('keychain.wrap through a store: sigelo-wrap/1, signs the vector', (wrapped.secret as keychain.WrappedSecret).v === 'sigelo-wrap/1' && (keychain.inject(mem), keys.signer('x', wrapped).sign(vec.body)) === vec.sig);
+  keychain.inject(down);
+  ok('keychain.answers: false when the store does not answer', keychain.answers(down) === false);
+  ok('keychain.wrap, no store: keychain_unavailable', code(() => keychain.wrap(new Uint8Array(32), plain())) === 'keychain_unavailable');
+  ok('a keychain file, no store: signs nothing, keychain_unavailable', code(() => keys.signer('x', wrapped).sign(vec.body)) === 'keychain_unavailable');
+  ok('a keychain file, no store: does not rotate', code(() => keys.rotate('x', wrapped, 1)) === 'keychain_unavailable' && wrapped.rotations.length === 0);
+  const t0 = Date.now();
+  ok('keyclient.request, no agent: key_agent_unavailable within 2 s', code(() => request({ op: 'list' }, NONE)) === 'key_agent_unavailable' && Date.now() - t0 <= 2000);
+  ok('an agent file, no agent: signs nothing, key_agent_unavailable', code(() => keys.signer('x', agent, NONE).sign(vec.body)) === 'key_agent_unavailable');
+  ok('an agent file, no agent: does not rotate', code(() => keys.rotate('x', agent, 1, NONE)) === 'key_agent_unavailable' && agent.rotations.length === 0);
+  for (const [prov, want, env] of [['keychain', 'keychain_unavailable', {}], ['agent', 'key_agent_unavailable', NONE]] as const) {
     const f = join(HOME, `init-${prov}.json`);
-    ok(`init as ${prov}: key_provider_unbuilt, nothing written`, code(() => keys.init(f, COMMIT, prov)) === 'key_provider_unbuilt' && !existsSync(f));
+    ok(`init as ${prov}: ${want}, nothing written`, code(() => keys.init(f, COMMIT, prov, env)) === want && !existsSync(f));
   }
-  const p = file('wrap.json', plain()), before = readFileSync(p);
-  for (const [verb, k] of [['wrap', 'K2'], ['unwrap', 'K2'], ['to-agent', 'K3']] as const) {
-    const r = cli(p, {}, 'keys', verb);
-    ok(`keys ${verb}: unbuilt, says ${k}, file unchanged`, r.status === 1 && r.stderr.includes('key_provider_unbuilt') && r.stderr.includes(k) && readFileSync(p).equals(before), r.stderr);
+  keychain.inject();
+  // The CLI with no store tool on PATH and no session bus: the host's keychain is out of reach.
+  const p = file('wrap.json', plain()), before = readFileSync(p), BIN = join(HOME, 'no-bin');
+  mkdirSync(BIN, { recursive: true });
+  const nokc = (...args: string[]) => spawnSync(process.execPath, [CLI, ...args], { env: { PATH: BIN, HOME, SIGELO_IDENTITY: p, DBUS_SESSION_BUS_ADDRESS: 'unix:path=/nonexistent', ...NONE }, encoding: 'utf8' });
+  for (const [args, want] of [[['wrap'], 'keychain_unavailable'], [['unwrap'], 'usage'], [['unwrap', '--plain'], 'key_provider_required'], [['to-agent'], 'key_agent_unavailable']] as const) {
+    const r = nokc('keys', ...args);
+    ok(`keys ${args.join(' ')}: refused (${want}), file unchanged`, r.status === 1 && r.stderr.includes(want) && readFileSync(p).equals(before), r.stderr);
   }
-  const st = cli(file('agent.json', agent), {}, 'keys', 'status');
-  ok('keys status on an agent file: provider agent, does not sign, by name', st.status === 0 && /"provider": "agent"/.test(st.stdout) && /"code": "key_provider_unbuilt"/.test(st.stdout), st.stdout + st.stderr);
+  const st = cli(file('agent.json', agent), NONE, 'keys', 'status');
+  ok('keys status on an agent file, no agent: provider agent, does not sign, by name', st.status === 0 && /"provider": "agent"/.test(st.stdout) && /"code": "key_agent_unavailable"/.test(st.stdout), st.stdout + st.stderr);
 }
 
 // ── the core refuses a key that is not a plain file ───────────────────────────────────────
@@ -105,9 +119,6 @@ const file = (name: string, s: object): string => { const p = join(HOME, name); 
   const r = cli(p, { SIGELO_KEY_PROVIDER: 'file' }, 'init', '--no-recovery');
   const s = r.status === 0 ? load(p) : plain();
   ok('init with SIGELO_KEY_PROVIDER=file: "provider": "file", secret a 64-hex string', r.status === 0 && s.provider === 'file' && /^[0-9a-f]{64}$/.test(s.secret as string), r.stderr);
-  const q = join(HOME, 'new', 'default.json');
-  const r2 = cli(q, {}, 'init', '--no-recovery');
-  ok('init without SIGELO_KEY_PROVIDER: today\'s file, no provider field', r2.status === 0 && !('provider' in load(q)), r2.stderr);
   const d0 = did(s.genesis), rot = cli(p, {}, 'rotate');
   const after = load(p);
   ok('rotate a "provider": "file" identity: one rotation, still file, new key signs', rot.status === 0 && after.rotations.length === 1 && after.provider === 'file'
@@ -129,7 +140,7 @@ else {
     writeFileSync(join(old, f.split('/').at(-1)!), execFileSync('git', ['-C', ROOT, 'show', `${PRE_K1}:${f}`]));
   }
   symlinkSync(join(import.meta.dirname, 'node_modules'), join(old, 'node_modules'));
-  const oldCli = (p: string, ...args: string[]) => spawnSync('node', [join(old, 'cli.ts'), ...args], { env: { PATH: process.env['PATH'], HOME, SIGELO_IDENTITY: p }, encoding: 'utf8' });
+  const oldCli = (p: string, ...args: string[]) => spawnSync('node', [join(old, 'cli.ts'), ...args], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME, SIGELO_IDENTITY: p }, encoding: 'utf8' });
   const p = join(HOME, 'k1-file.json');
   keys.init(p, COMMIT, 'file');
   const s = load(p), body = { v: 'sigelo/0', typ: 'challenge', did: did(s.genesis), ctx: 'k1.test', nonce: 'zVtK1aCTZHfuBYaDyoFv5VS' };

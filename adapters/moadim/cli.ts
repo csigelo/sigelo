@@ -240,6 +240,7 @@ try {
       if (rest.includes('--recovery')) usage(`rotate: this command does voluntary rotations only.${OFFLINE_RECOVERY}`);
       // A derived identity (keeper --from-words) is refused there: its next key is rotation n + 1 of the words.
       const store = update((s) => { const r = keys.rotate(path, s, now); return { store: r, result: r }; });
+      keys.commit(store);
       note('rotated; the previous key is retired. Ask each world to reissue its attestation to the new DID.');
       out({ did: did(id.head(store)), chain: id.chainOf(store) });
       break;

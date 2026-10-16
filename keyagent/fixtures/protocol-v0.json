@@ -1,0 +1,428 @@
+{
+  "v": "sigelo-key-agent/0",
+  "about": "sigelo-key-agent/0 request and reply lines (design/key-providers.md §4.2-4.3), replayed in order per session through one agent with a plain store. A session with \"continues\" runs on the store the named session left. Randomness: draw n (from 0, counted across the file) is the first bytes of SHA-256(\"sigelo-key-agent-fixture/0 \" + n), 32 for a seed then 16 for a genesis nonce; clock: now (ms). A request is sent as UTF-8 bytes, or in its \"encoding\" (latin1: to carry a byte that is not UTF-8).",
+  "now": 1790000000000,
+  "sessions": [
+    {
+      "name": "the default agent: no payments, no attestations",
+      "flags": {},
+      "pairs": [
+        {
+          "name": "list, empty",
+          "request": "{\"op\":\"list\"}",
+          "reply": "{\"ok\":true,\"keys\":[]}"
+        },
+        {
+          "name": "import the vector identity (test-vectors seed \"agent\")",
+          "request": "{\"op\":\"import\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"seed\":\"0000000000000000000000000000000000000000000000000000000000000001\"}",
+          "reply": "{\"ok\":true,\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "import it again: key_held",
+          "request": "{\"op\":\"import\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"seed\":\"0000000000000000000000000000000000000000000000000000000000000001\"}",
+          "reply": "{\"ok\":false,\"code\":\"key_held\",\"detail\":\"this agent holds did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG already\"}"
+        },
+        {
+          "name": "import a seed that is not the genesis key: key_mismatch",
+          "request": "{\"op\":\"import\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ\",\"recovery\":null,\"created\":\"2026-01-01T00:00:00Z\",\"nonce\":\"zP4rMbpayn6a9JeaZgpVMMj\"},\"seed\":\"0000000000000000000000000000000000000000000000000000000000000001\"}",
+          "reply": "{\"ok\":false,\"code\":\"key_mismatch\",\"detail\":\"the seed is not the key of did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw\"}"
+        },
+        {
+          "name": "import a genesis that is not one: request_invalid",
+          "request": "{\"op\":\"import\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"rotation\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"seed\":\"0000000000000000000000000000000000000000000000000000000000000001\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"genesis: typ is \\\"rotation\\\"\"}"
+        },
+        {
+          "name": "list, one key",
+          "request": "{\"op\":\"list\"}",
+          "reply": "{\"ok\":true,\"keys\":[{\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"form\":\"plain\"}]}"
+        },
+        {
+          "name": "pubkey",
+          "request": "{\"op\":\"pubkey\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}",
+          "reply": "{\"ok\":true,\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\"}"
+        },
+        {
+          "name": "pubkey of a DID not held: key_unknown",
+          "request": "{\"op\":\"pubkey\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\"}",
+          "reply": "{\"ok\":false,\"code\":\"key_unknown\",\"detail\":\"this agent holds no key for did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\"}"
+        },
+        {
+          "name": "sign challenge (the challenge vector's sig)",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"challenge\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"z5CcrJaLeMWYUnqEDmpp23xFCpncXnjR3Bazy3vqXYxCLqe2pSMkE3LZpuDzB1AE8AcEhEESU89opFod92yWF9MBo\"}"
+        },
+        {
+          "name": "sign relay-login",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-relay/0\",\"typ\":\"relay-login\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"relay\":\"relay.test\",\"nonce\":\"zRe1ayNonce\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"z4GWDrRVaJ2gdCuoP9wiBbTbZoXKU7dMEAbdZpJDQXHaqMrVwnBYLVcVbsT7aHLowZeX3Apm2fjnNGddTjLPE5qUv\"}"
+        },
+        {
+          "name": "sign invite-answer",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-invite/0\",\"typ\":\"invite-answer\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"nonce\":\"zInv1teNonce\",\"transcript\":\"zAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"zof8yeXLDnNHMHm6AxBim7yrVLwSe6mdmZZhdQUpLWp5RzysgeyNwSAKQND8GVdJvzhcydBKWdFfF2UoqKaK2o61\"}"
+        },
+        {
+          "name": "sign invite-reply",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-invite/0\",\"typ\":\"invite-reply\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"nonce\":\"zInv1teNonce\",\"transcript\":\"zBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"z4UHF332qWYtiZykkHuJFwYbztVhYPp13vDDBNk4B8BNFkWWWT3pTSMofMTLmwEeaYvV1D6XXWsVhA8MFBRtD4dgJ\"}"
+        },
+        {
+          "name": "sign message",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-msg/0\",\"typ\":\"message\",\"from\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"to\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"pair\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"epoch\":\"11111111111111111111111111111111\",\"n\":0,\"iat\":1790000000,\"label\":\"x\",\"content\":{\"text\":\"hello\"}}}",
+          "reply": "{\"ok\":true,\"sig\":\"z36ySBp6iAPBJ6Qcwf2RmDr8Mxig6UHdZbq5NfV4tLoaktBWsP219oEFRvhz9ofU4NDboUVodpc1pbEivj7hVQn4p\"}"
+        },
+        {
+          "name": "sign prekeys",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-msg/0\",\"typ\":\"prekeys\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"pair\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"iat\":1790000000,\"exp\":1792678400,\"keys\":[],\"last_resort\":null}}",
+          "reply": "{\"ok\":true,\"sig\":\"zQAjQ8nRgVr9hxDqXxLwZz3xUiXLrGayEewu6Ua48wpot93cWYG1VBoxWKUT72onKUoZJ83hrtLnMMESsNWoYu3r\"}"
+        },
+        {
+          "name": "sign contact-notice",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-carrier/0\",\"typ\":\"contact-notice\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"pair\":\"0000000000000000000000000000000000000000000000000000000000000000\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"z2vHPLU3wnXbcJo4TTeHoS1JygptJFWcE5PRRYTGmVUPDBX2o7rzHk6JWW3EDDqH935PgwZr38sEGksgNhTqrvCS2\"}"
+        },
+        {
+          "name": "sign a binding without --allow-payments: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"binding\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"ed25519-test\",\"addr\":\"z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4\",\"iat\":1757203200,\"exp\":1764979200,\"nonce\":\"zTHKNvrWPf52gDYivvHooQP\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"binding: this agent was started without --allow-payments\"}"
+        },
+        {
+          "name": "sign an invoice without --allow-payments: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"invoice\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"addr\":\"7BwuLFbUUxwUPqTZFgYoRFbjmzAQTN7MPUnyKaRe7TR35rGpixSRuuqmv4HcFcEqcRnDUYNU3xdpsKSAiWvARw9m1MCe6Ea\",\"iat\":1757203200,\"exp\":1757289600,\"nonce\":\"zW1W3KQTRThZVWiahN4n6Fs\",\"amount\":\"150000000000\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"invoice: this agent was started without --allow-payments\"}"
+        },
+        {
+          "name": "sign an attestation without --allow-attest: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"attestation\",\"iss\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"sub\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"iat\":1757203200,\"exp\":1764979200,\"ctx\":\"1f916.ai\",\"admission\":\"invite\",\"admission_by\":\"did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox\",\"claims\":{\"joined\":\"2026-04-02\",\"posts\":412,\"standing\":\"citizen\"}}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"attestation: ctx \\\"1f916.ai\\\" was not given with --allow-attest\"}"
+        },
+        {
+          "name": "sign a rotation: policy_rotation",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"rotation\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"next\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"iat\":1759276800,\"reason\":\"voluntary\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_rotation\",\"detail\":\"a rotation is never signed through sign; rotate makes one, to a key this agent made itself\"}"
+        },
+        {
+          "name": "sign a rotation under another v: policy_rotation",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-msg/0\",\"typ\":\"rotation\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"next\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"iat\":1759276800,\"reason\":\"voluntary\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_rotation\",\"detail\":\"a rotation is never signed through sign; rotate makes one, to a key this agent made itself\"}"
+        },
+        {
+          "name": "sign a genesis: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/0\\\" \\\"genesis\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+        },
+        {
+          "name": "sign a bundle: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"bundle\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"rotations\":[],\"bindings\":[],\"attestations\":[],\"issuers\":[]}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/0\\\" \\\"bundle\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+        },
+        {
+          "name": "sign a probe body: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-keys/0\",\"typ\":\"probe\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo-keys/0\\\" \\\"probe\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+        },
+        {
+          "name": "sign an enrol request: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-enrol/1\",\"typ\":\"enrol-request\",\"proof\":{}}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo-enrol/1\\\" \\\"enrol-request\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+        },
+        {
+          "name": "sign a challenge under v sigelo/1: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/1\",\"typ\":\"challenge\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/1\\\" \\\"challenge\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+        },
+        {
+          "name": "sign a challenge with an extra field: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"challenge\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\",\"extra\":1}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"sign-challenge: a challenge has exactly v, typ, did, ctx, nonce — refusing extra field(s) extra\"}"
+        },
+        {
+          "name": "sign a body that is not an object: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":\"sigelo\"}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"the body is not a JSON object\"}"
+        },
+        {
+          "name": "sign a challenge naming a foreign DID: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"challenge\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"challenge: did is \\\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "sign a relay-login naming a foreign DID: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-relay/0\",\"typ\":\"relay-login\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"relay\":\"relay.test\",\"nonce\":\"zRe1ayNonce\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"relay-login: did is \\\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "sign an invite-answer naming a foreign DID: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-invite/0\",\"typ\":\"invite-answer\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"nonce\":\"zInv1teNonce\",\"transcript\":\"zAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"invite-answer: did is \\\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "sign a contact-notice naming a foreign DID: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-carrier/0\",\"typ\":\"contact-notice\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"pair\":\"0000000000000000000000000000000000000000000000000000000000000000\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"contact-notice: did is \\\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "sign a prekeys naming a foreign DID: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-msg/0\",\"typ\":\"prekeys\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"pair\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"iat\":1790000000,\"exp\":1792678400,\"keys\":[],\"last_resort\":null}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"prekeys: did is \\\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "sign a message from a foreign DID: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-msg/0\",\"typ\":\"message\",\"from\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"to\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"pair\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"epoch\":\"11111111111111111111111111111111\",\"n\":0,\"iat\":1790000000,\"label\":\"x\",\"content\":{\"text\":\"hello\"}}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"message: from is \\\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "sign a message naming this DID as to, not from: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-msg/0\",\"typ\":\"message\",\"from\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"to\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"pair\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"epoch\":\"11111111111111111111111111111111\",\"n\":0,\"iat\":1790000000,\"label\":\"x\",\"content\":{\"text\":\"hello\"}}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"message: from is \\\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "sign for a DID not held: key_unknown",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"challenge\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\"}}",
+          "reply": "{\"ok\":false,\"code\":\"key_unknown\",\"detail\":\"this agent holds no key for did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\"}"
+        },
+        {
+          "name": "create, recovery a commitment",
+          "request": "{\"op\":\"create\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\"}",
+          "reply": "{\"ok\":true,\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkwYe3sheMDc9Ernj6NUmQ8fpNHxpoHzAQnrhkaLXyEZKi\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-21T14:13:20Z\",\"nonce\":\"z9g3fgne53ssN7UirFCjHJ2\"}}"
+        },
+        {
+          "name": "create, recovery a key",
+          "request": "{\"op\":\"create\",\"recovery\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\"}",
+          "reply": "{\"ok\":true,\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkutJRPxai6GohogpAHhohpptA9W1rNAKYsaJ1LRNBYy3T\",\"recovery\":\"sha256:4a67330b803d5c88757afb9328615344a89c49839a07f1f76887ad62d06a1f57\",\"created\":\"2026-09-21T14:13:20Z\",\"nonce\":\"z488kG941efYpvsHkGRAyKu\"}}"
+        },
+        {
+          "name": "create, recovery null",
+          "request": "{\"op\":\"create\",\"recovery\":null}",
+          "reply": "{\"ok\":true,\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6Mkt7JnTJ1ygzKevYzbmdM7cWViokc23i389SZcDfPfvPZ8\",\"recovery\":null,\"created\":\"2026-09-21T14:13:20Z\",\"nonce\":\"zPWTKucg5zANrGpXaiiVj3X\"}}"
+        },
+        {
+          "name": "create, recovery not a key: request_invalid",
+          "request": "{\"op\":\"create\",\"recovery\":\"sha256:00\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"multibase: not base58btc (expected a leading \\\"z\\\")\"}"
+        },
+        {
+          "name": "rotate to fido2: key_provider_unbuilt (K4)",
+          "request": "{\"op\":\"rotate\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"to\":\"fido2\"}",
+          "reply": "{\"ok\":false,\"code\":\"key_provider_unbuilt\",\"detail\":\"rotate to fido2: hardware keys arrive with milestone K4\"}"
+        },
+        {
+          "name": "rotate to card: key_provider_unbuilt (K5)",
+          "request": "{\"op\":\"rotate\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"to\":\"card\"}",
+          "reply": "{\"ok\":false,\"code\":\"key_provider_unbuilt\",\"detail\":\"rotate to card: hardware keys arrive with milestone K5\"}"
+        },
+        {
+          "name": "rotate a DID not held: key_unknown",
+          "request": "{\"op\":\"rotate\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"to\":\"software\"}",
+          "reply": "{\"ok\":false,\"code\":\"key_unknown\",\"detail\":\"this agent holds no key for did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\"}"
+        },
+        {
+          "name": "rotate: the rotation, kept pending",
+          "request": "{\"op\":\"rotate\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"to\":\"software\"}",
+          "reply": "{\"ok\":true,\"rotation\":{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"rotation\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"next\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\",\"iat\":1790000000,\"reason\":\"voluntary\"},\"sig\":\"z3zooJjrXqEYXtTbJSF1qPmKt8qf3yq11r1MZpPmUgFoqFuBuHPRogSsHY2GetAhrtVuf6vQei74hsbzFePyAgGKt\",\"next_genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkuHVzCvZ7xVTcz6tVZVEkykqiv3Hns7j2esrn7acS4xqG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-21T14:13:20Z\",\"nonce\":\"zLufjLVCz59S4MqN67gnnbE\"}}}"
+        },
+        {
+          "name": "rotate again before the write: the same rotation (a torn rotation converges)",
+          "request": "{\"op\":\"rotate\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"to\":\"software\"}",
+          "reply": "{\"ok\":true,\"rotation\":{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"rotation\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"next\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\",\"iat\":1790000000,\"reason\":\"voluntary\"},\"sig\":\"z3zooJjrXqEYXtTbJSF1qPmKt8qf3yq11r1MZpPmUgFoqFuBuHPRogSsHY2GetAhrtVuf6vQei74hsbzFePyAgGKt\",\"next_genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkuHVzCvZ7xVTcz6tVZVEkykqiv3Hns7j2esrn7acS4xqG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-21T14:13:20Z\",\"nonce\":\"zLufjLVCz59S4MqN67gnnbE\"}}}"
+        },
+        {
+          "name": "sign with the old key while the rotation is pending",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-relay/0\",\"typ\":\"relay-login\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"relay\":\"relay.test\",\"nonce\":\"zRe1ayNonce\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"z4GWDrRVaJ2gdCuoP9wiBbTbZoXKU7dMEAbdZpJDQXHaqMrVwnBYLVcVbsT7aHLowZeX3Apm2fjnNGddTjLPE5qUv\"}"
+        },
+        {
+          "name": "commit naming the old DID: policy_did",
+          "request": "{\"op\":\"commit\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG is not the pending rotation's DID did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9 nor the current one without a rotation pending\"}"
+        },
+        {
+          "name": "commit a DID not held: key_unknown",
+          "request": "{\"op\":\"commit\",\"did\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\"}",
+          "reply": "{\"ok\":false,\"code\":\"key_unknown\",\"detail\":\"this agent holds no key for did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\"}"
+        }
+      ]
+    },
+    {
+      "name": "after the rotation: the new DID",
+      "flags": {},
+      "continues": "the default agent: no payments, no attestations",
+      "pairs": [
+        {
+          "name": "commit naming the new DID",
+          "request": "{\"op\":\"commit\",\"did\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\"}",
+          "reply": "{\"ok\":true}"
+        },
+        {
+          "name": "commit again: nothing pending, already current",
+          "request": "{\"op\":\"commit\",\"did\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\"}",
+          "reply": "{\"ok\":true}"
+        },
+        {
+          "name": "sign with the old DID now: policy_did (the file is behind)",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"challenge\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG is not the current DID of this identity (did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9): the identity file is behind\"}"
+        },
+        {
+          "name": "rotate from the old DID: policy_did (no fork from a stale copy)",
+          "request": "{\"op\":\"rotate\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"to\":\"software\"}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG is not the current DID of this identity (did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9): the identity file is behind\"}"
+        },
+        {
+          "name": "sign a challenge for the new DID",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"challenge\",\"did\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"z41G6sFMcQkuctvKZZMPiUesgX5rXeVje7xywDZyg9fQiLUtve65WL9SkqujcCotrQzvzUHugrmYQzQdE5E4VWTJY\"}"
+        },
+        {
+          "name": "a challenge for the new DID sent as the old one: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"challenge\",\"did\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG is not the current DID of this identity (did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9): the identity file is behind\"}"
+        },
+        {
+          "name": "rotate the new DID",
+          "request": "{\"op\":\"rotate\",\"did\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\",\"to\":\"software\"}",
+          "reply": "{\"ok\":true,\"rotation\":{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"rotation\",\"id\":\"did:sigelo:z56uY4ytf4izNgQw27c5LyRukKNqsuo8xzNX8TeydKqS9\",\"next\":\"did:sigelo:zAmyBb7KDQJGdDbRXCKCpiT5JjaBg68TQ5iw6gfF7BaoC\",\"iat\":1790000000,\"reason\":\"voluntary\"},\"sig\":\"z2CXk8T7GrPVNy5cKW3AA6rekEv7SA1yAJegRkzyzUxgt893En15bBLaVR3CiLmtsfa7iXTtF5WcWDmarWt1ijSmd\",\"next_genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkqzNh8hCGdU4WKwNtrDUakUphzUY8fpmR5YLGecR9Q6es\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-21T14:13:20Z\",\"nonce\":\"zqBdEt979hdJtKNBXY3uGx\"}}}"
+        },
+        {
+          "name": "pubkey naming the pending DID commits it",
+          "request": "{\"op\":\"pubkey\",\"did\":\"did:sigelo:zAmyBb7KDQJGdDbRXCKCpiT5JjaBg68TQ5iw6gfF7BaoC\"}",
+          "reply": "{\"ok\":true,\"key\":\"z6MkqzNh8hCGdU4WKwNtrDUakUphzUY8fpmR5YLGecR9Q6es\"}"
+        },
+        {
+          "name": "list",
+          "request": "{\"op\":\"list\"}",
+          "reply": "{\"ok\":true,\"keys\":[{\"did\":\"did:sigelo:z2axDuSi8y9tHtvo8Ga3aoBSPeqtKi8964vqZEPCR4k7q\",\"key\":\"z6Mkt7JnTJ1ygzKevYzbmdM7cWViokc23i389SZcDfPfvPZ8\",\"form\":\"plain\"},{\"did\":\"did:sigelo:z8HW4zvoMYJZt99eEeazNq5tG4a38e8iRFhcFaAprqYjY\",\"key\":\"z6MkwYe3sheMDc9Ernj6NUmQ8fpNHxpoHzAQnrhkaLXyEZKi\",\"form\":\"plain\"},{\"did\":\"did:sigelo:zAmyBb7KDQJGdDbRXCKCpiT5JjaBg68TQ5iw6gfF7BaoC\",\"key\":\"z6MkqzNh8hCGdU4WKwNtrDUakUphzUY8fpmR5YLGecR9Q6es\",\"form\":\"plain\"},{\"did\":\"did:sigelo:zvZyyZDRnrSYUpQtjbFcuZeytimh1A4QLcK2FKZj12xD\",\"key\":\"z6MkutJRPxai6GohogpAHhohpptA9W1rNAKYsaJ1LRNBYy3T\",\"form\":\"plain\"}]}"
+        },
+        {
+          "name": "lock",
+          "request": "{\"op\":\"lock\"}",
+          "reply": "{\"ok\":true}"
+        }
+      ]
+    },
+    {
+      "name": "started with --allow-payments --allow-attest 1f916.ai",
+      "flags": {
+        "allowPayments": true,
+        "allowAttest": [
+          "1f916.ai"
+        ]
+      },
+      "pairs": [
+        {
+          "name": "import the vector identity",
+          "request": "{\"op\":\"import\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"seed\":\"0000000000000000000000000000000000000000000000000000000000000001\"}",
+          "reply": "{\"ok\":true,\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "import the vector world",
+          "request": "{\"op\":\"import\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ\",\"recovery\":null,\"created\":\"2026-01-01T00:00:00Z\",\"nonce\":\"zP4rMbpayn6a9JeaZgpVMMj\"},\"seed\":\"0000000000000000000000000000000000000000000000000000000000000003\"}",
+          "reply": "{\"ok\":true,\"did\":\"did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw\"}"
+        },
+        {
+          "name": "sign the binding vector (its sig_id)",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"binding\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"ed25519-test\",\"addr\":\"z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4\",\"iat\":1757203200,\"exp\":1764979200,\"nonce\":\"zTHKNvrWPf52gDYivvHooQP\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"z5kKgaz4cYTnLMZCkYaQGkKHQzuZ6zYT7UcLbPKLgYraa5h8Vw5c5WRFRjBjArFPiuyP8WXRqws4yjqWG5FbLpzWc\"}"
+        },
+        {
+          "name": "sign the invoice vector (its sig)",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"invoice\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"monero\",\"addr\":\"7BwuLFbUUxwUPqTZFgYoRFbjmzAQTN7MPUnyKaRe7TR35rGpixSRuuqmv4HcFcEqcRnDUYNU3xdpsKSAiWvARw9m1MCe6Ea\",\"iat\":1757203200,\"exp\":1757289600,\"nonce\":\"zW1W3KQTRThZVWiahN4n6Fs\",\"amount\":\"150000000000\"}}",
+          "reply": "{\"ok\":true,\"sig\":\"z5kkZAgJdD7QihxjW2oehSsaLp27bAdZUMM6mSFL1rW3PELyXvrwanNSxFWRkKCxYEniDX8nhryPwP9jzkicwCwWk\"}"
+        },
+        {
+          "name": "sign a binding for a foreign DID: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"binding\",\"id\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"method\":\"ed25519-test\",\"addr\":\"z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4\",\"iat\":1757203200,\"exp\":1764979200,\"nonce\":\"zTHKNvrWPf52gDYivvHooQP\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"binding: id is \\\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "the world signs the attestation vector, ctx 1f916.ai (its sig)",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"attestation\",\"iss\":\"did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw\",\"sub\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"iat\":1757203200,\"exp\":1764979200,\"ctx\":\"1f916.ai\",\"admission\":\"invite\",\"admission_by\":\"did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox\",\"claims\":{\"joined\":\"2026-04-02\",\"posts\":412,\"standing\":\"citizen\"}}}",
+          "reply": "{\"ok\":true,\"sig\":\"z5STzdK3h1Z3tk1xwgkwhcv3vgy3dvYtuC7S1BuMTrkUcqpPANdgr5bkaYookdKmbBhe1i4fdFNEXzQXYj4zVwKz1\"}"
+        },
+        {
+          "name": "an attestation under another ctx: policy_typ",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"attestation\",\"iss\":\"did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw\",\"sub\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"iat\":1757203200,\"exp\":1764979200,\"ctx\":\"other.example\",\"admission\":\"invite\",\"admission_by\":\"did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox\",\"claims\":{\"joined\":\"2026-04-02\",\"posts\":412,\"standing\":\"citizen\"}}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"attestation: ctx \\\"other.example\\\" was not given with --allow-attest\"}"
+        },
+        {
+          "name": "an attestation issued by another DID: policy_did",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"attestation\",\"iss\":\"did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw\",\"sub\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"iat\":1757203200,\"exp\":1764979200,\"ctx\":\"1f916.ai\",\"admission\":\"invite\",\"admission_by\":\"did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox\",\"claims\":{\"joined\":\"2026-04-02\",\"posts\":412,\"standing\":\"citizen\"}}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_did\",\"detail\":\"attestation: iss is \\\"did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw\\\", not this key's current DID did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}"
+        },
+        {
+          "name": "a rotation, even so: policy_rotation",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"rotation\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"next\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"iat\":1759276800,\"reason\":\"voluntary\"}}",
+          "reply": "{\"ok\":false,\"code\":\"policy_rotation\",\"detail\":\"a rotation is never signed through sign; rotate makes one, to a key this agent made itself\"}"
+        }
+      ]
+    },
+    {
+      "name": "malformed requests",
+      "flags": {},
+      "pairs": [
+        {
+          "name": "not JSON: request_invalid",
+          "request": "{\"op\":\"list\"",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"not strict JSON (expected \\\",\\\" or \\\"}\\\" at offset 12)\"}"
+        },
+        {
+          "name": "a duplicate key: request_invalid",
+          "request": "{\"op\":\"list\",\"op\":\"lock\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"not strict JSON (duplicate key \\\"op\\\" at offset 17)\"}"
+        },
+        {
+          "name": "not UTF-8: request_invalid",
+          "request": "{\"op\":\"ÿ\"}",
+          "encoding": "latin1",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"not strict JSON (invalid UTF-8 in document)\"}"
+        },
+        {
+          "name": "an array: request_invalid",
+          "request": "[]",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"a request is a JSON object\"}"
+        },
+        {
+          "name": "an unknown op: request_invalid",
+          "request": "{\"op\":\"export\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"op \\\"export\\\" is not one of list, create, import, pubkey, sign, rotate, commit, lock\"}"
+        },
+        {
+          "name": "an op inherited from Object: request_invalid",
+          "request": "{\"op\":\"toString\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"op \\\"toString\\\" is not one of list, create, import, pubkey, sign, rotate, commit, lock\"}"
+        },
+        {
+          "name": "an extra field: request_invalid",
+          "request": "{\"op\":\"list\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"list takes exactly no field; extra: did\"}"
+        },
+        {
+          "name": "a missing field: request_invalid",
+          "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"sign takes exactly did, body; missing: body\"}"
+        },
+        {
+          "name": "did not a string: request_invalid",
+          "request": "{\"op\":\"pubkey\",\"did\":7}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"did is a string\"}"
+        },
+        {
+          "name": "seed not 64 hex: request_invalid",
+          "request": "{\"op\":\"import\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"seed\":\"000000000000000000000000000000000000000000000000000000000000000g\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"seed is 64 lowercase hex\"}"
+        },
+        {
+          "name": "to unknown: request_invalid",
+          "request": "{\"op\":\"rotate\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"to\":\"hsm\"}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"to is one of software, fido2, card\"}"
+        },
+        {
+          "name": "recovery a number: request_invalid",
+          "request": "{\"op\":\"create\",\"recovery\":1}",
+          "reply": "{\"ok\":false,\"code\":\"request_invalid\",\"detail\":\"recovery is \\\"sha256:…\\\", \\\"z6Mk…\\\" or null\"}"
+        }
+      ]
+    }
+  ]
+}

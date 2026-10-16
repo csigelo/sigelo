@@ -2,7 +2,8 @@
 // What every test-*.ts file shares: the CLI's path, `ok`, the summary line, a temp HOME, a CLI run
 // in a child, and the in-process relay (relay/server.mjs, SKIP without a checkout and its
 // node_modules). Each file ends with one line: `ALL PASS <file> (<n> ok)` or `FAIL <file> (…)`.
-// `npm test` runs them all (test-all.ts).
+// `npm test` runs them all (test-all.ts). Every CLI child gets SIGELO_KEY_PROVIDER=file: `init`'s default
+// is the OS keychain where one answers (a desktop session, Windows), and test identities stay files.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';

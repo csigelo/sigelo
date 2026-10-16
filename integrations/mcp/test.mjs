@@ -21,8 +21,25 @@ const dir = mkdtempSync(join(tmpdir(), 'sigelo-mcp-'));
 let fails = 0, passes = 0;
 const ok = (c, name, extra = '') => { if (c) passes++; else { fails++; console.error(`FAIL ${name} ${extra}`); } };
 
+// SIGELO_KEY_PROVIDER=file: sigelo_init defaults to the OS keychain where one answers (a desktop
+// session); these identities are throwaway files, never items in the developer's real store.
+// SIGELO_TEST_KEY_AGENT=1 (keyagent/test.mjs runs it so): the same suite with every key in a
+// sigelo-key-agent on a temp socket. Each server gets SIGELO_KEY_AGENT and sigelo_init writes
+// {"provider":"agent"}; a key the recovery writes back into a file goes to the agent (keys to-agent).
+let keyAgent = null;
+if (process.env.SIGELO_TEST_KEY_AGENT === '1') {
+  const { request } = await import('../../adapters/moadim/sigelo-agent-keyclient.ts');
+  const run = join(dir, 'key-agent');
+  mkdirSync(run, { mode: 0o700 });
+  const sock = process.platform === 'win32' ? `\\\\.\\pipe\\sigelo-mcp-test-${process.pid}` : join(run, 'agent.sock');
+  keyAgent = spawn(process.execPath, [join(here, '..', '..', 'keyagent', 'agent.mjs'), 'start', '--socket', sock, '--store', join(run, 'store'), '--store-plain'], { stdio: 'ignore' });
+  for (let i = 0; i < 200; i++) { try { request({ op: 'list' }, { SIGELO_KEY_AGENT: sock }); break; } catch { await new Promise((r) => setTimeout(r, 50)); } }
+  Object.assign(process.env, { SIGELO_KEY_AGENT: sock, SIGELO_KEY_PROVIDER: 'agent' });
+  console.log(`key agent mode: every key in sigelo-key-agent at ${sock}`);
+}
+
 function client(env, server = join(here, 'server.mjs')) {
-  const p = spawn(process.execPath, [server], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const p = spawn(process.execPath, [server], { env: { ...process.env, SIGELO_KEY_PROVIDER: keyAgent ? 'agent' : 'file', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let buf = '', next = 1; const waiting = new Map(); let stderr = '';
   p.stderr.on('data', (d) => { stderr += d; });
   p.stdout.on('data', (d) => {
@@ -206,7 +223,7 @@ try {
   await c2.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   r = await c2.call('sigelo_init', { recovery: 'none' });
   ok(!r.isError && r.data.genesis.recovery === null && /permanently/.test(r.data.warning), 'init recovery none warns');
-  ok(/recovery: null/.test(c2.stderr()), 'keygen warning went to stderr, not the protocol');
+  ok(keyAgent || /recovery: null/.test(c2.stderr()), 'keygen warning went to stderr, not the protocol'); // with a key agent, keygen runs (and warns) there
   c2.close();
 
   // ---------------- with a keeper
@@ -400,9 +417,9 @@ ${code.slice(60)}
       // A contact's nested message (content is any JSON; sigelo's parser allows 512 levels) beside
       // two short ones. The page is measured in the text the client gets: compact, so 500 levels
       // are 1,000 characters, where the indented result was 507,009 and carried the other two.
-      const lib = await import('../../contact/carrier.mjs'), idLib = await import('../../adapters/moadim/sigelo-agent.ts');
+      const lib = await import('../../contact/carrier.mjs'), idLib = await import('../../adapters/moadim/sigelo-agent.ts'), keysLib = await import('../../adapters/moadim/sigelo-agent-keys.ts');
       const bFile = join(dir, 'bob.local.json');
-      const bobCarrier = new lib.Carrier({ identity: () => { const s = idLib.load(bFile); return { secret: idLib.secretOf(s), bundle: idLib.bundleOf(s) }; }, ...lib.pathsFor(bFile), ...lib.optionsFromEnv(env) });
+      const bobCarrier = new lib.Carrier({ identity: () => { const s = idLib.load(bFile); return { ...(keyAgent ? { sign: keysLib.signer(bFile, s).sign } : { secret: idLib.secretOf(s) }), bundle: idLib.bundleOf(s) }; }, ...lib.pathsFor(bFile), ...lib.optionsFromEnv(env) });
       let nested = [];
       for (let i = 1; i < 500; i++) nested = [nested];
       const sentNested = await bobCarrier.sendAll('alice', ['important 1', nested, 'important 2'], { label: '' });
@@ -449,6 +466,10 @@ ${code.slice(60)}
         const rc = spawnSync(process.execPath, [join(here, '..', '..', 'adapters', 'moadim', 'cli.ts'), 'recover', '--recovery-key', keyFile],
           { env: { ...process.env, SIGELO_IDENTITY: join(dir, 'alice.local.json') }, encoding: 'utf8' });
         ok(rc.status === 0, 'relay: sigelo-agent recover', rc.stderr);
+        if (keyAgent) {
+          const ta = spawnSync(process.execPath, [join(here, '..', '..', 'adapters', 'moadim', 'cli.ts'), 'keys', 'to-agent'], { env: { ...process.env, SIGELO_IDENTITY: join(dir, 'alice.local.json') }, encoding: 'utf8' });
+          ok(ta.status === 0, 'relay, key agent mode: the recovered key moves to the agent (keys to-agent)', ta.stderr);
+        }
         r = await a2.call('sigelo_contacts');
         ok(r.data?.contacts[0]?.re_pair === 'own_recovery', 'relay: alice\'s sigelo_contacts marks bob re_pair "own_recovery"', r.text);
         r = await a2.call('sigelo_send', { to: 'bob', text: 'after the recovery' });
@@ -554,6 +575,7 @@ ${code.slice(60)}
   ok(/no contact tools: they need sigelo-contact, .*: sigelo-contact is incomplete: .*sigelo-test-package-not-installed/.test(c10.stderr()), 'and one line on stderr names the package', c10.stderr().slice(0, 300));
 } finally {
   keeper.close();
+  if (keyAgent) { keyAgent.kill(); await new Promise((r) => keyAgent.once('exit', r)); }
   rmSync(dir, { recursive: true, force: true });
 }
 console.log(fails ? `${fails} FAILED, ${passes} passed` : `ALL PASS (${passes} checks)`);

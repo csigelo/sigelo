@@ -20,8 +20,12 @@ Node 22.18 or newer; tested on 24. On 23.0 to 23.5, `npm run build`, then `node 
 Identity file: `$SIGELO_IDENTITY`, else
 `~/.config/moadim/sigelo.local.json` (0600 in a 0700 directory; Windows ignores modes).
 
-**Key form:** `secret` is the key, hex, as always; `"provider": "file"` beside it (`init` under
-`SIGELO_KEY_PROVIDER=file`) changes nothing. Other forms are refused by name until built.
+**Key form:** `init` seals the key under one the OS keychain holds (macOS, Windows, Linux
+`secret-tool`); else `secret` is hex, `"provider": "file"`, with a warning.
+`SIGELO_KEY_PROVIDER=file|keychain|agent` chooses ([KEYCHAIN.md](KEYCHAIN.md)).
+
+**Key agent:** `keys to-agent` moves the key into [`sigelo-key-agent`](../../keyagent/README.md);
+the file then says `{"provider":"agent"}` and signatures go over `SIGELO_KEY_AGENT`'s socket.
 
 ## Commands
 
@@ -36,7 +40,8 @@ Identity file: `$SIGELO_IDENTITY`, else
 | `adopt <json\|file\|-> [--force]` | a keeper's `POST /delegate` answer, checked |
 | `adopt --rotation <json\|file\|->` | apply `sigelo-offline recover`'s output; written only if it verifies |
 | `whoami` | DID, genesis, chain |
-| `keys status` | key form, whether it signs; never the key. `wrap`, `unwrap`, `to-agent`: not built (K2, K3) |
+| `keys status`, `wrap`, `unwrap --plain` | key form, whether it signs (never the key); to keychain; back to hex |
+| `keys to-agent` | the key into the key agent; the file keeps none |
 | `sign-challenge <json\|->` | sign only `{ v, typ: "challenge", did, ctx, nonce }` naming our DID |
 | `add-issuer <genesis json\|->` | store a world's genesis |
 | `add-attestation <{body,sig} json\|->` | store a world's attestation (one per `iss` + `ctx`) |

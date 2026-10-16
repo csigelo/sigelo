@@ -1,0 +1,32 @@
+{
+  "name": "sigelo-key-agent",
+  "version": "0.1.7",
+  "private": true,
+  "description": "Local key agent for sigelo identities: holds the identity key and signs known sigelo bodies over a 0700 Unix socket (named pipe on Windows), as ssh-agent does",
+  "homepage": "https://sigelo.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csigelo/sigelo.git",
+    "directory": "keyagent"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sigelo-key-agent": "agent.mjs"
+  },
+  "files": [
+    "agent.mjs",
+    "protocol.mjs",
+    "policy.mjs",
+    "store.mjs",
+    "units",
+    "fixtures/protocol-v0.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node test.mjs"
+  }
+}

@@ -5,8 +5,12 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Key agent (K3):** `sigelo-key-agent` (`keyagent/`) holds identity keys and signs known bodies over a
+  0700 socket; `keys to-agent`, `SIGELO_KEY_AGENT`; no rotation through `sign`.
 - **Key providers (K1):** every signature goes through one signer (`sigelo-agent-keys.ts`);
   `keys status`; an optional `"provider": "file"` in the identity file; other forms refused by name. Files, DIDs unchanged.
+- **Key providers (K2):** `init` seals the key under the OS keychain where one answers, else a plain file and a warning;
+  `keys wrap`, `keys unwrap --plain`. ChaCha20-Poly1305, vector in `fixtures/wrap-v1.json`.
 - **Pro gift codes:** `sigelo-agent pro redeem PRO-K7F3-Q9ZP` makes the operator's pool Pro for 1, 6 or 12 months
   (`POST /gift`); the relay holds each code's hash only, totals on `/stats`.
 

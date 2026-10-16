@@ -1,0 +1,18 @@
+{
+  "v": "sigelo-wrap/1",
+  "about": "design/key-providers.md §3. ct = ChaCha20-Poly1305 (RFC 8439 §2.8) of seed under file_key and nonce, AAD the UTF-8 bytes of aad: \"sigelo-wrap/1\" LF, then the head genesis key string. ct = 32-byte ciphertext then the 16-byte tag, base64url without padding. Seed and genesis: test-vectors.json seeds.agent and vectors.genesis.doc. file_key and nonce are the RFC 8439 §2.8.2 example values; in use both are random.",
+  "file_key": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+  "nonce": "070000004041424344454647",
+  "seed": "0000000000000000000000000000000000000000000000000000000000000001",
+  "head_key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+  "aad": "sigelo-wrap/1\nz6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+  "ct": "n3vpXQH9QLoV4o_7NoEKrsHAiD8JAW7e3YrQh1WCA6SnJp_IHDyAcfxsKVn-vqs8",
+  "secret": {
+    "provider": "keychain",
+    "v": "sigelo-wrap/1",
+    "store": "secret-service",
+    "account": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+    "nonce": "BwAAAEBBQkNERUZH",
+    "ct": "n3vpXQH9QLoV4o_7NoEKrsHAiD8JAW7e3YrQh1WCA6SnJp_IHDyAcfxsKVn-vqs8"
+  }
+}

@@ -1324,30 +1324,30 @@ function canonicalize(value) {
 }
 function parse(text) {
   let i = 0;
-  const fail2 = (msg) => {
+  const fail3 = (msg) => {
     throw new JcsError(`${msg} at offset ${i}`);
   };
   const ws = () => {
     while (i < text.length && " 	\n\r".includes(text[i])) i++;
   };
-  const lit = (word, value) => text.startsWith(word, i) ? (i += word.length, value) : fail2(`unexpected token ${JSON.stringify(text[i] ?? "<end>")}`);
+  const lit = (word, value) => text.startsWith(word, i) ? (i += word.length, value) : fail3(`unexpected token ${JSON.stringify(text[i] ?? "<end>")}`);
   function string() {
-    if (text[i] !== '"') fail2("expected string");
+    if (text[i] !== '"') fail3("expected string");
     const start = i++;
     let s = "";
     for (; ; ) {
       const c = text[i];
-      if (c === void 0) fail2("unterminated string");
+      if (c === void 0) fail3("unterminated string");
       if (c === '"') {
         const nc = noncharIn(s);
         if (nc !== void 0) {
           i = start;
-          fail2(`noncharacter ${nc} in string`);
+          fail3(`noncharacter ${nc} in string`);
         }
         return i++, s;
       }
       if (c !== "\\") {
-        if (c.charCodeAt(0) < 32) fail2("unescaped control character in string");
+        if (c.charCodeAt(0) < 32) fail3("unescaped control character in string");
         s += c;
         i++;
         continue;
@@ -1355,13 +1355,13 @@ function parse(text) {
       const e = text[++i];
       if (e === "u") {
         const hex2 = text.slice(i + 1, i + 5);
-        if (!/^[0-9a-fA-F]{4}$/.test(hex2)) fail2("bad \\u escape");
+        if (!/^[0-9a-fA-F]{4}$/.test(hex2)) fail3("bad \\u escape");
         s += String.fromCharCode(parseInt(hex2, 16));
         i += 5;
       } else if (e !== void 0 && e in ESC) {
         s += ESC[e];
         i++;
-      } else fail2(`bad escape \\${e ?? "<end>"}`);
+      } else fail3(`bad escape \\${e ?? "<end>"}`);
     }
   }
   function num() {
@@ -1373,18 +1373,18 @@ function parse(text) {
     };
     if (text[i] === "-") i++;
     if (text[i] === "0") i++;
-    else if (!(text[i] >= "1" && text[i] <= "9" && digits())) fail2("expected number");
+    else if (!(text[i] >= "1" && text[i] <= "9" && digits())) fail3("expected number");
     let integer = true;
     if (text[i] === ".") {
       i++;
       integer = false;
-      if (!digits()) fail2("expected digit");
+      if (!digits()) fail3("expected digit");
     }
     if (text[i] === "e" || text[i] === "E") {
       i++;
       integer = false;
       if (text[i] === "+" || text[i] === "-") i++;
-      if (!digits()) fail2("expected digit");
+      if (!digits()) fail3("expected digit");
     }
     const lex = text.slice(start, i);
     const n = Number(lex);
@@ -1393,11 +1393,11 @@ function parse(text) {
   function key(o) {
     ws();
     const k = string();
-    if (o.seen.has(k)) fail2(`duplicate key ${JSON.stringify(k)}`);
-    if (k === "__proto__") fail2('forbidden key "__proto__"');
+    if (o.seen.has(k)) fail3(`duplicate key ${JSON.stringify(k)}`);
+    if (k === "__proto__") fail3('forbidden key "__proto__"');
     o.seen.add(k);
     ws();
-    if (text[i] !== ":") fail2('expected ":"');
+    if (text[i] !== ":") fail3('expected ":"');
     i++;
     o.k = k;
   }
@@ -1407,7 +1407,7 @@ function parse(text) {
     const c = text[i];
     let v;
     if (c === "{" || c === "[") {
-      if (stack.length === MAX_DEPTH) fail2(`nesting deeper than ${MAX_DEPTH}`);
+      if (stack.length === MAX_DEPTH) fail3(`nesting deeper than ${MAX_DEPTH}`);
       i++;
       ws();
       if (text[i] === (c === "{" ? "}" : "]")) {
@@ -1427,19 +1427,19 @@ function parse(text) {
     else if (c === "t") v = lit("true", true);
     else if (c === "f") v = lit("false", false);
     else if (c === "n") v = lit("null", null);
-    else fail2(c === void 0 ? "unexpected end of input" : `unexpected token ${JSON.stringify(c)}`);
+    else fail3(c === void 0 ? "unexpected end of input" : `unexpected token ${JSON.stringify(c)}`);
     for (; ; ) {
       const top = stack[stack.length - 1];
       if (top === void 0) {
         ws();
-        if (i !== text.length) fail2("trailing content");
+        if (i !== text.length) fail3("trailing content");
         return v;
       }
       if ("arr" in top) top.arr.push(v);
       else Object.defineProperty(top.obj, top.k, { value: v, enumerable: true, writable: true, configurable: true });
       ws();
       const d = text[i];
-      if (d !== "," && d !== ("arr" in top ? "]" : "}")) fail2("arr" in top ? 'expected "," or "]"' : 'expected "," or "}"');
+      if (d !== "," && d !== ("arr" in top ? "]" : "}")) fail3("arr" in top ? 'expected "," or "]"' : 'expected "," or "}"');
       i++;
       if (d === ",") {
         if (!("arr" in top)) key(top);
@@ -2433,151 +2433,6 @@ var init_sigelo_agent = __esm({
   }
 });
 
-// adapters/moadim/sigelo-agent-keychain.ts
-function wrap(_seed, _s, _kc) {
-  return unbuilt("wrap");
-}
-function unwrap(_s, _kc) {
-  return unbuilt("unwrap");
-}
-var unbuilt;
-var init_sigelo_agent_keychain = __esm({
-  "adapters/moadim/sigelo-agent-keychain.ts"() {
-    "use strict";
-    init_sigelo();
-    unbuilt = (what) => {
-      throw Object.assign(new SigeloError(`key_provider_unbuilt: ${what}: the keychain provider arrives with milestone K2; use a plain file (provider "file") until then`), { check: "key_provider_unbuilt" });
-    };
-  }
-});
-
-// adapters/moadim/sigelo-agent-keyclient.ts
-function request(_req, _env = process.env) {
-  throw Object.assign(new SigeloError('key_provider_unbuilt: the key agent arrives with milestone K3; use a plain file (provider "file") until then'), { check: "key_provider_unbuilt" });
-}
-var init_sigelo_agent_keyclient = __esm({
-  "adapters/moadim/sigelo-agent-keyclient.ts"() {
-    "use strict";
-    init_sigelo();
-  }
-});
-
-// adapters/moadim/sigelo-agent-keys.ts
-var sigelo_agent_keys_exports = {};
-__export(sigelo_agent_keys_exports, {
-  USAGE: () => USAGE,
-  fail: () => fail,
-  init: () => init2,
-  main: () => main,
-  providerOf: () => providerOf,
-  rotate: () => rotate2,
-  signChallenge: () => signChallenge2,
-  signer: () => signer
-});
-import { existsSync as existsSync2 } from "node:fs";
-function fail(code, detail) {
-  throw Object.assign(new SigeloError(`${code}: ${detail}`), { check: code });
-}
-function providerOf(s) {
-  const p = typeof s.secret === "string" ? "file" : s.secret?.provider;
-  if (typeof p !== "string" || !PROVIDERS.includes(p)) fail("key_provider_unknown", `the identity file's secret names provider ${JSON.stringify(p)}; this sigelo-agent knows ${PROVIDERS.join(", ")}`);
-  if (s.provider !== void 0 && s.provider !== p) fail("key_provider_unknown", `the identity file says provider ${JSON.stringify(s.provider)} but holds a ${p} key`);
-  return p;
-}
-function using(path, s, env2) {
-  const p = providerOf(s);
-  if (env2["SIGELO_KEY_AGENT"] && p !== "agent") fail("key_agent_mismatch", `SIGELO_KEY_AGENT is set but ${path} still holds the key (${p}): move it (sigelo-agent keys to-agent), or unset SIGELO_KEY_AGENT`);
-  return p;
-}
-function withSeed(s, fn) {
-  const seed = providerOf(s) === "file" ? secretOf(s) : unwrap(s);
-  try {
-    return fn(seed);
-  } finally {
-    seed.fill(0);
-  }
-}
-function signer(path, s, env2 = process.env) {
-  const p = using(path, s, env2), g = head(s), d = did(g);
-  const raw = p === "agent" ? (body) => request({ op: "sign", did: d, body }, env2)["sig"] : (body) => withSeed(s, (seed) => sign2(seed, body));
-  return { did: d, key: g.key, sign: (body) => {
-    const sig = raw(body);
-    if (typeof sig !== "string" || !verifySig(g.key, body, sig)) fail("key_mismatch", `the ${p} key of ${path} does not sign for ${d}, its head genesis key: the file or its key store was changed`);
-    return sig;
-  } };
-}
-function init2(path, recovery, provider, env2 = process.env) {
-  if (provider !== void 0 && !PROVIDERS.includes(provider)) fail("key_provider_unknown", `SIGELO_KEY_PROVIDER is ${JSON.stringify(provider)}; use ${PROVIDERS.join(", ")}`);
-  if (provider === void 0) return init(path, recovery);
-  if (existsSync2(path)) throw new SigeloError(`init: ${path} already holds an identity — refusing to overwrite it`);
-  let store;
-  if (provider === "agent") {
-    const genesis = request({ op: "create", recovery }, env2)["genesis"];
-    store = { v: VERSION, provider, secret: { provider }, genesis, rotations: [], attestations: [], issuers: [] };
-  } else {
-    const id2 = keygen({ recovery });
-    store = { v: VERSION, provider, secret: "", genesis: id2.genesis, rotations: [], attestations: [], issuers: [] };
-    try {
-      store.secret = provider === "file" ? Buffer.from(id2.secret).toString("hex") : wrap(id2.secret, store);
-    } finally {
-      id2.secret.fill(0);
-    }
-  }
-  save(path, store);
-  return store;
-}
-function rotate2(path, s, now, env2 = process.env) {
-  const d = s.derived;
-  if (d) throw new SigeloError(`rotate: this identity comes from your 25 words (${d.path}): a random key would not. Its next key is rotation ${d.n + 1} of them: sigelo-agent keeper --from-words --rotate-me`);
-  const p = using(path, s, env2);
-  if (p === "file") return rotateKey(s, now);
-  if (p === "agent") {
-    s.rotations.push(request({ op: "rotate", did: did(head(s)), to: "software" }, env2)["rotation"]);
-    return s;
-  }
-  const cur = head(s), fresh = keygen({ recovery: cur.recovery });
-  try {
-    s.rotations.push(withSeed(s, (secret) => rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: "voluntary", secret })));
-    s.secret = wrap(fresh.secret, s);
-  } finally {
-    fresh.secret.fill(0);
-  }
-  return s;
-}
-function main(args, path, s, env2 = process.env) {
-  const verb = args[0];
-  if (verb === "status" || verb === "show") {
-    const p = providerOf(s), d = did(head(s));
-    let code = "ok";
-    try {
-      signer(path, s, env2).sign({ v: "sigelo-keys/0", typ: "probe", did: d });
-    } catch (e) {
-      code = e.check ?? "error";
-    }
-    return { did: d, provider: p, file: path, key_agent: env2["SIGELO_KEY_AGENT"] ?? null, signs: code === "ok", ...code !== "ok" && { code } };
-  }
-  if (verb === "wrap" || verb === "unwrap") fail("key_provider_unbuilt", `keys ${verb}: keychain wrapping arrives with milestone K2; the identity file is unchanged`);
-  if (verb === "to-agent") fail("key_provider_unbuilt", "keys to-agent: the key agent arrives with milestone K3; the identity file is unchanged");
-  return null;
-}
-var PROVIDERS, signChallenge2, USAGE;
-var init_sigelo_agent_keys = __esm({
-  "adapters/moadim/sigelo-agent-keys.ts"() {
-    "use strict";
-    init_sigelo();
-    init_sigelo_agent();
-    init_sigelo_agent_keychain();
-    init_sigelo_agent_keyclient();
-    PROVIDERS = ["file", "keychain", "agent"];
-    signChallenge2 = (path, s, body, env2 = process.env) => ({ did: challengeDid(s, body), sig: signer(path, s, env2).sign(body) });
-    USAGE = `Where the identity key rests (identity file field "provider"):
-  keys status                            the key's form, and whether it signs for the current DID;
-                                         never prints key material
-  keys wrap | keys unwrap --plain        file <-> OS keychain: milestone K2, not built yet
-  keys to-agent                          move the key into sigelo-key-agent: milestone K3, not built yet`;
-  }
-});
-
 // adapters/moadim/sigelo-agent-monero.ts
 var sigelo_agent_monero_exports = {};
 __export(sigelo_agent_monero_exports, {
@@ -2741,6 +2596,400 @@ var init_sigelo_agent_monero = __esm({
   }
 });
 
+// adapters/moadim/sigelo-agent-keychain.ts
+import { spawnSync } from "node:child_process";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "node:crypto";
+function seal(key, nonce, plain, ad) {
+  const c = createCipheriv("chacha20-poly1305", key, nonce, { authTagLength: 16 }).setAAD(ad, { plaintextLength: plain.length });
+  return Buffer.concat([c.update(plain), c.final(), c.getAuthTag()]);
+}
+function open(key, nonce, ct, ad, what) {
+  const d = createDecipheriv("chacha20-poly1305", key, nonce, { authTagLength: 16 }).setAAD(ad, { plaintextLength: ct.length - 16 });
+  d.setAuthTag(ct.subarray(ct.length - 16));
+  const out = d.update(ct.subarray(0, ct.length - 16));
+  try {
+    d.final();
+    return out;
+  } catch {
+    out.fill(0);
+    return refuse("wrap_auth", `the sealed seed does not open with ${what}: another item, or the identity file was changed`);
+  }
+}
+function systemKeychain(env2 = process.env, run, platform = process.platform) {
+  if (injected && !run) return injected;
+  const by = { darwin: ["macos", macos], win32: ["dpapi", dpapi] };
+  const [name, make] = by[platform] ?? ["secret-service", secretService];
+  return make(caller(name, run ?? spawnRun, env2));
+}
+function answers(kc) {
+  try {
+    kc.read("sigelo-probe").fill(0);
+    return true;
+  } catch (e) {
+    return e.check !== "keychain_unavailable";
+  }
+}
+function wrap(seed, s, kc = systemKeychain()) {
+  const prev = typeof s.secret === "object" ? s.secret : void 0;
+  if (prev && prev.store !== kc.store) missing(kc.store, prev.account);
+  const account = prev?.account ?? did(s.genesis), old = prev ? kc.read(acct(account), prev.dpapi) : held(kc, account), key = old ?? randomBytes4(32);
+  let out;
+  try {
+    const dpapiBlob = prev ? prev.dpapi : old ? void 0 : kc.write(account, key), nonce = randomBytes4(12);
+    out = { provider: "keychain", v: V, store: kc.store, account, nonce: b64u(nonce), ct: b64u(seal(key, nonce, seed, aad(s))), ...dpapiBlob && { dpapi: dpapiBlob } };
+  } finally {
+    key.fill(0);
+  }
+  if (!prev) unwrap({ ...s, secret: out }, kc).fill(0);
+  return out;
+}
+function unwrap(s, kc = systemKeychain()) {
+  const w = s.secret;
+  if (w.v !== V) refuse("key_provider_unknown", `keychain secret ${JSON.stringify(w.v)}; this sigelo-agent reads ${V}`);
+  if (w.store !== kc.store) missing(kc.store, String(w.account));
+  const nonce = unb64u(w.nonce, 12, "nonce"), ct = unb64u(w.ct, 48, "ct"), key = kc.read(acct(w.account), w.dpapi);
+  let seed;
+  try {
+    seed = open(key, nonce, ct, aad(s), `the ${kc.store} item for ${w.account}`);
+  } finally {
+    key.fill(0);
+  }
+  if (!verifySig(head(s).key, PROBE, sign2(seed, PROBE))) {
+    seed.fill(0);
+    refuse("key_mismatch", `the unwrapped seed does not sign for ${did(head(s))}`);
+  }
+  return seed;
+}
+function move(path, verb, plain, kc = systemKeychain()) {
+  if (verb === "unwrap" && !plain) refuse("usage", "keys unwrap writes the key back to the file as plain hex: say so with --plain");
+  return withLock(path, () => {
+    const s = load(path), from = typeof s.secret === "string" ? s.provider ?? "file" : s.secret.provider, want = verb === "wrap" ? "file" : "keychain";
+    if (from !== want) refuse("key_provider_required", `keys ${verb} moves a ${want} key; ${path} holds a ${from} key`);
+    let removed = true;
+    if (verb === "wrap") {
+      const seed = secretOf(s);
+      try {
+        s.secret = wrap(seed, s, kc);
+      } finally {
+        seed.fill(0);
+      }
+      save(path, Object.assign(s, { provider: "keychain" }));
+    } else {
+      const w = s.secret, seed = unwrap(s, kc);
+      try {
+        s.secret = Buffer.from(seed).toString("hex");
+      } finally {
+        seed.fill(0);
+      }
+      save(path, Object.assign(s, { provider: "file" }));
+      try {
+        kc.remove(w.account);
+      } catch {
+        removed = false;
+      }
+    }
+    return { did: did(head(s)), provider: s.provider, store: kc.store, file: path, ...!removed && { item_left: `${kc.store}: service sigelo, account ${did(s.genesis)}` } };
+  });
+}
+var V, SERVICE, PROBE, refuse, b64u, unb64u, acct, aad, spawnRun, caller, missing, fileKey, macos, secretService, ps, PROTECT, UNPROTECT, dpapi, injected, held;
+var init_sigelo_agent_keychain = __esm({
+  "adapters/moadim/sigelo-agent-keychain.ts"() {
+    "use strict";
+    init_sigelo();
+    init_sigelo_agent();
+    init_sigelo_agent_monero();
+    V = "sigelo-wrap/1";
+    SERVICE = "sigelo";
+    PROBE = { v: "sigelo-wrap/1", typ: "probe" };
+    refuse = (code, detail) => {
+      throw Object.assign(new SigeloError(`${code}: ${detail}`), { check: code });
+    };
+    b64u = (b) => Buffer.from(b).toString("base64url");
+    unb64u = (s, n, what, code = "wrap_auth") => {
+      const b = typeof s === "string" && /^[A-Za-z0-9_-]+$/.test(s) ? Buffer.from(s, "base64url") : Buffer.alloc(0);
+      return b.length === n ? b : refuse(code, `${what} is not ${n} bytes of base64url`);
+    };
+    acct = (a) => typeof a === "string" && /^[A-Za-z0-9:._-]{1,200}$/.test(a) ? a : refuse("wrap_auth", `account ${JSON.stringify(a)} is not a DID`);
+    aad = (s) => Buffer.from(`${V}
+${head(s).key}`, "utf8");
+    spawnRun = (cmd, args, input2, env2) => {
+      const r = spawnSync(cmd, args, { input: input2, env: env2, encoding: "utf8", timeout: 6e4, windowsHide: true });
+      return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", ...r.error && { error: r.error } };
+    };
+    caller = (store, run, env2) => (cmd, args, input2 = "") => {
+      const r = run(cmd, args, input2, env2);
+      const down = (why = r.stderr.trim().split("\n")[0] || `exit ${r.status}`) => refuse("keychain_unavailable", `${store}: ${cmd} ${args[0]}: ${why}`);
+      if (r.error || r.status === null) down(r.error?.message ?? "no answer");
+      return { ...r, down };
+    };
+    missing = (store, a) => refuse("keychain_missing", `${store} holds no sigelo item for ${a}: wrapped on another machine or user? unwrap it there (keys unwrap --plain)`);
+    fileKey = (t) => unb64u(t.trim(), 32, "the store's item");
+    macos = (x) => ({
+      store: "macos",
+      read: (a) => {
+        const r = x("security", ["find-generic-password", "-s", SERVICE, "-a", acct(a), "-w"]);
+        if (r.status === 44) missing("macos", a);
+        return r.status === 0 ? fileKey(r.stdout) : r.down();
+      },
+      // `security -i` reads the command from stdin: the key never reaches argv. -T "": no app is trusted to read it without asking (§6).
+      write: (a, k) => {
+        const r = x("security", ["-i"], `add-generic-password -U -s ${SERVICE} -a ${acct(a)} -T "" -w ${b64u(k)}
+`);
+        return r.status === 0 && !/error/i.test(r.stderr) ? void 0 : r.down();
+      },
+      remove: (a) => {
+        const r = x("security", ["delete-generic-password", "-s", SERVICE, "-a", acct(a)]);
+        if (r.status !== 0 && r.status !== 44) r.down();
+      }
+    });
+    secretService = (x) => ({
+      store: "secret-service",
+      read: (a) => {
+        const r = x("secret-tool", ["lookup", "service", SERVICE, "account", acct(a)]);
+        if (r.status === 1 && !r.stderr.trim()) missing("secret-service", a);
+        return r.status === 0 ? fileKey(r.stdout) : r.down();
+      },
+      write: (a, k) => {
+        const r = x("secret-tool", ["store", "--label=sigelo key wrap", "service", SERVICE, "account", acct(a)], b64u(k));
+        return r.status === 0 ? void 0 : r.down();
+      },
+      remove: (a) => {
+        const r = x("secret-tool", ["clear", "service", SERVICE, "account", acct(a)]);
+        if (r.stderr.trim()) r.down();
+      }
+    });
+    ps = (script) => ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
+    PROTECT = "$k=[Console]::In.ReadToEnd(); [Console]::Out.Write((ConvertTo-SecureString $k -AsPlainText -Force | ConvertFrom-SecureString))";
+    UNPROTECT = "$b=[Console]::In.ReadToEnd().Trim(); if(-not $b){exit 3}; try{$s=ConvertTo-SecureString $b -ErrorAction Stop}catch{exit 4}; $M=[Runtime.InteropServices.Marshal]; $p=$M::SecureStringToBSTR($s); try{[Console]::Out.Write($M::PtrToStringBSTR($p))}finally{$M::ZeroFreeBSTR($p)}";
+    dpapi = (x) => ({
+      store: "dpapi",
+      read: (a, blob) => {
+        const r = x("powershell", ps(UNPROTECT), blob ? Buffer.from(blob, "base64").toString("hex") : "");
+        if (r.status === 3 || r.status === 4) missing("dpapi", a);
+        return r.status === 0 ? fileKey(r.stdout) : r.down();
+      },
+      write: (_a2, k) => {
+        const r = x("powershell", ps(PROTECT), b64u(k));
+        return r.status === 0 && /^[0-9a-f]+$/i.test(r.stdout.trim()) ? Buffer.from(r.stdout.trim(), "hex").toString("base64") : r.down();
+      },
+      remove: () => {
+      }
+      // the blob lives in the file: dropping the field removes it
+    });
+    held = (kc, a) => {
+      if (kc.store === "dpapi") return void 0;
+      try {
+        return kc.read(acct(a));
+      } catch (e) {
+        if (e.check === "keychain_missing") return void 0;
+        throw e;
+      }
+    };
+  }
+});
+
+// adapters/moadim/sigelo-agent-keyclient.ts
+import { tmpdir, userInfo } from "node:os";
+import { join as join2 } from "node:path";
+import { MessageChannel, receiveMessageOnPort, Worker } from "node:worker_threads";
+function socketPath(env2 = process.env, platform = process.platform) {
+  if (env2["SIGELO_KEY_AGENT"]) return env2["SIGELO_KEY_AGENT"];
+  if (platform === "win32") return `\\\\.\\pipe\\sigelo-agent-${userInfo().username}`;
+  if (platform === "darwin") return join2(env2["TMPDIR"] || tmpdir(), "sigelo", "agent.sock");
+  return env2["XDG_RUNTIME_DIR"] ? join2(env2["XDG_RUNTIME_DIR"], "sigelo", "agent.sock") : join2(tmpdir(), `sigelo-${userInfo().uid}`, "agent.sock");
+}
+function channel() {
+  if (chan) return chan;
+  const flag = new Int32Array(new SharedArrayBuffer(4)), { port1, port2 } = new MessageChannel();
+  new Worker(WORKER, { eval: true, workerData: { port: port2, flag }, transferList: [port2] }).unref();
+  port1.unref();
+  return chan = { port: port1, flag };
+}
+function request(req, env2 = process.env) {
+  const path = socketPath(env2), c = channel(), id2 = ++seq, until = Date.now() + REPLY_MS + CONNECT_MS + 1e3;
+  let m;
+  Atomics.store(c.flag, 0, 0);
+  c.port.postMessage({ id: id2, path, line: JSON.stringify(req) + "\n" });
+  while (!m && Date.now() < until) {
+    Atomics.wait(c.flag, 0, 0, until - Date.now());
+    Atomics.store(c.flag, 0, 0);
+    for (let x; x = receiveMessageOnPort(c.port)?.message; ) if (x.id === id2) m = x;
+  }
+  if (!m) return fail("key_agent_timeout", `the key agent at ${path} did not answer`);
+  if (m.code) return fail(m.code, `the key agent at ${path} (SIGELO_KEY_AGENT): ${m.detail}; start it with sigelo-key-agent start`);
+  let r;
+  try {
+    r = parseBytes(m.bytes);
+  } catch {
+  }
+  if (r?.["ok"] === true) return r;
+  return fail(typeof r?.["code"] === "string" ? r["code"] : "key_agent_reply", `${typeof r?.["detail"] === "string" ? r["detail"] : "not a reply of protocol sigelo-key-agent/0"} (key agent at ${path})`);
+}
+var CONNECT_MS, REPLY_MS, fail, WORKER, chan, seq;
+var init_sigelo_agent_keyclient = __esm({
+  "adapters/moadim/sigelo-agent-keyclient.ts"() {
+    "use strict";
+    init_sigelo();
+    CONNECT_MS = 2e3;
+    REPLY_MS = 6e4;
+    fail = (code, detail) => {
+      throw Object.assign(new SigeloError(`${code}: ${detail}`), { check: code });
+    };
+    WORKER = `const net = require('node:net'), { workerData: { port, flag } } = require('node:worker_threads');
+port.on('message', ({ id, path, line }) => {
+  let got = Buffer.alloc(0), done = false, timer;
+  const end = (m) => { if (done) return; done = true; clearTimeout(timer); s.destroy(); port.postMessage({ id, ...m }); Atomics.store(flag, 0, 1); Atomics.notify(flag, 0); };
+  const s = net.connect(path, () => { clearTimeout(timer); timer = setTimeout(() => end({ code: 'key_agent_timeout', detail: 'no reply within ${REPLY_MS / 1e3} s' }), ${REPLY_MS}); s.write(line); });
+  timer = setTimeout(() => end({ code: 'key_agent_unavailable', detail: 'nothing answers within ${CONNECT_MS / 1e3} s' }), ${CONNECT_MS});
+  s.on('data', (d) => { got = Buffer.concat([got, d]); const i = got.indexOf(10); if (i >= 0) end({ bytes: got.subarray(0, i) }); });
+  s.on('error', (e) => end({ code: 'key_agent_unavailable', detail: e.code || e.message }));
+  s.on('close', () => end({ code: 'key_agent_unavailable', detail: 'the agent closed the connection without a reply' }));
+});`;
+    seq = 0;
+  }
+});
+
+// adapters/moadim/sigelo-agent-keys.ts
+var sigelo_agent_keys_exports = {};
+__export(sigelo_agent_keys_exports, {
+  USAGE: () => USAGE,
+  commit: () => commit,
+  fail: () => fail2,
+  init: () => init2,
+  main: () => main,
+  providerOf: () => providerOf,
+  rotate: () => rotate2,
+  signChallenge: () => signChallenge2,
+  signer: () => signer
+});
+import { existsSync as existsSync2 } from "node:fs";
+function fail2(code, detail) {
+  throw Object.assign(new SigeloError(`${code}: ${detail}`), { check: code });
+}
+function providerOf(s) {
+  const p = typeof s.secret === "string" ? "file" : s.secret?.provider;
+  if (typeof p !== "string" || !PROVIDERS.includes(p)) fail2("key_provider_unknown", `the identity file's secret names provider ${JSON.stringify(p)}; this sigelo-agent knows ${PROVIDERS.join(", ")}`);
+  if (s.provider !== void 0 && s.provider !== p) fail2("key_provider_unknown", `the identity file says provider ${JSON.stringify(s.provider)} but holds a ${p} key`);
+  return p;
+}
+function using(path, s, env2) {
+  const p = providerOf(s);
+  if (env2["SIGELO_KEY_AGENT"] && p !== "agent") fail2("key_agent_mismatch", `SIGELO_KEY_AGENT is set but ${path} still holds the key (${p}): move it (sigelo-agent keys to-agent), or unset SIGELO_KEY_AGENT`);
+  return p;
+}
+function withSeed(s, fn) {
+  const seed = providerOf(s) === "file" ? secretOf(s) : unwrap(s);
+  try {
+    return fn(seed);
+  } finally {
+    seed.fill(0);
+  }
+}
+function signer(path, s, env2 = process.env) {
+  const p = using(path, s, env2), g = head(s), d = did(g);
+  const raw = p === "agent" ? (body) => request({ op: "sign", did: d, body }, env2)["sig"] : (body) => withSeed(s, (seed) => sign2(seed, body));
+  return { did: d, key: g.key, sign: (body) => {
+    const sig = raw(body);
+    if (typeof sig !== "string" || !verifySig(g.key, body, sig)) fail2("key_mismatch", `the ${p} key of ${path} does not sign for ${d}, its head genesis key: the file or its key store was changed`);
+    return sig;
+  } };
+}
+function init2(path, recovery, provider, env2 = process.env) {
+  if (provider !== void 0 && !PROVIDERS.includes(provider)) fail2("key_provider_unknown", `SIGELO_KEY_PROVIDER is ${JSON.stringify(provider)}; use ${PROVIDERS.join(", ")}`);
+  if (existsSync2(path)) throw new SigeloError(`init: ${path} already holds an identity — refusing to overwrite it`);
+  provider ??= answers(systemKeychain(env2)) ? "keychain" : (console.error('sigelo-agent: no OS keychain answers here, so the key is a plain file ("provider": "file"); see `sigelo-agent keys wrap`'), "file");
+  let store;
+  if (provider === "agent") {
+    const genesis = request({ op: "create", recovery }, env2)["genesis"];
+    store = { v: VERSION, provider, secret: { provider }, genesis, rotations: [], attestations: [], issuers: [] };
+  } else {
+    const id2 = keygen({ recovery });
+    store = { v: VERSION, provider, secret: "", genesis: id2.genesis, rotations: [], attestations: [], issuers: [] };
+    try {
+      store.secret = provider === "file" ? Buffer.from(id2.secret).toString("hex") : wrap(id2.secret, store, systemKeychain(env2));
+    } finally {
+      id2.secret.fill(0);
+    }
+  }
+  save(path, store);
+  return store;
+}
+function rotate2(path, s, now, env2 = process.env) {
+  const d = s.derived;
+  if (d) throw new SigeloError(`rotate: this identity comes from your 25 words (${d.path}): a random key would not. Its next key is rotation ${d.n + 1} of them: sigelo-agent keeper --from-words --rotate-me`);
+  const p = using(path, s, env2);
+  if (p === "file") return rotateKey(s, now);
+  if (p === "agent") {
+    s.rotations.push(request({ op: "rotate", did: did(head(s)), to: "software" }, env2)["rotation"]);
+    return s;
+  }
+  const cur = head(s), fresh = keygen({ recovery: cur.recovery });
+  try {
+    s.rotations.push(withSeed(s, (secret) => rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: "voluntary", secret })));
+    s.secret = wrap(fresh.secret, s);
+  } finally {
+    fresh.secret.fill(0);
+  }
+  return s;
+}
+function main(args, path, s, env2 = process.env) {
+  const verb = args[0];
+  if (verb === "status" || verb === "show") {
+    const p = providerOf(s), d = did(head(s));
+    let code = "ok";
+    try {
+      if (p !== "agent") signer(path, s, env2).sign({ v: "sigelo-keys/0", typ: "probe", did: d });
+      else if (request({ op: "pubkey", did: d }, env2)["key"] !== head(s).key) fail2("key_mismatch", d);
+    } catch (e) {
+      code = e.check ?? "error";
+    }
+    return { did: d, provider: p, file: path, key_agent: env2["SIGELO_KEY_AGENT"] ?? null, signs: code === "ok", ...code !== "ok" && { code } };
+  }
+  if (verb === "wrap" || verb === "unwrap") return move(path, verb, args.includes("--plain"), systemKeychain(env2));
+  if (verb === "to-agent") return toAgent(path, env2);
+  return null;
+}
+var PROVIDERS, signChallenge2, commit, toAgent, USAGE;
+var init_sigelo_agent_keys = __esm({
+  "adapters/moadim/sigelo-agent-keys.ts"() {
+    "use strict";
+    init_sigelo();
+    init_sigelo_agent();
+    init_sigelo_agent_monero();
+    init_sigelo_agent_keychain();
+    init_sigelo_agent_keyclient();
+    PROVIDERS = ["file", "keychain", "agent"];
+    signChallenge2 = (path, s, body, env2 = process.env) => ({ did: challengeDid(s, body), sig: signer(path, s, env2).sign(body) });
+    commit = (s, env2 = process.env) => {
+      try {
+        if (providerOf(s) === "agent") request({ op: "commit", did: did(head(s)) }, env2);
+      } catch {
+      }
+    };
+    toAgent = (path, env2) => withLock(path, () => {
+      const s = load(path), p = providerOf(s), g = head(s), d = did(g);
+      if (p === "agent") fail2("key_provider_required", `keys to-agent: ${path} holds no key: the agent has it already`);
+      withSeed(s, (seed) => {
+        try {
+          request({ op: "import", genesis: g, seed: Buffer.from(seed).toString("hex") }, env2);
+        } catch (e) {
+          if (e.check !== "key_held") throw e;
+        }
+      });
+      if (request({ op: "pubkey", did: d }, env2)["key"] !== g.key) fail2("key_mismatch", `the key agent holds another key for ${d}; ${path} is unchanged`);
+      save(path, Object.assign(s, { provider: "agent", secret: { provider: "agent" } }));
+      return { did: d, provider: "agent", file: path, key_agent: socketPath(env2), note: "older copies of the file (backups, sync folders) still hold the key: rotate if one may have leaked" };
+    });
+    USAGE = `Where the identity key rests (identity file field "provider"):
+  keys status                            the key's form, and whether it signs for the current DID;
+                                         never prints key material
+  keys wrap | keys unwrap --plain        seal the key under a key in the OS store (macOS keychain,
+                                         Secret Service, DPAPI) | write it back as plain hex
+  keys to-agent                          move the key into sigelo-key-agent (SIGELO_KEY_AGENT, else its
+                                         default socket); the file then says {"provider":"agent"}`;
+  }
+});
+
 // adapters/moadim/sigelo-agent-adopt.ts
 var sigelo_agent_adopt_exports = {};
 __export(sigelo_agent_adopt_exports, {
@@ -2780,8 +3029,9 @@ function applyRotation(s, input2, now) {
   if (at < chain.length - 1 && r.body.reason !== "recovery") throw new SigeloError(`adopt --rotation: a voluntary rotation from ${r.body.id}, which is not the head, is a fork (SPEC §7.3) — only a recovery rotation may start from an earlier node`);
   const dropped = s.rotations.length - at;
   const kept = new Set(chain.slice(0, at + 1).concat(r.body.next));
+  const { provider: _held, ...plain } = s;
   const next = {
-    ...s,
+    ...plain,
     secret,
     rotations: s.rotations.slice(0, at).concat(r),
     attestations: s.attestations.filter((a) => kept.has(a.body.sub)),
@@ -2825,7 +3075,7 @@ var init_contact = __esm({
 
 // integrations/mcp/server.mjs
 import { existsSync as existsSync4, readdirSync } from "node:fs";
-import { basename as basename2, dirname as dirname2, join as join2, sep } from "node:path";
+import { basename as basename2, dirname as dirname2, join as join3, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 var INSTALLED = fileURLToPath(import.meta.url).split(sep).includes("node_modules");
 var { did: did2, parse: parse2, parseBytes: parseBytes2, verify: verify3, SigeloError: SigeloError2 } = await Promise.resolve().then(() => (init_sigelo(), sigelo_exports));
@@ -2861,7 +3111,7 @@ var refusal = (check, message, cause) => Object.assign(new SigeloError2(message,
 var pathOf = (name) => {
   if (name === void 0 || name === "") return base;
   if (typeof name !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) throw refusal("usage", `identity: ${JSON.stringify(name)} is not a profile name; it must match [a-z0-9][a-z0-9_-]{0,63}, e.g. "researcher-1"`);
-  return join2(dirname2(base), `sigelo.${name}.local.json`);
+  return join3(dirname2(base), `sigelo.${name}.local.json`);
 };
 var profiles = () => {
   try {
@@ -2965,6 +3215,7 @@ var HANDLERS = {
       const r = keys.rotate(path, st, nowS());
       return { store: r, result: r };
     });
+    keys.commit(s);
     return { did: did2(id.head(s)), chain: id.chainOf(s), next: "ask each world to reissue its attestation to the new DID" };
   }
 };

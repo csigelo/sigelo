@@ -41,13 +41,14 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | `routine.local.toml` `[env]` | **2** | the hookup |
 | `sigelo-agent.ts` | **75** | identity store, `init`, `signChallenge`, `addIssuer`, `addAttestation`, `bundle`, `rotateKey` |
 | **identity total** | **77** | |
-| `sigelo-agent-keys.ts`, `-keychain.ts`, `-keyclient.ts` | 86, 10, 4 | every signature ([key providers](../../design/key-providers.md)); stubs until K2, K3 |
+| `sigelo-agent-keys.ts`, `-keychain.ts`, `-keyclient.ts` | 98, 122, 49 | every signature ([key providers](../../design/key-providers.md)); OS keychain; key agent client |
+| `keyagent/` `agent.mjs`, `protocol.mjs`, `policy.mjs`, `store.mjs` | 163, 40, 27, 69 | the key agent, its own package |
 | `sigelo-agent-monero.ts` | 134 | the Monero verbs, apart: an identity-only install reads 77 |
-| `sigelo-agent-adopt.ts` | 55 | `adopt`, `forgetIssuer`, outside the core |
-| `sigelo-agent-contact.ts`, `-watch.ts` | 425, 160 | contact verbs, `watch`, recovery verbs' argv, output escaping |
+| `sigelo-agent-adopt.ts` | 56 | `adopt`, `forgetIssuer`, outside the core |
+| `sigelo-agent-contact.ts`, `-watch.ts` | 437, 160 | contact verbs, `watch`, recovery verbs' argv, output escaping |
 | `sigelo-agent-enrol.ts` | 413 | `keeper`, `enrol`, `init --enrol`: your identity and worker i from your seed ([ENROL.md](ENROL.md)) |
 | `sigelo-agent-recovery.ts` | 54 | `recoveryKey`, `recoverWith`, `eraseRequest` |
-| `sigelo-agent-ui.ts` | 489 | `ui` page ([UI-API.md](UI-API.md)) |
+| `sigelo-agent-ui.ts` | 490 | `ui` page ([UI-API.md](UI-API.md)) |
 | `node-check.ts` | 9 | Node.js 22.18+, checked first |
 | `cli.ts`, `test-*.ts` | — | argv/output and tests, not argued |
 

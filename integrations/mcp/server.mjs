@@ -141,7 +141,7 @@ const HANDLERS = {
     return { bundle, did: result.did, ...(notes.length && { notes }) };
   },
   sigelo_verify: ({ bundle, now }) => verify(input(bundle, 'bundle'), Number.isSafeInteger(now) ? now : nowS()),
-  sigelo_rotate: (_, path) => { loadStore(path); const s = update(path, (st) => { const r = keys.rotate(path, st, nowS()); return { store: r, result: r }; }); return { did: did(id.head(s)), chain: id.chainOf(s), next: 'ask each world to reissue its attestation to the new DID' }; },
+  sigelo_rotate: (_, path) => { loadStore(path); const s = update(path, (st) => { const r = keys.rotate(path, st, nowS()); return { store: r, result: r }; }); keys.commit(s); return { did: did(id.head(s)), chain: id.chainOf(s), next: 'ask each world to reissue its attestation to the new DID' }; },
   sigelo_wallet_balance: () => wallet(['balance']),
   sigelo_wallet_receive: ({ note }) => wallet(['receive', ...(note ? [String(note)] : [])]),
   sigelo_wallet_pay: ({ to, amount, purpose, ref }) => wallet(['pay', String(to ?? ''), String(amount ?? ''), String(purpose ?? ''), ...(ref ? ['--ref', String(ref)] : [])]),

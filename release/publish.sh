@@ -419,6 +419,7 @@ else
     run "moadim adapter" sh -c "cd '$t/adapters/moadim' && npm ci --ignore-scripts --silent && npm test > '$work/moadim.out' 2>&1; for f in identity contact ui watch enrol; do grep -q \"^ALL PASS test-\$f.ts \" '$work/moadim.out' || exit 1; done; tail -1 '$work/moadim.out' | grep -q '^ALL PASS'"
     run "spend keeper" sh -c "cd '$t/spend' && npm ci --ignore-scripts --silent && npm test 2>&1 | grep -q '^ALL PASS'"
     run "mcp server" sh -c "cd '$t/integrations/mcp' && npm test 2>&1 | grep -q 'ALL PASS'"
+    run "key agent: fixture, socket, sidecar, contact and MCP suites through it" sh -c "cd '$t/keyagent' && node test.mjs 2>&1 | tail -1 | grep -q '^ALL PASS keyagent'"
     run "schemas" sh -c "cd '$t' && node schema/check.mjs | grep -q '^ALL PASS'"
     run "word budgets" sh -c "cd '$t' && node docs-test/check-budgets.mjs | grep -q '^ALL PASS'"
     run "pairing fixtures" sh -c "cd '$t' && node adapters/hermes/pairing/gen.mjs --check >/dev/null"

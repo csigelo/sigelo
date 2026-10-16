@@ -3,9 +3,9 @@
   "README.zh-CN.md": 620,
   "ts/README.md": 910,
   "go/README.md": 470,
-  "adapters/moadim/README.md": 550,
+  "adapters/moadim/README.md": 640,
   "adapters/1f916/INTEGRATION.md": 700,
-  "adapters/moadim/INTEGRATION.md": 680,
+  "adapters/moadim/INTEGRATION.md": 750,
   "adapters/hermes/INTEGRATION.md": 280,
   "adapters/hermes/pairing/README.md": 650,
   "accept/README.md": 480,
@@ -23,5 +23,6 @@
   "contact/README.md": 600,
   "design/key-providers.md": 5800,
   "integrations/JOIN.md": 400,
-  "integrations/a2a/README.md": 400
+  "integrations/a2a/README.md": 400,
+  "keyagent/README.md": 400
 }

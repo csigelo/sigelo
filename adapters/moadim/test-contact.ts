@@ -11,6 +11,23 @@ import { commitmentOf, keygen, verify, verifySig, type Genesis, type Rotation } 
 import { load } from './sigelo-agent.ts';
 import { CLI, ROOT, done, now, ok, posixModes, tmpHome, type Bundle } from './test-helpers.ts';
 
+// SIGELO_TEST_KEY_AGENT=1 (keyagent/test.mjs runs it so): the same checks with every key in a
+// sigelo-key-agent on a temp socket; init writes {"provider":"agent"}, a recovered key is moved
+// back into the agent (keys to-agent), and the stolen copy below cannot fork through it.
+const KA: Record<string, string> = {};
+let keyAgent: import('node:child_process').ChildProcess | undefined, agentHome = '';
+if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
+  const { request } = await import('./sigelo-agent-keyclient.ts');
+  agentHome = tmpHome('agent');
+  const run = join(agentHome, 'run');
+  mkdirSync(run, { mode: 0o700 });
+  const sock = process.platform === 'win32' ? `\\\\.\\pipe\\sigelo-contact-test-${process.pid}` : join(run, 'agent.sock');
+  keyAgent = spawn(process.execPath, [join(ROOT, 'keyagent', 'agent.mjs'), 'start', '--socket', sock, '--store', join(run, 'store'), '--store-plain'], { stdio: 'ignore' });
+  for (let i = 0; i < 200; i++) { try { request({ op: 'list' }, { SIGELO_KEY_AGENT: sock }); break; } catch { await new Promise((r) => setTimeout(r, 50)); } }
+  Object.assign(KA, { SIGELO_KEY_AGENT: sock, SIGELO_KEY_PROVIDER: 'agent' });
+  console.log(`key agent mode: every key in sigelo-key-agent at ${sock}`);
+}
+
 // ── the recovery key from the CLI alone; re_pair; exit codes ───────────────────────────────
 // recovery-key prints the public key alone and writes the secret 0600, never over a file, so
 // `init --recovery "$(sigelo-agent recovery-key --out f)"` needs nothing else installed; recover signs
@@ -19,7 +36,7 @@ import { CLI, ROOT, done, now, ok, posixModes, tmpHome, type Bundle } from './te
 // naming the check on stderr, with its JSON on stdout.
 {
   const H = tmpHome('rk');
-  const env = { PATH: process.env['PATH'], HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }) };
+  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }), ...KA };
   const cli = (...args: string[]) => spawnSync('node', [CLI, ...args], { env, cwd: H, encoding: 'utf8' });
   const inv = cli('invite', '--name', 'x');
   ok('invite with no identity: exit 2, "no identity: run sigelo-agent init", no raw ENOENT', inv.status === 2 && inv.stderr.includes('no identity: run sigelo-agent init') && !inv.stderr.includes('ENOENT'), inv.stderr);
@@ -105,6 +122,7 @@ import { CLI, ROOT, done, now, ok, posixModes, tmpHome, type Bundle } from './te
   ok('recover refuses a key that is not this identity\'s, and writes nothing',
     wrong.status === 1 && wrong.stderr.includes('not this identity\'s recovery key') && (JSON.parse(cli('whoami').stdout) as { chain: string[] }).chain.length === 1, wrong.stderr);
   const rec = cli('recover', '--recovery-key', 'recovery.key'), after = JSON.parse(rec.stdout || '{}') as { did: string; chain: string[] };
+  if (keyAgent) ok('key agent mode: the recovered key moves to the agent', cli('keys', 'to-agent').status === 0);
   const rb = JSON.parse(cli('bundle').stdout) as Bundle & { rotations: Rotation[] };
   ok('recover: a recovery rotation from the last honest node (the genesis here), signed by that key; the bundle verifies to the new DID; told to pair again',
     rec.status === 0 && JSON.stringify(after.chain) === JSON.stringify([g.did, after.did]) && rb.rotations[0]?.body.reason === 'recovery'
@@ -180,7 +198,7 @@ import { CLI, ROOT, done, now, ok, posixModes, tmpHome, type Bundle } from './te
   const srv = createServer((_, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, invite: long })); });
   await new Promise<void>((r) => { srv.listen(0, '127.0.0.1', () => r()); });
   const port = (srv.address() as { port: number }).port;
-  const env = { PATH: process.env['PATH'], HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: `http://127.0.0.1:${port}` } }) };
+  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: `http://127.0.0.1:${port}` } }), ...KA };
   const cli = (...args: string[]) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
     const c = spawn('node', [CLI, ...args], { env, cwd: H });
     let stdout = '', stderr = '';
@@ -211,26 +229,36 @@ import { CLI, ROOT, done, now, ok, posixModes, tmpHome, type Bundle } from './te
 // a relay or contact holding the thief's rotation follows the recovery.
 {
   const H = tmpHome('fork');
-  const env = { PATH: process.env['PATH'], HOME: H };
+  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, ...KA };
   const cli = (...args: string[]) => spawnSync('node', [CLI, ...args], { env, cwd: H, encoding: 'utf8' });
   const g = JSON.parse(cli('init', '--recovery', cli('recovery-key').stdout.trim()).stdout || '{}') as { did: string };
   const idFile = join(H, '.config', 'moadim', 'sigelo.local.json'), stolen = join(H, 'stolen', 'sigelo.local.json');
   mkdirSync(join(H, 'stolen'), { mode: 0o700 });
   copyFileSync(idFile, stolen);
   cli('rotate');
-  spawnSync('node', [CLI, 'rotate'], { env: { ...env, SIGELO_IDENTITY: stolen }, encoding: 'utf8' });
-  const thiefRotation = load(stolen).rotations[0]!;
-  // What the relay verifies: the rotations it keeps (the thief's) merged into the bundle sent.
-  const atRelay = (b: Bundle): string => { try { return verify({ ...b, rotations: [thiefRotation, ...b.rotations] } as never, now + 5).did; } catch (e) { return (e as Error).message; } };
-  const forked = atRelay(JSON.parse(cli('bundle').stdout || '{}') as Bundle);
-  ok('the owner\'s unseen rotation and the thief\'s from the same node: a fork wherever the thief\'s is held', /fork/.test(forked), forked);
-  const rec = cli('recover', '--recovery-key', 'recovery.key'), after = JSON.parse(rec.stdout || '{}') as { did: string; chain: string[] };
-  const rb = JSON.parse(cli('bundle').stdout || '{}') as Bundle & { rotations: Rotation[] };
-  const merged = atRelay(rb);
-  ok('recover after it: from the genesis, the owner\'s rotation dropped and said so; with the thief\'s merged in, the chain follows the recovery',
-    rec.status === 0 && JSON.stringify(after.chain) === JSON.stringify([g.did, after.did]) && rb.rotations.length === 1 && rb.rotations[0]?.body.id === g.did
-      && merged === after.did && rec.stderr.includes('The 1 rotation(s) after'), `${merged}; ${rec.stderr}`);
-  rmSync(H, { recursive: true, force: true });
+  const thief = spawnSync('node', [CLI, 'rotate'], { env: { ...env, SIGELO_IDENTITY: stolen }, encoding: 'utf8' });
+  if (keyAgent) {
+    // The copy holds no key, and the agent rotates only from the current DID: no fork to recover from.
+    ok('key agent mode: the stolen copy\'s rotate is refused (policy_did), nothing written', thief.status === 1 && thief.stderr.includes('policy_did') && load(stolen).rotations.length === 0, thief.stderr);
+    const rec = cli('recover', '--recovery-key', 'recovery.key'), after = JSON.parse(rec.stdout || '{}') as { did: string; chain: string[] };
+    ok('key agent mode: recover from the genesis still works, then the key moves to the agent', rec.status === 0 && after.chain?.[0] === g.did && cli('keys', 'to-agent').status === 0
+      && cli('sign-challenge', JSON.stringify({ v: 'sigelo/0', typ: 'challenge', did: after.did, ctx: 'k3.test', nonce: 'zVtK1aCTZHfuBYaDyoFv5VS' })).status === 0, rec.stderr);
+    rmSync(H, { recursive: true, force: true });
+  } else {
+    const thiefRotation = load(stolen).rotations[0]!;
+    // What the relay verifies: the rotations it keeps (the thief's) merged into the bundle sent.
+    const atRelay = (b: Bundle): string => { try { return verify({ ...b, rotations: [thiefRotation, ...b.rotations] } as never, now + 5).did; } catch (e) { return (e as Error).message; } };
+    const forked = atRelay(JSON.parse(cli('bundle').stdout || '{}') as Bundle);
+    ok('the owner\'s unseen rotation and the thief\'s from the same node: a fork wherever the thief\'s is held', /fork/.test(forked), forked);
+    const rec = cli('recover', '--recovery-key', 'recovery.key'), after = JSON.parse(rec.stdout || '{}') as { did: string; chain: string[] };
+    const rb = JSON.parse(cli('bundle').stdout || '{}') as Bundle & { rotations: Rotation[] };
+    const merged = atRelay(rb);
+    ok('recover after it: from the genesis, the owner\'s rotation dropped and said so; with the thief\'s merged in, the chain follows the recovery',
+      rec.status === 0 && JSON.stringify(after.chain) === JSON.stringify([g.did, after.did]) && rb.rotations.length === 1 && rb.rotations[0]?.body.id === g.did
+        && merged === after.did && rec.stderr.includes('The 1 rotation(s) after'), `${merged}; ${rec.stderr}`);
+    rmSync(H, { recursive: true, force: true });
+  }
 }
 
+if (keyAgent) { keyAgent.kill(); await new Promise((r) => keyAgent!.once('exit', r)); rmSync(agentHome, { recursive: true, force: true }); }
 done(import.meta.filename);

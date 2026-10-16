@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+# sigelo-key-agent as a systemd user unit (design/key-providers.md §4.4). Written by
+# `sigelo-key-agent install-unit`, which fills in ExecStart; nothing installs or starts it by
+# default. Then: systemctl --user enable --now sigelo-key-agent
+[Unit]
+Description=sigelo key agent: holds sigelo identity keys, signs known sigelo bodies over a 0700 socket
+
+[Service]
+ExecStart=@ARGS@
+UMask=0077
+Restart=on-failure
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
