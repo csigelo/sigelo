@@ -234,8 +234,8 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
 
 // ---- /changelog: terse, impersonal --------------------------------------------------------------
 // The reader pays per token: every bullet in the file (continuation lines joined) is ≤ 220
-// characters, and nowhere a story, a feedback quote or a first person. The why lives
-// in the internal JOURNAL.md.
+// characters, and nowhere a story, a feedback quote or a first person.
+//
 {
   const cl = readFileSync(join(DIST, 'changelog.md'), 'utf8');
   const bullets = cl.split(/\n(?=- |\S)/).filter((b) => b.startsWith('- ')).map((b) => b.replace(/\s*\n\s*/g, ' ').trim());

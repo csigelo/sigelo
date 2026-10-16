@@ -3,7 +3,7 @@
 
 The marketplace file is `../.claude-plugin/marketplace.json` (`csigelo`); it lists:
 
-- `sigelo/`: the identity MCP server and skill (no wallet). Directory submission: `adoption/claude-directory.md`.
+- `sigelo/`: the identity MCP server and skill (no wallet).
 - `sigelo-gate/`: the provenance gate's hooks, **prototype, installed disabled**.
 
 Each plugin is copied alone into the user's plugin cache, so its code is one generated file:

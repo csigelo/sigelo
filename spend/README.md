@@ -90,7 +90,7 @@ lock). The HTTP keeper (`serve`) and `sigelo-wallet` may run anywhere Node runs,
 outside Linux is unsupported. The rest of sigelo — `ts/` (the library and `sigelo-offline`),
 `go/`, `adapters/moadim/`, `integrations/mcp/` — is cross-platform: Linux, macOS, Windows. On
 Windows this package's test suite SKIPs its unit and file-mode checks, saying so, and runs the
-rest (policy, gate, receipts, licence, the fake wallet). See docs-test/PORTABILITY.md.
+rest (policy, gate, receipts, licence, the fake wallet).
 
 ### Free and paid
 
@@ -171,7 +171,7 @@ licence issued to a registered keeper whose `seats` cover one more; the new keep
 
 **What this is and is not.** The vendor DID is `DEV_VENDOR_DID` in `licence.ts` — a
 placeholder minted for the constant with its key discarded, so no licence verifies until **D1**
-(ROADMAP §7), when the Owner mints the vendor identity offline and sets it there.
+when the vendor identity is minted offline and set there.
 `SIGELO_VENDOR_DID` overrides it (the tests use a test vendor whose key lives in `test.ts` only,
 which is never packed, and the stagenet soak one minted into its own soak directory: soak/README.md, "The paid tier, end to end"). The check sits in MIT code on a host the operator controls: it marks the
 commercial terms; it is not DRM and hides nothing from the operator, who holds every key. A vendor

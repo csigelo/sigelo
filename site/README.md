@@ -97,7 +97,7 @@ have served them with `; charset=utf-8`, unlike `test/run.mjs`. Neither file has
 `nginx -t` or `apachectl configtest` (no server here); the helper runs `nginx -t` before
 every reload and keeps the old file if it fails.
 
-### GitHub Pages (ROADMAP §3's recommended primary: no IP linkage to the maintainer)
+### GitHub Pages (alternative primary)
 
 Publish `site/dist/` with the official Pages action (`actions/upload-pages-artifact` +
 `actions/deploy-pages`, pinned by SHA like the rest of CI), custom domain `sigelo.io` in the
@@ -110,7 +110,7 @@ sets its own short `max-age`). Which content type Pages sends for `.md` was not 
 
 ## Before deploying (decision D1)
 
-Decided 2026-10-01: the account **`csigelo`** (the pseudonym is the handle; no other name),
+Decided 2026-10-01: the account **`csigelo`** (no other name),
 the domain **sigelo.io**, the general e-mail **the contact address**. Still open: a display name
 beyond the handle (if any), the `security@sigelo.io` mailbox and its age recipient, the vendor
 DID ceremony, prices and hours, hosting and DNS.
@@ -126,7 +126,7 @@ DID ceremony, prices and hours, hosting and DNS.
    recipient is published, and a `Contact:` line for GitHub private vulnerability reporting once
    the repository exists. The site's security.txt `Expires` is the commit date plus a year: rebuild
    and redeploy before it lapses.
-3. **Author** — not used on the site. To show the pseudonym (JSON-LD `author`, the footer),
+3. **Author** — not used on the site. To show an author (JSON-LD `author`, the footer),
    add `csigelo` in `build.mjs`; nothing else needs it.
 4. **Go module path** — `github.com/csigelo/sigelo/go` in the public export (release/publish.sh
    `SIGELO_GO_MODULE`); the private tree keeps `module sigelo`. The verify page's `go install`

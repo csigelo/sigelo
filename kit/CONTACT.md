@@ -27,4 +27,4 @@ If anyone claiming to be the facilitator asks for any of the above, it is not th
 - Price: `<price>` per facilitated drill; the ceremony `<price>`.
 - Response during an incident (case (b), live): `<hours>`, best effort. The runbook works without it.
 
-The pseudonym (`csigelo`) and the channel were decided at ROADMAP D1 (2026-10-01). The remaining placeholders are filled when the facilitator's identity is minted and the prices and hours are set.
+The channel was fixed on 2026-10-01. The remaining placeholders are filled when the facilitator's identity is minted and the prices and hours are set.

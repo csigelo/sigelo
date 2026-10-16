@@ -20,7 +20,7 @@ The ceremony makes the one root `S` of your installation: 25 words (a Monero 25-
 | Role | Who | Sees the screen while the words are shown | Touches paper or media |
 |---|---|---|---|
 | Owner | {{people.owner}} | **yes — the only one** | yes |
-| Witness | {{people.witness}} | no: faces away until the Owner says "clear" | signs the record only |
+| Witness | {{people.witness}} | no: faces away until the Owner calls "clear" | signs the record only |
 | Facilitator (optional, contracted) | {{people.facilitator}} | **never** — may attend by voice only | **never** |
 
 The facilitator reads this procedure aloud, keeps the time and writes the record. The facilitator never sees the screen, the paper or a medium, and never receives a file. No camera, no screen sharing, no remote session on the ceremony host: `--human` keeps the words out of stdout and any agent's pipe, not out of a screen recorder or a terminal that logs (MONERO.md §4.6).

@@ -397,7 +397,7 @@ fails, and the last ten installed configs are in `/var/backups/sigelo-nginx/`.
 ## Privacy
 
 - **No raw client addresses are kept.** The access log's first field is the address cut to its
-  network (IPv4 /24 → `a.b.c.0`, IPv6 /48 → `a:b:c::`): a pseudonym shared by everyone on that
+  network (IPv4 /24 → `a.b.c.0`, IPv6 /48 → `a:b:c::`): a stand-in shared by everyone on that
   network, coarse enough to name no one, fine enough for GoAccess to estimate unique visitors
   (with the user agent and the day). Chosen over a salted hash, which nginx cannot compute without
   a scripting module the allowlist would have to admit, and over no address at all, which makes

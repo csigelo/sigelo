@@ -26,11 +26,11 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    (`GOPROXY=direct` if the proxy lags), then `sigelo-verify --conformance test-vectors.json` on the
    released file; `gh release download` one binary and check it against SHA256SUMS.
 7. Read the tag's conformance.yml run
-   (`api.github.com/repos/csigelo/sigelo/actions/runs?event=push&branch=v<v>`) and record it in
-   docs-test/PORTABILITY.md.
+   (`api.github.com/repos/csigelo/sigelo/actions/runs?event=push&branch=v<v>`) and record it.
+
 
 8. npm: the tag push runs `.github/workflows/npm-publish.yml` (OIDC;
-   adoption/npm-trusted-publishing.md): it rebuilds the tag, waits ≤ 30 min for step 5, publishes
+   trusted publishing): it rebuilds the tag, waits ≤ 30 min for step 5, publishes
    only if SHA256SUMS equals the release's; idempotent. Re-run:
    `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`. No trusted publisher (a new
    package): before step 4's push, `npm publish $S/a/<pkg>-<v>.tgz` (temporary-userconfig token;

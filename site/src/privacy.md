@@ -6,7 +6,7 @@ description: What sigelo.io and its world service log and for how long (truncate
 
 What this site and its services keep about you, and for how long.
 
-sigelo.io is run by its pseudonymous maintainer, csigelo, on a server in the EU.
+sigelo.io is run by csigelo on a server in the EU.
 
 - **Logs:** your address cut to its network (/24, /48), user agent, `Accept` header and path, kept 30 days. No cookies, no scripts, no third parties.
 - **World service:** keeps the signed statements it issues (public by design once their holder presents them) and single-use nonces for five minutes; no client address.

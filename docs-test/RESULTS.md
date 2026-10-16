@@ -1,8 +1,8 @@
 # Comprehension measurements
 
 What fresh agents did with the docs alone, as far as it was measured. Rounds 1–2 were run by
-the maintainer's harness outside the repo and recorded only in commit messages and ROADMAP
-R3; this file is their first record in the tree. **Every run so far used Claude models.**
+a harness outside the repo and recorded only in commit messages; this file is their first record
+in the tree. **Every run so far used Claude models.**
 
 | Date | Round | Task | Model | Result | Docs at | Led to |
 |---|---|---|---|---|---|---|

@@ -21,7 +21,7 @@ ignores aliases: with `bin/` on `PATH`, the commands below work typed, pasted in
 after a `cd`, and from any program that runs `sigelo-agent`.
 
 **Install without a clone.** After the first publish — not yet: the npm account and the Go
-module path are an Owner decision (ROADMAP D1) — each implementation is one command:
+module path are fixed at the first release — each implementation is one command:
 
 ```sh
 npx sigelo-agent init --no-recovery              # agent-side CLI (or --recovery <z6Mk…|sha256:…>, step 0)
