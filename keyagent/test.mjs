@@ -331,7 +331,7 @@ process.kill(process.pid, 'SIGKILL');   // between rotate and its write
 {
   const f = { rest: ['--allow-payments', '--idle', '600'] };
   const lu = unit('linux', f, { XDG_RUNTIME_DIR: '/run/user/1000', XDG_CONFIG_HOME: '/cfg' }), mu = unit('darwin', f, { TMPDIR: '/var/folders/x/T/' });
-  ok(lu.path === '/cfg/systemd/user/sigelo-key-agent.service' && lu.text.includes(`ExecStart="${process.execPath}" "${AGENT.replace(/\\/g, '\\\\')}" "start" "--socket" "/run/user/1000/sigelo/agent.sock" "--allow-payments" "--idle" "600"`) && /UMask=0077/.test(lu.text) && !lu.text.includes('@ARGS@'), 'install-unit, Linux: a user unit starting the agent on the default socket', lu.text);
+  ok(lu.path === '/cfg/systemd/user/sigelo-key-agent.service' && lu.text.includes(`ExecStart="${process.execPath.replace(/\\/g, '\\\\')}" "${AGENT.replace(/\\/g, '\\\\')}" "start" "--socket" "/run/user/1000/sigelo/agent.sock" "--allow-payments" "--idle" "600"`) && /UMask=0077/.test(lu.text) && !lu.text.includes('@ARGS@'), 'install-unit, Linux: a user unit starting the agent on the default socket', lu.text);
   ok(mu.path.endsWith('Library/LaunchAgents/io.sigelo.key-agent.plist') && mu.text.includes('<string>/var/folders/x/T/sigelo/agent.sock</string>') && mu.text.includes('<string>--allow-payments</string>') && !mu.text.includes('@ARGS@'), 'install-unit, macOS: a LaunchAgent with the same arguments', mu.text);
   ok(/on Windows start the agent by hand/.test(code(() => unit('win32', f)) ?? ''), 'install-unit on Windows: refused, by hand');
   if (process.platform === 'linux') {

@@ -14,7 +14,7 @@ review so far was by Claude models. Since then (to 2026-09-29): the wire changed
 been in a stagenet soak since 2026-09-23 with four incidents; every review is still by Claude
 models.
 
-## 0. Done and open, as of 2026-10-16 (master `9f130f5`)
+## 0. Done and open, as of 2026-10-16 (master `3da4e32`+)
 
 Kept so what is accomplished can be checked against the sections below. Commits name the merge.
 
@@ -28,7 +28,7 @@ Kept so what is accomplished can be checked against the sections below. Commits 
 | Key providers K4 FIDO2, K5 OpenPGP card, K6 docs | §7 | open; K4/K5 wait for the Nitrokey (Owner) |
 | Adapters: A2A operator attestation, PAP identity method | §10 | **done** 2026-10-16 (`1a4267f`, `4b1043b`) |
 | Adapter: Web Bot Auth (RFC 9421, Cloudflare's vectors reproduced) | §10 | **done** 2026-10-16 (`42b21c1`) |
-| sigelo.ai: About and Examples pages, one footer language control, languages with hreflang (8 live, 22 more building) | sites | **live** 2026-10-16 (relay `4024d55`); sigelo.io references linked (`80bfa9b`) |
+| sigelo.ai: About and Examples pages, one footer language control, 30 languages with hreflang, Arabic right-to-left, stale translations fall back to English | sites | **live** 2026-10-16 (relay `38b755b`); sigelo.io references linked (`80bfa9b`) |
 | Company relays: closed relay, relay per invite, 12-char codes, registry | §9 | decided, not started |
 | v0.2.0 wire freeze | VERSIONING §1 | on or after 2026-10-29 (Owner says go) |
 | Non-Claude docs-test (step 5), external review (step 11), paper + DID method (step 9), Mailcow (§8.3) | §6 | open; each waits on an Owner item (commercial/OWNER-TODO.md) |
