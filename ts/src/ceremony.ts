@@ -91,7 +91,7 @@ export function openTty(path = '/dev/tty'): Tty | string {
 /** The --human screen. "Vault only, never a hot wallet" is ROADMAP §2's one line. */
 function humanScreen(words: string, vault: string): string {
   const w = words.split(' ');
-  const rows = [0, 5, 10, 15, 20].map((i) => w.slice(i, i + 5).map((x, k) => `${String(i + k + 1).padStart(2)} ${x.padEnd(12)}`).join('').trimEnd());
+  const rows = [0, 5, 10, 15, 20].map((i) => w.slice(i, i + 5).map((x, k) => `${String(i + k + 1).padStart(2)} ${x.padEnd(13)}`).join('').trimEnd());
   return ['', '*** sigelo root: the 25 words, shown once, on this terminal only ***',
     'Write them on paper now. They are the vault\'s Monero seed and the root of every identity,',
     'keeper and wallet below it; backup.age holds the same words for the Owner\'s age key.',
