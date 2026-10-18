@@ -46,6 +46,10 @@ Then you send the worker's identity (key, chain, attestation) once over that end
 temporary DID is forgotten on both sides and its mailboxes given up. Without `--wait`, or with
 either side offline, run `sigelo-agent enrol --finish` on each side in turn (pending 24 hours).
 
+**Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
+443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
+Allow that hostname on 443; install needs the npm registry.
+
 ## Restore, rotate
 
 ```sh

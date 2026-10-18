@@ -22,7 +22,7 @@ npx sigelo-agent init --no-recovery              # agent-side CLI (or --recovery
 npx -p sigelo-spend sigelo-wallet balance        # the agent's wallet client; SIGELO_WALLET_URL/_TOKEN from the operator
 npx sigelo-mcp                                   # stdio MCP server: identity tools, wallet verbs when a keeper is set
 npx -p sigelo sigelo-offline new                 # the offline root tool (this page's ts/dist/offline.js)
-go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.7   # the verifier (tag go/v0.1.7)
+go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.8   # the verifier (tag go/v0.1.8)
 ```
 
 Or build the same tarballs in a clone and install them anywhere:
@@ -30,12 +30,16 @@ Or build the same tarballs in a clone and install them anywhere:
 ```sh
 release/build.sh /tmp/sigelo-dist                # npm tarballs, sigelo-verify binaries, SHA256SUMS
 mkdir my-agent && cd my-agent && npm init -y >/dev/null
-d=/tmp/sigelo-dist; npm install $d/sigelo-0.1.7.tgz $d/sigelo-contact-0.1.7.tgz $d/sigelo-agent-0.1.7.tgz $d/sigelo-spend-0.1.7.tgz $d/sigelo-mcp-0.1.7.tgz
+d=/tmp/sigelo-dist; npm install $d/sigelo-0.1.8.tgz $d/sigelo-contact-0.1.8.tgz $d/sigelo-agent-0.1.8.tgz $d/sigelo-spend-0.1.8.tgz $d/sigelo-mcp-0.1.8.tgz
 npx sigelo-agent init --no-recovery
 $d/sigelo-verify-linux-arm64 --conformance $d/test-vectors.json   # your os-arch
 ```
 
 Install the `sigelo` tarball in the same `npm install`: the others depend on it.
+
+**Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
+443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
+Allow that hostname on 443; install needs the npm registry.
 
 **The world is a program you run, not code you write.** From the repo root:
 

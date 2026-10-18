@@ -54,10 +54,10 @@
 // lock; the started one reconnects with backoff). Beside one, use inbox and send with local: the
 // state file only (sigelo-agent's one-owner rule, adapters/moadim/WATCH.md).
 //
-// Transport (transport, or SIGELO_RELAY_TRANSPORT): "mqtts" (the default), MQTT over TLS on 8883;
-// "wss", MQTT over WebSocket on 443 (wss://host/mqtt, or relay.json's endpoints.mqtt_ws on the same
-// host); "auto", 8883 for PROBE_MS, then 443 for the rest of the process. For networks that let only
-// HTTPS out. Both are TLS. HTTPS_PROXY (or https_proxy), an http:// proxy, carries the HTTPS calls
+// Transport (transport, or SIGELO_RELAY_TRANSPORT): "auto" (the default), 8883 for PROBE_MS, then
+// 443 for the rest of the process, so a network that lets only HTTPS out needs no setting; "mqtts",
+// MQTT over TLS on 8883 only; "wss", MQTT over WebSocket on 443 only (wss://host/mqtt, or
+// relay.json's endpoints.mqtt_ws on the same host), which skips the probe. Both are TLS. HTTPS_PROXY (or https_proxy), an http:// proxy, carries the HTTPS calls
 // and the WebSocket dial by HTTP CONNECT, unless NO_PROXY (or no_proxy) names the host (proxyFor);
 // MQTT on 8883 never goes through it. Certificates are checked as without a proxy, so
 // NODE_EXTRA_CA_CERTS works the same. The event { type: "transport" } says when auto fell back.
@@ -895,7 +895,7 @@ export class Carrier {
   #mineMemo = null; #clocks = new Map();
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
-    onEvent, keep, backoff = BACKOFF, tick = TICK, files, transport = 'mqtts' }) {
+    onEvent, keep, backoff = BACKOFF, tick = TICK, files, transport = 'auto' }) {
     if (!TRANSPORTS.includes(transport)) throw new TypeError(`transport: ${TRANSPORTS.join(', ')}`);
     this.transport = transport;
     if (typeof identity !== 'function') throw new TypeError('identity: a function returning { sign, bundle }');

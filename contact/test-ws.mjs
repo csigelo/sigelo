@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // The carrier (carrier.mjs) over MQTT over WebSocket, against a loopback relay (relay/server.mjs)
 // whose only listener is its HTTP port: two agents pair, write and read with 8883 unreachable,
-// with transport "wss" and with "auto", which falls back once and keeps to WebSocket for the rest
-// of the process. Then, in a child process with only an HTTP CONNECT proxy to reach the relay
+// with transport "wss" and with "auto" (the default), which falls back once, after the probe when
+// 8883 is silent, and keeps to WebSocket for the rest of the process. Then, in a child process with only an HTTP CONNECT proxy to reach the relay
 // (HTTPS_PROXY; the relay's name resolves nowhere, its certificate trusted by NODE_EXTRA_CA_CERTS),
 // the same through a stand-in nginx with TLS, whose relay.json names the WebSocket endpoint. Also:
 // endpointOf and proxyFor (NO_PROXY), SIGELO_RELAY_TRANSPORT, and a message refused because the
@@ -92,8 +92,8 @@ const checkOf = (f) => { try { f(); return 'accepted'; } catch (e) { return e.ch
   ok(via('https://x', { https_proxy: 'proxy:8080' }) === 'proxy:8080' && via('https://x', { HTTPS_PROXY: 'http://p:1', NO_PROXY: '*' }) === null && via('https://x', {}) === null,
     'proxyFor: https_proxy too, a bare host:port as http://; NO_PROXY=* and no proxy at all: none');
   ok(checkOf(() => proxyFor('https://x', { HTTPS_PROXY: 'socks5://p:1080' })) === 'connect', 'proxyFor: a proxy that is not http:// is refused by name');
-  ok(optionsFromEnv({ SIGELO_RELAY_TRANSPORT: 'auto' }).transport === 'auto' && checkOf(() => optionsFromEnv({ SIGELO_RELAY_TRANSPORT: 'tcp' })) === 'relay',
-    'SIGELO_RELAY_TRANSPORT: mqtts, wss or auto; anything else refused');
+  ok(optionsFromEnv({}).transport === undefined && optionsFromEnv({ SIGELO_RELAY_TRANSPORT: 'auto' }).transport === 'auto' && checkOf(() => optionsFromEnv({ SIGELO_RELAY_TRANSPORT: 'tcp' })) === 'relay',
+    'SIGELO_RELAY_TRANSPORT: unset leaves the default; mqtts, wss or auto; anything else refused');
   ok(checkOf(() => new Carrier({ identity: () => ({}), store: 'a', state: 'b', transport: 'ws' })).includes('transport'), 'the constructor refuses another transport');
 }
 
@@ -135,11 +135,27 @@ try {
     const s = await x.send('y', 'auto hello'), got = await y.inbox();
     ok(s.status === 'sent' && got.messages.map((m) => m.content).join() === 'auto hello', `transport auto: paired, sent and read over WebSocket (${s.status})`);
     ok(dead.n === 1, `every later connection, of both agents, went straight to WebSocket: the fallback is kept for the process (${dead.n} dial in all)`);
-    // Default transport: mqtts only, no fallback.
-    const m = make(dir, agent('mx'), { endpoints });
+    // Transport mqtts: the MQTT port only, no fallback.
+    const m = make(dir, agent('mx'), { endpoints, transport: 'mqtts' });
     let why = null;
     try { await m.invite(); } catch (e) { why = e.check; }
-    ok(why === 'connect' && dead.n === 2 && !m.events.some((e) => e.type === 'transport'), `transport mqtts (the default): the MQTT port only, no fallback (${why})`);
+    ok(why === 'connect' && dead.n === 2 && !m.events.some((e) => e.type === 'transport'), `transport mqtts: the MQTT port only, no fallback (${why})`);
+  }
+  // ================================================================ the default (auto), 8883 dropped
+  {
+    // An MQTT port that takes the connection and never answers: a firewall that drops, not refuses.
+    const held = [];
+    const silent = createNetServer((s) => { held.push(s); s.on('error', () => {}); });
+    const silentPort = await listen(silent);
+    try {
+      const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${silentPort}`, http: httpBase } };
+      const x = make(dir, agent('dx'), { endpoints });
+      ok(x.transport === 'auto', `no transport option and no SIGELO_RELAY_TRANSPORT: the carrier's transport is auto (${x.transport})`);
+      const t0 = Date.now(), inv = await x.invite({ name: 'y' }), ms = Date.now() - t0;
+      const fell = x.events.find((e) => e.type === 'transport');
+      ok(typeof inv.code === 'string' && held.length === 1 && fell?.transport === 'wss' && ms >= PROBE_MS - 100 && ms < PROBE_MS + 5000,
+        `the default, 8883 silent: connected over WebSocket after the ${PROBE_MS / 1000} s probe (${ms} ms, ${held.length} dial; ${fell?.detail})`);
+    } finally { for (const s of held) s.destroy(); silent.close(); }
   }
 
   // ================================================================ only an HTTP CONNECT proxy

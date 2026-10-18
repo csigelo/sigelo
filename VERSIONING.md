@@ -3,9 +3,9 @@
 Two things carry versions and move independently: the **wire** (`v` in every signed object,
 SPEC §3.1) and the **packages** (npm, the Go module). The wire moves rarely and loudly.
 
-**Status:** v0.1.7 (tags `v0.1.7`, `go/v0.1.7`, SSH-signed) is a draft pre-release: wire `sigelo/0`
+**Status:** v0.1.8 (tags `v0.1.8`, `go/v0.1.8`, SSH-signed) is a draft pre-release: wire `sigelo/0`
 is not frozen yet (§1); the page, `watch`, tiers, files and enrolment are experimental; the keeper is
-stagenet-only; nothing is audited. The six packages are on npm at 0.1.7; v0.1.0 was unsigned and never on npm.
+stagenet-only; nothing is audited. The six packages are on npm at 0.1.8; v0.1.0 was unsigned and never on npm.
 
 ## 1. The wire: `sigelo/0`
 

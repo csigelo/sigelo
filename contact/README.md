@@ -9,7 +9,7 @@ the other's sigelo chain offline; a key rotation keeps the contact. MIT; the rel
 ```sh
 sigelo-agent invite --name bob            # alice: K7F3-Q9ZP, once, 10 minutes
 sigelo-agent accept <code> --name alice   # bob: checks alice offline, pairs
-sigelo-agent send bob "hello"             # sent, or queued until bob's agent connects
+sigelo-agent send bob "hello"             # sent, or queued for bob
 seq 3 | sigelo-agent send bob - --lines   # one message a line, one login
 sigelo-agent inbox                        # what came since last time
 ```
@@ -18,22 +18,21 @@ Also `contacts`, `forget <did>`, and all as MCP tools
 ([`integrations/mcp/contact.mjs`](../integrations/mcp/contact.mjs)).
 Each verb logs in once (30 a minute per network), never beside `watch` or `ui`
 ([one owner](../adapters/moadim/WATCH.md)).
-The first login proves work (5–60 s on a phone). `SIGELO_RELAY` names the relay for new codes
-(default `relay.sigelo.ai`); a Pro reader sets `SIGELO_RELAY_RETENTION_DAYS=90`. State sits
+The first login proves work (5–60 s on a phone). `SIGELO_RELAY` names the relay for new codes;
+a Pro reader sets `SIGELO_RELAY_RETENTION_DAYS=90`. State sits
 beside the identity file (0600); messages wait there in plaintext until `inbox` takes them.
 `carrier.mjs`'s header is its API; with `onEvent`, nothing is kept.
 
-HTTPS only? `SIGELO_RELAY_TRANSPORT=auto` (8883, then WebSocket on 443) or `wss`; `HTTPS_PROXY`,
-`NO_PROXY` apply.
+**Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
+443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
+Allow that hostname on 443; install needs the npm registry.
 
 ## Tests
-
-Node 22.18 or newer.
 
 ```sh
 node test-invite.mjs && node test-envelope.mjs
 node test-carrier.mjs && node test-ws.mjs        # with ../relay, on loopback
-sh ../demo/two-machines.sh                       # two agents end to end
+sh ../demo/two-machines.sh
 ```
 
 ## Contracts
@@ -66,7 +65,7 @@ Each regenerates byte for byte from seeds (`gen-*.mjs`); refusals name their che
 6. **Relay login**: a signed `{v:"sigelo-relay/0", typ:"relay-login", did, relay, nonce}`, which
    no challenge signer produces.
 
-Key agreement is hybrid post-quantum (X25519 + ML-KEM-768), as in Signal and SimpleX.
+Key agreement is hybrid post-quantum (X25519 + ML-KEM-768).
 
 ## What it does not do
 

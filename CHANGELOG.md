@@ -3,12 +3,15 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
-## unreleased
+## v0.1.8 — 2026-10-18
 
-- **HTTPS-only networks:** `SIGELO_RELAY_TRANSPORT=auto` falls back from 8883 to MQTT over WebSocket on 443;
-  `HTTPS_PROXY`, `NO_PROXY` apply. A contact over quota is named as such (`side: "reader"`).
+- **Transport default `auto`:** 8883 for 5 s, then MQTT over WebSocket on 443, so an HTTPS-only network needs
+  no setting; `SIGELO_RELAY_TRANSPORT=mqtts|wss` picks one; `HTTPS_PROXY`, `NO_PROXY` apply.
+- **Contact over quota:** named as such (`side: "reader"`).
 - **Relay:** MQTT over WebSocket at `/mqtt` behind nginx, counted by `X-Real-IP`; `quota_storage` says
   whose quota (`side`); relay.json `endpoints`. New dependency: `ws`.
+- **Relay:** disk use is measured as `df` does, `used / (used + available)`; before, root's reserved blocks
+  (ext4's 5 %) counted as used and `relay_full` came near 65 % real use. The free tier's ceiling agrees.
 - ceremony `--human` screen: a 12-letter word ("verification") ran into the next number; the column is one wider.
 - **AgentCard operator:** the card profile's `params.operator` carries the operator attestation and chain under `sig`;
   verify reports `{did, exp}` or refuses by name; signing goes through the key providers.
