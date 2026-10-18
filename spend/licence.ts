@@ -35,8 +35,8 @@ import { canonicalize, did, structure, verify, verifySig, type Attestation, type
 /**
  * The vendor's DID, the only `iss` a licence may have. A PLACEHOLDER until D1 (ROADMAP §7): a
  * DID minted for this constant whose secret key was discarded at once, so no licence verifies
- * against it — nobody can issue one. At D1 the Owner mints the vendor identity offline and puts
- * its DID here (and in the release notes). `SIGELO_VENDOR_DID` overrides it: for tests, and for
+ * against it — nobody can issue one. At D1 the vendor identity is minted offline (the ceremony) and
+ * its DID goes here (and in the release notes). `SIGELO_VENDOR_DID` overrides it: for tests, and for
  * whoever forks the MIT code (who can equally delete this file).
  */
 export const DEV_VENDOR_DID = 'did:sigelo:z5xBk2Bp5dDptES9mNJaH68RT8Hm2oqprQdWbbrbVbFKC';
