@@ -24,7 +24,7 @@
       "additionalProperties": { "type": "array", "minItems": 1, "items": { "$ref": "attestation.json" } }
     },
     "bindings": {
-      "description": "Accepted binding bodies with their §6.1 proof status, in bundle order.",
+      "description": "Accepted binding bodies with their §6.1 proof status, in bundle order. superseded: the binding's id precedes the most recent recovery in chain. network: on a proven monero binding only, the network its addr decodes to (§6.2).",
       "type": "array",
       "items": {
         "type": "object",
@@ -32,8 +32,11 @@
         "additionalProperties": false,
         "properties": {
           "body": { "$ref": "binding.json" },
-          "proof": { "enum": ["proven", "unproven", "unsupported"] }
-        }
+          "proof": { "enum": ["proven", "unproven", "unsupported", "superseded"] },
+          "network": { "enum": ["mainnet", "stagenet", "testnet"] }
+        },
+        "if": { "required": ["network"] },
+        "then": { "properties": { "proof": { "const": "proven" }, "body": { "properties": { "method": { "const": "monero" } } } } }
       }
     },
     "rejected": {

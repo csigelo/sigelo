@@ -105,7 +105,7 @@ const out = (ok, line) => { ok ? pass++ : fail++; console.log(`${ok ? 'PASS' : '
 const mustPass = (label, name, v) => { const e = check(name, v); out(e === null, `${label} valid as ${name}${e ? ` — ${e}` : ''}`); };
 const mustFail = (label, name, v, where = '') => { const e = check(name, v); out(e !== null && e.includes(where), `${label} refused as ${name}${e ? ` (${e})` : ' — ACCEPTED'}`); };
 const pick = (o, ks) => Object.fromEntries(ks.filter((k) => own(o, k)).map((k) => [k, o[k]]));
-const envelopeOf = { attestation: ['body', 'sig'], binding: ['body', 'sig_id', 'sig_addr'], rotation: ['body', 'sig', 'next_genesis'] };
+const envelopeOf = { attestation: ['body', 'sig'], binding: ['body', 'sig_id', 'sig_addr'], rotation: ['body', 'sig', 'sig_next', 'next_genesis'] };
 
 const T = readJSON(path.join(root, 'test-vectors.json'));
 const counts = { positive: 0, structural: 0, sound: 0, inexpressible: 0, parity: 0 };
@@ -195,6 +195,13 @@ const parityExpressible = {
   binding_ed25519_test_addr_all_zero_unproven: 'an ed25519-test addr that is no usable Ed25519 point (SPEC §2)',
   fatal_duplicate_rotation_is_fork: 'a fork (§7.3 chain walk over valid signatures)',
   rotation_next_genesis_not_next: 'a sub off the chain, since hash(next_genesis) != next ends it (§7.2 hash check)',
+  // §7 sig_next and §6.2 small-order keys (the review of 2026-10-19): signatures and points, not shape
+  graft_voluntary_into_foreign_genesis: 'a sub and id off the chain, since a forged sig_next ends it (§7)',
+  graft_recovery_into_foreign_genesis: 'a sub and id off the chain, since a forged sig_next ends it (§7)',
+  rotation_bad_sig_next_not_a_candidate: 'a sub off the chain, since a bad sig_next ends it (§7)',
+  recovery_rotation_bad_sig_next_not_a_candidate: 'an id off the chain, since a bad sig_next ends it (§7)',
+  superseded_binding_bad_sig_addr_discarded: 'a sig_addr by the wrong key (§6.1)',
+  monero_view_key_small_order: 'an addr key of small order (§6.2)', monero_spend_key_identity: 'an addr key of small order (§6.2)',
 };
 for (const [n, c] of Object.entries(N.parity.cases)) {
   counts.parity++;

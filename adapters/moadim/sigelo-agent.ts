@@ -147,8 +147,9 @@ export function rotateKey(s: Store, now: number): Store {
   // absent from the agent's file (SPEC §4 — an attacker with full agent compromise should
   // learn a hash). `keygen` accepts the commitment verbatim, so the new genesis carries it
   // forward unchanged, which is what §7 demands and what `rotate()` re-checks before signing.
+  // The fresh key countersigns (`sig_next`, §7): it is in memory here, before it becomes `s.secret`.
   const fresh = keygen({ recovery: cur.recovery });
-  s.rotations.push(rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: 'voluntary', secret: secretOf(s) }));
+  s.rotations.push(rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: 'voluntary', secret: secretOf(s), next_secret: fresh.secret }));
   s.secret = Buffer.from(fresh.secret).toString('hex');
   return s;
 }

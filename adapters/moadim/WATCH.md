@@ -14,6 +14,9 @@ sigelo-agent watch [--identity <file>] [--on-message <cmd>] [--on-notice <cmd>] 
 | `friend` | `--on-notice`: `{from, name, tier, count}`, no content; the message stays for `inbox` | the default |
 | `quiet` | nothing; it stays for `inbox` | `tier <name> quiet`, `accept --tier quiet` |
 
+An own agent stays yours (`ours: true` in `contacts`) at `friend` or `quiet`, by your choice
+(`enrol --tier friend`, ENROL.md): for one exposed to untrusted input, its messages are pulled, not pushed.
+
 `--on-pairing` gets `paired` and `pairing_failed` events as JSON. Each command runs through the shell,
 one at a time, at most 2 minutes, with `SIGELO_TYPE`, `SIGELO_FROM` (the DID), `SIGELO_NAME`,
 `SIGELO_TIER`, `SIGELO_PATH` (files) and `SIGELO_IDENTITY`. Without a hook: one line per event on

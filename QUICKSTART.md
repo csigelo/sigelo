@@ -216,7 +216,7 @@ const binding = bind({ secret: a.secret, id: a.did, method: "ed25519-test", addr
 ```
 
 Without `addr_secret` the binding is `unproven`. `id` is the DID current when you sign and stays
-valid after rotations.
+valid after voluntary rotations; after a recovery it is `superseded`, never paid (SPEC §6.1).
 
 **Timestamps.** Every `iat` is the moment you sign, `Math.floor(Date.now() / 1000)`; do not space
 them out. Chain order comes from `id` → `next`, never `iat`. A verifier checks `iat ≤ now < exp`
@@ -231,9 +231,10 @@ good signatures. Fix the item; never pass a later `now`.
 **Later.** `sigelo-agent rotate` moves to a fresh key; old attestations still apply. After a
 theft: tier 1 as in step 0; tier 2, `rotate --recovery` prints the procedure, and
 `{ "rotation": …, "identity_seed_hex": … }` goes through `adopt --rotation`.
-Library: `rotate({ genesis: cur, next_genesis: keygen({ recovery: cur.recovery }).genesis, iat,
-reason: "voluntary", secret })` with `cur` the current genesis and `secret` its key; for
-recovery, `reason: "recovery"` and the recovery secret. The bundle's `genesis` stays the
+Library: `next = keygen({ recovery: cur.recovery })`, then `rotate({ genesis: cur, next_genesis:
+next.genesis, iat, reason: "voluntary", secret, next_secret: next.secret })` with `cur` the current
+genesis and `secret` its key; the next key countersigns (SPEC §7). For recovery, `reason:
+"recovery"` and the recovery secret. The bundle's `genesis` stays the
 original; each rotation goes in `rotations`.
 
 **Recovery beats `iat`, worked** (SPEC §7.1). A precedence test gives the **thief** the later
@@ -242,9 +243,10 @@ original; each rotation goes in `rotations`.
 ```js
 // cur = the genesis whose key leaked, leaked = that key's secret, T = Math.floor(Date.now() / 1000),
 // recoverySecret = the recovery key pair's secret (tier 2: Uint8Array.from(Buffer.from(<recovery.key>, "hex")))
-const stolen   = rotate({ genesis: cur, next_genesis: keygen({ recovery: cur.recovery }).genesis,
-                          iat: T + 3600, reason: "voluntary", secret: leaked });        // thief: one hour LATER
-const recovery = rotate({ genesis: cur, next_genesis: keygen({ recovery: cur.recovery }).genesis,
-                          iat: T,        reason: "recovery",  secret: recoverySecret });
+const t = keygen({ recovery: cur.recovery }), n = keygen({ recovery: cur.recovery });
+const stolen   = rotate({ genesis: cur, next_genesis: t.genesis, iat: T + 3600, reason: "voluntary",
+                          secret: leaked, next_secret: t.secret });                    // thief: one hour LATER
+const recovery = rotate({ genesis: cur, next_genesis: n.genesis, iat: T, reason: "recovery",
+                          secret: recoverySecret, next_secret: n.secret });
 // rotations: [ …earlier ones, stolen, recovery ]  →  verify(bundle, now).did === recovery.body.next
 ```

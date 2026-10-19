@@ -30,7 +30,10 @@ const MUTANTS = [
   ['expiry-inclusive', '§9 step 5: an attestation is still valid at now == exp', 'sigelo.js', '!(body.iat <= now && now < body.exp) || !chain.includes(body.sub)', '!(body.iat <= now && now <= body.exp) || !chain.includes(body.sub)'],
   ['sub-not-checked', '§9 step 5: an attestation to a DID outside the chain counts', 'sigelo.js', ' || !chain.includes(body.sub)) {', ') {'],
   ['unproven-is-proven', '§6.1: a binding without sig_addr reads as proven', 'sigelo.js', "proof = 'unproven'; // a claim only", "proof = 'proven'; // a claim only"],
-  ['integrated-accepted', '§6.2: an integrated address proves a binding', 'monero.js', "if (decodeAddress(address).kind === 'integrated')", 'if (false)'],
+  ['integrated-accepted', '§6.2: an integrated address proves a binding', 'monero.js', "if (kind === 'integrated')\n            return { good: false, version };", 'if (false) return { good: false, version };'],
+  ['small-order-accepted', '§6.2: an address key of small order proves a binding', 'monero.js', 'if (pt(spend).isSmallOrder() || pt(view).isSmallOrder())', 'if (false)'],
+  ['sig-next-unchecked', '§7: a rotation the next key did not countersign is followed', 'sigelo.js', ' && verifySig(r.next_genesis.key, r.body, r.sig_next));', ');'],
+  ['superseded-ignored', '§6.1: a binding by a DID before the last recovery stays payable', 'sigelo.js', 'if (chain.indexOf(body.id) < recovered)', 'if (false)'],
   // Aimed at worlds.mjs's dishonest issuers (the swarm's worlds are honest).
   ['future-iat-accepted', '§9 step 5: an attestation dated in the future counts', 'sigelo.js', '!(body.iat <= now && now < body.exp) || !chain.includes(body.sub)', '!(now < body.exp) || !chain.includes(body.sub)'],
   ['att-sig-unchecked', '§5: an attestation is not checked against its issuer key', 'sigelo.js', 'iss === undefined || !verifySig(iss.key, body, a.sig) ||', 'iss === undefined ||'],

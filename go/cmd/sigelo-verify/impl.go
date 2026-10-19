@@ -268,7 +268,9 @@ func buildCases(text []byte) (cases []implCase, inexpressible []string, err erro
 		}
 		return object(ps...)
 	}
-	rot := func(raw json.RawMessage) json.RawMessage { return pick(vs.obj(raw), "body", "sig", "next_genesis") }
+	rot := func(raw json.RawMessage) json.RawMessage {
+		return pick(vs.obj(raw), "body", "sig", "sig_next", "next_genesis")
+	}
 	bnd := func(raw json.RawMessage) json.RawMessage { return pick(vs.obj(raw), "body", "sig_id", "sig_addr") }
 	val := func(raw json.RawMessage) any { v, _ := decodeVal(raw); return v }
 	add := func(c implCase) {
@@ -287,7 +289,7 @@ func buildCases(text []byte) (cases []implCase, inexpressible []string, err erro
 	}
 
 	// ---- positive: the two bundles with a full §9.1 expectation
-	for _, n := range []string{"bundle", "bundle_minimal"} {
+	for _, n := range []string{"bundle", "bundle_minimal", "bundle_recovered"} {
 		add(implCase{group: "positive", name: n + " == expect", text: vs.at(pv(n), "bundle"), now: vs.int(pv(n), "now"),
 			kind: "result", expect: surface(val(vs.at(pv(n), "expect")))})
 	}
@@ -324,10 +326,15 @@ func buildCases(text []byte) (cases []implCase, inexpressible []string, err erro
 	for _, np := range [][2]string{{"binding", "proven"}, {"binding_unproven", "unproven"}, {"binding_monero", "proven"},
 		{"binding_monero_subaddress_spend", "proven"}, {"binding_monero_subaddress_view", "proven"}} {
 		n, p := np[0], np[1]
-		body := val(vs.at(pv(n), "body"))
+		entry := map[string]any{"body": val(vs.at(pv(n), "body")), "proof": p}
+		if x := vs.obj(pv(n)); x != nil {
+			if net, has := x.vals["expect_network"]; has { // §6.2: a proven monero entry names its network
+				entry["network"] = val(net)
+			}
+		}
 		add(implCase{group: groupOf(n, "positive"), name: n + " → " + p, text: bundle(kv{"bindings", array(bnd(pv(n)))}), kind: "check",
 			fn: func(r map[string]any) string {
-				return want(eq(r["bindings"], []any{map[string]any{"body": body, "proof": p}}) && field(r["rejected"], "bindings") == int64(0),
+				return want(eq(r["bindings"], []any{entry}) && field(r["rejected"], "bindings") == int64(0),
 					fmt.Sprintf("bindings %s, want [%q]", js(proofs(r)), p))
 			}})
 	}
@@ -538,8 +545,9 @@ func field(v any, k string) any {
 
 func rej(a, b int64) map[string]any { return map[string]any{"attestations": a, "bindings": b} }
 
-// surface is §9.1's conformance surface: the six fields, of a binding entry body and proof,
-// of rejected its two counts. Anything else a verifier attaches is ignored (§9.1, §6.2).
+// surface is §9.1's conformance surface: the six fields, of a binding entry body, proof and
+// network (§6.2, on a proven monero entry only), of rejected its two counts. Anything else a
+// verifier attaches is ignored (§9.1, §6.2).
 func surface(v any) any {
 	r, ok := v.(map[string]any)
 	if !ok {
@@ -549,7 +557,11 @@ func surface(v any) any {
 	if bs, ok := r["bindings"].([]any); ok {
 		out := make([]any, len(bs))
 		for i, b := range bs {
-			out[i] = map[string]any{"body": field(b, "body"), "proof": field(b, "proof")}
+			e := map[string]any{"body": field(b, "body"), "proof": field(b, "proof")}
+			if _, absent := field(b, "network").(missing); !absent {
+				e["network"] = field(b, "network")
+			}
+			out[i] = e
 		}
 		s["bindings"] = out
 	} else {

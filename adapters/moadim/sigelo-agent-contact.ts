@@ -65,7 +65,8 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
                                            (sgl1…; --ttl, default a day); --json: both, DID, relay, expiry
   accept <code> [--name <n>] [--wait <s>]  become that agent's contact (wait 0 to 300 s, default 10);
        [--tier friend|quiet]               --tier: how its messages reach you (default friend; own is detected)
-  contacts                                 contacts (four words to check; re_pair: pair again; tier), pending codes and answers
+  contacts                                 contacts (four words to check; re_pair: pair again; ours: yours by key;
+                                           tier: how far you trust it), pending codes and answers
   tier <did|name> own|friend|quiet         own: messages pushed in full (watch --on-message); friend: a notice
                                            only; quiet: nothing, read when you ask
   send <did|name> <text|-> [--label <l>]   an encrypted message; - reads it from stdin
@@ -104,7 +105,7 @@ interface Carrier {
   unpark(code: string): Promise<string>;
   accept(code: string, o: { name?: string; wait?: number; tier?: string }): Promise<{ status?: string; did?: string; contact?: Contact }>;
   contacts(): { contacts: Contact[]; failed?: Failed[] };
-  setTier(who: string, tier: string): { did: string; name: string; tier: string };
+  setTier(who: string, tier: string): { did: string; name: string; tier: string; ours?: boolean };
   send(to: string, text: string, o: { label?: string; local?: boolean }): Promise<unknown>;
   sendAll(to: string, texts: string[], o: { label?: string; local?: boolean }): Promise<{ status: string }[]>;
   sendFile(to: string, path: string, o?: { local?: boolean }): Promise<{ status: string; name: string; detail?: string; file: FileSent }>;
@@ -120,7 +121,7 @@ interface CarrierLib {
   readCode(text: string, now: number, how?: string): { did: string };
   keepLong(e: unknown, long: string): unknown;
 }
-interface Contact { name: string; did: string; re_pair?: string | null; fingerprint?: string | null; tier?: string }
+interface Contact { name: string; did: string; re_pair?: string | null; fingerprint?: string | null; ours?: boolean; tier?: string }
 interface FileSent { name: string; size: number; sha256: string; chunks: number }
 /** A file received whole (carrier.mjs #onFile), as an inbox item. */
 interface FileItem { type: 'file'; contact?: string | null; from: string; name: string; size: number; path: string }
@@ -328,6 +329,20 @@ const tierList = (v: string): string[] => {
   if (l.length === 0 || l.some((t) => !TIERS.includes(t))) throw misuse(`--tier: some of ${TIERS.join(', ')}, comma-separated, not ${JSON.stringify(v)}`);
   return l;
 };
+/** Ownership and trust, two facts: ours by key (an operator attestation of mine), trusted or not by
+ *  the tier, the operator's choice for an agent exposed to untrusted input. One line for people. */
+export function trustOf(name: string, ours: boolean | null | undefined, tier: string | null | undefined, worker?: number | null): string {
+  const how = tier === 'friend' ? 'its messages wait in the inbox (tier friend)' : tier === 'quiet' ? 'its messages wait in the inbox, no notice (tier quiet)' : 'its messages are pushed in full (tier own)';
+  if (!ours) return `${name}: a contact, ${how}`;
+  return `${name}: yours${worker == null ? '' : ` (worker ${worker})`}, ${tier === 'friend' || tier === 'quiet' ? 'low trust' : 'trusted'}: ${how}`;
+}
+// The roster beside an operator identity (enrol: <identity>.keeper.json): original DID → worker i.
+const workersBeside = (identity: string): Map<string, number> => {
+  try {
+    const k = JSON.parse(readFileSync(identity.replace(/\.json$/, '') + '.keeper.json', 'utf8')) as { workers?: Record<string, { original?: string }> };
+    return new Map(Object.entries(k.workers ?? {}).map(([i, w]) => [w.original ?? '', Number(i)]));
+  } catch { return new Map(); }
+};
 /** What to type to change a tier: the other choice. */
 const otherTier = (t: string | undefined): string => (t === 'quiet' ? 'friend' : t === 'own' ? 'friend' : 'quiet');
 
@@ -492,7 +507,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         const r = c.contacts();
         out({ ...r, contacts: r.contacts.map((x) => ({ ...x, pair: pairOf(x.did) })) });
         for (const x of r.contacts.filter((y) => y.fingerprint)) note(`${x.name}: Check with them: ${x.fingerprint}`);
-        for (const x of r.contacts.filter((y) => y.fingerprint)) note(`${x.name}: tier ${x.tier}`);
+        const roster = workersBeside(path);
+        for (const x of r.contacts.filter((y) => y.fingerprint)) note(trustOf(x.name, x.ours, x.tier, roster.get(x.did)));
         for (const x of r.contacts.filter((y) => y.re_pair)) {
           note(`${x.name}: re-pair needed (${x.re_pair === 'own_recovery' ? 'this agent recovered its identity' : 'it recovered its identity'}): nothing goes to it until a new invite and accept`);
         }
@@ -504,6 +520,7 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         const r = c.setTier(args[0]!, args[1]!);
         out(r);
         note(`${r.name} is ${r.tier}: ${r.tier === 'own' ? 'its messages are pushed in full (watch --on-message)' : r.tier === 'friend' ? 'a notice when it writes, the message read when you ask' : 'nothing until you ask (inbox)'}`);
+        note(trustOf(r.name, r.ours, r.tier, workersBeside(path).get(r.did)));
         break;
       }
       case 'send': {

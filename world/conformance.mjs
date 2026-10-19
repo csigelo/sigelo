@@ -9,7 +9,7 @@
 export function countCases(T) {
   const N = T.negative;
   let n = 0;
-  n += 2;   // positive: bundle, bundle_minimal == expect
+  n += 3;   // positive: bundle, bundle_minimal, bundle_recovered == expect
   n += 3;   // positive: genesis, world_genesis, member_genesis did
   n += 2;   // positive: attestation, attestation_unicode accepted
   n += 2;   // positive: a challenge in the attestation slot, an invoice in the binding slot

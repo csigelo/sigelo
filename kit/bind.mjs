@@ -64,6 +64,10 @@ export function values(kit, record) {
     }
   })(kit, '');
   if (record) { v.vault_address ??= record.vault_address; v.fingerprint ??= record.fingerprint; }
+  // The clean host's daemon options: TLS (wallet-rpc's --daemon-ssl, default autodetect) and,
+  // optionally, a SOCKS proxy (Tor) — the restore wallet holds spend keys.
+  const ch = kit.clean_host ?? {};
+  v.clean_daemon_opts = `--daemon-ssl ${ch.daemon_ssl || 'autodetect'}${ch.proxy ? ` --proxy ${ch.proxy}` : ''}`;
   const k = kit.keeper ?? {};
   const sup = kit.supervisor;
   if (sup === 'systemd-user' || sup === 'systemd-system') {
@@ -98,6 +102,10 @@ export async function bind({ kitPath, recordPath, out }) {
   if (!['mainnet', 'stagenet', 'testnet'].includes(kit.net)) problems.push('net: must be mainnet, stagenet or testnet');
   if (!['systemd-user', 'systemd-system', 'none'].includes(kit.supervisor)) problems.push('supervisor: must be systemd-user, systemd-system or none');
   problems.push(...secretProblems(kit, await wordlist()));
+  const ch = kit.clean_host ?? {};
+  if (ch.daemon_ssl !== undefined && !['enabled', 'disabled', 'autodetect'].includes(ch.daemon_ssl)) problems.push('clean_host.daemon_ssl: must be enabled, disabled or autodetect');
+  if (ch.proxy !== undefined && ch.proxy !== '' && !/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}$/.test(ch.proxy)) problems.push('clean_host.proxy: must be ip:port of a SOCKS proxy (Tor: 127.0.0.1:9050), or empty');
+  if (/\.onion(:[0-9]+)?$/i.test(String(ch.daemon ?? '')) && !ch.proxy) problems.push('clean_host.daemon: a .onion daemon needs clean_host.proxy (Tor\'s SOCKS port)');
   const record = recordPath ? JSON.parse(readFileSync(recordPath, 'utf8')) : undefined;
   if (record && record.net !== kit.net) problems.push(`net: kit.json says ${kit.net}, the ceremony record says ${record.net}`);
   if (problems.length) throw new Error(`bind: kit.json refused:\n  ${problems.join('\n  ')}`);

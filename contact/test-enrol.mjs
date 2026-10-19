@@ -130,7 +130,7 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs')) || !existsSync(join(RELAY_DIR, 'n
 const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
 const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
 const { Carrier, pathsFor } = await import('./carrier.mjs');
-setTimeout(() => { console.log(`FAIL the run did not finish in 300 s (${count} checks so far)`); process.exit(1); }, 300000).unref();
+setTimeout(() => { console.log(`FAIL the run did not finish in 420 s (${count} checks so far)`); process.exit(1); }, 420000).unref();
 
 const HOST = 'relay.test';
 const dir = mkdtempSync(join(tmpdir(), 'sigelo-enrol-'));
@@ -231,6 +231,44 @@ try {
   ok(l1.rest.events.some((e) => e.type === 'paired' && e.did === lz.did) && l2.sent.length === 1 && l3.delivered[0]?.did === w2.did && l4.placed[0]?.did === w2.did
     && l5.placed[0]?.did === w2.did && l5.placed[0].tier === 'own' && l6.events.some((e) => e.type === 'paired' && e.did === owner.did),
     `lazily, no side waiting: paired, request, identity, placed, filed, paired as the worker; one run each (${JSON.stringify([l1.refused, l2.refused, l3.refused, l4.refused, l5.refused])})`);
+  // An existing contact that learns an enrolment code's secret (the relay parks the long code; a
+  // chat shows it) proves it over its OWN pairing, without using the code. The worker goes only to
+  // the DID that paired through the code: before anyone has, enrol_unpaired; after, enrol_from.
+  const { readCode } = await import('./carrier.mjs');
+  const alice = agent('alice'), alicePeer = await co.invite({ name: 'alice' });
+  await co.start();
+  const pal = await alice.carrier.accept(alicePeer.code, { name: 'owner', wait: 20 });
+  await co.stop();
+  const inv4 = await issue({ carrier: co, file: fileOf(owner), i: 3, n: 0, name: 'stolen', keeper });
+  const stolenKey = enrolKey(readCode(inv4.code, Math.floor(Date.now() / 1000)).secret);
+  await alice.carrier.send(owner.did, request(stolenKey, pairWith(alice, owner)), { label: LABEL_ENROL });
+  const st1 = await complete({ carrier: co, file: fileOf(owner), keeper, wait: 30, until: (o) => o.delivered.length > 0 || o.refused.length > 0 });
+  const ai = await alice.carrier.inbox({ wait: 3 });
+  ok(pal.status === 'connected' && st1.delivered.length === 0 && st1.refused.some((x) => x.check === 'enrol_unpaired' && x.from === alice.did) && !ai.messages.some((x) => x.label === LABEL_IDENTITY),
+    `a contact proving the code over its own pairing before anyone paired through it: enrol_unpaired, no identity (${JSON.stringify(st1.delivered)} ${JSON.stringify(st1.refused)})`);
+  // The real machine then pairs through the code and is placed; alice asking again is enrol_from.
+  const w3 = workerChain(K, 3, 0, RECOVERY), real = agent('real-temp');
+  const opReal = complete({ carrier: co, file: fileOf(owner), keeper, wait: 90, until: (o) => o.placed.some((x) => x.id === inv4.id) && o.refused.some((x) => x.from === alice.did) });
+  const jr = await joinEnrol({ carrier: real.carrier, file: fileOf(real), code: inv4.short, name: 'owner', wait: 20, temp: 'real-temp' });
+  await alice.carrier.send(owner.did, request(stolenKey, pairWith(alice, owner)), { label: LABEL_ENROL });
+  const mr = await complete({ carrier: real.carrier, file: fileOf(real), temp: 'real-temp', wait: 90, place: placer('real'), until: (o) => o.placed.length > 0 });
+  const orr = await opReal, ai2 = await alice.carrier.inbox({ wait: 3 });
+  ok(jr.status === 'connected' && mr.placed[0]?.did === w3.did && orr.delivered.length === 1 && orr.delivered[0].temp === real.did && orr.placed[0]?.did === w3.did
+    && orr.refused.some((x) => x.check === 'enrol_from' && x.from === alice.did) && !ai2.messages.some((x) => x.label === LABEL_IDENTITY),
+    `the machine that paired through the code is placed; the contact asking after it: enrol_from, no identity (${JSON.stringify(orr.delivered)} ${JSON.stringify(orr.refused)} ${JSON.stringify(mr.refused)})`);
+
+  // The pairing read by a plain inbox (its paired event gone to another reader): the operator still
+  // knows who paired through the code, from the carrier's state, and answers that DID.
+  const inv5 = await issue({ carrier: co, file: fileOf(owner), i: 4, n: 0, name: 'plain', keeper });
+  const pl = agent('plain-temp'), w4 = workerChain(K, 4, 0, RECOVERY);
+  await joinEnrol({ carrier: pl.carrier, file: fileOf(pl), code: inv5.short, name: 'owner', wait: 1, temp: 'plain-temp' }).catch(() => {});
+  const pi = await co.inbox({ wait: 10, paired: true });
+  const p2 = await complete({ carrier: pl.carrier, file: fileOf(pl), temp: 'plain-temp', place: placer('plain', 1), wait: 10, until: (o) => o.sent.length > 0 });
+  const p3 = await complete({ carrier: co, file: fileOf(owner), keeper, wait: 10, until: (o) => o.delivered.length > 0 || o.refused.length > 0 });
+  ok(pi.events.some((e) => e.type === 'paired' && e.did === pl.did && e.invite === inv5.id) && p2.sent.length === 1 && p3.delivered[0]?.temp === pl.did && p3.delivered[0].did === w4.did,
+    `paired in a plain inbox (the event names the invite nonce only), then the request: answered (${JSON.stringify(p3.refused)})`);
+  ok(!JSON.stringify(pi.events).includes(hex(readCode(inv5.code, Math.floor(Date.now() / 1000)).secret)), 'the paired event carries no invite secret');
+  for (const a of [alice, real, pl]) await a.carrier.stop();
   for (const a of [owner, vps, eve, mallory, vps2, lz, ...Object.values(workers)]) await a.carrier.stop();
 } finally {
   await relay.close();

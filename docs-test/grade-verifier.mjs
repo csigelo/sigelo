@@ -11,7 +11,7 @@
 // whole score is observable through one command:
 //
 //   result   exit 0, stdout parses as JSON, compared BY VALUE with the vector's `expect` on the
-//            §9.1 conformance surface (the six fields; body + proof per binding; extras ignored)
+//            §9.1 conformance surface (the six fields; body + proof + network per binding; extras ignored)
 //   check    exit 0, and the named fields of the result are as the vector says
 //   reject   exit 1 (a crash that happens to exit 1 is indistinguishable; the positive cases are
 //            what catch a verifier that rejects everything)
@@ -56,7 +56,7 @@ const G0 = P.genesis.doc, W = P.world_genesis.doc;
 
 const bundle = (o = {}) => ({ v: 'sigelo/0', typ: 'bundle', genesis: G0, rotations: [], bindings: [], attestations: [], issuers: [], ...o });
 const env = (x, ks) => Object.fromEntries(ks.filter((k) => k in x).map((k) => [k, x[k]]));
-const rot = (x) => env(x, ['body', 'sig', 'next_genesis']);
+const rot = (x) => env(x, ['body', 'sig', 'sig_next', 'next_genesis']);
 const bnd = (x) => env(x, ['body', 'sig_id', 'sig_addr']);
 const ROT = ['rotation_voluntary', 'rotation_hostile', 'rotation_hostile_carried', 'rotation_recovery', 'rotation_recovery_second'];
 
@@ -70,10 +70,10 @@ const eq = (a, b) => {
 };
 // §9.1: "the fields above are the conformance surface"; implementations MAY attach per-item
 // reasons alongside, and §6.2 says a verifier SHOULD report the Monero signing mode. So only the
-// six fields are compared, and of a binding entry only body and proof; anything else is ignored.
+// six fields are compared, and of a binding entry only body, proof and network; anything else is ignored.
 const surface = (r) => (r && typeof r === 'object' ? {
   did: r.did, chain: r.chain, recovery: r.recovery, attestations: r.attestations,
-  bindings: Array.isArray(r.bindings) ? r.bindings.map((b) => ({ body: b?.body, proof: b?.proof })) : r.bindings,
+  bindings: Array.isArray(r.bindings) ? r.bindings.map((b) => ({ body: b?.body, proof: b?.proof, ...(b?.network !== undefined && { network: b.network }) })) : r.bindings,
   rejected: r.rejected && typeof r.rejected === 'object' ? { attestations: r.rejected.attestations, bindings: r.rejected.bindings } : r.rejected,
 } : r);
 const nAtt = (r) => Object.values(r.attestations ?? {}).reduce((n, xs) => n + (Array.isArray(xs) ? xs.length : 0), 0);
@@ -85,7 +85,7 @@ const cases = [], inexpressible = [];
 const add = (c) => cases.push({ now: NOW, ...c });
 
 // ---- positive: the two bundles with a full §9.1 expectation
-for (const n of ['bundle', 'bundle_minimal']) add({ group: 'positive', name: `${n} == expect`, bundle: P[n].bundle, now: P[n].now, kind: 'result', expect: P[n].expect });
+for (const n of ['bundle', 'bundle_minimal', 'bundle_recovered']) add({ group: 'positive', name: `${n} == expect`, bundle: P[n].bundle, now: P[n].now, kind: 'result', expect: P[n].expect });
 
 // ---- positive: genesis → DID (§4)
 for (const n of ['genesis', 'world_genesis', 'member_genesis'])
@@ -107,7 +107,7 @@ add({ group: 'positive', name: 'invoice presented as a binding is discarded', bu
 for (const [n, p] of [['binding', 'proven'], ['binding_unproven', 'unproven'], ['binding_monero', 'proven'],
   ['binding_monero_subaddress_spend', 'proven'], ['binding_monero_subaddress_view', 'proven']])
   add({ group: n.includes('monero') ? 'monero' : 'positive', name: `${n} → ${p}`, bundle: bundle({ bindings: [bnd(P[n])] }), kind: 'check',
-    fn: (r) => want(eq(r.bindings, [{ body: P[n].body, proof: p }]) && r.rejected?.bindings === 0, `bindings ${JSON.stringify(proofs(r))}, want ["${p}"]`) });
+    fn: (r) => want(eq(r.bindings, [{ body: P[n].body, proof: p, ...(P[n].expect_network !== undefined && { network: P[n].expect_network }) }]) && r.rejected?.bindings === 0, `bindings ${JSON.stringify(proofs(r))}, want ["${p}"]`) });
 
 // ---- positive: chains (§7)
 add({ group: 'positive', name: 'expected_chain (all five rotations)', bundle: bundle({ rotations: ROT.map((n) => rot(P[n])) }), kind: 'check',

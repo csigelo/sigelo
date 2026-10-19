@@ -128,7 +128,7 @@ ok(after.status === 200 && same(after.json.attestation, a), 'after a restart: th
 
 // ---- a rotated agent answers with its new key; the world reads the key from the bundle's chain ----
 const next = keygen({ recovery: agentRec.key });
-const rot = rotate({ genesis: agent.genesis, next_genesis: next.genesis, iat: a.body.iat, reason: 'voluntary', secret: agent.secret });
+const rot = rotate({ genesis: agent.genesis, next_genesis: next.genesis, iat: a.body.iat, reason: 'voluntary', secret: agent.secret, next_secret: next.secret });
 const rotated = await answer(next, { bundle: bundleOf(agent.genesis, [rot], [a], [issuerGenesis]) });
 ok(rotated.res.status === 200 && rotated.res.json.attestation.body.sub === next.did && rotated.res.json.attestation.body.claims.bundle_valid === true, 'rotated agent: attested under its current DID, key taken from the verified chain');
 const oldKey = await (async () => { const c = (await get(`/world/challenge?did=${encodeURIComponent(next.did)}`)).json;
@@ -242,9 +242,15 @@ const rec2 = cli('recovery-key', join(dir, 'recovery2.key')).stdout.trim();
 const newIssuer = JSON.parse(cli('keygen', rec2, join(dir, 'issuer2.json')).stdout);
 writeFileSync(join(dir, 'g1.json'), JSON.stringify(issuerGenesis)); writeFileSync(join(dir, 'g2.json'), JSON.stringify(newIssuer));
 const rr = cli('rotate', '-', join(dir, 'g1.json'), join(dir, 'g2.json'), join(dir, 'recovery.key'));
-const chain = rr.status === 0 ? JSON.parse(rr.stdout) : null;
-ok(chain && chain.rotations.length === 1 && chain.rotations[0].body.reason === 'recovery'
-  && verify(bundleOf(chain.genesis, chain.rotations), Math.floor(Date.now() / 1000)).did === did(newIssuer), 'rotate: a recovery rotation whose chain resolves to the new issuer');
+const pending = rr.status === 0 ? JSON.parse(rr.stdout) : null;
+ok(pending && pending.rotations.length === 1 && pending.rotations[0].body.reason === 'recovery' && pending.rotations[0].sig_next === undefined,
+  'rotate (offline, bare new genesis): the recovery-signed rotation, still without sig_next');
+writeFileSync(join(dir, 'r.json'), rr.stdout);
+const cs = cli('countersign', join(dir, 'r.json'), join(dir, 'issuer2.json'));
+const chain = cs.status === 0 ? JSON.parse(cs.stdout) : null;
+ok(chain && chain.rotations.length === 1 && typeof chain.rotations[0].sig_next === 'string'
+  && verify(bundleOf(chain.genesis, chain.rotations), Math.floor(Date.now() / 1000)).did === did(newIssuer), 'countersign (new issuer key, SPEC §7 sig_next): the chain resolves to the new issuer');
+ok(cli('countersign', join(dir, 'r.json'), join(dir, 'issuer.json')).status !== 0, 'countersign with a key the rotation does not enter: refused');
 ok((await goVerify(issuedBundle, a.body.iat + 60)).attestations?.[ISS]?.length === 1, 'attestations issued before the rotation still verify offline under the old issuer genesis');
 
 // ---- the rotated world, same state directory: the retired issuer's attestations are never replayed ----

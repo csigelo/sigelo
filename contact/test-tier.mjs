@@ -65,8 +65,16 @@ const chainOnly = (a) => ({ ...a.bundle, attestations: [], issuers: [] });
     ok(hs.observe(F.did, verify(F.bundle, now), now) === 'friend', 'observe an operator attestation from someone else: still friend');
     ok(checkOf(() => hs.observe(F.did, verify(A.bundle, now), now)) === 'original_did', 'observe another contact\'s bundle under this one: original_did');
     // The owner's choice: by name or DID, validated, kept.
-    ok(JSON.stringify(hs.setTier('friend', 'quiet', now)) === JSON.stringify({ did: F.did, name: 'friend', tier: 'quiet' }), 'setTier by name → {did, name, tier}');
+    ok(JSON.stringify(hs.setTier('friend', 'quiet', now)) === JSON.stringify({ did: F.did, name: 'friend', tier: 'quiet', ours: false }), 'setTier by name → {did, name, tier, ours}');
     ok(hs.setTier(A.did, 'friend', now).tier === 'friend' && hs.tierOf(hs.load().s.contacts[A.did], now) === 'friend', 'setTier own → friend by DID: the choice beats the attestation');
+    ok(hs.oursOf(hs.load().s.contacts[A.did], now) && !hs.oursOf(hs.load().s.contacts[F.did], now), 'and it stays ours (the attestation), friend by choice; a friend is not ours');
+    // presetTier: the owner's tier for a DID not yet a contact, filed by the admit that makes it one.
+    const P = agent('store preset'); operate(H, P);
+    ok(JSON.stringify(hs.presetTier(P.did, 'friend', now)) === JSON.stringify({ did: P.did, tier: 'friend', preset: true }) && checkOf(() => hs.presetTier(P.did, 'vip', now)) === 'tier', 'presetTier before the pairing: kept; an unknown tier: tier');
+    hs.admit(P.bundle, verify(P.bundle, now), 'p', { relay: 'relay.test', pair_key: key(13) }, now);
+    const p0 = hs.load().s.contacts[P.did];
+    ok(p0.tier === 'friend' && p0.tier_by === 'owner' && hs.oursOf(p0, now) && hs.s.preset[P.did] === undefined, 'admitted with my attestation: ours, friend by the owner; the preset spent');
+    ok(hs.presetTier(P.did, 'quiet', now).preset === false && hs.tiers(now).get(P.did) === 'quiet', 'presetTier on a contact: set at once');
     ok(checkOf(() => hs.setTier('friend', 'vip', now)) === 'tier', 'setTier to an unknown tier: tier');
     ok(checkOf(() => hs.setTier('nobody', 'quiet', now)) === 'not_contact', 'setTier of no contact: not_contact');
     ok(checkOf(() => hs.setTier('', 'quiet', now)) === 'not_contact', 'setTier of an empty name: not_contact');
@@ -217,7 +225,12 @@ try {
     now += 5; await cm.inbox(); now += 5; await ca.inbox();
   };
   const forged = { v: 'sigelo/0', typ: 'bundle', genesis: M.bundle.genesis, bindings: [], issuers: [H.genesis], attestations: B.bundle.attestations,
-    rotations: [rotate({ genesis: M.bundle.genesis, next_genesis: B.bundle.genesis, iat: now - 30, reason: 'voluntary', secret: M.secret })] };
+    rotations: [rotate({ genesis: M.bundle.genesis, next_genesis: B.bundle.genesis, iat: now - 30, reason: 'voluntary', secret: M.secret, next_secret: B.secret })] };
+  // Since the review of 2026-10-19 the next key countersigns (SPEC §7): mallory, who holds no key of
+  // B's, gets a chain that ends at her own DID. Countersigned here with B's key, so the carrier's
+  // own current_did check below stays exercised.
+  const byMallory = { ...forged, rotations: [{ ...forged.rotations[0], sig_next: forged.rotations[0].sig }] };
+  ok(verify(byMallory, now).did === M.did, 'the chain countersigned by mallory\'s key: not a candidate, it ends at mallory');
   ok(verify(forged, now).did === B.did && verify(forged, now).attestations[H.did]?.length === 1, 'the forged chain verifies, ends at hermes, and carries H\'s attestation');
   const dropped0 = events.claude.filter((e) => e.type === 'dropped').length;
   await inject({ proof: forged });

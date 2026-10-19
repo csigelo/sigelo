@@ -165,7 +165,7 @@ function rotateAgent(a) {
   const head = a.bundle.rotations.at(-1)?.next_genesis ?? a.bundle.genesis;
   a.rotations++;
   const next = keygen({ seed: seed(`${a.label} ${a.rotations}`), recovery: head.recovery, created: CREATED, nonce: seed(`${a.label} ${a.rotations} nonce`).slice(0, 16) });
-  a.bundle.rotations.push(rotate({ genesis: head, next_genesis: next.genesis, iat: now, reason: 'voluntary', secret: a.secret }));
+  a.bundle.rotations.push(rotate({ genesis: head, next_genesis: next.genesis, iat: now, reason: 'voluntary', secret: a.secret, next_secret: next.secret }));
   a.secret = next.secret;
   a.did = next.did;
 }
@@ -173,7 +173,7 @@ function rotateAgent(a) {
 // the owner does after a theft (SPEC §7.1).
 function recoverAgent(a) {
   const at = a.bundle.rotations[0].next_genesis, next = keygen({ seed: seed(`${a.label} recovered`), recovery: at.recovery, created: CREATED, nonce: seed(`${a.label} recovered nonce`).slice(0, 16) });
-  a.bundle.rotations = [a.bundle.rotations[0], rotate({ genesis: at, next_genesis: next.genesis, iat: now - 3600, reason: 'recovery', secret: seed(`${a.label} recovery`) })];
+  a.bundle.rotations = [a.bundle.rotations[0], rotate({ genesis: at, next_genesis: next.genesis, iat: now - 3600, reason: 'recovery', secret: seed(`${a.label} recovery`), next_secret: next.secret })];
   a.secret = next.secret;
   a.did = next.did;
 }
@@ -713,12 +713,13 @@ try {
     const G = agent('george');
     rotateAgent(G);
     // The audit's case: bob, a contact holding K, ends his chain at a third party's public genesis.
-    // A voluntary rotation needs only bob's key and the commitment carried forward, so dora's
-    // genesis made with bob's commitment is enough: the chain verifies, and resolves to dora's DID.
+    // Before the review of 2026-10-19 a voluntary rotation needed only bob's key and the commitment
+    // carried forward; now dora's key countersigns it (SPEC §7), so bob alone cannot. Countersigned
+    // here with dora's key, so the store's own check stays exercised: the chain resolves to dora.
     // Merged, alice's store filed dora's DIDs under bob (her own answers then refused, messages to
     // her DID queued for bob). bob holds no key of dora's, so no proof for that chain verifies.
     const dora = keygen({ seed: seed('dora'), recovery: B.bundle.genesis.recovery, created: CREATED, nonce: seed('dora nonce').slice(0, 16) });
-    const intoDora = { ...B.bundle, rotations: [rotate({ genesis: B.bundle.genesis, next_genesis: dora.genesis, iat: now, reason: 'voluntary', secret: B.secret })] };
+    const intoDora = { ...B.bundle, rotations: [rotate({ genesis: B.bundle.genesis, next_genesis: dora.genesis, iat: now, reason: 'voluntary', secret: B.secret, next_secret: dora.secret })] };
     const hostile = [
       ...UNWRITABLE.map(([, text]) => rawFrame(4, nk, t, pad(utf8(text)))),                                        // plaintext ×3
       notice({ ...B.bundle, attestations: [{ body: { x: 1 }, sig: 'y' }] }),                                         // bundle: not a chain only
@@ -1730,7 +1731,7 @@ try {
     const late = relayL.db.raw.prepare('SELECT id, topic, payload FROM messages WHERE account = ? ORDER BY seq DESC LIMIT 1').get(accountOf(vDid));
     relayL.db.raw.prepare('DELETE FROM messages WHERE id = ?').run(late.id);
     const R = keygen({ seed: seed('phone recovered'), recovery: Ph.bundle.genesis.recovery, created: CREATED, nonce: seed('phone recovered nonce').slice(0, 16) });
-    Ph.bundle.rotations = [rotate({ genesis: Ph.bundle.genesis, next_genesis: R.genesis, iat: t - 60, reason: 'recovery', secret: seed('phone recovery') })];
+    Ph.bundle.rotations = [rotate({ genesis: Ph.bundle.genesis, next_genesis: R.genesis, iat: t - 60, reason: 'recovery', secret: seed('phone recovery'), next_secret: R.secret })];
     Ph.secret = R.secret; Ph.did = R.did;
     secrets.add(R.did);
     await phone.inbox();   // the recovered chain logs in; its notice goes to vps

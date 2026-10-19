@@ -257,7 +257,7 @@ export function recover(o: {
   // A derived index that lands on the stolen key would "recover" into the thief's hands.
   if (id.key === o.from.key) throw new SigeloError('recover: the new key IS the current (stolen) key — pick the next rotation index (--n)');
   // rotate() checks SHA-256(recovery_key) against from.recovery: a wrong root fails here, named.
-  const rotation = rotate({ genesis: o.from, next_genesis: id.genesis, iat: o.iat, reason: 'recovery', secret });
+  const rotation = rotate({ genesis: o.from, next_genesis: id.genesis, iat: o.iat, reason: 'recovery', secret, next_secret: id.secret });
   return K !== undefined ? { did: id.did, rotation, keeper_root_hex: bytesToHex(K) } : { did: id.did, rotation, identity_seed_hex: bytesToHex(id.secret) };
 }
 

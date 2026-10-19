@@ -37,8 +37,12 @@ cache that is cleaned or a checkout that is rebuilt never changes a running keep
 systemd `--user` units: the keeper (`Restart=always`, `SIGELO_DAEMONS` from `--daemons`), with
 `--notify` an hourly `doctor --notify`, and with `--create-wallet-rpc --wallet-file F
 --password-file P` a unit for `monero-wallet-rpc` over your wallet file — `--rpc-bind-ip
-127.0.0.1`, a generated `--rpc-login` (kept in `policy.json`), `--untrusted-daemon`, the first
-`--daemons` entry as its `--daemon-address`. The unit runs the binary by the absolute path `init`
+127.0.0.1`, a generated RPC login (kept in `policy.json`; wallet-rpc reads it from a 0600
+`<dir>/wallet-rpc.conf` named by `--config-file`, never from its command line), `--untrusted-daemon`, the first
+`--daemons` entry as its `--daemon-address` (`https://` → `--daemon-ssl enabled`, pinned with
+`--daemon-ssl-fingerprint <sha256 hex>`, repeatable or comma-separated; `--daemon-proxy ip:port`
+→ `--proxy`, required for `.onion`; `--daemon-login-file F` (0600) → `daemon-login` in the same
+config file). The unit runs the binary by the absolute path `init`
 resolves: `--wallet-rpc-bin <path>`, else the first `monero-wallet-rpc` on PATH; with neither,
 `init` refuses (a unit for a binary that is not there would only fail at `systemctl start`). It installs them in `~/.config/systemd/user` and
 runs `daemon-reload` (`--no-systemd`: the unit files are written to `<dir>/systemd/` only), then
@@ -71,8 +75,12 @@ derivable from `spend.key` is refused wherever it appears. A keeper set up befor
 its `wallet.rpc` loopback), `spend.key` (the DID init made), `identity.json` (it verifies, its
 current key is `spend.key`'s, its recovery is off the host), `agent.token` (still the agent's),
 each unit (present, installed copy unchanged, its program and the frozen copy present, `serve`
-on the right policy and port, `SIGELO_DAEMONS` well formed; the wallet-rpc unit on 127.0.0.1 with
-an RPC login and never `--disable-rpc-login`, `--confirm-external-bind` or a trusted daemon), the
+on the right policy and port, `SIGELO_DAEMONS` well formed, a WARN when it mixes your own or
+onion node with clearnet ones; the wallet-rpc unit on 127.0.0.1, its login in a 0600
+`--config-file` and no `--rpc-login`, `--daemon-login` or `--password` on its command line, never
+`--disable-rpc-login`, `--confirm-external-bind` or `--restricted-rpc`, `--trusted-daemon` only for
+a loopback daemon, `--daemon-ssl enabled` and the pins for an `https://` daemon, `--proxy` for a
+`.onion` one; a WARN when a daemon's port is another network's default, a heuristic), the
 clock (not before `CLOCK_FLOOR`, not behind the newest signed line), the wallet-rpc
 (`get_version` within `RPC_RANGE`, the range `canary.ts` pins: RPC 1.30–1.33; its wallet on the
 policy's network), the keeper's `/health`, and the tier. Lines `ok`, `WARN` (the host's state:
@@ -81,6 +89,21 @@ the wallet-rpc or the keeper not answering, the clock) and `FAIL` (the install),
 1). `--notify` appends a line to `<dir>/alerts.log` and sends a desktop notification when it
 turns unhealthy, and one when it is healthy again. To upgrade, `init` a new directory and move
 the wallet over; `init` never writes into a keeper that exists.
+
+### Choosing a daemon
+
+A remote daemon learns your IP and which outputs your wallet asks about; your own node keeps both on your host.
+
+- Own or local node first: `--daemons 127.0.0.1:18081` (stagenet `127.0.0.1:38081`). Only a node on this host may be `--trusted-daemon`.
+- A trusted remote node: `--daemons https://node.example:18089 --daemon-ssl-fingerprint <sha256>`. TLS is then required, never autodetected.
+- Tor: `--daemons <x>.onion:18081 --daemon-proxy 127.0.0.1:9050`. A `.onion` daemon without a proxy is refused.
+- A daemon behind RPC auth: `--daemon-login-file F` (0600).
+- Fallback: every further `--daemons` entry is one the keeper may move the wallet to. Mixing your
+  node with public ones lets a fallback move it to a public one (`doctor` warns); onion and
+  clearnet in one list are refused.
+
+Several uids on one host: mount `/proc` with `hidepid=2`, also for a wallet-rpc you run yourself;
+its logins belong in a 0600 `--config-file`, never on its command line.
 
 ### Platforms
 
@@ -434,7 +457,8 @@ daemon, its `--daemon-address`; when that node is down every pay is `wallet_offl
 `SIGELO_DAEMONS` in the keeper's environment to an ordered list — commas or whitespace,
 each `host:port`, `[ipv6]:port`, or either with `http://`/`https://`, the wallet-rpc's own
 address first — and `serve` moves the wallet-rpc along it with `set_daemon {address, trusted:
-false}` when either:
+false}` (plus `ssl_support: "enabled"` for an `https://` entry: TLS required, checked against the
+system CAs; a `--daemon-ssl-fingerprint` pin holds only until the first switch) when either:
 
 - `DAEMON_FAILS` (3) builds in a row (`transfer`, or a revoke's `sweep_all`) were refused "no
   connection to daemon" — a build that worked resets the count; or
@@ -449,7 +473,11 @@ wallet-rpc moved from <a> to <b> (2/3, trusted=false). Not a spend …` — and 
 line; a failed `set_daemon` is a warning too, and the address after it is tried a minute later.
 Fail closed is unchanged: until the wallet has synced from the new daemon every pay is still
 `wallet_offline` (TRY LATER). A malformed or repeated entry stops `serve` at start (`parseDaemons`
-in `service.ts`); fewer than two entries means no fallback and no extra wallet call. Never
+in `service.ts`), and so does a list mixing `.onion` with other addresses; fewer than two entries
+means no fallback and no extra wallet call. `set_daemon` carries no `proxy`: wallet-rpc refuses
+a per-daemon proxy when started with `--proxy`, and that the process-level `--proxy` still holds
+after `set_daemon` is not verified against wallet-rpc 0.18.x — a Tor-only list is all `.onion`,
+so a lost proxy fails closed rather than reaching a node in the clear. Never
 `--trusted-daemon`: a public node's view of spent keys is not to be trusted, and nothing here needs
 it. What it does not cover: a host with no network at all (soak incident #4) — every address fails
 alike, the keeper cycles once a minute at most while asked to pay, and the fix is the host's
@@ -817,8 +845,11 @@ another DID, another ctx, other claims, another keeper, not yet valid, the seats
 registered keepers, the D1 placeholder refusing a test-issued licence, and the test vendor's DID
 and key in no shipped file; `init` and `doctor` run as the CLI on the mock wallet — the policy,
 modes, token, keeper DID, the snippet byte for byte against this README and MONERO.md, the units
-(the frozen copy, `SIGELO_DAEMONS`, the wallet-rpc unit's loopback, `--rpc-login` and untrusted
-daemon, `--notify`), every refusal (non-empty directory, a second keeper, missing or conflicting
+(the frozen copy, `SIGELO_DAEMONS`, the wallet-rpc unit's loopback, its login in the 0600
+config file and not on argv, untrusted daemon, `--daemon-ssl`/pins, `--proxy`, `daemon-login`,
+`--notify`), `doctor` failing a login on argv, a 0644 config or login file, a remote
+`--trusted-daemon`, an `https://` daemon without TLS, a `.onion` one without `--proxy`, and
+warning on a mixed list or a port of another network, every refusal (non-empty directory, a second keeper, missing or conflicting
 flags, a remote wallet-rpc, a bad amount) writing nothing, `doctor` valid with the wallet-rpc
 unreachable (exit 2), invalid on an RPC version outside the range or a missing script (exit 1),
 valid with the keeper running (exit 0); the free tier end to end through `sigelo-wallet`

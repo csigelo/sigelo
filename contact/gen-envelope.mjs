@@ -56,7 +56,7 @@ const pub = (l) => id(l, ZERO).key;
 export function identities() {
   const [aRec, bRec, cRec] = ['A-recovery', 'B-recovery', 'C-recovery'].map(pub);
   const A0 = id('A0', aRec), A1 = id('A1', aRec), B0 = id('B0', bRec), C0 = id('C0', cRec);
-  const rA1 = rotate({ genesis: A0.genesis, next_genesis: A1.genesis, iat: T0 + 1000, reason: 'voluntary', secret: A0.secret });
+  const rA1 = rotate({ genesis: A0.genesis, next_genesis: A1.genesis, iat: T0 + 1000, reason: 'voluntary', secret: A0.secret, next_secret: A1.secret });
   const K = { AB: pairKey(seed('invite-secret A-B'), seed('handshake-shared A-B'), A0.did, B0.did),
     AC: pairKey(seed('invite-secret A-C'), seed('handshake-shared A-C'), A0.did, C0.did) };
   return { A0, A1, B0, C0, rA1, K };

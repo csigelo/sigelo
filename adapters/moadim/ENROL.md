@@ -4,7 +4,8 @@ An enrolled agent is **worker i** of your keeper root: its key is `agentIdentity
 (`ts/src/keys.ts`, MONERO.md §2), its genesis commits to your seed's recovery key, and it carries
 your operator attestation (`sigelo-relay/operator`, 90 days). Your 25 words bring the same DID back.
 Enrolment is contact addition with one extra step: the other machine pairs like any contact (a
-code, four words), then its temporary DID is replaced by worker i, at tier own on your side.
+code, four words), then its temporary DID is replaced by worker i: yours, at tier own unless you
+lower it (below).
 
 ## Once: your identity and K
 
@@ -49,6 +50,15 @@ either side offline, run `sigelo-agent enrol --finish` on each side in turn (pen
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
 443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
 Allow that hostname on 443; install needs the npm registry.
+
+## Low-trust own agents
+
+Ownership and trust are two axes. An enrolled agent is yours by key: derived from the seed,
+attested, restorable. It may still be low trust by exposure: one that browses the web or reads
+untrusted repositories is prone to prompt injection, so its messages must not be pushed into
+another agent's context. `--tier friend` (or `quiet`) at enrolment makes them notices to pull:
+`sigelo-agent enrol --name reviewer --tier friend`. `contacts` shows `ours: true, tier: friend`;
+restore keeps the tier unless `--tier` is given again.
 
 ## Restore, rotate
 

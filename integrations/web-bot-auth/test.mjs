@@ -83,7 +83,7 @@ throws(() => verifyDeep(signRequest(B, get, { agent: ORIGIN, now: NOW }), foreig
 
 // ── rotation: the previous key for 7 days, then refused ─────────────────────────────────────
 const b = keygen({ recovery: seed(9), seed: seed(3), created: '2026-10-16T00:00:00Z', nonce: seed(4) });
-const RIAT = NOW + 1000, rot = rotate({ genesis: a.genesis, next_genesis: b.genesis, iat: RIAT, reason: 'voluntary', secret: a.secret });
+const RIAT = NOW + 1000, rot = rotate({ genesis: a.genesis, next_genesis: b.genesis, iat: RIAT, reason: 'voluntary', secret: a.secret, next_secret: b.secret });
 const rb = { ...bundle, rotations: [rot] }, inGrace = RIAT + 6 * 86400, after = RIAT + 7 * 86400;
 const rdir = directory(rb, { now: inGrace }), old = signRequest(A, get, { agent: ORIGIN, now: inGrace });
 ok(rdir.keys.length === 2 && rdir.keys[1].exp === after && rdir.sigelo.did === b.did, 'after a rotation: current + previous key, previous with exp = rotation + 7 days');

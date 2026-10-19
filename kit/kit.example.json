@@ -22,6 +22,8 @@
   "clean_host": {
     "name": "the offline/clean laptop, never a keeper host",
     "daemon": "node.example.org:18089",
+    "daemon_ssl": "autodetect",
+    "proxy": "",
     "rpc_port": 18084,
     "tmpfs": "/tmp/sigelo-clean"
   },

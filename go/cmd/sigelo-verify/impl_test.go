@@ -125,7 +125,7 @@ func TestImplRunner(t *testing.T) {
 	})
 	t.Run("unproven reported as proven", func(t *testing.T) {
 		code, out := runFake(t, "flip", false)
-		want := []string{"bundle == expect", "binding_unproven → unproven", "parity binding_envelope_sig_id_only_unproven"}
+		want := []string{"bundle_recovered == expect", "binding_unproven → unproven", "parity binding_envelope_sig_id_only_unproven"}
 		if code != 1 || strings.Join(fails(out), "|") != strings.Join(want, "|") || !strings.HasSuffix(out, "FAILURES\n") {
 			t.Fatalf("exit %d, fails %v, want %v", code, fails(out), want)
 		}
@@ -173,6 +173,7 @@ func TestJudge(t *testing.T) {
 		{res, 0, `{"x":1,"rejected":{"bindings":0,"attestations":0,"why":[]},"bindings":[{"proof":"proven","body":{"n":1e3},"reason":"ok"}],"attestations":{},"recovery":null,"chain":["d"],"did":"d"}`, true},
 		{res, 0, `{"did":"d","chain":["d"],"attestations":{},"bindings":[{"body":{"n":1000},"proof":"proven"}],"rejected":{"attestations":0,"bindings":0}}`, false}, // recovery absent ≠ null
 		{res, 0, `{"did":"d","chain":["d"],"recovery":null,"attestations":{},"bindings":[{"body":{"n":1000},"proof":"unproven"}],"rejected":{"attestations":0,"bindings":0}}`, false},
+		{res, 0, `{"did":"d","chain":["d"],"recovery":null,"attestations":{},"bindings":[{"body":{"n":1000},"proof":"proven","network":"mainnet"}],"rejected":{"attestations":0,"bindings":0}}`, false}, // network only where §6.2 puts it
 		{res, 1, ``, false},
 		{res, 0, `not json`, false},
 		{chk, 0, `{"bindings":[],"rejected":{"attestations":0,"bindings":1}}`, true},

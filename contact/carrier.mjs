@@ -14,7 +14,8 @@
 //   await c.cancelInvite(code)             → { cancelled, name }: an unanswered invite of this agent's withdrawn
 //   c.rename(who, name)                    the owner's name for a contact (store.mjs rename) → { did, name }
 //   c.contacts()                           → { contacts, invites, answers, failed }   each contact with its four words (fingerprint),
-//                                            pair id, chain, tier (store.mjs: own, friend, quiet) and tier_by, prekeys: its
+//                                            pair id, chain, ours (an operator attestation of mine marks it), tier
+//                                            (store.mjs: own, friend, quiet) and tier_by, prekeys: its
 //                                            bundle is here (false: messages wait for it), waiting: why they wait, or null;
 //                                            failed: pairing_failed events (code_expired: an answer that outlived its code) until inbox
 //   await c.send(to, content, { label, local }) → { status: 'sent' | 'queued', … }, or throws the relay's code
@@ -30,7 +31,11 @@
 //                                            paired: the wait also ends at a pairing (enrol.mjs)
 //   c.peek(), c.take(pick)                 the messages kept for inbox(), each with its sender's tier: read, or those
 //                                            pick(message, tier) chooses taken; no session (a started carrier's owner)
-//   c.setTier(who, tier)                   the owner's tier for a contact (store.mjs setTier) → { did, name, tier }
+//   c.setTier(who, tier)                   the owner's tier for a contact (store.mjs setTier) → { did, name, tier, ours }
+//   c.presetTier(did, tier)                the same for an original DID not yet a contact, filed when it pairs
+//   c.answeredBy(nonce)                    the original DID that paired through this agent's code `nonce`, or null
+//                                            (kept in the state until a day after the code's exp; the inviter's
+//                                            paired event names the code as `invite`: its nonce, never its secret)
 //   c.observe(bundle)                      a contact's full bundle seen: its operator attestations (store.mjs observe)
 //                                            a file received whole is one item {type: "file", from, contact, name, size,
 //                                            sha256, path, …}, saved under `files` (pathsFor), never opened
@@ -485,10 +490,10 @@ function withLock(path, fn) {
 }
 
 function loadState(path, self) {
-  const s = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { v: V, self, relays: {}, peers: {}, pending: [], inbox: [], events: [], dropped: {}, failing: {} };
+  const s = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { v: V, self, relays: {}, peers: {}, pending: [], inbox: [], events: [], dropped: {}, failing: {}, answered: {} };
   if (s.v !== V || s.self !== self) fail('state', `${path} is not the ${V} state of ${self}`);
   // Written by an earlier version of this file, which kept neither.
-  s.events ??= []; s.failing ??= {};
+  s.events ??= []; s.failing ??= {}; s.answered ??= {};
   return s;
 }
 
@@ -1626,15 +1631,18 @@ export class Carrier {
     const prekeys = s.in.prekeys.issue({ current_did: me.current_did, sign: me.sign }, s.pair, now);
     const reply = buildReply({ answer_id: res.answer_id, identity: { sign: me.sign, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_ct: ct, prekeys });
     const frame = seal(KIND.invite_reply, keys.key, keys.reply_topic, reply);
-    const entry = { relay: p.relay, topic: keys.reply_topic, kind: KIND.invite_reply, control: 'reply', peer: c.did, undo,
+    const entry = { relay: p.relay, topic: keys.reply_topic, kind: KIND.invite_reply, control: 'reply', peer: c.did, undo, invite: nonce,
       needs: [topic(K, c.did, me.did, isoWeek(now))], exp: p.exp };
     if (frame.length > INVITE_BYTES) {
       return [this.#unpair(ctx, entry, { code: 'too_large', detail: `the reply is ${frame.length} bytes, more than an invite topic holds (${INVITE_BYTES}): this agent's chain is too long` })];
     }
     st.peers[c.did] = { session: dumpSession(s), announced: me.current_did, known: me.current_did, outbox: st.peers[c.did]?.outbox ?? [], prekeys_resend: false, prekeys_iat: now };
     this.#queue(st, { ...entry, bytes: frame });
+    // Who answered this code (answeredBy): saved with the pairing, whoever reads the paired event.
+    for (const [x, a] of Object.entries(st.answered)) if (!(a.exp > now)) delete st.answered[x];
+    st.answered[nonce] = { did: c.did, exp: p.exp + DAY };
     this.#routes = new Map();
-    return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key) })];
+    return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key), invite: nonce })];
   }
 
   // Alice: her reply will never reach the answerer (refused, too large, or its code expired while
@@ -1647,6 +1655,7 @@ export class Carrier {
     if (e.undo.contact) store.s.contacts[e.peer] = e.undo.contact; else delete store.s.contacts[e.peer];
     store.save();
     this.#restorePeer(st, e);
+    if (e.invite) delete st.answered[e.invite];
     this.#routes = new Map();
     return this.#note(st, now, { type: 'pairing_failed', did: e.peer, name, code, detail });
   }
@@ -2448,7 +2457,7 @@ export class Carrier {
         contacts: Object.values(s.contacts).map((c) => {
           const e = st.peers[c.did], pair = c.revoked || !c.pair_key ? null : pairId(hexToBytes(c.pair_key));
           return { name: c.name, did: c.did, current_did: c.current_did, chain: c.chain, revoked: c.revoked, relay: c.relay, queued: e?.outbox.length ?? 0,
-            re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key), pair, tier: store.tierOf(c, now), tier_by: c.tier_by ?? null,
+            re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key), pair, ours: store.oursOf(c, now), tier: store.tierOf(c, now), tier_by: c.tier_by ?? null,
             prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
@@ -2599,16 +2608,22 @@ export class Carrier {
   }
 
   setTier(who, tier) { return this.#locked(({ now, store }) => store.setTier(who, tier, now)); }
+  // The owner's tier for an original DID before it is a contact (an enrolled worker): store.mjs presetTier.
+  presetTier(did, tier) { return this.#locked(({ now, store }) => store.presetTier(did, tier, now)); }
+  // The original DID that paired through this agent's code `nonce` (its inviteNonce, readCode().nonce),
+  // or null: none yet, or the code's life plus a day is over (enrol.mjs answers only that DID).
+  answeredBy(nonce) { return this.#read(({ now, st }) => { const a = Object.hasOwn(st.answered, nonce) ? st.answered[nonce] : null; return a && a.exp > now ? a.did : null; }); }
 
   // A contact's full bundle, from wherever it came (the UI reads its local agents' files): verified
-  // here; → { did, tier }, or null when it is no contact's.
+  // here; → { did, tier, ours }, or null when it is no contact's.
   observe(bundle) {
     return this.#locked(({ now, store }) => {
       let r;
       try { r = verify(bundle, now); } catch (e) { fail('bundle', `REJECT: ${e.message}`); }
       const c = store.lookup(r.chain[0]);
       if (!c || c.revoked || c.did !== r.chain[0]) return null;
-      return { did: c.did, tier: store.observe(c.did, r, now) };
+      const tier = store.observe(c.did, r, now);
+      return { did: c.did, tier, ours: store.oursOf(store.lookup(c.did), now) };
     });
   }
 

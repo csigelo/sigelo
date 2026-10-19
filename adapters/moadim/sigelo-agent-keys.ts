@@ -131,7 +131,7 @@ export function rotate(path: string, s: Store, now: number, env: Env = process.e
   if (p === 'agent') { s.rotations.push(request({ op: 'rotate', did: did(head(s)), to: 'software' }, env)['rotation'] as Rotation); return s; }
   const cur = head(s), fresh = keygen({ recovery: cur.recovery });
   try {
-    s.rotations.push(withSeed(s, (secret) => rotation({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: 'voluntary', secret })));
+    s.rotations.push(withSeed(s, (secret) => rotation({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: 'voluntary', secret, next_secret: fresh.secret })));
     s.secret = keychain.wrap(fresh.secret, s);
   } finally { fresh.secret.fill(0); }
   return s;

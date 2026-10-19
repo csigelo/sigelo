@@ -83,8 +83,15 @@ async function enrolOn(home: string, args: string[], machineArgs: string[] = [])
 
 const OP = mkdtempSync(join(tmpdir(), 'sigelo-enrol-op-')), SRV = mkdtempSync(join(tmpdir(), 'sigelo-enrol-srv-')), THIRD = mkdtempSync(join(tmpdir(), 'sigelo-enrol-3-'));
 const FOURTH = mkdtempSync(join(tmpdir(), 'sigelo-enrol-4-')), FIFTH = mkdtempSync(join(tmpdir(), 'sigelo-enrol-5-')), OTHER = mkdtempSync(join(tmpdir(), 'sigelo-enrol-x-'));
+const SIXTH = mkdtempSync(join(tmpdir(), 'sigelo-enrol-6-')), SEVENTH = mkdtempSync(join(tmpdir(), 'sigelo-enrol-7-'));
 const human = join(OP, '.config', 'sigelo', 'me.local.json'), agentFile = (h: string): string => join(h, '.config', 'moadim', 'sigelo.local.json');
-const contactsOf = (f: string) => (JSON.parse(readFileSync(f.replace(/\.json$/, '.contacts.json'), 'utf8')) as { contacts: Record<string, { did: string; current_did: string; revoked: boolean; tier: string; name: string; enrolled?: unknown }> }).contacts;
+const contactsOf = (f: string) => (JSON.parse(readFileSync(f.replace(/\.json$/, '.contacts.json'), 'utf8')) as { contacts: Record<string, { did: string; current_did: string; revoked: boolean; tier: string; tier_by?: string; name: string; enrolled?: unknown }> }).contacts;
+// The operator's `contacts` verb: each contact's ours, tier and tier_by, and the lines for people.
+type Listed = { did: string; ours: boolean; tier: string; tier_by: string | null };
+const listOp = async (): Promise<{ list: Listed[]; stderr: string }> => {
+  const r = await cli(OP, ['contacts'], { extra: { SIGELO_IDENTITY: human } });
+  return { list: (JSON.parse(r.stdout || '{}') as { contacts?: Listed[] }).contacts ?? [], stderr: r.stderr };
+};
 try {
   const none = await cli(OP, ['enrol', '--name', 'vps']);
   ok('enrol without an operator identity: exit 2, says keeper --from-words makes it', none.status === 2 && none.stderr.includes(`no operator identity at ${human}`) && none.stderr.includes('sigelo-agent keeper --from-words'), none.stderr);
@@ -140,6 +147,8 @@ try {
   const oc = contactsOf(human), temps = Object.values(oc).filter((c) => c.did !== w0.did);
   ok('the operator\'s contact: the worker\'s derived DID, tier own, no enrolled flag', oc[w0.did]?.tier === 'own' && oc[w0.did]!.name === 'vps' && !oc[w0.did]!.revoked && oc[w0.did]!.enrolled === undefined, JSON.stringify(oc));
   ok('the temporary DID is forgotten at the operator', temps.length === 1 && temps[0]!.revoked === true);
+  const l0 = (await listOp()).list.find((x) => x.did === w0.did);
+  ok('contacts JSON: the default enrolment is ours, tier own (detected)', l0?.ours === true && l0.tier === 'own' && l0.tier_by === 'auto' && e1.op.stderr.includes('vps: yours (worker 0), trusted'), JSON.stringify(l0));
   const sc = contactsOf(sfile);
   ok('the server\'s contacts start with the operator (own); no temporary file is left', Object.keys(sc).join() === opDid && sc[opDid]!.tier === 'own'
     && !readdirSync(join(SRV, '.config', 'moadim')).some((f) => f.includes('.enrol-')), readdirSync(join(SRV, '.config', 'moadim')).join());
@@ -203,6 +212,23 @@ try {
     && ws[0]!.n === 1 && ws[0]!.did === w01.did && ws[1]!.placed === 'here' && ws[2]!.did === w2.did, rb.stdout + rb.stderr);
   ok('and the next new worker is 3', ((r) => r.status === 0 && (JSON.parse(r.stdout) as { worker: number; did: string }).did === derived(3, 0).did)(await cli(OP, ['enrol', '--name', 'four', '--here'])));
 
+  // Low trust at enrolment: ours by key, its messages not pushed (--tier friend|quiet, tier_by owner).
+  ok('enrol --tier own: refused, exit 2 (own is the default)', (await cli(OP, ['enrol', '--name', 'x', '--tier', 'own'])).status === 2);
+  const w4 = derived(4, 0), e6 = await enrolOn(SIXTH, ['--name', 'reviewer', '--tier', 'friend']);
+  const r6 = JSON.parse(e6.op.stdout.split('\n').slice(1).join('\n') || '{}') as { ours?: boolean; tier?: string; did?: string };
+  const l4 = (await listOp()), c4 = l4.list.find((x) => x.did === w4.did);
+  ok('enrol --tier friend: the contact is ours, tier friend, tier_by owner; the output says both', e6.op.status === 0 && e6.m.status === 0 && r6.did === w4.did && r6.ours === true && r6.tier === 'friend'
+    && c4?.ours === true && c4.tier === 'friend' && c4.tier_by === 'owner' && e6.op.stderr.includes('reviewer: yours (worker 4), low trust: its messages wait in the inbox (tier friend)')
+    && l4.stderr.includes('reviewer: yours (worker 4), low trust'), e6.op.stdout + e6.op.stderr + JSON.stringify(c4));
+  const e7 = await enrolOn(SEVENTH, ['--restore', '4']), c7 = contactsOf(human)[w4.did];
+  ok('enrol --restore 4 without --tier: the same DID, the tier stays friend (by the owner)', e7.op.status === 0 && e7.m.status === 0 && c7?.tier === 'friend' && c7.tier_by === 'owner', e7.op.stderr + JSON.stringify(c7));
+  const rq = await cli(OP, ['enrol', '--restore', '4', '--here', '--tier', 'quiet', '--name', 'reviewer2']), c7q = contactsOf(human)[w4.did];
+  ok('enrol --restore 4 --here --tier quiet: the contact now quiet, still ours', rq.status === 0 && c7q?.tier === 'quiet' && (await listOp()).list.find((x) => x.did === w4.did)?.ours === true, rq.stderr);
+  const w5 = derived(5, 0), h5 = await cli(OP, ['enrol', '--name', 'browser', '--here', '--tier', 'friend']);
+  const preset = (JSON.parse(readFileSync(human.replace(/\.json$/, '.contacts.json'), 'utf8')) as { preset?: Record<string, string> }).preset ?? {};
+  ok('enrol --here --tier friend: not a contact yet, the tier kept for its pairing; ours, tier friend in the output', h5.status === 0 && preset[w5.did] === 'friend'
+    && (JSON.parse(h5.stdout) as { ours: boolean; tier: string }).tier === 'friend' && h5.stderr.includes('browser: yours (worker 5), low trust'), h5.stdout + h5.stderr);
+
   // The operator identity rotates from the words, never randomly; a loss restores the rotation.
   const rr = await cli(OP, ['rotate'], { extra: { SIGELO_IDENTITY: human } });
   ok('rotate on the seed-derived operator identity: refused, exit 1, points to keeper --from-words --rotate-me', rr.status === 1 && rr.stderr.includes('keeper --from-words --rotate-me') && meDid() === opDid, rr.stderr);
@@ -221,6 +247,6 @@ try {
 } finally {
   await relay.close();
   pm.s.close(); ph.s.close();
-  for (const d of [D, OP, SRV, THIRD, FOURTH, FIFTH, OTHER]) rmSync(d, { recursive: true, force: true });
+  for (const d of [D, OP, SRV, THIRD, FOURTH, FIFTH, SIXTH, SEVENTH, OTHER]) rmSync(d, { recursive: true, force: true });
 }
 done(import.meta.filename);

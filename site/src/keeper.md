@@ -17,6 +17,8 @@ npx -p sigelo-spend sigelo-spend init --wallet-rpc http://127.0.0.1:38083 --allo
 sigelo-spend doctor
 ```
 
+Own node recommended: `--daemons 127.0.0.1:18081`.
+
 The agent's four verbs, with `SIGELO_WALLET_URL` and `SIGELO_WALLET_TOKEN` from its operator:
 
 ```

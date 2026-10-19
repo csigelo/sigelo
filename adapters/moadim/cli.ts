@@ -66,7 +66,8 @@ A recovery rotation is signed by the offline recovery key and MUST NOT run in an
 runtime — a recovery key in the same process as the identity key protects nothing
 (THREAT-MODEL §5). On the air-gapped box, with recovery.key and the chain from
 \`sigelo-agent bundle\`: rotate({ genesis: <head genesis>, next_genesis: <fresh genesis,
-same or new recovery commitment>, iat, reason: "recovery", secret: <recovery seed> }), and
+same or new recovery commitment>, iat, reason: "recovery", secret: <recovery seed>,
+next_secret: <the fresh genesis's seed, which countersigns> }), and
 bring back { "rotation": <it>, "identity_seed_hex": <the fresh genesis's seed> } for
 \`sigelo-agent adopt --rotation <file>\`.
 Tier 1 (the operator's 25-word root): \`node ts/dist/offline.js recover --genesis <whoami.json>

@@ -175,6 +175,7 @@
       "sig_id": "z4eVyR2sfY7mg4qvMnJrZAsk9HCKftrHzsFyW4VgDqcAz39mXLM43m9Kppi8Ukabf12XxW6N5UCjup8xdsofFgKdW",
       "sig_addr": "SigV2DV6pHnuNNYEcKKU668PjkL4EDaCWhE1DzAmoAhKGSKT3LaYs4tPwLBvVmcK9PXgRUm3WQyDgk3nKCSvfaRKd6SHM",
       "expect_proof": "proven",
+      "expect_network": "mainnet",
       "expect_mode": "view",
       "note": "§6.2 view mode: a view-only wallet (a, B) proves it can see the wallet without ever holding a spend key. addr is the MAINNET STANDARD address of monero_spend_seed. Signing nonce fixed at 0x11 * 32; real ones are random, so byte-equality is not the target."
     },
@@ -192,6 +193,7 @@
       "sig_id": "z66vMLcKdxCAB8mPN4vsM52byzUqNDgQxaZvprWTbvWqrMwN4htNjLchDM5rCGdNNYqidoLfZgJBygYRT6Ndo7625",
       "sig_addr": "SigV2WTQ1HbgE5vRU9EGBV6stpWidsfXdVeTrPSFBAHDUj4iMjNifRYQqC9WRx7nKxpbY61DSEekUkB3cYBadn1sDrCnd",
       "expect_proof": "proven",
+      "expect_network": "mainnet",
       "expect_mode": "spend",
       "note": "§6.2 subaddress: addr is MAINNET SUBADDRESS (0,1) of monero_spend_seed; sig_addr is spend mode over its own (D, C) with d = b + m. Signing nonce fixed at 0x22 * 32."
     },
@@ -209,6 +211,7 @@
       "sig_id": "z3KgkwZpqu4n6urTHPKvRpmBCdKhdkMZPt3NHFA9XySMSfmLi5g1N52rdFbHyKrbsk3QBngEAfVti9a5rFmVdwonr",
       "sig_addr": "SigV2bB792cPH2nKdbcS6M3nAaXRgpLzybry6gQtYgR2jDiWPSbAVFYUbGGDYVPn6fzZB1TcoMuHYD5eoXM5zqAGwX8Qf",
       "expect_proof": "proven",
+      "expect_network": "mainnet",
       "expect_mode": "view",
       "note": "§6.2 subaddress, view mode: secret a*(b + m), over (D, C). Still needs the spend key — for a subaddress, view mode does not imply a view-only signer. Signing nonce fixed at 0x77 * 32."
     },
@@ -222,6 +225,7 @@
         "reason": "voluntary"
       },
       "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+      "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -242,6 +246,7 @@
         "reason": "voluntary"
       },
       "sig": "z5LapZPYHAnkW9xtuv94jVkesTfjsaKsjNeQfQH5EHni78CxdanDHZ4mDDPgpUPfbMKRcPeQbu2H3mXxyNYqjzNBD",
+      "sig_next": "z4sVvbvX67AuVC9zWNmm1ExPjpXnamXQP9EXPqQoTSJsTMWmpr4CLtdCVVSiBS7ENHTh7q96j1yFDfRkoT1gwAmte",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -262,6 +267,7 @@
         "reason": "voluntary"
       },
       "sig": "z5AfrGXTAieCRpoWq37HhoTBKmu3rt2p7qzrZhhTjuu5X2XoArbbYTDwDEdfvpDoJGJtyQcVRAY6AcrMWHbazF3Na",
+      "sig_next": "z5UGeJzsTRbzMHCS2dYVBYXk8iCCS3P512GLo5dpjnvhMgQYMsz3bcZZVbXzqd25xTYWYixXTdnQii98avpSduZB3",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -283,6 +289,7 @@
         "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
       },
       "sig": "z2ginhdmAqehRPBpMqKHHX7Jj46M9fs3PQEYYeswNmhVHB28tFd9Dv663KnNVgAduFJgVCFw5Gc6LurWXcxZ2uN8A",
+      "sig_next": "z3ka8gS3vzy3LC47PmVgY24X5gHpei35cRXXJAS71LLoZzKf4ytrx4kXwijEgXyYVohUXPUVkjW1EQQZA87r8Kd1L",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -305,6 +312,7 @@
         "recovery_key": "z6MkigjnFK3pgYLdERx3po9zWJnxzm1baNgR6hknPyPxxUwF"
       },
       "sig": "z5JfwkwinXhWunrP4sRWQzdpJDWMrcXYMpYvSWH2Yaukmas2zgbuyFwN8NcXb6d7qBUZU3t6gsMEJnQqmptwfjYfd",
+      "sig_next": "z2TyHGQ3n6sMQiQCoW4Ksj8vbQEAKJfpsJWdiHMxtyaX4xzFVJh8aKvg4LBFMcPRVWavHVEPjDNweRqfMJwqUAkyw",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -359,6 +367,7 @@
               "reason": "voluntary"
             },
             "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+            "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
             "next_genesis": {
               "v": "sigelo/0",
               "typ": "genesis",
@@ -378,6 +387,7 @@
               "reason": "voluntary"
             },
             "sig": "z5LapZPYHAnkW9xtuv94jVkesTfjsaKsjNeQfQH5EHni78CxdanDHZ4mDDPgpUPfbMKRcPeQbu2H3mXxyNYqjzNBD",
+            "sig_next": "z4sVvbvX67AuVC9zWNmm1ExPjpXnamXQP9EXPqQoTSJsTMWmpr4CLtdCVVSiBS7ENHTh7q96j1yFDfRkoT1gwAmte",
             "next_genesis": {
               "v": "sigelo/0",
               "typ": "genesis",
@@ -397,6 +407,7 @@
               "reason": "voluntary"
             },
             "sig": "z5AfrGXTAieCRpoWq37HhoTBKmu3rt2p7qzrZhhTjuu5X2XoArbbYTDwDEdfvpDoJGJtyQcVRAY6AcrMWHbazF3Na",
+            "sig_next": "z5UGeJzsTRbzMHCS2dYVBYXk8iCCS3P512GLo5dpjnvhMgQYMsz3bcZZVbXzqd25xTYWYixXTdnQii98avpSduZB3",
             "next_genesis": {
               "v": "sigelo/0",
               "typ": "genesis",
@@ -417,6 +428,7 @@
               "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
             },
             "sig": "z2ginhdmAqehRPBpMqKHHX7Jj46M9fs3PQEYYeswNmhVHB28tFd9Dv663KnNVgAduFJgVCFw5Gc6LurWXcxZ2uN8A",
+            "sig_next": "z3ka8gS3vzy3LC47PmVgY24X5gHpei35cRXXJAS71LLoZzKf4ytrx4kXwijEgXyYVohUXPUVkjW1EQQZA87r8Kd1L",
             "next_genesis": {
               "v": "sigelo/0",
               "typ": "genesis",
@@ -437,6 +449,7 @@
               "recovery_key": "z6MkigjnFK3pgYLdERx3po9zWJnxzm1baNgR6hknPyPxxUwF"
             },
             "sig": "z5JfwkwinXhWunrP4sRWQzdpJDWMrcXYMpYvSWH2Yaukmas2zgbuyFwN8NcXb6d7qBUZU3t6gsMEJnQqmptwfjYfd",
+            "sig_next": "z2TyHGQ3n6sMQiQCoW4Ksj8vbQEAKJfpsJWdiHMxtyaX4xzFVJh8aKvg4LBFMcPRVWavHVEPjDNweRqfMJwqUAkyw",
             "next_genesis": {
               "v": "sigelo/0",
               "typ": "genesis",
@@ -827,7 +840,7 @@
               "exp": 1764979200,
               "nonce": "zTHKNvrWPf52gDYivvHooQP"
             },
-            "proof": "proven"
+            "proof": "superseded"
           },
           {
             "body": {
@@ -840,7 +853,7 @@
               "exp": 1764979200,
               "nonce": "zTQWQg4WFq6gzBh5eV6fpAp"
             },
-            "proof": "unproven"
+            "proof": "superseded"
           },
           {
             "body": {
@@ -853,7 +866,7 @@
               "exp": 1764979200,
               "nonce": "zTn5VugVrMBfv689oBXFrU7"
             },
-            "proof": "unsupported"
+            "proof": "superseded"
           }
         ],
         "rejected": {
@@ -861,7 +874,7 @@
           "bindings": 2
         }
       },
-      "note": "verify(bundle, now) must equal `expect` as JSON. Rejected: expired, tampered, unknown issuer (genesis not in issuers), sub not in chain, unknown admission value, missing ctx (malformed attestation bodies are per-item, SPEC §9 step 2); one binding whose sig_addr is by the wrong key (discarded, not downgraded), one binding whose id is not in the chain. Two issuers: grouping is by iss, compared by value."
+      "note": "verify(bundle, now) must equal `expect` as JSON. Rejected: expired, tampered, unknown issuer (genesis not in issuers), sub not in chain, unknown admission value, missing ctx (malformed attestation bodies are per-item, SPEC §9 step 2); one binding whose sig_addr is by the wrong key (discarded, not downgraded), one binding whose id is not in the chain. The three accepted bindings are by d0, which precedes the recovery into d3 (and d2): superseded, SPEC §6.1, whatever their status before. Two issuers: grouping is by iss, compared by value."
     },
     "bundle_minimal": {
       "now": 1757289600,
@@ -895,6 +908,447 @@
         }
       },
       "note": "The smallest bundle that verifies. recovery: null is reported as null."
+    },
+    "rotation_recovery_from_genesis": {
+      "body": {
+        "v": "sigelo/0",
+        "typ": "rotation",
+        "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+        "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+        "iat": 1757206800,
+        "reason": "recovery",
+        "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+      },
+      "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+      "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+      "next_genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+        "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+        "created": "2026-10-10T00:00:00Z",
+        "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+      },
+      "expect_next_did": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+      "note": "A recovery straight from d0: every binding by d0 is superseded from here on (§6.1)."
+    },
+    "rotation_voluntary_after_recovery": {
+      "body": {
+        "v": "sigelo/0",
+        "typ": "rotation",
+        "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+        "next": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+        "iat": 1757213200,
+        "reason": "voluntary"
+      },
+      "sig": "zzYtJfKzjAiHUzVoxchmbyiu5vp6dAoGFmLmQB66BdRcSmwPbWs2gBcwLG14FyEWob97d4mKnP7edo2CTh9mi9k7",
+      "sig_next": "z3juYzbEYJwgcvFqqeu2h4SUKKH8F4gAv6MWVTAFywzm2ZABJBXqwDexkWvWDFcBxnVXESjfzqCH8C3ZucoMJpLsU",
+      "next_genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+        "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zPozY54aApGY17Wis5ffRxK"
+      },
+      "expect_next_did": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+      "note": "Voluntary, after the recovery: bindings by d2 stay proven."
+    },
+    "bundle_recovered": {
+      "now": 1757289600,
+      "bundle": {
+        "v": "sigelo/0",
+        "typ": "bundle",
+        "genesis": {
+          "v": "sigelo/0",
+          "typ": "genesis",
+          "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+          "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+          "created": "2026-09-07T00:00:00Z",
+          "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+        },
+        "rotations": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "iat": 1757206800,
+              "reason": "recovery",
+              "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+            },
+            "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+            "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+              "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+              "created": "2026-10-10T00:00:00Z",
+              "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+            }
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "next": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+              "iat": 1757213200,
+              "reason": "voluntary"
+            },
+            "sig": "zzYtJfKzjAiHUzVoxchmbyiu5vp6dAoGFmLmQB66BdRcSmwPbWs2gBcwLG14FyEWob97d4mKnP7edo2CTh9mi9k7",
+            "sig_next": "z3juYzbEYJwgcvFqqeu2h4SUKKH8F4gAv6MWVTAFywzm2ZABJBXqwDexkWvWDFcBxnVXESjfzqCH8C3ZucoMJpLsU",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+              "created": "2026-11-01T00:00:00Z",
+              "nonce": "zPozY54aApGY17Wis5ffRxK"
+            }
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "next": "did:sigelo:z6FfJsPgZBMqhvUEyFW2SoHM3MaJV8QLdLJje2y8KvFEJ",
+              "iat": 1757223200,
+              "reason": "voluntary"
+            },
+            "sig": "zJn7S5aaE7eXWWxf9tUkhFoEAkJ7hEZ3Jx6kwd2Csuupzg2iRgh4tMjthV2Tz8FAf1iExJnyJmR6tvsyWZNcqEbr",
+            "sig_next": "z4JnVFtjw31fnFdeBRPLi8HNNS34RAXmXA3HeVBor69QXuVtZ57hNe5uakcrD8ZQAGzE2sreXdvnQLn6MwDsSLUBt",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-10-21T00:00:00Z",
+              "nonce": "zTXhSRGW818MJ9qSN3uXpwF"
+            }
+          }
+        ],
+        "bindings": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "method": "ed25519-test",
+              "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "iat": 1757210400,
+              "exp": 1764979200,
+              "nonce": "zF1VQBNjkYEe1PHMyvJSVZi"
+            },
+            "sig_id": "z2SRt2ofsWXu5mB8jiJYD3MdQFfkfpzbEyp5PsJHVv2uzjigMGydqd8vp31mtNT5RwGZErtaYesXAQBccY5MjxSwE",
+            "sig_addr": "zDTYL6P4xU63NUjLXjnjrNC7dniieU2KPcemVXyTQhgF4nLN2V1VLK9AvaHS3dbwvxCEKu6prisj9YJJTjT2LiZz"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "method": "ed25519-test",
+              "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "iat": 1754611200,
+              "exp": 1764979200,
+              "nonce": "zF8gRvajciGJKMRihV7JWL9"
+            },
+            "sig_id": "z3X93KzJCBRARk7Va3Pj4Gcbrx6WT3DwbLiwwz9uqFGK1StPBvSjYMzS7iH5To4wof6EN4c427fqL16NVnQP94P5L",
+            "sig_addr": "z4Arp3xVpqMUjUrQvYEd4U5drweNwnzBjg968iXEYqmzZAt23yCn675PXwioAKhWeyuXdRVgRyNGTsieLMrpRre9v"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "method": "monero",
+              "addr": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+              "iat": 1757210400,
+              "exp": 1764979200,
+              "nonce": "zFFsTfnjUtHxdKa5R3vAX6a"
+            },
+            "sig_id": "z3NYBLy2h3dYejBQHHCrNs8CoJqReovM7gK2zHsAwEYsTHqBPbcXyLRoZ2SJPLDqm6hHKPasbH3ZKAZfYj4xUK7oY",
+            "sig_addr": "SigV262Xhr2PjCmkiAi9F97LRHZaHh4fK19X5DSuMVJZoXtv8UqciJ2zaVxwMDpytLeaF2fQqcG6eSYNTnA5kZJehbc9M"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "method": "ed25519-test",
+              "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFP4VQzjM4KcwHiS8cj2Xs1"
+            },
+            "sig_id": "zz58kB92txFpUsK6aBtTpKZAsKegU9PxqXCsqgtLvtxFrYNeAzoSKSu8GM1sunRAeVdWUQjsNL4QzYtFdUDmuuev",
+            "sig_addr": "z2gn4gDm5L46QuCvMAUUjcj3hsNEjxypVMqxnxDBV1xS79Qh6b3LLGuWCoyWuKcmg1Sy4o1pQCN4ZmKoMBX9xmNFP"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "method": "monero",
+              "addr": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFWFXACjDEMHFFrnrBXtYdS"
+            },
+            "sig_id": "z5ssMDEWVpTGa1s6idzyhLG8eJSqQ3QntvNpwtYfiuTRgmRDz4SA5ZAePF2nnXmrJnh7nLQsW4TfSWnitBd71XxSq",
+            "sig_addr": "SigV2Gk3XdGT3Z7H9CPqQJk8APB9ja5iQH6724dY9FfwTBoveAjDtXLbjXks3oxgwVp5Z1YDRmMKD8otgMRj6t3jBvqvV"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+              "method": "monero",
+              "addr": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFdSYuQj5QNwZE19ZkLkZPs"
+            },
+            "sig_id": "z5Uyd7fnJZRUUyR8CLyma7wR5WXVHL1Cv1qRwpbHbPXYd4oMv5WRPyhYmv67NbjTqJZLzbYoiPiT1bhnbLXwX8sf",
+            "sig_addr": "SigV2ESbGxzUB6BLjju9v82JGzURfaFqqVzTNti9qETBEJjFuL868pLgiDLdZ7gvvJuoqxi1uFPjhvuSTnFLYMWm5yj2c"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+              "method": "ed25519-test",
+              "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFkdaeciwaQbsC9WHK9caAJ"
+            },
+            "sig_id": "zEdp1BbE33jmd4ED1mFozDyWtk2WT8b6fxMwce6UWFvDBqxBy3qD7cnvdoF6KkzUeYWHzcbV24v5uczamWSFwizq"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:z6FfJsPgZBMqhvUEyFW2SoHM3MaJV8QLdLJje2y8KvFEJ",
+              "method": "ed25519-test",
+              "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFspcPpiokSGBAHrzsxUavj"
+            },
+            "sig_id": "zkLH9XATPep1DWP9pZmdoRLLWEZs6QyA6qSrdceJAiMuFvBe3WFpyzQH6SMHxifVbBaWccgC1CAQMANSZQM4pXmA",
+            "sig_addr": "znwuhbBPih7bH8ukh6T1jKYqpMaBT2VUfnojgAetn6XVwZzR2h98JjuGCiBVgMgy9o1yaW1v1VyaWbxoJuy6n91C"
+          }
+        ],
+        "attestations": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "invite",
+              "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+              "claims": {
+                "joined": "2026-04-02",
+                "posts": 412,
+                "standing": "citizen"
+              }
+            },
+            "sig": "z5STzdK3h1Z3tk1xwgkwhcv3vgy3dvYtuC7S1BuMTrkUcqpPANdgr5bkaYookdKmbBhe1i4fdFNEXzQXYj4zVwKz1"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "open",
+              "claims": {
+                "standing": "citizen"
+              }
+            },
+            "sig": "z5GXcygEs8NFUNNGbzmSzqpABSyxJ5NvQWAaipNGTfvJce5jm2nZn5siEKZErTf1gbMeqVfFswjwNmpbWPEeSCqop"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:z6FfJsPgZBMqhvUEyFW2SoHM3MaJV8QLdLJje2y8KvFEJ",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "open",
+              "claims": {
+                "standing": "citizen"
+              }
+            },
+            "sig": "z3QQaP5HH8HT752BBRtze7Sw4J7sw4D9HQFEknezazYvpBEpim9R89GF2Tzt4r82KiMCizbre6QnCJ8KRD8yxjbsg"
+          }
+        ],
+        "issuers": [
+          {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+            "recovery": null,
+            "created": "2026-01-01T00:00:00Z",
+            "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+          }
+        ]
+      },
+      "expect": {
+        "did": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+        "chain": [
+          "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+          "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+          "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA"
+        ],
+        "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+        "attestations": {
+          "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw": [
+            {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "invite",
+              "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+              "claims": {
+                "joined": "2026-04-02",
+                "posts": 412,
+                "standing": "citizen"
+              }
+            },
+            {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "open",
+              "claims": {
+                "standing": "citizen"
+              }
+            }
+          ]
+        },
+        "bindings": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "method": "ed25519-test",
+              "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "iat": 1757210400,
+              "exp": 1764979200,
+              "nonce": "zF1VQBNjkYEe1PHMyvJSVZi"
+            },
+            "proof": "superseded"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "method": "ed25519-test",
+              "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "iat": 1754611200,
+              "exp": 1764979200,
+              "nonce": "zF8gRvajciGJKMRihV7JWL9"
+            },
+            "proof": "superseded"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "method": "monero",
+              "addr": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+              "iat": 1757210400,
+              "exp": 1764979200,
+              "nonce": "zFFsTfnjUtHxdKa5R3vAX6a"
+            },
+            "proof": "superseded"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "method": "ed25519-test",
+              "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFP4VQzjM4KcwHiS8cj2Xs1"
+            },
+            "proof": "proven"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "method": "monero",
+              "addr": "54NMFZ1KFrLX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SACTcV",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFWFXACjDEMHFFrnrBXtYdS"
+            },
+            "proof": "proven",
+            "network": "stagenet"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+              "method": "monero",
+              "addr": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFdSYuQj5QNwZE19ZkLkZPs"
+            },
+            "proof": "proven",
+            "network": "mainnet"
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+              "method": "ed25519-test",
+              "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "nonce": "zFkdaeciwaQbsC9WHK9caAJ"
+            },
+            "proof": "unproven"
+          }
+        ],
+        "rejected": {
+          "attestations": 1,
+          "bindings": 1
+        }
+      },
+      "note": "SPEC §6.1 superseded: d0 -> d2 is a recovery, so the three bindings by d0 (the thief's address after the recovery, the same backdated, a Monero one) are superseded: positional in the chain, never by iat. The thief's valid voluntary rotation at d0 loses to the recovery (§7.1). d2 bound before the voluntary rotation to d3: proven. A proven monero entry carries `network` (§6.2). Attestations to d0 still count; the one to the thief's DID and the thief's own binding are not in the chain."
     }
   },
   "negative": {
@@ -1025,6 +1479,7 @@
         "recovery_key": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU"
       },
       "sig": "z58pew3Qw2nEGZYZChNV6Xd674qxHEQyZMheTtNzvhs1i7fzAQCgMpLmdfQTeSRqTF2CKuqeWa27vYY8XWokQ6Ajk",
+      "sig_next": "z658Tx7cPr7k6siZdaemp7wDDmGeH179vGYnaiR55tBGKrqcqKFJ9oertWpN9KKyqt4fLUYf4Ehe6ZVDc7x1vkHzT",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -1053,6 +1508,7 @@
         "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
       },
       "sig": "z3adXred9HJ9mVHFzUcdJWBQigSiKKQ7DLJD3McewtuNahsY2wUWau42emA8rse8L2Sym6vnNk2mF1dj3R9pRQgqr",
+      "sig_next": "z32iGP7Xp4LCgzrzUXqcoxavjKyCrwKktP6ptYup7QtHCTuDyfaX4fw2XKhEN3DDmgtQbkzHSpe93pextL8QQChCc",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -1082,6 +1538,7 @@
         "reason": "voluntary"
       },
       "sig": "z5LapZPYHAnkW9xtuv94jVkesTfjsaKsjNeQfQH5EHni78CxdanDHZ4mDDPgpUPfbMKRcPeQbu2H3mXxyNYqjzNBD",
+      "sig_next": "z4sVvbvX67AuVC9zWNmm1ExPjpXnamXQP9EXPqQoTSJsTMWmpr4CLtdCVVSiBS7ENHTh7q96j1yFDfRkoT1gwAmte",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -1109,6 +1566,7 @@
         "reason": "voluntary"
       },
       "sig": "z5PUx5cwBaUTHP3EecFKRmKtrobSwysEFNrTWYhioLbvPsgH6JZ59XfswRbXeJTqp445SpeVsv9oK3e4QWx1CU47K",
+      "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -1166,6 +1624,7 @@
         "reason": "voluntary"
       },
       "sig": "z3zZnyYEFbCV6BHbkVrScdnRcZgSUiNipC7kN2ei26xYQ1zovD9r2DiBsLnH6caerra9J8tnqv5rm3pbESHXju8ET",
+      "sig_next": "z5fhtkkmcdSCZr6ZdhAqC5eQszbxY4ssBrpEU3pSvXAsfkyLpmJDvmy1j7Da6vDp7D7g9R47mkJ51ZR6Qrz4Q4w4y",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -1186,6 +1645,7 @@
         "reason": "voluntary"
       },
       "sig": "zHLyxticFY8xixhECHsjPMZCkrusd1McjJNq9EHsXVUS4TxgdHeMKoXWgiz627kvmPoonEsPjjTSuNHCemnmPCat",
+      "sig_next": "z66KmG22MSgnjMMkx1PLCqNNmAVZMkjZ8f6Jq91R6qc2QHQzzXemahNVwPPt6YXhhYjrMAdp1V6hMdSJx8kGDXvj5",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -1206,6 +1666,7 @@
         "reason": "voluntary"
       },
       "sig": "zHij9Fm8cNfMJZetnBe7w2Ni6fxe5WqJ14AKjc6gdMBhQv2LYnMXBVDMvvKpJ6jDdRmhtzYxuH5FzqiE3Z3yGaFg",
+      "sig_next": "zHij9Fm8cNfMJZetnBe7w2Ni6fxe5WqJ14AKjc6gdMBhQv2LYnMXBVDMvvKpJ6jDdRmhtzYxuH5FzqiE3Z3yGaFg",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
@@ -4374,6 +4835,7 @@
                   "recovery_key": "z6MkvUK5T7wX3YKPL8TakfM6vdwQQtkJSzV8fTKGdgosTh6E"
                 },
                 "sig": "z2ginhdmAqehRPBpMqKHHX7Jj46M9fs3PQEYYeswNmhVHB28tFd9Dv663KnNVgAduFJgVCFw5Gc6LurWXcxZ2uN8A",
+                "sig_next": "z3ka8gS3vzy3LC47PmVgY24X5gHpei35cRXXJAS71LLoZzKf4ytrx4kXwijEgXyYVohUXPUVkjW1EQQZA87r8Kd1L",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -4988,6 +5450,7 @@
                   "reason": "voluntary"
                 },
                 "sig": 5,
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5081,6 +5544,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5132,6 +5596,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5183,6 +5648,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5234,6 +5700,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5285,6 +5752,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5365,6 +5833,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5384,6 +5853,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5434,6 +5904,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5509,6 +5980,7 @@
                   "reason": "voluntary"
                 },
                 "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
                 "next_genesis": {
                   "v": "sigelo/0",
                   "typ": "genesis",
@@ -5561,6 +6033,1215 @@
             }
           }
         },
+        "superseded_binding_after_recovery": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757206800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+                },
+                "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+                "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-10-10T00:00:00Z",
+                  "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+                  "iat": 1757210400,
+                  "exp": 1764979200,
+                  "nonce": "zF1VQBNjkYEe1PHMyvJSVZi"
+                },
+                "sig_id": "z2SRt2ofsWXu5mB8jiJYD3MdQFfkfpzbEyp5PsJHVv2uzjigMGydqd8vp31mtNT5RwGZErtaYesXAQBccY5MjxSwE",
+                "sig_addr": "zDTYL6P4xU63NUjLXjnjrNC7dniieU2KPcemVXyTQhgF4nLN2V1VLK9AvaHS3dbwvxCEKu6prisj9YJJTjT2LiZz"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [
+              "superseded"
+            ],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 0
+            }
+          }
+        },
+        "superseded_binding_backdated": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757206800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+                },
+                "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+                "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-10-10T00:00:00Z",
+                  "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+                  "iat": 1754611200,
+                  "exp": 1764979200,
+                  "nonce": "zF8gRvajciGJKMRihV7JWL9"
+                },
+                "sig_id": "z3X93KzJCBRARk7Va3Pj4Gcbrx6WT3DwbLiwwz9uqFGK1StPBvSjYMzS7iH5To4wof6EN4c427fqL16NVnQP94P5L",
+                "sig_addr": "z4Arp3xVpqMUjUrQvYEd4U5drweNwnzBjg968iXEYqmzZAt23yCn675PXwioAKhWeyuXdRVgRyNGTsieLMrpRre9v"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [
+              "superseded"
+            ],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 0
+            }
+          }
+        },
+        "superseded_monero_binding_after_recovery": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757206800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+                },
+                "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+                "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-10-10T00:00:00Z",
+                  "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "monero",
+                  "addr": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+                  "iat": 1757210400,
+                  "exp": 1764979200,
+                  "nonce": "zFFsTfnjUtHxdKa5R3vAX6a"
+                },
+                "sig_id": "z3NYBLy2h3dYejBQHHCrNs8CoJqReovM7gK2zHsAwEYsTHqBPbcXyLRoZ2SJPLDqm6hHKPasbH3ZKAZfYj4xUK7oY",
+                "sig_addr": "SigV262Xhr2PjCmkiAi9F97LRHZaHh4fK19X5DSuMVJZoXtv8UqciJ2zaVxwMDpytLeaF2fQqcG6eSYNTnA5kZJehbc9M"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [
+              "superseded"
+            ],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 0
+            }
+          }
+        },
+        "superseded_unproven_binding": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757206800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+                },
+                "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+                "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-10-10T00:00:00Z",
+                  "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+                  "iat": 1757210400,
+                  "exp": 1764979200,
+                  "nonce": "zF1VQBNjkYEe1PHMyvJSVZi"
+                },
+                "sig_id": "z2SRt2ofsWXu5mB8jiJYD3MdQFfkfpzbEyp5PsJHVv2uzjigMGydqd8vp31mtNT5RwGZErtaYesXAQBccY5MjxSwE"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [
+              "superseded"
+            ],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 0
+            }
+          }
+        },
+        "superseded_binding_bad_sig_addr_discarded": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757206800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+                },
+                "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+                "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-10-10T00:00:00Z",
+                  "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+                  "iat": 1757210400,
+                  "exp": 1764979200,
+                  "nonce": "zF1VQBNjkYEe1PHMyvJSVZi"
+                },
+                "sig_id": "z2SRt2ofsWXu5mB8jiJYD3MdQFfkfpzbEyp5PsJHVv2uzjigMGydqd8vp31mtNT5RwGZErtaYesXAQBccY5MjxSwE",
+                "sig_addr": "z5YLVd9AcVSGTuwuKq5SzvY9sAXyLkt9QDc4txtGrY8emo9w2CTHVPJSosahRNQs4TJntefmF3FPumpcvoQL6qKv7"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 1
+            }
+          }
+        },
+        "recovery_new_did_binding_proven": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757206800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+                },
+                "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+                "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-10-10T00:00:00Z",
+                  "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zFP4VQzjM4KcwHiS8cj2Xs1"
+                },
+                "sig_id": "zz58kB92txFpUsK6aBtTpKZAsKegU9PxqXCsqgtLvtxFrYNeAzoSKSu8GM1sunRAeVdWUQjsNL4QzYtFdUDmuuev",
+                "sig_addr": "z2gn4gDm5L46QuCvMAUUjcj3hsNEjxypVMqxnxDBV1xS79Qh6b3LLGuWCoyWuKcmg1Sy4o1pQCN4ZmKoMBX9xmNFP"
+              }
+            ],
+            "attestations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "attestation",
+                  "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+                  "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "ctx": "1f916.ai",
+                  "admission": "invite",
+                  "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+                  "claims": {
+                    "joined": "2026-04-02",
+                    "posts": 412,
+                    "standing": "citizen"
+                  }
+                },
+                "sig": "z5STzdK3h1Z3tk1xwgkwhcv3vgy3dvYtuC7S1BuMTrkUcqpPANdgr5bkaYookdKmbBhe1i4fdFNEXzQXYj4zVwKz1"
+              },
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "attestation",
+                  "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+                  "sub": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "ctx": "1f916.ai",
+                  "admission": "invite",
+                  "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+                  "claims": {
+                    "joined": "2026-04-02",
+                    "posts": 412,
+                    "standing": "citizen"
+                  }
+                },
+                "sig": "z3V85yUDpbtKadM85VVh5jmFBEdsZ8gUH76iz8dxFD3H2hhAjn2zntPH7S61SyXQVw8bypUwH6pdqQmmsdf7U92y5"
+              }
+            ],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [
+              "proven"
+            ],
+            "attestations": 2,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 0
+            }
+          }
+        },
+        "binding_before_voluntary_rotation_proven": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+                  "iat": 1759276800,
+                  "reason": "voluntary"
+                },
+                "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL",
+                  "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zVPYtbNU6bZFwfzo7Y2U2Ri"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zTHKNvrWPf52gDYivvHooQP"
+                },
+                "sig_id": "z5kKgaz4cYTnLMZCkYaQGkKHQzuZ6zYT7UcLbPKLgYraa5h8Vw5c5WRFRjBjArFPiuyP8WXRqws4yjqWG5FbLpzWc",
+                "sig_addr": "zb8oXnaBqNwdP3sFkpR8LBHqQdoLRkhWmP8owZLsSLv617RMqrLamzPyuUCGZ7tNhXJbJQnxKrdyit9ZYDGCG2Xp"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [
+              "proven"
+            ],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 0
+            }
+          }
+        },
+        "binding_before_voluntary_after_recovery_proven": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757206800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+                },
+                "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+                "sig_next": "z5NKNrPJyLdvdK8Z4ijjGKU5PgHVeH26As45WDTtvwo427CTV1DGNTHieZo2xAtEBVNh7Vsobs1SjgrzydYMMbRpz",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-10-10T00:00:00Z",
+                  "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+                }
+              },
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "next": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+                  "iat": 1757213200,
+                  "reason": "voluntary"
+                },
+                "sig": "zzYtJfKzjAiHUzVoxchmbyiu5vp6dAoGFmLmQB66BdRcSmwPbWs2gBcwLG14FyEWob97d4mKnP7edo2CTh9mi9k7",
+                "sig_next": "z3juYzbEYJwgcvFqqeu2h4SUKKH8F4gAv6MWVTAFywzm2ZABJBXqwDexkWvWDFcBxnVXESjfzqCH8C3ZucoMJpLsU",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-11-01T00:00:00Z",
+                  "nonce": "zPozY54aApGY17Wis5ffRxK"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+                  "iat": 1757210400,
+                  "exp": 1764979200,
+                  "nonce": "zF1VQBNjkYEe1PHMyvJSVZi"
+                },
+                "sig_id": "z2SRt2ofsWXu5mB8jiJYD3MdQFfkfpzbEyp5PsJHVv2uzjigMGydqd8vp31mtNT5RwGZErtaYesXAQBccY5MjxSwE",
+                "sig_addr": "zDTYL6P4xU63NUjLXjnjrNC7dniieU2KPcemVXyTQhgF4nLN2V1VLK9AvaHS3dbwvxCEKu6prisj9YJJTjT2LiZz"
+              },
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zFP4VQzjM4KcwHiS8cj2Xs1"
+                },
+                "sig_id": "zz58kB92txFpUsK6aBtTpKZAsKegU9PxqXCsqgtLvtxFrYNeAzoSKSu8GM1sunRAeVdWUQjsNL4QzYtFdUDmuuev",
+                "sig_addr": "z2gn4gDm5L46QuCvMAUUjcj3hsNEjxypVMqxnxDBV1xS79Qh6b3LLGuWCoyWuKcmg1Sy4o1pQCN4ZmKoMBX9xmNFP"
+              },
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:z6tH4xM1YgH1sWab2KRHBDsP7WDATEKCaxLtQCTPFWsQA",
+                  "method": "monero",
+                  "addr": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCZ9uhm5tGiWXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4SfKK35",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zFdSYuQj5QNwZE19ZkLkZPs"
+                },
+                "sig_id": "z5Uyd7fnJZRUUyR8CLyma7wR5WXVHL1Cv1qRwpbHbPXYd4oMv5WRPyhYmv67NbjTqJZLzbYoiPiT1bhnbLXwX8sf",
+                "sig_addr": "SigV2ESbGxzUB6BLjju9v82JGzURfaFqqVzTNti9qETBEJjFuL868pLgiDLdZ7gvvJuoqxi1uFPjhvuSTnFLYMWm5yj2c"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [
+              "superseded",
+              "proven",
+              "proven"
+            ],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 0
+            }
+          }
+        },
+        "fatal_rotation_missing_sig_next": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-01T00:00:00Z",
+              "nonce": "zWsqFXrSUfuBfHj5iKipBct"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:z7kznGvDqUbQ3JCQEiCZbHcrnx1WxAjRK252hgkzDtwsS",
+                  "next": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "iat": 1757116800,
+                  "reason": "voluntary"
+                },
+                "sig": "z3NmEY2nhYr6B5M57nNTkwizDwRMQi9KA98n5GU8eNRVUZ84zuDjGBhQfHvAkvVHzsb2WzR4CenZH7JBPCRthQPLr",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+                  "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+                  "created": "2026-09-07T00:00:00Z",
+                  "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+                }
+              }
+            ],
+            "bindings": [],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "reject": "rotation: missing sig_next"
+          }
+        },
+        "fatal_rotation_sig_next_number": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+                  "iat": 1759276800,
+                  "reason": "voluntary"
+                },
+                "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": 5,
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL",
+                  "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zVPYtbNU6bZFwfzo7Y2U2Ri"
+                }
+              }
+            ],
+            "bindings": [],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "reject": "rotation: missing sig_next"
+          }
+        },
+        "graft_voluntary_into_foreign_genesis": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-01T00:00:00Z",
+              "nonce": "zWsqFXrSUfuBfHj5iKipBct"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:z7kznGvDqUbQ3JCQEiCZbHcrnx1WxAjRK252hgkzDtwsS",
+                  "next": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "iat": 1757116800,
+                  "reason": "voluntary"
+                },
+                "sig": "z3NmEY2nhYr6B5M57nNTkwizDwRMQi9KA98n5GU8eNRVUZ84zuDjGBhQfHvAkvVHzsb2WzR4CenZH7JBPCRthQPLr",
+                "sig_next": "z3NmEY2nhYr6B5M57nNTkwizDwRMQi9KA98n5GU8eNRVUZ84zuDjGBhQfHvAkvVHzsb2WzR4CenZH7JBPCRthQPLr",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+                  "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+                  "created": "2026-09-07T00:00:00Z",
+                  "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zTHKNvrWPf52gDYivvHooQP"
+                },
+                "sig_id": "z5kKgaz4cYTnLMZCkYaQGkKHQzuZ6zYT7UcLbPKLgYraa5h8Vw5c5WRFRjBjArFPiuyP8WXRqws4yjqWG5FbLpzWc",
+                "sig_addr": "zb8oXnaBqNwdP3sFkpR8LBHqQdoLRkhWmP8owZLsSLv617RMqrLamzPyuUCGZ7tNhXJbJQnxKrdyit9ZYDGCG2Xp"
+              }
+            ],
+            "attestations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "attestation",
+                  "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+                  "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "ctx": "1f916.ai",
+                  "admission": "invite",
+                  "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+                  "claims": {
+                    "joined": "2026-04-02",
+                    "posts": 412,
+                    "standing": "citizen"
+                  }
+                },
+                "sig": "z5STzdK3h1Z3tk1xwgkwhcv3vgy3dvYtuC7S1BuMTrkUcqpPANdgr5bkaYookdKmbBhe1i4fdFNEXzQXYj4zVwKz1"
+              }
+            ],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 1,
+              "bindings": 1
+            }
+          }
+        },
+        "graft_recovery_into_foreign_genesis": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "recovery": "sha256:079f9df0d4111bb30305c17ede6397ab843a105db8a013ea4cf33fbcb408ddd6",
+              "created": "2026-09-01T00:00:00Z",
+              "nonce": "zX12HH4SLqvqyFsSRtXgCPK"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:z8bAs23eqQyMfYXS7kCT4x6QiP6sR4RhLrESi65w2yNAf",
+                  "next": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "iat": 1757116800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4"
+                },
+                "sig": "z3Ju7HinEApU1VB8LyCxjMMmtM4tvUy6C8iEEvm93a6SmvrHf7BdL1VgMQsudcVY8X1o6VT9SELPJfvn7nwdcU62p",
+                "sig_next": "z55Qc6PUsAc81F1svQZHoQRFjJiyCou1BMsKA9VzTFLKsLpMruNVkYACeSPZjYgm7XX5xsxWkEz18cE6YKzeiGDcX",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+                  "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+                  "created": "2026-09-07T00:00:00Z",
+                  "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zTHKNvrWPf52gDYivvHooQP"
+                },
+                "sig_id": "z5kKgaz4cYTnLMZCkYaQGkKHQzuZ6zYT7UcLbPKLgYraa5h8Vw5c5WRFRjBjArFPiuyP8WXRqws4yjqWG5FbLpzWc",
+                "sig_addr": "zb8oXnaBqNwdP3sFkpR8LBHqQdoLRkhWmP8owZLsSLv617RMqrLamzPyuUCGZ7tNhXJbJQnxKrdyit9ZYDGCG2Xp"
+              }
+            ],
+            "attestations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "attestation",
+                  "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+                  "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "ctx": "1f916.ai",
+                  "admission": "invite",
+                  "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+                  "claims": {
+                    "joined": "2026-04-02",
+                    "posts": 412,
+                    "standing": "citizen"
+                  }
+                },
+                "sig": "z5STzdK3h1Z3tk1xwgkwhcv3vgy3dvYtuC7S1BuMTrkUcqpPANdgr5bkaYookdKmbBhe1i4fdFNEXzQXYj4zVwKz1"
+              }
+            ],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 1,
+              "bindings": 1
+            }
+          }
+        },
+        "rotation_bad_sig_next_not_a_candidate": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+                  "iat": 1759276800,
+                  "reason": "voluntary"
+                },
+                "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+                "sig_next": "z5PUx5cwBaUTHP3EecFKRmKtrobSwysEFNrTWYhioLbvPsgH6JZ59XfswRbXeJTqp445SpeVsv9oK3e4QWx1CU47K",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL",
+                  "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+                  "created": "2026-10-01T00:00:00Z",
+                  "nonce": "zVPYtbNU6bZFwfzo7Y2U2Ri"
+                }
+              }
+            ],
+            "bindings": [],
+            "attestations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "attestation",
+                  "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+                  "sub": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "ctx": "1f916.ai",
+                  "admission": "invite",
+                  "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+                  "claims": {
+                    "joined": "2026-04-02",
+                    "posts": 412,
+                    "standing": "citizen"
+                  }
+                },
+                "sig": "z3aJmoKvyFRWQFbcuGz4UVSmDrjEMYJaaRD8pDJCj9mdew7DAoiRjADPR131hxFpG9E3FGBbHWkGhFSsEbQsYnGTQ"
+              }
+            ],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 1,
+              "bindings": 0
+            }
+          }
+        },
+        "recovery_rotation_bad_sig_next_not_a_candidate": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "rotation",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "iat": 1757206800,
+                  "reason": "recovery",
+                  "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+                },
+                "sig": "z2h9tTV2q7sFumFxiP8Wkfq6mQCFM8A8F65x6EQb4bLY3buRB5VWQJq7idG7NE61yAvMB84fky3699KooFueTmhHe",
+                "sig_next": "z3XoELCQfZjkCyz23qZEmSWqURh76WbhCoAZyGZPecj69xmBzeuT5APov8zVwUiPyMtFsds2ZwYJDpQLYmRgysM3S",
+                "next_genesis": {
+                  "v": "sigelo/0",
+                  "typ": "genesis",
+                  "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+                  "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+                  "created": "2026-10-10T00:00:00Z",
+                  "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+                }
+              }
+            ],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+                  "method": "ed25519-test",
+                  "addr": "z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zFP4VQzjM4KcwHiS8cj2Xs1"
+                },
+                "sig_id": "zz58kB92txFpUsK6aBtTpKZAsKegU9PxqXCsqgtLvtxFrYNeAzoSKSu8GM1sunRAeVdWUQjsNL4QzYtFdUDmuuev",
+                "sig_addr": "z2gn4gDm5L46QuCvMAUUjcj3hsNEjxypVMqxnxDBV1xS79Qh6b3LLGuWCoyWuKcmg1Sy4o1pQCN4ZmKoMBX9xmNFP"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 1
+            }
+          }
+        },
+        "monero_view_key_small_order": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "monero",
+                  "addr": "44AKAi6McFEX4QaBSsK3AE2T5DADCs5mHVfACLPsA1dBCYPQxhW2xTh11111111111111111111111111111111116k7mWs",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zG11e92ifvTvV8SDiSmLbhA"
+                },
+                "sig_id": "z2HJDXAAAsy4HtuSbqM6sZzKDf3XWsrp3TAzWKKyXTb6gXFR6R3EzrYHVkAZ3K8AQgTjy9rqCZwMnRqoJru9T4TbK",
+                "sig_addr": "SigV2dL4HSfJ6C7fPS1cfsJKcyGQ1rQahPQZ1BdBTYFcAjGbriEQxeLTm1syWqFbUjrvkSSc2CgSFYhgLkd6XwgKsAwXX"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 1
+            }
+          }
+        },
+        "monero_spend_key_identity": {
+          "bundle": {
+            "v": "sigelo/0",
+            "typ": "bundle",
+            "genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-09-07T00:00:00Z",
+              "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+            },
+            "rotations": [],
+            "bindings": [
+              {
+                "body": {
+                  "v": "sigelo/0",
+                  "typ": "binding",
+                  "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+                  "method": "monero",
+                  "addr": "41fJjQDhryD11111111111111111111111111111111111mVk4arKFpXcq3pjCeqnPRDqyCVNALCkjGhsUjiSn2m4VNkdYB",
+                  "iat": 1757203200,
+                  "exp": 1764979200,
+                  "nonce": "zG8CftEiY6Vao6aaS1aCcTb"
+                },
+                "sig_id": "z5jvnXRUUS5tgXmveQY4ooniHwj3ZKvic8JAL8E2ngQcDqAASKrGuUwb7KfJfRnGE8jZ1H38UwJvZMZUxHSFigGrm",
+                "sig_addr": "SigV2XkuwSwbKyXvDPhTaY7Twp9ALZ7xv6y3gb1xtnGLSmRzuiEQxeLTm1syWqFbUjrvkSSc2CgSFYhgLkd6XwgKsAwXX"
+              }
+            ],
+            "attestations": [],
+            "issuers": [
+              {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+                "recovery": null,
+                "created": "2026-01-01T00:00:00Z",
+                "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+              }
+            ]
+          },
+          "expect": {
+            "proofs": [],
+            "attestations": 0,
+            "rejected": {
+              "attestations": 0,
+              "bindings": 1
+            }
+          }
+        },
         "raw_binding_good_and_float": {
           "raw": "{\"v\":\"sigelo/0\",\"typ\":\"bundle\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"rotations\":[],\"bindings\":[{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"binding\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"ed25519-test\",\"addr\":\"z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4\",\"iat\":1757203200,\"exp\":1764979200,\"nonce\":\"zTHKNvrWPf52gDYivvHooQP\"},\"sig_id\":\"z5kKgaz4cYTnLMZCkYaQGkKHQzuZ6zYT7UcLbPKLgYraa5h8Vw5c5WRFRjBjArFPiuyP8WXRqws4yjqWG5FbLpzWc\",\"sig_addr\":\"zb8oXnaBqNwdP3sFkpR8LBHqQdoLRkhWmP8owZLsSLv617RMqrLamzPyuUCGZ7tNhXJbJQnxKrdyit9ZYDGCG2Xp\"},{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"binding\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"method\":\"ed25519-test\",\"addr\":\"z6MkuMt3JfxzcCfZq43BdkvhGsgMWefqNcZurqEpxZrzL1D4\",\"iat\":1757203200.5,\"exp\":1764979200,\"nonce\":\"zTHKNvrWPf52gDYivvHooQP\"},\"sig_id\":\"z1\",\"sig_addr\":\"z1\"}],\"attestations\":[],\"issuers\":[{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ\",\"recovery\":null,\"created\":\"2026-01-01T00:00:00Z\",\"nonce\":\"zP4rMbpayn6a9JeaZgpVMMj\"}]}",
           "expect": {
@@ -5586,7 +7267,7 @@
           }
         },
         "raw_fatal_rotation_iat_float": {
-          "raw": "{\"v\":\"sigelo/0\",\"typ\":\"bundle\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"rotations\":[{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"rotation\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"next\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"iat\":1757203200.5,\"reason\":\"voluntary\"},\"sig\":\"z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3\",\"next_genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-10-01T00:00:00Z\",\"nonce\":\"zVPYtbNU6bZFwfzo7Y2U2Ri\"}}],\"bindings\":[],\"attestations\":[],\"issuers\":[{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ\",\"recovery\":null,\"created\":\"2026-01-01T00:00:00Z\",\"nonce\":\"zP4rMbpayn6a9JeaZgpVMMj\"}]}",
+          "raw": "{\"v\":\"sigelo/0\",\"typ\":\"bundle\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"rotations\":[{\"body\":{\"v\":\"sigelo/0\",\"typ\":\"rotation\",\"id\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"next\":\"did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq\",\"iat\":1757203200.5,\"reason\":\"voluntary\"},\"sig\":\"z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3\",\"sig_next\":\"z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi\",\"next_genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-10-01T00:00:00Z\",\"nonce\":\"zVPYtbNU6bZFwfzo7Y2U2Ri\"}}],\"bindings\":[],\"attestations\":[],\"issuers\":[{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ\",\"recovery\":null,\"created\":\"2026-01-01T00:00:00Z\",\"nonce\":\"zP4rMbpayn6a9JeaZgpVMMj\"}]}",
           "expect": {
             "reject": "bundle: non-integer number"
           }

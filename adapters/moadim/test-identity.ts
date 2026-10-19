@@ -352,7 +352,7 @@ if (!existsSync(built) && !hasGo) {
   // The compromised agent rotates voluntarily (its file now has a 2-node chain the thief shares),
   // and the thief forks from the genesis too. The Owner recovers from the genesis.
   at2('rotate');
-  const thief: Rotation[] = [1, 2].map((x) => rotate({ genesis: minted.genesis, next_genesis: keygen({ seed: new Uint8Array(32).fill(x), recovery: minted.genesis.recovery }).genesis, iat: now + 5, reason: 'voluntary', secret: seed }));
+  const thief: Rotation[] = [1, 2].map((x) => rotate({ genesis: minted.genesis, next_genesis: keygen({ seed: new Uint8Array(32).fill(x), recovery: minted.genesis.recovery }).genesis, iat: now + 5, reason: 'voluntary', secret: seed, next_secret: new Uint8Array(32).fill(x) }));
   const gFile = join(HOME, 'honest-genesis.json'), recFile = join(HOME, 'recovery.local.json');
   writeFileSync(gFile, JSON.stringify(minted.genesis));
   const rec = spawnSync('node', [join(ROOT, 'ts', 'dist', 'offline.js'), 'recover', '--genesis', gFile, '-', '--agent', '3', '--n', '1', '--iat', String(now)], { input: words, encoding: 'utf8' });
@@ -361,7 +361,13 @@ if (!existsSync(built) && !hasGo) {
   const r = JSON.parse(rec.stdout) as { did: string; rotation: Rotation; identity_seed_hex: string };
   const foreign = keygen({ seed: new Uint8Array(32).fill(9), recovery: minted.genesis.recovery });
   ok('adopt --rotation refuses a rotation that is not from this chain',
-    at2Fails('', 'adopt', '--rotation', JSON.stringify({ ...r, rotation: rotate({ genesis: foreign.genesis, next_genesis: r.rotation.next_genesis, iat: now, reason: 'voluntary', secret: foreign.secret }) })).includes('not a DID of this identity'));
+    at2Fails('', 'adopt', '--rotation', JSON.stringify({ ...r, rotation: rotate({ genesis: foreign.genesis, next_genesis: r.rotation.next_genesis, iat: now, reason: 'voluntary', secret: foreign.secret, next_secret: Buffer.from(r.identity_seed_hex, 'hex') }) })).includes('not a DID of this identity'));
+  // §7 sig_next (the review of 2026-10-19): the envelope is carried whole, so verify() sees the countersignature or its absence.
+  const { sig_next: _sn, ...bare } = r.rotation;
+  ok('adopt --rotation refuses a rotation without sig_next',
+    at2Fails('', 'adopt', '--rotation', JSON.stringify({ ...r, rotation: bare })).includes('missing sig_next'));
+  ok('adopt --rotation refuses a rotation whose sig_next is not the new key\'s',
+    at2Fails('', 'adopt', '--rotation', JSON.stringify({ ...r, rotation: { ...r.rotation, sig_next: sign(foreign.secret, r.rotation.body) } })).includes('does not follow'));
   ok('adopt --rotation refuses a seed that is not the new key',
     at2Fails('', 'adopt', '--rotation', JSON.stringify({ ...r, identity_seed_hex: hex(seed) })).includes('does not produce'));
   ok('adopt --rotation refuses a voluntary rotation from a retired node (a fork)',

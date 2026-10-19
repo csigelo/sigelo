@@ -44,7 +44,8 @@ derives from `spend.key` — abandoned, not recovered, after a compromise; `gen-
 and `check` say so, and never add an `identity.json` to it (that would change the DID its licence
 names).
 
-**Daemons.** The wallet-rpc unit starts on `node.monerodevs.org:38089`; the keeper's
+**Daemons** (the test host's, stagenet; use your own node: spend/README.md "Choosing a daemon").
+The wallet-rpc unit starts on `node.monerodevs.org:38089`; the keeper's
 `SIGELO_DAEMONS` lists it first, then `node2.monerodevs.org:38089`, `xmr-lux.boldsuck.org:38081`
 (native IPv6) and `stagenet.xmr-tw.org:38081` (IPv4 only), all four
 answering and in sync on 2026-09-29. After 3 "no connection to daemon" builds in a row, or 20 min

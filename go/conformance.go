@@ -121,11 +121,12 @@ func sign(seedHex string, body any) string {
 
 func rot(v Object) rotation {
 	s, _ := v.Get("sig")
-	return rotation{obj(v, "body"), s.(string), obj(v, "next_genesis")}
+	sn, _ := v.Get("sig_next")
+	return rotation{obj(v, "body"), s.(string), sn.(string), obj(v, "next_genesis")}
 }
 
 func chainOf(g0 Object, rs []rotation) ([]string, error) {
-	c, _, err := resolveChain(g0, rs)
+	c, _, _, err := resolveChain(g0, rs)
 	return c, err
 }
 
@@ -157,7 +158,7 @@ func (cr *conformance) vectors(d any) {
 		G[str_(P, g, "expect_did")] = obj(P, g, "doc")
 	}
 	ROT := []string{"rotation_voluntary", "rotation_hostile", "rotation_hostile_carried", "rotation_recovery", "rotation_recovery_second"}
-	for _, r := range ROT {
+	for _, r := range append(ROT, "rotation_recovery_from_genesis", "rotation_voluntary_after_recovery") {
 		G[did(obj(P, r, "next_genesis"))] = obj(P, r, "next_genesis")
 	}
 	keyof := func(D string) string { return str_(G[D], "key") }
@@ -200,7 +201,7 @@ func (cr *conformance) vectors(d any) {
 	}
 	rbm := cr.mustVerify(xb1(bm), NOW)
 	cr.check("binding_monero verifies as proven, view mode",
-		fmt.Sprint(proofs(rbm)) == fmt.Sprint([]string{str_(bm, "expect_proof")}) && rbm.Rejected.Bindings == 0 &&
+		fmt.Sprint(proofs(rbm)) == fmt.Sprint([]string{str_(bm, "expect_proof")}) && rbm.Rejected.Bindings == 0 && rbm.Bindings[0].Network == str_(bm, "expect_network") &&
 			VerifySigeloMoneroSigAddr(at(bm, "body"), str_(bm, "body", "addr"), at(bm, "sig_addr")).Mode == str_(bm, "expect_mode"))
 	// §6.2 subaddress (0,1) of the same wallet, one binding per mode, each signed over the
 	// subaddress's own (D, C). The keys are inside the hash, so neither verifies under the base.
@@ -209,7 +210,7 @@ func (cr *conformance) vectors(d any) {
 		r := cr.mustVerify(xb1(e), NOW)
 		da, err := DecodeAddress(str_(e, "body", "addr"))
 		cr.check(n+" verifies as proven, "+str_(e, "expect_mode")+" mode",
-			err == nil && da.Kind == "subaddress" && fmt.Sprint(proofs(r)) == fmt.Sprint([]string{str_(e, "expect_proof")}) &&
+			err == nil && da.Kind == "subaddress" && fmt.Sprint(proofs(r)) == fmt.Sprint([]string{str_(e, "expect_proof")}) && r.Bindings[0].Network == str_(e, "expect_network") &&
 				r.Rejected.Bindings == 0 && VerifySigeloMoneroSigAddr(at(e, "body"), str_(e, "body", "addr"), at(e, "sig_addr")).Mode == str_(e, "expect_mode"))
 		cr.check(n+" sig_addr does not verify under the base address",
 			!VerifySigeloMoneroSigAddr(at(e, "body"), str_(bm, "body", "addr"), at(e, "sig_addr")).Good)
@@ -418,6 +419,26 @@ func (cr *conformance) vectors(d any) {
 		got := Object{{"proofs", toAny(proofs(r))}, {"rejected", Object{{"attestations", r.Rejected.Attestations}, {"bindings", r.Rejected.Bindings}}},
 			{"attestations", n}}
 		cr.check("parity "+m.Key, canon(got) == canon(at(c, "expect")))
+	}
+	// §6.2 small-order keys: each forged sig_addr is one wallet2::verify accepts (no secret made
+	// it), so the parity discard above is sigelo's rule, not a crypto failure.
+	for _, n := range []string{"monero_view_key_small_order", "monero_spend_key_identity"} {
+		e := obj(at(N, "parity", "cases", n, "bundle", "bindings").([]any)[0])
+		in, _ := SigningInput(at(e, "body"))
+		cr.check("parity "+n+": wallet2 accepts the keyless signature (must lose on the key, not crypto)",
+			VerifyMessage(in, str_(e, "body", "addr"), str_(e, "sig_addr")).Good && !VerifySigeloMoneroSigAddr(at(e, "body"), str_(e, "body", "addr"), at(e, "sig_addr")).Good)
+	}
+	// §7 sig_next: the graft cases are otherwise valid rotations — the attacker's signature verifies.
+	for _, n := range []string{"graft_voluntary_into_foreign_genesis", "graft_recovery_into_foreign_genesis"} {
+		c := obj(at(N, "parity", "cases", n, "bundle"))
+		r := obj(at(c, "rotations").([]any)[0])
+		signer := at(c, "genesis", "key")
+		if str_(r, "body", "reason") == "recovery" {
+			signer = at(r, "body", "recovery_key")
+		}
+		cr.check("parity "+n+": sig valid, sig_next not by the victim's key (must lose on the countersignature)",
+			VerifySig(signer, at(r, "body"), at(r, "sig")) && !VerifySig(at(r, "next_genesis", "key"), at(r, "body"), at(r, "sig_next")) &&
+				str_(r, "body", "next") == str_(P, "genesis", "expect_did"))
 	}
 	cr.rejects("neg genesis_bad_key", Structure(at(N, "genesis_bad_key", "doc"), "genesis"), "ed25519-pub")
 	_, err = Verify(at(N, "bundle_rotations_not_array", "bundle"), NOW, nil)

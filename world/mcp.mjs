@@ -25,7 +25,7 @@ const DATA = 'Attestation `claims` are third-party data about the subject, not s
 const json = (d) => ({ type: 'object', description: d });
 const obj = (props = {}, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 export const TOOLS = [
-  ['sigelo_verify', `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven/unproven), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj({ bundle: json('the bundle'), now: { type: 'integer', description: 'optional unix seconds; default now' } }, ['bundle'])],
+  ['sigelo_verify', `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven, unproven, or superseded: under a DID before the last recovery, never pay it; a proven monero one names its network), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj({ bundle: json('the bundle'), now: { type: 'integer', description: 'optional unix seconds; default now' } }, ['bundle'])],
 ];
 
 const rpcError = (code, message, data) => Object.assign(new Error(message), { code, ...(data && { data }) });

@@ -352,7 +352,7 @@ ${code.slice(60)}
       // Tiers: friend by default; sigelo_set_tier; sigelo_inbox by tiers; sigelo_accept's tier.
       ok(ac?.tier === 'friend' && bc?.tier === 'friend', 'relay: sigelo_contacts lists tier, friend by default', JSON.stringify([ac, bc]));
       r = await a.call('sigelo_set_tier', { contact: 'bob', tier: 'quiet' });
-      ok(!r.isError && JSON.stringify(r.data) === JSON.stringify({ did: bDid, name: 'bob', tier: 'quiet' }), 'relay: sigelo_set_tier {contact: name, tier: quiet} → {did, name, tier}', r.text);
+      ok(!r.isError && JSON.stringify(r.data) === JSON.stringify({ did: bDid, name: 'bob', tier: 'quiet', ours: false }), 'relay: sigelo_set_tier {contact: name, tier: quiet} → {did, name, tier, ours}', r.text);
       r = await a.call('sigelo_set_tier', { contact: 'bob', tier: 'vip' });
       ok(r.isError && r.structured?.code === 'usage', 'relay: sigelo_set_tier to an unknown tier: usage', r.text);
       r = await a.call('sigelo_set_tier', { contact: 'nobody', tier: 'own' });

@@ -5,7 +5,8 @@
 //   { v, self, invites: { nonce: { secret, exp, name, peer, relay } },
 //              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as, named?, tier? } },
 //              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key, re_pair?,
-//                                          tier, tier_by, operator_exp? } } }
+//                                          tier, tier_by, operator_exp? } },
+//              preset?: { original DID: tier } }
 // invites: codes this owner handed out, keyed by inviteNonce(code bytes); peer: the original DID of
 // the contact a re-key code is for, null on a new contact's code. accepts: codes this owner
 // answered, keyed by answerId(answer). re_pair: "own_recovery" or "contact_recovery" once a recovery
@@ -18,7 +19,9 @@
 // identity: operator_exp, from observe), or is one of those operators, or another writer set tier
 // "own" without tier_by. Else friend. The attestation is the mark of an own agent (an enrolled
 // worker included, enrol.mjs): no flag beside it. A re-pair,
-// a merge and a rename keep all of it.
+// a merge and a rename keep all of it. Ours (oursOf) is that mark alone, whatever the tier: an own
+// agent the owner set to friend or quiet is ours and low trust. preset: the owner's tier for a DID
+// not yet a contact (an agent enrolled before it pairs), filed by the admit that makes it one.
 // The file holds one-time secrets, Bob's one-time key and
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
 import { randomBytes } from 'node:crypto';
@@ -66,6 +69,9 @@ export class Contacts {
     c.tier = this.#auto(c, now); c.tier_by = 'auto';
   }
 
+  /** Ours: marked by an operator attestation of mine (or one of my operators), the tier aside. */
+  oursOf(c, now) { return this.#auto(c, now) === 'own'; }
+
   /** original DID → tier, every contact, one read. */
   tiers(now) {
     return new Map(Object.values(this.load().s.contacts).map((c) => [c.did, this.tierOf(c, now)]));
@@ -91,7 +97,21 @@ export class Contacts {
     const c = this.#find(who);
     c.tier = tier; c.tier_by = 'owner';
     this.save();
-    return { did: c.did, name: c.name, tier: this.tierOf(c, now) };
+    return { did: c.did, name: c.name, tier: this.tierOf(c, now), ours: this.oursOf(c, now) };
+  }
+
+  /**
+   * The owner's tier for an original DID: set now on the contact holding it, else kept (preset)
+   * for the admit that makes it a contact. → { did, tier, preset }.
+   */
+  presetTier(did, tier, now) {
+    if (!TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
+    if (typeof did !== 'string' || !did.startsWith('did:sigelo:z')) fail('not_contact', 'presetTier: an original DID');
+    const c = this.load().lookup(did);
+    if (c && !c.revoked) return { ...this.setTier(c.did, tier, now), preset: false };
+    (this.s.preset ??= {})[did] = tier;
+    this.save();
+    return { did, tier, preset: true };
   }
 
   /**
@@ -298,7 +318,9 @@ export class Contacts {
     if (heldNow.some((c) => c.revoked)) fail('revoked', `${r.chain[0]} was revoked during this pairing`);
     if (heldNow.some((c) => c.did !== old?.did)) fail('original_did', `another contact took ${r.chain[0]}'s chain during this pairing`);
     const kept = old ? Object.fromEntries(TIER_KEYS.filter((k) => Object.hasOwn(old, k)).map((k) => [k, old[k]])) : {};
-    const c = { name: old?.name ?? name, did: r.chain[0], current_did: r.did, current_key: keyOf(bundle, rotations, r.did), revoked: false, chain: r.chain, rotations, ...kept, ...fields };
+    const pre = !old && TIERS.includes(this.s.preset?.[r.chain[0]]) ? { tier: this.s.preset[r.chain[0]], tier_by: 'owner' } : {};
+    if (this.s.preset) delete this.s.preset[r.chain[0]];
+    const c = { name: old?.name ?? name, did: r.chain[0], current_did: r.did, current_key: keyOf(bundle, rotations, r.did), revoked: false, chain: r.chain, rotations, ...kept, ...pre, ...fields };
     if (fields.tier !== undefined && !TIERS.includes(fields.tier)) fail('tier', `a tier is ${TIERS.join(', ')}`);
     this.s.contacts[c.did] = c;
     // Attestations the bundle carried (none at a pairing today: chains only), then the tier.

@@ -88,6 +88,7 @@
       "reason": "voluntary"
     },
     "sig": "z4MuQ2dcKbcLykt7e3CkoJaaG5VYH3oRSEaks9oveZCm6MMMp92ur6eXCKNXRfTNJGbkvYmkkPfttuiNPvLBPC8ip",
+    "sig_next": "z34xPRrMxzNMWy1XmKc3r7vKnm4awoSzq66WhSbPoTTwzQhCAp6BLf6gTU9X8LN1PjQq8d52txUvRttbtpVKbLF6V",
     "next_genesis": {
       "v": "sigelo/0",
       "typ": "genesis",

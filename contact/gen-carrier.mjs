@@ -64,8 +64,8 @@ export function build() {
   // be a thief's: bob recovers from B0 to B2 with his recovery key, which beats B1 (SPEC §7.1).
   const [aRec, bRec] = ['A-recovery', 'B-recovery'].map((l) => id(l, ZERO).key);
   const A0 = id('A0', aRec), B0 = id('B0', bRec), B1 = id('B1', bRec), B2 = id('B2', bRec);
-  const rB1 = rotate({ genesis: B0.genesis, next_genesis: B1.genesis, iat: T0 + 100, reason: 'voluntary', secret: B0.secret });
-  const rB2 = rotate({ genesis: B0.genesis, next_genesis: B2.genesis, iat: T0 + 200, reason: 'recovery', secret: id('B-recovery', ZERO).secret });
+  const rB1 = rotate({ genesis: B0.genesis, next_genesis: B1.genesis, iat: T0 + 100, reason: 'voluntary', secret: B0.secret, next_secret: B1.secret });
+  const rB2 = rotate({ genesis: B0.genesis, next_genesis: B2.genesis, iat: T0 + 200, reason: 'recovery', secret: id('B-recovery', ZERO).secret, next_secret: B2.secret });
 
   // The invite secret, alice's code and what they yield (contact/invite.mjs, sigelo-invite/0). Code:
   // version 1 | SHA-256(JCS(A0's genesis)) | secret | exp, u32 BE | relay length | relay | checksum =

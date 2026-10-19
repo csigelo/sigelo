@@ -97,7 +97,7 @@ const readJson = <T>(file: string, empty: T): T => { try { return JSON.parse(rea
 // ---- types of what sigelo-contact hands out (carrier.mjs header)
 interface Contact {
   name: string; did: string; current_did: string; chain: string[]; revoked: boolean; relay: string; queued: number; re_pair: string | null; fingerprint: string | null;
-  pair: string | null; tier: string; tier_by: string | null; prekeys: boolean; waiting: string | null;
+  pair: string | null; ours: boolean; tier: string; tier_by: string | null; prekeys: boolean; waiting: string | null;
 }
 type Ev = Record<string, unknown> & { type?: string };
 interface Car {
@@ -285,10 +285,12 @@ export async function startUi(o: UiOptions): Promise<Ui> {
         local: agent?.name ?? null, mine, unread: msgs.filter((r) => r.kind === 'in' && r.n > read).length,
         last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: last.status ?? null } : null,
         waiting, not_collected: queued.length, queued: x.queued,
-        status: x.re_pair ? 'pair_again' : waiting ? 'waiting' : queued.length ? 'not_collected' : 'ok', tier,
+        status: x.re_pair ? 'pair_again' : waiting ? 'waiting' : queued.length ? 'not_collected' : 'ok', ours: x.ours === true || mine !== null, tier,
       };
     });
-    const mineGroup = live_.filter((x) => x.tier === 'own'), rest = live_.filter((x) => x.tier !== 'own');
+    // Mine: ours by key, whatever the tier (an own agent set to friend is still mine), or tier own.
+    const isMine = (x: { ours: boolean; tier: string }): boolean => x.ours || x.tier === 'own';
+    const mineGroup = live_.filter(isMine), rest = live_.filter((x) => !isMine(x));
     const pendingInvites = c.invites.map((p) => {
       const ours = [...invites.values()].find((x) => x.name === p.name);
       return { name: p.name, exp: p.exp, relay: p.relay, ...(ours && { id: ours.id, short: ours.short ?? null, short_exp: ours.short_exp ?? null, code: ours.code }) };

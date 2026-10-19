@@ -121,6 +121,14 @@ declare module 'node:http' {
     closeAllConnections(): void;
   }
   export function createServer(handler: (req: IncomingMessage, res: ServerResponse) => void): Server;
+  /** The wallet-rpc client (service.ts `walletRpc`): one kept-alive socket per call. */
+  export class Agent { constructor(opts: { keepAlive: boolean; maxSockets: number }); destroy(): void; }
+  export interface ClientRequest {
+    on(event: 'error', cb: (err: Error) => void): void;
+    destroy(err?: Error): void;
+    end(body?: string): void;
+  }
+  export function request(url: string, opts: { method: string; headers: Record<string, string>; agent: Agent }, cb: (res: IncomingMessage & { statusCode?: number }) => void): ClientRequest;
 }
 declare module 'node:child_process' {
   /** init.ts: systemctl --user and notify-send; test.ts: the CLI verbs. */

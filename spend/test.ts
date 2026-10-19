@@ -17,11 +17,11 @@
  *   4. monero-wallet-rpc --offline agrees that our binding signature is valid (SKIP if absent).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { attest, bind, canonicalize, commitmentOf, did as didOf, keygen, rotate, sign, verify, verifySig, type Binding, type Bundle, type Genesis, type Rotation } from 'sigelo';
@@ -30,7 +30,7 @@ import { agentIdentitySeed, deriveIdentity, keeperRoot, mnemonicFromRoot, newRoo
 import { ceremony } from 'sigelo/dist/ceremony.js';
 import { encodeAddress, hashToScalar, sigeloMoneroSigAddr, signMessage, subaddress, subaddressKeys, verifySigeloMoneroSigAddr } from 'sigelo/dist/monero.js';
 import { agentOf, evaluate, fingerprint, invoiceKey, parsePolicy, sameHash, tokenHash, type Destination, type PayRequest, type Policy, type Prior, type Spent } from './policy.js';
-import { BUILD_TIMEOUT_MS, CLOCK_FLOOR, CLOCK_SKEW, DAEMON_FAILS, DAEMON_STALE_MS, DAEMON_SWITCH_MS, codeOf, keeperGenesis, keeperIdentity, loadKeeper, loadPolicy, loadRoot, parseDaemons, priorOf, readLog, serve as serveBare, spentOf, startOf, WALLET_TIMEOUT_MS, type Receipt, type ServeOptions } from './service.js';
+import { BUILD_TIMEOUT_MS, CLOCK_FLOOR, CLOCK_SKEW, DAEMON_FAILS, DAEMON_STALE_MS, DAEMON_SWITCH_MS, codeOf, keeperGenesis, keeperIdentity, loadKeeper, loadPolicy, loadRoot, parseDaemons, priorOf, readLog, serve as serveBare, spentOf, startOf, WALLET_TIMEOUT_MS, walletRpc, type Receipt, type ServeOptions } from './service.js';
 import { checkLicence, DEV_VENDOR_DID, describe as describeLicence, LICENCE_SKEW, licenceRefusal, readLicence, rememberVendorChain, TERM_MAX_DAYS, vendorDid, type KeeperEntry } from './licence.js';
 import { SNIPPET } from './init.js';
 import { explain, LINES, run, toAtomic, toXmr, type Outcome } from './wallet.js';
@@ -1647,7 +1647,7 @@ const approvalOf = (body: ApprovalBody, id: { secret: Uint8Array; genesis: Genes
   {
     // the agent's key under another DID, rotated to a fresh key: the current key is not the agent's, the chain's was
     const twin2 = keygen({ recovery: twinId.genesis.recovery!, seed: seed(0x8c) });
-    const fromTwin = idBundle(twinId.genesis, [rotate({ genesis: twinId.genesis, next_genesis: twin2.genesis, iat: NOW - 100, reason: 'voluntary', secret: twinId.secret })]);
+    const fromTwin = idBundle(twinId.genesis, [rotate({ genesis: twinId.genesis, next_genesis: twin2.genesis, iat: NOW - 100, reason: 'voluntary', secret: twinId.secret, next_secret: twin2.secret })]);
     says('G6 approve: self-approval — an approver whose chain rotated away from the agent\'s key', checkApproval(approvalOf(body, twin2, fromTwin), ctx({ approvers: [twin2.did] })), 'rotated away from the requesting agent\'s key');
   }
   says('G6 approve: the keeper cannot approve', checkApproval(approvalOf(body, keeperId), ctx({ approvers: [keeperId.did] })), 'keeper cannot approve');
@@ -1655,7 +1655,7 @@ const approvalOf = (body: ApprovalBody, id: { secret: Uint8Array; genesis: Genes
   says('G6 approve: reused — the nonce was spent by a payment', checkApproval(approvalOf(body, ownerId), ctx({ used: () => 'spent' })), 'already used by a payment');
   // an approver who rotated: the policy names the CURRENT DID, and only the current key signs
   const owner2 = keygen({ recovery: ownerId.genesis.recovery!, seed: seed(0x8a) });
-  const rotated = idBundle(ownerId.genesis, [rotate({ genesis: ownerId.genesis, next_genesis: owner2.genesis, iat: NOW - 100, reason: 'voluntary', secret: ownerId.secret })]);
+  const rotated = idBundle(ownerId.genesis, [rotate({ genesis: ownerId.genesis, next_genesis: owner2.genesis, iat: NOW - 100, reason: 'voluntary', secret: ownerId.secret, next_secret: owner2.secret })]);
   const cur = ctx({ approvers: [owner2.did] });
   accepts('G6 approve: a rotated approver signs with its current key', checkApproval(approvalOf(body, owner2, rotated), cur));
   says('G6 approve: …not with its rotated-away key', checkApproval(approvalOf(body, ownerId, rotated), cur), 'signature does not verify');
@@ -2247,10 +2247,10 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   // wallet-rpc to the next daemon after DAEMON_FAILS "no connection to daemon" builds in a row,
   // or a height stuck for DAEMON_STALE_MS while asked to pay; never on one failure, never twice
   // a minute, never a log line, and every pay meanwhile is still wallet_offline.
-  const A = 'node.monerodevs.org:38089', B = 'node2.monerodevs.org:38089', C = '[2605:6400:30:f91d::2]:38081';
+  const A = 'node.example:38089', B = 'node2.example:38089', C = '[2001:db8::2]:38081';
   ok('parseDaemons: commas or whitespace, host:port, [ipv6]:port, http(s)://', JSON.stringify(parseDaemons(` ${A}, ${B}\n${C} https://x.example:18089 `)) === JSON.stringify([A, B, C, 'https://x.example:18089']) &&
     parseDaemons('').length === 0);
-  for (const bad of ['node.monerodevs.org', 'x:0', 'x:65536', 'ftp://x:1', 'a b:1:2', `${A},${A}`, 'x:1/path', '-x:1']) {
+  for (const bad of ['node.example', 'x:0', 'x:65536', 'ftp://x:1', 'a b:1:2', `${A},${A}`, 'x:1/path', '-x:1']) {
     let why = '';
     try { parseDaemons(bad); } catch (e) { why = (e as Error).message; }
     ok(`parseDaemons refuses ${JSON.stringify(bad)}`, why.startsWith('SIGELO_DAEMONS:'), why || 'accepted');
@@ -2302,7 +2302,25 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     f.w.mode.transferError = 'no connection to daemon';
     await drained(f, { ...body, purpose: 'm3' }); await drained(f, { ...body, purpose: 'm4' });
     ok('daemons: a build that worked resets the count (2 + ok + 2 is not 3 in a row)', paid.body['code'] !== 'wallet_offline' && called(f.w, 'transfer').length > 0 && sets().length === 3, `${paid.status} · ${sets().join()}`);
+    ok('daemons: a plain host:port fallback entry sets no ssl_support (wallet-rpc autodetects)', called(f.w, 'set_daemon').every((c) => !('ssl_support' in (c['params'] as Record<string, unknown>))));
     await f.done();
+
+    // An https:// entry keeps its meaning: set_daemon requires TLS.
+    t += DAEMON_SWITCH_MS;
+    warned.length = 0;
+    const HS = 'https://node3.example:38089';
+    const tl = await fresh(small(), { transferError: 'no connection to daemon' }, { daemons: [A, HS], daemonClock: () => t });
+    for (let i = 0; i < DAEMON_FAILS; i++) await drained(tl, body);
+    const tp = called(tl.w, 'set_daemon').map((c) => c['params'] as Record<string, unknown>);
+    ok('daemons: an https:// fallback entry → set_daemon {address, trusted: false, ssl_support: "enabled"}, no proxy', tp.length === 1 && tp[0]!['address'] === HS && tp[0]!['trusted'] === false &&
+      tp[0]!['ssl_support'] === 'enabled' && !('proxy' in tp[0]!), JSON.stringify(tp));
+    await tl.done();
+    {
+      let mixed = '';
+      try { parseDaemons(`${'a'.repeat(56)}.onion:18081 node.example:18089`); } catch (x) { mixed = (x as Error).message; }
+      ok('parseDaemons refuses a list mixing .onion and clearnet (the keeper does not start)', mixed.startsWith('SIGELO_DAEMONS: mixes .onion') && mixed.includes('list one kind'), mixed || 'accepted');
+      ok('parseDaemons: an all-onion list, and loopback with clearnet, parse', parseDaemons(`${'a'.repeat(56)}.onion:18081 ${'b'.repeat(56)}.onion:18081`).length === 2 && parseDaemons('127.0.0.1:18081 node.example:18089').length === 2);
+    }
 
     // The height signal: builds failing some other way while the height stays put.
     t += DAEMON_SWITCH_MS;
@@ -2335,6 +2353,39 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
       warned.every((x) => x.includes('failed (wallet: set_daemon: Failed to set daemon')) && still.body['code'] === 'wallet_offline', `${tried.join()} · ${warned.join(' | ')}`);
     await e.done();
   } finally { console.warn = warn; }
+}
+
+{
+  // The RPC login is HTTP digest with a nonce valid only on the connection that received it
+  // (monero-wallet-rpc 0.18.5.0: a nonce replayed on a new socket is 401): the retry reuses it.
+  const md5 = (x: string): string => createHash('md5').update(x).digest('hex');
+  const [user, pass] = ['sigelo', 'abc-DEF_123'];
+  const nonces = new WeakMap<object, string>();
+  let n = 0;
+  const srv = createServer((req, res) => {
+    const sock = req.socket as object;
+    if (!nonces.has(sock)) nonces.set(sock, `n${++n}==`);
+    const nonce = nonces.get(sock)!, a = req.headers['authorization'] ?? '';
+    const f = (k: string): string => new RegExp(`${k}="?([^",]*)"?`).exec(a)?.[1] ?? '';
+    const want = md5([md5(`${user}:monero-rpc:${pass}`), nonce, f('nc'), f('cnonce'), 'auth', md5(`POST:${req.url ?? ''}`)].join(':'));
+    req.on('data', () => undefined);
+    req.on('end', () => {
+      if (f('nonce') !== nonce || f('response') !== want) {
+        res.writeHead(401, { 'WWW-authenticate': `Digest qop="auth",algorithm=MD5,realm="monero-rpc",nonce="${nonce}",stale=false` });
+        return res.end('<html>401</html>');
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: '0', jsonrpc: '2.0', result: { version: 1 << 16 | 30 } }));
+    });
+  });
+  await new Promise<void>((r) => { srv.listen(0, '127.0.0.1', () => r()); });
+  const at = `http://127.0.0.1:${(srv.address() as { port: number }).port}/json_rpc`;
+  const pol = (login?: string): Policy => ({ wallet: { rpc: at, ...(login !== undefined && { login }) } }) as unknown as Policy;
+  let good = '', bad = '';
+  try { good = JSON.stringify(await walletRpc(pol(`${user}:${pass}`), 'get_version', {}, 5000)); } catch (e) { good = (e as Error).message; }
+  try { await walletRpc(pol(`${user}:wrong`), 'get_version', {}, 5000); bad = 'accepted'; } catch (e) { bad = (e as Error).message; }
+  ok('walletRpc: the digest login answers on the socket that got the nonce (per-connection nonce, as wallet-rpc 0.18.5.0); a wrong login is 401', good === '{"version":65566}' && bad === 'wallet: 401 — wallet.login is missing or wrong', `${good} · ${bad}`);
+  srv.closeAllConnections(); srv.close();
 }
 
 // ---------------------------------------------------------------- 2l. the installer, the tiers and the licence (monetization line 2)
@@ -2402,10 +2453,10 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     const at = (raw: unknown, dir: string): string => whyOf(raw, gA, dir);
     const vRec2 = keygen({ recovery: seed(0x68), seed: seed(0x69) });
     const v2 = keygen({ recovery: vendorRec.key, seed: seed(0x65) }), thief = keygen({ recovery: vendorRec.key, seed: seed(0x66) }), rec = keygen({ recovery: vRec2.key, seed: seed(0x67) });
-    const rotV = rotate({ genesis: vendorId.genesis, next_genesis: v2.genesis, iat: T - 5000, reason: 'voluntary', secret: vendorId.secret });
-    const rotT = rotate({ genesis: vendorId.genesis, next_genesis: thief.genesis, iat: T - 3000, reason: 'voluntary', secret: vendorId.secret });
+    const rotV = rotate({ genesis: vendorId.genesis, next_genesis: v2.genesis, iat: T - 5000, reason: 'voluntary', secret: vendorId.secret, next_secret: v2.secret });
+    const rotT = rotate({ genesis: vendorId.genesis, next_genesis: thief.genesis, iat: T - 3000, reason: 'voluntary', secret: vendorId.secret, next_secret: thief.secret });
     // The recovery deliberately carries an EARLIER iat than the thief's rotation (SPEC §7.1: never reorder by time).
-    const rotR = rotate({ genesis: vendorId.genesis, next_genesis: rec.genesis, iat: T - 9000, reason: 'recovery', secret: vendorRec.secret });
+    const rotR = rotate({ genesis: vendorId.genesis, next_genesis: rec.genesis, iat: T - 9000, reason: 'recovery', secret: vendorRec.secret, next_secret: rec.secret });
     const byV2 = lic(dA, { iss: v2.did, secret: v2.secret, rotations: [rotV] }), byG = lic(dA), byGLegacy = lic(dA, { legacy: true });
     const byThief = lic(dA, { iss: thief.did, secret: thief.secret, rotations: [rotT] }), byRec = lic(dA, { iss: rec.did, secret: rec.secret, rotations: [rotR] });
     const remember = (raw: unknown, dir: string) => rememberVendorChain(dir, raw, gA, T, []);
@@ -2543,8 +2594,10 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   const wunit = readFileSync(join(kw, 'systemd', 'sigelo-wallet-rpc-kw.service'), 'utf-8'), kunit = readFileSync(join(kw, 'systemd', 'sigelo-keeper-kw.service'), 'utf-8');
   const wpol = loadPolicy(join(kw, 'policy.json'));
   ok('init --create-wallet-rpc --wallet-rpc-bin: exits 0, the policy holds a generated RPC login', iw.code === 0 && wpol.wallet.login?.startsWith('sigelo:') === true, iw.err);
-  onKeeperHost('init --create-wallet-rpc: the wallet-rpc unit runs the given binary, binds 127.0.0.1 with --rpc-login (the policy holds it), --stagenet, an untrusted daemon, over the given wallet file',
-    () => iw.code === 0 && wunit.startsWith('[Unit]') && wunit.includes(`ExecStart="${stub}" "--stagenet"`) && /"--rpc-bind-ip" "127\.0\.0\.1"/.test(wunit) && wunit.includes(`"--rpc-login" "${wpol.wallet.login}"`) && wpol.wallet.login?.startsWith('sigelo:') === true &&
+  onKeeperHost('init --create-wallet-rpc: the wallet-rpc unit runs the given binary, binds 127.0.0.1, its RPC login (the policy holds it) in a 0600 --config-file and not on argv, --stagenet, an untrusted daemon, over the given wallet file',
+    () => iw.code === 0 && wunit.startsWith('[Unit]') && wunit.includes(`ExecStart="${stub}" "--stagenet"`) && /"--rpc-bind-ip" "127\.0\.0\.1"/.test(wunit) && wpol.wallet.login?.startsWith('sigelo:') === true &&
+    wunit.includes(`"--config-file" "${join(kw, 'wallet-rpc.conf')}"`) && !wunit.includes('--rpc-login') && !wunit.includes(wpol.wallet.login) && mode(join(kw, 'wallet-rpc.conf')) === 0o600 &&
+    readFileSync(join(kw, 'wallet-rpc.conf'), 'utf-8').includes(`\nrpc-login=${wpol.wallet.login}\n`) && !wunit.includes('--daemon-ssl') && !wunit.includes('--proxy') &&
     wunit.includes('"--stagenet"') && wunit.includes('"--untrusted-daemon"') && wunit.includes(`"--wallet-file" "${wf}"`) && wunit.includes('"--daemon-address" "node.example.org:38089"') &&
     !wunit.includes('--trusted-daemon ') && !wunit.includes('disable-rpc-login'), () => iw.err + wunit);
   ok('init --daemons: the keeper unit carries SIGELO_DAEMONS in order, after the wallet unit; --notify adds the hourly doctor',
@@ -2554,6 +2607,7 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   const dw = await cli(['doctor', '--dir', kw], join(scratch, 'reg-w.json'));
   onKeeperHost('doctor (--create-wallet-rpc install, wallet-rpc not running): every unit checks, the wallet-rpc is unreachable, the install is valid (exit 2)',
     () => dw.code === 2 && dw.out.includes('ok   unit sigelo-wallet-rpc-kw.service: wallet-rpc on 127.0.0.1 with an RPC login') && dw.out.includes('WARN wallet-rpc unreachable') &&
+    dw.out.includes('WARN daemons: SIGELO_DAEMONS mixes [::1]:38081 with clearnet node.example.org:38089: a fallback may move the wallet from your node to a public one') &&
     dw.out.includes('INSTALL VALID, with warnings') && !dw.out.includes('FAIL'), () => dw.out);
   if (WIN) skip('doctor: a wallet-rpc unit whose binary is gone fails the install', NOT_A_KEEPER_HOST);
   else {
@@ -2562,6 +2616,92 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     const dNoBin = await cli(['doctor', '--dir', kw], join(scratch, 'reg-w.json'));
     writeFileSync(wunitPath, wunit, { mode: 0o600 });
     ok('doctor: a wallet-rpc unit whose binary is gone fails the install', dNoBin.code === 1 && dNoBin.out.includes(`FAIL unit sigelo-wallet-rpc-kw.service: ExecStart runs "${join(emptyDir, 'monero-wallet-rpc')}", which does not exist`), dNoBin.out);
+  }
+
+  // The daemon: TLS, Tor, a daemon login, trust, the network — in the unit, and checked by doctor.
+  {
+    const FP = 'ab'.repeat(32), FP2 = 'cd'.repeat(32), FP3 = '0f'.repeat(32), ONION = `${'a'.repeat(56)}.onion:18081`;
+    const dargs = async (dir: string, daemons: string, ...more: string[]): Promise<string[]> => ['init', '--dir', dir, '--no-systemd', '--create-wallet-rpc', '--wallet-file', wf, '--password-file', pwf,
+      '--wallet-rpc-port', String(await freePort()), '--wallet-rpc-bin', stub, '--daemons', daemons, ...more];
+    const unitOf = (dir: string): string => readFileSync(join(dir, 'systemd', `sigelo-wallet-rpc-${basename(dir)}.service`), 'utf-8');
+    const withUnit = async (dir: string, edit: (u: string) => string, reg: string): Promise<Cli> => {
+      const path = join(dir, 'systemd', `sigelo-wallet-rpc-${basename(dir)}.service`), was = readFileSync(path, 'utf-8');
+      writeFileSync(path, edit(was), { mode: 0o600 });
+      const r = await cli(['doctor', '--dir', dir], reg);
+      writeFileSync(path, was, { mode: 0o600 });
+      return r;
+    };
+    // https:// → --daemon-ssl enabled, pinned when asked (repeatable, comma-separated, colons allowed).
+    const kt = join(scratch, 'kt'), regT = join(scratch, 'reg-t.json');
+    const it = await cli([...await dargs(kt, 'https://node.example:38089,node2.example:38089'), '--daemon-ssl-fingerprint', FP.match(/../g)!.join(':').toUpperCase(), '--daemon-ssl-fingerprint', `${FP2},${FP3}`], regT);
+    const tu = it.code === 0 ? unitOf(kt) : '';
+    onKeeperHost('init: an https:// daemon → --daemon-ssl enabled and each --daemon-ssl-fingerprint as --daemon-ssl-allowed-fingerprints, the address without its scheme',
+      () => it.code === 0 && tu.includes(`"--daemon-address" "node.example:38089" "--untrusted-daemon" "--daemon-ssl" "enabled" "--daemon-ssl-allowed-fingerprints" "${FP}" "--daemon-ssl-allowed-fingerprints" "${FP2}" "--daemon-ssl-allowed-fingerprints" "${FP3}"`), () => it.err + tu);
+    const dt = await cli(['doctor', '--dir', kt], regT);
+    onKeeperHost('doctor: the TLS unit matches the policy (TLS required)', () => !dt.out.includes('FAIL') && dt.out.includes(', TLS required'), () => dt.out);
+    const dtNo = await withUnit(kt, (u) => u.replace('"--daemon-ssl" "enabled" ', ''), regT);
+    onKeeperHost('doctor: an https:// daemon whose unit lacks --daemon-ssl enabled fails (autodetect falls back to plaintext)', () => dtNo.code === 1 && dtNo.out.includes('the unit lacks --daemon-ssl enabled'), () => dtNo.out);
+    const dtPin = await withUnit(kt, (u) => u.replace(`"${FP2}"`, `"${'ef'.repeat(32)}"`), regT);
+    onKeeperHost('doctor: a pinned fingerprint changed in the unit fails', () => dtPin.code === 1 && dtPin.out.includes('are not the ones init pinned'), () => dtPin.out);
+    const fpPlain = await cli([...await dargs(join(scratch, 'k-fp'), 'node.example:38089'), '--daemon-ssl-fingerprint', FP], join(scratch, 'reg-fp.json'));
+    const fpBad = await cli([...await dargs(join(scratch, 'k-fp'), 'https://node.example:38089'), '--daemon-ssl-fingerprint', 'abc'], join(scratch, 'reg-fp.json'));
+    ok('init: a fingerprint without an https:// first daemon, or not 64 hex, is refused and writes nothing', fpPlain.err.includes('pins an https:// daemon') && fpBad.err.includes('is not a SHA-256 fingerprint') && !existsSync(join(scratch, 'k-fp')), fpPlain.err + fpBad.err);
+
+    // .onion → --proxy; never without one; never mixed with clearnet.
+    const ko = join(scratch, 'ko'), regO = join(scratch, 'reg-o.json');
+    const io = await cli([...await dargs(ko, ONION), '--daemon-proxy', '127.0.0.1:9050'], regO);
+    const ou = io.code === 0 ? unitOf(ko) : '';
+    onKeeperHost('init --daemon-proxy: the unit has --proxy for the .onion daemon', () => io.code === 0 && ou.includes(`"--daemon-address" "${ONION}"`) && ou.includes('"--proxy" "127.0.0.1:9050"'), () => io.err + ou);
+    const doo = await cli(['doctor', '--dir', ko], regO);
+    onKeeperHost('doctor: an onion daemon through --proxy passes', () => !doo.out.includes('FAIL') && doo.out.includes('through --proxy 127.0.0.1:9050'), () => doo.out);
+    const doNo = await withUnit(ko, (u) => u.replace(' "--proxy" "127.0.0.1:9050"', ''), regO);
+    onKeeperHost('doctor: a .onion daemon whose unit has no --proxy fails', () => doNo.code === 1 && doNo.out.includes('is a .onion daemon and the unit has no --proxy'), () => doNo.out);
+    const oNo = await cli(await dargs(join(scratch, 'k-on'), ONION), join(scratch, 'reg-on.json'));
+    const oMix = await cli([...await dargs(join(scratch, 'k-on'), `${ONION},node.example:18089`), '--daemon-proxy', '127.0.0.1:9050'], join(scratch, 'reg-on.json'));
+    const pBad = await cli([...await dargs(join(scratch, 'k-on'), ONION), '--daemon-proxy', 'tor.example:9050'], join(scratch, 'reg-on.json'));
+    const pNot = await cli(['init', '--dir', join(scratch, 'k-on'), '--no-systemd', '--wallet-rpc', rpc, '--daemon-proxy', '127.0.0.1:9050'], join(scratch, 'reg-on.json'));
+    ok('init: a .onion daemon without --daemon-proxy, a list mixing onion and clearnet, a proxy that is not ip:port, a daemon flag without --create-wallet-rpc — refused, writing nothing',
+      oNo.err.includes('is a .onion address and there is no --daemon-proxy') && oMix.err.includes('mixes .onion') && pBad.err.includes('is not ip:port of a SOCKS proxy') &&
+      pNot.err.includes('--daemon-proxy goes with --create-wallet-rpc') && !existsSync(join(scratch, 'k-on')), [oNo.err, oMix.err, pBad.err, pNot.err].join(' | '));
+
+    // --daemon-login-file → daemon-login in the 0600 config file, never on argv.
+    const kl = join(scratch, 'kl'), regL = join(scratch, 'reg-l.json'), lf = join(scratch, 'node.login');
+    writeFileSync(lf, 'me:s3cret-pass\n', { mode: 0o600 });
+    const il = await cli([...await dargs(kl, '127.0.0.1:38081'), '--daemon-login-file', lf], regL);
+    const lu = il.code === 0 ? unitOf(kl) : '', lconf = il.code === 0 ? readFileSync(join(kl, 'wallet-rpc.conf'), 'utf-8') : '';
+    onKeeperHost('init --daemon-login-file: daemon-login in the 0600 --config-file, not on argv', () => il.code === 0 && lconf.includes('\ndaemon-login=me:s3cret-pass\n') && /\nrpc-login=sigelo:/.test(lconf) &&
+      !lu.includes('s3cret') && !lu.includes('--daemon-login') && mode(join(kl, 'wallet-rpc.conf')) === 0o600, () => il.err + lu + lconf);
+    const dl = await cli(['doctor', '--dir', kl], regL);
+    onKeeperHost('doctor: the config file 0600 and the login file 0600 pass; daemons only on this host, no mixing warning', () => !dl.out.includes('FAIL') && !dl.out.includes('WARN daemons:') && dl.out.includes('wallet-rpc.conf (0600)'), () => dl.out);
+    if (WIN) skip('doctor: logins on argv, a loose config file or login file fail', NOT_A_KEEPER_HOST);
+    else {
+      const dArgv = await withUnit(kl, (u) => u.replace('"--non-interactive"', '"--rpc-login" "sigelo:x" "--daemon-login" "me:s3cret-pass" "--non-interactive"'), regL);
+      ok('doctor: --rpc-login or --daemon-login on the command line fails (/proc/<pid>/cmdline)', dArgv.code === 1 && dArgv.out.includes('--rpc-login, --daemon-login on the command line, which every local user reads in /proc/<pid>/cmdline'), dArgv.out);
+      const dNoConf = await withUnit(kl, (u) => u.replace(/ "--config-file" "[^"]*"/, ''), regL);
+      ok('doctor: a wallet-rpc unit without --config-file fails', dNoConf.code === 1 && dNoConf.out.includes('no --config-file holding the RPC login'), dNoConf.out);
+      chmodSync(join(kl, 'wallet-rpc.conf'), 0o644);
+      const d644 = await cli(['doctor', '--dir', kl], regL);
+      chmodSync(join(kl, 'wallet-rpc.conf'), 0o600);
+      ok('doctor: a 0644 config file fails', d644.code === 1 && d644.out.includes('wallet-rpc.conf is readable by others (mode 644; chmod 600)'), d644.out);
+      chmodSync(lf, 0o644);
+      const dLf = await cli(['doctor', '--dir', kl], regL);
+      const lLoose = await cli([...await dargs(join(scratch, 'k-lf'), '127.0.0.1:38081'), '--daemon-login-file', lf], join(scratch, 'reg-lf.json'));
+      chmodSync(lf, 0o600);
+      ok('doctor and init: a daemon login file readable by others fails / is refused', dLf.code === 1 && dLf.out.includes(`--daemon-login-file ${lf} is readable by others (chmod 600)`) &&
+        lLoose.err.includes('is readable by others (chmod 600)') && !existsSync(join(scratch, 'k-lf')), dLf.out + lLoose.err);
+    }
+    // --trusted-daemon: allowed for this host's node, refused for a remote one.
+    const dTrust = await withUnit(kl, (u) => u.replace('"--untrusted-daemon"', '"--trusted-daemon"'), regL);
+    onKeeperHost('doctor: --trusted-daemon on a loopback daemon passes', () => !dTrust.out.includes('FAIL') && dTrust.out.includes('a trusted daemon on this host'), () => dTrust.out);
+    const dTrustR = await withUnit(kw, (u) => u.replace('"--untrusted-daemon"', '"--trusted-daemon"'), join(scratch, 'reg-w.json'));
+    onKeeperHost('doctor: --trusted-daemon on a remote daemon fails', () => dTrustR.code === 1 && dTrustR.out.includes('--trusted-daemon for the remote daemon node.example.org:38089'), () => dTrustR.out);
+
+    // The network, by port (a heuristic): a mainnet port on a stagenet keeper warns.
+    const kn = join(scratch, 'kn'), regN = join(scratch, 'reg-n.json');
+    const inn = await cli(await dargs(kn, '127.0.0.1:18081'), regN);
+    const dn = await cli(['doctor', '--dir', kn], regN);
+    onKeeperHost('doctor: a daemon on mainnet\'s port for a stagenet policy warns (port heuristic); stagenet ports do not', () => inn.code === 0 && dn.code === 2 &&
+      dn.out.includes('WARN daemon 127.0.0.1:18081: its port is mainnet\'s default and the policy is on stagenet (a port heuristic') && !dl.out.includes('WARN daemon '), () => inn.err + dn.out);
   }
 
   // doctor on k1: wallet reachable (RPC 1.30), keeper not yet running
@@ -2771,9 +2911,9 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     // ---- 3. compromise: the thief holds spend.key (K_0) and everything on the host
     const T = Math.floor(Date.now() / 1000);
     const thiefKey = keygen({ recovery: RC, seed: seed(0x5e) });
-    const thief = rotate({ genesis: idj.genesis, next_genesis: thiefKey.genesis, iat: T + 3600, reason: 'voluntary', secret: keeperIdentity(K0).secret });
+    const thief = rotate({ genesis: idj.genesis, next_genesis: thiefKey.genesis, iat: T + 3600, reason: 'voluntary', secret: keeperIdentity(K0).secret, next_secret: thiefKey.secret });
     let thiefRecovers = true;
-    try { rotate({ genesis: idj.genesis, next_genesis: thiefKey.genesis, iat: T + 7200, reason: 'recovery', secret: recoverySeed(K0) }); } catch { thiefRecovers = false; }
+    try { rotate({ genesis: idj.genesis, next_genesis: thiefKey.genesis, iat: T + 7200, reason: 'recovery', secret: recoverySeed(K0), next_secret: thiefKey.secret }); } catch { thiefRecovers = false; }
     ok('keeper recovery: the thief can rotate the DID voluntarily, but cannot sign a recovery: recoverySeed(spend.key) does not hash to the commitment', !thiefRecovers &&
       verify({ ...idj, rotations: [thief] }, T).did === thiefKey.did);
     // The burnt host's identity.json, as the thief left it: with its rotation in it.

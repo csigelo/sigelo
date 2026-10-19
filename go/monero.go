@@ -123,6 +123,12 @@ func point(b []byte) (*edwards25519.Point, error) {
 	return p, nil
 }
 
+// smallOrder reports a canonical point (DecodeAddress has checked it) of order 1, 2, 4 or 8.
+func smallOrder(b []byte) bool {
+	p, err := point(b)
+	return err != nil || new(edwards25519.Point).MultByCofactor(p).Equal(edwards25519.NewIdentityPoint()) == 1
+}
+
 func baseMul(s []byte) []byte { return new(edwards25519.Point).ScalarBaseMult(scalar(s)).Bytes() }
 
 // ---------------------------------------------------------------- base58 (src/common/base58.cpp)
@@ -431,8 +437,9 @@ func SigeloMoneroSigAddr(body any, mode string, secret, spendPub, viewPub, nonce
 }
 
 // VerifySigeloMoneroSigAddr verifies a binding's sig_addr against its own `addr` (§6.1, §6.2).
-// Two §6.2 rules live here rather than in VerifyMessage, which stays a faithful wallet2: the
-// address must be STANDARD or SUBADDRESS (never integrated), and SigV1 is not accepted. A
+// Three §6.2 rules live here rather than in VerifyMessage, which stays a faithful wallet2: the
+// address must be STANDARD or SUBADDRESS (never integrated), neither of its keys may be of small
+// order, and SigV1 is not accepted. A
 // subaddress is checked against its own (D, C), which wallet2::sign's subaddress branch signs
 // with (b + m spend, a(b + m) view): either mode needs the spend key there. Never fails.
 func VerifySigeloMoneroSigAddr(body any, addr string, sigAddr any) MsgResult {
@@ -445,7 +452,14 @@ func VerifySigeloMoneroSigAddr(body any, addr string, sigAddr any) MsgResult {
 	// the prefix, so the integrated spelling of a wallet reuses the base address's signature
 	// verbatim — accepting it would let a payment id nobody signed for ride along on a proven
 	// binding. A subaddress carries its own keys, so its signature is its own.
-	if a, err := DecodeAddress(addr); err != nil || a.Kind == "integrated" {
+	a, err := DecodeAddress(addr)
+	if err != nil || a.Kind == "integrated" {
+		return bad
+	}
+	// §6.2: neither key may be of small order (the identity included). check_key accepts them,
+	// but with P of small order c·P carries no secret, and r·G alone answers the challenge: a
+	// signature nobody needed a key for, in the mode that uses P (review of 2026-10-19).
+	if smallOrder(a.Spend) || smallOrder(a.View) {
 		return bad
 	}
 	// §6.2: "Legacy SigV1 is not accepted." Its hash is Keccak256(data) alone: neither the mode

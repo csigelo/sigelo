@@ -13,7 +13,7 @@ import * as ed from '@noble/ed25519';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { bytesToHex, concatBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize, JcsError, parse, parseBytes, RawNumber } from './jcs.js';
-import { verifySigeloMoneroSigAddr } from './monero.js';
+import { decodeAddress, verifySigeloMoneroSigAddr } from './monero.js';
 
 // @noble/ed25519 v3 keeps the synchronous API behind an injected hash so the package can stay
 // dependency-free. One suite, no agility (SPEC §2), so this is set once, here.
@@ -29,7 +29,8 @@ const COMMITMENT = /^sha256:[0-9a-f]{64}$/; // a recovery commitment, as it appe
 const NONCE = /^z[1-9A-HJ-NP-Za-km-z]{1,63}$/; // §2: z + base58btc, at most 64 characters
 
 export type Admission = (typeof ADMISSION)[number];
-export type Proof = 'proven' | 'unproven' | 'unsupported';
+export type Proof = 'proven' | 'unproven' | 'unsupported' | 'superseded';
+export type Network = 'mainnet' | 'stagenet' | 'testnet';
 export type Reason = 'voluntary' | 'recovery';
 
 export interface Genesis { v: string; typ: 'genesis'; key: string; recovery: string | null; created: string; nonce: string }
@@ -40,7 +41,7 @@ export interface AttestationBody {
 }
 export interface ChallengeBody { v: string; typ: 'challenge'; did: string; ctx: string; nonce: string }
 export interface BindingBody { v: string; typ: 'binding'; id: string; method: string; addr: string; iat: number; exp: number; nonce: string }
-export interface Rotation { body: RotationBody; sig: string; next_genesis: Genesis }
+export interface Rotation { body: RotationBody; sig: string; sig_next: string; next_genesis: Genesis }
 export interface Attestation { body: AttestationBody; sig: string }
 export interface Challenge { body: ChallengeBody; sig: string }
 export interface Binding { body: BindingBody; sig_id: string; sig_addr?: string }
@@ -48,10 +49,12 @@ export interface Bundle {
   v: string; typ: 'bundle'; genesis: Genesis;
   rotations: Rotation[]; bindings: Binding[]; attestations: Attestation[]; issuers: Genesis[];
 }
+/** One accepted binding (§9.1). `network` is on a `proven` monero entry only (§6.2): the caller refuses the wrong one. */
+export interface BindingResult { body: BindingBody; proof: Proof; network?: Network }
 export interface VerifyResult {
   did: string; chain: string[]; recovery: string | null;
   attestations: Record<string, AttestationBody[]>;
-  bindings: { body: BindingBody; proof: Proof }[];
+  bindings: BindingResult[];
   rejected: { attestations: number; bindings: number };
 }
 
@@ -196,7 +199,7 @@ const OPTIONAL: Record<Slot, string[]> = {
  */
 const NOT_STRING = ['iat', 'exp', 'recovery', 'claims', 'amount', 'genesis', 'rotations', 'bindings', 'attestations', 'issuers'];
 /** §3.1: an envelope is exactly these members. Nothing outside `body` is signed, so an extra one is data no signature covers. */
-const ENVELOPE: Partial<Record<Slot, string[]>> = { rotation: ['body', 'sig', 'next_genesis'], binding: ['body', 'sig_id', 'sig_addr'], attestation: ['body', 'sig'] };
+const ENVELOPE: Partial<Record<Slot, string[]>> = { rotation: ['body', 'sig', 'sig_next', 'next_genesis'], binding: ['body', 'sig_id', 'sig_addr'], attestation: ['body', 'sig'] };
 function envelope(env: object, slot: Slot): void {
   for (const f of Object.keys(env)) if (!ENVELOPE[slot]!.includes(f)) throw new SigeloError(`${slot}: unknown envelope field ${JSON.stringify(f)}`);
 }
@@ -275,14 +278,18 @@ function isRFC3339UTC(s: string): boolean {
  * Walk the chain from the original genesis (SPEC §7.3). Returns the ordered DIDs and the
  * governing recovery commitment (§7.2: the one in the most recent recovery-signed genesis).
  */
-function resolveChain(g0: Genesis, rotations: Rotation[]): { chain: string[]; recovery: string | null } {
+function resolveChain(g0: Genesis, rotations: Rotation[]): { chain: string[]; recovery: string | null; recovered: number } {
   let cur = did(g0);
   const chain = [cur];
+  let recovered = 0; // §6.1: index of the DID the most recent recovery rotated into; earlier DIDs are superseded
   const genesisOf = new Map<string, Genesis>([[cur, g0]]);
   for (const r of rotations) genesisOf.set(did(r.next_genesis), r.next_genesis);
   let commitment = g0.recovery;
   for (;;) {
-    const candidates = rotations.filter((r) => r.body.id === cur); // 1
+    // 1. §7: the NEXT key countersigns every rotation (`sig_next`), so no chain can enter a DID
+    // whose holder did not sign the entry: a genesis that copies a victim's public commitment
+    // cannot rotate into the victim's DID and inherit its attestations (review of 2026-10-19).
+    const candidates = rotations.filter((r) => r.body.id === cur && verifySig(r.next_genesis.key, r.body, r.sig_next));
     const recovery = candidates.filter((r) => r.body.reason === 'recovery' && commitment !== null && // 2
       commitmentOf(r.body.recovery_key!) === commitment && verifySig(r.body.recovery_key, r.body, r.sig) &&
       did(r.next_genesis) === r.body.next);
@@ -312,13 +319,14 @@ function resolveChain(g0: Genesis, rotations: Rotation[]): { chain: string[]; re
       // 3: a fork under one key is a compromise signal. The verifier does not pick a side.
       throw new SigeloError(`chain: fork at ${cur} (${voluntary.length} valid voluntary rotations)`);
     } else {
-      return { chain, recovery: commitment }; // 4
+      return { chain, recovery: commitment, recovered }; // 4
     }
     // 5: a `next` already in the chain is a cycle. Only a key holder can produce one, it has
     // no legitimate meaning, and following it would hang the verifier — so reject, never loop.
     if (chain.includes(chosen.body.next)) throw new SigeloError(`chain: cycle back to ${chosen.body.next}`);
     cur = chosen.body.next;
     chain.push(cur);
+    if (chosen.body.reason === 'recovery') recovered = chain.length - 1;
   }
 }
 
@@ -360,6 +368,7 @@ export function verify(bundle: Bundle, now: number, knownIssuers?: Record<string
     if (r.next_genesis === undefined) throw new SigeloError('rotation: missing next_genesis');
     structure(r.next_genesis, 'genesis');
     if (typeof r.sig !== 'string') throw new SigeloError('rotation: missing sig');
+    if (typeof r.sig_next !== 'string') throw new SigeloError('rotation: missing sig_next');
     envelope(r, 'rotation');
   }
   for (const g of bundle.issuers) structure(g, 'genesis');
@@ -370,7 +379,7 @@ export function verify(bundle: Bundle, now: number, knownIssuers?: Record<string
   const badAttestations = malformed(bundle.attestations, 'attestation', 'sig');
   const badBindings = malformed(bundle.bindings, 'binding', 'sig_id');
   // 3. Chain
-  const { chain, recovery } = resolveChain(bundle.genesis, bundle.rotations);
+  const { chain, recovery, recovered } = resolveChain(bundle.genesis, bundle.rotations);
   const genesisOf = new Map<string, Genesis>([[d0, bundle.genesis]]);
   for (const r of bundle.rotations) genesisOf.set(did(r.next_genesis), r.next_genesis);
   // 4. Issuers — derived by hashing, so no key/value pair can disagree (SPEC §8). A locally
@@ -392,7 +401,7 @@ export function verify(bundle: Bundle, now: number, knownIssuers?: Record<string
     }
   }
   // 6. Bindings
-  const bindings: { body: BindingBody; proof: Proof }[] = [];
+  const bindings: BindingResult[] = [];
   let rejectedBindings = 0;
   for (const [i, b] of bundle.bindings.entries()) {
     const body = b?.body; // as above: guarded by badBindings (so is `b` itself: it may be null)
@@ -414,7 +423,12 @@ export function verify(bundle: Bundle, now: number, knownIssuers?: Record<string
       rejectedBindings++; // §6.1: a bad proof is not the same thing as no proof
       continue;
     }
-    bindings.push({ body, proof });
+    // §6.1: a DID before the most recent recovery is presumed stolen, so nothing it bound is
+    // payable. The rule is positional in the chain, never by `iat`: the thief chooses `iat`.
+    // A voluntary rotation implies no theft, so DIDs after the last recovery keep their bindings.
+    if (chain.indexOf(body.id) < recovered) bindings.push({ body, proof: 'superseded' });
+    else if (proof === 'proven' && body.method === 'monero') bindings.push({ body, proof, network: decodeAddress(body.addr).net });
+    else bindings.push({ body, proof });
   }
   // 7. Return. No scores, no ranking — weighting is the caller's job.
   return { did: chain[chain.length - 1]!, chain, recovery, attestations, bindings,
@@ -503,7 +517,7 @@ export function bind(opts: {
 /**
  * Rotate to a new genesis (SPEC §7). `reason: 'voluntary'` is signed by the current identity
  * key; `reason: 'recovery'` is signed by the recovery key, whose public half must hash to the
- * current commitment. Both `id` and `next` are derived by hashing the documents, so the
+ * current commitment. Either way `next_secret`, the new identity key, countersigns (`sig_next`). Both `id` and `next` are derived by hashing the documents, so the
  * envelope cannot disagree with them.
  *
  * The commitment checked here is `genesis.recovery` of the node being rotated from, which is
@@ -511,13 +525,16 @@ export function bind(opts: {
  * rotation writes a new one, so the current node's genesis always holds it (§7.2).
  */
 export function rotate(opts: {
-  genesis: Genesis; next_genesis: Genesis; iat: number; reason: Reason; secret: Uint8Array;
+  genesis: Genesis; next_genesis: Genesis; iat: number; reason: Reason; secret: Uint8Array; next_secret: Uint8Array;
 }): Rotation {
   structure(opts.genesis, 'genesis');
   structure(opts.next_genesis, 'genesis');
   const id = did(opts.genesis);
   const next = did(opts.next_genesis);
   if (next === id) throw new SigeloError('rotation: next == id');
+  // §7: the next key countersigns. Without its secret there is no rotation to make.
+  if (!(opts.next_secret instanceof Uint8Array) || opts.next_secret.length !== 32 || encodeKey(ed.getPublicKey(opts.next_secret)) !== opts.next_genesis.key)
+    throw new SigeloError('rotation: next_secret does not match next_genesis.key (the next key countersigns, §7)');
   const head = { v: VERSION, typ: 'rotation', id, next, iat: opts.iat } as const;
   let body: RotationBody;
   if (opts.reason === 'recovery') {
@@ -530,7 +547,7 @@ export function rotate(opts: {
     body = { ...head, reason: 'voluntary' };
   }
   structure(body, 'rotation');
-  return { body, sig: sign(opts.secret, body), next_genesis: opts.next_genesis };
+  return { body, sig: sign(opts.secret, body), sig_next: sign(opts.next_secret, body), next_genesis: opts.next_genesis };
 }
 
 /**

@@ -56,6 +56,18 @@ const bn = node([join(KIT, 'bind.mjs'), '--kit', join(tmp, 'kit-none.json'), '--
 t('bind, no supervisor: freeze is kill -9 on spend.lock\'s pid (the lock stays as evidence)', bn.code === 0 && read(join(tmp, 'bound-none', 'RUNBOOK.md')).includes('kill -9 "$(head -n1 /home/agents/.local/share/sigelo/keeper/spend.lock)"'));
 const bnet = node([join(KIT, 'bind.mjs'), '--kit', join(KIT, 'kit.example.json'), '--record', recPath, '--out', join(tmp, 'b1')]);
 t('bind refuses a kit.json whose net disagrees with the ceremony record', bnet.code === 2 && bnet.err.includes('the ceremony record says stagenet'));
+t('bound DRILL and RUNBOOK: the clean wallet-rpc gets --daemon-ssl from clean_host.daemon_ssl, and the note: own node or Tor, never a public node, for the restore wallet',
+  ['DRILL.md', 'RUNBOOK.md'].every((d) => texts[d].includes('--daemon-address node.example.org:18089 --daemon-ssl autodetect \\') && !texts[d].includes('--proxy') &&
+    texts[d].includes('The restore wallet holds spend keys: point it at your own node, or at one through Tor (`clean_host.proxy`), never at a public node.')));
+const kitOf = (name, ch) => { const p = join(tmp, name); writeFileSync(p, JSON.stringify({ ...kit, net: 'stagenet', clean_host: { ...kit.clean_host, ...ch } })); return p; };
+const tor = node([join(KIT, 'bind.mjs'), '--kit', kitOf('kit-tor.json', { daemon: `${'a'.repeat(56)}.onion:18081`, proxy: '127.0.0.1:9050', daemon_ssl: 'disabled' }), '--record', recPath, '--out', join(tmp, 'bound-tor')]);
+t('bind, clean_host.proxy and daemon_ssl: --daemon-ssl disabled --proxy 127.0.0.1:9050 on the clean wallet-rpc', tor.code === 0 &&
+  read(join(tmp, 'bound-tor', 'RUNBOOK.md')).includes('.onion:18081 --daemon-ssl disabled --proxy 127.0.0.1:9050 \\') && read(join(tmp, 'bound-tor', 'DRILL.md')).includes('--proxy 127.0.0.1:9050'));
+const noProxy = node([join(KIT, 'bind.mjs'), '--kit', kitOf('kit-onion.json', { daemon: `${'a'.repeat(56)}.onion:18081` }), '--record', recPath, '--out', join(tmp, 'b-onion')]);
+const badCh = node([join(KIT, 'bind.mjs'), '--kit', kitOf('kit-badch.json', { daemon_ssl: 'yes', proxy: 'tor:9050' }), '--record', recPath, '--out', join(tmp, 'b-badch')]);
+t('bind refuses a .onion clean_host.daemon without clean_host.proxy, a daemon_ssl that is not enabled/disabled/autodetect, a proxy that is not ip:port',
+  noProxy.code === 2 && noProxy.err.includes('a .onion daemon needs clean_host.proxy') && badCh.code === 2 && badCh.err.includes('clean_host.daemon_ssl: must be') &&
+  badCh.err.includes('clean_host.proxy: must be ip:port') && !existsSync(join(tmp, 'b-onion')) && !existsSync(join(tmp, 'b-badch')));
 const words25 = 'abbey abducts ability ablaze abnormal abort abrasive absorb abyss academy aces aching acidic acoustic acquire across actress acumen adapt addicted adept adhesive adjust adopt adrenalin';
 const bad = { ...kit, net: 'stagenet', keeper: { ...kit.keeper, spend_key: 'x' }, backup: { ...kit.backup, paper_location: words25 }, note: 'a'.repeat(0) + 'f'.repeat(64), extra: 'AGE-SECRET-KEY-1QQQ' };
 writeFileSync(join(tmp, 'kit-bad.json'), JSON.stringify(bad));

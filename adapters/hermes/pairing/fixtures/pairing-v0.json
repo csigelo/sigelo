@@ -592,6 +592,7 @@
                       "reason": "voluntary"
                     },
                     "sig": "z668cnG2dd2CxA9QbfECtKnZqjHZ4EW9R6KW6aZZGG6pw5uk9XJf4omJUbZBt1hrJqDUbfcPmyLzzsm8kMkAf7yx2",
+                    "sig_next": "z2oqWfmc76hyYLS6d1rMS7iJwhFZcwaLeXKaawKRYUts6847PSLCUn9TS2hJv6cczYBYwqiNjbeFHLomRrXSmbTfP",
                     "next_genesis": {
                       "v": "sigelo/0",
                       "typ": "genesis",
@@ -611,6 +612,7 @@
                       "reason": "voluntary"
                     },
                     "sig": "z5Q8sXhPk9YmKSEVD8NNguF3o1dYB3jCmjQmwzesmcntGRQgRmjDtM2Bki6Hg9jzer6zyKHw4jG71ESpJJoYNW56R",
+                    "sig_next": "z65vyWbRgAV6gpZVXtC5h9Sy5KmJemVaeYNM2YdcMPCKjQbQHhqbb7TsXBtKnyG4pbjpTEUcue3Khr7gy5iqMDTqY",
                     "next_genesis": {
                       "v": "sigelo/0",
                       "typ": "genesis",
@@ -735,6 +737,7 @@
                       "reason": "voluntary"
                     },
                     "sig": "z668cnG2dd2CxA9QbfECtKnZqjHZ4EW9R6KW6aZZGG6pw5uk9XJf4omJUbZBt1hrJqDUbfcPmyLzzsm8kMkAf7yx2",
+                    "sig_next": "z2oqWfmc76hyYLS6d1rMS7iJwhFZcwaLeXKaawKRYUts6847PSLCUn9TS2hJv6cczYBYwqiNjbeFHLomRrXSmbTfP",
                     "next_genesis": {
                       "v": "sigelo/0",
                       "typ": "genesis",
@@ -859,6 +862,7 @@
                       "reason": "voluntary"
                     },
                     "sig": "z668cnG2dd2CxA9QbfECtKnZqjHZ4EW9R6KW6aZZGG6pw5uk9XJf4omJUbZBt1hrJqDUbfcPmyLzzsm8kMkAf7yx2",
+                    "sig_next": "z2oqWfmc76hyYLS6d1rMS7iJwhFZcwaLeXKaawKRYUts6847PSLCUn9TS2hJv6cczYBYwqiNjbeFHLomRrXSmbTfP",
                     "next_genesis": {
                       "v": "sigelo/0",
                       "typ": "genesis",
@@ -878,6 +882,7 @@
                       "reason": "voluntary"
                     },
                     "sig": "z57Rc57W3bFSWYWPXj9XUjq8DtHkMzHenpvwXM1yu8uARRsUJ4oKNpdLwHJ8VMGuSLh1ETosTqVr17PQVjxejJtMh",
+                    "sig_next": "z5fCKQmzoRvAnTRK5DRbEccUUkSmndw1uw7nQL2wK8bBvTJet1g5zKu5kUujdx6SaJ2zfcbwNhbd5Ec6yA5dcBnzJ",
                     "next_genesis": {
                       "v": "sigelo/0",
                       "typ": "genesis",
@@ -1002,6 +1007,7 @@
                       "reason": "voluntary"
                     },
                     "sig": "z668cnG2dd2CxA9QbfECtKnZqjHZ4EW9R6KW6aZZGG6pw5uk9XJf4omJUbZBt1hrJqDUbfcPmyLzzsm8kMkAf7yx2",
+                    "sig_next": "z2oqWfmc76hyYLS6d1rMS7iJwhFZcwaLeXKaawKRYUts6847PSLCUn9TS2hJv6cczYBYwqiNjbeFHLomRrXSmbTfP",
                     "next_genesis": {
                       "v": "sigelo/0",
                       "typ": "genesis",
@@ -1022,6 +1028,7 @@
                       "recovery_key": "z6Mkh1et1WQh7XYeNU772owpZSWzw3Ad7DefRFDgjaJSH5mA"
                     },
                     "sig": "z5YuQ1QCuqiG76yUPoMguS1Fzr3xSXSLZWASDoEZAzTm8iN8qLRKnS18gvD4GGD6tXqedMDbdLoi4HRqECPFe4bMj",
+                    "sig_next": "z2ez56BpuJHcF32PjMWe8mfGBaKP386JoALVQcjqVa5mAyvgNtqZyp7m5N9KuY4Q3VqHmceUkKnpcq7xoXFxNkWY1",
                     "next_genesis": {
                       "v": "sigelo/0",
                       "typ": "genesis",

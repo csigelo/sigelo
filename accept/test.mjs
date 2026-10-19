@@ -29,7 +29,7 @@ ok(R.did !== R.run('whoami').chain[0], 'agent R rotated: its current DID is not 
 // S: the stolen-old-key case, built with the library because the CLI rightly refuses to sign for a DID that is not current.
 const rc = 'sha256:' + '0'.repeat(64), s0 = keygen({ recovery: rc }), s1 = keygen({ recovery: rc });
 const S = { old: did(s0.genesis), bundle: { v: 'sigelo/0', typ: 'bundle', genesis: s0.genesis, bindings: [], attestations: [], issuers: [],
-  rotations: [rotate({ genesis: s0.genesis, next_genesis: s1.genesis, iat: Math.floor(Date.now() / 1000) - 60, reason: 'key', secret: s0.secret })] } };
+  rotations: [rotate({ genesis: s0.genesis, next_genesis: s1.genesis, iat: Math.floor(Date.now() / 1000) - 60, reason: 'key', secret: s0.secret, next_secret: s1.secret })] } };
 
 const get = async (base, d) => { const r = await fetch(`${base}/sigelo/challenge?did=${encodeURIComponent(d)}`); return r.ok ? r.json() : null; };
 const post = async (base, body) => { const r = await fetch(`${base}/sigelo/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });

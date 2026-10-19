@@ -253,9 +253,12 @@ agent, one account per agent" by G1–G6 (§8). Every check below is **built** a
 single-token predecessor has moved real stagenet coins, and the generalised keeper's live run
 is G8 (§8).
 
-**Shape.** Wraps one loopback `monero-wallet-rpc` (`--rpc-login`, `--rpc-bind-ip 127.0.0.1`,
+**Shape.** Wraps one loopback `monero-wallet-rpc` (an RPC login, `--rpc-bind-ip 127.0.0.1`,
 *not* `--restricted-rpc`, which blocks `transfer`, `sign` and `verify` alike); refuses to start
 if `wallet.rpc` is not loopback. Loopback HTTP; the agent surface is §4.2.
+That login spends without the keeper's policy, so it lives in a 0600 `--config-file`, never on
+wallet-rpc's command line (`/proc/<pid>/cmdline` is readable by every local uid); `doctor` fails a unit with one there.
+Where several uids share the host, mount `/proc` with `hidepid=2`, also for a wallet-rpc the operator runs.
 
 **The wallet-rpc it accepts.** `spend/canary.ts` pins every method, parameter and result field
 the keeper uses; inside `npm test` and in the weekly CI job (the pinned v0.18.5.0 and the
@@ -267,7 +270,7 @@ stock-wallet oracle and the whole `spend/` suite against it, then move the ceili
 
 **Installing it.** `sigelo-spend init` sets up one keeper on the operator's own host over the
 operator's own wallet-rpc and wallet (keys, token, policy from a template, systemd `--user`
-units, optionally a loopback wallet-rpc unit with `--rpc-login`); `sigelo-spend doctor` checks
+units, optionally a loopback wallet-rpc unit with its login in a 0600 `--config-file`); `sigelo-spend doctor` checks
 the install, including the wallet-rpc against the range above. There is no hosted or managed
 mode: the vendor never holds a key or routes a payment. The free tier is one keeper and one
 agent with its whole policy; delegation (§4.3), approvals (step 8), receipts export and more
@@ -425,7 +428,8 @@ within a minute, and only from the lane after an answer, so a switch never delay
 one. A switch is a warning on stderr, never a log line: it signs nothing and spends nothing.
 Fail closed is unchanged — while the wallet has no daemon every pay is `wallet_offline`, a TRY
 LATER. It does not help a host with no network at all (soak incident #4); that is the host's
-to notice (spend/soak `check.mjs --notify`).
+to notice (spend/soak `check.mjs --notify`). Which daemons to list, TLS, Tor and what a node
+learns: spend/README.md "Choosing a daemon".
 
 **The spend-approval** (G6, `spend/approval.ts`). One closed object, signed by an approver
 in `approvers` over `"sigelo\n" ‖ JCS(body)` (SPEC §3):
@@ -850,8 +854,9 @@ relationship wallet's view key) sees "received", not "available".
 ## 6. Running it
 
 Installed on the test host: the distribution's `monero-0.18.5.0` (`monero-wallet-rpc`, `monero-wallet-cli`,
-`monerod`). Stagenet for everything below production; public stagenet nodes reachable from
-here: `node.monerodevs.org:38089`, `stagenet.xmr-tw.org:38081`, `xmr-lux.boldsuck.org:38081`.
+`monerod`). Stagenet for everything below production; public nodes reachable from here
+(the test host's, stagenet; use your own node: spend/README.md "Choosing a daemon"):
+`node.monerodevs.org:38089`, `stagenet.xmr-tw.org:38081`, `xmr-lux.boldsuck.org:38081`.
 Faucets: `stagenet-faucet.xmr-tw.org` works and needs no captcha — a plain
 `GET /send_tx/?addr=<stagenet address>` paid 0.1 XMR into the allowance wallet on
 2026-09-23. `xmrfaucet.xnothingx.com` also listed; the `melo.tools` faucet is dead (the

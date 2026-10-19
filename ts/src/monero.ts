@@ -277,9 +277,9 @@ export function sigeloMoneroSigAddr(body: unknown, o: { mode: Mode; secret: Uint
 /**
  * Verify one against the binding's own `addr`. Used by sigelo.verify (§6.1, §6.2).
  *
- * Two §6.2 rules live here rather than in verifyMessage, which stays a faithful wallet2:
- * a binding's `addr` must be a STANDARD or SUBADDRESS address (never integrated), and SigV1
- * is not accepted. A subaddress is checked against its own (D, C) — the keys the address
+ * Three §6.2 rules live here rather than in verifyMessage, which stays a faithful wallet2:
+ * a binding's `addr` must be a STANDARD or SUBADDRESS address (never integrated) whose keys
+ * are not of small order, and SigV1 is not accepted. A subaddress is checked against its own (D, C) — the keys the address
  * spells, which is what wallet2::verify hashes and what wallet2::sign's subaddress branch
  * signs with (`b + m` spend, `a(b + m)` view), so either mode needs the spend key there.
  */
@@ -291,7 +291,12 @@ export function verifySigeloMoneroSigAddr(body: unknown, address: string, sigAdd
     // not the prefix, so the integrated spelling of a wallet reuses the base address's
     // signature verbatim — accepting it would let a payment id nobody signed for ride along on
     // a proven binding. A subaddress carries its own keys, so its signature is its own.
-    if (decodeAddress(address).kind === 'integrated') return { good: false, version };
+    const { kind, spend, view } = decodeAddress(address);
+    if (kind === 'integrated') return { good: false, version };
+    // §6.2: neither key may be of small order (the identity included). check_key accepts them,
+    // but with P of small order c·P carries no secret, and r·G alone answers the challenge: a
+    // signature nobody needed a key for, in the mode that uses P (review of 2026-10-19).
+    if (pt(spend).isSmallOrder() || pt(view).isSmallOrder()) return { good: false, version };
     // §6.2: "Legacy `SigV1` is not accepted." Its hash is Keccak256(data) alone — neither the
     // mode byte nor the address's keys are inside it, so it cannot tell view from spend.
     if (version !== 2) return { good: false, version };

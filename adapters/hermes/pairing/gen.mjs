@@ -29,7 +29,7 @@ const B0 = id('B0', bRec), M0 = id('M0', mRec), W = id('W', wRec);
 
 // Rotations (SPEC §7). The recovery A1 -> A2 carries an EARLIER iat than the thief's A1 -> T:
 // precedence never reads timestamps (§7.1).
-const rot = (from, to, iat, reason, secret) => rotate({ genesis: from.genesis, next_genesis: to.genesis, iat, reason, secret });
+const rot = (from, to, iat, reason, secret) => rotate({ genesis: from.genesis, next_genesis: to.genesis, iat, reason, secret, next_secret: to.secret });
 const rA1 = rot(A0, A1, T0 + 1000, 'voluntary', A0.secret), rX = rot(A0, X, T0 + 1001, 'voluntary', A0.secret);
 const rT = rot(A1, T, T0 + 2000, 'voluntary', A1.secret), rA2 = rot(A1, A2, T0 + 1500, 'recovery', seed('A-recovery'));
 // One world W attests A0, so `attestations` is not empty (SPEC §5).

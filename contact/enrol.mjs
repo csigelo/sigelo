@@ -20,8 +20,9 @@
 //             the operator answers a request whose proof matches an enrolment it issued with the
 //             worker's identity, label LABEL_IDENTITY, end to end, once per enrolment, with a long
 //             invite the worker accepts; once the worker has paired, the operator files it (observe:
-//             tier own, by the attestation) and forgets the temporary DID. The machine takes the
-//             identity only from the DID it paired with through the code, checks it (checkIdentity)
+//             ours by the attestation; tier own unless the operator chose one) and forgets the
+//             temporary DID. The machine takes the identity only from the DID it paired with
+//             through the code, checks it (checkIdentity)
 //             and hands it to place(), which writes the file and pairs as the worker; then it
 //             forgets the operator on the temporary identity, which gives its mailboxes up.
 //             Anything else comes back in `rest`, for the caller's own inbox.
@@ -31,8 +32,17 @@
 //   key   = HKDF-SHA256(secret, no salt, info "sigelo-enrol/0 key", 32 bytes)
 //   proof = hex HMAC-SHA256(key, "sigelo-enrol/0 request\n" ‖ pair id)
 // where the pair id (kdf.pairId) is that of the pairing the request travels on. A plain `accept` of
-// the code pairs and gets nothing; a proof lifted onto another pairing does not match. One
-// enrolment, one temporary DID: a second is refused (enrol_used).
+// the code pairs and gets nothing; a proof lifted onto another pairing does not match. The secret
+// alone is not enough: anyone who saw the long code (a chat it was pasted in; the relay, which
+// parks it behind the short code) can compute a proof over a pairing of its own. So the operator
+// answers only the DID that paired through this enrolment's own code (carrier.answeredBy(nonce),
+// recorded with that pairing): enrol_unpaired while nobody has, enrol_from for any other contact.
+// The relay is no contact: knowing the secret gives it no pairing to send a proof on, and that
+// holds for a relay operator who is also a contact (its own pairing did not come through the code).
+// What stays is the code itself: whoever ANSWERS it first (the relay, which holds it; anyone it was
+// shown to) pairs through it and is answered; the machine then sees park_unknown or four words that
+// differ, after the key went (THREAT-MODEL §2.11). One enrolment, one temporary DID: enrol_used
+// stays as a second check, unreachable while one code pairs one DID.
 //
 // The private key travels once, inside a sigelo-msg/0 envelope (end to end); it is never parked
 // on the relay and never encrypted under the 8-character code (40 bits).
@@ -80,7 +90,7 @@ function pinnedGenesis(seed, recovery) {
 function pinnedChain(seedAt, n, recovery) {
   if (!Number.isSafeInteger(n) || n < 0 || n > MAX_N) fail('enrol', `rotation: 0 to ${MAX_N}, not ${n}`);
   const g = Array.from({ length: n + 1 }, (_, m) => pinnedGenesis(seedAt(m), recovery));
-  const rotations = g.slice(1).map((x, m) => rotate({ genesis: g[m].genesis, next_genesis: x.genesis, iat: ROTATION_IAT, reason: 'voluntary', secret: g[m].seed }));
+  const rotations = g.slice(1).map((x, m) => rotate({ genesis: g[m].genesis, next_genesis: x.genesis, iat: ROTATION_IAT, reason: 'voluntary', secret: g[m].seed, next_secret: x.seed }));
   return { genesis: g[0].genesis, rotations, secret: g[n].seed, original: g[0].did, did: g[n].did };
 }
 
@@ -327,16 +337,21 @@ async function sendRequests(carrier, file, temp, out, first) {
 }
 
 // The operator: a request from a contact. Answered only when its proof matches an enrolment this
-// operator issued, over that contact's own pairing, and only for the first contact that asked.
+// operator issued, over that contact's own pairing, and only when that contact is the DID that
+// paired through the enrolment's code (the header's "The marker").
 async function onRequest(carrier, file, keeper, m, out) {
   const now = nowOf(carrier), c = readStore(carrier).contacts[m.from];
   const who = `${m.name ?? m.from} (${m.from})`;
   if (!c || c.revoked || !c.pair_key) { out.refused.push({ check: 'enrol_contact', detail: `an enrolment request from ${who}, no live contact: ignored`, from: m.from }); return; }
   const pair = pairOf(c);
+  // Who paired through each code, read before the pending file's lock (the carrier takes its own).
+  const answered = Object.fromEntries(pending(file, now, (s) => Object.keys(s.issued)).map((id) => [id, carrier.answeredBy(id)]));
   const r = pending(file, now, (s) => {
     const hit = Object.entries(s.issued).find(([, e]) => matches(m.content, hexToBytes(e.key), pair));
     if (!hit) return { check: 'enrol_proof', detail: `${who} asked to be enrolled, but its request matches no enrolment code this operator issued in the last 24 hours (a plain contact, or an expired code): nothing sent` };
-    const [id, e] = hit;
+    const [id, e] = hit, by = answered[id] ?? null;
+    if (!by) return { check: 'enrol_unpaired', detail: `${who} proved an enrolment code over its own pairing, but nobody has paired through that code yet (the machine pairs first): nothing sent` };
+    if (by !== c.did) return { check: 'enrol_from', detail: `${who} proved an enrolment code over its own pairing, but ${by} paired through that code: only it is answered; nothing sent` };
     if (e.temp && e.temp !== c.did) return { check: 'enrol_used', detail: `${who} answered an enrolment that ${e.temp} took already: one code places one worker; nothing sent` };
     if (e.done) return { check: 'enrol_done', detail: `${who} asked again for worker ${e.i}, placed already: nothing sent` };
     e.temp = c.did;
@@ -370,11 +385,11 @@ async function settle(carrier, file, keeper, out) {
     if (!c || pairOf(c) === e.old_pair) continue;
     const identity = workerIdentity({ K: keeper.K, i: e.i, n: e.n, recovery: keeper.recovery, attestation: e.attestation, issuer: e.issuer });
     const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: identity.genesis, rotations: identity.rotations, bindings: [], attestations: identity.attestations, issuers: identity.issuers };
-    const tier = carrier.observe(bundle)?.tier ?? null;
+    const seen = carrier.observe(bundle), tier = seen?.tier ?? null, ours = seen?.ours ?? null;
     let released = false;
     try { released = (await carrier.forget(e.temp)).released; } catch (x) { if (!(x instanceof MsgError) || x.check !== 'not_contact') throw x; }
     pending(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].done = nowOf(carrier); });
-    out.placed.push({ id, name: c.name, did: c.current_did, original: c.did, i: e.i, n: e.n, tier, temp: e.temp, released, exp: e.attestation.body.exp });
+    out.placed.push({ id, name: c.name, did: c.current_did, original: c.did, i: e.i, n: e.n, ours, tier, temp: e.temp, released, exp: e.attestation.body.exp });
   }
 }
 

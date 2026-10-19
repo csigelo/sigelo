@@ -67,7 +67,7 @@ export function createAgent({ store: dir, plain = false, allowPayments = false, 
       if (e.pending) return { ok: true, rotation: e.pending.rotation };   // a caller that died before writing it gets the same one
       const cur = head(e), next = fresh(cur.recovery);
       try {
-        const rotation = store.withSeed(e, (secret) => S.rotate({ genesis: cur, next_genesis: next.genesis, iat: Math.floor(now() / 1000), reason: 'voluntary', secret }));
+        const rotation = store.withSeed(e, (secret) => S.rotate({ genesis: cur, next_genesis: next.genesis, iat: Math.floor(now() / 1000), reason: 'voluntary', secret, next_secret: next.secret }));
         store.pend(e, rotation, next.secret);
         return { ok: true, rotation };
       } finally { next.secret.fill(0); }

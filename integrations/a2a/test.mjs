@@ -35,7 +35,7 @@ await rejects(() => signCard(card, bundle, signerOf(keygen({ recovery: seed(9), 
 await rejects(() => signCard(card, bundle, a.secret, NOW), /pass a signer/, 'a raw key refused: signing goes through a signer (K1)');
 
 const b = keygen({ recovery: seed(9), seed: seed(3), created: '2026-10-14T00:00:00Z', nonce: seed(4) });
-const rot = rotate({ genesis: a.genesis, next_genesis: b.genesis, iat: NOW - 10, reason: 'voluntary', secret: a.secret });
+const rot = rotate({ genesis: a.genesis, next_genesis: b.genesis, iat: NOW - 10, reason: 'voluntary', secret: a.secret, next_secret: b.secret });
 const rotated = { ...bundle, rotations: [rot] };
 ok(verifyCard(await signCard(card, rotated, signerOf(b), NOW), NOW).did === b.did, 'after rotation: signed by the new key, verifies');
 await rejects(() => signCard(card, rotated, signerOf(a), NOW), /bad signature/, 'after rotation: the old key refused');
@@ -58,7 +58,7 @@ await rejects(() => signCard(card, bundle, signerOf(a), NOW, { attestation: att,
 // SPEC §5: the old attestation verifies under the old DID, but the chain shows the key was rotated away
 // from, so it is refused, as the keeper's licence check refuses a rotated-away vendor key (spend/licence.ts).
 const op2 = keygen({ recovery: seed(19), seed: seed(14), created: '2026-10-15T00:00:00Z', nonce: seed(15) });
-const opChain = bundleOf(op.genesis, [rotate({ genesis: op.genesis, next_genesis: op2.genesis, iat: NOW - 50, reason: 'voluntary', secret: op.secret })]);
+const opChain = bundleOf(op.genesis, [rotate({ genesis: op.genesis, next_genesis: op2.genesis, iat: NOW - 50, reason: 'voluntary', secret: op.secret, next_secret: op2.secret })]);
 await rejects(() => signCard(card, bundle, signerOf(a), NOW, { attestation: att, bundle: opChain }), /operator_rotated/, 'operator\'s rotated-away key refused (SPEC §5)');
 const att2 = attest({ ...att.body, secret: op2.secret, iss: op2.did, admission_by: op2.did });
 const v2 = verifyCard(await signCard(card, bundle, signerOf(a), NOW, { attestation: att2, bundle: opChain }), NOW);

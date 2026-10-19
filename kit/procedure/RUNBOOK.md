@@ -77,9 +77,12 @@ The vault is the wallet the 25 words restore: cold, never loaded by a keeper. Va
 
 ```sh
 mkdir -m 700 {{clean_host.tmpfs}}
-monero-wallet-rpc --{{net}} --wallet-dir {{clean_host.tmpfs}} --daemon-address {{clean_host.daemon}} \
+monero-wallet-rpc --{{net}} --wallet-dir {{clean_host.tmpfs}} --daemon-address {{clean_host.daemon}} {{clean_daemon_opts}} \
   --rpc-bind-ip 127.0.0.1 --rpc-bind-port {{clean_host.rpc_port}} --disable-rpc-login --log-file {{clean_host.tmpfs}}/rpc.log
 ```
+
+   The restore wallet holds spend keys: point it at your own node, or at one through Tor (`clean_host.proxy`), never at a public node.
+   A public node learns this host's IP and every output of the restored wallet.
 
    `generate_from_keys {filename, address, spendkey, viewkey, restore_height}`; raise the account lookahead to the highest account index in `spend.log` (MONERO.md §7); `refresh {start_height}`: one blocking call (minutes), nothing else answers meanwhile, so do not poll.
 3. For every account in `get_accounts` with `unlocked_balance` > 0: `sweep_all {address: "{{vault_address}}", account_index: i, subaddr_indices_all: true, priority: 4, unlock_time: 0}`. **On error -4 `No unlocked balance` while `get_balance` still shows unlocked funds, step down to priority 3, then 2, then 1** (F7): wallet2 skips outputs worth less than their own fee at the chosen priority. Stop when only dust is left (refused at 1) and record it. Locked outputs: repeat every block until empty. Record every txid, amount and fee. Many small outputs cost: T14 paid 17 % of the wallet in fees (priority 4 left 182 outputs that only priority 2 took). Accept it: speed wins the race.

@@ -147,7 +147,7 @@ function makeAgent(i) {
     const t = T0 + d * DAY;
     const cur = nodes[nodes.length - 1];
     const nx = mk(n + 1, t);
-    rotations.push({ env: S.rotate({ genesis: cur.genesis, next_genesis: nx.genesis, iat: t, reason: 'voluntary', secret: cur.secret }), iat: t });
+    rotations.push({ env: S.rotate({ genesis: cur.genesis, next_genesis: nx.genesis, iat: t, reason: 'voluntary', secret: cur.secret, next_secret: nx.secret }), iat: t });
     nodes.push({ ...nx, from: t });
   }
   const at = (t) => nodes.filter((x) => x.from <= t).pop();

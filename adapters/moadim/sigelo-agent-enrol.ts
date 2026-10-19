@@ -22,7 +22,7 @@ import { keeperRoot, parseRoot, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { bundleOf, head, identityPath, load, save, type Store } from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
-import { absent, contactLib, debug, heldPath, holderFor, lockHolder, MISSING, putBack, safeJson, safeText, unreadable, type Batch } from './sigelo-agent-contact.ts';
+import { absent, contactLib, debug, heldPath, holderFor, lockHolder, MISSING, putBack, safeJson, safeText, trustOf, unreadable, type Batch } from './sigelo-agent-contact.ts';
 
 export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of your keeper root, restorable from the 25 words
   keeper --from-words [--keeper <j>]       once: your identity (the root identity of the words, when absent) and
@@ -31,20 +31,24 @@ export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of
                                            aside; --rotate-me: your identity's next key, rotation n+1 of the words
   enrol --name <n> [--index <i>]           worker i (next free): a one-time code (10 minutes) for the other machine;
        [--wait <s>] [--identity <file>]    it pairs like any contact, then takes on worker i's identity, run by you
+       [--tier friend|quiet]               --tier: yours but low trust (it reads the web): its messages wait in the
+                                           inbox, never pushed (default own: pushed in full)
   enrol --name <n> --here                  worker i into this machine's agents' directory, for a sub-agent
-  enrol --restore <i> [--rotate] [--here]  place worker i again: the same DID; --rotate: its next key (rotation n+1)
+  enrol --restore <i> [--rotate] [--here]  place worker i again: the same DID; --rotate: its next key (rotation n+1);
+                                           the tier stays unless --tier
   enrol --finish [--wait <s>]              finish what is pending here, either side (kept 24 hours)
   init --enrol <code> [--name <n>]         on the other machine: pair, then become the operator's worker
        [--wait <s>]                        (--name: the operator's contact name; --wait 0 to 300 s, default 120)
 Operator identity: --identity, else $SIGELO_HUMAN, else ~/.config/sigelo/me.local.json; never in the agents'
 directory. Exit 3: still pending when the wait ended.`;
 
-interface Placed { id: string; name: string; did: string; original: string; i?: number; n?: number; tier?: string; temp: string | null; released?: boolean; exp: number;
+interface Placed { id: string; name: string; did: string; original: string; i?: number; n?: number; ours?: boolean | null; tier?: string; temp: string | null; released?: boolean; exp: number;
   worker?: number | null; operator?: string; status?: string | null; contact?: { fingerprint?: string } | null }
 interface Out { delivered: { id: string; name: string; temp: string; did: string }[]; placed: Placed[]; refused: { check: string; detail: string; from?: string }[];
   sent: { did: string }[]; rest: Batch; offline?: string; lastError?: unknown }
 interface Carrier { relay: string; stop(): Promise<void>; unpark(code: string): Promise<string>; inbox(o: object): Promise<Batch>;
-  accept(code: string, o: object): Promise<{ status: string; contact?: { did: string; name: string; fingerprint?: string } }>; contacts(): { answers: unknown[] } }
+  accept(code: string, o: object): Promise<{ status: string; contact?: { did: string; name: string; fingerprint?: string } }>;
+  contacts(): { answers: unknown[]; contacts: { did: string; revoked: boolean; ours: boolean; tier: string }[] }; presetTier(did: string, tier: string): { tier: string } }
 interface Enrol {
   enrolPath(identity: string): string;
   pending<T>(file: string, now: number, fn?: (s: { issued: Record<string, { done?: unknown; temp?: string }>; joining: Record<string, { temp?: string }> }) => T): T;
@@ -296,7 +300,7 @@ function report(path: string, r: Out, said?: string): void {
   }
   for (const d of r.delivered) note(`sent worker ${d.did}'s identity to ${d.temp}, end to end, once`);
   for (const p of r.placed) {
-    if (p.i !== undefined) note(`${p.name}: paired, then replaced its identity with yours: worker ${p.i} (${p.did}), run by you until ${until(p.exp)}; tier ${p.tier ?? 'own'}. Its temporary DID ${p.temp} is forgotten`);
+    if (p.i !== undefined) note(`${p.name}: paired, then replaced its identity with yours: worker ${p.i} (${p.did}), run by you until ${until(p.exp)}. Its temporary DID ${p.temp} is forgotten. ${trustOf(p.name, p.ours, p.tier, p.i)}`);
     else note(`paired, then replaced this machine's identity with the operator's: worker ${p.worker ?? '?'} (${p.did}), run by ${p.operator} until ${until(p.exp)}. The temporary DID ${p.temp} is forgotten`);
   }
   for (const x of r.refused) note(`enrol: ${x.check}: ${x.detail}`);
@@ -304,11 +308,18 @@ function report(path: string, r: Out, said?: string): void {
   if (r.offline !== undefined) note(`enrol: offline: ${r.offline}`);
 }
 
+/** The operator's tier for worker `original` (--tier, kept by tier_by "owner", filed when it pairs), else
+ *  what its contact has, else own (detected by the attestation). → the tier. */
+function tierFor(c: Carrier, original: string, tier: string | undefined): string {
+  if (tier !== undefined) return c.presetTier(original, tier).tier;
+  return c.contacts().contacts.find((x) => x.did === original && !x.revoked)?.tier ?? 'own';
+}
+
 /** The operator: worker i derived, then placed here or by a code. */
 async function place(opPath: string, f: Map<string, string>): Promise<number> {
   checkOperator(opPath);
   const k = readKeeper(opPath), { K, recovery } = rootOf(k), { lib, enrol } = await libs();
-  const restore = f.has('--restore'), here = f.has('--here'), wait = seconds(f.get('--wait'), 0);
+  const restore = f.has('--restore'), here = f.has('--here'), wait = seconds(f.get('--wait'), 0), tier = f.get('--tier');
   // By a code, the operator identity logs in: not beside its page or watcher (the page enrols too).
   if (!here) holderFor(opPath, 'enrol');
   let i: number, n: number, name = f.get('--name');
@@ -340,14 +351,18 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
       save(file, id);
     });
     roster('here');
-    note(`worker ${i} (${w.did}) written to ${file} (0600), run by you until ${until(attestation.body.exp)}. A sub-agent uses it as SIGELO_IDENTITY=${file}`);
-    out({ worker: i, n, did: w.did, original: w.original, name, file });
+    const oc = carrierFor(lib, opPath);
+    let tierNow: string;
+    try { tierNow = tierFor(oc, w.original, tier); } finally { await oc.stop(); }
+    note(`worker ${i} (${w.did}) written to ${file} (0600), run by you until ${until(attestation.body.exp)}. A sub-agent uses it as SIGELO_IDENTITY=${file}. ${trustOf(name, true, tierNow, i)}`);
+    out({ worker: i, n, did: w.did, original: w.original, name, file, ours: true, tier: tierNow });
     return 0;
   }
   const c = carrierFor(lib, opPath), file = enrol.enrolPath(opPath);
   try {
     const r = await enrol.issue({ carrier: c, file, i, n, name, keeper: { K, recovery } });
     roster('remote');
+    tierFor(c, w.original, tier);
     console.log(r.short);
     note(`enrolment code for worker ${i} (${name}), good for 10 minutes (until ${until(r.short_exp)}), once. On the other machine: sigelo-agent init --enrol ${r.short}. `
       + `It pairs like any contact (compare the four words), then its identity is replaced with yours: worker ${i} (${w.did})`
@@ -356,7 +371,7 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
     report(opPath, res);
     if (res.offline !== undefined) { debug(res.lastError, { identity: opPath, relay: c.relay }); return 1; }
     const done = res.placed.find((p) => p.id === r.id);
-    if (done) out({ worker: i, n, did: done.did, original: done.original, name, tier: done.tier });
+    if (done) out({ worker: i, n, did: done.did, original: done.original, name, ours: done.ours, tier: done.tier });
     if (wait > 0 && !done) { note(`enrol: not done within ${wait} s; kept 24 hours: sigelo-agent enrol --finish once the other side has run`); return 3; }
     return 0;
   } finally { await c.stop(); }
@@ -437,11 +452,13 @@ async function finish(opFlag: string | undefined, wait: number): Promise<number>
 /** sigelo-agent enrol …; → the exit code (0 done, 1 refused or offline, 2 usage, 3 still pending). */
 export async function main(rest: string[]): Promise<number> {
   try {
-    const f = flags(rest, ['--name', '--wait', '--identity', '--index', '--restore'], ['--finish', '--here', '--rotate']);
+    const f = flags(rest, ['--name', '--wait', '--identity', '--index', '--restore', '--tier'], ['--finish', '--here', '--rotate']);
     if (f.has('--finish') && [...f.keys()].some((k) => !['--finish', '--wait', '--identity'].includes(k))) throw usageError('enrol: --finish takes only --wait and --identity');
     if (f.has('--rotate') && !f.has('--restore')) throw usageError('enrol: --rotate goes with --restore <i>');
     if (f.has('--index') && f.has('--restore')) throw usageError('enrol: --index or --restore, not both');
     if (f.has('--here') && f.has('--wait')) throw usageError('enrol: --here waits for nothing (no --wait)');
+    // own is the default, detected by the attestation; --tier lowers it at enrolment.
+    if (f.has('--tier') && f.get('--tier') !== 'friend' && f.get('--tier') !== 'quiet') throw usageError(`enrol --tier: friend or quiet, not ${JSON.stringify(f.get('--tier'))} (own is the default)`);
     if (f.has('--finish')) return await finish(f.get('--identity'), seconds(f.get('--wait'), 0));
     return await place(operatorPath(f.get('--identity')), f);
   } catch (e) { return failed(e); }

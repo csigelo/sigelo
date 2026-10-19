@@ -424,8 +424,9 @@ function matchRule(rule: AllowRule, to: Destination & { addr: string }, amount: 
     return nope(`issuer: no accepted attestation from ${rule.issuer}${rule.ctx === undefined ? '' : ` with ctx ${JSON.stringify(rule.ctx)}`}`);
   }
   // SPEC §6.1: funds go to `proven` bindings only. §6.2: the hash does not cover the network
-  // prefix, so the address must be checked against the network we are spending on.
-  const bound = result.bindings.filter((b) => b.proof === 'proven' && b.body.method === 'monero' && netOf(b.body.addr) === policy.net);
+  // prefix, so the address must be checked against the network we are spending on. verify()
+  // reports it as `network`; both must agree. `superseded` (bound before a recovery) never pays.
+  const bound = result.bindings.filter((b) => b.proof === 'proven' && b.body.method === 'monero' && b.network === policy.net && netOf(b.body.addr) === policy.net);
   if (bound.length === 0) return nope(`binding: ${result.did} has no proven monero binding on ${policy.net}`);
   if (bound.some((b) => b.body.addr === to.addr)) return { ok: true, did: result.did };
   // §6.3: a binding names the wallet, an invoice names where to pay this time. sigelo cannot

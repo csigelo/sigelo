@@ -32,7 +32,7 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 | `POST /api/accept` | `{code, name?, tier?}` | `{status: "connected", contact: {did, name, fingerprint, pair, tier}}`, or `{status: "waiting"\|"pending", did, detail, exp}`; `tier`: `friend` or `quiet` (own is detected) |
 | `POST /api/words` | `{contact, match}` | `true`: `{checked: true}`; `false`: forget and block |
 | `POST /api/rename` | `{contact, name}` | `{did, name}`; `409 name_taken` if another live contact has it |
-| `POST /api/tier` | `{contact, tier}` | `{did, name, tier}`: `own`, `friend` or `quiet`, kept until changed |
+| `POST /api/tier` | `{contact, tier}` | `{did, name, tier, ours}`: `own`, `friend` or `quiet`, kept until changed |
 | `POST /api/tag` | `{contact, tags: [≤ 8, ≤ 20 chars]}` | `{tags}` |
 | `POST /api/forget` | `{contact}` | `{forgotten, offline}`: revoked here for good |
 | `POST /api/send` | `{to, text}` | the history record: `{n, at, kind: "out", did, id, text, status: "sent"\|"queued"\|"refused", code?, detail?}` |
@@ -45,11 +45,12 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 
 `contact` is the contact's original DID. A contact in `groups`: `{did, name, current_did, relay, re_pair,
 words, pair, words_checked, tags, local, mine, unread, last, waiting, not_collected, queued, status,
-tier}`. `status`: `ok`, `waiting` (their keys have not come, or the carrier says why messages wait:
+ours, tier}`. `status`: `ok`, `waiting` (their keys have not come, or the carrier says why messages wait:
 `waiting`), `not_collected` (a message queued, no reader yet), `pair_again` (`re_pair` after a recovery). `tier` (contact/store.mjs): `own` (my agents:
 an unexpired `sigelo-relay/operator` attestation from my DID, seen in a local agent's file or proved
 by the agent), `friend` (the default; the page shows "new message" and a count), `quiet` (nothing
-until opened); the human's choice (`/api/tier`) wins. **Mine** = tier `own`; `mine` = the attestation's
+until opened); the human's choice (`/api/tier`) wins. `ours`: that attestation marks it, whatever the tier (an
+own agent may be `friend` by choice). **Mine** = `ours` or tier `own`; `mine` = the attestation's
 expiry for a local agent; `local` = the agent's name on this machine.
 
 `me` in `state`: `{did, relay, online, clock_offset (s, relay minus local, the carrier's `clockOffset`), clock_checked,

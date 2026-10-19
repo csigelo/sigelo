@@ -31,7 +31,7 @@ import { writeFileSync } from 'node:fs';
 import { canonicalize, JcsError } from './jcs.js';
 import {
   encodeAddress, hashToScalar, keccak256, keysFromSpend, moneroBase58Encode, scReduce32,
-  sigeloMoneroSigAddr, subaddress, subaddressKeys,
+  sigeloMoneroSigAddr, signMessageHash, subaddress, subaddressKeys,
 } from './monero.js';
 import { commitmentOf, did, encodeKey, sign, signingInput } from './sigelo.js';
 
@@ -91,6 +91,10 @@ const key = (n: string): string => encodeKey(ed.getPublicKey(K[n]!));
 const commit = (n: string): string => commitmentOf(key(n));
 const sig = (n: string, body: unknown): string => sign(K[n]!, body);
 const nonce = (b: string): string => mb(hex(b.repeat(16)));
+/** §7 `sig_next`: the countersignature by the key of `next_genesis`, whichever seed that is. */
+const sigNext = (body: unknown, ng: J): string => sig(Object.keys(K).find((n) => key(n) === ng.key)!, body);
+/** A rotation envelope: signed by `signer`, countersigned by the next key (§7). */
+const rotEnv = (body: J, signer: string, ng: J): J => ({ body, sig: sig(signer, body), sig_next: sigNext(body, ng), next_genesis: ng });
 const genesis = (n: string, rec: string | null, created: string, nb: string): J =>
   ({ v: V, typ: 'genesis', key: key(n), recovery: rec, created, nonce: nonce(nb) });
 
@@ -190,7 +194,7 @@ const xsig = (body: unknown, n: string): string =>
 const bx = { v: V, typ: 'binding', id: d0, method: 'monero', addr: xstd, iat: T0, exp: T0 + 90 * DAY, nonce: nonce('c1') };
 P.binding_monero = {
   body: bx, sig_id: sig('agent', bx), sig_addr: xsig(bx, '11'),
-  expect_proof: 'proven', expect_mode: 'view',
+  expect_proof: 'proven', expect_network: 'mainnet', expect_mode: 'view',
   note: '§6.2 view mode: a view-only wallet (a, B) proves it can see the wallet without ever ' +
     'holding a spend key. addr is the MAINNET STANDARD address of monero_spend_seed. ' +
     'Signing nonce fixed at 0x11 * 32; real ones are random, so byte-equality is not the target.',
@@ -209,14 +213,14 @@ const ssig = (body: unknown, mode: 'spend' | 'view', n: string): string => sigel
 });
 P.binding_monero_subaddress_spend = {
   body: bxs, sig_id: sig('agent', bxs), sig_addr: ssig(bxs, 'spend', '22'),
-  expect_proof: 'proven', expect_mode: 'spend',
+  expect_proof: 'proven', expect_network: 'mainnet', expect_mode: 'spend',
   note: '§6.2 subaddress: addr is MAINNET SUBADDRESS (0,1) of monero_spend_seed; sig_addr is spend mode ' +
     'over its own (D, C) with d = b + m. Signing nonce fixed at 0x22 * 32.',
 };
 const bxsv = { ...bxs, nonce: nonce('c7') };
 P.binding_monero_subaddress_view = {
   body: bxsv, sig_id: sig('agent', bxsv), sig_addr: ssig(bxsv, 'view', '77'),
-  expect_proof: 'proven', expect_mode: 'view',
+  expect_proof: 'proven', expect_network: 'mainnet', expect_mode: 'view',
   note: '§6.2 subaddress, view mode: secret a*(b + m), over (D, C). Still needs the spend key — for a ' +
     'subaddress, view mode does not imply a view-only signer. Signing nonce fixed at 0x77 * 32.',
 };
@@ -226,13 +230,13 @@ P.binding_monero_subaddress_view = {
 // voluntary: recovery commitment carried forward
 const g1 = genesis('agent2', rec1, '2026-10-01T00:00:00Z', 'e5'), d1 = did(g1);
 const r1 = { v: V, typ: 'rotation', id: d0, next: d1, iat: T0 + 24 * DAY, reason: 'voluntary' };
-P.rotation_voluntary = { body: r1, sig: sig('agent', r1), next_genesis: g1, expect_next_did: d1 };
+P.rotation_voluntary = { ...rotEnv(r1, 'agent', g1), expect_next_did: d1 };
 
 // hostile: stolen agent2 key, later iat, valid sig, changes commitment
 const ga = genesis('attacker', commit('attacker'), '2026-10-20T00:00:00Z', 'f6'), da = did(ga);
 const rh = { v: V, typ: 'rotation', id: d1, next: da, iat: T0 + 45 * DAY, reason: 'voluntary' };
 P.rotation_hostile = {
-  body: rh, sig: sig('agent2', rh), next_genesis: ga,
+  ...rotEnv(rh, 'agent2', ga),
   note: 'Signature VALID. next_genesis carries a DIFFERENT recovery commitment — ' +
     'that alone is grounds to REJECT a voluntary rotation (see negative.voluntary_changes_recovery). ' +
     'Even if it did not, recovery below supersedes it.',
@@ -242,7 +246,7 @@ P.rotation_hostile = {
 const gac = genesis('attacker', rec1, '2026-10-21T00:00:00Z', 'd6'), dac = did(gac);
 const rhc = { v: V, typ: 'rotation', id: d1, next: dac, iat: T0 + 50 * DAY, reason: 'voluntary' };
 P.rotation_hostile_carried = {
-  body: rhc, sig: sig('agent2', rhc), next_genesis: gac,
+  ...rotEnv(rhc, 'agent2', gac),
   note: 'Signature VALID, commitment UNCHANGED, latest iat at this node: a fully valid voluntary rotation. ' +
     'It loses only because a valid recovery rotation exists at the same node (SPEC §7.1). ' +
     'A verifier that picks by iat, or by "voluntary first", follows this and fails chain_precedence_only.',
@@ -252,7 +256,7 @@ P.rotation_hostile_carried = {
 const g2 = genesis('agent3', rec2, '2026-10-10T00:00:00Z', 'a7'), d2 = did(g2);
 const rr = { v: V, typ: 'rotation', id: d1, next: d2, iat: T0 + 35 * DAY, reason: 'recovery', recovery_key: key('recovery') };
 P.rotation_recovery = {
-  body: rr, sig: sig('recovery', rr), next_genesis: g2, expect_next_did: d2,
+  ...rotEnv(rr, 'recovery', g2), expect_next_did: d2,
   note: 'iat EARLIER than both hostile rotations. Recovery outranks key. Chain is now d0 -> d1 -> d2. ' +
     'Recovery commitment changes to rec2; subsequent recoveries must use recovery2.',
 };
@@ -261,7 +265,7 @@ P.rotation_recovery = {
 const g3 = genesis('agent', rec2, '2026-11-01T00:00:00Z', 'b8'), d3 = did(g3);
 const rr2 = { v: V, typ: 'rotation', id: d2, next: d3, iat: T0 + 60 * DAY, reason: 'recovery', recovery_key: key('recovery2') };
 P.rotation_recovery_second = {
-  body: rr2, sig: sig('recovery2', rr2), next_genesis: g3, expect_next_did: d3,
+  ...rotEnv(rr2, 'recovery2', g3), expect_next_did: d3,
   note: 'Verified against the commitment in g2 (most recent recovery-signed genesis), not g0.',
 };
 
@@ -285,7 +289,7 @@ const att_m = { v: V, typ: 'attestation', iss: dm, sub: d0, iat: T0, exp: T0 + 9
 const b_off = { v: V, typ: 'binding', id: da, method: 'ed25519-test', addr: key('paykey'), iat: T0, exp: T0 + 90 * DAY, nonce: nonce('d9') };
 const b_bad = { ...b, nonce: nonce('d7') };
 const b_opaque = { v: V, typ: 'binding', id: d0, method: 'opaque-test', addr: 'anything', iat: T0, exp: T0 + 90 * DAY, nonce: nonce('d8') };
-const ENVELOPE = ['body', 'sig', 'sig_id', 'sig_addr', 'next_genesis']; // strip vector-only annotations
+const ENVELOPE = ['body', 'sig', 'sig_next', 'sig_id', 'sig_addr', 'next_genesis']; // strip vector-only annotations
 const bundle = {
   v: V, typ: 'bundle', genesis: g0,
   rotations: ['rotation_voluntary', 'rotation_hostile', 'rotation_hostile_carried', 'rotation_recovery', 'rotation_recovery_second']
@@ -315,18 +319,73 @@ P.bundle = {
   expect: {
     did: d3, chain: [d0, d1, d2, d3], recovery: rec2,
     attestations: { [dw]: [att, attu, att_d2], [dm]: [att_m] },
-    bindings: [{ body: b, proof: 'proven' }, { body: bu, proof: 'unproven' }, { body: b_opaque, proof: 'unsupported' }],
+    bindings: [{ body: b, proof: 'superseded' }, { body: bu, proof: 'superseded' }, { body: b_opaque, proof: 'superseded' }],
     rejected: { attestations: 6, bindings: 2 },
   },
   note: 'verify(bundle, now) must equal `expect` as JSON. Rejected: expired, tampered, unknown issuer (genesis not in issuers), ' +
     'sub not in chain, unknown admission value, missing ctx (malformed attestation bodies are per-item, SPEC §9 step 2); ' +
     'one binding whose sig_addr is by the wrong key (discarded, not downgraded), one binding whose id is not in the chain. ' +
+    'The three accepted bindings are by d0, which precedes the recovery into d3 (and d2): superseded, SPEC §6.1, whatever their status before. ' +
     'Two issuers: grouping is by iss, compared by value.',
 };
 P.bundle_minimal = {
   now: NOW, bundle: { v: V, typ: 'bundle', genesis: gm, rotations: [], bindings: [], attestations: [], issuers: [] },
   expect: { did: dm, chain: [dm], recovery: null, attestations: {}, bindings: [], rejected: { attestations: 0, bindings: 0 } },
   note: 'The smallest bundle that verifies. recovery: null is reported as null.',
+};
+
+// §6.1 superseded (review of 2026-10-19): d0 -> d2 by RECOVERY, then d2 -> d3 voluntary. The thief
+// holds d0's key: everything d0 bound is superseded, whatever its iat, and a valid voluntary
+// rotation the thief made at d0 loses to the recovery (§7.1). d2 bound before a VOLUNTARY
+// rotation: still proven (a voluntary rotation implies no theft). Attestations to d0 still count.
+const rr0 = { v: V, typ: 'rotation', id: d0, next: d2, iat: T0 + 3600, reason: 'recovery', recovery_key: key('recovery') };
+const rv23 = { v: V, typ: 'rotation', id: d2, next: d3, iat: T0 + 10000, reason: 'voluntary' };
+const rt0 = { v: V, typ: 'rotation', id: d0, next: dac, iat: T0 + 20000, reason: 'voluntary' };
+P.rotation_recovery_from_genesis = { ...rotEnv(rr0, 'recovery', g2), expect_next_did: d2,
+  note: 'A recovery straight from d0: every binding by d0 is superseded from here on (§6.1).' };
+P.rotation_voluntary_after_recovery = { ...rotEnv(rv23, 'agent3', g3), expect_next_did: d3,
+  note: 'Voluntary, after the recovery: bindings by d2 stay proven.' };
+const xstage = encodeAddress({ net: 'stagenet', kind: 'standard', spend: mk.B, view: mk.A });
+const bT1 = { v: V, typ: 'binding', id: d0, method: 'ed25519-test', addr: key('attacker'), iat: T0 + 7200, exp: T0 + 90 * DAY, nonce: nonce('71') };
+const bT1b = { ...bT1, iat: T0 - 30 * DAY, nonce: nonce('72') };
+const bT1c = { ...bx, iat: T0 + 7200, nonce: nonce('73') };
+const bD2 = { v: V, typ: 'binding', id: d2, method: 'ed25519-test', addr: key('paykey'), iat: T0, exp: T0 + 90 * DAY, nonce: nonce('74') };
+const bD2x = { ...bx, id: d2, addr: xstage, nonce: nonce('75') };
+const bD3x = { ...bx, id: d3, nonce: nonce('76') };
+const bD3u = { ...bD2, id: d3, nonce: nonce('77') };
+const bThief = { ...bD2, id: dac, nonce: nonce('78') };
+const attThief = { ...att_d2, sub: dac };
+const RECOVERED = {
+  rotations: [P.rotation_recovery_from_genesis, P.rotation_voluntary_after_recovery, rotEnv(rt0, 'agent', gac)],
+  bindings: [
+    { body: bT1, sig_id: sig('agent', bT1), sig_addr: sig('attacker', bT1) },
+    { body: bT1b, sig_id: sig('agent', bT1b), sig_addr: sig('attacker', bT1b) },
+    { body: bT1c, sig_id: sig('agent', bT1c), sig_addr: xsig(bT1c, '91') },
+    { body: bD2, sig_id: sig('agent3', bD2), sig_addr: sig('paykey', bD2) },
+    { body: bD2x, sig_id: sig('agent3', bD2x), sig_addr: xsig(bD2x, '92') },
+    { body: bD3x, sig_id: sig('agent', bD3x), sig_addr: xsig(bD3x, '93') },
+    { body: bD3u, sig_id: sig('agent', bD3u) },
+    { body: bThief, sig_id: sig('attacker', bThief), sig_addr: sig('paykey', bThief) },
+  ],
+  attestations: [P.attestation, { body: att_d2, sig: sig('world', att_d2) }, { body: attThief, sig: sig('world', attThief) }],
+};
+P.bundle_recovered = {
+  now: NOW,
+  bundle: { v: V, typ: 'bundle', genesis: g0, ...Object.fromEntries(Object.entries(RECOVERED).map(([k, xs]) => [k, xs.map((e: J) => pick(e, ENVELOPE))])), issuers: [gw] },
+  expect: {
+    did: d3, chain: [d0, d2, d3], recovery: rec2,
+    attestations: { [dw]: [att, att_d2] },
+    bindings: [
+      { body: bT1, proof: 'superseded' }, { body: bT1b, proof: 'superseded' }, { body: bT1c, proof: 'superseded' },
+      { body: bD2, proof: 'proven' }, { body: bD2x, proof: 'proven', network: 'stagenet' },
+      { body: bD3x, proof: 'proven', network: 'mainnet' }, { body: bD3u, proof: 'unproven' },
+    ],
+    rejected: { attestations: 1, bindings: 1 },
+  },
+  note: 'SPEC §6.1 superseded: d0 -> d2 is a recovery, so the three bindings by d0 (the thief\'s address after the recovery, ' +
+    'the same backdated, a Monero one) are superseded: positional in the chain, never by iat. The thief\'s valid voluntary rotation ' +
+    'at d0 loses to the recovery (§7.1). d2 bound before the voluntary rotation to d3: proven. A proven monero entry carries ' +
+    '`network` (§6.2). Attestations to d0 still count; the one to the thief\'s DID and the thief\'s own binding are not in the chain.',
 };
 
 // ================================================================ NEGATIVE
@@ -349,21 +408,21 @@ N.typ_mismatch = {
 };
 const rk = { ...rr, recovery_key: key('attacker') };
 N.recovery_key_mismatch = {
-  body: rk, sig: sig('attacker', rk), next_genesis: g2, chain_with: ['rotation_voluntary'], expected_chain: [d0, d1],
+  ...rotEnv(rk, 'attacker', g2), chain_with: ['rotation_voluntary'], expected_chain: [d0, d1],
   expect: 'NOT A CANDIDATE: hash(recovery_key) != commitment. With rotation_voluntary, the chain ends at d1.',
 };
 const stale = { ...rr2, recovery_key: key('recovery') };
 N.stale_recovery_key = {
-  body: stale, sig: sig('recovery', stale), next_genesis: g3, chain_with: ['rotation_voluntary', 'rotation_recovery'], expected_chain: [d0, d1, d2],
+  ...rotEnv(stale, 'recovery', g3), chain_with: ['rotation_voluntary', 'rotation_recovery'], expected_chain: [d0, d1, d2],
   expect: 'NOT A CANDIDATE: recovery1 no longer governs after rotation_recovery changed the commitment to rec2. Chain ends at d2.',
 };
 N.voluntary_changes_recovery = {
-  body: rh, sig: P.rotation_hostile.sig, next_genesis: ga, chain_with: ['rotation_voluntary'], expected_chain: [d0, d1],
+  ...rotEnv(rh, 'agent2', ga), chain_with: ['rotation_voluntary'], expected_chain: [d0, d1],
   expect: 'NOT A CANDIDATE: voluntary rotation whose next_genesis.recovery != current commitment. Chain ends at d1.',
 };
 const rb = { v: V, typ: 'rotation', id: d0, next: d1, iat: T0 + 24 * DAY, reason: 'voluntary' };
 N.rotation_bad_sig = {
-  body: rb, sig: sig('attacker', rb), next_genesis: g1, chain_with: [], expected_chain: [d0],
+  ...rotEnv(rb, 'attacker', g1), chain_with: [], expected_chain: [d0],
   expect: "NOT A CANDIDATE: signed by a key that is not d0's. Alone, the chain is just [d0].",
 };
 const att_extra = { ...att, extra: 1 };
@@ -375,16 +434,16 @@ N.unknown_field_genesis = { doc: { ...g0, extra: 1 }, expect: 'REJECT (fatal): a
 const gf = genesis('paykey', rec1, '2026-10-02T00:00:00Z', 'c9'), df = did(gf);
 const rf = { v: V, typ: 'rotation', id: d0, next: df, iat: T0 + 25 * DAY, reason: 'voluntary' };
 N.fork = {
-  body: rf, sig: sig('agent', rf), next_genesis: gf,
+  ...rotEnv(rf, 'agent', gf),
   expect: 'REJECT chain: two valid voluntary rotations from d0 (this and rotation_voluntary). Fork = compromise signal.',
 };
 const rc = { v: V, typ: 'rotation', id: d1, next: d0, iat: T0 + 30 * DAY, reason: 'voluntary' };
 N.cycle = {
-  body: rc, sig: sig('agent2', rc), next_genesis: g0,
+  ...rotEnv(rc, 'agent2', g0),
   expect: 'REJECT chain: valid voluntary rotation from d1 back to d0 (after rotation_voluntary). next already in chain; a naive walk never terminates.',
 };
 const rs = { v: V, typ: 'rotation', id: d0, next: d0, iat: T0 + 30 * DAY, reason: 'voluntary' };
-N.self_rotation = { body: rs, sig: sig('agent', rs), next_genesis: g0, expect: 'REJECT structure: next == id' };
+N.self_rotation = { ...rotEnv(rs, 'agent', g0), expect: 'REJECT structure: next == id' };
 N.expired_attestation = { body: att_exp, sig: sig('world', att_exp), expect: 'REJECT (at `now`) exp in the past' };
 
 // §3.1 / §6.3: `amount` is a STRING of atomic units, or absent. Every one of these carries a
@@ -639,6 +698,59 @@ C.fatal_duplicate_rotation_is_fork = [bnd([], [], { rotations: [pick(RV, ENVELOP
 // an attestation to the next DID is accepted through a good rotation and discarded through this one.
 C.rotation_followed_attestation_to_next = [bnd([], [envA({ sub: d1 })], { rotations: [pick(RV, ENVELOPE)] }), counts([], 1, 0, 0)];
 C.rotation_next_genesis_not_next = [bnd([], [envA({ sub: d1 })], { rotations: [{ ...pick(RV, ENVELOPE), next_genesis: { ...g1, nonce: g0.nonce } }] }), counts([], 0, 1, 0)];
+// §6.1 superseded (review of 2026-10-19): T1, T1b, T1c — the stolen pre-recovery key binds the
+// thief's address after the recovery, with an honest or a backdated iat, Ed25519 or Monero.
+const RR0 = pick(P.rotation_recovery_from_genesis, ENVELOPE), RV23 = pick(P.rotation_voluntary_after_recovery, ENVELOPE);
+const envR = (n: number): J => pick(RECOVERED.bindings[n], ENVELOPE);
+C.superseded_binding_after_recovery = [bnd([envR(0)], [], { rotations: [RR0] }), counts(['superseded'], 0, 0, 0)];
+C.superseded_binding_backdated = [bnd([envR(1)], [], { rotations: [RR0] }), counts(['superseded'], 0, 0, 0)];
+C.superseded_monero_binding_after_recovery = [bnd([envR(2)], [], { rotations: [RR0] }), counts(['superseded'], 0, 0, 0)];
+C.superseded_unproven_binding = [bnd([omit(envR(0), 'sig_addr')], [], { rotations: [RR0] }), counts(['superseded'], 0, 0, 0)];
+C.superseded_binding_bad_sig_addr_discarded = [bnd([{ ...envR(0), sig_addr: sig('paykey', bT1) }], [], { rotations: [RR0] }), discB];
+// A legitimate recovery chain still works: the new DID binds, attestations to the old DID stay.
+C.recovery_new_did_binding_proven = [bnd([envR(3)], [envA(), envA({ sub: d2 })], { rotations: [RR0] }), counts(['proven'], 2, 0, 0)];
+// Voluntary rotations supersede nothing: before any recovery, and after the last one.
+C.binding_before_voluntary_rotation_proven = [bnd([envB()], [], { rotations: [pick(RV, ENVELOPE)] }), counts(['proven'], 0, 0, 0)];
+C.binding_before_voluntary_after_recovery_proven = [bnd([envR(0), envR(3), envR(5)], [], { rotations: [RR0, RV23] }), counts(['superseded', 'proven', 'proven'], 0, 0, 0)];
+// §7 sig_next (review of 2026-10-19), T7 and T7b: a genesis that copies the victim's public
+// commitment rotates into the victim's genesis d0. Without the victim's key there is no valid
+// countersignature: missing, the bundle is malformed; forged, the rotation is not a candidate,
+// the chain ends at the attacker's genesis and the victim's attestation and binding are not in it.
+const gx = genesis('attacker', rec1, '2026-09-01T00:00:00Z', 'f1');
+const gy = genesis('attacker', commit('paykey'), '2026-09-01T00:00:00Z', 'f2');
+const rT7 = { v: V, typ: 'rotation', id: did(gx), next: d0, iat: T0 - DAY, reason: 'voluntary' };
+const rT7b = { v: V, typ: 'rotation', id: did(gy), next: d0, iat: T0 - DAY, reason: 'recovery', recovery_key: key('paykey') };
+const forged = (body: J, signer: string): J => ({ body, sig: sig(signer, body), sig_next: sig('attacker', body), next_genesis: g0 });
+C.fatal_rotation_missing_sig_next = [bnd([], [], { genesis: gx, rotations: [omit(forged(rT7, 'attacker'), 'sig_next')] }), { reject: 'rotation: missing sig_next' }];
+C.fatal_rotation_sig_next_number = [bnd([], [], { rotations: [{ ...pick(RV, ENVELOPE), sig_next: 5 }] }), { reject: 'rotation: missing sig_next' }];
+C.graft_voluntary_into_foreign_genesis = [bnd([envB()], [envA()], { genesis: gx, rotations: [forged(rT7, 'attacker')] }), counts([], 0, 1, 1)];
+C.graft_recovery_into_foreign_genesis = [bnd([envB()], [envA()], { genesis: gy, rotations: [forged(rT7b, 'paykey')] }), counts([], 0, 1, 1)];
+C.rotation_bad_sig_next_not_a_candidate = [bnd([], [envA({ sub: d1 })], { rotations: [{ ...pick(RV, ENVELOPE), sig_next: sig('attacker', RV.body) }] }), counts([], 0, 1, 0)];
+C.recovery_rotation_bad_sig_next_not_a_candidate = [bnd([envR(3)], [], { rotations: [{ ...RR0, sig_next: sig('attacker', RR0.body) }] }), discB];
+// §6.2 small-order keys (review of 2026-10-19), T2 and T2b: a key of small order makes c·P
+// carry no secret, so a SigV2 in the mode that uses it is forgeable with no key at all. Monero's
+// check_key accepts both points, and wallet2's verify accepts both signatures.
+/** A SigV2 over `body` in `mode` whose key P is of small order n (P·n = 0), made with no secret. */
+function forge(body: J, spendPub: Uint8Array, viewPub: Uint8Array, mode: 'spend' | 'view', n: number): string {
+  const Pb = mode === 'spend' ? spendPub : viewPub, P = Point.fromBytes(Pb, false);
+  const h = signMessageHash({ spendPub, viewPub, mode, data: signingInput(body) });
+  for (let i = 1; ; i++) {
+    const r = leNum(scReduce32(sha256(Uint8Array.of(i))));
+    let tP = Point.ZERO;
+    for (let t = 0; t < n; t++, tP = tP.add(P)) { // c·P = (c mod n)·P: guess t = c mod n
+      const R = tP.add(Point.BASE.multiply(r));
+      if (R.is0()) continue;
+      const c = leNum(hashToScalar(h, Pb, R.toBytes()));
+      if (c !== 0n && c % BigInt(n) === BigInt(t)) return 'SigV2' + moneroBase58Encode(concatBytes(leBytes(c), leBytes(r)));
+    }
+  }
+}
+const order4 = new Uint8Array(32); // y = 0: (sqrt(-1), 0), a point of order 4
+const identity = Uint8Array.from({ length: 32 }, (_, j) => (j === 0 ? 1 : 0));
+const bT2 = { ...bx, addr: encodeAddress({ net: 'mainnet', kind: 'standard', spend: mk.B, view: order4 }), nonce: nonce('79') };
+const bT2b = { ...bx, addr: encodeAddress({ net: 'mainnet', kind: 'standard', spend: identity, view: mk.A }), nonce: nonce('7a') };
+C.monero_view_key_small_order = [bnd([{ body: bT2, sig_id: sig('agent', bT2), sig_addr: forge(bT2, mk.B, order4, 'view', 4) }]), discB];
+C.monero_spend_key_identity = [bnd([{ body: bT2b, sig_id: sig('agent', bT2b), sig_addr: forge(bT2b, identity, mk.A, 'spend', 1) }]), discB];
 // A lone surrogate cannot be written to this UTF-8 file raw: such a case travels as escaped JSON text in `raw`.
 const kase = (bd: J, e: J): J => (hasLoneSurrogate(bd) ? { raw: pyDumps(bd), expect: e } : { bundle: bd, expect: e });
 // Bundle TEXT (`raw`), read with the strict parser. A duplicate key makes the text ambiguous, so

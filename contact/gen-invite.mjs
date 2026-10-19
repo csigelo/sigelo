@@ -32,13 +32,15 @@ const [aRec, aRec2, bRec, cRec, mRec, wRec] = ['A-recovery', 'A-recovery-2', 'B-
 const A0 = id('A0', aRec), A1 = id('A1', aRec), T = id('T', aRec), A2 = id('A2', aRec2);
 const B0 = id('B0', bRec), C0 = id('C0', cRec), M0 = id('M0', mRec), W = id('W', wRec);
 // Throwaway geneses for the prefix attack: each carries the real genesis's recovery commitment
-// (public), so a voluntary rotation from it into the real genesis is valid (SPEC §7).
+// (public), so a voluntary rotation from it into the real genesis is valid (SPEC §7) once the real
+// key countersigns it: a thief holding that key, or, here, the generator, so the invite layer's own
+// original-DID check stays exercised.
 const XA = id('XA', aRec), XB = id('XB', bRec), XC = id('XC', cRec);
 const ids = { A0, A1, A2, B0, C0, M0, T, XA, XB, XC };
 
 // Alice rotates A0 -> A1, then a thief holding A1's key rotates A1 -> T, and Alice recovers
 // A1 -> A2. The recovery carries the EARLIER iat: precedence never reads timestamps (SPEC §7.1).
-const rot = (from, to, iat, reason, secret) => rotate({ genesis: from.genesis, next_genesis: to.genesis, iat, reason, secret });
+const rot = (from, to, iat, reason, secret) => rotate({ genesis: from.genesis, next_genesis: to.genesis, iat, reason, secret, next_secret: to.secret });
 const rA1 = rot(A0, A1, T0 + 5000, 'voluntary', A0.secret), rA2 = rot(A1, A2, T0 + 7000, 'recovery', seed('A-recovery'));
 const rT = rot(A1, T, T0 + 8000, 'voluntary', A1.secret);
 const rXA = rot(XA, A0, T0 + 1, 'voluntary', XA.secret), rXB = rot(XB, B0, T0 + 1, 'voluntary', XB.secret), rXC = rot(XC, C0, T0 + 1, 'voluntary', XC.secret);

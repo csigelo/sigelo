@@ -132,9 +132,9 @@ rejects('bind refuses to sign addr for an unsupported method',
 function rerotate(name: string, from: Genesis, nextSeed: string, nextRecovery: Uint8Array | null, signer: string): Genesis {
   const v = P[name];
   const next = regen(nextSeed, nextRecovery, v.next_genesis);
-  const made = rotate({ genesis: from, next_genesis: next, iat: v.body.iat, reason: v.body.reason, secret: K[signer]! });
+  const made = rotate({ genesis: from, next_genesis: next, iat: v.body.iat, reason: v.body.reason, secret: K[signer]!, next_secret: K[nextSeed]! });
   minted.push(['rotation', made.body]);
-  t(`${name} reproduced`, canonicalize(made.body) === canonicalize(v.body) && made.sig === v.sig &&
+  t(`${name} reproduced`, canonicalize(made.body) === canonicalize(v.body) && made.sig === v.sig && made.sig_next === v.sig_next &&
     canonicalize(made.next_genesis) === canonicalize(v.next_genesis) &&
     (v.expect_next_did === undefined || did(made.next_genesis) === v.expect_next_did));
   return next;
@@ -144,18 +144,26 @@ const g1 = rerotate('rotation_voluntary', g0, 'agent2', pub('recovery'), 'agent'
 // only its raw signature can be reproduced, with sign().
 const ga = keygen({ recovery: pub('attacker'), seed: K.attacker!, created: P.rotation_hostile.next_genesis.created, nonce: P.rotation_hostile.next_genesis.nonce }).genesis;
 rejects('rotate refuses a voluntary rotation that changes the commitment',
-  () => rotate({ genesis: g1, next_genesis: ga, iat: P.rotation_hostile.body.iat, reason: 'voluntary', secret: K.agent2! }),
+  () => rotate({ genesis: g1, next_genesis: ga, iat: P.rotation_hostile.body.iat, reason: 'voluntary', secret: K.agent2!, next_secret: K.attacker! }),
   'changes the recovery commitment');
-t('rotation_hostile signature reproduced', sign(K.agent2!, P.rotation_hostile.body) === P.rotation_hostile.sig &&
+t('rotation_hostile signature reproduced', sign(K.agent2!, P.rotation_hostile.body) === P.rotation_hostile.sig && sign(K.attacker!, P.rotation_hostile.body) === P.rotation_hostile.sig_next &&
   canonicalize(ga) === canonicalize(P.rotation_hostile.next_genesis));
 // ...whereas rotation_hostile_carried is a fully valid voluntary rotation: the library mints
 // it happily, and only §7.1 precedence defeats it at verification time.
 rerotate('rotation_hostile_carried', g1, 'attacker', pub('recovery'), 'agent2');
 const g2 = rerotate('rotation_recovery', g1, 'agent3', pub('recovery2'), 'recovery');
-rerotate('rotation_recovery_second', g2, 'agent', pub('recovery2'), 'recovery2');
+const g3 = rerotate('rotation_recovery_second', g2, 'agent', pub('recovery2'), 'recovery2');
+rerotate('rotation_recovery_from_genesis', g0, 'agent3', pub('recovery2'), 'recovery');
+rerotate('rotation_voluntary_after_recovery', g2, 'agent', pub('recovery2'), 'agent3');
 rejects('rotate refuses a recovery rotation under a retired key',
-  () => rotate({ genesis: g2, next_genesis: g0, iat: NOW, reason: 'recovery', secret: K.recovery! }),
+  () => rotate({ genesis: g2, next_genesis: g0, iat: NOW, reason: 'recovery', secret: K.recovery!, next_secret: K.agent! }),
   'does not hash to the current commitment');
+// §7: the next key countersigns. rotate() refuses to mint a rotation it cannot countersign.
+rejects('rotate refuses a next_secret that is not next_genesis.key (§7 sig_next)',
+  () => rotate({ genesis: g0, next_genesis: g1, iat: NOW, reason: 'voluntary', secret: K.agent!, next_secret: K.attacker! }), 'next_secret does not match');
+rejects('rotate refuses a missing next_secret',
+  () => rotate({ genesis: g0, next_genesis: g1, iat: NOW, reason: 'voluntary', secret: K.agent! } as Any), 'next_secret does not match');
+void g3;
 
 // SPEC §5.2 proof of control: fixed body, identity key, never in a bundle.
 const ch = P.challenge;
@@ -206,14 +214,14 @@ const xb1 = (e: Any): Bundle => ({
 }) as Bundle;
 const rbm = verify(xb1(bm), NOW);
 t('binding_monero verifies as proven, view mode',
-  rbm.bindings.length === 1 && rbm.bindings[0]!.proof === bm.expect_proof && rbm.rejected.bindings === 0 &&
+  rbm.bindings.length === 1 && rbm.bindings[0]!.proof === bm.expect_proof && rbm.bindings[0]!.network === bm.expect_network && rbm.rejected.bindings === 0 &&
   verifySigeloMoneroSigAddr(bm.body, bm.body.addr, bm.sig_addr).mode === bm.expect_mode);
 // §6.2 subaddress (0,1) of the same wallet, one binding per mode, each signed over the
 // subaddress's own (D, C). The keys are inside the hash, so neither verifies under the base.
 for (const n of ['binding_monero_subaddress_spend', 'binding_monero_subaddress_view']) {
   const e = P[n], r = verify(xb1(e), NOW);
   t(`${n} verifies as proven, ${e.expect_mode} mode`,
-    decodeAddress(e.body.addr).kind === 'subaddress' && r.bindings.length === 1 && r.bindings[0]!.proof === e.expect_proof &&
+    decodeAddress(e.body.addr).kind === 'subaddress' && r.bindings.length === 1 && r.bindings[0]!.proof === e.expect_proof && r.bindings[0]!.network === e.expect_network &&
     r.rejected.bindings === 0 && verifySigeloMoneroSigAddr(e.body, e.body.addr, e.sig_addr).mode === e.expect_mode);
   t(`${n} sig_addr does not verify under the base address`,
     !verifySigeloMoneroSigAddr(e.body, bm.body.addr, e.sig_addr).good);
@@ -371,8 +379,8 @@ for (const [cp, bad] of [
 
 // ---------------------------------------------------------------- c. chain (SPEC §7.3)
 
-const rot = (name: string): Any => ({ body: P[name].body, sig: P[name].sig, next_genesis: P[name].next_genesis });
-const nrot = (name: string): Any => ({ body: N[name].body, sig: N[name].sig, next_genesis: N[name].next_genesis });
+const rot = (name: string): Any => ({ body: P[name].body, sig: P[name].sig, sig_next: P[name].sig_next, next_genesis: P[name].next_genesis });
+const nrot = (name: string): Any => ({ body: N[name].body, sig: N[name].sig, sig_next: N[name].sig_next, next_genesis: N[name].next_genesis });
 /** A minimal bundle carrying just a chain, so §7.3 can be exercised through verify(). */
 const chainBundle = (rotations: Any[]): Bundle =>
   ({ v: VERSION, typ: 'bundle', genesis: P.genesis.doc, rotations, bindings: [], attestations: [], issuers: [] }) as Bundle;
@@ -438,11 +446,11 @@ t('neg recovery_key_mismatch commitment differs', commitmentOf(N.recovery_key_mi
 for (const name of ['recovery_key_mismatch', 'stale_recovery_key', 'voluntary_changes_recovery', 'rotation_bad_sig']) {
   const v = N[name];
   t(`neg ${name} is not a candidate (chain ends where the vector says)`,
-    same(chainOf([...v.chain_with.map(rot), { body: v.body, sig: v.sig, next_genesis: v.next_genesis }]), v.expected_chain));
+    same(chainOf([...v.chain_with.map(rot), { body: v.body, sig: v.sig, sig_next: v.sig_next, next_genesis: v.next_genesis }]), v.expected_chain));
 }
 // §7.3 step 2 / §7.4: two valid recoveries sharing the latest iat is operator error, and no
 // rule picks between them. Not in the vectors, so minted here from the same recovery key.
-const tie = rotate({ genesis: g1, next_genesis: P.rotation_hostile_carried.next_genesis, iat: P.rotation_recovery.body.iat, reason: 'recovery', secret: K.recovery! });
+const tie = rotate({ genesis: g1, next_genesis: P.rotation_hostile_carried.next_genesis, iat: P.rotation_recovery.body.iat, reason: 'recovery', secret: K.recovery!, next_secret: K.attacker! });
 rejects('two recovery rotations sharing the latest iat reject the chain',
   () => chainOf([rot('rotation_voluntary'), rot('rotation_recovery'), tie]), 'tie');
 // Differential D2: the latest recovery iat was Math.max(...list), one argument per valid
@@ -454,11 +462,11 @@ rejects('two recovery rotations sharing the latest iat reject the chain',
   const many: Any[] = [], base: number = P.rotation_recovery.body.iat;
   for (let n = 0; n < 200; n++) {
     const ng = keygen({ recovery: pub('recovery2'), seed: K.agent3!, created: '2026-10-10T00:00:00Z', nonce: Uint8Array.from({ length: 16 }, (_, j) => (j === 0 ? n >> 8 : j === 1 ? n & 0xff : 7)) }).genesis;
-    many.push(rotate({ genesis: g0, next_genesis: ng, iat: base + ((n * 7919) % 200), reason: 'recovery', secret: K.recovery! }));
+    many.push(rotate({ genesis: g0, next_genesis: ng, iat: base + ((n * 7919) % 200), reason: 'recovery', secret: K.recovery!, next_secret: K.agent3! }));
   }
   const latest = many.find((r) => r.body.iat === base + 199)!;
   t('200 valid recovery rotations at one node: the latest iat is chosen (§7.3 step 2)', same(chainOf(many), [did(g0), latest.body.next]));
-  const twin = rotate({ genesis: g0, next_genesis: P.rotation_recovery.next_genesis, iat: latest.body.iat, reason: 'recovery', secret: K.recovery! });
+  const twin = rotate({ genesis: g0, next_genesis: P.rotation_recovery.next_genesis, iat: latest.body.iat, reason: 'recovery', secret: K.recovery!, next_secret: K.agent3! });
   rejects('... and a second one at that latest iat is a tie', () => chainOf([...many, twin]), 'recovery tie');
   const lib = ['sigelo.js', 'jcs.js', 'monero.js'].map((f) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), f), 'utf-8')).join('\n');
   t('no argument spread over data in the verifier (Math.max/min(...), push(...), apply)', !/Math\.(max|min)\(\.\.\.|\.push\(\.\.\.|\.apply\(/.test(lib));
@@ -471,7 +479,7 @@ rejects('neg fork', () => chainOf([rot('rotation_voluntary'), nrot('fork')]), 'f
 rejects('neg cycle', () => chainOf([rot('rotation_voluntary'), nrot('cycle')]), 'cycle');
 rejects('neg self_rotation (structure)', () => structure(N.self_rotation.body, 'rotation'), 'next == id');
 rejects('neg self_rotation (rotate refuses to mint one)',
-  () => rotate({ genesis: g0, next_genesis: g0, iat: N.self_rotation.body.iat, reason: 'voluntary', secret: K.agent! }), 'next == id');
+  () => rotate({ genesis: g0, next_genesis: g0, iat: N.self_rotation.body.iat, reason: 'voluntary', secret: K.agent!, next_secret: K.agent! }), 'next == id');
 const exp = N.expired_attestation;
 t('neg expired_attestation (at the file-level now)', !(exp.body.iat <= NOW && NOW < exp.body.exp));
 const expired = verify({
@@ -567,6 +575,19 @@ for (const [n, c] of Object.entries(N.parity.cases as Record<string, Any>)) {
     if (!(e instanceof SigeloError || ('raw' in c && e instanceof JcsError))) throw e;
     t(`parity ${n} (${e.message})`, 'reject' in c.expect && e.message.includes(c.expect.reject));
   }
+}
+// §6.2 small-order keys: each forged sig_addr is one Monero's own check_key and wallet2::verify
+// accept (no secret made it), so the parity discard above is sigelo's rule, not a crypto failure.
+for (const n of ['monero_view_key_small_order', 'monero_spend_key_identity']) {
+  const e = N.parity.cases[n].bundle.bindings[0];
+  t(`parity ${n}: wallet2 accepts the keyless signature (must lose on the key, not crypto)`,
+    verifyMessage({ message: xin(e.body), address: e.body.addr, signature: e.sig_addr }).good && !verifySigeloMoneroSigAddr(e.body, e.body.addr, e.sig_addr).good);
+}
+// §7 sig_next: the graft cases are otherwise valid rotations — the attacker's signature verifies.
+for (const n of ['graft_voluntary_into_foreign_genesis', 'graft_recovery_into_foreign_genesis']) {
+  const c = N.parity.cases[n].bundle, r = c.rotations[0];
+  t(`parity ${n}: sig valid, sig_next not by the victim's key (must lose on the countersignature)`,
+    verifySig(r.body.reason === 'recovery' ? r.body.recovery_key : c.genesis.key, r.body, r.sig) && !verifySig(r.next_genesis.key, r.body, r.sig_next) && r.body.next === P.genesis.expect_did);
 }
 rejects('neg genesis_bad_key', () => structure(N.genesis_bad_key.doc, 'genesis'), 'ed25519-pub');
 // Differential S1: `created` was checked only for being a string. The same table is in
@@ -1388,7 +1409,7 @@ try {
     const g0 = keygen({ seed: agentIdentitySeed(KC0, 3, 0), recovery: recoveryCommitment(SC), created: '2026-09-24T00:00:00Z', nonce: new Uint8Array(16) });
     const world = keygen({ seed: new Uint8Array(32).fill(7), recovery: recoveryCommitment(SC) });
     const att = attest({ secret: world.secret, iss: world.did, sub: g0.did, iat: T0, exp: T0 + 86400 * 30, ctx: 'recover.test', admission: 'open', claims: { posts: 3 } });
-    const thief = [1, 2].map((x) => rotate({ genesis: g0.genesis, next_genesis: keygen({ seed: new Uint8Array(32).fill(x), recovery: g0.genesis.recovery }).genesis, iat: T0 + 200, reason: 'voluntary', secret: g0.secret }));
+    const thief = [1, 2].map((x) => rotate({ genesis: g0.genesis, next_genesis: keygen({ seed: new Uint8Array(32).fill(x), recovery: g0.genesis.recovery }).genesis, iat: T0 + 200, reason: 'voluntary', secret: g0.secret, next_secret: new Uint8Array(32).fill(x) }));
     const r = recover({ from: g0.genesis, S: SC, next: { kind: 'agent', keeper: 0, agent: 3, n: 1 }, iat: T0 + 100 });
     t('recover: a SPEC §7 recovery rotation from the given node, recovery_key = the root\'s recovery public key',
       r.rotation.body.reason === 'recovery' && r.rotation.body.id === g0.did && r.rotation.body.next === r.did && did(r.rotation.next_genesis) === r.did &&
@@ -1460,7 +1481,7 @@ try {
   const keeperGen = (K: Uint8Array) => keygen({ seed: identitySeed(K, 0), recovery: recoveryCommitment(SC), created: '1970-01-01T00:00:00Z', nonce: new Uint8Array(16) });
   const kg = keeperGen(KC0);
   const bundle0 = { v: VERSION, typ: 'bundle', genesis: kg.genesis, rotations: [], bindings: [], attestations: [], issuers: [] } as unknown as Bundle;
-  const thief = rotate({ genesis: kg.genesis, next_genesis: keygen({ seed: new Uint8Array(32).fill(9), recovery: kg.genesis.recovery }).genesis, iat: T0 + 500, reason: 'voluntary', secret: kg.secret });
+  const thief = rotate({ genesis: kg.genesis, next_genesis: keygen({ seed: new Uint8Array(32).fill(9), recovery: kg.genesis.recovery }).genesis, iat: T0 + 500, reason: 'voluntary', secret: kg.secret, next_secret: new Uint8Array(32).fill(9) });
   const stolen = { ...bundle0, rotations: [thief] } as Bundle;
   t('keeper: the last honest node of a bundle with the thief\'s voluntary step is the original genesis', same(keeperLastHonest(stolen, T0), kg.genesis));
   const r = recoverKeeper({ bundle: stolen, S: SC, keeper: 1, iat: T0 + 100 });

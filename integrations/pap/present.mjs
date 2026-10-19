@@ -41,7 +41,7 @@ export function pairwise(K, recovery, issuer, n = 0) {
     const seed = k(K, `${PAP_PATH}/${m}/${issuer}`), key = keygen({ seed, recovery, created: PINNED_CREATED, nonce: new Uint8Array(16) }).key;
     return { seed, ...keygen({ seed, recovery, created: PINNED_CREATED, nonce: createHash('sha256').update(decodeKey(key)).digest().subarray(0, 16) }) };
   });
-  const rotations = g.slice(1).map((x, m) => rotate({ genesis: g[m].genesis, next_genesis: x.genesis, iat: 0, reason: 'voluntary', secret: g[m].seed }));
+  const rotations = g.slice(1).map((x, m) => rotate({ genesis: g[m].genesis, next_genesis: x.genesis, iat: 0, reason: 'voluntary', secret: g[m].seed, next_secret: x.seed }));
   const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: g[0].genesis, rotations, bindings: [], attestations: [], issuers: [] };
   return { bundle, signer: { did: g[n].did, sign: (body) => sign(g[n].seed, body) } };
 }

@@ -42,7 +42,7 @@ var (
 	// §3.1 field types: iat/exp are integer Unix seconds, everything else a string except these.
 	notString = []string{"iat", "exp", "recovery", "claims", "amount", "genesis", "rotations", "bindings", "attestations", "issuers"}
 	// §3.1: an envelope is exactly these members. Nothing outside `body` is signed.
-	envelopeKeys = map[string][]string{"rotation": {"body", "sig", "next_genesis"}, "binding": {"body", "sig_id", "sig_addr"}, "attestation": {"body", "sig"}}
+	envelopeKeys = map[string][]string{"rotation": {"body", "sig", "sig_next", "next_genesis"}, "binding": {"body", "sig_id", "sig_addr"}, "attestation": {"body", "sig"}}
 )
 
 // SigeloError is every fatal failure. The message names the check that failed.
@@ -197,6 +197,7 @@ func Structure(body any, slot string) error {
 type rotation struct {
 	body        Object
 	sig         string
+	sigNext     string // §7: the next key's countersignature over the same body
 	nextGenesis Object
 }
 
@@ -205,10 +206,13 @@ func (r rotation) iat() int64          { n, _ := r.body.Get("iat"); return n.(in
 
 // resolveChain walks the chain from the original genesis (SPEC §7.3). It returns the ordered
 // DIDs and the governing recovery commitment (§7.2: the one in the most recent
-// recovery-signed genesis). Rotations must already have passed Structure.
-func resolveChain(g0 Object, rotations []rotation) ([]string, any, error) {
+// recovery-signed genesis), and the index in the chain of the DID the most recent recovery
+// rotated into (0 if none): every DID before it is superseded (§6.1). Rotations must already
+// have passed Structure.
+func resolveChain(g0 Object, rotations []rotation) ([]string, any, int, error) {
 	cur := did(g0)
 	chain := []string{cur}
+	recovered := 0
 	genesisOf := map[string]Object{cur: g0}
 	for _, r := range rotations {
 		genesisOf[did(r.nextGenesis)] = r.nextGenesis
@@ -217,7 +221,11 @@ func resolveChain(g0 Object, rotations []rotation) ([]string, any, error) {
 	for {
 		var recovery, voluntary []rotation
 		for _, r := range rotations {
-			if r.str("id") != cur { // 1
+			// 1. §7: the NEXT key countersigns every rotation (sig_next), so no chain can enter a
+			// DID whose holder did not sign the entry: a genesis that copies a victim's public
+			// commitment cannot rotate into the victim's DID and inherit its attestations.
+			nkey, _ := r.nextGenesis.Get("key")
+			if r.str("id") != cur || !VerifySig(nkey, r.body, r.sigNext) {
 				continue
 			}
 			ngRecovery, _ := r.nextGenesis.Get("recovery")
@@ -243,24 +251,27 @@ func resolveChain(g0 Object, rotations []rotation) ([]string, any, error) {
 			top := slices.MaxFunc(recovery, func(a, b rotation) int { return int(a.iat() - b.iat()) }).iat()
 			ties := slices.DeleteFunc(slices.Clone(recovery), func(r rotation) bool { return r.iat() != top })
 			if len(ties) > 1 { // operator error: the operator controls both, no rule picks one
-				return nil, nil, fail("chain: recovery tie at %s (two valid recovery rotations share iat %d)", cur, top)
+				return nil, nil, 0, fail("chain: recovery tie at %s (two valid recovery rotations share iat %d)", cur, top)
 			}
 			chosen = ties[0]
 			commitment, _ = chosen.nextGenesis.Get("recovery") // §7.2: only a recovery may change it
 		case len(voluntary) == 1:
 			chosen = voluntary[0]
 		case len(voluntary) > 1: // a fork under one key is a compromise signal; do not pick a side
-			return nil, nil, fail("chain: fork at %s (%d valid voluntary rotations)", cur, len(voluntary))
+			return nil, nil, 0, fail("chain: fork at %s (%d valid voluntary rotations)", cur, len(voluntary))
 		default:
-			return chain, commitment, nil // 4
+			return chain, commitment, recovered, nil // 4
 		}
 		// 5: a `next` already in the chain is a cycle. Only a key holder can produce one, it has
 		// no legitimate meaning, and following it would hang the verifier — reject, never loop.
 		if slices.Contains(chain, chosen.str("next")) {
-			return nil, nil, fail("chain: cycle back to %s", chosen.str("next"))
+			return nil, nil, 0, fail("chain: cycle back to %s", chosen.str("next"))
 		}
 		cur = chosen.str("next")
 		chain = append(chain, cur)
+		if chosen.str("reason") == "recovery" {
+			recovered = len(chain) - 1
+		}
 	}
 }
 
@@ -276,10 +287,12 @@ type Result struct {
 	Rejected     Rejected            `json:"rejected"`
 }
 
-// BindingResult is one accepted binding: its body and its §6.1 proof status.
+// BindingResult is one accepted binding: its body, its §6.1 proof status and, on a proven
+// monero binding only, the §6.2 network its addr decodes to (the caller refuses the wrong one).
 type BindingResult struct {
-	Body  Object `json:"body"`
-	Proof string `json:"proof"` // "proven", "unproven" or "unsupported"
+	Body    Object `json:"body"`
+	Proof   string `json:"proof"`             // "proven", "unproven", "unsupported" or "superseded"
+	Network string `json:"network,omitempty"` // "mainnet", "stagenet" or "testnet"
 }
 
 // Rejected counts what §9 steps 2, 5 and 6 discarded.
@@ -357,10 +370,14 @@ func Verify(bundle any, now int64, knownIssuers map[string]Object) (*Result, err
 		if !ok {
 			return nil, fail("rotation: missing sig")
 		}
+		sigNext, ok := field(env, "sig_next").(string)
+		if !ok {
+			return nil, fail("rotation: missing sig_next")
+		}
 		if err := envelope(env, "rotation"); err != nil {
 			return nil, err
 		}
-		rotations = append(rotations, rotation{field(env, "body").(Object), sig, ng.(Object)})
+		rotations = append(rotations, rotation{field(env, "body").(Object), sig, sigNext, ng.(Object)})
 	}
 	for _, g := range field(b, "issuers").([]any) {
 		if err := Structure(g, "genesis"); err != nil {
@@ -375,7 +392,7 @@ func Verify(bundle any, now int64, knownIssuers map[string]Object) (*Result, err
 	badAttestations := malformed(attestations, "attestation", "sig")
 	badBindings := malformed(bindings, "binding", "sig_id")
 	// 3. Chain
-	chain, recovery, err := resolveChain(g0, rotations)
+	chain, recovery, recovered, err := resolveChain(g0, rotations)
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +466,17 @@ func Verify(bundle any, now int64, knownIssuers map[string]Object) (*Result, err
 			res.Rejected.Bindings++ // §6.1: a bad proof is not the same thing as no proof
 			continue
 		}
-		res.Bindings = append(res.Bindings, BindingResult{body, proof})
+		// §6.1: a DID before the most recent recovery is presumed stolen, so nothing it bound is
+		// payable. The rule is positional in the chain, never by `iat`: the thief chooses `iat`.
+		// A voluntary rotation implies no theft, so DIDs after the last recovery keep their bindings.
+		network := ""
+		if slices.Index(chain, id) < recovered {
+			proof = "superseded"
+		} else if proof == "proven" && field(body, "method") == "monero" {
+			a, _ := DecodeAddress(field(body, "addr").(string)) // decoded once already by the proof
+			network = a.Net
+		}
+		res.Bindings = append(res.Bindings, BindingResult{body, proof, network})
 	}
 	// 7. Return. No scores, no ranking — weighting is the caller's job.
 	return res, nil
@@ -471,7 +498,11 @@ func (r *Result) Value() Object {
 	}
 	binds := []any{}
 	for _, x := range r.Bindings {
-		binds = append(binds, Object{{"body", x.Body}, {"proof", x.Proof}})
+		entry := Object{{"body", x.Body}, {"proof", x.Proof}}
+		if x.Network != "" {
+			entry = append(entry, Member{"network", x.Network})
+		}
+		binds = append(binds, entry)
 	}
 	chain := []any{}
 	for _, d := range r.Chain {

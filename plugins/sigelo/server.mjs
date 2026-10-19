@@ -1867,7 +1867,9 @@ function verifySigeloMoneroSigAddr(body, address, sigAddr) {
   const version = typeof sigAddr === "string" && sigAddr.startsWith("SigV2") ? 2 : 1;
   try {
     if (typeof sigAddr !== "string" || typeof address !== "string") throw new MoneroError("sig_addr: not a string");
-    if (decodeAddress(address).kind === "integrated") return { good: false, version };
+    const { kind, spend, view } = decodeAddress(address);
+    if (kind === "integrated") return { good: false, version };
+    if (pt(spend).isSmallOrder() || pt(view).isSmallOrder()) return { good: false, version };
     if (version !== 2) return { good: false, version };
     return verifyMessage({ message: sigeloInput(body), address, signature: sigAddr });
   } catch {
@@ -2093,11 +2095,12 @@ function isRFC3339UTC(s) {
 function resolveChain(g0, rotations) {
   let cur = did(g0);
   const chain = [cur];
+  let recovered = 0;
   const genesisOf = /* @__PURE__ */ new Map([[cur, g0]]);
   for (const r of rotations) genesisOf.set(did(r.next_genesis), r.next_genesis);
   let commitment = g0.recovery;
   for (; ; ) {
-    const candidates = rotations.filter((r) => r.body.id === cur);
+    const candidates = rotations.filter((r) => r.body.id === cur && verifySig(r.next_genesis.key, r.body, r.sig_next));
     const recovery = candidates.filter((r) => r.body.reason === "recovery" && commitment !== null && // 2
     commitmentOf(r.body.recovery_key) === commitment && verifySig(r.body.recovery_key, r.body, r.sig) && did(r.next_genesis) === r.body.next);
     const voluntary = candidates.filter((r) => r.body.reason === "voluntary" && // 3
@@ -2114,11 +2117,12 @@ function resolveChain(g0, rotations) {
     } else if (voluntary.length > 1) {
       throw new SigeloError(`chain: fork at ${cur} (${voluntary.length} valid voluntary rotations)`);
     } else {
-      return { chain, recovery: commitment };
+      return { chain, recovery: commitment, recovered };
     }
     if (chain.includes(chosen.body.next)) throw new SigeloError(`chain: cycle back to ${chosen.body.next}`);
     cur = chosen.body.next;
     chain.push(cur);
+    if (chosen.body.reason === "recovery") recovered = chain.length - 1;
   }
 }
 function malformed(items, slot, sigField) {
@@ -2146,12 +2150,13 @@ function verify2(bundle2, now, knownIssuers) {
     if (r.next_genesis === void 0) throw new SigeloError("rotation: missing next_genesis");
     structure(r.next_genesis, "genesis");
     if (typeof r.sig !== "string") throw new SigeloError("rotation: missing sig");
+    if (typeof r.sig_next !== "string") throw new SigeloError("rotation: missing sig_next");
     envelope(r, "rotation");
   }
   for (const g of bundle2.issuers) structure(g, "genesis");
   const badAttestations = malformed(bundle2.attestations, "attestation", "sig");
   const badBindings = malformed(bundle2.bindings, "binding", "sig_id");
-  const { chain, recovery } = resolveChain(bundle2.genesis, bundle2.rotations);
+  const { chain, recovery, recovered } = resolveChain(bundle2.genesis, bundle2.rotations);
   const genesisOf = /* @__PURE__ */ new Map([[d0, bundle2.genesis]]);
   for (const r of bundle2.rotations) genesisOf.set(did(r.next_genesis), r.next_genesis);
   const issuers = /* @__PURE__ */ new Map();
@@ -2186,7 +2191,9 @@ function verify2(bundle2, now, knownIssuers) {
       rejectedBindings++;
       continue;
     }
-    bindings.push({ body, proof });
+    if (chain.indexOf(body.id) < recovered) bindings.push({ body, proof: "superseded" });
+    else if (proof === "proven" && body.method === "monero") bindings.push({ body, proof, network: decodeAddress(body.addr).net });
+    else bindings.push({ body, proof });
   }
   return {
     did: chain[chain.length - 1],
@@ -2255,6 +2262,8 @@ function rotate(opts) {
   const id2 = did(opts.genesis);
   const next = did(opts.next_genesis);
   if (next === id2) throw new SigeloError("rotation: next == id");
+  if (!(opts.next_secret instanceof Uint8Array) || opts.next_secret.length !== 32 || encodeKey(getPublicKey(opts.next_secret)) !== opts.next_genesis.key)
+    throw new SigeloError("rotation: next_secret does not match next_genesis.key (the next key countersigns, §7)");
   const head2 = { v: VERSION, typ: "rotation", id: id2, next, iat: opts.iat };
   let body;
   if (opts.reason === "recovery") {
@@ -2267,7 +2276,7 @@ function rotate(opts) {
     body = { ...head2, reason: "voluntary" };
   }
   structure(body, "rotation");
-  return { body, sig: sign2(opts.secret, body), next_genesis: opts.next_genesis };
+  return { body, sig: sign2(opts.secret, body), sig_next: sign2(opts.next_secret, body), next_genesis: opts.next_genesis };
 }
 function challenge(opts) {
   structure(opts.genesis, "genesis");
@@ -2326,7 +2335,7 @@ var init_sigelo = __esm({
       bundle: []
     };
     NOT_STRING = ["iat", "exp", "recovery", "claims", "amount", "genesis", "rotations", "bindings", "attestations", "issuers"];
-    ENVELOPE = { rotation: ["body", "sig", "next_genesis"], binding: ["body", "sig_id", "sig_addr"], attestation: ["body", "sig"] };
+    ENVELOPE = { rotation: ["body", "sig", "sig_next", "next_genesis"], binding: ["body", "sig_id", "sig_addr"], attestation: ["body", "sig"] };
     rfc3339 = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
     asNonce = (n, len) => n === void 0 ? mb(randomBytes(len)) : typeof n === "string" ? n : mb(n);
   }
@@ -2405,7 +2414,7 @@ function bundle(s, now) {
 function rotateKey(s, now) {
   const cur = head(s);
   const fresh = keygen({ recovery: cur.recovery });
-  s.rotations.push(rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: "voluntary", secret: secretOf(s) }));
+  s.rotations.push(rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: "voluntary", secret: secretOf(s), next_secret: fresh.secret }));
   s.secret = Buffer.from(fresh.secret).toString("hex");
   return s;
 }
@@ -2940,7 +2949,7 @@ function rotate2(path, s, now, env2 = process.env) {
   }
   const cur = head(s), fresh = keygen({ recovery: cur.recovery });
   try {
-    s.rotations.push(withSeed(s, (secret) => rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: "voluntary", secret })));
+    s.rotations.push(withSeed(s, (secret) => rotate({ genesis: cur, next_genesis: fresh.genesis, iat: now, reason: "voluntary", secret, next_secret: fresh.secret })));
     s.secret = wrap(fresh.secret, s);
   } finally {
     fresh.secret.fill(0);
@@ -3128,7 +3137,7 @@ var TOOLS = [
   ["sigelo_add_attestation", `Store a world's signed attestation {body, sig} about you (replaces an older one from the same issuer+ctx). Pass issuer (its genesis) too when you have it. ${DATA}`, idObj({ attestation: json("{body, sig}"), issuer: json("optional: the issuer genesis document") }, ["attestation"])],
   ["sigelo_forget_issuer", "Drop an issuer DID's attestations and genesis from your file. Your local action after that world announced a retirement or rotation out of band.", idObj({ issuer: str2('the retired issuer DID "did:sigelo:z…"') }, ["issuer"])],
   ["sigelo_bundle", "Your portable proof: the verified SPEC §8 bundle (genesis, rotations, attestations, issuers, bindings). Give it to a world or stranger that asks who you are.", idObj()],
-  ["sigelo_verify", `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven/unproven), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj2({ bundle: json("the bundle"), now: { type: "integer", description: "optional unix seconds; default now" } }, ["bundle"])],
+  ["sigelo_verify", `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven, unproven, or superseded: under a DID before the last recovery, never pay it; a proven monero one names its network), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj2({ bundle: json("the bundle"), now: { type: "integer", description: "optional unix seconds; default now" } }, ["bundle"])],
   ["sigelo_rotate", "Voluntary rotation to a fresh key (e.g. on schedule or if you suspect a leak). Your identity continues; ask each world to reissue its attestation to the new DID.", idObj()]
 ];
 var base = id.identityPath();

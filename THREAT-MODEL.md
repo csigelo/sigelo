@@ -34,6 +34,8 @@ a key they control. Defense: a recovery rotation supersedes it regardless of tim
 (SPEC §7.1). Vectors: `rotation_hostile` and `rotation_recovery`, where the legitimate
 recovery deliberately carries the earlier `iat`.
 
+After a recovery, bindings and invoices by the stolen key's DIDs are `superseded` and never paid, whatever their `iat` (SPEC §6.1, §6.3; wire change of 2026-10-19).
+
 ### 2.5 Recovery authority hijack
 Attacker with a stolen key rotates to a genesis embedding their own recovery commitment.
 Defeated twice over: a voluntary rotation whose `next_genesis.recovery` differs from the
@@ -73,6 +75,8 @@ against truncated displays. Verifiers compare full DIDs; UIs never truncate (SPE
 ### 2.6 Address hijack
 Claiming someone else's payment address to borrow their history, or substituting your own to
 divert funds. Defeated by cross-signing: both keys sign identical bytes (SPEC §6).
+
+A Monero address key of small order lets a SigV2 be made with no secret; such bindings are `discarded` (SPEC §6.2; wire change of 2026-10-19).
 
 ### 2.7 Cross-language signature divergence
 Two conformant implementations disagreeing on canonical bytes. Mitigated by forbidding
@@ -124,12 +128,17 @@ gets worker i's key and the operator attestation. The real server then sees `par
 operator's `enrol` names the DID it sent to: abandon index i (enrol the next one), `forget` the
 contact, and the attestation lapses in at most 90 days (no revocation, SPEC §5). Say the code only
 to the machine it is for. **One worker per code:** the relay hands the code out once, and the
-operator sends to the first DID that proves it (a second is `enrol_used`). **The server** takes an
+operator sends only to the DID that paired through that code (`enrol_unpaired` before anyone has, `enrol_from` for
+any other contact): knowing the secret is not enough, so a contact that saw the long code, or the relay, cannot
+prove it over a pairing of its own. **The server** takes an
 identity only from the DID it paired with through its code, signed by that contact's current key,
 whose secret matches the chain's head and whose invite names the operator. **The relay** holds the
 long code (§3.8) and can answer it itself, receiving the worker's key. The four words do not differ
 until after the key went: compare them, and the operator DID `init --enrol` prints with the
-operator's `whoami`; on a mismatch treat index i as burnt, as above.
+operator's `whoami`; on a mismatch treat index i as burnt, as above. **Ours is not trusted:** an own agent that
+browses the web or reads untrusted repositories carries whatever injected it; pushed in full
+(tier own) into another agent's context, its content is a prompt-injection path that the key and
+attestation do nothing against. `enrol --tier friend|quiet` keeps it ours with notices only.
 
 ### 2.12 Operator hints: own agents find each other (contact/carrier.mjs, `sigelo-operator/0`)
 **Claim:** a contact becomes `own` only by an unexpired `sigelo-relay/operator` attestation, from me
@@ -147,6 +156,10 @@ credential): it learns who operates the agent. An agent before 0.1.7 shows the h
 as a message labelled `sigelo-operator/0`, once per pairing and renewal; there is no version on the
 wire to gate on, and adding one to the prekeys frame would break those agents.
 
+### 2.13 Graft into a foreign genesis
+
+A genesis that copies a victim's public commitment cannot rotate into the victim's genesis: every rotation is countersigned by the next key (`sig_next`, SPEC §7; wire change of 2026-10-19). Residual: a thief holding the victim's key can graft before the recovery; after it, a §5.2 answer for the head fails.
+
 ## 3. Attacks NOT defended — read this section
 
 ### 3.1 Sybil
@@ -163,6 +176,8 @@ not that it is true. The only remedy is verifiers withdrawing trust from that is
 same remedy covers a world key stolen after the world rotated away from it: it keeps minting
 attestations that verify under the old DID until they expire (SPEC §5, by design: issuer
 chains are not walked), so a verifier told of the rotation drops the old DID.
+
+An issuer's key stolen before its own recovery keeps minting attestations under the old DID until `exp`; the remedy is dropping that DID.
 
 ### 3.3 Collusion rings
 Worlds cross-attesting each other's Sybils, all with `admission: "invite"`, all valid.

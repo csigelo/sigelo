@@ -8,8 +8,10 @@
 //   node world/server.mjs                                    serve (env below)
 //   node world/server.mjs keygen <sha256:commitment> <out>   issuer identity → <out> (0600), genesis on stdout
 //   node world/server.mjs recovery-key <out>                 an off-site recovery key → <out> (0600), commitment on stdout
-//   node world/server.mjs rotate <rotations.json|-> <current-genesis> <next-genesis> <recovery-key>
-//                                                            recovery-rotate the issuer: the new rotations.json on stdout
+//   node world/server.mjs rotate <rotations.json|-> <current-genesis> <next-genesis|next-issuer> <recovery-key>
+//                                                            recovery-rotate the issuer: the new rotations.json on stdout;
+//                                                            given a bare genesis, the rotation still lacks sig_next
+//   node world/server.mjs countersign <rotations.json> <issuer>  the new issuer key countersigns (SPEC §7 sig_next)
 //
 // Env: SIGELO_WORLD_KEY (issuer file, default /var/lib/sigelo-world/issuer.json), SIGELO_WORLD_STATE
 // (default: the key's directory), SIGELO_WORLD_PORT (default 8790; 0 = any), SIGELO_WORLD_VECTORS
@@ -21,7 +23,7 @@ import { readFileSync, writeFileSync, appendFileSync, renameSync, existsSync } f
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { attest, canonicalize, commitmentOf, did, keygen, multibase, parse, parseBytes, rotate, structure, verify, verifySig } from '../ts/dist/sigelo.js';
+import { attest, canonicalize, commitmentOf, did, keygen, multibase, parse, parseBytes, rotate, sign, structure, verify, verifySig } from '../ts/dist/sigelo.js';
 import { countCases, readSummary } from './conformance.mjs';
 import { mcp } from './mcp.mjs';
 
@@ -33,6 +35,11 @@ const TTL = 300, DAY = 86400, LIFETIME = 90 * DAY, MAX_BODY = 256 * 1024, RING =
 const DID_RE = /^did:sigelo:z[1-9A-HJ-NP-Za-km-z]{40,50}$/;
 const nowS = () => Math.floor(Date.now() / 1000);
 const load = (p) => parseBytes(readFileSync(p));
+/** The published chain must resolve to `g`, exactly as a verifier walks it. */
+function resolvesTo(chain, g) {
+  const res = verify({ v: V, typ: 'bundle', genesis: chain.genesis, rotations: chain.rotations, bindings: [], attestations: [], issuers: [] }, nowS());
+  if (res.did !== did(g)) throw new Error(`the chain resolves to ${res.did}, not ${did(g)}`);
+}
 const save = (p, v, mode = 0o644) => { writeFileSync(p + '.tmp', typeof v === 'string' ? v : JSON.stringify(v), { mode }); renameSync(p + '.tmp', p); };
 const fail = (status, error) => Object.assign(new Error(error), { status });
 
@@ -66,13 +73,32 @@ if (cmd === 'keygen' || cmd === 'recovery-key') {
 if (cmd === 'rotate') {
   const [rotPath, curPath, nextPath, recPath] = args;
   if (!recPath) { console.error('usage: see the header of world/server.mjs'); process.exit(2); }
-  const cur = load(curPath), next = load(nextPath);
+  const cur = load(curPath), nextFile = load(nextPath), rec = load(recPath);
   const chain = rotPath === '-' ? { genesis: cur, rotations: [] } : load(rotPath);
-  const r = rotate({ genesis: cur, next_genesis: next, iat: nowS(), reason: 'recovery', secret: Uint8Array.from(Buffer.from(load(recPath).secret, 'hex')) });
-  chain.rotations.push(r);
-  // The published chain must resolve to the new issuer, exactly as a verifier walks it.
-  const res = verify({ v: V, typ: 'bundle', genesis: chain.genesis, rotations: chain.rotations, bindings: [], attestations: [], issuers: [] }, nowS());
-  if (res.did !== did(next)) throw new Error(`the chain resolves to ${res.did}, not ${did(next)}`);
+  const secret = Uint8Array.from(Buffer.from(rec.secret, 'hex'));
+  if (nextFile.secret !== undefined) { // the new issuer file itself (keygen's output): both keys here
+    chain.rotations.push(rotate({ genesis: cur, next_genesis: nextFile.genesis, iat: nowS(), reason: 'recovery', secret, next_secret: Uint8Array.from(Buffer.from(nextFile.secret, 'hex')) }));
+    resolvesTo(chain, nextFile.genesis);
+  } else {
+    // The recovery key is offline and the new issuer key never leaves the VPS (SPEC §7: the next
+    // key countersigns), so the Owner signs here and the VPS adds sig_next with `countersign`.
+    structure(cur, 'genesis'); structure(nextFile, 'genesis');
+    if (commitmentOf(rec.key) !== cur.recovery) throw new Error('the recovery key does not hash to the current commitment');
+    const body = { v: V, typ: 'rotation', id: did(cur), next: did(nextFile), iat: nowS(), reason: 'recovery', recovery_key: rec.key };
+    structure(body, 'rotation');
+    chain.rotations.push({ body, sig: sign(secret, body), next_genesis: nextFile });
+  }
+  console.log(JSON.stringify(chain, null, 2));
+  process.exit(0);
+}
+if (cmd === 'countersign') {
+  const [rotPath, issuerPath] = args;
+  if (!issuerPath) { console.error('usage: see the header of world/server.mjs'); process.exit(2); }
+  const chain = load(rotPath), issuer = load(issuerPath), secret = Uint8Array.from(Buffer.from(issuer.secret, 'hex'));
+  // Every rotation INTO this issuer that lacks its countersignature gets one; nothing else changes.
+  chain.rotations = chain.rotations.map((r) => r.sig_next !== undefined || r.next_genesis?.key !== issuer.genesis.key ? r
+    : { body: r.body, sig: r.sig, sig_next: sign(secret, r.body), next_genesis: r.next_genesis });
+  resolvesTo(chain, issuer.genesis);
   console.log(JSON.stringify(chain, null, 2));
   process.exit(0);
 }

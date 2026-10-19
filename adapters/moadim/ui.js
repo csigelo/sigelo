@@ -101,6 +101,7 @@
     const badges = [tierChip(c.tier)];
     if (c.local) badges.push(badge('on this machine'));
     if (c.mine) badges.push(badge(`run by me · ${c.mine.days_left} d`, c.mine.days_left < 14 ? 'alert' : ''));
+    if (c.ours && c.tier !== 'own') badges.push(badge('mine · low trust'));
     for (const t of c.tags) badges.push(badge('#' + t));
     if (c.status === 'pair_again') badges.push(badge('Pair again', 'alert'));
     else if (c.status === 'waiting') badges.push(badge('waiting for their side'));
@@ -147,7 +148,7 @@
       if (!S.snap) return;
       const { mine, contacts } = S.snap.groups, pending = pendingRows(S.snap.pending);
       put(list,
-        h('h2', null, `Mine (${mine.length})`), mine.length ? mine.map(contactRow) : h('p', { class: 'muted' }, 'Your own agents (tier own): Me → Agents on this machine.'),
+        h('h2', null, `Mine (${mine.length})`), mine.length ? mine.map(contactRow) : h('p', { class: 'muted' }, 'Your own agents (yours by key, or tier own): Me → Agents on this machine.'),
         h('h2', null, `Contacts (${contacts.length})`), contacts.length ? contacts.map(contactRow) : h('p', { class: 'muted' }, 'Nobody yet: Invite, or Enter a code.'),
         pending.length ? [h('h2', null, 'Pending'), pending] : null);
     };

@@ -27,7 +27,7 @@ import { verifySig } from 'sigelo';
 import { checkLicence, describe, LICENCE_FILE, licenceRefusal, liveKeepers, readLicence, register, rememberVendorChain, registryPath, type LicenceStatus } from './licence.js';
 import { parsePolicy, tokenHash } from './policy.js';
 import { commitmentOf, keygen } from 'sigelo';
-import { CLOCK_FLOOR, CLOCK_SKEW, IDENTITY_FILE, keeperBundle, keeperGenesis, keeperOf, loadKeeper, loadPolicy, parseDaemons, readLog, walletRpc, type KeeperId } from './service.js';
+import { CLOCK_FLOOR, CLOCK_SKEW, IDENTITY_FILE, keeperBundle, keeperGenesis, keeperOf, daemonNet, isLoopback, isOnion, loadKeeper, loadPolicy, parseDaemons, readLog, walletRpc, type KeeperId } from './service.js';
 import { rpcVersionOk, RPC_RANGE } from './rpcrange.js';
 import { toAtomic, toXmr } from './wallet.js';
 
@@ -38,7 +38,7 @@ const iso = (t: number): string => new Date(t * 1000).toISOString().replace('.00
 const now = (): number => Math.floor(Date.now() / 1000);
 export const DEFAULT_DIR = (): string => join(process.env['XDG_DATA_HOME'] || join(homedir(), '.local', 'share'), 'sigelo-spend', 'keeper');
 const unitDir = (): string => join(process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config'), 'systemd', 'user');
-const INSTALL = 'install.json', TOKEN = 'agent.token';
+const INSTALL = 'install.json', TOKEN = 'agent.token', WALLET_CONF = 'wallet-rpc.conf';
 
 /** MONERO.md §4.2 — the whole prompt snippet a harness gives a weak agent; "10 minutes" is dedupe_seconds 600. */
 export const SNIPPET = `You have a Monero wallet. Use only the \`sigelo-wallet\` command. You never see or need keys.
@@ -222,7 +222,7 @@ export interface InitResult { dir: string; did: string; token: string; tokenPath
 
 export function init(argv: string[]): InitResult {
   const f = flags(argv, ['--dir', '--net', '--wallet-rpc', '--wallet-rpc-login', '--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin',
-    '--daemons', '--port', '--agent', '--account', '--allow', '--per-tx', '--per-day', '--licence', '--keeper-package', '--recovery-commitment', '--adopt', '--key'],
+    '--daemons', '--daemon-proxy', '--daemon-ssl-fingerprint', '--daemon-login-file', '--port', '--agent', '--account', '--allow', '--per-tx', '--per-day', '--licence', '--keeper-package', '--recovery-commitment', '--adopt', '--key'],
   ['--create-wallet-rpc', '--notify', '--no-systemd']);
   if (f.pos.length > 0) throw new Error(`init takes flags only, not ${JSON.stringify(f.pos[0])}`);
   const dir = resolve(one(f, '--dir') ?? DEFAULT_DIR());
@@ -238,7 +238,14 @@ export function init(argv: string[]): InitResult {
   if (perTx === undefined || perDay === undefined) throw new Error('--per-tx and --per-day are XMR amounts, like 0.05');
 
   // Where the keeper's wallet-rpc is: an existing one (--wallet-rpc), or one these units run.
-  let rpc: string, login: string | undefined, walletUnit: string | undefined;
+  let rpc: string, login: string | undefined, walletUnit: string | undefined, walletConf: string | undefined;
+  const daemonFlags = ['--daemon-proxy', '--daemon-ssl-fingerprint', '--daemon-login-file'];
+  const proxy = one(f, '--daemon-proxy'), loginFile = one(f, '--daemon-login-file');
+  const fingerprints = (f.v.get('--daemon-ssl-fingerprint') ?? []).flatMap((x) => x.split(',')).filter((x) => x.trim() !== '').map((x) => {
+    const h = x.trim().replace(/:/g, '').toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(h)) throw new Error(`--daemon-ssl-fingerprint ${JSON.stringify(x)} is not a SHA-256 fingerprint (64 hex characters, colons allowed)`);
+    return h;
+  });
   const slug = slugOf(dir);
   const names = { keeper: `sigelo-keeper-${slug}.service`, wallet: `sigelo-wallet-rpc-${slug}.service`, check: `sigelo-keeper-${slug}-check` };
   if (create === (one(f, '--wallet-rpc') !== undefined)) throw new Error('give exactly one of --wallet-rpc <url> (a wallet-rpc you run) or --create-wallet-rpc (a unit for one, over your wallet file)');
@@ -247,19 +254,39 @@ export function init(argv: string[]): InitResult {
     if (file === undefined || pw === undefined) throw new Error('--create-wallet-rpc needs --wallet-file <your allowance wallet> and --password-file <its password file>: the wallet is yours, the installer makes none');
     if (!existsSync(resolve(file)) || !existsSync(resolve(pw))) throw new Error(`--wallet-file ${file} or --password-file ${pw} does not exist`);
     if (daemons.length === 0) throw new Error('--create-wallet-rpc needs --daemons a[,b,…]: the first is the wallet-rpc\'s --daemon-address, the rest the keeper\'s fallback');
+    // The daemon: https:// means TLS required (never autodetect, which falls back to plaintext),
+    // optionally pinned; .onion needs a SOCKS proxy (Tor); a daemon login comes from a file.
+    const first = daemons[0]!, tls = first.startsWith('https://');
+    if (fingerprints.length > 0 && !tls) throw new Error(`--daemon-ssl-fingerprint pins an https:// daemon, and the first --daemons entry ${first} is not one`);
+    if (proxy !== undefined && !/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}$/.test(proxy)) throw new Error(`--daemon-proxy ${JSON.stringify(proxy)} is not ip:port of a SOCKS proxy (Tor: 127.0.0.1:9050)`);
+    if (proxy === undefined && daemons.some(isOnion)) throw new Error(`--daemons ${daemons.find(isOnion)!} is a .onion address and there is no --daemon-proxy: give the Tor SOCKS port (--daemon-proxy 127.0.0.1:9050)`);
+    let daemonLogin: string | undefined;
+    if (loginFile !== undefined) {
+      const lf = resolve(loginFile);
+      if (!existsSync(lf)) throw new Error(`--daemon-login-file ${lf} does not exist`);
+      if (process.platform !== 'win32' && (statSync(lf).mode & 0o077) !== 0) throw new Error(`--daemon-login-file ${lf} is readable by others (chmod 600)`);
+      daemonLogin = readFileSync(lf, 'utf-8').replace(/\r?\n$/, '');
+      if (!/^[^\s#:][^\r\n#]*$/.test(daemonLogin) || daemonLogin !== daemonLogin.trim()) throw new Error(`--daemon-login-file ${lf}: one line user[:password], without '#' or edge spaces (wallet-rpc's config file reads '#' as a comment)`);
+    }
     const wport = port(one(f, '--wallet-rpc-port'), '--wallet-rpc-port', net === 'stagenet' ? 38088 : 18088);
     const bin = walletRpcBin(one(f, '--wallet-rpc-bin'));
     rpc = `http://127.0.0.1:${wport}/json_rpc`;
     login = `sigelo:${randomBytes(18).toString('base64url')}`;
+    // Logins in a 0600 --config-file, never on argv: /proc/<pid>/cmdline is readable by every local uid.
+    walletConf = `# monero-wallet-rpc --config-file for sigelo keeper ${slug}: the logins, off the command line\nrpc-login=${login}\n${daemonLogin !== undefined ? `daemon-login=${daemonLogin}\n` : ''}`;
     walletUnit = `[Unit]
 Description=monero-wallet-rpc for sigelo keeper ${slug} (${net}, 127.0.0.1:${wport})
 
 [Service]
 Type=simple
-# Loopback, with an RPC login (the keeper holds it in policy.json), never a trusted daemon.
+# Loopback, with an RPC login (the keeper holds it in policy.json; wallet-rpc reads it from the
+# 0600 --config-file, never argv), never a trusted daemon.
 ExecStart=${[bin, ...(net === 'stagenet' ? ['--stagenet'] : []), '--wallet-file', resolve(file), '--password-file', resolve(pw),
-    '--daemon-address', daemons[0]!.replace(/^https?:\/\//, ''), '--untrusted-daemon', '--rpc-bind-ip', '127.0.0.1', '--rpc-bind-port', String(wport),
-    '--rpc-login', login, '--non-interactive', '--log-file', join(dir, 'wallet-rpc.log')].map(arg).join(' ')}
+    '--daemon-address', first.replace(/^https?:\/\//, ''), '--untrusted-daemon',
+    ...(tls ? ['--daemon-ssl', 'enabled', ...fingerprints.flatMap((x) => ['--daemon-ssl-allowed-fingerprints', x])] : []),
+    ...(proxy !== undefined ? ['--proxy', proxy] : []),
+    '--rpc-bind-ip', '127.0.0.1', '--rpc-bind-port', String(wport),
+    '--config-file', join(dir, WALLET_CONF), '--non-interactive', '--log-file', join(dir, 'wallet-rpc.log')].map(arg).join(' ')}
 Restart=on-failure
 RestartSec=30
 # wallet-rpc saves the wallet on SIGTERM; give it time.
@@ -270,7 +297,7 @@ UMask=0077
 WantedBy=default.target
 `;
   } else {
-    for (const x of ['--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin']) if (f.v.has(x)) throw new Error(`${x} goes with --create-wallet-rpc`);
+    for (const x of ['--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin', ...daemonFlags]) if (f.v.has(x)) throw new Error(`${x} goes with --create-wallet-rpc`);
     rpc = one(f, '--wallet-rpc')!;
     try { if (new URL(rpc).pathname === '/') rpc = rpc.replace(/\/?$/, '/json_rpc'); } catch { throw new Error(`--wallet-rpc ${JSON.stringify(rpc)} is not a URL`); }
     login = one(f, '--wallet-rpc-login');
@@ -325,6 +352,7 @@ WantedBy=default.target
   secret('policy.json', JSON.stringify(policy, null, 2) + '\n');
   secret(TOKEN, token + '\n');
   if (licence !== undefined) secret(LICENCE_FILE, licence);
+  if (walletConf !== undefined) secret(WALLET_CONF, walletConf);
   const cli = copyApp(join(dir, 'app'));
   const sd = join(dir, 'systemd');
   mkdirSync(sd, { mode: 0o700 });
@@ -377,6 +405,7 @@ WantedBy=timers.target
   }
   writeFileSync(join(dir, INSTALL), JSON.stringify({
     v: 1, net, port: keeperPort, agent, account, wallet_rpc: rpc, created_wallet_rpc: walletUnit !== undefined, daemons,
+    ...(walletUnit !== undefined && { daemon_proxy: proxy ?? null, daemon_ssl_fingerprints: fingerprints, daemon_login_file: loginFile !== undefined ? resolve(loginFile) : null }),
     systemd, unit_dir: systemd ? unitDir() : null, units, keeper_did: id.did, app: cli, node: process.execPath, created: iso(now()),
   }, null, 2) + '\n', { mode: 0o600 });
   register({ dir, did: id.did, genesis: id.genesis });
@@ -390,7 +419,7 @@ WantedBy=timers.target
     `  recovery      ${said}`,
     `  policy        ${join(dir, 'policy.json')}: agent ${JSON.stringify(agent)}, account ${account}, ${toXmr(perTx)} XMR per payment, ${toXmr(perDay)} XMR per day, approval_above off`,
     `  agent token   ${tokenPath} (0600, the only copy; \`sigelo-spend token new ${join(dir, 'policy.json')} ${agent}\` rotates it)`,
-    `  wallet-rpc    ${rpc}${walletUnit !== undefined ? ` (unit ${names.wallet}, over your wallet file, login in policy.json)` : ' (yours, already running)'}`,
+    `  wallet-rpc    ${rpc}${walletUnit !== undefined ? ` (unit ${names.wallet}, over your wallet file, login in policy.json and ${WALLET_CONF})` : ' (yours, already running)'}`,
     `  units         ${systemd ? `installed in ${unitDir()} (and kept in ${sd})` : `written to ${sd} only (--no-systemd): copy them to ${unitDir()} to use them`}`,
     `  start         systemctl --user enable --now ${start.join(' ')}`,
     `  check         sigelo-spend doctor --dir ${dir}`,
@@ -464,6 +493,9 @@ export async function doctor(dir: string, at = now(), timeoutMs = 5000): Promise
 
   // The units: written, installed where init said, runnable, loopback.
   const units = Array.isArray(inst['units']) ? (inst['units'] as unknown[]).map(String) : [];
+  const strs = (x: unknown): string[] => (Array.isArray(x) ? x.map(String) : []);
+  let listed = strs(inst['daemons']);
+  const loose = (x: string): boolean => process.platform !== 'win32' && (statSync(x).mode & 0o077) !== 0;
   for (const u of units) {
     let text: string;
     try { text = readFileSync(join(dir, 'systemd', u), 'utf-8'); } catch { fail(`unit ${u}: missing from ${join(dir, 'systemd')}`); continue; }
@@ -479,13 +511,51 @@ export async function doctor(dir: string, at = now(), timeoutMs = 5000): Promise
       if (!existsSync(a[1] ?? '')) { fail(`unit ${u}: ${a[1] ?? '(no script)'} does not exist (the frozen copy under ${join(dir, 'app')})`); continue; }
       if (a[2] !== 'serve' || a[3] !== pp || a[5] !== String(inst['port'])) { fail(`unit ${u}: ExecStart is not serve ${pp} --port ${String(inst['port'])}`); continue; }
       const env = /^Environment="SIGELO_DAEMONS=([^"]*)"$/m.exec(text)?.[1];
-      try { parseDaemons(env ?? ''); ok(`unit ${u}: serve on 127.0.0.1:${String(inst['port'])} (the keeper binds loopback only)${env === undefined ? '' : `, SIGELO_DAEMONS ${env}`}`); } catch (e) { fail(`unit ${u}: ${why(e)}`); }
+      try {
+        const l = parseDaemons(env ?? '');
+        if (env !== undefined) listed = l;
+        ok(`unit ${u}: serve on 127.0.0.1:${String(inst['port'])} (the keeper binds loopback only)${env === undefined ? '' : `, SIGELO_DAEMONS ${env}`}`);
+        const own = l.filter((d) => isLoopback(d) || isOnion(d)), pub = l.filter((d) => !isLoopback(d) && !isOnion(d));
+        if (own.length > 0 && pub.length > 0) warn(`daemons: SIGELO_DAEMONS mixes ${own[0]} with clearnet ${pub[0]}: a fallback may move the wallet from your node to a public one (spend/README.md "Choosing a daemon")`);
+      } catch (e) { fail(`unit ${u}: ${why(e)}`); }
     } else if (u.startsWith('sigelo-wallet-rpc-')) {
-      const bad = ['--disable-rpc-login', '--confirm-external-bind', '--trusted-daemon', '--restricted-rpc'].filter((x) => a.includes(x));
-      const bind = a[a.indexOf('--rpc-bind-ip') + 1];
-      if (bind !== '127.0.0.1' || !a.includes('--rpc-login') || bad.length > 0) fail(`unit ${u}: wallet-rpc must bind 127.0.0.1 with --rpc-login and none of ${bad.join(', ') || '--disable-rpc-login/--confirm-external-bind/--trusted-daemon'}`);
-      else ok(`unit ${u}: wallet-rpc on 127.0.0.1 with an RPC login, untrusted daemon`);
+      const val = (x: string): string | undefined => { const i = a.indexOf(x); return i < 0 ? undefined : a[i + 1]; };
+      const has = (x: string): boolean => a.some((y) => y === x || y.startsWith(`${x}=`));
+      const p: string[] = [];
+      const bad = ['--disable-rpc-login', '--confirm-external-bind', '--restricted-rpc'].filter(has);
+      if (val('--rpc-bind-ip') !== '127.0.0.1' || bad.length > 0) p.push(`wallet-rpc must bind 127.0.0.1 and use none of ${bad.join(', ') || '--disable-rpc-login/--confirm-external-bind/--restricted-rpc'}`);
+      const onArgv = ['--rpc-login', '--daemon-login', '--password'].filter(has);
+      if (onArgv.length > 0) p.push(`${onArgv.join(', ')} on the command line, which every local user reads in /proc/<pid>/cmdline: logins go in the 0600 --config-file`);
+      const conf = val('--config-file');
+      let confText = '';
+      if (conf === undefined) p.push('no --config-file holding the RPC login');
+      else if (!existsSync(conf)) p.push(`--config-file ${conf} does not exist`);
+      else {
+        confText = readFileSync(conf, 'utf-8');
+        if (loose(conf)) p.push(`--config-file ${conf} is readable by others (mode ${(statSync(conf).mode & 0o777).toString(8)}; chmod 600)`);
+        if (!/^rpc-login=\S/m.test(confText)) p.push(`--config-file ${conf} has no rpc-login`);
+      }
+      // The daemon: trusted only when it is this host's; https:// enforced and pinned as init
+      // was asked; .onion only through a proxy; a daemon login from a private file.
+      const addr = val('--daemon-address') ?? '', first = listed[0];
+      if (has('--trusted-daemon') && !isLoopback(addr)) p.push(`--trusted-daemon for the remote daemon ${addr}: trust only a node on this host (127.0.0.1, [::1])`);
+      if (first?.startsWith('https://') === true && val('--daemon-ssl') !== 'enabled') p.push(`the daemon is ${first} and the unit lacks --daemon-ssl enabled: wallet-rpc's autodetect falls back to plaintext`);
+      const pins = strs(inst['daemon_ssl_fingerprints']).sort().join(), pinned = a.flatMap((x, i) => (x === '--daemon-ssl-allowed-fingerprints' ? [a[i + 1] ?? ''] : [])).sort().join();
+      if (pins !== pinned) p.push(`--daemon-ssl-allowed-fingerprints [${pinned}] are not the ones init pinned [${pins}]`);
+      if (listed.some(isOnion) && val('--proxy') === undefined) p.push(`${listed.find(isOnion)!} is a .onion daemon and the unit has no --proxy (Tor's SOCKS port)`);
+      const lf = inst['daemon_login_file'];
+      if (typeof lf === 'string') {
+        if (!/^daemon-login=\S/m.test(confText)) p.push(`init was given --daemon-login-file ${lf} and the --config-file has no daemon-login`);
+        if (existsSync(lf) && loose(lf)) p.push(`--daemon-login-file ${lf} is readable by others (chmod 600)`);
+      }
+      for (const x of p) fail(`unit ${u}: ${x}`);
+      if (p.length === 0) ok(`unit ${u}: wallet-rpc on 127.0.0.1 with an RPC login in ${conf!} (0600), ${has('--trusted-daemon') ? 'a trusted daemon on this host' : 'untrusted daemon'}${val('--daemon-ssl') === 'enabled' ? ', TLS required' : ''}${val('--proxy') !== undefined ? `, through --proxy ${val('--proxy')!}` : ''}`);
     } else ok(`unit ${u}`);
+  }
+  // The daemons' network: wallet-rpc reports none, so the port is the only evidence (a heuristic).
+  if (policy !== undefined) for (const d of listed) {
+    const n = daemonNet(d);
+    if (n !== undefined && n !== policy.net) warn(`daemon ${d}: its port is ${n}'s default and the policy is on ${policy.net} (a port heuristic: wallet-rpc reports no daemon network)`);
   }
   if (inst['systemd'] === true) {
     const keeper = units.find((u) => u.startsWith('sigelo-keeper-') && !u.includes('-check'));

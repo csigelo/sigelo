@@ -61,8 +61,9 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
         && tOwn.stderr.includes('pushed in full') && (JSON.parse(tQuiet.stdout) as { tier: string; name: string }).name === 'hotel', tOwn.stderr + tQuiet.stdout);
       const tBad = await cli('alice', 'tier', 'pal', 'vip'), tNone = await cli('alice', 'tier', 'nobody', 'quiet');
       ok('tier: an unknown tier → exit 2; no such contact → exit 1, not_contact', tBad.status === 2 && tNone.status === 1 && tNone.stderr.includes('is not a contact'), tBad.stderr + tNone.stderr);
-      const cs = await cli('alice', 'contacts'), listed = (JSON.parse(cs.stdout) as { contacts: { name: string; tier: string }[] }).contacts;
-      ok('contacts: each with its tier (JSON and the stderr line)', listed.map((c) => `${c.name}:${c.tier}`).sort().join() === 'hotel:quiet,mine:own,pal:friend' && cs.stderr.includes('sigelo-agent: mine: tier own\n') && cs.stderr.includes('sigelo-agent: hotel: tier quiet\n'), cs.stdout);
+      const cs = await cli('alice', 'contacts'), listed = (JSON.parse(cs.stdout) as { contacts: { name: string; tier: string; ours: boolean }[] }).contacts;
+      ok('contacts: each with its tier, none ours (no attestation; own by choice) (JSON and the stderr line)', listed.map((c) => `${c.name}:${c.tier}`).sort().join() === 'hotel:quiet,mine:own,pal:friend' && listed.every((c) => c.ours === false)
+        && cs.stderr.includes('sigelo-agent: mine: a contact, its messages are pushed in full (tier own)\n') && cs.stderr.includes('sigelo-agent: hotel: a contact, its messages wait in the inbox, no notice (tier quiet)\n'), cs.stdout + cs.stderr);
       await new Promise((r) => setTimeout(r, 1500));
       for (const n of ['mine', 'pal', 'hotel']) await cli(n, 'send', 'alice', `hello from ${n}`);
       ok('watch, no hook: the own contact\'s message on a line, the friend\'s as a count', await until(() => w1!.out.includes('own mine: hello from mine') && w1!.out.includes('friend pal: 1 new message')), w1.out);

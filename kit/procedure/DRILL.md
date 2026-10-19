@@ -96,9 +96,12 @@ The attacker holds the same keys: whichever sweep confirms first wins.
 
 ```sh
 mkdir -m 700 {{clean_host.tmpfs}}
-monero-wallet-rpc --{{net}} --wallet-dir {{clean_host.tmpfs}} --daemon-address {{clean_host.daemon}} \
+monero-wallet-rpc --{{net}} --wallet-dir {{clean_host.tmpfs}} --daemon-address {{clean_host.daemon}} {{clean_daemon_opts}} \
   --rpc-bind-ip 127.0.0.1 --rpc-bind-port {{clean_host.rpc_port}} --disable-rpc-login --log-file {{clean_host.tmpfs}}/rpc.log
 ```
+
+  The restore wallet holds spend keys: point it at your own node, or at one through Tor (`clean_host.proxy`), never at a public node.
+  A public node learns this host's IP and every output of the restored wallet.
 
 - [ ] **3.2** `generate_from_keys {filename, address, spendkey, viewkey, restore_height}`; raise the account lookahead to the highest account index in `spend.log`; `refresh {start_height: <restore height>}`. **`refresh` blocks**: the wallet-rpc answers nothing else (even `get_height` times out) until it returns — T14: 7 min for 4 927 blocks. Do not poll, do not restart it. Then `get_accounts`: every `delegate` account index in `spend.log` is present.
 - [ ] **3.3** For every account with `unlocked_balance` > 0: `sweep_all {address: <vault>, account_index: i, subaddr_indices_all: true, priority: 4, unlock_time: 0}`. **Step down on error -4** (F7): `No unlocked balance in the specified subaddress(es)` while `get_balance` still shows unlocked funds means the rest are outputs worth less than their own fee at that priority (wallet2 skips them). Repeat at 3, then 2, then 1; stop when only dust is left (refused at 1) and record the dust. Record every txid, amount, fee and priority in the timeline's sweep table. Locked outputs: repeat every block until every account is empty.

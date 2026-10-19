@@ -8,7 +8,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { Agent as HttpAgent, createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { canonicalize, decodeKey, did, keygen, sign, parse, structure, verify, verifySig, type Bundle, type Genesis } from 'sigelo';
 import { agentIdentitySeed, deriveIdentity, identitySeed as identitySeedOf, recoveryCommitment } from 'sigelo/dist/keys.js';
@@ -105,7 +105,7 @@ export const WALLET_TIMEOUT_MS = 60_000;
  * The daemon fallback (MONERO.md §4 "Daemons"). A keeper whose wallet-rpc talks to one remote
  * daemon is down whenever that node is: every pay is `wallet_offline`, a TRY LATER. With
  * `SIGELO_DAEMONS` set to two or more addresses, the keeper moves wallet-rpc to the next one
- * (`set_daemon`, `trusted: false`) when `DAEMON_FAILS` builds in a row answered "no connection
+ * (`set_daemon`, `trusted: false`, `ssl_support: "enabled"` for an `https://` one) when `DAEMON_FAILS` builds in a row answered "no connection
  * to daemon", or when the wallet height has not moved for `DAEMON_STALE_MS` while it is asked to
  * pay — never on one failure, and never twice within `DAEMON_SWITCH_MS`. A switch is a warning on
  * stderr, never a spend.log line: nothing is signed and no pay is answered differently; while the
@@ -118,8 +118,9 @@ const DAEMON = /^(?:https?:\/\/)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])
 /**
  * `SIGELO_DAEMONS` → the fallback list: addresses separated by commas or whitespace, each
  * `host:port`, `[ipv6]:port` or either with `http://`/`https://`, as wallet-rpc's
- * `--daemon-address` takes them. Throws on anything else and on a repeat, so a typo stops the
- * start instead of turning into a fallback that is never there.
+ * `--daemon-address` takes them. Throws on anything else, on a repeat, and on a list mixing
+ * `.onion` with other addresses, so a typo stops the start instead of turning into a fallback
+ * that is never there, or one that leaves Tor.
  */
 export function parseDaemons(raw: string): string[] {
   const list = raw.split(/[\s,]+/).filter((x) => x !== '');
@@ -128,7 +129,22 @@ export function parseDaemons(raw: string): string[] {
     if (m === null || Number(m[1]) < 1 || Number(m[1]) > 65535) throw new Error(`SIGELO_DAEMONS: ${JSON.stringify(d)} is not host:port (or [ipv6]:port, optionally with http:// or https://)`);
   }
   if (new Set(list).size !== list.length) throw new Error('SIGELO_DAEMONS: an address is listed twice');
+  const onion = list.filter(isOnion), clear = list.filter((d) => !isOnion(d));
+  if (onion.length > 0 && clear.length > 0) throw new Error(`SIGELO_DAEMONS: mixes .onion (${onion[0]}) and other addresses (${clear[0]}): one wallet-rpc --proxy cannot serve both, and a fallback would move the wallet off Tor; list one kind`);
   return list;
+}
+/** A daemon address's host, without scheme, port or IPv6 brackets. */
+export const daemonHost = (d: string): string => d.replace(/^https?:\/\//, '').replace(/:[0-9]+$/, '').replace(/^\[(.*)\]$/, '$1').toLowerCase();
+export const isOnion = (d: string): boolean => daemonHost(d).endsWith('.onion');
+export const isLoopback = (d: string): boolean => { const h = daemonHost(d); return h === 'localhost' || h === '::1' || /^127\.[0-9.]+$/.test(h); };
+/**
+ * The network a daemon's port says, or undefined: monerod's defaults are 18081 (RPC) and 18089
+ * (restricted RPC) on mainnet, 28081/28089 testnet, 38081/38089 stagenet. A heuristic only:
+ * wallet-rpc reports no daemon network, and an operator may run any port.
+ */
+export function daemonNet(d: string): string | undefined {
+  const p = Number(/:([0-9]+)$/.exec(d)?.[1]);
+  return ({ 18081: 'mainnet', 18089: 'mainnet', 28081: 'testnet', 28089: 'testnet', 38081: 'stagenet', 38089: 'stagenet' } as Record<number, string>)[p];
 }
 
 const MODE = 0o600;
@@ -520,21 +536,36 @@ export async function walletRpc(policy: Policy, method: string, params: unknown,
   const url = policy.wallet.rpc;
   const uri = new URL(url).pathname;
   const body = JSON.stringify({ jsonrpc: '2.0', id: '0', method, params });
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const send = (): Promise<Awaited<ReturnType<typeof fetch>>> =>
-    fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(timeoutMs) });
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Content-Length': String(new TextEncoder().encode(body).length) };
+  // One kept-alive socket for the call: wallet-rpc's digest nonce is valid only on the
+  // connection that received it, so the authenticated retry must reuse that connection.
+  const agent = new HttpAgent({ keepAlive: true, maxSockets: 1 });
+  const send = (): Promise<{ status: number; challenge: string; text: string }> => new Promise((done, fail) => {
+    const req = httpRequest(url, { method: 'POST', headers, agent }, (r) => {
+      let text = '';
+      r.setEncoding('utf8');
+      r.on('data', (c) => { text += String(c); });
+      r.on('end', () => { clearTimeout(timer); done({ status: r.statusCode ?? 0, challenge: [r.headers['www-authenticate'] ?? ''].flat().join(', '), text }); });
+      r.on('error', fail);
+    });
+    const timer = setTimeout(() => req.destroy(Object.assign(new Error('timeout'), { name: 'TimeoutError' })), timeoutMs);
+    req.on('error', (e) => { clearTimeout(timer); fail(e); });
+    req.end(body);
+  });
   // A wait that ran out is said apart from a refused connection: for a build it is `wallet_slow`.
   const lost = (e: unknown): Error => new Error((e as { name?: unknown })?.name === 'TimeoutError'
     ? `wallet: ${method}: ${url} timed out after ${timeoutMs} ms` : `wallet: ${method}: ${url} unreachable (${why(e)})`);
   let res;
-  try { res = await send(); } catch (e) { throw lost(e); }
-  if (res.status === 401 && policy.wallet.login !== undefined) {
-    headers['Authorization'] = digestHeader(res.headers.get('www-authenticate') ?? '', policy.wallet.login, uri);
+  try {
     try { res = await send(); } catch (e) { throw lost(e); }
-  }
+    if (res.status === 401 && policy.wallet.login !== undefined) {
+      headers['Authorization'] = digestHeader(res.challenge, policy.wallet.login, uri);
+      try { res = await send(); } catch (e) { throw lost(e); }
+    }
+  } finally { agent.destroy(); }
   if (res.status === 401) throw new Error('wallet: 401 — wallet.login is missing or wrong');
   let out: { result?: unknown; error?: { code: number; message: string } };
-  try { out = await res.json() as typeof out; } catch (e) { throw new Error(`wallet: ${method}: reply is not JSON (HTTP ${res.status}, ${why(e)})`); }
+  try { out = JSON.parse(res.text) as typeof out; } catch (e) { throw new Error(`wallet: ${method}: reply is not JSON (HTTP ${res.status}, ${why(e)})`); }
   if (!plain(out)) throw new Error(`wallet: ${method}: reply is not a JSON-RPC object`);
   if (out.error) throw new Error(`wallet: ${method}: ${out.error.message} (code ${out.error.code})`);
   if (!plain(out.result)) throw new Error(`wallet: ${method}: no result in the reply`);
@@ -865,7 +896,9 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     [switched, misses, seen] = [t, 0, undefined];
     const to = daemons[current]!, which = `${current + 1}/${daemons.length}`;
     try {
-      await walletRpc(policy, 'set_daemon', { address: to, trusted: false }, 15_000);
+      // https:// keeps its meaning: TLS required, never wallet-rpc's autodetect (which falls back to
+      // plaintext). No `proxy`: wallet-rpc refuses one when started with --proxy (parseDaemons).
+      await walletRpc(policy, 'set_daemon', { address: to, trusted: false, ...(to.startsWith('https://') && { ssl_support: 'enabled' }) }, 15_000);
       console.warn(`sigelo-spend: daemon fallback: ${cause}; wallet-rpc moved from ${from} to ${to} (${which}, trusted=false). Not a spend: nothing signed or logged; pays stay TRY LATER (wallet_offline) until the wallet syncs`);
     } catch (e) {
       console.warn(`sigelo-spend: daemon fallback: ${cause}; set_daemon ${to} (${which}) failed (${why(e)}) — the next address is tried in a minute at the earliest`);

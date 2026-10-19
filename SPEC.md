@@ -138,7 +138,7 @@ different places give two answers for the same bytes. 512 leaves a bundle's `cla
 ```
 
 Bindings carry `sig_id` and optionally `sig_addr` instead of `sig`. Rotations additionally
-carry `next_genesis`. Nothing in the envelope outside `body` is signed, but the rules above
+carry `sig_next` (§7) and `next_genesis`. Nothing in the envelope outside `body` is signed, but the rules above
 apply to the whole envelope: a float anywhere in it makes the item malformed (§9 step 2), and
 so does a key outside its members (§3.1).
 
@@ -157,8 +157,8 @@ so does a key outside its members (§3.1).
 **No other top-level keys.** A body carrying a key not in its row is malformed. `claims` is
 the one free-form value and may hold anything JCS can serialize. **Envelopes** are part of the
 same rule, both ways: an envelope is exactly its defined members — a rotation envelope `body`,
-`sig` and `next_genesis`; a binding envelope `body`, `sig_id` and optionally `sig_addr`; an
-attestation envelope `body` and `sig` — with `sig` and `sig_id` strings. An envelope missing
+`sig`, `sig_next` and `next_genesis`; a binding envelope `body`, `sig_id` and optionally `sig_addr`; an
+attestation envelope `body` and `sig` — with `sig`, `sig_next` and `sig_id` strings. An envelope missing
 one, or carrying any other key, is malformed in the same class as its body (§9 step 2): fatal
 for a rotation (`rotation: unknown envelope field "…"`), the item discarded and counted for an
 attestation or binding (vectors `attestation_envelope_extra_key_int`,
@@ -341,18 +341,33 @@ One-sided signatures are insufficient:
 
 ### 6.1 Proof status
 
-Every binding the verifier returns carries exactly one of three statuses:
+Every binding the verifier returns carries exactly one of four statuses:
 
 | `proof` | Meaning |
 |---|---|
 | `proven` | `sig_id` valid and `sig_addr` present and valid for `method` |
 | `unproven` | `sig_id` valid, `sig_addr` absent — the identity *claims* the address |
 | `unsupported` | `sig_id` valid, `sig_addr` present, verifier has no routine for `method` |
+| `superseded` | any of the above, but `id` comes before the most recent recovery in the chain |
+
+**Superseded** *(wire change of 2026-10-19)* (vectors `bundle_recovered`, `negative.parity.superseded_binding_after_recovery`,
+`superseded_binding_backdated`, `superseded_monero_binding_after_recovery`). A recovery rotation
+says the key before it was stolen; whatever that key signed may name the thief's address. So a
+binding whose `id` precedes, in `chain`, the DID the most recent valid recovery rotated into is
+`superseded`, whatever its status would otherwise be, and is never paid. The rule is positional in
+the chain, never by `iat`: the thief signs with any `iat`, so a backdated binding is superseded too.
+A **voluntary** rotation supersedes nothing (`binding_before_voluntary_rotation_proven`,
+`binding_before_voluntary_after_recovery_proven`): it implies no theft, bindings live 30–90 days
+and invoices are minted by the current key anyway (§6.3), so a head-only rule would cost every
+rotation a rebinding and defend against nothing a voluntary rotation reveals. A key stolen without
+a recovery is undefended by either rule, which is what recovery is for. A superseded binding is
+still checked: a bad `sig_addr` discards it as below.
 
 Where a payment method has no practical message-signing path, `sig_addr` MAY be omitted.
 The binding is then an **unproven claim**, whatever the method; `unsupported` applies only
 when a `sig_addr` is present. Verifiers MUST report the status in the return
-type, not as a boolean, and MUST NOT send funds to any address whose status is not `proven`.
+type, not as a boolean, and MUST NOT send funds to any address whose status is not `proven`
+(`superseded` included).
 Keep `exp` short on unproven bindings.
 
 A binding whose `sig_id` fails, or whose `sig_addr` is present but *invalid* for a method
@@ -393,7 +408,10 @@ Keccak padding, and verification recomputes `R' = c·P + r·G` and checks
 `src/crypto/crypto.cpp` `check_signature`). Verifiers MUST accept either mode and SHOULD
 report which one. Legacy `SigV1` is not accepted. Both keys in `addr` MUST decode as Monero's
 `check_key` decodes them (`ge_frombytes_vartime`: y < p, and not x = 0 with the sign bit set), or
-the binding is not proven, whichever mode signed.
+the binding is not proven, whichever mode signed. Neither key may be of small order, the identity
+included *(wire change of 2026-10-19)*: `check_key` accepts such a point, but then c·P carries no secret and a
+signature in the mode that uses it is made with no key at all; a verifier MUST discard the binding
+(vectors `negative.parity.monero_view_key_small_order`, `monero_spend_key_identity`).
 
 (The subaddress row is `wallet2::sign` for a non-zero index.) A binding whose SigV2 verifies
 against its `addr`'s own keys, in either mode, is `proven`; one whose signature was made with
@@ -408,8 +426,10 @@ are derived from `b`, so a view-only wallet cannot produce either mode, and a su
 binding is made by whoever holds the spend key (a keeper, MONERO.md §3).
 
 **The hash does not cover the network prefix.** One key pair's mainnet, stagenet and testnet
-addresses verify the same signature. A verifier MUST check that `addr` decodes to the
-network it expects before treating the binding as `proven`.
+addresses verify the same signature. A payer MUST check that `addr` decodes to the network it
+expects before paying a `proven` binding. `verify` reports it and does not refuse *(wire change of 2026-10-19)*: a
+`proven` `monero` entry of §9.1 carries `network` (`mainnet`, `stagenet` or `testnet`, from the
+prefix of `addr`), and no other entry does; only the caller knows which network it pays on.
 
 ### 6.3 Invoices
 
@@ -423,8 +443,11 @@ key, exchanged bilaterally, never in a bundle:
 
 `addr` is a receive address of the bound wallet, for Monero a fresh subaddress per
 counterparty per invoice. The payer checks: the signature against the identity key of `did`,
-`iat ≤ now < exp`, and that `did` has a `proven` binding for the same `method` in a bundle
-it has verified. sigelo cannot prove a subaddress belongs to the bound wallet (that needs the
+`iat ≤ now < exp`, that `did` is the `did` of the §9.1 result (the chain's current DID) of a
+bundle it has verified, and that the result has a `proven` binding for the same `method`.
+An invoice by an earlier DID is refused *(wire change of 2026-10-19)*: after a recovery it is the thief's, the same
+case as a superseded binding (§6.1), and an invoice is per payment, so unlike a binding nothing
+is lost by requiring the current key; the result names the chain's head and nothing finer. sigelo cannot prove a subaddress belongs to the bound wallet (that needs the
 view key); the identity's signature is the claim, the binding is its anchor, and a payment
 to an address the identity did not sign for is the payer's own mistake. `amount` is a string
 of atomic units or absent; `memo` is free text and, like `claims`, untrusted data.
@@ -455,13 +478,26 @@ caller invoke it deliberately. Bindings, invoices and proofs are what get automa
 Envelope carries `next_genesis`; verifiers MUST check `hash(next_genesis) == next`.
 `next` MUST differ from `id`; a self-rotation is structurally invalid.
 
-**voluntary** — signed by the current identity key. `recovery_key` absent.
+**Countersigned** *(wire change of 2026-10-19)* (vectors `negative.parity.graft_voluntary_into_foreign_genesis`,
+`graft_recovery_into_foreign_genesis`, `fatal_rotation_missing_sig_next`,
+`rotation_bad_sig_next_not_a_candidate`). The envelope also carries `sig_next`: a §3 signature over
+the same body by `next_genesis.key`, whatever the `reason`, the cross-signing rule of bindings (§6).
+Without it a genesis that copies a victim's public recovery commitment rotates into the victim's
+genesis, voluntarily or by its own recovery key, and the chain inherits every attestation and
+binding of the victim under a `chain[0]` that is not the victim's. With it, every DID after
+`chain[0]` signed its own entry into the chain, so the graft needs the victim's key, and a thief
+who holds that key controls the identity anyway until the recovery; the recovery's next key is the
+owner's, so after it a §5.2 answer for the head (§12.3) fails for the thief. That is why
+`chain[0]` stays the chain's name (§9 step 1, §12.3): proof of control at the head alone would
+leave an offline reader of a bundle, who asks no challenge, with the graft.
+
+**voluntary** — signed by the current identity key, countersigned by the next. `recovery_key` absent.
 **Constraint:** `next_genesis.recovery` MUST equal the current recovery commitment. A
 voluntary rotation that changes the commitment is **not a candidate** (§7.4): it is never
 followed, and its presence does not by itself reject the chain. This is what stops an
 attacker with a stolen key from installing their own recovery key.
 
-**recovery** — signed by the recovery key. `recovery_key` present; `SHA-256(raw key)` MUST
+**recovery** — signed by the recovery key, countersigned by the next identity key. `recovery_key` present; `SHA-256(raw key)` MUST
 equal the **current** recovery commitment (§7.2). `next_genesis` MAY carry a new commitment,
 or `null`, which retires recovery permanently: no later recovery rotation can validate.
 
@@ -491,11 +527,11 @@ operator can retire a recovery key, and an attacker never can.
 
 Each DID in the chain is rotated from at most once. At a node:
 1. Collect rotations whose `id` is this node.
-2. Among them, the **valid** recovery rotations (signature, commitment, `next` hash all
+2. Among them, the **valid** recovery rotations (signature, `sig_next`, commitment, `next` hash all
    check; §7.4 lists what disqualifies one): if any, take the one with the latest `iat` —
    the operator controls all of them. If two share that latest `iat` → **REJECT the
    chain**; that is operator error and the fix is to reissue.
-3. Otherwise, the **valid** voluntary rotations (signature, `next` hash, commitment
+3. Otherwise, the **valid** voluntary rotations (signature, `sig_next`, `next` hash, commitment
    unchanged); invalid ones are not counted: exactly one → follow it. **More than one →
    REJECT the chain.** A fork under a single key is a compromise signal; the remedy is a
    recovery rotation, not verifier guesswork. Two entries are two candidates even when
@@ -522,11 +558,12 @@ verify). Nothing in between.
 | Failure | Outcome |
 |---|---|
 | signature does not verify | not a candidate |
+| `sig_next` does not verify under `next_genesis.key` *(wire change of 2026-10-19)* | not a candidate |
 | `hash(next_genesis) ≠ next` | not a candidate |
 | voluntary, `next_genesis.recovery` ≠ current commitment | not a candidate |
 | recovery, `SHA-256(recovery_key)` ≠ current commitment (wrong or stale key) | not a candidate |
 | recovery while the current commitment is `null` | not a candidate |
-| body or `next_genesis` malformed, `sig` or `next_genesis` missing (§3.1) | REJECT (structure, §9 step 2) |
+| body or `next_genesis` malformed, `sig`, `sig_next` or `next_genesis` missing (§3.1) | REJECT (structure, §9 step 2) |
 | two valid voluntary rotations at one node | REJECT (fork) |
 | two valid recovery rotations sharing the latest `iat` | REJECT (tie) |
 | chosen `next` already in the chain | REJECT (cycle) |
@@ -536,7 +573,9 @@ discounting is for. Vectors: `negative.rotation_bad_sig`, `negative.recovery_key
 `negative.stale_recovery_key` and `negative.voluntary_changes_recovery` are all "not a
 candidate" cases and each states the chain that results.
 
-Reputation follows the chain: attestations to any prior DID apply to the current one. After
+Reputation follows the chain: attestations to any prior DID apply to the current one, before a
+recovery too (`recovery_new_did_binding_proven`): keeping them is what recovery is for. Payment
+does not: bindings by a DID before the most recent recovery are superseded (§6.1). After
 a recovery, the prior key was compromised for an unknown window. Verifiers SHOULD discount
 attestations to the compromised DID with `iat` near the recovery, and SHOULD treat an
 attestation issued to a DID *after* it was rotated away from as suspect. sigelo cannot
@@ -586,7 +625,8 @@ than reading a clock, so results are reproducible and testable.
    the chain; nothing else in the bundle may name the identity except by this hash. The
    algorithm takes no expected DID: a caller that has one (a login claim) compares it, in
    full, against `chain[0]` or `did` of the result, and treats a mismatch as a failed
-   claim. Vector `negative.genesis_tampered` is that comparison.
+   claim. Vector `negative.genesis_tampered` is that comparison. Matching `chain[0]` names the
+   chain; control of it is a §5.2 answer for `did`, the head, never for an earlier DID.
 2. **Structure.** A body is malformed if it has a non-integer number, a duplicate key, an
    unknown `v`, a missing required field, a top-level key outside its §3.1 row (or an envelope
    key outside its members, §3.1), a `typ` not
@@ -598,7 +638,8 @@ than reading a clock, so results are reproducible and testable.
    it in `rejected`, exactly as a bad signature would; the other items still verify. The presenter chose to
    include it, but an issuer wrote it; one world's bug must not sink its members' bundles.
 3. **Chain.** Apply §7.3 from the original genesis. Output: current DID, ordered chain of
-   DIDs, governing recovery commitment. Reject on fork, on cycle, or any structural failure.
+   DIDs, governing recovery commitment, and the position in the chain of the DID the most recent
+   chosen recovery rotation rotated into (0 if none). Reject on fork, on cycle, or any structural failure.
 4. **Issuers.** Hash each document in `bundle.issuers` to its DID. Add to the set of known
    issuer genesis documents; a locally known genesis for the same DID is kept in
    preference to the presented one (they are identical if both are honest).
@@ -607,7 +648,8 @@ than reading a clock, so results are reproducible and testable.
    individually — one bad attestation does not sink a bundle.
 6. **Bindings.** Verify `sig_id` against the identity key of the DID in `id` (must be ∈
    chain). Check `iat ≤ now < exp`. Verify `sig_addr` if present, per method. Tag proof
-   status per §6.1. Discard failures individually.
+   status per §6.1; then `superseded` if `id` is earlier in the chain than the position of step 3 *(wire change of 2026-10-19)*;
+   a `proven` `monero` entry also names its `network` (§6.2). Discard failures individually.
 7. **Return** the result below. No scores. No ranking. Weighting is the caller's job.
 
 ### 9.1 Result
@@ -618,20 +660,23 @@ than reading a clock, so results are reproducible and testable.
   "chain": [ "did:sigelo:<original>", …, "did:sigelo:<current>" ],
   "recovery": "sha256:…",
   "attestations": { "did:sigelo:<iss>": [ { …attestation body… }, … ] },
-  "bindings": [ { "body": { …binding body… }, "proof": "proven" } ],
+  "bindings": [ { "body": { …binding body… }, "proof": "proven" },
+                { "body": { …a monero binding… }, "proof": "proven", "network": "stagenet" } ],
   "rejected": { "attestations": 2, "bindings": 0 }
 }
 ```
 
-`attestations` holds accepted attestation bodies verbatim, grouped by `iss`, in bundle
+`bindings` holds accepted bodies with their proof status, in bundle order, and `network` on a
+`proven` `monero` entry only. `attestations` holds accepted attestation bodies verbatim, grouped by `iss`, in bundle
 order within each issuer. The same attestation presented twice is accepted twice and listed
 twice: a verifier does not deduplicate here any more than it does rotations (§7.3) — every
 copy verifies, and it reports what was presented — so a caller that counts attestations counts
 distinct ones. Key order of that object is informative only; conformance is
-compared by value, and an implementation whose objects are unordered is conformant. `bindings` holds accepted bodies with their proof status, in bundle order.
+compared by value, and an implementation whose objects are unordered is conformant.
 `recovery` is the governing commitment, `null` if the identity has none. `rejected` counts
 what steps 2, 5 and 6 discarded. Implementations MAY attach per-item reasons alongside;
-the fields above are the conformance surface (vector `bundle`, compared as JSON).
+the fields above are the conformance surface, `network` included (vectors `bundle`,
+`bundle_recovered`, compared as JSON).
 
 ---
 
@@ -645,7 +690,8 @@ expected §9.1 result at a fixed `now`. Negative cases include missing domain pr
 mismatch, stale recovery key, voluntary rotation changing the commitment, a fork, a cycle,
 a duplicate key, an integer outside ±2^53−1, an unknown top-level field, and a rotation with a
 bad signature. `invoice` and `challenge` are the two signed objects that never enter a bundle. A second bundle, `bundle_minimal`, is the smallest thing that verifies: one
-genesis with `recovery: null`, four empty arrays.
+genesis with `recovery: null`, four empty arrays. A third, `bundle_recovered`, is the stolen key
+after a recovery: its bindings superseded, a voluntary rotation's not, `network` reported.
 
 Conformant = every positive vector reproduced byte-for-byte, every vector carrying a `bundle`
 and `expect` reproduced as a §9.1 result compared by value, every negative rejected for the stated reason. The `rotation_recovery`
@@ -700,7 +746,8 @@ if it is in the result's `chain`, to the `key` of the genesis of the current DID
 
 `<key>` is that genesis `key` verbatim (`z6Mk…`: multicodec `0xed01` + 32 bytes, §2, the
 encoding `Multikey` and `Ed25519VerificationKey2020` share). Metadata: `canonicalId` =
-`chain[0]`, `equivalentId` = the rest of `chain`. `authentication` is §5.2 proof of control.
+`chain[0]`, `equivalentId` = the rest of `chain`; every DID after `chain[0]` countersigned its
+entry (§7), so no chain names a `chain[0]` its later keys did not join. `authentication` is §5.2 proof of control.
 Not applicable: `controller` (self), `alsoKnownAs`, `assertionMethod` (attestations carry
 their own signatures, §5), `keyAgreement` (no encryption, §11), `capabilityInvocation`,
 `capabilityDelegation`, `service` (no discovery, §11). The recovery key is never a
@@ -710,7 +757,7 @@ verification method; until used it is a hash (§4). A bundle that does not verif
 ### 12.4 Update
 
 Update is rotation (§7), and it changes the DID: the chain moves to `next`, and every earlier
-DID of the chain resolves to the new key. **Voluntary:** signed by the current key, commitment
+DID of the chain resolves to the new key. Every rotation is countersigned by the next key (§7). **Voluntary:** signed by the current key, commitment
 carried forward. **Recovery:** signed by the recovery key, which must hash to the governing
 commitment (§7.2); it may install a new commitment or `null`. **Precedence** (§7.1): at any
 node a valid recovery rotation supersedes any voluntary one, regardless of `iat`; two valid

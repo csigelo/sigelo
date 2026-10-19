@@ -25,7 +25,7 @@ import { dirname, join, relative } from 'node:path';
 const DIST = process.env.SIM_TS_DIST ? pathToFileURL(process.env.SIM_TS_DIST.replace(/\/?$/, '/')) : new URL('../ts/dist/', import.meta.url);
 const S = await import(new URL('sigelo.js', DIST).href);
 const { k: kdf, agentIdentitySeed, keeperRoot, walletFromRoot, recoverySeed, recoveryPublicKey, recoveryCommitment } = await import(new URL('keys.js', DIST).href);
-const { subaddress, sigeloMoneroSigAddr, decodeAddress, encodeAddress } = await import(new URL('monero.js', DIST).href);
+const { subaddress, sigeloMoneroSigAddr, decodeAddress, encodeAddress, keysFromSpend, scReduce32, hashToScalar, signMessageHash, moneroBase58Encode } = await import(new URL('monero.js', DIST).href);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -157,7 +157,7 @@ function simulateAgent(i, cfg, env) {
   const A = {
     g0: g0id.genesis, pubRotations: [], pubChain: [g0id.did], pubCommit: g0id.genesis.recovery,
     fatal: null, owner: g0id.did, thief: null, clean: true,
-    atts: [], thiefAtts: [], bindings: [], worlds: new Set(), sub: 0,
+    atts: [], thiefAtts: [], bindings: [], worlds: new Set(), sub: 0, pubRecovered: [],
   };
   const wallet = walletFromRoot(simRoot, `counterparty/${i}`, 'stagenet');
   const view = wallet.viewOnly();
@@ -190,7 +190,7 @@ function simulateAgent(i, cfg, env) {
     const bindings = A.bindings.map((b) => ({ ...b, env: clone(b.env), bad: false }));
     const iss = [...new Set(atts.map((a) => a.iss))];
     return { genesis: clone(A.g0), rotations: A.pubRotations.map(clone), atts, bindings, issuers: iss.map((d) => clone(known[d])),
-      chain: [...A.pubChain], recovery: A.pubCommit, fatal: A.fatal, textMut: undefined, bundleMut: undefined };
+      chain: [...A.pubChain], recovery: A.pubCommit, recovered: [...A.pubRecovered], fatal: A.fatal, textMut: undefined, bundleMut: undefined };
   }
   const bundleOf = (p) => {
     const b = { v: S.VERSION, typ: 'bundle', genesis: p.genesis, rotations: p.rotations, bindings: p.bindings.map((x) => x.env),
@@ -209,7 +209,11 @@ function simulateAgent(i, cfg, env) {
     const bindings = [];
     for (const b of p.bindings) {
       const ok = !b.bad && p.chain.includes(b.id) && b.iat <= now && now < b.exp && b.proof !== 'bad';
-      if (ok) bindings.push({ body: b.env.body, proof: b.proof }); else rb++;
+      // SPEC §6.1: a binding by a DID before the most recent recovery is superseded; a proven
+      // monero one names its network (§6.2).
+      if (!ok) rb++;
+      else if (p.chain.indexOf(b.id) < Math.max(0, ...p.recovered.map((d) => p.chain.indexOf(d)))) bindings.push({ body: b.env.body, proof: 'superseded' });
+      else bindings.push({ body: b.env.body, proof: b.proof, ...(b.proof === 'proven' && { network: netOf(b.env.body.addr) }) });
     }
     return { did: p.chain[p.chain.length - 1], chain: p.chain, recovery: p.recovery, attestations, bindings, rejected: { attestations: ra, bindings: rb } };
   }
@@ -301,7 +305,7 @@ function simulateAgent(i, cfg, env) {
     if (style === 'valid') {
       const nid = mkGenesis(tseed, A.pubCommit, now);
       nodes.set(nid.did, { genesis: nid.genesis, secret: nid.secret });
-      publish(S.rotate({ genesis, next_genesis: nid.genesis, iat: now, reason: 'voluntary', secret }), 'thief');
+      publish(S.rotate({ genesis, next_genesis: nid.genesis, iat: now, reason: 'voluntary', secret, next_secret: nid.secret }), 'thief');
       A.pubChain.push(nid.did);
       A.thief = { at: X, tail: nid.did, n: 0 };
     } else if (style === 'swap-commitment') {
@@ -310,7 +314,7 @@ function simulateAgent(i, cfg, env) {
       const nid = mkGenesis(tseed, recoveryCommitment(kdf(tseed, 'rec')), now);
       nodes.set(nid.did, { genesis: nid.genesis, secret: nid.secret });
       const body = { v: S.VERSION, typ: 'rotation', id: X, next: nid.did, iat: now, reason: 'voluntary' };
-      publish({ body, sig: S.sign(secret, body), next_genesis: nid.genesis }, 'thief');
+      publish({ body, sig: S.sign(secret, body), sig_next: S.sign(nid.secret, body), next_genesis: nid.genesis }, 'thief');
       A.thief = null; // its rotation leads nowhere
     } else {
       // A recovery signed with a key that does not hash to the commitment: not a candidate.
@@ -318,7 +322,7 @@ function simulateAgent(i, cfg, env) {
       const nid = mkGenesis(tseed, recoveryCommitment(kdf(tseed, 'rec')), now);
       nodes.set(nid.did, { genesis: nid.genesis, secret: nid.secret });
       const body = { v: S.VERSION, typ: 'rotation', id: X, next: nid.did, iat: now + 5, reason: 'recovery', recovery_key: recoveryPublicKey(kdf(tseed, 'rec')) };
-      publish({ body, sig: S.sign(rs, body), next_genesis: nid.genesis }, 'thief');
+      publish({ body, sig: S.sign(rs, body), sig_next: S.sign(nid.secret, body), next_genesis: nid.genesis }, 'thief');
       A.thief = null;
     }
     // The thief presents the stolen identity to a world straight away.
@@ -329,7 +333,7 @@ function simulateAgent(i, cfg, env) {
     const X = A.owner;
     const cur = nodes.get(X);
     const nid = nextOwnerGenesis(now, A.pubCommit === null ? null : nodes.get(X).genesis.recovery);
-    publish(S.rotate({ genesis: cur.genesis, next_genesis: nid.genesis, iat: now, reason: 'voluntary', secret: cur.secret }), 'link');
+    publish(S.rotate({ genesis: cur.genesis, next_genesis: nid.genesis, iat: now, reason: 'voluntary', secret: cur.secret, next_secret: nid.secret }), 'link');
     A.owner = nid.did;
     if (A.thief && A.thief.at === X && A.fatal === null) {
       // Two valid voluntary rotations from X: the key was stolen. Every verifier must reject.
@@ -352,14 +356,15 @@ function simulateAgent(i, cfg, env) {
     // "Regardless of iat": half the time the recovery claims to be older than everything.
     const iat = rng.chance(0.5) ? T0 - (1 + rng.int(300)) * DAY : now;
     const from = nodes.get(X).genesis;
-    publish(S.rotate({ genesis: from, next_genesis: nid.genesis, iat, reason: 'recovery', secret: recoverySeed(rec) }), 'recovery');
+    publish(S.rotate({ genesis: from, next_genesis: nid.genesis, iat, reason: 'recovery', secret: recoverySeed(rec), next_secret: nid.secret }), 'recovery');
     if (rng.chance(0.15)) {
       // The operator also published an earlier recovery at X (lower iat): the latest one wins.
       const alt = mkGenesis(kdf(simRoot, `sim/agent/${i}/alt/${r}`), newCommit, now);
-      publish(S.rotate({ genesis: from, next_genesis: alt.genesis, iat: iat - 1 - rng.int(1000), reason: 'recovery', secret: recoverySeed(rec) }), 'recovery');
+      publish(S.rotate({ genesis: from, next_genesis: alt.genesis, iat: iat - 1 - rng.int(1000), reason: 'recovery', secret: recoverySeed(rec), next_secret: alt.secret }), 'recovery');
       count('recovery:with-older-sibling');
     }
     A.pubChain = [...A.pubChain.slice(0, A.pubChain.indexOf(X) + 1), nid.did];
+    A.pubRecovered.push(nid.did);
     A.pubCommit = newCommit;
     A.fatal = null; A.thief = null; A.owner = nid.did;
     count(`recovery:${change ? 'new-commitment' : 'same-commitment'}${iat < T0 ? ':backdated' : ''}`);
@@ -422,10 +427,10 @@ function simulateAgent(i, cfg, env) {
       ['att-exponent', nA ? 1 : 0], ['att-unknown-v', nA ? 2 : 0], ['att-lone-surrogate', nA ? 1 : 0], ['att-missing-sig', nA ? 1 : 0],
       ['att-unknown-field', nA ? 1 : 0], ['att-issuer-omitted', nA ? 2 : 0], ['challenge-as-attestation', 2], ['att-null', 1],
       ['bind-addr-swapped', nB ? 2 : 0], ['bind-unproven', nB ? 1 : 0], ['bind-garbage-proof', nB ? 1 : 0],
-      ['bind-integrated', ownerIsTail() ? 1 : 0], ['bind-mainnet', ownerIsTail() ? 1 : 0], ['bind-subaddr-view-signed', ownerIsTail() ? 1 : 0],
+      ['bind-integrated', ownerIsTail() ? 1 : 0], ['bind-small-order-key', ownerIsTail() ? 1 : 0], ['bind-mainnet', ownerIsTail() ? 1 : 0], ['bind-subaddr-view-signed', ownerIsTail() ? 1 : 0],
       ['dup-key-top', 2], ['dup-key-att', nA ? 1 : 0], ['proto-key', nA ? 1 : 0], ['invalid-utf8', 1], ['genesis-wrong-typ', 1], ['genesis-float', 1],
       ['rotation-float-iat', nR ? 1 : 0], ['rotation-unknown-v', nR ? 1 : 0], ['rotation-missing-next-genesis', nR ? 1 : 0],
-      ['rotation-missing-sig', nR ? 1 : 0], ['rotation-typ-attestation', nR ? 1 : 0], ['issuer-malformed', p.issuers.length ? 1 : 0],
+      ['rotation-missing-sig', nR ? 1 : 0], ['rotation-missing-sig-next', nR ? 1 : 0], ['rotation-bad-sig-next', p.fatal ? 0 : 1], ['rotation-typ-attestation', nR ? 1 : 0], ['issuer-malformed', p.issuers.length ? 1 : 0],
       ['bundle-unknown-field', 1], ['bundle-unknown-v', 1], ['cycle', p.fatal || p.chain.length < 2 ? 0 : 2], ['recovery-tie', !p.fatal && A.pubCommit ? 2 : 0],
       ['recovery-low-iat', !p.fatal && A.pubCommit ? 1 : 0], ['rotation-bad-sig', p.fatal ? 0 : 2], ['rotation-next-mismatch', p.fatal ? 0 : 1],
       ['voluntary-changes-commitment', p.fatal ? 0 : 2], ['stale-recovery-key', !p.fatal && recGen > 0 ? 2 : 0],
@@ -436,9 +441,10 @@ function simulateAgent(i, cfg, env) {
     const X = p.fatal ? null : p.chain[p.chain.length - 1];
     const tailNode = X && nodes.get(X);
     const fatal = (cls) => { p.fatal = cls; };
-    const rot = (from, next, iat, reason, secret, extra = {}) => {
+    // §7: the next key countersigns (`sig_next`); `nextSecret` is that key's seed.
+    const rot = (from, next, iat, reason, secret, nextSecret, extra = {}) => {
       const body = { v: S.VERSION, typ: 'rotation', id: S.did(from), next: S.did(next), iat, reason, ...extra };
-      return { body, sig: S.sign(secret, body), next_genesis: next };
+      return { body, sig: S.sign(secret, body), sig_next: S.sign(nextSecret, body), next_genesis: next };
     };
     const fresh = (tag, rec) => mkGenesis(kdf(simRoot, `sim/tamper/${i}/${r}/${tag}`), rec, now);
     switch (v) {
@@ -473,6 +479,17 @@ function simulateAgent(i, cfg, env) {
         p.bindings.push({ env: { body, sig_id: S.sign(tailNode.secret, body), sig_addr }, id: X, iat: now, exp: now + DAY, bad: false, proof: v === 'bind-mainnet' ? 'proven' : 'bad' });
         break;
       }
+      case 'bind-small-order-key': {
+        // §6.2: a spend key that is the identity makes c·P = 0, so a spend-mode SigV2 needs no
+        // secret: pick r, R = r·G (keysFromSpend's B), c = H_s(h || P || R). Discarded, never proven.
+        const I = Uint8Array.from({ length: 32 }, (_, j) => (j === 0 ? 1 : 0)), rs = rng.bytes(32);
+        const addr = encodeAddress({ net: 'stagenet', kind: 'standard', spend: I, view: viewPub });
+        const body = { v: S.VERSION, typ: 'binding', id: X, method: 'monero', addr, iat: now, exp: now + DAY, nonce: S.multibase(rng.bytes(16)) };
+        const h = signMessageHash({ spendPub: I, viewPub, mode: 'spend', data: new TextEncoder().encode('sigelo\n' + S.canonicalize(body)) });
+        const sig_addr = 'SigV2' + moneroBase58Encode(Uint8Array.from([...hashToScalar(h, I, keysFromSpend(rs).B), ...scReduce32(rs)]));
+        p.bindings.push({ env: { body, sig_id: S.sign(tailNode.secret, body), sig_addr }, id: X, iat: now, exp: now + DAY, bad: false, proof: 'bad' });
+        break;
+      }
       case 'dup-key-top': p.textMut = (t) => t.replace('"typ":"bundle"', '"typ":"bundle","typ":"bundle"'); fatal('parse'); break;
       case 'dup-key-att': p.textMut = (t) => t.replace(/"ctx":"world-/, '"ctx":"dup","ctx":"world-'); fatal('parse'); break;
       case 'proto-key': p.textMut = (t) => t.replace('"claims":{', '"claims":{"__proto__":{},'); fatal('parse'); break;
@@ -494,25 +511,28 @@ function simulateAgent(i, cfg, env) {
         // only if that genesis carries the governing commitment; then it is a cycle (fatal).
         const target = p.chain.slice(0, -1).map((d) => nodes.get(d).genesis).filter((g) => g.recovery === p.recovery);
         const g = target.length ? rng.pick(target) : nodes.get(p.chain[0]).genesis;
-        p.rotations.push(rot(tailNode.genesis, g, now, 'voluntary', tailNode.secret));
+        p.rotations.push(rot(tailNode.genesis, g, now, 'voluntary', tailNode.secret, nodes.get(S.did(g)).secret));
         if (target.length) fatal('cycle');
         break;
       }
       case 'recovery-tie': {
         const a = fresh('tie-a', p.recovery), b = fresh('tie-b', p.recovery);
         const rk = recoveryPublicKey(recRoot(recGen)), rs = recoverySeed(recRoot(recGen));
-        p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'recovery', rs, { recovery_key: rk }), rot(tailNode.genesis, b.genesis, now, 'recovery', rs, { recovery_key: rk }));
+        p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'recovery', rs, a.secret, { recovery_key: rk }), rot(tailNode.genesis, b.genesis, now, 'recovery', rs, b.secret, { recovery_key: rk }));
         fatal('tie'); break;
       }
       case 'recovery-low-iat': {
         const a = fresh('low', p.recovery);
-        p.rotations.push(rot(tailNode.genesis, a.genesis, 1, 'recovery', recoverySeed(recRoot(recGen)), { recovery_key: recoveryPublicKey(recRoot(recGen)) }));
-        p.chain = [...p.chain, a.did]; break;
+        p.rotations.push(rot(tailNode.genesis, a.genesis, 1, 'recovery', recoverySeed(recRoot(recGen)), a.secret, { recovery_key: recoveryPublicKey(recRoot(recGen)) }));
+        p.chain = [...p.chain, a.did]; p.recovered.push(a.did); break;
       }
-      case 'rotation-bad-sig': { const a = fresh('badsig', p.recovery); p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'voluntary', a.secret)); break; }
-      case 'rotation-next-mismatch': { const a = fresh('nm-a', p.recovery), b = fresh('nm-b', p.recovery); const x = rot(tailNode.genesis, a.genesis, now, 'voluntary', tailNode.secret); x.next_genesis = b.genesis; p.rotations.push(x); break; }
-      case 'voluntary-changes-commitment': { const a = fresh('vcc', recoveryCommitment(kdf(simRoot, `sim/tamper/${i}/${r}/x`))); p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'voluntary', tailNode.secret)); break; }
-      case 'stale-recovery-key': { const a = fresh('stale', p.recovery); p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'recovery', recoverySeed(recRoot(recGen - 1)), { recovery_key: recoveryPublicKey(recRoot(recGen - 1)) })); break; }
+      case 'rotation-bad-sig': { const a = fresh('badsig', p.recovery); p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'voluntary', a.secret, a.secret)); break; }
+      // §7 sig_next: a valid rotation the next key did not countersign is not a candidate.
+      case 'rotation-bad-sig-next': { const a = fresh('badnext', p.recovery); p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'voluntary', tailNode.secret, tailNode.secret)); break; }
+      case 'rotation-missing-sig-next': delete p.rotations[ri].sig_next; fatal('structure'); break;
+      case 'rotation-next-mismatch': { const a = fresh('nm-a', p.recovery), b = fresh('nm-b', p.recovery); const x = rot(tailNode.genesis, a.genesis, now, 'voluntary', tailNode.secret, a.secret); x.next_genesis = b.genesis; p.rotations.push(x); break; }
+      case 'voluntary-changes-commitment': { const a = fresh('vcc', recoveryCommitment(kdf(simRoot, `sim/tamper/${i}/${r}/x`))); p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'voluntary', tailNode.secret, a.secret)); break; }
+      case 'stale-recovery-key': { const a = fresh('stale', p.recovery); p.rotations.push(rot(tailNode.genesis, a.genesis, now, 'recovery', recoverySeed(recRoot(recGen - 1)), a.secret, { recovery_key: recoveryPublicKey(recRoot(recGen - 1)) })); break; }
       case 'rotation-mutated': {
         // A clean chain has exactly one rotation per node, so breaking one signature ends the
         // chain at its `id`: later DIDs, and whatever was issued to them, fall away.
@@ -612,7 +632,7 @@ function simulateAgent(i, cfg, env) {
         const cur = nodes.get(A.thief.tail);
         const nid = mkGenesis(kdf(simRoot, `sim/thief/${i}/${r}/x`), A.pubCommit, now);
         nodes.set(nid.did, { genesis: nid.genesis, secret: nid.secret });
-        publish(S.rotate({ genesis: cur.genesis, next_genesis: nid.genesis, iat: now, reason: 'voluntary', secret: cur.secret }), 'thief');
+        publish(S.rotate({ genesis: cur.genesis, next_genesis: nid.genesis, iat: now, reason: 'voluntary', secret: cur.secret, next_secret: nid.secret }), 'thief');
         A.pubChain.push(nid.did); A.thief.tail = nid.did; count('thief:extend');
       }
     }

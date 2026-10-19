@@ -54,14 +54,14 @@ throws(() => verifyPresentation(pres(a, { ...bundleOf([], [self]), issuers: [a.g
 
 // 4. rotation: the client_id stays, the new key answers
 const b = keygen({ recovery: rec.key, seed: seed(3), created: C, nonce: seed(4) });
-const vol = rotate({ genesis: a.genesis, next_genesis: b.genesis, iat: NOW - 100, reason: 'voluntary', secret: a.secret });
+const vol = rotate({ genesis: a.genesis, next_genesis: b.genesis, iat: NOW - 100, reason: 'voluntary', secret: a.secret, next_secret: b.secret });
 const vr = verifyPresentation(pres(b, bundleOf([vol])), { ...at, known: [a.did] });
 ok(vr.client_id === a.did && vr.did === b.did && vr.operators.length === 1, 'a rotated agent verifies under the same client_id, the attestation follows the chain');
 throws(() => pres(a, bundleOf([vol])), /not the bundle's current DID/, 'after rotation: present refuses the old key');
 
 // 5. theft, then recovery: the owner rotates A → R with the offline recovery key
 const r = keygen({ recovery: rec.key, seed: seed(5), created: C, nonce: seed(6) });
-const recv = rotate({ genesis: a.genesis, next_genesis: r.genesis, iat: NOW - 200, reason: 'recovery', secret: rec.secret });
+const recv = rotate({ genesis: a.genesis, next_genesis: r.genesis, iat: NOW - 200, reason: 'recovery', secret: rec.secret, next_secret: r.secret });
 const recovered = verifyPresentation(pres(r, bundleOf([recv])), { ...at, known: [a.did] });
 ok(recovered.client_id === a.did && recovered.did === r.did, 'recovered: same client_id, the new key answers');
 // what a thief sends without present()'s own check: any bundle, a proof signed with a key it holds

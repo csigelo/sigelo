@@ -49,13 +49,14 @@ code that does. Mitigations: deploy only the public export; `deploy.sh` stops on
 other than what it staged. A thief of it can only mint false "seen" attestations until
 rotation. The recovery key stays offline with the Owner.
 
-Rotation, from the repository root:
+Rotation:
 
-1. Owner: `node world/server.mjs recovery-key new-recovery.key` → prints the new commitment.
+1. Owner: `node world/server.mjs recovery-key new-recovery.key` → the new commitment.
 2. VPS (root): stop the unit, move `issuer.json` aside, `server-setup.sh --world <new commitment>`.
 3. Owner: `node world/server.mjs rotate world/rotations.json world/genesis.json new-genesis.json world-recovery.key > r.json` (OLD recovery key).
-4. `mv r.json world/rotations.json`, new genesis → `world/genesis.json`, `new-recovery.key` → `world-recovery.key`; commit, deploy.
-5. Verifiers do not walk issuer chains (SPEC §5): announce the new DID; holders re-attest.
+4. VPS: `node world/server.mjs countersign r.json <issuer.json> > world/rotations.json` (SPEC §7).
+5. New genesis → `world/genesis.json`, `new-recovery.key` → `world-recovery.key`; deploy.
+6. Verifiers do not walk issuer chains (SPEC §5): announce the new DID; holders re-attest.
 
 ## Conformance (self-reported)
 

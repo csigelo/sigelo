@@ -3,6 +3,33 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## unreleased
+
+- wire: a binding whose `id` precedes the last recovery in the chain is `superseded`, never paid; positional, not by `iat`
+  (SPEC §6.1, vector `bundle_recovered`). Review 2026-10-19, HIGH 1.
+- wire: a payer accepts an invoice only from the chain's current DID (SPEC §6.3).
+- wire: every rotation carries `sig_next`, the next key's countersignature; missing is fatal, wrong is not a candidate
+  (SPEC §7, vector `graft_voluntary_into_foreign_genesis`). Review 2026-10-19, MEDIUM 1. `rotate()` takes `next_secret`.
+- wire: Monero address keys of small order make a binding `discarded` (SPEC §6.2, vector `monero_view_key_small_order`).
+- wire: a `proven` monero binding reports `network`; `verify` does not refuse it (SPEC §6.2, §9.1).
+- Published issuer chains without `sig_next` need `node world/server.mjs countersign` by the issuer key before new
+  verifiers accept them; the earliest `sigelo/0` freeze moves to 2026-11-19 (VERSIONING §1).
+- **contact/enrol:** the worker identity goes only to the DID that paired through the code (`carrier.answeredBy`);
+  a contact that learnt the code's secret could prove it over its own pairing and take the worker's key.
+- **contact/enrol:** new refusals `enrol_unpaired`, `enrol_from`; the inviter's `paired` event names the code's nonce
+  (`invite`). External review 2026-10-19, HIGH 2.
+- **Low-trust own agents:** `enrol --tier friend|quiet` sets the trust at enrolment (kept by a restore);
+  `contacts`, `sigelo_contacts` and the page show `ours` beside `tier`: yours by key, its messages wait in the inbox.
+- **Keeper, logins off the command line:** RPC and daemon logins go into a 0600 `wallet-rpc.conf` (`--config-file`);
+  `doctor` fails a login on `ExecStart` or a config file not 0600. Review 2026-10-19, HIGH 3.
+- **Keeper, RPC login works:** wallet-rpc's digest nonce holds for one connection and the retry opened another,
+  so a wallet-rpc with an RPC login always answered 401. One kept-alive socket per call.
+- **Keeper, choosing a daemon:** `https://` → `--daemon-ssl enabled` (`--daemon-ssl-fingerprint` pins); `--daemon-proxy`
+  for Tor (`.onion` without one refused); `--daemon-login-file` (0600). README "Choosing a daemon".
+- **Keeper, doctor:** `--trusted-daemon` on loopback only; warns when own and public nodes mix in the fallback list;
+  refuses onion with clearnet; checks the daemon port against the network.
+- **Recovery kit:** `clean_host.proxy` / `daemon_ssl`; the runbook says own node or Tor for a restore.
+
 ## v0.1.8 — 2026-10-18
 
 - **Transport default `auto`:** 8883 for 5 s, then MQTT over WebSocket on 443, so an HTTPS-only network needs
