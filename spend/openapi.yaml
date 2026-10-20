@@ -32,7 +32,7 @@ info:
     relay_failed`: the money may have moved; never retry) · 503 the keeper's clock is behind the
     newest line it signed, or before its build's floor (`clock_behind`, every route that signs:
     nothing was signed, logged or sent; try later), or (`busy`, with `Retry-After: 1`) more
-    than 32 requests already wait in the one-at-a-time lane (`/pay`, `/delegate`, `/fund`,
+    than 64 requests already wait in the one-at-a-time lane (`/pay`, `/delegate`, `/fund`,
     `/revoke`, `/approve`; at most 4 of them `/approve`): nothing was done, try again in seconds.
 
     **Who may call (every route, before any token or body).** The `Host` header must be

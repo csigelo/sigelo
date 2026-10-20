@@ -71,8 +71,11 @@ export interface ServeOptions {
  * keeper) gets this far, so the lane fills only through an agent's own traffic; past the bound
  * the keeper answers `503 busy` with `Retry-After` instead of queueing without end. Token-less
  * /approve posts (the approver holds no token) get `APPROVE_MAX` of the lane at most.
+ * 64: one request in flight for each agent of a 50-agent pool, and room for approvals and
+ * retries (32 refused the nightly swarm's honest load, 2026-10-20). A waiting request holds its
+ * body (≤ BODY_MAX, a token holder's), so the lane's memory stays bounded.
  */
-export const LANE_MAX = 32;
+export const LANE_MAX = 64;
 export const APPROVE_MAX = 4;
 /** The Host names a loopback client sends; anything else is a page whose name was pointed at 127.0.0.1 (DNS rebinding). */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);

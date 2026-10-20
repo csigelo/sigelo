@@ -193,8 +193,39 @@ async function stopKeeper(signal) {
   await new Promise((r) => { p.once('exit', r); p.kill(signal); });
 }
 
-/** One HTTP call. status 0 = no answer: refused (keeper down, nothing sent), reset, timeout, abort. */
-async function call(path, { method = 'GET', token, body, rawBody, timeoutMs = 60_000, abortAfter } = {}) {
+// The keeper's one-at-a-time lane (spend/service.ts LANE_MAX): past its bound the keeper answers
+// 503 busy with Retry-After, nothing done. A real client waits Retry-After and sends the same
+// request again; so does this one, up to BUSY_TRIES sends or BUSY_MS, then the busy answer stands
+// (and is a finding: no flow allows it).
+const BUSY_TRIES = 10, BUSY_MS = 30_000;
+const LANE_ROUTES = new Set(['/pay', '/approve', '/delegate', '/fund', '/revoke']);
+const busy = { retries: 0, requests: 0, gaveUp: 0, maxTries: 0, byPath: {} };
+let inFlight = 0, inFlightPeak = 0;
+/** One HTTP call, riding out 503 busy (see BUSY_TRIES). */
+async function call(path, o = {}) {
+  const lanePost = (o.method ?? 'GET') === 'POST' && LANE_ROUTES.has(path);
+  if (lanePost) { inFlight++; inFlightPeak = Math.max(inFlightPeak, inFlight); }
+  try {
+    const t0 = Date.now();
+    for (let n = 1; ; n++) {
+      const r = await call1(path, o);
+      if (!(r.status === 503 && r.body?.code === 'busy')) {
+        if (n > 1) { busy.requests++; busy.maxTries = Math.max(busy.maxTries, n); }
+        return r;
+      }
+      const wait = 1000 * Math.max(0, Number(r.retryAfter ?? 1) || 1);
+      if (n >= BUSY_TRIES || Date.now() - t0 + wait > BUSY_MS) {
+        busy.requests++; busy.gaveUp++; busy.maxTries = Math.max(busy.maxTries, n);
+        finding(`busy past the bound: ${path} still 503 busy after ${n} sends in ${Date.now() - t0} ms`, { path, body: o.body });
+        return r;
+      }
+      busy.retries++; busy.byPath[path] = (busy.byPath[path] ?? 0) + 1;
+      await sleep(wait);
+    }
+  } finally { if (lanePost) inFlight--; }
+}
+/** One HTTP send. status 0 = no answer: refused (keeper down, nothing sent), reset, timeout, abort. */
+async function call1(path, { method = 'GET', token, body, rawBody, timeoutMs = 60_000, abortAfter } = {}) {
   const signals = [AbortSignal.timeout(timeoutMs)];
   if (abortAfter !== undefined) signals.push(AbortSignal.timeout(abortAfter));
   const t = Date.now();
@@ -206,7 +237,7 @@ async function call(path, { method = 'GET', token, body, rawBody, timeoutMs = 60
     });
     const text = await r.text();
     let j; try { j = JSON.parse(text); } catch { j = { nonjson: text.slice(0, 200) }; }
-    return { status: r.status, body: j, ms: Date.now() - t };
+    return { status: r.status, body: j, ms: Date.now() - t, retryAfter: r.headers.get('retry-after') ?? undefined };
   } catch (e) {
     const code = e?.cause?.code;
     const why = code === 'ECONNREFUSED' ? 'refused' : e?.name === 'TimeoutError' || e?.name === 'AbortError'
@@ -485,7 +516,7 @@ async function runFlow(f) {
       let got = '';
       let closed = false;
       s.on('data', (x) => { got += x; }); s.on('error', () => {}); s.on('close', () => { closed = true; });
-      s.write(`POST /pay HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ${tok}\r\nContent-Type: application/json\r\nContent-Length: 500\r\n\r\n{"to":`);
+      s.write(`POST /pay HTTP/1.1\r\nHost: 127.0.0.1:${KPORT}\r\nAuthorization: Bearer ${tok}\r\nContent-Type: application/json\r\nContent-Length: 500\r\n\r\n{"to":`);
       const during = await pay(probe.token, { to: { label: 'v0' }, amount: '1000', purpose: purpose + ' during', ref: ref + '-probe' });
       record(f, 'pay_during_half_body', during, ['200:', '502:wallet', '502:relay_failed']);
       const t0 = Date.now();
@@ -733,6 +764,7 @@ const summary = {
   sim: 'keeper-swarm', seed: SEED, plan_hash: planHash, agents: K, flows: FLOWS, concurrency: CONC, chaos: CHAOS,
   events: events.length, mismatches: events.filter((e) => !e.ok).length, by_kind: byKind, outcomes: counts,
   licence: { tier: licence.status.tier, seats: licence.status.seats, vendor: process.env.SIGELO_VENDOR_DID },
+  busy: { ...busy, lane_posts_in_flight_peak: inFlightPeak, bound: { tries: BUSY_TRIES, ms: BUSY_MS } },
   keeper: { starts: keeper.starts, kills: keeper.kills, did: keeperDid, crash_retries: crashRetries, approvals_expired_under_load: expiredUnderLoad, half_body_answer_ms: halfBodyMs, stderr_tail: keeper.stderr.slice(-1500) },
   wallet: { relayed: wallet.moved.length, sweeps, injected: wallet.injected, calls: Object.fromEntries(wallet.calls) },
   log: { lines: rawLines.length, tree_lines: tree.length, uncertain_but_moved: uncertainMoved, uncertain_stayed_home: uncertainHome, intent_only: intentOnly },
@@ -742,7 +774,7 @@ const summary = {
 };
 mkdirSync(join(HERE, 'out'), { recursive: true });
 writeFileSync(join(HERE, 'out', 'keeper-summary.json'), JSON.stringify(summary, null, 2) + '\n');
-console.error(`keeper-swarm: seed ${SEED} plan ${planHash} · ${K} agents · ${FLOWS} flows · ${events.length} events · ${wallet.moved.length} relayed · ${keeper.starts} keeper starts · ${findings.length} findings · ${Math.round((Date.now() - T0) / 1000)} s`);
+console.error(`keeper-swarm: seed ${SEED} plan ${planHash} · ${K} agents · ${FLOWS} flows · ${events.length} events · ${wallet.moved.length} relayed · ${keeper.starts} keeper starts · ${busy.retries} busy retries (${busy.requests} requests, peak ${inFlightPeak} lane posts in flight) · ${findings.length} findings · ${Math.round((Date.now() - T0) / 1000)} s`);
 for (const f of findings.slice(0, 30)) console.error(`FINDING ${f.what} ${f.detail}`);
 console.log(JSON.stringify(summary));
 process.exit(findings.length === 0 ? 0 : 1);

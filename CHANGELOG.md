@@ -3,6 +3,15 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## unreleased
+
+- **Keeper:** the one-at-a-time lane holds 64 requests, up from 32: 32 refused an honest 50-agent pool (one request each);
+  `/approve` stays at 4, `503 busy` keeps `Retry-After: 1`.
+- **Keeper init:** `chown` runs only as root; a non-root test proves init chowns nothing (a setgid gid-0 TMPDIR made the
+  root-path test's real chowns EPERM in a clean-clone run).
+- **Sim keeper-swarm:** `503 busy` is sent again after Retry-After (up to 10 sends or 30 s, then a finding); busy retries
+  and peak in-flight lane posts are reported; `half_body` sends a loopback Host.
+
 ## v0.1.9 — 2026-10-20
 
 - **Keeper:** `/delegate` derives on its own label `sigelo/v1/delegate/<i>/…`: on K_1 it handed out enrolled worker i's

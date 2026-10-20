@@ -2633,7 +2633,11 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     // init as root (uid 0 passed in; every chown goes to this test's own uid, which needs no root).
     const was = process.env['SIGELO_SPEND_REGISTRY'];
     process.env['SIGELO_SPEND_REGISTRY'] = join(scratch, 'reg-root.json');
-    const tryInit = (argv: string[]): string => { try { initKeeper(argv, { uid: 0 }); return 'ok'; } catch (e) { return (e as Error).message; } };
+    // The chowns are recorded, never made: a real chown from a non-root test is EPERM when the
+    // scratch's gid is one this user is not in (a setgid TMPDIR: the nightly run of 2026-10-20).
+    const chowns: [string, number, number][] = [];
+    const chown = (p: string, u: number, g: number): void => { chowns.push([p, u, g]); };
+    const tryInit = (argv: string[]): string => { try { initKeeper(argv, { uid: 0, chown }); return 'ok'; } catch (e) { return (e as Error).message; } };
     const base = ['--no-systemd', '--wallet-rpc', rpc, '--port', String(await freePort())];
     mkdirSync(join(scratch, 'srv'), { mode: 0o700 }); mkdirSync(join(scratch, 'agenthome'), { mode: 0o700 });
     const noTok = tryInit(['--dir', join(scratch, 'srv', 'keeper'), ...base]);
@@ -2641,7 +2645,8 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     const rootTok = tryInit(['--dir', join(scratch, 'srv', 'keeper'), ...base, '--agent-token-file', '/sigelo-spend-test-never.token']);
     ok('init as root: needs --agent-token-file, and refuses a keeper parent or a token directory that belongs to root, writing nothing',
       noTok.includes('as root, init needs --agent-token-file') && rootParent.includes('belongs to root') && rootTok.includes('belongs to root') && !existsSync(join(scratch, 'srv', 'keeper')), [noTok, rootParent, rootTok].join(' | '));
-    const r = initKeeper(['--dir', join(scratch, 'srv', 'keeper'), ...base, '--agent-token-file', join(scratch, 'agenthome', 'a.token')], { uid: 0 });
+    const refusedChowns = chowns.length;
+    const r = initKeeper(['--dir', join(scratch, 'srv', 'keeper'), ...base, '--agent-token-file', join(scratch, 'agenthome', 'a.token')], { uid: 0, chown });
     process.env['SIGELO_SPEND_REGISTRY'] = was;
     const unit = readFileSync(join(scratch, 'srv', 'keeper', 'systemd', 'sigelo-keeper-keeper.service'), 'utf-8');
     const inst = JSON.parse(readFileSync(join(scratch, 'srv', 'keeper', 'install.json'), 'utf-8')) as Record<string, unknown>;
@@ -2650,6 +2655,23 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
       r.tokenPath === join(scratch, 'agenthome', 'a.token') && mode(r.tokenPath) === 0o600 && /^User=\S+$/m.test(unit) && unit.includes('WantedBy=multi-user.target') &&
       r.lines.some((l) => l.startsWith('  start         systemctl enable --now sigelo-keeper-keeper.service')) && inst['agent_token_file'] === r.tokenPath &&
       (statSync(r.tokenPath) as unknown as { uid: number }).uid === me.uid, unit + JSON.stringify(inst));
+    const srvSt = statSync(join(scratch, 'srv')), ahSt = statSync(join(scratch, 'agenthome'));
+    ok('init as root: the keeper directory, every file in it, goes to its parent\'s owner and the token to its directory\'s owner; a refused init chowns nothing',
+      refusedChowns === 0 && chowns.some(([p, u, g]) => p === r.tokenPath && u === ahSt.uid && g === ahSt.gid) &&
+      chowns.some(([p, u, g]) => p === join(scratch, 'srv', 'keeper') && u === srvSt.uid && g === srvSt.gid) &&
+      chowns.some(([p]) => p === join(scratch, 'srv', 'keeper', 'policy.json')) && chowns.some(([p]) => p === join(scratch, 'srv', 'keeper', 'spend.key')), JSON.stringify(chowns.slice(0, 5)));
+    // As an ordinary user init chowns nothing, even when the parent's owner is not the user.
+    const userChowns: [string, number, number][] = [];
+    const other = srvSt.uid + 4242;
+    process.env['SIGELO_SPEND_REGISTRY'] = join(scratch, 'reg-user.json');
+    mkdirSync(join(scratch, 'srv-u'), { mode: 0o700 });
+    let userErr = 'ok';
+    try { initKeeper(['--dir', join(scratch, 'srv-u', 'keeper'), ...base.slice(0, -1), String(await freePort()), '--agent-token-file', join(scratch, 'agenthome', 'u.token')],
+      { uid: other, chown: (p, u, g) => { userChowns.push([p, u, g]); } }); } catch (e) { userErr = (e as Error).message; }
+    process.env['SIGELO_SPEND_REGISTRY'] = was;
+    ok('init as an ordinary user whose uid is not the parent\'s owner: no chown at all, the single-user layout',
+      userErr === 'ok' && userChowns.length === 0 && existsSync(join(scratch, 'srv-u', 'keeper', 'policy.json')) &&
+      (JSON.parse(readFileSync(join(scratch, 'srv-u', 'keeper', 'install.json'), 'utf-8')) as Record<string, unknown>)['layout'] === 'single-user', userErr + JSON.stringify(userChowns));
     ok('init as root: keeper and agent under one uid is said to be the weaker layout', inst['layout'] === 'single-user (root install)' && r.lines.some((l) => l.includes('the weaker layout')), r.lines.join('\n'));
   }
   {

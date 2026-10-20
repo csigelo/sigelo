@@ -706,7 +706,7 @@ checks the fixed ones against this table):
 | `wallet_slow`: the wallet was still building the payment when the keeper's 180 s build wait ran out (a slow daemon link); built with `do_not_relay`, so what it finishes later is never sent, and the same command later builds afresh and pays once | 2 | `TRY LATER: the wallet is still working on that payment (a slow network); nothing was sent. Run the same command in a few minutes.` |
 | `wallet`: any other wallet failure, nothing relayed | 2 | `TRY LATER: the wallet could not do that right now; nothing was sent. Run the same command later.` |
 | `clock_behind`: the keeper's clock is behind its own log, or before its build (a host booted without the time) | 2 | `TRY LATER: the wallet service's clock is not set yet; nothing was sent. Run the same command later.` |
-| `busy`: more than 32 requests already wait in the keeper's one-at-a-time lane (503, `Retry-After: 1`); nothing was done | 2 | `TRY LATER: the wallet service is busy with other requests; nothing was sent. Run the same command in a few seconds.` |
+| `busy`: more than 64 requests already wait in the keeper's one-at-a-time lane (503, `Retry-After: 1`); nothing was done | 2 | `TRY LATER: the wallet service is busy with other requests; nothing was sent. Run the same command in a few seconds.` |
 | `approval`: approval needed | 3 | `WAITING FOR APPROVAL (ref <ref>): tell your operator, then run the same command again.` |
 | `relay_failed`, or an intent with no outcome | 4 | `UNCERTAIN: the payment may have gone out (txid <txid>). Do not pay again; tell your operator.` |
 | `timeout`: `pay` (or `fund`) got no answer in time — the keeper may have relayed it after the CLI stopped waiting | 4 | ``UNCERTAIN: the request timed out; the payment may have gone out. Run `sigelo-wallet history` before paying again.`` |
@@ -809,8 +809,9 @@ the approval on file until its `exp`.
   a preflight, never JSON). On `/pay`, `/delegate`, `/fund` and `/revoke` the token is checked
   (constant-time) before the body is read or the request waits in the one-at-a-time lane, so a
   token-less flood never delays a real payment (review 2026-10-19: 50 posts held one 10 s; now
-  none). The lane holds at most 32 requests (4 of them token-less `/approve`); past that, `503
-  busy` with `Retry-After: 1`.
+  none). The lane holds at most 64 requests (4 of them token-less `/approve`): one in flight for
+  each agent of a 50-agent pool, with room for approvals and retries; past that, `503 busy` with
+  `Retry-After: 1`, and a client waits that long and sends the same request again.
 - **The tree is only as sound as `spend.key` and `spend.log`.** A tree line must verify under
   the keeper key, so appending to the log without the key mints nobody; deleting a `revoke`
   line from the log would revive a subtree, so the log's integrity is part of the policy.

@@ -44,6 +44,8 @@ const SYSTEM_UNITS = '/etc/systemd/system';
 // p is dir or under it. By relative(), so Windows separators and case compare the way the platform does
 // (startsWith with '/' never matched a C:\ path: the CI of 2026-10-20).
 const inside = (p: string, dir: string): boolean => { const r = relative(dir, p); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
+type Chown = (p: string, uid: number, gid: number) => void;
+
 /** /etc/passwd's name and home for `uid`, or undefined. */
 function passwdOf(uid: number): { name: string; home: string } | undefined {
   let text = '';
@@ -55,9 +57,9 @@ function passwdOf(uid: number): { name: string; home: string } | undefined {
   return undefined;
 }
 /** Every file and directory under `p` (dereferenced: the frozen copy has no links) to uid:gid. */
-function chownR(p: string, uid: number, gid: number): void {
-  chownSync(p, uid, gid);
-  if (statSync(p).isDirectory()) for (const n of readdirSync(p)) chownR(join(p, n), uid, gid);
+function chownR(p: string, uid: number, gid: number, chown: Chown): void {
+  chown(p, uid, gid);
+  if (statSync(p).isDirectory()) for (const n of readdirSync(p)) chownR(join(p, n), uid, gid, chown);
 }
 const INSTALL = 'install.json', TOKEN = 'agent.token', WALLET_CONF = 'wallet-rpc.conf';
 
@@ -243,6 +245,10 @@ export interface InitResult { dir: string; did: string; token: string; tokenPath
 
 /**
  * `sys.uid`: who runs init (default the process's uid; tests pass 0 to exercise the root path).
+ * `sys.chown`: the chown init calls (default chownSync; tests record the calls instead). It is
+ * called ONLY as root: as an ordinary user every file init writes is already that user's, and a
+ * chown there could only fail (a parent of another uid, or a setgid parent whose gid the user is
+ * not in, makes chown EPERM — the nightly run of 2026-10-20).
  *
  * Two layouts (README "Two users"). Run as ROOT, init sets up the recommended one: every file in
  * the keeper directory belongs to the user who owns the directory's parent (the keeper's own
@@ -253,8 +259,9 @@ export interface InitResult { dir: string; did: string; token: string; tokenPath
  * under ~/.config/sigelo-wallet/). The token is never in the keeper directory either way: a token
  * there makes the agent run as the keeper's uid, beside policy.json (the wallet login) and spend.key.
  */
-export function init(argv: string[], sys: { uid?: number } = {}): InitResult {
+export function init(argv: string[], sys: { uid?: number; chown?: Chown } = {}): InitResult {
   const uid = sys.uid ?? process.getuid?.() ?? -1, root = uid === 0;
+  const chown: Chown = (p, u, g) => { if (!root) throw new Error(`internal: chown ${p} as uid ${uid}, not root`); (sys.chown ?? chownSync)(p, u, g); };
   const f = flags(argv, ['--agent-token-file', '--dir', '--net', '--wallet-rpc', '--wallet-rpc-login', '--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin',
     '--daemons', '--daemon-proxy', '--daemon-ssl-fingerprint', '--daemon-login-file', '--port', '--agent', '--account', '--allow', '--per-tx', '--per-day', '--licence', '--keeper-package', '--recovery-commitment', '--adopt', '--key'],
   ['--create-wallet-rpc', '--notify', '--no-systemd']);
@@ -469,7 +476,7 @@ WantedBy=timers.target
   if (givenTok === undefined) mkdirSync(dirname(tokenPath), { recursive: true, mode: 0o700 });
   writeFileSync(tokenPath, token + '\n', { mode: 0o600 });
   chmodSync(tokenPath, 0o600);
-  if (agentOwner !== undefined) chownSync(tokenPath, agentOwner.uid, agentOwner.gid);
+  if (agentOwner !== undefined) chown(tokenPath, agentOwner.uid, agentOwner.gid);
   writeFileSync(join(dir, INSTALL), JSON.stringify({
     v: 1, net, port: keeperPort, agent, account, wallet_rpc: rpc, created_wallet_rpc: walletUnit !== undefined, daemons,
     ...(walletUnit !== undefined && { daemon_proxy: proxy ?? null, daemon_ssl_fingerprints: fingerprints, daemon_login_file: loginFile !== undefined ? resolve(loginFile) : null }),
@@ -479,9 +486,9 @@ WantedBy=timers.target
   }, null, 2) + '\n', { mode: 0o600 });
   register({ dir, did: id.did, genesis: id.genesis });
   if (owner !== undefined) {
-    chownR(dir, owner.uid, owner.gid);
+    chownR(dir, owner.uid, owner.gid, chown);
     const reg = registryPath();
-    if (inside(reg, owner.home)) { for (let p = reg; inside(p, owner.home) && p !== owner.home; p = dirname(p)) chownSync(p, owner.uid, owner.gid); }
+    if (inside(reg, owner.home)) { for (let p = reg; inside(p, owner.home) && p !== owner.home; p = dirname(p)) chown(p, owner.uid, owner.gid); }
   }
 
   const url = `http://127.0.0.1:${keeperPort}`;
