@@ -19,6 +19,7 @@
         "recovery_key": "z6MkjECf2Vetnf4N3ASinDsSbtLXH8fiWTn13vpcFeRUay6a"
       },
       "sig": "z2aRhcbUe2oVEdzxdScUsvpYJb3PxvmrVyfn14pjoup1XVTtVeEJPk3bT8NQtaRk9xHH2u8rwHjRiVBEgTHH5S7PC",
+      "sig_next": "z4zkEUoMm9A42n4sVfF3daaXTjF1mHaLbpsDdtAjqZjuWq42BJrnVqrk2sG6RkucoR5DeaonwjfPzmj8e4hDLV1GS",
       "next_genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
