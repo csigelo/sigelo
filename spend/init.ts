@@ -19,7 +19,7 @@
 import { randomBytes } from 'node:crypto';
 import { chmodSync, chownSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { decodeAddress } from 'sigelo/dist/monero.js';
@@ -41,7 +41,9 @@ const configHome = (): string => process.env['XDG_CONFIG_HOME'] || join(homedir(
 const unitDir = (): string => join(configHome(), 'systemd', 'user');
 const SYSTEM_UNITS = '/etc/systemd/system';
 /** `p` is `dir` or inside it. */
-const inside = (p: string, dir: string): boolean => p === dir || p.startsWith(dir.endsWith('/') ? dir : dir + '/');
+// p is dir or under it. By relative(), so Windows separators and case compare the way the platform does
+// (startsWith with '/' never matched a C:\ path: the CI of 2026-10-20).
+const inside = (p: string, dir: string): boolean => { const r = relative(dir, p); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
 /** /etc/passwd's name and home for `uid`, or undefined. */
 function passwdOf(uid: number): { name: string; home: string } | undefined {
   let text = '';
