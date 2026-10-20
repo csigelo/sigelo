@@ -30,6 +30,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
+    # Runs on a tag push only once the repository variable NPM_TRUSTED_PUBLISHING is 'true' (the
+    # trusted publisher configured on npmjs for all six packages); before that a tag push would fail
+    # on E404 every release. workflow_dispatch always runs.
+    if: github.event_name == 'workflow_dispatch' || vars.NPM_TRUSTED_PUBLISHING == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
