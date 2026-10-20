@@ -327,5 +327,74 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   }
 }
 
+// ── one rule for which identity (ENROL.md "Which identity") ───────────────────────────────
+// The operator runs contact verbs on their own file while the shell names an agent (SIGELO_IDENTITY):
+// --identity <file>, or --operator ($SIGELO_HUMAN, else ~/.config/sigelo/me.local.json). Beside a
+// watch on that file, however it was named, send queues for it and inbox reads what it got. The
+// operator role still refuses a file in an agents' directory.
+{
+  if (!hasRelay()) console.log(`SKIP which identity: ${NO_RELAY}`);
+  else {
+    const H = tmpHome('which'), relay = await startTestRelay(H), endpoints = JSON.stringify(relay.endpoints);
+    const me = join(H, '.config', 'sigelo', 'me.local.json'), rev = join(H, 'agents', 'rev.local.json');
+    const base = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA };
+    // The shell names the agent; SIGELO_HUMAN names the operator.
+    const env = { ...base, SIGELO_IDENTITY: rev, SIGELO_HUMAN: me };
+    const cli = (...args: string[]) => cliIn(env, H)(...args), plain = (...args: string[]) => cliIn({ ...base, SIGELO_IDENTITY: rev }, H)(...args);
+    const json = (r: { stdout: string }): Record<string, unknown> => { try { return JSON.parse(r.stdout) as Record<string, unknown>; } catch { return {}; } };
+    let w: import('node:child_process').ChildProcess | undefined;
+    try {
+      const mk = await plain('init', '--no-recovery', '--identity', me), mkr = await plain('init', '--no-recovery');
+      const opDid = (json(mk) as { did?: string }).did, revDid = (json(mkr) as { did?: string }).did;
+      const who = await plain('whoami', '--operator'), whoF = await plain('whoami', '--identity', me);
+      ok('init/whoami --identity <file> and whoami --operator (default ~/.config/sigelo/me.local.json): the operator file, not SIGELO_IDENTITY',
+        mk.status === 0 && existsSync(me) && json(who)['did'] === opDid && json(whoF)['did'] === opDid && opDid !== revDid, who.stderr + whoF.stderr);
+      ok('init --operator: refused (the operator identity comes from the words), exit 2', ((r) => r.status === 2 && r.stderr.includes('keeper --from-words'))(await plain('init', '--operator', '--no-recovery')));
+      const code = (await cli('invite', '--long', '--name', 'rev', '--operator')).stdout.trim();
+      const acc = await cli('accept', code, '--name', 'operator', '--wait', '0');
+      await cli('inbox', '--operator'); await cli('inbox');
+      const listed = (r: { stdout: string }): string[] => ((json(r)['contacts'] ?? []) as { did: string }[]).map((c) => c.did);
+      const cF = await plain('contacts', '--identity', me), cH = await cli('contacts', '--operator');
+      ok('contacts --identity <operator file> and SIGELO_HUMAN + --operator: the operator\'s contact (rev), not the agent\'s', acc.status === 0
+        && listed(cF).join() === revDid && listed(cH).join() === revDid && listed(await cli('contacts')).join() === opDid, cF.stderr + cH.stderr + acc.stderr);
+      const tierOf = (f: string): string | undefined => (Object.values((JSON.parse(readFileSync(f.replace(/\.json$/, '.contacts.json'), 'utf8')) as { contacts: Record<string, { tier: string }> }).contacts)[0])?.tier;
+      const t1 = await cli('tier', 'rev', 'quiet', '--operator'), q = tierOf(me), t2 = await plain('tier', 'rev', 'friend', '--identity', me);
+      ok('tier on the operator file: via SIGELO_HUMAN + --operator (quiet), via --identity (friend); the agent\'s contacts untouched',
+        t1.status === 0 && q === 'quiet' && t2.status === 0 && tierOf(me) === 'friend' && tierOf(rev) !== 'quiet', t1.stderr + t2.stderr);
+      const s1 = await plain('send', 'rev', 'by --identity', '--identity', me), s2 = await cli('send', 'rev', 'by SIGELO_HUMAN', '--operator');
+      const got = ((json(await cli('inbox', '--wait', '10')).messages ?? []) as { content: unknown; from: string }[]);
+      ok('send on the operator file via --identity and via SIGELO_HUMAN + --operator: both arrive from the operator\'s DID', s1.status === 0 && s2.status === 0
+        && got.length === 2 && got.every((m) => m.from === opDid), JSON.stringify(got) + s1.stderr + s2.stderr);
+      const back = await cli('send', 'operator', 'to you'), ib = await cli('inbox', '--wait', '10', '--operator', '--quiet-too');
+      const hF = await plain('history', '--identity', me), hH = await cli('history', '--operator');
+      const contents = (r: { stdout: string }): unknown[] => ((json(r)['messages'] ?? []) as { content: unknown }[]).map((m) => m.content);
+      ok('history on the operator file via --identity and via SIGELO_HUMAN + --operator: what its inbox gave out', back.status === 0 && contents(ib).join() === 'to you'
+        && contents(hF).join() === 'to you' && contents(hH).join() === 'to you', ib.stderr + hF.stderr);
+      const sameEnv = await cliIn({ ...base, SIGELO_IDENTITY: me }, H)('contacts', '--operator');
+      ok('SIGELO_IDENTITY = the operator file, with --operator: taken as the operator\'s (one line), not refused', sameEnv.status === 0 && listed(sameEnv).join() === revDid
+        && sameEnv.stderr.includes('SIGELO_IDENTITY names your operator identity'), sameEnv.stderr);
+      // The one-owner rule, the file named three ways: a watcher by --operator; send by --identity
+      // queues for it; inbox by SIGELO_HUMAN reads through it; invite refuses (busy).
+      w = spawn('node', [CLI, 'watch', '--operator', '--quiet'], { env, cwd: H });
+      let werr = '';
+      w.stderr!.on('data', (d) => { werr += d; });
+      for (let i = 0; i < 150 && !werr.includes('connected to relay.test'); i++) await new Promise((r) => setTimeout(r, 200));
+      const sq = await plain('send', 'rev', 'queued', '--identity', me), iq = await cli('inbox', '--operator'), bz = await plain('invite', '--identity', me);
+      ok('watch --operator owns the session: send --identity queues for it, inbox --operator reads through it, invite --identity refuses busy',
+        werr.includes('connected to relay.test') && sq.status === 0 && sq.stderr.includes('queued for sigelo-agent watch') && iq.status === 0
+        && iq.stderr.includes('holds the relay session') && bz.status === 1 && bz.stderr.includes('is watched by sigelo-agent watch'), werr + sq.stderr + iq.stderr + bz.stderr);
+      w.kill('SIGTERM'); await new Promise((r) => w!.once('close', r)); w = undefined;
+      const inA = await cliIn({ ...base, SIGELO_IDENTITY: rev, SIGELO_HUMAN: join(H, 'agents', 'me.local.json') }, H)('contacts', '--operator');
+      const inD = await cliIn({ ...base, SIGELO_IDENTITY: rev }, H)('tier', 'rev', 'own', '--operator', '--identity', join(H, '.config', 'moadim', 'me.local.json'));
+      ok('--operator on a file in an agents\' directory (SIGELO_IDENTITY\'s, or the default\'s): refused, exit 2', inA.status === 2 && inA.stderr.includes('in the agents\' directory')
+        && inD.status === 2 && inD.stderr.includes('in the agents\' directory'), inA.stderr + inD.stderr);
+    } finally {
+      if (w) { w.kill('SIGTERM'); await new Promise((r) => w!.once('close', r)); }
+      await relay.close?.();
+      rmSync(H, { recursive: true, force: true });
+    }
+  }
+}
+
 if (keyAgent) { keyAgent.kill(); await new Promise((r) => keyAgent!.once('exit', r)); rmSync(agentHome, { recursive: true, force: true }); }
 done(import.meta.filename);

@@ -32,6 +32,11 @@ the agents' directory (i = 0, 1, … until neither knows worker i).
 vault, other keepers or recovery key. A worker's key on a server reveals that worker only. Delete
 the file to stop enrolling; the words make it again.
 
+**Which identity.** Every verb takes `--identity <file>`, or `--operator`: yours (`$SIGELO_HUMAN`, else
+`~/.config/sigelo/me.local.json`), the default of enrol, keeper and ui. Otherwise `$SIGELO_IDENTITY`, an
+agent's. Yours is refused in an agents' directory (`SIGELO_IDENTITY`'s, the default's): every agent's MCP
+server could sign with it, or with K beside it. `SIGELO_IDENTITY` naming your own file is taken as yours.
+
 ## Place a worker
 
 ```sh
@@ -49,7 +54,8 @@ either side offline, run `sigelo-agent enrol --finish` on each side in turn (pen
 
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
 443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
-Allow that hostname on 443; install needs the npm registry.
+Allow that hostname on 443; install needs the npm registry. Per environment:
+[sandboxes, CI, proxies](https://sigelo.io/sandboxes.html).
 
 ## Low-trust own agents
 

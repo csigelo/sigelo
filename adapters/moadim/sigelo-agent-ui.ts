@@ -22,17 +22,16 @@
  */
 import { spawn } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, existsSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, existsSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { did, verify, VERSION, type Attestation, type Genesis } from 'sigelo';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import { enrolInto, keeperPath, workersOf } from './sigelo-agent-enrol.ts';
-import { busyText, contactLib, lockHolder, lockPath, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
+import { agentsDirFor, busyText, contactLib, humanPath, insideAgents, operatorFile, lockHolder, lockPath, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
 
 export const OPERATOR_CTX = 'sigelo-relay/operator';
 const DAY = 86400, OPERATOR_DAYS = 90, RENEW_DAYS = 14, TAG_MAX = 20, NAME_MAX = 64, TEXT_MAX = 100_000, BODY_MAX = 256 * 1024;
@@ -43,19 +42,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const nowS = (): number => Math.floor(Date.now() / 1000);
 const note = (s: string): void => console.error(`sigelo-agent: ${safeText(s)}`);
 
-/** $SIGELO_HUMAN, else ~/.config/sigelo/me.local.json ($XDG_CONFIG_HOME when absolute). */
-export function humanPath(env: Record<string, string | undefined> = process.env): string {
-  if (env['SIGELO_HUMAN']) return resolve(env['SIGELO_HUMAN']);
-  const xdg = env['XDG_CONFIG_HOME'];
-  return join(xdg && isAbsolute(xdg) ? xdg : join(env['HOME'] ?? homedir(), '.config'), 'sigelo', 'me.local.json');
-}
-const real = (p: string): string => { try { return realpathSync(p); } catch { return resolve(p); } };
-/** The agents' directory `file` sits in or under (SIGELO_IDENTITY's, and the default's), or null. */
-export function insideAgents(file: string, env: Record<string, string | undefined> = process.env, extra: string[] = []): string | null {
-  const dirs = [id.identityPath(env), id.identityPath({ ...env, SIGELO_IDENTITY: undefined })].map((p) => real(dirname(resolve(p)))).concat(extra.map(real));
-  const mine = real(dirname(resolve(file)));
-  return dirs.find((d) => mine === d || mine.startsWith(d + sep)) ?? null;
-}
+// The operator's file and the agents' directory: one rule for every verb (sigelo-agent-contact.ts).
+export { humanPath, insideAgents };
 
 // ---- the pid lock (sigelo-agent-contact.ts lockPath), shared with `watch`: one of them per file
 export { lockPath };
@@ -127,7 +115,7 @@ export interface UiOptions { identity: string; agents?: string; carrier?: Record
 export interface Ui { url: string; port: number; token: string; close(): Promise<void> }
 
 export async function startUi(o: UiOptions): Promise<Ui> {
-  const path = resolve(o.identity), agentsDir = resolve(o.agents ?? dirname(id.identityPath()));
+  const path = resolve(o.identity), agentsDir = resolve(o.agents ?? agentsDirFor(path));
   const inside = insideAgents(path, process.env, [agentsDir]);
   if (inside !== null) refuse(400, 'identity', `${path} is in the agents' directory ${inside}: any agent could sign as you there. Use $SIGELO_HUMAN outside it, or the default ~/.config/sigelo/me.local.json`);
   if (!existsSync(path)) refuse(400, 'identity', `no identity at ${path}: make it once from your 25 words: sigelo-agent keeper --from-words`);
@@ -537,16 +525,16 @@ function openBrowser(url: string): void {
 
 /** `sigelo-agent ui [--no-open]`. Runs until SIGINT/SIGTERM. */
 export async function main(rest: string[]): Promise<number> {
-  let noOpen = false;
-  for (const a of rest) {
+  let noOpen = false, flag: string | undefined;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!;
     if (a === '--no-open') noOpen = true;
-    else { note(`ui: unexpected ${JSON.stringify(a)}: ui [--no-open]${a.includes('recovery') ? '. Your identity comes from your 25 words: sigelo-agent keeper --from-words' : ''}`); return 2; }
+    else if (a === '--identity' && rest[i + 1] !== undefined && flag === undefined) flag = rest[++i];
+    else if (a === '--operator') continue;
+    else { note(`ui: unexpected ${JSON.stringify(a)}: ui [--no-open] [--identity <file>]${a.includes('recovery') ? '. Your identity comes from your 25 words: sigelo-agent keeper --from-words' : ''}`); return 2; }
   }
-  const path = humanPath(), inside = insideAgents(path);
-  if (inside !== null) {
-    note(`ui: ${path} is in the agents' directory ${inside}: the MCP server maps identity names to files there, so every agent could sign as you. Set SIGELO_HUMAN to a file outside it, or unset it for ~/.config/sigelo/me.local.json`);
-    return 2;
-  }
+  let path: string;
+  try { path = operatorFile('ui', flag); } catch (e) { note((e as Error).message); return 2; }
   if (!existsSync(path)) { note(`ui: no identity at ${path}: make it once from your 25 words (it is their root identity, so they restore it): sigelo-agent keeper --from-words`); return 2; }
   let ui: Ui;
   try { ui = await startUi({ identity: path }); } catch (e) { note((e as Error).message); return 1; }

@@ -42,7 +42,7 @@ Monero (MONERO.md §2-§3, SPEC §6):
 ${keys.USAGE}
 
 The human's page (UI-API.md):
-  ui [--no-open]                         a page on 127.0.0.1 for your own DID: contacts, codes, the four
+  ui [--no-open] [--identity <file>]     a page on 127.0.0.1 for your own DID: contacts, codes, the four
                                          words, messages, your agents; $SIGELO_HUMAN, else
                                          ~/.config/sigelo/me.local.json (made by keeper --from-words)
 
@@ -50,7 +50,8 @@ Staying connected (WATCH.md):
   ${watch.USAGE.replaceAll('\n', '\n  ')}
 
 A <json|-> argument may also be a file holding the JSON.
-Identity file: $SIGELO_IDENTITY, else ~/.config/moadim/sigelo.local.json (0600).
+Identity file: --identity <file>; --operator: yours ($SIGELO_HUMAN, else ~/.config/sigelo/me.local.json);
+else $SIGELO_IDENTITY, else ~/.config/moadim/sigelo.local.json (0600). Any verb (ENROL.md).
 This process never holds a Monero spend key: wallet-set refuses one.`;
 
 const OFFLINE_KEYGEN = `
@@ -100,23 +101,30 @@ if (cmd === 'enrol') await contact.exit(await enrol.main(rest));
 if (cmd === 'keeper') await contact.exit(await enrol.keeperMain(rest));
 if (cmd === 'watch') await contact.exit(await watch.main(rest));
 const flag = (name: string): string | undefined => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
-const path = id.identityPath();
+/** A command line missing what it needs: exit 2, as an unknown command (USAGE). */
+function usage(why: string): never { note(why); process.exit(2); }
+// Every verb names its identity one way (ENROL.md "Which identity"): --identity <file>, or --operator.
+const at = rest.indexOf('--identity');
+if (at >= 0 && (rest[at + 1] === undefined || rest[at + 1]!.startsWith('--'))) usage(`${cmd}: --identity needs a file`);
+const fileFlag = at >= 0 ? rest.splice(at, 2)[1] : undefined, asOperator = rest.includes('--operator');
+if (asOperator) rest.splice(rest.indexOf('--operator'), 1);
+if (asOperator && (cmd === 'init' || cmd === 'adopt')) usage(`${cmd} --operator: your identity comes from your 25 words: sigelo-agent keeper --from-words`);
+let path: string;
+try { path = contact.actingFile(cmd ?? '', fileFlag, asOperator); } catch (e) { usage((e as Error).message); }
 const now = Math.floor(Date.now() / 1000);
 // The verbs that read the identity: with none, "run init" and exit 2, as the contact verbs say
 // it (a bare "load: no identity" exited 1).
 const READS = ['whoami', 'keys', 'sign-challenge', 'sign-http', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
 // adopt --rotation changes an identity: with none, it took the lock in a missing directory, a raw ENOENT.
 if ((READS.includes(cmd ?? '') || (cmd === 'adopt' && rest.includes('--rotation'))) && !existsSync(path)) {
-  note(contact.noIdentity(path));
+  note(contact.noIdentity(path, asOperator));
   process.exit(2);
 }
 /** The operator identity made by `keeper --from-words` (sigelo-agent-enrol.ts): seed-derived, no S in it. */
 type Derived = { derived?: { path: string; n: number } };
-/** A command line missing what it needs: exit 2, as an unknown command (USAGE). */
-function usage(why: string): never { note(why); process.exit(2); }
 /** The identity, or one line naming the file that does not load (it may be corrupt, or another file). */
 const load = (): id.Store => {
-  if (!existsSync(path)) { note(contact.noIdentity(path)); process.exit(2); }
+  if (!existsSync(path)) { note(contact.noIdentity(path, asOperator)); process.exit(2); }
   try { return id.load(path); } catch (e) { throw contact.unreadable(path, e); }
 };
 /** Every load → change → save holds the one lock `receive` takes. A command that saves a store

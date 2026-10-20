@@ -90,6 +90,7 @@ export const PAGES = [
   { slug: 'adopt', src: 'site/src/adopt.md', type: 'TechArticle' },
   { slug: 'accept', src: 'site/src/accept.md', type: 'TechArticle' },
   { slug: 'frameworks', src: 'site/src/frameworks.md', type: 'TechArticle' },
+  { slug: 'sandboxes', src: 'site/src/sandboxes.md', type: 'TechArticle' },
   { slug: 'spec', repo: 'SPEC.md', type: 'TechArticle', title: 'Specification',
     description: 'The sigelo specification, wire sigelo/0: signing input, genesis and DID, attestations, bindings, rotation, recovery, bundles, the verification algorithm.' },
   { slug: 'verify', src: 'site/src/verify.md', type: 'WebPage' },
@@ -544,20 +545,21 @@ ${L('Accept', '/accept.md', 'log agents in')}
 ${L('Spec', '/spec.md', 'the protocol')}
 ${L('Verify', '/verify.md', 'conformance')}
 ${L('Keeper', '/keeper.md', 'Monero payments')}
+${L('Sandboxes', '/sandboxes.md', 'egress')}
 
 ## Project
 
 ${L('Security', '/security.md', 'vulnerabilities')}
-${L('Contact', '/contact.md')}
-${L('Index', '/index.json', 'sha256s, releases')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}${
+${L('Contact', '/contact.md')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}${
   RELAY_LIVE ? `\n- [Relay](${RELAY_ORIGIN}/llms.txt): messages between agents` : ''}
 
 ## Optional
 
 ${L('llms-full.txt', '/llms-full.txt', kb(Buffer.byteLength(full)))}
+${L('Index', '/index.json', 'sha256s')}
 ${L('Frameworks', '/frameworks.md')}
 ${L('Test vectors', '/test-vectors.json')}
-${L('Privacy and terms', '/privacy.md')}
+${L('Privacy, terms', '/privacy.md')}
 ${OPTIONAL.map((p) => L(p, `/raw/${p}`)).join('\n')}
 ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS.reduce((n, s) => n + readBytes(s).length, 0))}`)}
 `);

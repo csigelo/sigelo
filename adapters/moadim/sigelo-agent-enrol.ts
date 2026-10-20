@@ -14,7 +14,6 @@
  * agents' directory, for a sub-agent's SIGELO_IDENTITY. `--restore i [--rotate]`: the same again.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { did, keygen, parseBytes, VERSION } from 'sigelo';
@@ -22,7 +21,7 @@ import { keeperRoot, parseRoot, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { bundleOf, head, identityPath, load, save, type Store } from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
-import { absent, contactLib, debug, heldPath, holderFor, lockHolder, MISSING, putBack, safeJson, safeText, trustOf, unreadable, type Batch } from './sigelo-agent-contact.ts';
+import { absent, agentFileFor, agentsDirFor, contactLib, debug, heldPath, holderFor, humanPath, lockHolder, MISSING, operatorFile, putBack, safeJson, safeText, trustOf, unreadable, type Batch } from './sigelo-agent-contact.ts';
 
 export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of your keeper root, restorable from the 25 words
   keeper --from-words [--keeper <j>]       once: your identity (the root identity of the words, when absent) and
@@ -40,7 +39,7 @@ export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of
   init --enrol <code> [--name <n>]         on the other machine: pair, then become the operator's worker
        [--wait <s>]                        (--name: the operator's contact name; --wait 0 to 300 s, default 120)
 Operator identity: --identity, else $SIGELO_HUMAN, else ~/.config/sigelo/me.local.json; never in the agents'
-directory. Exit 3: still pending when the wait ended.`;
+directory (SIGELO_IDENTITY's, unless it names this file, and the default's). Exit 3: still pending when the wait ended.`;
 
 interface Placed { id: string; name: string; did: string; original: string; i?: number; n?: number; ours?: boolean | null; tier?: string; temp: string | null; released?: boolean; exp: number;
   worker?: number | null; operator?: string; status?: string | null; contact?: { fingerprint?: string } | null }
@@ -82,18 +81,14 @@ const index = (flag: string, v: string): number => {
 };
 
 /** The operator's identity file: --identity, $SIGELO_HUMAN, else ~/.config/sigelo/me.local.json. */
-export function operatorPath(flag: string | undefined, env: Record<string, string | undefined> = process.env): string {
-  return flag ?? env['SIGELO_HUMAN'] ?? join(env['HOME'] ?? homedir(), '.config', 'sigelo', 'me.local.json');
-}
-/** The agents' directory: the pool sub-agents take their SIGELO_IDENTITY from. */
-const agentsDir = (): string => dirname(resolve(identityPath()));
+export const operatorPath = (flag: string | undefined, env: Record<string, string | undefined> = process.env): string => (flag !== undefined ? resolve(flag) : humanPath(env));
+/** The agents' directory: the pool sub-agents take their SIGELO_IDENTITY from (never the operator's own file's). */
+const agentsDir = (op: string): string => agentsDirFor(op);
 // The MCP server signs with any `sigelo.<name>.local.json` in the agents' directory, for any caller:
-// an operator key there, or K beside it, would be every agent's (design/human-ui-plan.md §1).
-function checkOperator(path: string, mayBeAbsent = false): void {
-  if (dirname(resolve(path)) === agentsDir()) {
-    throw usageError(`enrol: the operator identity ${path} is in the agents' directory ${agentsDir()}, where every agent's MCP server can sign with it: keep it apart (default ~/.config/sigelo/me.local.json, or $SIGELO_HUMAN)`);
-  }
-  if (!mayBeAbsent && !existsSync(path)) throw usageError(`enrol: no operator identity at ${path}: make it once from your 25 words: sigelo-agent keeper --from-words (read from the terminal, never the command line)`);
+// an operator key there, or K beside it, would be every agent's (operatorFile refuses it).
+function checkOperator(path: string, mayBeAbsent = false, what = 'enrol'): void {
+  operatorFile(what, path);
+  if (!mayBeAbsent && !existsSync(path)) throw usageError(`${what}: no operator identity at ${path}: make it once from your 25 words: sigelo-agent keeper --from-words (read from the terminal, never the command line)`);
 }
 
 async function libs(): Promise<Libs> {
@@ -157,7 +152,7 @@ function scan(enrol: Enrol, lib: Libs['lib'], op: string, k: Keeper): void {
   const { K, recovery } = rootOf(k), store = lib.pathsFor(op).store;
   const contacts = existsSync(store) ? Object.values((JSON.parse(readFileSync(store, 'utf8')) as { contacts: Record<string, { did: string; name: string; chain: string[]; revoked?: boolean }> }).contacts) : [];
   const pool: { file: string; s: Store }[] = [];
-  try { for (const f of readdirSync(agentsDir())) if (/^sigelo\.[a-z0-9][a-z0-9_-]{0,63}\.local\.json$/.test(f)) { try { pool.push({ file: f, s: load(join(agentsDir(), f)) }); } catch {} } } catch {}
+  try { for (const f of readdirSync(agentsDir(op))) if (/^sigelo\.[a-z0-9][a-z0-9_-]{0,63}\.local\.json$/.test(f)) { try { pool.push({ file: f, s: load(join(agentsDir(op), f)) }); } catch {} } } catch {}
   for (let i = 0; ; i++) {
     const original = enrol.workerChain(K, i, 0, recovery).original;
     const c = contacts.find((x) => x.did === original), p = pool.find((x) => did(x.s.genesis) === original);
@@ -219,9 +214,9 @@ function placeMe(enrol: Enrol, S: Uint8Array, op: string, known: number | undefi
 /** sigelo-agent keeper [--from-words [--replace-me] [--rotate-me]] [--keeper j] [--identity f] → exit code. */
 export async function keeperMain(rest: string[]): Promise<number> {
   try {
-    const f = flags(rest, ['--keeper', '--identity'], ['--from-words', '--replace-me', '--rotate-me']), op = operatorPath(f.get('--identity'));
+    const f = flags(rest, ['--keeper', '--identity'], ['--from-words', '--replace-me', '--rotate-me', '--operator']), op = operatorPath(f.get('--identity'));
     if ((f.has('--replace-me') || f.has('--rotate-me')) && !f.has('--from-words')) throw usageError('keeper: --replace-me and --rotate-me go with --from-words: they need the words');
-    checkOperator(op, f.has('--from-words'));
+    checkOperator(op, f.has('--from-words'), 'keeper');
     const { lib, enrol } = await libs();
     let me: Me | undefined;
     if (f.has('--from-words')) {
@@ -342,10 +337,10 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
   const roster = (placed: string): void => { writeKeeper(opPath, (x) => { x.workers[i] = { name: name!, n, did: w.did, original: w.original, placed, at: nowS() }; }); };
   if (restore) note(`worker ${i}: ${n > (k.workers[i]?.n ?? 0) ? `rotation ${n}, its next key (the previous one retires), ` : ''}the same DID ${w.original}; ${restored(w.original)}`);
   if (here) {
-    const file = join(agentsDir(), `sigelo.${name}.local.json`), s = load(opPath), relay = lib.optionsFromEnv().relay ?? lib.DEFAULT_RELAY, t = nowS();
+    const file = join(agentsDir(opPath), `sigelo.${name}.local.json`), s = load(opPath), relay = lib.optionsFromEnv().relay ?? lib.DEFAULT_RELAY, t = nowS();
     const attestation = enrol.operatorAttestation({ sign: signer(opPath, s).sign, iss: did(head(s)), sub: w.original, relay, now: t });
     const id = enrol.workerIdentity({ K, i, n, recovery, attestation, issuer: head(s) });
-    mkdirSync(agentsDir(), { recursive: true, mode: 0o700 });
+    mkdirSync(agentsDir(opPath), { recursive: true, mode: 0o700 });
     withLock(file, () => {
       if (existsSync(file)) throw Object.assign(new Error(`enrol: ${file} exists (${did(load(file).genesis)}): move it away first; nothing written`), { check: 'enrol_exists' });
       save(file, id);
@@ -417,7 +412,7 @@ async function asMachine(l: Libs, path: string, temp: string, name: string | und
 /** Whatever is pending here: the operator's issued, the machine's joining, a worker's own pairing. */
 async function finish(opFlag: string | undefined, wait: number): Promise<number> {
   const l = await libs(), { lib, enrol } = l, end = Date.now() + wait * 1000, left = (): number => Math.max(0, Math.ceil((end - Date.now()) / 1000));
-  const agentPath = identityPath(), opPath = operatorPath(opFlag);
+  const opPath = operatorPath(opFlag), agentPath = agentFileFor(opPath);
   const temps = [...new Set(enrol.pending(enrol.enrolPath(agentPath), nowS(), (s) => Object.values(s.joining).map((j) => j.temp)).filter((t): t is string => typeof t === 'string' && existsSync(t)))];
   const issued = existsSync(opPath) && resolve(opPath) !== resolve(agentPath) && enrol.pending(enrol.enrolPath(opPath), nowS(), (s) => Object.values(s.issued).some((e) => !e.done));
   const answering = existsSync(agentPath) && temps.length === 0 && carrierFor(lib, agentPath).contacts().answers.length > 0;
@@ -452,8 +447,8 @@ async function finish(opFlag: string | undefined, wait: number): Promise<number>
 /** sigelo-agent enrol …; → the exit code (0 done, 1 refused or offline, 2 usage, 3 still pending). */
 export async function main(rest: string[]): Promise<number> {
   try {
-    const f = flags(rest, ['--name', '--wait', '--identity', '--index', '--restore', '--tier'], ['--finish', '--here', '--rotate']);
-    if (f.has('--finish') && [...f.keys()].some((k) => !['--finish', '--wait', '--identity'].includes(k))) throw usageError('enrol: --finish takes only --wait and --identity');
+    const f = flags(rest, ['--name', '--wait', '--identity', '--index', '--restore', '--tier'], ['--finish', '--here', '--rotate', '--operator']);
+    if (f.has('--finish') && [...f.keys()].some((k) => !['--finish', '--wait', '--identity', '--operator'].includes(k))) throw usageError('enrol: --finish takes only --wait and --identity');
     if (f.has('--rotate') && !f.has('--restore')) throw usageError('enrol: --rotate goes with --restore <i>');
     if (f.has('--index') && f.has('--restore')) throw usageError('enrol: --index or --restore, not both');
     if (f.has('--here') && f.has('--wait')) throw usageError('enrol: --here waits for nothing (no --wait)');

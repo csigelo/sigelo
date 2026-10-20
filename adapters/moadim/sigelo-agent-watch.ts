@@ -24,7 +24,7 @@ import { existsSync, rmSync, unwatchFile, watchFile } from 'node:fs';
 import { resolve } from 'node:path';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
-import { contactLib, debug, kickPath, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
+import { actingFile, contactLib, debug, kickPath, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
 import { takeLock } from './sigelo-agent-ui.ts';
 
 const HOOK_MS = 120_000, SYNC_MS = 60_000, KICK_MS = 1000, NOTICE_MS = 300, TEXT_MAX = 200;
@@ -173,21 +173,24 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
   } catch (e) { release(); throw e; }
 }
 
-export const USAGE = `watch [--identity <file>] [--on-message <cmd>] [--on-notice <cmd>] [--on-pairing <cmd>] [--quiet]
+export const USAGE = `watch [--identity <file> | --operator] [--on-message <cmd>] [--on-notice <cmd>] [--on-pairing <cmd>] [--quiet]
   stays connected; own contacts' messages → --on-message (JSON on stdin), friends' → --on-notice
   ({from, name, tier, count}), quiet → nothing; pairings → --on-pairing. No hook: a line on stdout.`;
 
 /** `sigelo-agent watch …`: runs until SIGINT/SIGTERM → 0; 2 usage or no identity; 1 refused (busy). */
 export async function main(rest: string[]): Promise<number> {
   const o: Partial<WatchOptions> = {};
+  let operator = false;
   const takes: Record<string, keyof WatchOptions> = { '--identity': 'identity', '--on-message': 'onMessage', '--on-notice': 'onNotice', '--on-pairing': 'onPairing' };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!, k = takes[a];
     if (a === '--quiet') { o.quiet = true; continue; }
+    if (a === '--operator') { operator = true; continue; }
     if (k === undefined || rest[i + 1] === undefined || o[k] !== undefined) { note(`watch: ${k === undefined ? `unexpected ${JSON.stringify(a)}` : o[k] !== undefined ? `${a} given twice` : `${a} needs a value`}\n${USAGE}`); return 2; }
     (o as Record<string, unknown>)[k] = rest[++i];
   }
-  const path = o.identity ?? id.identityPath();
+  let path: string;
+  try { path = actingFile('watch', o.identity, operator); } catch (e) { note((e as Error).message); return 2; }
   let w: Watch;
   try { w = await startWatch({ ...o, identity: path } as WatchOptions); } catch (e) {
     note((e as Error).message);

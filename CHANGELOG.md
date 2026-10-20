@@ -5,6 +5,12 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **sigelo-agent:** every verb takes `--identity <file>` or `--operator` (`$SIGELO_HUMAN`, else me.local.json); `SIGELO_IDENTITY`
+  naming your own file is taken as yours, not refused; a file in an agents' directory is refused.
+- **Site, sandboxes:** new `/sandboxes`: the one host dialled (the relay, 8883 else 443), where to allow it in cloud
+  sandboxes, CI, TLS proxies and containers; `watch` for conversing agents; verifying needs no egress.
+- **Site, adopt:** the first block is the three commands (init with recovery, sign-challenge, bundle) after a one-line
+  install; the verifier download moved to step 4.
 - **Keeper:** the one-at-a-time lane holds 64 requests, up from 32: 32 refused an honest 50-agent pool (one request each);
   `/approve` stays at 4, `503 busy` keeps `Retry-After: 1`.
 - **Keeper init:** `chown` runs only as root; a non-root test proves init chowns nothing (a setgid gid-0 TMPDIR made the

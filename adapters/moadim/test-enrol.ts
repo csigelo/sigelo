@@ -229,6 +229,23 @@ try {
   ok('enrol --here --tier friend: not a contact yet, the tier kept for its pairing; ours, tier friend in the output', h5.status === 0 && preset[w5.did] === 'friend'
     && (JSON.parse(h5.stdout) as { ours: boolean; tier: string }).tier === 'friend' && h5.stderr.includes('browser: yours (worker 5), low trust'), h5.stdout + h5.stderr);
 
+  // One rule for which identity (ENROL.md): SIGELO_IDENTITY naming the operator file is taken as the
+  // operator's (one line), and the agents' directory is then the default's; tier and contacts reach
+  // the operator file by --identity and by SIGELO_HUMAN + --operator, while SIGELO_IDENTITY names an agent.
+  const w6 = derived(6, 0), h6 = await cli(OP, ['enrol', '--name', 'six', '--here'], { extra: { SIGELO_IDENTITY: human } });
+  ok('enrol --here with SIGELO_IDENTITY = the operator file: not refused; one line says so; worker 6 into the default agents\' directory', h6.status === 0
+    && (JSON.parse(h6.stdout || '{}') as { did?: string }).did === w6.did && existsSync(join(OP, '.config', 'moadim', 'sigelo.six.local.json'))
+    && h6.stderr.includes('SIGELO_IDENTITY names your operator identity') && !h6.stderr.includes('in the agents\' directory'), h6.stderr);
+  const asAgent = { SIGELO_IDENTITY: pool, SIGELO_HUMAN: human };
+  const tq = await cli(OP, ['tier', 'reviewer', 'own', '--operator'], { extra: asAgent }), tqd = contactsOf(human)[w4.did]?.tier;
+  const tf = await cli(OP, ['tier', 'reviewer', 'quiet', '--identity', human], { extra: { SIGELO_IDENTITY: pool } });
+  const cl = await cli(OP, ['contacts', '--operator'], { extra: asAgent }), ci = await cli(OP, ['contacts', '--identity', human], { extra: { SIGELO_IDENTITY: pool } });
+  const dids = (r: Run): string[] => ((JSON.parse(r.stdout || '{}') as { contacts?: { did: string }[] }).contacts ?? []).map((c) => c.did);
+  ok('tier and contacts on the operator file with SIGELO_IDENTITY naming an agent: by SIGELO_HUMAN + --operator, and by --identity', tq.status === 0 && tqd === 'own'
+    && tf.status === 0 && contactsOf(human)[w4.did]?.tier === 'quiet' && dids(cl).includes(w4.did) && dids(ci).join() === dids(cl).join(), tq.stderr + tf.stderr + cl.stderr);
+  const pooled = join(OP, 'pool'), inPool = await cli(OP, ['enrol', '--name', 'x', '--here'], { extra: { SIGELO_IDENTITY: join(pooled, 'sigelo.local.json'), SIGELO_HUMAN: join(pooled, 'me.local.json') } });
+  ok('enrol with $SIGELO_HUMAN in SIGELO_IDENTITY\'s directory (not the default\'s): still refused, exit 2', inPool.status === 2 && inPool.stderr.includes(`in the agents' directory ${pooled}`), inPool.stderr);
+
   // The operator identity rotates from the words, never randomly; a loss restores the rotation.
   const rr = await cli(OP, ['rotate'], { extra: { SIGELO_IDENTITY: human } });
   ok('rotate on the seed-derived operator identity: refused, exit 1, points to keeper --from-words --rotate-me', rr.status === 1 && rr.stderr.includes('keeper --from-words --rotate-me') && meDid() === opDid, rr.stderr);

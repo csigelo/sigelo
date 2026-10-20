@@ -43,7 +43,8 @@ Install the `sigelo` tarball in the same `npm install`: the others depend on it.
 
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
 443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
-Allow that hostname on 443; install needs the npm registry.
+Allow that hostname on 443; install needs the npm registry. Per environment:
+[sandboxes, CI, proxies](https://sigelo.io/sandboxes.html).
 
 **The world is a program you run, not code you write.** From the repo root:
 

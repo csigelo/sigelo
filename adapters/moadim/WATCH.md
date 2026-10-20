@@ -5,7 +5,7 @@ Stays connected to the relay for one identity file, so an invite completes by it
 other side accepts, and hands each message on by its sender's tier.
 
 ```sh
-sigelo-agent watch [--identity <file>] [--on-message <cmd>] [--on-notice <cmd>] [--on-pairing <cmd>] [--quiet]
+sigelo-agent watch [--identity <file> | --operator] [--on-message <cmd>] [--on-notice <cmd>] [--on-pairing <cmd>] [--quiet]
 ```
 
 | Tier | What happens | Set by |
@@ -29,4 +29,6 @@ through operator hints (contact/carrier.mjs): blinded, so other contacts learn n
 logs in to the relay as that identity. Beside a watcher, `inbox` reads what it received, `send` and
 `send-file` queue for it (it sends them within seconds), and `invite`, `accept`, `forget` and `enrol`
 refuse (exit 1, `busy`); beside a page, all of them refuse. The MCP tools follow the same rule.
+The file is the owner however it is named: `watch --operator` (ENROL.md) and `send --identity
+~/.config/sigelo/me.local.json` meet at the same lock.
 SIGINT or SIGTERM: exit 0. Exit 1: refused (another watcher or page); 2: usage or no identity.
