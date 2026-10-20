@@ -64,6 +64,9 @@ On S — derived by the ceremony, which then forgets S:
 On a keeper root K — derived by that keeper, on demand, without S:
   keeper identity Ed25519 seed  k(K, "sigelo/v1/identity/ed25519/<n>")      = identitySeed(K, n)   built fn
   agent identity  Ed25519 seed  k(K, "sigelo/v1/identity/<i>/ed25519/<n>")  i = the agent's account  built (G4)
+                  = an enrolled worker i (`sigelo-agent enrol`, contact/enrol.mjs)
+  delegate        Ed25519 seed  k(K, "sigelo/v1/delegate/<i>/ed25519/<n>")  i = its account (POST /delegate)  built
+                  spend.log `delegate` line `"kdf": "delegate/1"`; a line without `kdf` predates it: identity/<i>/… (compat)
   wallet(w)       b = sc_reduce32(k(K, "sigelo/v1/monero/<w>"))             = walletFromRoot(K, w)  built fn
 
 a = H_s(b), B = bG, A = aG for every wallet.
@@ -74,8 +77,11 @@ Ed25519 takes its seed raw; only the Monero branch reduces mod `L`
 padding `0x01`, never SHA3 (`src/crypto/keccak.c:119`). `<i>`, `<j>`, `<n>` are decimal
 without leading zeros, so no two paths share a string (`identity/ed25519/0` is not
 `identity/0/ed25519/0`). `ts/src/keys.ts` computes `k`, `identitySeed`, `walletFromRoot`,
-`keeperRoot(S, j)` and `agentIdentitySeed(K, i, n)` (G4, `846b7cd`); `go/keys.go` computes the
-same, pinned to ts byte for byte (`4f85df7`).
+`keeperRoot(S, j)` and `agentIdentitySeed(K, i, n)` (G4, `846b7cd`), and `delegateIdentitySeed(K,
+i, n)`; `go/keys.go` computes the same, pinned to ts byte for byte (`4f85df7`; the delegate label by
+`test-vectors.json` `key_derivation_delegate`). The delegate label is its own because the
+delegating agent receives its delegate's seed: under the worker label, on the treasury keeper's
+`K_1`, that seed was enrolled worker `i`'s key (review of 2026-10-19).
 
 **The 25 words.** Monero's Electrum-style English mnemonic
 (monero `d02c7c57`, `src/mnemonics/electrum-words.cpp`, wordlist `english.h`, 1626 words, prefix length 3):
@@ -278,6 +284,29 @@ keepers on a host need a licence, which is a sigelo attestation (SPEC §5) from 
 to the keeper DID, verified offline; without one those verbs refuse `licence_required`, never
 silently, and a payment that would need an approval is refused, not paid. Details:
 [`spend/README.md`](spend/README.md) "Install".
+
+**Two users (the recommended layout).** The keeper and its wallet-rpc run as their own user;
+the agent runs as another and holds only its token, in its own 0600 file. An agent that runs as
+the keeper's uid can read `policy.json` (the wallet login, which spends without any policy) and
+edit it, so a prompt injection with file access gets the wallet. Run as root, `init` sets this up:
+the keeper directory goes to the user who owns its parent, the units are system units with
+`User=`, and `--agent-token-file` (required) is written for the user who owns its directory:
+
+```sh
+useradd --system --home-dir /var/lib/sigelo-keeper --create-home sigelo-keeper
+install -d -o agent -m 0700 /home/agent/.config/sigelo-wallet
+sigelo-spend init --dir /var/lib/sigelo-keeper/keeper --agent-token-file /home/agent/.config/sigelo-wallet/agent.token …
+# /etc/systemd/system/sigelo-keeper-keeper.service and sigelo-wallet-rpc-keeper.service:
+#   User=sigelo-keeper
+systemctl enable --now sigelo-wallet-rpc-keeper.service sigelo-keeper-keeper.service
+```
+
+Run as an ordinary user, `init` keeps the single-user layout (a laptop: `--user` units, the token
+under `~/.config/sigelo-wallet/`): the weaker one, and `init` says so. The token is never written
+into the keeper directory, and `doctor` warns when it finds it there (a keeper set up before
+2026-10-20). The keeper answers only a loopback `Host`, refuses any `Origin` header and any POST
+that is not `application/json` (a web page on the host cannot post), checks the token before a
+request may wait for the one-at-a-time lane, and bounds that lane (`503 busy`, `Retry-After`).
 
 **The keeper's own identity** (`164b8c4`). `spend.key` is the keeper root `K_j`; the keeper signs
 with `identitySeed(K_j, 0)`; its genesis, kept beside the policy as `identity.json` (a SPEC §8
@@ -560,10 +589,11 @@ pure + `service.ts`; `caps` = `{per_tx_max?, per_period_max?, rate_per_minute?,
 max_delegates?, approval_above?}`, a cap left out being the caller's). The keeper, for an agent
 with `max_delegates` left, checks everything before the wallet is touched; then takes a new
 account `i` (`create_account`, skipping any index an agent ever held: indices and names are
-never reused); derives the delegate's identity `agentIdentitySeed(K, i, 0)` from its
+never reused); derives the delegate's identity `delegateIdentitySeed(K, i, 0)` (§2; not worker `i`'s `agentIdentitySeed`) from its
 `spend.key` with the policy's `recovery_commitment` (§2; refused without one); mints a token
 and logs only its hash; writes a signed `delegate` line `{kind, ts, name, parent, account,
-address, did, genesis, token_hash, caps, allow, max_delegates, approval_above}` — the log, not
+address, did, genesis, token_hash, caps, allow, max_delegates, approval_above, kdf}` (`kdf`
+absent on a line from before 2026-10-20: the old label) — the log, not
 the Owner's policy file, holds delegates, so replay rebuilds the tree, and a line that does not
 verify under the keeper key, a reused name or account, or a revoke by a non-ancestor refuses
 the start; and funds it (below). It answers `{name, account, address, did, genesis,

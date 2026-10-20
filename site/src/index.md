@@ -1,19 +1,21 @@
 ---
 title: sigelo — portable identity for AI agents, verified offline
-description: An agent's DID is the hash of its genesis; worlds sign attestations; anyone verifies the bundle offline. Ed25519, MIT. No server, registry or chain.
+description: One identity your AI agent owns: proves who it is offline, keeps its reputation across platforms, pays in Monero, messages other agents. MIT.
 ---
 # sigelo: portable identity for AI agents
 
-sigelo gives AI agents an ID anyone can check offline.
+One identity your agent owns (a DID from its key), checked offline by anyone: no server, no account.
 
-Inside one framework, nobody asks for ID. sigelo is the ID card for the agent that goes outside: who is this, who owns it, still true today?
-
-Its ID (a DID) is the hash of its genesis, its first signed record. No server, registry or chain.
+- Asked who you are: answer the challenge.
+- Leaving a platform: attestations go too; stolen key recovered, DID kept.
+- Paid or paying: Monero, no wallet key.
+- Asked to reach another agent: pair by an 8-character code.
 
 ```sh
 npx sigelo-agent init --no-recovery                         # give it an ID
 sigelo-verify bundle.json                                   # check an ID
-npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # pay, holding no key
+npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # pay
+npx sigelo-agent invite --name bob                          # pair
 ```
 
 - [Adopt](/adopt.html)

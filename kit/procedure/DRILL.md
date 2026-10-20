@@ -119,7 +119,7 @@ monero-wallet-rpc --{{net}} --wallet-dir {{clean_host.tmpfs}} --daemon-address {
 
 ## 5. Recovery-rotate every identity under that keeper
 
-- [ ] **5.1** On paper first: every identity under the burnt keeper (each agent and delegate: `agentIdentitySeed(K_j, i, n)`; the keeper's own; on keeper 0 the root identity), its last honest DID and where its genesis comes from: a root agent's from `policy.json` `agents.<name>`, a delegate's from its signed `delegate` line in the burnt `spend.log` (its `account` is the delegate's `i`). One genesis file per identity:
+- [ ] **5.1** On paper first: every identity under the burnt keeper (each agent: `agentIdentitySeed(K_j, i, n)`; each delegate: `delegateIdentitySeed(K_j, i, n)`, or the agent label if its line has no `kdf`; the keeper's own; on keeper 0 the root identity), its last honest DID and where its genesis comes from: a root agent's from `policy.json` `agents.<name>`, a delegate's from its signed `delegate` line in the burnt `spend.log` (its `account` is the delegate's `i`). One genesis file per identity:
 
 ```sh
 node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));for(const[n,g]of Object.entries(p.agents))require("fs").writeFileSync(n+".genesis.json",JSON.stringify(g))' <burnt>/policy.json
@@ -133,7 +133,7 @@ sigelo-offline recover --genesis <name>.genesis.json --backup backup.age --ident
   --agent <i> --keeper <j+1> --n 0 > <name>.recovery.local.json
 ```
 
-  (root identity: `--identity-n <n+1>` instead of `--agent/--keeper/--n`.) The output holds the new identity's secret: the agent applies it with `sigelo-agent adopt --rotation <file>`, then every copy is shredded. `recover` refuses a root that is not canonical ("not a canonical root"); a ceremony's root always is. The new `policy.json`'s `did`/`genesis` fields are the rotated agents' new ones, by hand.
+  (a delegate: `--delegate <i>` instead of `--agent <i>`; root identity: `--identity-n <n+1>` instead of `--agent/--keeper/--n`.) The output holds the new identity's secret: the agent applies it with `sigelo-agent adopt --rotation <file>`, then every copy is shredded. `recover` refuses a root that is not canonical ("not a canonical root"); a ceremony's root always is. The new `policy.json`'s `did`/`genesis` fields are the rotated agents' new ones, by hand.
 - [ ] **5.3 The keeper's own DID** (`/health`, the signer of receipts and approvals), INCIDENT.md §5. A keeper with an `identity.json` (keyed by `sigelo-spend init` or the soak's `gen-keys.mjs` from `164b8c4` on) is recovery-rotated on the offline box: `sigelo-offline recover --genesis <burnt>/identity.json <root> --new-keeper <j+1> > keeper.recovered.json`, then `sigelo-spend init --adopt keeper.recovered.json` on the new keeper directory; it keeps `chain[0]`, the DID receipts and the licence name, and `init --adopt` refuses the stolen key. Drill 2 ran the `recover` line on a live keeper without adopting it: the Go verifier accepted the bundle, and the stolen `K_j` was refused. A keeper keyed before `164b8c4` (no `identity.json`) can only be abandoned and announced retired out of band, signed by the root identity, with the new keeper DID. Write down what you did and when.
 
 ## 6. Re-attest and re-bind

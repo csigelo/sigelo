@@ -106,10 +106,11 @@ replacement needs a new wallet name, which no CLI offers today, or a new root (�
 
 ## 5. Recovery-rotate every identity under that keeper
 
-Every agent (`agentIdentitySeed(K_j, i, n)`, any `n`), the keeper's own identity, and, on
+Every agent (`agentIdentitySeed(K_j, i, n)`, any `n`), every delegate (`delegateIdentitySeed(K_j,
+i, n)`; the agent label if its `delegate` line has no `kdf`), the keeper's own identity, and, on
 keeper 0, the root identity. For each: current genesis from `policy.json` (`genesis`), the
 `delegate` line in `spend.log`, or the agent's file. New genesis: `agentIdentitySeed(K_{j+1}, i,
-0)` (root: `identitySeed(S, n+1)`), same recovery commitment. Sign SPEC §7's recovery rotation
+0)` (a delegate: `delegateIdentitySeed`, `recover --delegate`; root: `identitySeed(S, n+1)`), same recovery commitment. Sign SPEC §7's recovery rotation
 `{v: "sigelo/0", typ: "rotation", id: <last DID you know is yours>, next: <new DID>, iat,
 reason: "recovery", recovery_key: <recovery public key>}` with the recovery secret, envelope
 carrying `next_genesis` (ts: `rotate({genesis, next_genesis, iat, reason: "recovery", secret:

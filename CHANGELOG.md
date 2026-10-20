@@ -3,13 +3,30 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
-## unreleased
+## v0.1.9 — 2026-10-20
 
+- **Keeper:** `/delegate` derives on its own label `sigelo/v1/delegate/<i>/…`: on K_1 it handed out enrolled worker i's
+  key. New log lines carry `"kdf": "delegate/1"`; old lines keep the old label.
+- **Keeper:** the token is checked before the one-at-a-time queue; POSTs must be `application/json` from a loopback
+  Host with no Origin; the queue is capped at 32 (503 `busy`). 50 token-less posts: 10.9 s → 0.47 s.
+- **Keeper init:** the agent's token goes to its own file (`--agent-token-file`), never the keeper directory; as root,
+  system units with `User=` (two users); the single-user layout is the weaker one; `doctor` warns.
+- **Relay:** the all-networks brakes for short-code lookups and gift tries keep their ceilings (600/10 min, 300/h)
+  but no network takes over 1/8, and 1/8 is held back so a network not seen this window still gets one try.
+- **Inbox log:** what `inbox`, `watch`, `ui` and MCP hand out is first written to `<identity>.inbox.log` (0600, newest 500);
+  `history [--since]` and `sigelo_history` print it again, no relay.
+- **Received files:** one folder per contact by DID hash; a file of the same name is never written over (`<sha8>-2-<name>`);
+  characters NTFS refuses are stripped; Windows device names get `_`.
+- **`send <name> -`:** a final CRLF is dropped whole (it left `\r`); multi-line stdin tested byte for byte. `watch`'s
+  200-character line says how much was cut. The remote MCP says it needs no login and keeps nothing.
+- **Agent-facing first screens lead with the utility:** llms.txt, index.json, the MCP instructions, adopt.md, README,
+  QUICKSTART and relay.json say what an agent gains before how it works.
 - wire: a binding whose `id` precedes the last recovery in the chain is `superseded`, never paid; positional, not by `iat`
   (SPEC §6.1, vector `bundle_recovered`). Review 2026-10-19, HIGH 1.
 - wire: a payer accepts an invoice only from the chain's current DID (SPEC §6.3).
 - wire: every rotation carries `sig_next`, the next key's countersignature; missing is fatal, wrong is not a candidate
-  (SPEC §7, vector `graft_voluntary_into_foreign_genesis`). Review 2026-10-19, MEDIUM 1. `rotate()` takes `next_secret`.
+  (SPEC §7, vector `graft_voluntary_into_foreign_genesis`). Review 2026-10-19, MEDIUM 1.
+- `rotate()` takes `next_secret` (the countersigning key): an API change for every caller.
 - wire: Monero address keys of small order make a binding `discarded` (SPEC §6.2, vector `monero_view_key_small_order`).
 - wire: a `proven` monero binding reports `network`; `verify` does not refuse it (SPEC §6.2, §9.1).
 - Published issuer chains without `sig_next` need `node world/server.mjs countersign` by the issuer key before new

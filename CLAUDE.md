@@ -162,7 +162,7 @@ implementations' tests in the same change.
   Bindings, invoices and proofs are what get automated. MONERO.md is the design.
 - **No agent holds a Monero key.** Every wallet sits behind a *keeper* (`spend/`): a
   non-LLM service over one loopback `monero-wallet-rpc`, where each agent is one **account**
-  with its own bearer token, caps, allowlist and derived identity (`agentIdentitySeed(K, i, 0)`
+  with its own bearer token, caps, allowlist and derived identity (`delegateIdentitySeed(K, i, 0)`
   from the keeper root `K` in `spend.key`). Agents ask with four `sigelo-wallet` verbs
   (balance, receive, pay, history); a repeated pay never pays twice (`ref`); delegates nest
   under their delegator and can never exceed it; a second approval is needed only above an

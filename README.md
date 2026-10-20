@@ -2,32 +2,38 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Portable, offline-verifiable identity for AI agents. An agent's DID is the hash of a genesis
-document holding an Ed25519 key; worlds sign attestations about it; anyone verifies the bundle
-offline — no server, registry or chain. Draft v0.1, wire format `sigelo/0`; nothing is stable before v1.0.
+One identity an AI agent owns, from a key it holds. The agent:
 
-Your framework runs your agents in one office; nobody there asks for ID. sigelo is the ID card
-for when an agent goes outside: who is this, who does it work for, is that still true today.
+- **proves who it is** to any site or agent offline, in one challenge: no server, no account;
+- **keeps its standing when it leaves a platform:** attestations (reputation) travel with it, and a
+  stolen key is recovered without losing the DID;
+- **gets paid and pays** in Monero without holding a wallet key (keeper, stagenet-only);
+- **messages other agents** end to end through a relay that cannot read them, paired by an 8-character code.
 
-Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). MCP server: `sigelo-mcp`
-(`io.github.csigelo/sigelo`). Why an agent would use it: [`WHY.md`](WHY.md).
+Use it when a world asks who you are (answer its challenge), a human asks you to talk to their
+other agent (pair by a code), or your standing should outlive the platform you earned it on.
+
+How: the DID is the hash of a genesis holding an Ed25519 key; worlds sign attestations; bundles
+verify offline. Draft v0.1: wire `sigelo/0` not frozen before v1.0.
+
+Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). MCP: `sigelo-mcp`
+(`io.github.csigelo/sigelo`). Why: [`WHY.md`](WHY.md).
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/csigelo/sigelo)
 
 Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhUkH7FebKRGj8rf96SdoLa`) under a human owner, `csigelo`. No third party has audited it yet.
 
 ## Use it
 
-- **As an agent:** [`QUICKSTART.md`](QUICKSTART.md) (seven steps), or plug in through
-  [`integrations/`](integrations/README.md) (MCP server, Claude Code plugin, configs for other harnesses).
+- **As an agent:** [`QUICKSTART.md`](QUICKSTART.md) (seven steps), or
+  [`integrations/`](integrations/README.md) (MCP server, plugin, harness configs).
 - **As a world admitting agents:** [`accept/`](accept/README.md) — `challenge(did, ctx)` and
-  `accept(challenge, answer, bundle)` for node, Python and Go; `sh accept/test.sh` runs them.
+  `accept(challenge, answer, bundle)` for node, Python and Go.
   Live example: [`world/`](world/README.md).
 - **As an implementer:** [`SPEC.md`](SPEC.md) and [`test-vectors.json`](test-vectors.json);
   check yours with `sigelo-verify --conformance test-vectors.json --impl <your command>` ([`go/`](go/README.md)).
 
-Requirements: Node ≥ 22.18, Go ≥ 1.27; optional `age` (root ceremony) and `monero-wallet-rpc`
-(keeper). Linux, macOS, Windows on x86_64 and arm64;
-on Windows file modes such as 0600 are ignored, so keep secret files under your own profile.
+Requirements: Node ≥ 22.18, Go ≥ 1.27; optional `age` (ceremony), `monero-wallet-rpc` (keeper).
+Linux, macOS, Windows, x86_64 and arm64; Windows ignores 0600: keep secrets under your profile.
 
 ## Build and test
 
@@ -46,21 +52,18 @@ node schema/check.mjs
 release/build.sh /tmp/rel && release/pack-test.sh /tmp/rel           # 5 npm tarballs, sigelo-verify ×5, SHA256SUMS
 ```
 
-Without `age` the ceremony's real-age check SKIPs; without `monero-wallet-rpc` on 127.0.0.1:38083
-the live-wallet sections SKIP.
+Without `age` or `monero-wallet-rpc` (127.0.0.1:38083) their sections SKIP.
 
 ## Design
 
-- **Identity:** a genesis document — public key plus a commitment to an offline recovery key.
-  The DID is its hash, so it cannot be revised.
-- **Attestations:** signed statements by a world about an agent. `claims` is world-defined and
-  untrusted (never instructions to an LLM); `admission` says what entry cost (open, invite, payment, stake).
-- **Bindings:** an identity key and a payment key sign the same bytes. Spending keys stay out of
-  the agent: a view-only Monero wallet can be bound ([`MONERO.md`](MONERO.md)).
-- **Recovery beats key:** a valid recovery rotation supersedes any voluntary rotation regardless
-  of timestamp, so a stolen hot key is recoverable.
-- **Non-goals:** trust scores, revocation lists, discovery, hosted services. The verifier reports;
-  weighting is the caller's job. Bundles carry every issuer's genesis, so they verify with no prior knowledge.
+- **Identity:** a genesis document: public key plus a commitment to an offline recovery key.
+- **Attestations:** a world's signed statements about an agent; `claims` are untrusted data, never
+  instructions; `admission` says what entry cost (open, invite, payment, stake).
+- **Bindings:** an identity key and a payment key sign the same bytes; spend keys stay out of the
+  agent ([`MONERO.md`](MONERO.md)).
+- **Recovery beats key:** a recovery rotation supersedes any voluntary one, whatever the timestamp.
+- **Non-goals:** trust scores, revocation lists, discovery, hosted services; the verifier reports,
+  the caller weighs. Bundles carry their issuers' geneses, so they verify with no prior knowledge.
 
 Threats in scope and out: [`THREAT-MODEL.md`](THREAT-MODEL.md).
 

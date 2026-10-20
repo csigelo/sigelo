@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import * as ed from '@noble/ed25519';
 import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
 import { canonicalize } from './jcs.js';
-import { agentIdentitySeed, deriveRoot, identitySeed, keeperRoot, mnemonicFromRoot, newRoot, recoverySeed, rootFromMnemonic } from './keys.js';
+import { agentIdentitySeed, delegateIdentitySeed, deriveRoot, identitySeed, keeperRoot, mnemonicFromRoot, newRoot, recoverySeed, rootFromMnemonic } from './keys.js';
 import { decodeAddress, Net } from './monero.js';
 import { Bundle, did, encodeKey, Genesis, keygen, rotate, Rotation, SigeloError, structure, verify } from './sigelo.js';
 
@@ -218,11 +218,13 @@ export function restoreWords(o: { words: string; net: Net; keepers?: number; fin
 
 /**
  * Where the recovered identity's new key comes from. `agent`: `agentIdentitySeed(K_j, i, n)`,
- * a keeper-minted agent or delegate (INCIDENT.md §5: the same keeper's next `n`, or `K_{j+1}`
- * when the keeper itself burnt). `identity`: the root identity's `identitySeed(S, n)`.
+ * a keeper's agent or enrolled worker (INCIDENT.md §5: the same keeper's next `n`, or `K_{j+1}`
+ * when the keeper itself burnt). `delegate`: `delegateIdentitySeed(K_j, i, n)`, the same for a
+ * delegate `POST /delegate` minted (never `agent`: that is worker `i`'s key under `K_j`). `identity`: the root identity's `identitySeed(S, n)`.
  * `random`: a fresh key nobody can re-derive — the default, and the only choice without `S`.
  */
-export type NextKey = { kind: 'agent'; keeper: number; agent: number; n: number } | { kind: 'identity'; n: number } | { kind: 'random' }
+export type NextKey = { kind: 'agent'; keeper: number; agent: number; n: number } | { kind: 'delegate'; keeper: number; delegate: number; n: number }
+  | { kind: 'identity'; n: number } | { kind: 'random' }
   /**
    * A KEEPER's own identity (INCIDENT.md §5): a new keeper root `K'` — `keeperRoot(S, keeper)`, or
    * random without `keeper` — whose `identitySeed(K', 0)` is the new key, as `sigelo-spend` signs
@@ -248,10 +250,11 @@ export function recover(o: {
   if (o.from.recovery === null) throw new SigeloError(`recover: ${did(o.from)} has recovery: null — theft of it is terminal and no recovery rotation can exist (SPEC §4)`);
   const secret = o.recoverySecret ?? recoverySeed(o.S!);
   const next = o.next ?? { kind: 'random' };
-  const derived = next.kind === 'agent' || next.kind === 'identity' || (next.kind === 'keeper' && next.keeper !== undefined);
+  const derived = next.kind === 'agent' || next.kind === 'delegate' || next.kind === 'identity' || (next.kind === 'keeper' && next.keeper !== undefined);
   if (derived && o.S === undefined) throw new SigeloError(`recover: a derived new key (${next.kind}) needs the root S, not only the recovery secret`);
   const K = next.kind !== 'keeper' ? undefined : next.keeper === undefined ? randomBytes(32) : keeperRoot(o.S!, next.keeper);
   const seed = next.kind === 'agent' ? agentIdentitySeed(keeperRoot(o.S!, next.keeper), next.agent, next.n)
+    : next.kind === 'delegate' ? delegateIdentitySeed(keeperRoot(o.S!, next.keeper), next.delegate, next.n)
     : next.kind === 'identity' ? identitySeed(o.S!, next.n) : K !== undefined ? identitySeed(K, 0) : undefined;
   const id = keygen({ recovery: o.nextRecovery === undefined ? o.from.recovery : o.nextRecovery, seed, created: o.created, nonce: o.nonce });
   // A derived index that lands on the stolen key would "recover" into the thief's hands.

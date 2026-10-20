@@ -230,7 +230,20 @@ storage and nothing else; online, a network gets 10 guesses an hour.
 `sigelo-agent ui` keeps every message and pairing event in `me.local.history.jsonl` and its tags,
 checked words and read marks in `me.local.ui.json`, in plaintext (0600) until §7's keychain unlock
 (K2): whoever reads the user's files reads them, and "clear" (`POST /api/history/clear`) is the only
-mitigation.
+mitigation. The same holds for `<identity>.inbox.log` (contact/carrier.mjs `log`): the newest 500
+messages and file items `inbox`, `watch`, `ui` and the MCP tools gave out, plaintext 0600, so `history`
+can print them again; deleting the file is the mitigation, and `log: false` keeps none.
+
+### 3.10 Linkability (privacy by design)
+**The relay sees metadata.** Per session it sees the DID, the mailbox topics, message sizes and
+timing, and the client's address (kept as its /24 or /48); behind a TLS-re-terminating egress proxy
+(cloud sandboxes, corporate proxies) the proxy sees the same. Content stays end to end.
+**Seed-derived identities are marked.** Enrolled workers and other identities restored from the words
+carry `created: 1970-01-01T00:00:00Z`: a restore must rebuild the same genesis byte for byte, so the
+timestamp cannot vary, and anyone reading the genesis can tell the identity is derived.
+**Workers of one operator link.** Every worker derived from one keeper root carries the operator's
+recovery commitment in its genesis, so two workers' bundles link to each other and to the operator
+without any attestation: an unlinkable worker is not possible today. Known limitation.
 
 ## 4. Prompt injection
 

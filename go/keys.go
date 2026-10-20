@@ -11,6 +11,7 @@
 //	wallet     = b = sc_reduce32(k(S, "sigelo/v1/monero/<w>"))   a = H_s(b), B = bG, A = aG
 //	keeper     = K_j = k(S, "sigelo/v1/keeper/<j>")
 //	agent      = Ed25519 seed  k(K, "sigelo/v1/identity/<i>/ed25519/<n>")
+//	delegate   = Ed25519 seed  k(K, "sigelo/v1/delegate/<i>/ed25519/<n>")
 //
 // The path is the HKDF info verbatim: the strings below are literals and must never be
 // "tidied". Indices are decimal without leading zeros, capped at 2^53−1 as in ts (a JS safe
@@ -81,6 +82,19 @@ func AgentIdentitySeed(keeper []byte, i, n uint64) ([32]byte, error) {
 		return [32]byte{}, err
 	}
 	return K(keeper, fmt.Sprintf("sigelo/v1/identity/%d/ed25519/%d", i, n))
+}
+
+// DelegateIdentitySeed is the Ed25519 seed for the delegate a keeper's POST /delegate mints at
+// account i, rotation n, under keeper root K: its own label, so it never equals the seed of an
+// enrolled worker i (AgentIdentitySeed) under the same K.
+func DelegateIdentitySeed(keeper []byte, i, n uint64) ([32]byte, error) {
+	if err := index("delegate", i); err != nil {
+		return [32]byte{}, err
+	}
+	if err := index("delegate rotation", n); err != nil {
+		return [32]byte{}, err
+	}
+	return K(keeper, fmt.Sprintf("sigelo/v1/delegate/%d/ed25519/%d", i, n))
 }
 
 // RecoverySeed is the Ed25519 seed for the recovery key: one per root, it outlives every rotation.

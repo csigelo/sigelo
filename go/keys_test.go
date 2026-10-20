@@ -39,6 +39,10 @@ func TestKeys(t *testing.T) {
 	check("go keys agentIdentitySeed fixed vector: (K_0, i=1, n=0)",
 		hx(must(AgentIdentitySeed(K0[:], 1, 0))) == "36ca4e02c29c9131344139b99be1d894c30d43fab762a1dd4e37720e08c5e2df" &&
 			must(AgentIdentitySeed(K0[:], 1, 0)) == must(K(K0[:], "sigelo/v1/identity/1/ed25519/0")))
+	check("go keys delegateIdentitySeed fixed vector: (K_1, i=2, n=0), not the worker's (K_1, 2, 0)",
+		hx(must(DelegateIdentitySeed(K1[:], 2, 0))) == "066e6bf8d5bacf9b493e3ec4e936a5f2f43d0b5537d159d304d6bc5517998ad7" &&
+			must(DelegateIdentitySeed(K1[:], 2, 0)) == must(K(K1[:], "sigelo/v1/delegate/2/ed25519/0")) &&
+			hx(must(AgentIdentitySeed(K1[:], 2, 0))) == "b0799910d2f8d25044c8cf0920a8f35550510d6c40004f9d0f6a8aa6091f308a")
 	check("go keys agentIdentitySeed fixed vector: (K_0, i=0, n=1)",
 		hx(must(AgentIdentitySeed(K0[:], 0, 1))) == "400d40c3663541b8f2dd7341ac491e921bb05b91f3308b1ca8c4770884935037")
 
@@ -105,7 +109,8 @@ func TestKeys(t *testing.T) {
 	seps := [][32]byte{K0, K1, must(IdentitySeed(S1, 0)), must(IdentitySeed(S1, 1)), must(IdentitySeed(K0[:], 0)),
 		must(RecoverySeed(S1)), must(K(S1, "sigelo/v1/monero/treasury")), must(K(S1, "sigelo/v1/monero/allowance")),
 		must(AgentIdentitySeed(K0[:], 0, 0)), must(AgentIdentitySeed(K0[:], 1, 0)), must(AgentIdentitySeed(K0[:], 0, 1)),
-		must(AgentIdentitySeed(K1[:], 0, 0))}
+		must(AgentIdentitySeed(K1[:], 0, 0)), must(DelegateIdentitySeed(K0[:], 0, 0)), must(DelegateIdentitySeed(K0[:], 1, 0)),
+		must(DelegateIdentitySeed(K1[:], 0, 0))}
 	seen := map[[32]byte]bool{}
 	for _, s := range seps {
 		seen[s] = true

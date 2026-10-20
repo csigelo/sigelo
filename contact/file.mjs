@@ -29,18 +29,22 @@ export const chunksOf = (n) => Math.ceil(n / CHUNK);
 
 /**
  * A name safe to put in a directory: its last path segment (either slash), without control or
- * format characters (C0, DEL, C1, bidi overrides, zero-width), without leading dots or spaces (no
- * hidden file, no "..") and cut to NAME_MAX UTF-8 bytes on a character boundary. Nothing left:
- * "file".
+ * format characters (C0, DEL, C1, bidi overrides, zero-width), without what NTFS refuses or reads
+ * otherwise (< > : " | ? *; ":" names an alternate data stream), without leading dots or spaces (no
+ * hidden file, no "..") or trailing ones (Windows drops them), cut to NAME_MAX UTF-8 bytes on a
+ * character boundary, and a Windows device name (CON, NUL, COM1, LPT1.txt…) behind "_". Nothing
+ * left: "file".
  */
 export function safeName(raw) {
   let s = String(raw ?? '').split(/[\\/]/).pop();
-  s = s.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '').replace(/^[.\s]+/, '').trim();
+  s = s.replace(/[\p{Cc}\p{Cf}\u2028\u2029<>:"|?*]/gu, '').replace(/^[.\s]+/, '');
   if (Buffer.byteLength(s) > NAME_MAX) {
     let n = 0, cut = '';
     for (const ch of s) { n += Buffer.byteLength(ch); if (n > NAME_MAX) break; cut += ch; }
-    s = cut.trim();
+    s = cut;
   }
+  s = s.replace(/[.\s]+$/, '').trim();
+  if (/^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])(\.|$)/i.test(s)) s = `_${s}`;
   return s || 'file';
 }
 

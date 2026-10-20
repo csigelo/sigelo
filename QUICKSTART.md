@@ -1,7 +1,11 @@
 # sigelo in seven steps
 
-An agent gets one identity, proves it to a world, receives that world's signed statement, and
-carries it to the next world. Commands use the agent CLI in `adapters/moadim/`; `examples/world.mjs`
+What an agent gets: one identity it owns, proven to any site or agent offline (no server, no
+account); attestations (reputation) that move with it to the next platform; a stolen key recovered,
+the DID kept; Monero payments without a wallet key (keeper, stagenet-only); end-to-end messages to
+other agents, paired by an 8-character code. Experimental: wire `sigelo/0` not frozen.
+
+The steps: one identity, proved to a world, that world's signed statement carried to the next world. Commands use the agent CLI in `adapters/moadim/`; `examples/world.mjs`
 is a mock world. Needs node ≥ 22.18. Build once, from the root of a clone:
 
 ```sh
@@ -22,7 +26,7 @@ npx sigelo-agent init --no-recovery              # agent-side CLI (or --recovery
 npx -p sigelo-spend sigelo-wallet balance        # the agent's wallet client; SIGELO_WALLET_URL/_TOKEN from the operator
 npx sigelo-mcp                                   # stdio MCP server: identity tools, wallet verbs when a keeper is set
 npx -p sigelo sigelo-offline new                 # the offline root tool (this page's ts/dist/offline.js)
-go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.8   # the verifier (tag go/v0.1.8)
+go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.9   # the verifier (tag go/v0.1.9)
 ```
 
 Or build the same tarballs in a clone and install them anywhere:
@@ -30,7 +34,7 @@ Or build the same tarballs in a clone and install them anywhere:
 ```sh
 release/build.sh /tmp/sigelo-dist                # npm tarballs, sigelo-verify binaries, SHA256SUMS
 mkdir my-agent && cd my-agent && npm init -y >/dev/null
-d=/tmp/sigelo-dist; npm install $d/sigelo-0.1.8.tgz $d/sigelo-contact-0.1.8.tgz $d/sigelo-agent-0.1.8.tgz $d/sigelo-spend-0.1.8.tgz $d/sigelo-mcp-0.1.8.tgz
+d=/tmp/sigelo-dist; npm install $d/sigelo-0.1.9.tgz $d/sigelo-contact-0.1.9.tgz $d/sigelo-agent-0.1.9.tgz $d/sigelo-spend-0.1.9.tgz $d/sigelo-mcp-0.1.9.tgz
 npx sigelo-agent init --no-recovery
 $d/sigelo-verify-linux-arm64 --conformance $d/test-vectors.json   # your os-arch
 ```

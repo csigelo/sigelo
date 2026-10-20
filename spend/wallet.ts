@@ -83,6 +83,7 @@ export const LINES = {
   offline: 'TRY LATER: the wallet has no connection to the Monero network; nothing was sent. Run the same command later.',
   slow: 'TRY LATER: the wallet is still working on that payment (a slow network); nothing was sent. Run the same command in a few minutes.',
   clock: 'TRY LATER: the wallet service\'s clock is not set yet; nothing was sent. Run the same command later.',
+  busy: 'TRY LATER: the wallet service is busy with other requests; nothing was sent. Run the same command in a few seconds.',
   amount: 'REFUSED: amount must look like 0.05 (XMR, at most 12 decimals).',
   amountAtomic: 'REFUSED: with --atomic, amount must be a whole number of atomic units above 0, like 50000000000.',
   purpose: 'REFUSED: purpose must be at most 200 characters.',
@@ -159,6 +160,7 @@ export function explain(status: number, b: Body, shown = '', label?: string, ver
     case 'wallet_offline': return out('try_later', code, LINES.offline, b);
     case 'wallet_slow': return out('try_later', code, LINES.slow, b);
     case 'clock_behind': return out('try_later', code, LINES.clock, b);
+    case 'busy': return out('try_later', code, LINES.busy, b);
     default: return out('refused', code, LINES.service(clean(str(b['error'])) || `HTTP ${status}`), b);
   }
 }

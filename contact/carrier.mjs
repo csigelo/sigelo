@@ -31,6 +31,9 @@
 //                                            paired: the wait also ends at a pairing (enrol.mjs)
 //   c.peek(), c.take(pick)                 the messages kept for inbox(), each with its sender's tier: read, or those
 //                                            pick(message, tier) chooses taken; no session (a started carrier's owner)
+//   c.history({ since })                   → { messages }: what inbox() and take() gave out, again, from the local log
+//                                            (`log`: x.inbox.log, pathsFor), received at or after since (unix seconds);
+//                                            no session, nothing taken
 //   c.setTier(who, tier)                   the owner's tier for a contact (store.mjs setTier) → { did, name, tier, ours }
 //   c.presetTier(did, tier)                the same for an original DID not yet a contact, filed when it pairs
 //   c.answeredBy(nonce)                    the original DID that paired through this agent's code `nonce`, or null
@@ -54,6 +57,10 @@
 // inbox(), in plaintext, until taken (INBOX_MAX at most: the oldest go, counted as inbox_full); by
 // default only without onEvent, so a message onEvent took is not left at rest after the keys that
 // opened it are gone (contacts.md §3: keys stolen today must not open yesterday's messages).
+// log: every message and file item inbox() or take() gives out is first appended to this file
+// (JSON lines, 0600, the newest LOG_MAX or LOG_BYTES; enrolment's key-carrying labels never), so a
+// reader that dropped its output can read it again (history); by default x.inbox.log beside the
+// state; false: none. Plaintext at rest, as the state's inbox is (THREAT-MODEL §3.9).
 // One connected carrier per identity: every process logs in with the identity's one MQTT client
 // id, so a second login takes the session from a started carrier (the files stay sound under the
 // lock; the started one reconnects with backoff). Beside one, use inbox and send with local: the
@@ -192,7 +199,7 @@ import { createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { connect as tlsConnect } from 'node:tls';
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
@@ -247,6 +254,16 @@ const POISON_TRIES = 3;
 // Events kept for the next inbox(): pairings, rotations, failed pairings. The oldest go first.
 // Messages kept for it (keep), likewise.
 const EVENTS_MAX = 1000, INBOX_MAX = 1000;
+// The inbox log (the constructor's log): at most so many items and bytes, the oldest go first (the
+// newest is kept whatever its size). Labels it never holds: enrolment's, one of which carries a key.
+export const LOG_MAX = 500, LOG_BYTES = 4 * 1024 * 1024;
+const UNLOGGED = /^sigelo-(identity|enrol)\//;
+// Received files of one name and hash prefix kept side by side, at most (#onFile).
+const FILE_COPIES = 64;
+// A contact's folder of received files: its name as safeName keeps it, and 16 hex digits of the
+// SHA-256 of its original DID, so two contacts whose names reduce alike never share one, and a
+// rename keeps the DID part.
+export const contactDir = (c) => `${safeName(c.name || 'contact')}-${hex(sha256(utf8ToBytes(c.did))).slice(0, 16)}`;
 // Files arriving at once from one contact (#onFile): each holds up to 8 MiB of parts here.
 const FILES_OPEN = 8;
 // Half the relay's publish brake (20 a second, 200 at once): past it the relay refuses publishes
@@ -342,10 +359,10 @@ const GIFT_CHECKS = new Set(['gift', 'gift_member', 'gift_term', 'pow', ...LOGIN
 
 // ---------------------------------------------------------------- configuration
 
-/** The contact store, this carrier's state and the files received, beside the identity file: x.json → x.contacts.json, x.carrier.json, x.files/. */
+/** The contact store, this carrier's state, the files received and the inbox log, beside the identity file: x.json → x.contacts.json, x.carrier.json, x.files/, x.inbox.log. */
 export function pathsFor(identityFile) {
   const base = identityFile.replace(/\.json$/, '');
-  return { store: `${base}.contacts.json`, state: `${base}.carrier.json`, files: `${base}.files` };
+  return { store: `${base}.contacts.json`, state: `${base}.carrier.json`, files: `${base}.files`, log: `${base}.inbox.log` };
 }
 
 /**
@@ -900,7 +917,7 @@ export class Carrier {
   #mineMemo = null; #clocks = new Map();
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
-    onEvent, keep, backoff = BACKOFF, tick = TICK, files, transport = 'auto' }) {
+    onEvent, keep, backoff = BACKOFF, tick = TICK, files, log, transport = 'auto' }) {
     if (!TRANSPORTS.includes(transport)) throw new TypeError(`transport: ${TRANSPORTS.join(', ')}`);
     this.transport = transport;
     if (typeof identity !== 'function') throw new TypeError('identity: a function returning { sign, bundle }');
@@ -916,6 +933,27 @@ export class Carrier {
     // Files received (#onFile): files, else beside the state as pathsFor names it (x.carrier.json → x.files).
     if (files !== undefined && typeof files !== 'string') throw new TypeError('files: a directory path (pathsFor(identityFile))');
     this.filesDir = resolve(files ?? state.replace(/(\.carrier)?\.json$/, '') + '.files');
+    // The inbox log: log, else beside the state as pathsFor names it (x.carrier.json → x.inbox.log); false: none.
+    if (log !== undefined && log !== false && typeof log !== 'string') throw new TypeError('log: a file path (pathsFor(identityFile)) or false');
+    this.logPath = log === false ? null : resolve(log ?? state.replace(/(\.carrier)?\.json$/, '') + '.inbox.log');
+  }
+
+  // Items given out (inbox, take), appended to the log before they are: a reader that loses its
+  // output reads them again (history). Under the lock, before the state drops them, so a failed
+  // write leaves them in the state; an item already logged (a crash before the state was saved) is
+  // not logged twice. Written whole to a fresh 0600 name, then renamed, as the state is.
+  #logOut(items) {
+    const path = this.logPath, add = items.filter((m) => !(typeof m?.label === 'string' && UNLOGGED.test(m.label)));
+    if (path === null || add.length === 0) return;
+    let lines = [];
+    try { lines = readFileSync(path, 'utf8').split('\n').filter((l) => l !== ''); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    const had = new Set(lines);
+    for (const m of add) { const l = JSON.stringify(m); if (!had.has(l)) { had.add(l); lines.push(l); } }
+    let bytes = lines.reduce((n, l) => n + Buffer.byteLength(l) + 1, 0), cut = 0;
+    while (lines.length - cut > 1 && (lines.length - cut > LOG_MAX || bytes > LOG_BYTES)) bytes -= Buffer.byteLength(lines[cut++]) + 1;
+    const tmp = join(dirname(path), `.${basename(path)}.${randomId()}.tmp`);
+    writeFileSync(tmp, lines.slice(cut).map((l) => `${l}\n`).join(''), { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, path);
   }
 
   // ---- files, under the lock
@@ -1339,8 +1377,11 @@ export class Carrier {
   // A FILE_LABEL message from contact c, opened (r). The manifest is kept in the state (files,
   // under a key of the contact and the file's id), each chunk under filesDir/.partial/<key>/<i>
   // (0600, directories 0700); once all have come, the file is checked (size, SHA-256), saved as
-  // filesDir/<contact>/<sha256[0..8]>-<name> (0600), and given to inbox() as one item of type
-  // "file". Never opened, never made executable. Anything wrong with the message is counted in
+  // filesDir/<contact>-<16 hex of SHA-256(original DID)>/<sha256[0..8]>-<name> (0600), and given to
+  // inbox() as one item of type "file". The folder is the contact's alone, whatever its name
+  // reduces to; a name taken already is never written over (linked in, or opened wx): the file
+  // goes as <sha256[0..8]>-<n>-<name>, n from 2, and past FILE_COPIES it is dropped, file_exists.
+  // Never opened, never made executable. Anything wrong with the message is counted in
   // dropped by its check, as a refused bundle is above; the envelope stays opened either way.
   // A chunk before its manifest (none: the sender sends the manifest first, in one login) is
   // dropped, file_chunk. The disk is written before the state: a crash between them leaves a
@@ -1390,14 +1431,26 @@ export class Carrier {
       rmSync(this.#partDir(key), { recursive: true, force: true });
       return drop(e);
     }
-    const dir = join(this.filesDir, safeName(c.name || c.did));
+    const dir = join(this.filesDir, contactDir(c));
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(this.filesDir, 0o700); chmodSync(dir, 0o700);
-    const path = join(dir, `${p.sha256.slice(0, 8)}-${p.name}`), tmp = join(dir, `.${randomId()}.tmp`);
+    const tmp = join(dir, `.${randomId()}.tmp`);
     writeFileSync(tmp, bytes, { mode: 0o600, flag: 'wx' });
-    renameSync(tmp, path);
+    let path = null;
+    try {
+      for (let n = 1; path === null && n <= FILE_COPIES; n++) {
+        const at = join(dir, `${p.sha256.slice(0, 8)}-${n === 1 ? '' : `${n}-`}${p.name}`);
+        try { linkSync(tmp, at); path = at; } catch (e) {
+          if (e.code === 'EEXIST') continue;
+          // No hard links here (FAT, some network file systems): written again, exclusively.
+          if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS'].includes(e.code)) throw e;
+          try { writeFileSync(at, bytes, { mode: 0o600, flag: 'wx' }); path = at; } catch (e2) { if (e2.code !== 'EEXIST') throw e2; }
+        }
+      }
+    } finally { rmSync(tmp, { force: true }); }
     delete st.files[key];
     rmSync(this.#partDir(key), { recursive: true, force: true });
+    if (path === null) return drop(new MsgError('file_exists', `${p.name}: ${FILE_COPIES} files of that name and hash are in ${dir} already; not saved`));
     const item = { type: 'file', from: c.did, contact: c.name, current_did: r.body.from, label: FILE_LABEL, name: p.name, size: p.size, sha256: p.sha256, path,
       iat: r.body.iat, received: now, last_resort: r.last_resort };
     // Kept for inbox() as a message is (#onPeer), and so many at most.
@@ -2550,8 +2603,8 @@ export class Carrier {
     let ownDir;
     try { ownDir = realpathSync(dirname(own)); } catch { ownDir = dirname(own); }
     const leaf = basename(real);
-    if (real.startsWith(files + sep) || (dirname(real) === ownDir && (leaf.startsWith(`${basename(own)}.`) || leaf.includes('.local.')))) {
-      fail('file', `${path} is one of this agent's identity files (key, contacts, state, files received): not sent`);
+    if (real.startsWith(files + sep) || real === this.logPath || (dirname(real) === ownDir && (leaf.startsWith(`${basename(own)}.`) || leaf.includes('.local.')))) {
+      fail('file', `${path} is one of this agent's identity files (key, contacts, state, files received, inbox log): not sent`);
     }
     try { bytes = readFileSync(real); } catch (e) { fail('file', `cannot read ${path}: ${e.code ?? e.message}`, { cause: e }); }
     if (bytes.length > MAX_FILE) fail('file_too_large', `${path} is ${bytes.length} bytes, at most ${MAX_FILE} (8 MiB) a file`);
@@ -2587,6 +2640,7 @@ export class Carrier {
     return this.#locked(({ now, store, st }) => {
       this.#sweepFiles(st, now);
       const pick = picks(store, now), messages = st.inbox.filter(pick);
+      this.#logOut(messages);
       const out = { messages, events: st.events, dropped: st.dropped, ...(offline && { offline }) };
       st.inbox = st.inbox.filter((m) => !pick(m)); st.events = []; st.dropped = {};
       return out;
@@ -2602,9 +2656,27 @@ export class Carrier {
     return this.#locked(({ now, store, st }) => {
       const t = store.tiers(now), out = [], keep = [];
       for (const m of st.inbox) (pick(m, t.get(m.from) ?? 'friend') ? out : keep).push(m);
+      this.#logOut(out);
       st.inbox = keep;
       return out;
     });
+  }
+
+  // The log as written (atomic renames: no lock needed), oldest first; since: unix seconds, by
+  // `received`. A line that does not parse (a hand edit) is skipped, never the rest.
+  history({ since = 0 } = {}) {
+    if (!Number.isSafeInteger(since) || since < 0) throw new TypeError('since: unix seconds, a whole number');
+    if (this.logPath === null) return { messages: [] };
+    let text = '';
+    try { text = readFileSync(this.logPath, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    const messages = [];
+    for (const l of text.split('\n')) {
+      if (l === '') continue;
+      let m;
+      try { m = JSON.parse(l); } catch { continue; }
+      if (m !== null && typeof m === 'object' && (m.received ?? 0) >= since) messages.push(m);
+    }
+    return { messages };
   }
 
   setTier(who, tier) { return this.#locked(({ now, store }) => store.setTier(who, tier, now)); }

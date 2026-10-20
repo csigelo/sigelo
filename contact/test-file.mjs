@@ -2,7 +2,7 @@
 // File transfer (file.mjs, carrier.sendFile and its receive path; design/human-ui-plan.md §4):
 // the pure part (byte-exact round trips from fixed seeds, a tampered chunk, oversize, names); then,
 // with the relay checkout beside contact/ (SIGELO_RELAY_DIR, else ../relay), on a loopback relay: a
-// 1 MiB file each way, saved 0600 under <identity>.files/<contact>/, a forged file refused, an
+// 1 MiB file each way, saved 0600 under <identity>.files/<contact>-<16 hex of its DID hash>/, never over a file, a forged file refused, an
 // incomplete one dropped at the retention.
 //   node contact/test-file.mjs   → ALL PASS (n)
 import { createHash } from 'node:crypto';
@@ -74,10 +74,13 @@ const ID = 'ab'.repeat(16);
   ok(checkOf(() => checkManifest({ ...manifest, size: 1.5 })) === 'file', 'a manifest with a fractional size: file');
   ok(checkOf(() => checkManifest({ ...manifest, name: 'x'.repeat(1025) })) === 'file', 'a manifest name past 1,024 characters: file');
 
-  // Names: the last segment, no controls, no leading dots, at most 200 bytes, never empty.
+  // Names: the last segment, no controls, nothing NTFS refuses (":" streams), no leading dots, no
+  // trailing dots or spaces, no device names, at most 200 bytes, never empty.
   for (const [raw, want] of [['report.pdf', 'report.pdf'], ['../../etc/passwd', 'passwd'], ['..\\..\\boot.ini', 'boot.ini'], ['/abs/path/x.txt', 'x.txt'],
     ['.bashrc', 'bashrc'], ['...hidden', 'hidden'], ['..', 'file'], ['', 'file'], ['dir/', 'file'], ['a\u0000b\u001bc\u007fd\u0085e.txt', 'abcde.txt'],
-    ['evil\u202Etxt.exe', 'eviltxt.exe'], ['line\nbreak.md', 'linebreak.md'], [' \t.x', 'x'], ['naïve café.txt', 'naïve café.txt']]) {
+    ['evil\u202Etxt.exe', 'eviltxt.exe'], ['line\nbreak.md', 'linebreak.md'], [' \t.x', 'x'], ['naïve café.txt', 'naïve café.txt'],
+    ['notes.txt:secret', 'notes.txtsecret'], ['C:evil.exe', 'Cevil.exe'], ['a<b>c"d|e?f*g.txt', 'abcdefg.txt'], ['trail. . ', 'trail'],
+    ['CON', '_CON'], ['nul.txt', '_nul.txt'], ['com1.log', '_com1.log'], ['Lpt9', '_Lpt9'], ['console.txt', 'console.txt'], [':', 'file']]) {
     ok(safeName(raw) === want, `safeName ${JSON.stringify(raw)} → ${JSON.stringify(safeName(raw))}, expected ${JSON.stringify(want)}`);
   }
   const long = safeName('é'.repeat(150) + '.txt');
@@ -97,7 +100,7 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs'))) {
 // ================================================================ the flow, on a loopback relay
 const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
 const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
-const { Carrier, pathsFor } = await import('./carrier.mjs');
+const { Carrier, LOG_MAX, contactDir, pathsFor } = await import('./carrier.mjs');
 setTimeout(() => { console.log(`FAIL the run did not finish in 300 s (${count} checks so far)`); process.exit(1); }, 300000).unref();
 
 const HOST = 'relay.test', CREATED = '2026-10-01T00:00:00Z';
@@ -146,7 +149,7 @@ try {
     now += 60;
     const box = await cTo.inbox();
     const f = box.messages.find((m) => m.type === 'file');
-    const want = join(dir, `${to}.local.files`, fromName, `${sum.slice(0, 8)}-${from}-photo.jpg`);
+    const want = join(dir, `${to}.local.files`, contactDir({ name: fromName, did: (from === 'alice' ? alice : bob).did }), `${sum.slice(0, 8)}-${from}-photo.jpg`);
     ok(box.messages.length === 1 && f && f.name === `${from}-photo.jpg` && f.size === 1 << 20 && f.sha256 === sum && f.path === want && f.contact === fromName && f.label === FILE_LABEL,
       `${to}'s inbox: one item {type: file, name, size, sha256, path} (${JSON.stringify(box.messages.map((m) => ({ ...m, content: undefined })))}; dropped ${JSON.stringify(box.dropped)})`);
     ok(f && existsSync(f.path) && same(readFileSync(f.path), bytes), `${to}: the saved file is byte-exact`);
@@ -155,6 +158,31 @@ try {
       `${to}: onEvent got one file event, no chunk as a message`);
     ok(!existsSync(join(dir, `${to}.local.files`, '.partial')) || readdirSync(join(dir, `${to}.local.files`, '.partial')).length === 0, `${to}: no parts left behind`);
   }
+
+  // Folders by contact: two names that reduce alike, two DIDs, two folders; the name stays readable.
+  ok(contactDir({ name: 'bo:b', did: alice.did }) !== contactDir({ name: 'bob', did: bob.did }) && contactDir({ name: 'bo:b', did: alice.did }).startsWith('bob-')
+    && /^bob-[0-9a-f]{16}$/.test(contactDir({ name: 'bob', did: bob.did })), 'contactDir: name-<16 hex of the DID hash>, distinct for two DIDs whose names reduce alike');
+  // The same file again: never written over; the second is saved beside it, the first unchanged.
+  now += 60;
+  const again = join(dir, 'alice-photo.jpg'), aBytes = readFileSync(again);
+  await ca.sendFile('bob', again);
+  now += 60;
+  const a2 = (await cb.inbox()).messages.find((m) => m.type === 'file');
+  const aDir = join(dir, 'bob.local.files', contactDir({ name: 'alice', did: alice.did })), aSum = createHash('sha256').update(aBytes).digest('hex');
+  ok(a2?.path === join(aDir, `${aSum.slice(0, 8)}-2-alice-photo.jpg`) && same(readFileSync(a2.path), aBytes) && same(readFileSync(join(aDir, `${aSum.slice(0, 8)}-alice-photo.jpg`)), aBytes),
+    `a name taken already: saved as <sha8>-2-<name>, the first kept (${a2?.path})`);
+  // A file planted where the next copy would go (another process, a user): left alone.
+  writeFileSync(join(aDir, `${aSum.slice(0, 8)}-3-alice-photo.jpg`), 'planted');
+  now += 60;
+  await ca.sendFile('bob', again);
+  now += 60;
+  const a4 = (await cb.inbox()).messages.find((m) => m.type === 'file');
+  ok(a4?.path === join(aDir, `${aSum.slice(0, 8)}-4-alice-photo.jpg`) && readFileSync(join(aDir, `${aSum.slice(0, 8)}-3-alice-photo.jpg`), 'utf8') === 'planted',
+    `a planted file is not written over: the next free name (${a4?.path})`);
+  // The inbox log holds the file items' metadata, not the bytes, 0600.
+  const logFile = pathsFor(join(dir, 'bob.local.json')).log, logText = readFileSync(logFile, 'utf8');
+  ok(mode(logFile) === 0o600 && cb.history().messages.filter((m) => m.type === 'file').length === 3 && logText.length < 20000,
+    `bob's inbox log: 0600, the three file items, no file bytes (${logText.length} bytes)`);
 
   // Queued while offline: the chunks wait in <identity>.files/.out, not in the state; another
   // process (a restart) sends them; the spool is gone once they went.
@@ -180,6 +208,37 @@ try {
   const plain = (await cb.inbox()).messages[0];
   ok(plain && plain.type === undefined && plain.content === 'plain' && plain.name === 'alice', 'a plain message: as before (no type, name = the contact)');
 
+  // The inbox log (carrier.mjs log): inbox and take append before they give out; history reads it
+  // again with no session; enrolment's labels never; a failed write leaves the messages in the state;
+  // the newest LOG_MAX only; log: false keeps none.
+  const bobLog = pathsFor(join(dir, 'bob.local.json')).log;
+  ok(cb.logPath === bobLog && cb.history().messages.at(-1)?.content === 'plain', 'history: the plain message inbox gave out, from <identity>.inbox.log');
+  now += 60;
+  await ca.sendAll('bob', ['kept 1', 'kept 2'], {});
+  await ca.send('bob', { secret: 'a worker key' }, { label: 'sigelo-identity/0' });
+  now += 60;
+  const broken = new Carrier({ identity: () => ({ secret: bob.secret, bundle: bob.bundle }), ...pathsFor(join(dir, 'bob.local.json')), log: join(dir, 'no-such-dir', 'x.log'),
+    relay: HOST, endpoints, clock: () => now, keep: true, retentionDays: 7 });
+  ok(await refused(() => broken.inbox()) !== 'accepted', 'a log that cannot be written: inbox throws');
+  const kb = await cb.inbox();
+  ok(kb.messages.map((m) => m.content?.secret ?? m.content).join() === 'kept 1,kept 2,a worker key', `…and nothing was taken: the next inbox has them (${kb.messages.length})`);
+  const hist = cb.history().messages.map((m) => m.content);
+  ok(hist.includes('kept 1') && hist.includes('kept 2') && !readFileSync(bobLog, 'utf8').includes('a worker key'), 'logged once each; a sigelo-identity/0 message (a worker key) never');
+  ok(cb.history({ since: now + 1 }).messages.length === 0 && cb.history({ since: now - 60 }).messages.length === 2, 'history since: by received');
+  now += 60;
+  await ca.send('bob', 'taken by take');
+  await cb.sync();
+  const tk = cb.take((m) => m.content === 'taken by take');
+  ok(tk.length === 1 && cb.history().messages.at(-1)?.content === 'taken by take', 'take() logs what it hands out');
+  writeFileSync(bobLog, Array.from({ length: LOG_MAX + 100 }, (_, i) => JSON.stringify({ content: `old ${i}`, received: 1 })).join('\n') + '\n', { mode: 0o600 });
+  now += 60;
+  await ca.send('bob', 'newest');
+  await cb.inbox();
+  const trimmed = cb.history().messages;
+  ok(trimmed.length === LOG_MAX && trimmed.at(-1).content === 'newest' && trimmed[0].content === 'old 101', `the log keeps the newest ${LOG_MAX} (${trimmed.length}, first ${trimmed[0]?.content})`);
+  const none = new Carrier({ identity: () => ({ secret: bob.secret, bundle: bob.bundle }), ...pathsFor(join(dir, 'bob.local.json')), log: false, relay: HOST, endpoints, clock: () => now, keep: true });
+  ok(none.logPath === null && none.history().messages.length === 0, 'log: false: no log, history empty');
+
   // Refused before anything connects: oversize, missing, a directory, the identity's own files.
   const big = join(dir, 'big.bin');
   writeFileSync(big, Buffer.alloc(MAX_FILE + 1));
@@ -187,11 +246,11 @@ try {
   ok(await refused(() => ca.sendFile('bob', join(dir, 'nope.bin'))) === 'file', 'sendFile of a missing file: file');
   ok(await refused(() => ca.sendFile('bob', dir)) === 'file', 'sendFile of a directory: file');
   for (const f of ['alice.local.json', 'bob.local.json']) writeFileSync(join(dir, f), '{}');
-  for (const own of ['alice.local.json', 'alice.local.carrier.json', 'alice.local.contacts.json', 'bob.local.json']) {
+  for (const own of ['alice.local.json', 'alice.local.carrier.json', 'alice.local.contacts.json', 'bob.local.json', 'alice.local.inbox.log']) {
     ok(await refused(() => ca.sendFile('bob', join(dir, own))) === 'file', `sendFile of ${own}: refused (an identity's own file)`);
   }
-  const got = readdirSync(join(dir, 'alice.local.files', 'bob'))[0];
-  ok(await refused(() => ca.sendFile('bob', join(dir, 'alice.local.files', 'bob', got))) === 'file', 'sendFile of a file received: refused');
+  const bobDir = join(dir, 'alice.local.files', contactDir({ name: 'bob', did: bob.did })), got = readdirSync(bobDir)[0];
+  ok(await refused(() => ca.sendFile('bob', join(bobDir, got))) === 'file', 'sendFile of a file received: refused');
 
   // A forged file: a manifest, then a chunk not of those bytes (still canonical base64).
   now += 60;
@@ -200,7 +259,7 @@ try {
   raw[10] ^= 0xff;
   await ca.sendAll('bob', [manifest, { ...chunks[0], data: raw.toString('base64') }], { label: FILE_LABEL });
   const fb = await cb.inbox();
-  ok(fb.messages.length === 0 && fb.dropped.file_hash === 1 && !readdirSync(join(dir, 'bob.local.files', 'alice')).some((n) => n.endsWith('forged.txt')), `a tampered chunk: no file, dropped file_hash (${JSON.stringify(fb.dropped)})`);
+  ok(fb.messages.length === 0 && fb.dropped.file_hash === 1 && !readdirSync(join(dir, 'bob.local.files', contactDir({ name: 'alice', did: alice.did }))).some((n) => n.endsWith('forged.txt')), `a tampered chunk: no file, dropped file_hash (${JSON.stringify(fb.dropped)})`);
   // A chunk with no manifest, and a malformed manifest.
   now += 60;
   await ca.sendAll('bob', [splitFile(real, 'orphan.txt').chunks[0], { ...manifest, id: 'x' }], { label: FILE_LABEL });

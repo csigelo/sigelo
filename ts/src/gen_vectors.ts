@@ -29,6 +29,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, concatBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { writeFileSync } from 'node:fs';
 import { canonicalize, JcsError } from './jcs.js';
+import { agentIdentitySeed, delegateIdentitySeed, keeperRoot } from './keys.js';
 import {
   encodeAddress, hashToScalar, keccak256, keysFromSpend, moneroBase58Encode, scReduce32,
   sigeloMoneroSigAddr, signMessageHash, subaddress, subaddressKeys,
@@ -786,6 +787,23 @@ N.parity = {
   note: 'Malformed objects both verifiers must treat identically: verify(bundle, now) (`bundle`, or `raw` read with the strict parser) either raises with ' +
     '`expect.reject` in the message (a `raw` text the strict parser refuses counts as raising), or returns bindings whose proofs are `expect.proofs`, `expect.attestations` ' +
     'accepted attestations, and `expect.rejected`. Signatures are valid wherever the body can be signed at all.',
+};
+
+// ---------------------------------------------------------------- key derivation (MONERO.md §2)
+// A delegate's seed and an enrolled worker's under the same keeper root K_1 (the treasury
+// keeper's default) and the same account: two labels, two keys. Root: "sigelo root seed, test
+// vector #1" as ASCII, as in ts/src/test.ts. Never for funds.
+
+const DROOT = '736967656c6f20726f6f7420736565642c207465737420766563746f72202331';
+const DK = keeperRoot(hex(DROOT), 1);
+P.key_derivation_delegate = {
+  root_hex: DROOT, keeper: 1, keeper_root_hex: bytesToHex(DK), account: 2, rotation: 0,
+  delegate_path: 'sigelo/v1/delegate/2/ed25519/0', delegate_seed_hex: bytesToHex(delegateIdentitySeed(DK, 2, 0)),
+  delegate_key: encodeKey(ed.getPublicKey(delegateIdentitySeed(DK, 2, 0))),
+  worker_path: 'sigelo/v1/identity/2/ed25519/0', worker_seed_hex: bytesToHex(agentIdentitySeed(DK, 2, 0)),
+  note: 'keeper_root_hex = HKDF-SHA256(root, "", "sigelo/v1/keeper/1"); each seed = HKDF-SHA256(keeper root, "", path), ' +
+    'Ed25519 raw. The delegate a keeper mints at account 2 and the worker enrolled at index 2 under the same keeper root ' +
+    'must hold different keys: delegate_seed_hex != worker_seed_hex.',
 };
 
 // ---------------------------------------------------------------- output

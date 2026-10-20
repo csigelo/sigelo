@@ -15,6 +15,7 @@
 import { did as didOf, structure, type Genesis } from 'sigelo';
 import { parseAllow, plain, type Agent, type AllowRule, type Policy } from './policy.js';
 import type { Net } from 'sigelo/dist/monero.js';
+import { agentIdentitySeed, delegateIdentitySeed } from 'sigelo/dist/keys.js';
 
 /** What a delegate may spend. `period_seconds` is not here: it is always the root's. */
 export interface DelegateCaps { per_tx_max: string; per_period_max: string; rate_per_minute: number }
@@ -30,6 +31,12 @@ export interface DelegateEntry {
   max_delegates: number;
   /** Its own threshold (§4.1 step 8), or null for none of its own: it is clamped by its ancestors' anyway. */
   approval_above: string | null;
+  /**
+   * How its identity seed derives from the keeper root (`delegateSeed`): `"delegate/1"` on every
+   * line written since the review of 2026-10-19; absent on an older line, whose seed is the
+   * enrolled-worker label's (compat, MONERO.md §2).
+   */
+  kdf?: typeof DELEGATE_KDF;
 }
 /** `by` is the agent that revoked it: a strict ancestor. Revoking a node revokes its subtree. */
 export interface RevokeEntry { kind: 'revoke'; ts: number; name: string; by: string }
@@ -42,6 +49,19 @@ const ATOMIC = /^(0|[1-9][0-9]*)$/;
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const HASH = /^sha256:[0-9a-f]{64}$/;
 const DELEGATE_FIELDS = ['kind', 'ts', 'name', 'parent', 'account', 'address', 'did', 'genesis', 'token_hash', 'caps', 'allow', 'max_delegates', 'approval_above'];
+/** Optional on a delegate line: absent on lines written before it existed. */
+const DELEGATE_OPTIONAL = ['kdf'];
+/** The `kdf` of a delegate line whose seed is `delegateIdentitySeed` (MONERO.md §2). */
+export const DELEGATE_KDF = 'delegate/1';
+
+/**
+ * A delegate's identity seed under keeper root `K`, as its line says it was minted: `kdf:
+ * "delegate/1"` is `delegateIdentitySeed(K, account, 0)`; a line without `kdf` predates it and
+ * keeps `agentIdentitySeed(K, account, 0)`, the label it was minted with, so its logged genesis
+ * still matches. New lines always carry the field.
+ */
+export const delegateSeed = (K: Uint8Array, e: Pick<DelegateEntry, 'account' | 'kdf'>): Uint8Array =>
+  e.kdf === DELEGATE_KDF ? delegateIdentitySeed(K, e.account, 0) : agentIdentitySeed(K, e.account, 0);
 const intIn = (x: unknown, min: number): x is number => Number.isSafeInteger(x) && (x as number) >= min;
 const min = (a: string, b: string): string => (BigInt(a) < BigInt(b) ? a : b);
 /** The lower of two thresholds, `null` being "never" — above every number. */
@@ -65,8 +85,9 @@ export function asTreeEntry(e: unknown, net: Net, at: string): TreeEntry | undef
     return e as unknown as RevokeEntry;
   }
   if (e['kind'] !== 'delegate') return fail(`unknown kind ${JSON.stringify(e['kind'])}`);
-  for (const k of Object.keys(e)) if (!DELEGATE_FIELDS.includes(k)) fail(`unknown field ${JSON.stringify(k)}`);
+  for (const k of Object.keys(e)) if (!DELEGATE_FIELDS.includes(k) && !DELEGATE_OPTIONAL.includes(k)) fail(`unknown field ${JSON.stringify(k)}`);
   for (const k of DELEGATE_FIELDS) if (!own(e, k)) fail(`missing ${k}`);
+  if (own(e, 'kdf') && e['kdf'] !== DELEGATE_KDF) fail(`kdf is not ${JSON.stringify(DELEGATE_KDF)} (a keeper older or newer than this one wrote it)`);
   if (typeof e['parent'] !== 'string' || !NAME.test(e['parent'])) fail('parent is not an agent name');
   if (!intIn(e['account'], 1)) fail('account is not an account index above 0');
   if (typeof e['address'] !== 'string') fail('address is not a string');

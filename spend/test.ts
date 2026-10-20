@@ -17,7 +17,7 @@
  *   4. monero-wallet-rpc --offline agrees that our binding signature is valid (SKIP if absent).
  */
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -26,15 +26,15 @@ import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { attest, bind, canonicalize, commitmentOf, did as didOf, keygen, rotate, sign, verify, verifySig, type Binding, type Bundle, type Genesis, type Rotation } from 'sigelo';
 import { approvalRequest, checkApproval, stillValid, type ApprovalBody, type ApproveContext, type Approved } from './approval.js';
-import { agentIdentitySeed, deriveIdentity, keeperRoot, mnemonicFromRoot, newRoot, recoveryCommitment, recoverySeed, rootFromMnemonic, walletFromRoot } from 'sigelo/dist/keys.js';
+import { agentIdentitySeed, delegateIdentitySeed, deriveIdentity, keeperRoot, mnemonicFromRoot, newRoot, recoveryCommitment, recoverySeed, rootFromMnemonic, walletFromRoot } from 'sigelo/dist/keys.js';
 import { ceremony } from 'sigelo/dist/ceremony.js';
 import { encodeAddress, hashToScalar, sigeloMoneroSigAddr, signMessage, subaddress, subaddressKeys, verifySigeloMoneroSigAddr } from 'sigelo/dist/monero.js';
 import { agentOf, evaluate, fingerprint, invoiceKey, parsePolicy, sameHash, tokenHash, type Destination, type PayRequest, type Policy, type Prior, type Spent } from './policy.js';
 import { BUILD_TIMEOUT_MS, CLOCK_FLOOR, CLOCK_SKEW, DAEMON_FAILS, DAEMON_STALE_MS, DAEMON_SWITCH_MS, codeOf, keeperGenesis, keeperIdentity, loadKeeper, loadPolicy, loadRoot, parseDaemons, priorOf, readLog, serve as serveBare, spentOf, startOf, WALLET_TIMEOUT_MS, walletRpc, type Receipt, type ServeOptions } from './service.js';
 import { checkLicence, DEV_VENDOR_DID, describe as describeLicence, LICENCE_SKEW, licenceRefusal, readLicence, rememberVendorChain, TERM_MAX_DAYS, vendorDid, type KeeperEntry } from './licence.js';
-import { SNIPPET } from './init.js';
+import { init as initKeeper, SNIPPET } from './init.js';
 import { explain, LINES, run, toAtomic, toXmr, type Outcome } from './wallet.js';
-import { asTreeEntry, covered, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry } from './tree.js';
+import { asTreeEntry, covered, DELEGATE_KDF, delegateSeed, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry } from './tree.js';
 
 let passed = 0, failed = 0, skipped = 0;
 const ok = (name: string, cond: boolean, detail = ''): void => {
@@ -534,7 +534,7 @@ await wallet.close();
 // the mock wallet would actually have broadcast.
 
 type Api = { status: number; body: Record<string, unknown> };
-async function fresh(over: Raw, mode: WalletMode = {}, opts: { dryRun?: boolean; walletTimeoutMs?: number; buildTimeoutMs?: number; bodyTimeoutMs?: number; clock?: () => number; daemons?: string[]; daemonClock?: () => number } = {}) {
+async function fresh(over: Raw, mode: WalletMode = {}, opts: { dryRun?: boolean; walletTimeoutMs?: number; buildTimeoutMs?: number; bodyTimeoutMs?: number; clock?: () => number; daemons?: string[]; daemonClock?: () => number; laneMax?: number } = {}) {
   const d = mkdtempSync(join(tmpdir(), 'sigelo-spend-2p-'));
   const w = await mockWallet(mode);
   const pp = join(d, 'policy.json');
@@ -1309,6 +1309,22 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
   const A = del('a', 'boss', { max_delegates: 3 }), B = del('b', 'a', { max_delegates: 1 }), C = del('c', 'b', { max_delegates: 0 });
   const t = replayTree([A, B, C], R);
 
+  {
+    // Review of 2026-10-19: the treasury keeper runs on K_1 (`keeper --from-words` default, ceremony
+    // --treasury-keeper >= 1), the same root enrolled workers derive from (contact/enrol.mjs,
+    // agentIdentitySeed(K_1, i, n)). Before the delegate label the two were the same key.
+    const K1 = keeperRoot(Uint8Array.from({ length: 32 }, (_, x) => x + 1), 1), hx = (b: Uint8Array): string => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+    ok('G5 kdf: with keeper index 1, the delegate at account i and enrolled worker i derive DIFFERENT keys (i = 1..6)',
+      [1, 2, 3, 4, 5, 6].every((i) => hx(delegateSeed(K1, { account: i, kdf: DELEGATE_KDF })) !== hx(agentIdentitySeed(K1, i, 0)) &&
+        hx(delegateSeed(K1, { account: i, kdf: DELEGATE_KDF })) === hx(delegateIdentitySeed(K1, i, 0))));
+    ok('G5 kdf: a delegate line without kdf (written before it) keeps deriving with the old identity label', hx(delegateSeed(K1, { account: 3 })) === hx(agentIdentitySeed(K1, 3, 0)));
+    const lineA = A as unknown as Record<string, unknown>;
+    ok('G5 kdf: an old line (no kdf) and a new one (kdf "delegate/1") both parse', asTreeEntry(lineA, NET, 'L') !== undefined && asTreeEntry({ ...lineA, kdf: 'delegate/1' }, NET, 'L')!.kind === 'delegate');
+    let msg = '';
+    try { asTreeEntry({ ...lineA, kdf: 'delegate/2' }, NET, 'L'); } catch (e) { msg = (e as Error).message; }
+    ok('G5 kdf: an unknown kdf is refused, naming the field', msg.includes('kdf is not "delegate/1"'), msg);
+  }
+
   const ea = effective(t, R, 'a')!;
   ok('G5 tree: a delegate below its parent keeps its own caps', ea.per_tx_max === '800' && ea.per_period_max === '4000' && ea.rate_per_minute === 4 && ea.account === A.account);
   ok('G5 tree: period_seconds is always the root\'s', effective(t, R, 'c')!.period_seconds === 86400);
@@ -1442,10 +1458,12 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
   ok('G5 http: /delegate answers the credentials once — token, url, did, identity seed', sc.status === 200 && /^[0-9a-f]{64}$/.test(scTok) &&
     sc.body['url'] === `http://127.0.0.1:${s.port}` && typeof sc.body['identity_seed_hex'] === 'string', JSON.stringify(sc.body));
   ok('G5 http: create_account indices already held by policy agents are skipped, never reused', scAcct === 3 && called(w, 'create_account').length === 3, String(scAcct));
-  const want = keygen({ seed: agentIdentitySeed(K, scAcct, 0), recovery: RC });
+  const want = keygen({ seed: delegateIdentitySeed(K, scAcct, 0), recovery: RC });
   const gen = sc.body['genesis'] as Genesis;
-  ok('G5 http: the delegate\'s identity is agentIdentitySeed(K, account, 0) under the key spend.key holds, with the root\'s recovery commitment',
-    gen.key === want.key && gen.recovery === RC && sc.body['did'] === didOf(gen) && sc.body['identity_seed_hex'] === [...agentIdentitySeed(K, scAcct, 0)].map((x) => x.toString(16).padStart(2, '0')).join(''));
+  ok('G5 http: the delegate\'s identity is delegateIdentitySeed(K, account, 0) under the key spend.key holds, with the root\'s recovery commitment',
+    gen.key === want.key && gen.recovery === RC && sc.body['did'] === didOf(gen) && sc.body['identity_seed_hex'] === [...delegateIdentitySeed(K, scAcct, 0)].map((x) => x.toString(16).padStart(2, '0')).join(''));
+  ok('G5 http: the delegate\'s key is NOT enrolled worker i\'s under the same root (agentIdentitySeed(K, account, 0)) — review of 2026-10-19',
+    gen.key !== keygen({ seed: agentIdentitySeed(K, scAcct, 0), recovery: RC }).key && sc.body['identity_seed_hex'] !== [...agentIdentitySeed(K, scAcct, 0)].map((x) => x.toString(16).padStart(2, '0')).join(''));
   const fundTx = called(w, 'transfer').at(-1)?.['params'] as Record<string, unknown>;
   ok('G5 http: fund > 0 is an on-chain transfer from the delegator\'s account to the delegate\'s (i, 0)', (sc.body['fund'] as Record<string, unknown>)?.['http'] === 200 &&
     fundTx['account_index'] === 1 && (fundTx['destinations'] as { address: string }[])[0]!.address === scAddr && w.moved.length === 1, JSON.stringify(sc.body['fund']));
@@ -1453,6 +1471,7 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
   ok('G5 http: a signed delegate line — token hash only, never the token — verifies under the keeper key', lines1.length === 1 &&
     verifySig(s.key, lines1[0]!['entry'], lines1[0]!['sig']) && (lines1[0]!['entry'] as Record<string, unknown>)['token_hash'] === tokenHash(scTok) &&
     !readFileSync(join(d, 'spend.log'), 'utf-8').includes(scTok) && !readFileSync(pp, 'utf-8').includes('scout'));
+  ok('G5 http: the delegate line carries kdf "delegate/1" (how its seed derives from spend.key)', (lines1[0]!['entry'] as Record<string, unknown>)['kdf'] === 'delegate/1');
   const bossBudget = (await api(s.port, '/budget', { token: BOSS })).body;
   ok('G5 http: the funding counts against the delegator\'s caps (amount + fee)', bossBudget['spent'] === String(1000000000 + 30480000), JSON.stringify(bossBudget));
 
@@ -1781,7 +1800,7 @@ loadRefuses('G6 load: max_approval_ttl 0 is refused', g6Raw(undefined, {}, { max
   const twin = await approve(approvalOf(q, twinId));
   ok('G6 http: forged, altered and self-approvals are 403 code approval, and write nothing', [forged, moreMoney, twin].every((r) => r.status === 403 && r.body['code'] === 'approval') &&
     String(twin.body['error']).includes('self-approval') && lines().length === 3, JSON.stringify([forged.body, moreMoney.body, twin.body]));
-  ok('G6 http: a body that is not strict JSON is 400', (await fetch(`http://127.0.0.1:${s.port}/approve`, { method: 'POST', body: '{"body":1,"body":2}' })).status === 400);
+  ok('G6 http: a body that is not strict JSON is 400', (await fetch(`http://127.0.0.1:${s.port}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"body":1,"body":2}' })).status === 400);
 
   // an approved line nobody signed lets nothing through
   writeFileSync(join(d, 'spend.log'), readFileSync(join(d, 'spend.log'), 'utf-8') + JSON.stringify({ entry: { ...pend.entry, status: 'approved', approval: { body: q, sig: sign(ownerId.secret, q), approver: ownerId.did, key: ownerId.key } }, sig: '' }) + '\n', { mode: 0o600 });
@@ -1880,15 +1899,84 @@ const rawSend = (port: number, text: string) => {
     `${queued} · ${next === 'timeout' ? 'next BLOCKED' : next.status} · transfers ${called(t.w, 'transfer').length}`);
 
   // A half-sent body to /approve (which takes no token) while the lane is otherwise idle.
-  const half = rawSend(t.port(), 'POST /approve HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{"body":');
+  const half = rawSend(t.port(), 'POST /approve HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{"body":');
   await sleep(50);
   const during = await within(t.pay({ to: { addr: LITERAL }, amount: '4000', purpose: 'during a half body' }), 8000);
   ok('lane: a half-sent /approve body does not hold the lane — /pay answers while it waits', during !== 'timeout' && during.status === 200, during === 'timeout' ? 'BLOCKED' : JSON.stringify(during.body));
   ok('body: a body not received in full within the body timeout is 408 code body, and the connection is closed',
     await until(() => half.closed(), 3000) && half.got().startsWith('HTTP/1.1 408') && half.got().includes('"code":"body"'), half.got());
-  const big = rawSend(t.port(), `POST /pay HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ${TOKEN}\r\nContent-Type: application/json\r\nContent-Length: 1100000\r\n\r\n${'x'.repeat(1_100_000)}`);
+  const big = rawSend(t.port(), `POST /pay HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${TOKEN}\r\nContent-Type: application/json\r\nContent-Length: 1100000\r\n\r\n${'x'.repeat(1_100_000)}`);
   ok('body: a body over 1 MB is 413 and never reaches the lane', await until(() => big.got().includes('\r\n\r\n'), 5000) && big.got().startsWith('HTTP/1.1 413') && called(t.w, 'transfer').length === 3, big.got().slice(0, 200));
   big.destroy();
+  await t.done();
+}
+{
+  // Review 2026-10-19 (keeper LOW): a token-less /pay joined the lane and replayed the whole log
+  // before its token was checked; text/plain was accepted, so a browser page could post. Measured
+  // there: a real /pay 817 ms alone, 10 005 ms behind 50 token-less posts on a 20k-line log.
+  const t = await fresh({}, {});
+  const seed = await t.pay({ to: { addr: LITERAL }, amount: '1000', purpose: 'seed' });
+  // Pad the log the way a long-lived keeper's looks: old relayed lines (outside every window).
+  const e = JSON.parse(t.lines().at(-1)!) as Receipt;
+  let pad = '';
+  for (let i = 0; i < 5000; i++) { e.entry.txid = i.toString(16).padStart(64, 'f'); e.entry.ts = Math.floor(Date.now() / 1000) - 90000; pad += JSON.stringify(e) + '\n'; }
+  appendFileSync(join(t.dir, 'spend.log'), pad, { mode: 0o600 });
+  const timed = async <T,>(f: () => Promise<T>): Promise<[number, T]> => { const s0 = Date.now(); const r = await f(); return [Date.now() - s0, r]; };
+  const [alone] = await timed(() => t.pay({ to: { addr: LITERAL }, amount: '1000', purpose: 'alone' }));
+  const post = (headers: Record<string, string>, body = JSON.stringify({ to: { addr: LITERAL }, amount: '1000', purpose: 'flood' })) =>
+    fetch(`http://127.0.0.1:${t.port()}/pay`, { method: 'POST', headers, body }).then(async (r) => ({ status: r.status, body: await r.json() as Record<string, unknown> }));
+  const flood = [...Array.from({ length: 50 }, () => post({ 'Content-Type': 'application/json' })),
+    ...Array.from({ length: 50 }, () => post({ 'Content-Type': 'text/plain' }))];
+  const [behind, r] = await timed(() => t.pay({ to: { addr: LITERAL }, amount: '1000', purpose: 'behind the posts' }));
+  const fl = await Promise.all(flood);
+  console.log(`  lane: authorised /pay alone ${alone} ms, behind 100 token-less posts ${behind} ms (log ${t.lines().length} lines)`);
+  ok('lane: 100 token-less posts are refused before the lane (401 token / 415), and an authorised /pay behind them is not delayed by them',
+    seed.status === 200 && r.status === 200 && fl.slice(0, 50).every((x) => x.status === 401 && x.body['code'] === 'token') && fl.slice(50).every((x) => x.status === 415) &&
+    behind < alone * 3 + 500 && !t.lines().some((l) => l.includes('flood')), `alone ${alone} ms, behind ${behind} ms, ${[...new Set(fl.map((x) => x.status))]}`);
+  const n = called(t.w, 'transfer').length;
+  const plainPay = await post({ 'Content-Type': 'text/plain', Authorization: `Bearer ${TOKEN}` });
+  const formPay = await post({ 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Bearer ${TOKEN}` });
+  ok('lane: a /pay with a live token but Content-Type text/plain (or a form) is 415, no wallet call', plainPay.status === 415 && plainPay.body['code'] === 'request' && formPay.status === 415 && called(t.w, 'transfer').length === n, JSON.stringify(plainPay));
+  const asHost = async (host: string, extra = '') => {
+    const c = rawSend(t.port(), `POST /pay HTTP/1.1\r\nHost: ${host}\r\nAuthorization: Bearer ${TOKEN}\r\nContent-Type: application/json\r\n${extra}Content-Length: 2\r\n\r\n{}`);
+    await until(() => c.got().includes('\r\n\r\n'), 3000); c.destroy(); return c.got();
+  };
+  const foreign = await asHost(`evil.example:${t.port()}`), rebound = await asHost('evil.example'), otherPort = await asHost('127.0.0.1:1'), withOrigin = await asHost(`127.0.0.1:${t.port()}`, 'Origin: http://evil.example\r\n'), nullOrigin = await asHost(`localhost:${t.port()}`, 'Origin: null\r\n');
+  ok('lane: a foreign Host (DNS rebinding), another port, or any Origin header (null included) is 403 code origin, no wallet call',
+    [foreign, rebound, otherPort, withOrigin, nullOrigin].every((g) => g.startsWith('HTTP/1.1 403') && g.includes('"code":"origin"')) && called(t.w, 'transfer').length === n, [foreign, withOrigin].map((g) => g.slice(0, 60)).join(' | '));
+  const loop = await asHost(`localhost:${t.port()}`), v6 = await asHost(`[::1]:${t.port()}`), bare = await asHost('127.0.0.1');
+  ok('lane: Host 127.0.0.1, localhost:<port> and [::1]:<port> are let through (to the body check)', [loop, v6, bare].every((g) => g.startsWith('HTTP/1.1 400')), [loop, v6, bare].map((g) => g.slice(0, 20)).join(' | '));
+  const rd = await fetch(`http://127.0.0.1:${t.port()}/budget`, { headers: { Authorization: `Bearer ${TOKEN}`, Origin: 'http://evil.example' } });
+  ok('lane: the read routes refuse an Origin header too', rd.status === 403);
+  await t.done();
+}
+{
+  // The lane is bounded: past `laneMax` requests a /pay is 503 busy with Retry-After, not queued.
+  const t = await fresh({}, { transfer: 'slow' }, { laneMax: 2 });
+  const go = (i: number) => fetch(`http://127.0.0.1:${t.port()}/pay`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ to: { addr: LITERAL }, amount: String(1000 + i), purpose: `bounded ${i}` }) }).then(async (r) => ({ status: r.status, retry: r.headers.get('retry-after'), body: await r.json() as Record<string, unknown> }));
+  const first = go(0); await sleep(50); const second = go(1); await sleep(50);
+  const [third, fourth] = await Promise.all([go(2), go(3)]);
+  const appr = await fetch(`http://127.0.0.1:${t.port()}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  ok('lane: past laneMax a /pay is 503 code busy with Retry-After, at once, and nothing is built for it', [third, fourth].every((x) => x.status === 503 && x.body['code'] === 'busy' && x.retry === '1') &&
+    !t.lines().some((l) => l.includes('bounded 2') || l.includes('bounded 3')), JSON.stringify([third, fourth].map((x) => [x.status, x.body['code'], x.retry])));
+  ok('lane: a /approve (no token) is 503 busy too while the lane is full', appr.status === 503, String(appr.status));
+  const [a, b] = await Promise.all([first, second]);
+  const after = await go(4);
+  ok('lane: the slots come back — the queued pays answer and the next /pay is let in', a.status === 200 && b.status === 200 && after.status === 200, JSON.stringify([a.status, b.status, after.status, after.body['code']]));
+  ok('lane: sigelo-wallet says TRY LATER for busy', explain(503, third.body).status === 'try_later' && explain(503, third.body).message === LINES.busy);
+  await t.done();
+}
+{
+  // Token-less /approve posts hold at most APPROVE_MAX (4) of the lane: four half-sent bodies
+  // hold their slots, the fifth is busy, and an agent's /pay still gets in.
+  const t = await fresh({}, {}, { bodyTimeoutMs: 1500 });
+  const halves = Array.from({ length: 4 }, () => rawSend(t.port(), 'POST /approve HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{"body":'));
+  await sleep(100);
+  const fifth = await fetch(`http://127.0.0.1:${t.port()}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const p = await within(t.pay({ to: { addr: LITERAL }, amount: '1000', purpose: 'beside four approvals' }), 3000);
+  ok('lane: a fifth waiting /approve is 503 busy; a /pay beside four is let in and answered', fifth.status === 503 && p !== 'timeout' && p.status === 200, `${fifth.status} ${p === 'timeout' ? 'BLOCKED' : p.status}`);
+  for (const h of halves) h.destroy();
   await t.done();
 }
 {
@@ -2532,12 +2620,47 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   const a1 = pol['agents']!['agent']!;
   ok('init: policy.json is one root agent, approval_above off, no delegates, the --allow payee, and it loads', Object.keys(pol['agents']!).length === 1 && a1['approval_above'] === null &&
     a1['max_delegates'] === 0 && JSON.stringify(a1['allow']) === JSON.stringify([{ label: 'bob', addr: LITERAL }]) && loadPolicy(join(k1, 'policy.json')).net === 'stagenet');
-  const token1 = readFileSync(join(k1, 'agent.token'), 'utf-8').trim();
-  ok('init: agent.token holds the token whose hash is in the policy', tokenHash(token1) === a1['token_hash']);
-  onKeeperHost('init: the directory is 0700, spend.key, policy.json and agent.token 0600', () => mode(k1) === 0o700 && ['spend.key', 'policy.json', 'agent.token', 'install.json'].every((f) => mode(join(k1, f)) === 0o600));
+  // Review 2026-10-19 MEDIUM 2: the token is in the agent's own file, never in the keeper directory.
+  const tok1 = join(scratch, 'config', 'sigelo-wallet', 'k1-agent.token');
+  const token1 = readFileSync(tok1, 'utf-8').trim();
+  ok('init: the agent\'s token is in its own file (~/.config/sigelo-wallet/<dir>-<agent>.token), not in the keeper directory, and install.json names it',
+    tokenHash(token1) === a1['token_hash'] && !existsSync(join(k1, 'agent.token')) && !readdirSync(k1).some((f) => f.endsWith('.token')) &&
+    (JSON.parse(readFileSync(join(k1, 'install.json'), 'utf-8')) as Record<string, unknown>)['agent_token_file'] === tok1);
+  onKeeperHost('init: the directory is 0700, spend.key, policy.json and the token file 0600', () => mode(k1) === 0o700 && ['spend.key', 'policy.json', 'install.json'].every((f) => mode(join(k1, f)) === 0o600) && mode(tok1) === 0o600);
+  ok('init: as an ordinary user it says the layout is single-user, the weaker one', i1.out.includes('layout        single user:') && i1.out.includes('the weaker layout'), i1.out);
+  if (WIN) skip('init as root: the two-user layout', NOT_A_KEEPER_HOST);
+  else {
+    // init as root (uid 0 passed in; every chown goes to this test's own uid, which needs no root).
+    const was = process.env['SIGELO_SPEND_REGISTRY'];
+    process.env['SIGELO_SPEND_REGISTRY'] = join(scratch, 'reg-root.json');
+    const tryInit = (argv: string[]): string => { try { initKeeper(argv, { uid: 0 }); return 'ok'; } catch (e) { return (e as Error).message; } };
+    const base = ['--no-systemd', '--wallet-rpc', rpc, '--port', String(await freePort())];
+    mkdirSync(join(scratch, 'srv'), { mode: 0o700 }); mkdirSync(join(scratch, 'agenthome'), { mode: 0o700 });
+    const noTok = tryInit(['--dir', join(scratch, 'srv', 'keeper'), ...base]);
+    const rootParent = tryInit(['--dir', '/sigelo-spend-test-never', ...base, '--agent-token-file', join(scratch, 'agenthome', 'a.token')]);
+    const rootTok = tryInit(['--dir', join(scratch, 'srv', 'keeper'), ...base, '--agent-token-file', '/sigelo-spend-test-never.token']);
+    ok('init as root: needs --agent-token-file, and refuses a keeper parent or a token directory that belongs to root, writing nothing',
+      noTok.includes('as root, init needs --agent-token-file') && rootParent.includes('belongs to root') && rootTok.includes('belongs to root') && !existsSync(join(scratch, 'srv', 'keeper')), [noTok, rootParent, rootTok].join(' | '));
+    const r = initKeeper(['--dir', join(scratch, 'srv', 'keeper'), ...base, '--agent-token-file', join(scratch, 'agenthome', 'a.token')], { uid: 0 });
+    process.env['SIGELO_SPEND_REGISTRY'] = was;
+    const unit = readFileSync(join(scratch, 'srv', 'keeper', 'systemd', 'sigelo-keeper-keeper.service'), 'utf-8');
+    const inst = JSON.parse(readFileSync(join(scratch, 'srv', 'keeper', 'install.json'), 'utf-8')) as Record<string, unknown>;
+    const me = statSync(join(scratch, 'srv')) as unknown as { uid: number };
+    ok('init as root: system units with User= the owner of the keeper directory\'s parent, multi-user.target, the token in --agent-token-file (0600), the start line without --user',
+      r.tokenPath === join(scratch, 'agenthome', 'a.token') && mode(r.tokenPath) === 0o600 && /^User=\S+$/m.test(unit) && unit.includes('WantedBy=multi-user.target') &&
+      r.lines.some((l) => l.startsWith('  start         systemctl enable --now sigelo-keeper-keeper.service')) && inst['agent_token_file'] === r.tokenPath &&
+      (statSync(r.tokenPath) as unknown as { uid: number }).uid === me.uid, unit + JSON.stringify(inst));
+    ok('init as root: keeper and agent under one uid is said to be the weaker layout', inst['layout'] === 'single-user (root install)' && r.lines.some((l) => l.includes('the weaker layout')), r.lines.join('\n'));
+  }
+  {
+    const inDir = await cli(['init', '--dir', join(scratch, 'kt'), '--no-systemd', '--wallet-rpc', rpc, '--agent-token-file', join(scratch, 'kt', 'agent.token')], REG);
+    ok('init: --agent-token-file inside the keeper directory is refused, writing nothing', inDir.code === 1 && inDir.err.includes('is inside the keeper directory') && !existsSync(join(scratch, 'kt')), inDir.err);
+    const exists = await cli(['init', '--dir', join(scratch, 'kt'), '--no-systemd', '--wallet-rpc', rpc, '--agent-token-file', tok1], REG);
+    ok('init: an --agent-token-file that exists is refused (never written over)', exists.code === 1 && exists.err.includes('exists') && !existsSync(join(scratch, 'kt')), exists.err);
+  }
   const did1 = loadKeeper(k1, loadRoot(join(k1, 'policy.json'))).did;
   ok('init: prints the keeper DID a licence is issued to', i1.out.includes(`keeper DID    ${did1}`));
-  ok('init: prints the agent\'s URL, token path and the prompt snippet of MONERO.md §4.2, verbatim (the README\'s and MONERO.md\'s, byte for byte)', i1.out.includes(`SIGELO_WALLET_URL=http://127.0.0.1:${port1}\nSIGELO_WALLET_TOKEN=$(cat ${join(k1, 'agent.token')})\n\n${SNIPPET}\n`) &&
+  ok('init: prints the agent\'s URL, token path and the prompt snippet of MONERO.md §4.2, verbatim (the README\'s and MONERO.md\'s, byte for byte)', i1.out.includes(`SIGELO_WALLET_URL=http://127.0.0.1:${port1}\nSIGELO_WALLET_TOKEN=$(cat ${tok1})\n\n${SNIPPET}\n`) && !i1.out.includes(`cat ${k1}`) &&
     SNIPPET.split('\n').length === 10 && readFileSync(join(here, '..', 'README.md'), 'utf-8').includes(SNIPPET) && readFileSync(join(here, '..', '..', 'MONERO.md'), 'utf-8').includes(SNIPPET));
   ok('init: says it runs on this host with your keys, nothing hosted', i1.out.includes('Runs on this host with your wallet and your keys; nothing is hosted'));
   const unit1 = readFileSync(join(k1, 'systemd', `sigelo-keeper-k1.service`), 'utf-8');
@@ -2707,7 +2830,7 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   // doctor on k1: wallet reachable (RPC 1.30), keeper not yet running
   const d1 = await cli(['doctor', '--dir', k1], REG);
   ok('doctor: policy, key, token, unit, clock, licence ok; wallet-rpc RPC 1.30 accepted; keeper not answering → valid, exit 2', d1.code === 2 &&
-    ['ok   policy: valid, 1 agent(s) on stagenet', `ok   spend.key: keeper ${did1}`, 'ok   agent.token: the token of "agent"', 'ok   unit sigelo-keeper-k1.service: serve on 127.0.0.1',
+    ['ok   policy: valid, 1 agent(s) on stagenet', `ok   spend.key: keeper ${did1}`, `ok   agent token: ${tok1}, the token of "agent"`, 'ok   unit sigelo-keeper-k1.service: serve on 127.0.0.1',
       'ok   wallet-rpc: reachable, RPC 1.30 (accepted 1.30–1.33)', 'WARN keeper not answering', 'ok   licence: tier free (no licence.json)', 'ok   clock:'].every((x) => d1.out.includes(x)), d1.out);
   w.mode.version = 1 << 16 | 40;
   const dOld = await cli(['doctor', '--dir', k1], REG);
@@ -2720,6 +2843,16 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     const dGone = await cli(['doctor', '--dir', k1], REG);
     writeFileSync(k1unit, unit1, { mode: 0o600 });
     ok('doctor: a unit whose script is missing fails the install', dGone.code === 1 && dGone.out.includes('gone.js does not exist'), dGone.out);
+  }
+  {
+    // A keeper set up before 2026-10-20: agent.token in the keeper directory. doctor warns.
+    const inst = join(k1, 'install.json'), was = readFileSync(inst, 'utf-8');
+    writeFileSync(join(k1, 'agent.token'), token1 + '\n', { mode: 0o600 });
+    writeFileSync(inst, JSON.stringify({ ...JSON.parse(was) as object, agent_token_file: undefined }), { mode: 0o600 });
+    const dIn = await cli(['doctor', '--dir', k1], REG);
+    writeFileSync(inst, was, { mode: 0o600 }); rmSync(join(k1, 'agent.token'), { recursive: false, force: true });
+    ok('doctor: a token file inside the keeper directory (the old layout) warns: the agent would run as the keeper\'s user', dIn.code === 2 &&
+      dIn.out.includes(`WARN agent token: ${join(k1, 'agent.token')} is inside the keeper directory`), dIn.out);
   }
   ok('doctor: a directory init did not make is invalid', (await cli(['doctor', '--dir', scratch], REG)).out.includes('FAIL install:'));
 
@@ -2902,7 +3035,7 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     ok('keeper recovery: doctor says identity.json verifies and its recovery is off the host', d1.out.includes(`ok   spend.key: keeper ${DID}`) && d1.out.includes('ok   identity: identity.json verifies'), d1.out);
 
     // ---- 2. a receipt from the original keeper
-    const token1 = readFileSync(join(kp, 'agent.token'), 'utf-8').trim();
+    const token1 = readFileSync(String(jsonOf(join(kp, 'install.json'))['agent_token_file']), 'utf-8').trim();
     const s1 = await serveBare({ policyPath: join(kp, 'policy.json'), port: pp });
     const r1 = await payBob(pp, token1, 'before');
     ok('keeper recovery: the keeper serves the identity.json DID and signs a receipt with identitySeed(K_0, 0)', s1.did === DID && s1.identity.recoverable && r1 !== undefined && verifySig(idj.genesis.key, r1.entry, r1.sig));
@@ -2941,7 +3074,7 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     ok('keeper recovery: init --adopt writes spend.key = keeperRoot(S, 1) and identity.json = genesis + the rotations; install.json names the SAME keeper DID',
       i2.code === 0 && readFileSync(join(kn, 'spend.key'), 'utf-8').trim() === hex(K1) && didOf(idn.genesis) === DID && idn.rotations.length === 2 &&
       jsonOf(join(kn, 'install.json'))['keeper_did'] === DID && i2.out.includes(`keeper DID    ${DID}`) && i2.out.includes('(recovered)'), i2.err + i2.out);
-    const token2 = readFileSync(join(kn, 'agent.token'), 'utf-8').trim();
+    const token2 = readFileSync(String(jsonOf(join(kn, 'install.json'))['agent_token_file']), 'utf-8').trim();
     const s2 = await serveBare({ policyPath: join(kn, 'policy.json'), port: pn });
     const r2 = await payBob(pn, token2, 'after');
     ok('keeper recovery: the new keeper answers as the same DID with a new key, and signs receipts with it', s2.did === DID && s2.key !== s1.key &&

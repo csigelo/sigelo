@@ -12,15 +12,17 @@ sigelo-agent accept <code> --name alice   # bob: checks alice offline, pairs
 sigelo-agent send bob "hello"             # sent, or queued for bob
 seq 3 | sigelo-agent send bob - --lines   # one message a line, one login
 sigelo-agent inbox                        # what came since last time
+sigelo-agent history --since 3600         # again, no relay
 ```
 
 Also `contacts`, `forget <did>`, and all as MCP tools
 ([`integrations/mcp/contact.mjs`](../integrations/mcp/contact.mjs)).
-Each verb logs in once (30 a minute per network), never beside `watch` or `ui`
+Each verb logs in once (30/minute per network), never beside `watch` or `ui`
 ([one owner](../adapters/moadim/WATCH.md)).
-The first login proves work (5–60 s on a phone). `SIGELO_RELAY` names the relay for new codes;
+The first login proves work (5–60 s on phones). `SIGELO_RELAY` names the relay for new codes;
 a Pro reader sets `SIGELO_RELAY_RETENTION_DAYS=90`. State sits
-beside the identity file (0600); messages wait there in plaintext until `inbox` takes them.
+beside the identity file (0600), plaintext: messages until `inbox` takes them, then the last 500
+in `<identity>.inbox.log`.
 `carrier.mjs`'s header is its API; with `onEvent`, nothing is kept.
 
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
@@ -43,8 +45,7 @@ sh ../demo/two-machines.sh
 | `sigelo-msg/0` | `fixtures/envelope-v0.json` | envelope bytes, prekeys, key schedule, epoch recovery |
 | `sigelo-carrier/0` | `fixtures/carrier-v0.json` | frames of kinds 1, 2, 4 and 5, their keys, refusals |
 
-Each regenerates byte for byte from seeds (`gen-*.mjs`); refusals name their check
-(`MsgError.check`).
+Each regenerates byte for byte from seeds (`gen-*.mjs`).
 
 ## How it works
 
@@ -74,5 +75,5 @@ Key agreement is hybrid post-quantum (X25519 + ML-KEM-768).
   contacts write until the next weekly prekey replacement.
 - Confirm delivery (the relay acknowledges, not the contact): a relay withholding an epoch's key
   agreement loses what follows until fresh prekeys restart it.
-- Check where a stranger's relay resolves (only its name).
+- Check where a stranger's relay resolves.
 - Push, groups, direct delivery, unsend.

@@ -2,14 +2,15 @@
 // The contact verbs and the recovery key without a relay: recovery-key, init --recovery, erase-request,
 // recover and the re_pair it leaves, accept's code parsing, send and send-file refused before anything
 // connects, inbox and forget offline, held messages and files, exit codes; a short code fetched then
-// refused (the long code printed); a recovery after a fork a relay saw first.
+// refused (the long code printed); a recovery after a fork a relay saw first; on a loopback relay,
+// `send <name> -` byte for byte and the inbox log read again by `history`.
 //   node test-contact.ts
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { commitmentOf, keygen, verify, verifySig, type Genesis, type Rotation } from 'sigelo';
 import { load } from './sigelo-agent.ts';
-import { CLI, ROOT, done, now, ok, posixModes, tmpHome, type Bundle } from './test-helpers.ts';
+import { CLI, ROOT, NO_RELAY, cliIn, done, hasRelay, now, ok, posixModes, startTestRelay, tmpHome, type Bundle } from './test-helpers.ts';
 
 // SIGELO_TEST_KEY_AGENT=1 (keyagent/test.mjs runs it so): the same checks with every key in a
 // sigelo-key-agent on a temp socket; init writes {"provider":"agent"}, a recovered key is moved
@@ -257,6 +258,72 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
       rec.status === 0 && JSON.stringify(after.chain) === JSON.stringify([g.did, after.did]) && rb.rotations.length === 1 && rb.rotations[0]?.body.id === g.did
         && merged === after.did && rec.stderr.includes('The 1 rotation(s) after'), `${merged}; ${rec.stderr}`);
     rmSync(H, { recursive: true, force: true });
+  }
+}
+
+// ── stdin, byte for byte; the inbox log (history) ──────────────────────────────────────────
+// A reviewer's first message, ~1.9 KB and many lines through `send operator -`, was reported cut
+// "after the first lines". Each body here goes through stdin, a loopback relay and `inbox`, and must
+// come back exactly: blank lines, CRLF, no final newline, 1.9 KB. One final line end (LF or CRLF) is
+// what echo and heredocs add: dropped, nothing else. Then inbox's output is lost (a reader that
+// filtered it): `history` prints the same messages again from <identity>.inbox.log (0600), no relay.
+{
+  if (!hasRelay()) console.log(`SKIP stdin round trip: ${NO_RELAY}`);
+  else {
+    const H = tmpHome('stdin'), relay = await startTestRelay(H), endpoints = JSON.stringify(relay.endpoints);
+    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA });
+    const cli = (n: string, ...args: string[]) => cliIn(envOf(n), H)(...args);
+    const piped = (n: string, input: string, ...args: string[]) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+      const c = spawn('node', [CLI, ...args], { env: envOf(n), cwd: H });
+      let stdout = '', stderr = '';
+      c.stdout.on('data', (d) => { stdout += d; }); c.stderr.on('data', (d) => { stderr += d; });
+      c.on('close', (status) => resolve({ status, stdout, stderr }));
+      c.stdin.end(Buffer.from(input, 'utf8'));
+    });
+    try {
+      for (const n of ['rev', 'op']) await cli(n, 'init', '--no-recovery');
+      const code = (await cli('op', 'invite', '--long', '--name', 'rev')).stdout.trim();
+      const acc = await cli('rev', 'accept', code, '--name', 'operator', '--wait', '0');
+      await cli('op', 'inbox'); await cli('rev', 'inbox');
+      ok('stdin: rev and op paired over the loopback relay', acc.status === 0 && (JSON.parse((await cli('op', 'contacts')).stdout) as { contacts: unknown[] }).contacts.length === 1, acc.stderr);
+      const line = (i: number): string => `line ${String(i).padStart(2, '0')}: the quick brown fox jumps over the lazy dog, again and again.`;
+      const long = Array.from({ length: 27 }, (_, i) => line(i)).join('\n');
+      const bodies: [string, string, string][] = [
+        ['blank lines', 'first\n\nthird\n\n\nsixth\n \n\tlast', 'first\n\nthird\n\n\nsixth\n \n\tlast'],
+        ['CRLF, no final newline', 'one\r\ntwo\r\n\r\nfour', 'one\r\ntwo\r\n\r\nfour'],
+        ['CRLF with a final CRLF', 'one\r\ntwo\r\n', 'one\r\ntwo'],
+        ['no final newline', 'no newline at the end', 'no newline at the end'],
+        ['a final LF, and blank lines before it', 'a\n\n\nb\n\n\n', 'a\n\n\nb\n\n'],
+        [`${long.length} bytes, 27 lines`, `${long}\n`, long],
+        ['unicode and a lone CR', 'naïve 🦀\rafter CR\n— end', 'naïve 🦀\rafter CR\n— end'],
+      ];
+      ok('stdin: the long body is about 1.9 KB', long.length > 1850 && long.length < 2000, String(long.length));
+      for (const [, input] of bodies) {
+        const r = await piped('rev', input, 'send', 'operator', '-');
+        if (r.status !== 0) ok(`send - (${JSON.stringify(input.slice(0, 20))}): exit 0`, false, r.stderr);
+      }
+      const ib = await cli('op', 'inbox', '--wait', '10'), got = (JSON.parse(ib.stdout || '{}') as { messages?: { content: unknown; received: number }[] }).messages ?? [];
+      ok(`stdin: ${bodies.length} messages arrive, in order`, ib.status === 0 && got.length === bodies.length, `${got.length}: ${ib.stderr}`);
+      bodies.forEach(([what, , want], i) => ok(`send - round trip, byte for byte: ${what}`, got[i]?.content === want, JSON.stringify(got[i]?.content)));
+      // The inbox log: written before the output, the same items, 0600; history prints them again.
+      const logFile = join(H, 'op.local.inbox.log');
+      ok('inbox log: <identity>.inbox.log beside the identity, 0600, one line per message', existsSync(logFile) && (!posixModes || (statSync(logFile).mode & 0o777) === 0o600)
+        && readFileSync(logFile, 'utf8').trim().split('\n').length === bodies.length);
+      const again = await cli('op', 'inbox');
+      ok('inbox again: nothing (each message shown once)', ((JSON.parse(again.stdout) as { messages: unknown[] }).messages).length === 0);
+      const h = await cli('op', 'history'), hm = (JSON.parse(h.stdout || '{}') as { messages?: { content: unknown }[] }).messages ?? [];
+      ok('history: the same messages again, byte for byte, no relay needed', h.status === 0 && hm.length === bodies.length && hm.every((m, i) => m.content === bodies[i]![2]), h.stderr);
+      const hs = await cli('op', 'history', '--since', '3600'), hf = await cli('op', 'history', '--since', '2099-01-01T00:00:00Z');
+      ok('history --since 3600 (seconds ago): all; --since a future ISO time: none, said on stderr',
+        (JSON.parse(hs.stdout) as { messages: unknown[] }).messages.length === bodies.length && (JSON.parse(hf.stdout) as { messages: unknown[] }).messages.length === 0 && hf.stderr.includes('history: nothing'), hf.stderr);
+      const hb = await cli('op', 'history', '--since', 'yesterday');
+      ok('history --since yesterday: exit 2, the forms named', hb.status === 2 && hb.stderr.includes('an ISO time'), hb.stderr);
+      const sf = await cli('op', 'send-file', 'rev', logFile);
+      ok('send-file of the inbox log: refused (one of the identity\'s own files)', sf.status === 1 && sf.stderr.includes('inbox log'), sf.stderr);
+    } finally {
+      await relay.close?.();
+      rmSync(H, { recursive: true, force: true });
+    }
   }
 }
 

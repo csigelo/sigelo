@@ -56,7 +56,8 @@ const same = (a: Item, b: Item): boolean => a.from === b.from && a.iat === b.iat
 const textOf = (m: Item): string => {
   if (m.type === 'file') return `file ${m.name ?? ''} (${m.size ?? 0} bytes) → ${m.path ?? ''}`;
   const t = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-  return t.length > TEXT_MAX ? `${t.slice(0, TEXT_MAX)}…` : t;
+  // One line on a terminal: cut, and said so, with where the whole is (the message stays for inbox).
+  return t.length > TEXT_MAX ? `${t.slice(0, TEXT_MAX)}… (${t.length - TEXT_MAX} more characters: sigelo-agent inbox)` : t;
 };
 
 /** Runs CMD through the shell with json on stdin; → true when it exits 0 within HOOK_MS. */

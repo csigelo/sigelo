@@ -31,8 +31,7 @@ writes, into a new directory (`--dir`, default `~/.local/share/sigelo-spend/keep
 non-empty one is refused): a keeper root `spend.key`, the keeper's identity `identity.json` (below), `policy.json` from a template (one
 root agent, `--agent`, default `agent`, on `--account` 0; 0.1 XMR per payment and 0.5 XMR a day,
 `--per-tx`/`--per-day`; rate 3 a minute; `approval_above` off; no delegates; an allowlist of only
-what `--allow label=address` names — empty pays nobody), the agent's token in `agent.token`
-(0600, the only copy), a frozen copy of this package under `app/` for the units to run (an npx
+what `--allow label=address` names — empty pays nobody), a frozen copy of this package under `app/` for the units to run (an npx
 cache that is cleaned or a checkout that is rebuilt never changes a running keeper), and the
 systemd `--user` units: the keeper (`Restart=always`, `SIGELO_DAEMONS` from `--daemons`), with
 `--notify` an hourly `doctor --notify`, and with `--create-wallet-rpc --wallet-file F
@@ -47,8 +46,51 @@ resolves: `--wallet-rpc-bin <path>`, else the first `monero-wallet-rpc` on PATH;
 `init` refuses (a unit for a binary that is not there would only fail at `systemctl start`). It installs them in `~/.config/systemd/user` and
 runs `daemon-reload` (`--no-systemd`: the unit files are written to `<dir>/systemd/` only), then
 prints the keeper DID, the `systemctl --user enable --now …` line, and what the agent needs:
-`SIGELO_WALLET_URL`, `SIGELO_WALLET_TOKEN=$(cat <dir>/agent.token)` and the prompt snippet below.
+`SIGELO_WALLET_URL`, `SIGELO_WALLET_TOKEN=$(cat <token file>)` and the prompt snippet below.
+The agent's token goes to its own file, never into the keeper directory: `--agent-token-file
+PATH` (0600, the only copy; it must not exist), default `~/.config/sigelo-wallet/<dir>-<agent>.token`.
 Every choice is a flag; a refusal names the flag and writes nothing.
+
+### Two users
+
+**Recommended: the keeper and wallet-rpc under their own user, the agent under another.** An
+agent that runs as the keeper's uid can read `policy.json` (the wallet login, which spends
+without any policy), `spend.key` and `spend.log`, and edit `policy.json` — systemd restarts the
+keeper with the new caps. A prompt injection with file access then has the wallet. Run `init` as
+root and it sets up the two-user layout:
+
+```sh
+useradd --system --home-dir /var/lib/sigelo-keeper --create-home sigelo-keeper
+chown sigelo-keeper /srv/wallet/allowance /srv/wallet/allowance.keys /srv/wallet/password   # with --create-wallet-rpc
+install -d -o agent -m 0700 /home/agent/.config/sigelo-wallet
+sigelo-spend init --dir /var/lib/sigelo-keeper/keeper \
+  --agent-token-file /home/agent/.config/sigelo-wallet/agent.token \
+  --create-wallet-rpc --wallet-file /srv/wallet/allowance --password-file /srv/wallet/password --daemons node.example:38089 …
+systemctl enable --now sigelo-wallet-rpc-keeper.service sigelo-keeper-keeper.service
+```
+
+As root, every file in the keeper directory goes to the user who owns its parent (here
+`sigelo-keeper`; root is refused), the units go to `/etc/systemd/system` with
+
+```ini
+[Service]
+User=sigelo-keeper
+Group=<its gid>
+```
+
+(`WantedBy=multi-user.target`), the wallet file and password file must belong to that user, the
+licence registry is that user's (`~sigelo-keeper/.config/sigelo-spend/keepers.json`), and the
+token file is written for the user who owns its directory (root is refused). The agent's harness
+reads `SIGELO_WALLET_TOKEN` from that file; nothing else of the keeper's is readable by it.
+`doctor`, run as the keeper's user, says the token is not readable there (correct) and checks the
+keeper answers without it.
+
+**Single user (a laptop).** Run as an ordinary user, `init` writes `--user` units and the token
+under `~/.config/sigelo-wallet/`. Agent and keeper share a uid: the token is out of the keeper
+directory, but the agent can still read `policy.json`. This is the weaker layout, and `init` says
+so; use it for an agent you run yourself, not one that reads untrusted text with file access.
+`doctor` warns when the token file sits inside the keeper directory (a keeper set up before
+2026-10-20: move `agent.token` out and record the new path as `agent_token_file` in `install.json`).
 
 **The keeper's identity and its recovery** (INCIDENT.md §5). The keeper signs receipts,
 approvals and `spend.log` as a sigelo DID whose genesis (`identity.json`, a SPEC §8 bundle,
@@ -73,7 +115,8 @@ derivable from `spend.key` is refused wherever it appears. A keeper set up befor
 
 `sigelo-spend doctor [--dir D]` checks an install: `install.json`, `policy.json` (valid, 0600,
 its `wallet.rpc` loopback), `spend.key` (the DID init made), `identity.json` (it verifies, its
-current key is `spend.key`'s, its recovery is off the host), `agent.token` (still the agent's),
+current key is `spend.key`'s, its recovery is off the host), the agent's token file (still the
+agent's; a WARN when it sits inside the keeper directory),
 each unit (present, installed copy unchanged, its program and the frozen copy present, `serve`
 on the right policy and port, `SIGELO_DAEMONS` well formed, a WARN when it mixes your own or
 onion node with clearnet ones; the wallet-rpc unit on 127.0.0.1, its login in a 0600
@@ -88,7 +131,11 @@ the wallet-rpc or the keeper not answering, the clock) and `FAIL` (the install),
 `INSTALL VALID` (exit 0), `INSTALL VALID, with warnings: …` (exit 2) or `INSTALL INVALID` (exit
 1). `--notify` appends a line to `<dir>/alerts.log` and sends a desktop notification when it
 turns unhealthy, and one when it is healthy again. To upgrade, `init` a new directory and move
-the wallet over; `init` never writes into a keeper that exists.
+the wallet over; `init` never writes into a keeper that exists. Since the delegate label (2026-10-20) new `delegate`
+lines carry `"kdf"`; a keeper older than that refuses a log holding one (`unknown field "kdf"`), by
+design, so do not run an older keeper on a newer log. Delegates minted before keep their seed;
+their key is enrolled worker `i`'s on the same root: on a keeper whose root also enrols workers,
+revoke them and delegate anew.
 
 ### Choosing a daemon
 
@@ -492,9 +539,11 @@ survives a restart, and a recovery: after `init --adopt` it is still `chain[0]` 
 **`spend.key` is the keeper root `K`** (MONERO.md §2): on a keeper set up by the ceremony,
 the `keeper_root_hex` of its `keeper-<j>.json`; on an older one, the random root it created
 on first run — both are 32 bytes and used the same way. The keeper signs with
-`identitySeed(K, 0)`, and each delegate's identity is `agentIdentitySeed(K, i, 0)` for its
-account `i`. `K` derives no recovery key the keeper uses: its genesis commits to one held off
-the host (above). Losing `spend.key` loses the keeper's signing key and the ability to re-derive
+`identitySeed(K, 0)`, and each delegate's identity is `delegateIdentitySeed(K, i, 0)` for its
+account `i` — not `agentIdentitySeed(K, i, 0)`, which is enrolled worker `i`'s key under the same
+`K`. Each `delegate` line says which with `"kdf": "delegate/1"`; a line without it was written
+before, and its delegate keeps the `agentIdentitySeed` it was minted with.
+`K` derives no recovery key the keeper uses: its genesis commits to one held off the host (above). Losing `spend.key` loses the keeper's signing key and the ability to re-derive
 its delegates' seeds; every tree line in the log must verify under it or the service does not
 start.
 
@@ -506,7 +555,7 @@ own identity and its own token, and is funded on-chain from its delegator's acco
 
 | route | does |
 |---|---|
-| `POST /delegate {name, fund, caps?, allow?}` | `caps` = `{per_tx_max?, per_period_max?, rate_per_minute?, max_delegates?, approval_above?}`, each ≤ the caller's (a cap left out is the caller's); `allow` ⊆ the caller's (left out: the caller's, copied); `fund` atomic units, `"0"` for none. Refused before anything happens if the nesting rule, the count, or the caller's own caps on `fund` say no. Then `create_account` (an index any agent ever held is skipped: indices are never reused), the identity `agentIdentitySeed(K, i, 0)` with the policy's `recovery_commitment`, a random token, a signed `delegate` line holding the token's **hash**, and, if `fund` > 0, a transfer from the caller's account to the delegate's (i, 0) through the ordinary `/pay` path — it counts against the caller's caps and rate, and above its `approval_above` waits for an approval like any pay. Answers `200 {name, account, address, did, genesis, identity_seed_hex, url, token, shown_once, fund}` — the token is in this answer and nowhere else. `fund` is `null` for `"0"`, else `{http, …}`: `http` is the status `/pay` would have answered and the rest is that answer's body, unchanged (e.g. `{http: 200, ref, txid, fee, receipt}`, `{http: 202, status: "approval_needed", code: "approval", ref, error, approval_request}`, `{http: 403, error, code, facts?}`); the delegate exists whatever `fund.http` says |
+| `POST /delegate {name, fund, caps?, allow?}` | `caps` = `{per_tx_max?, per_period_max?, rate_per_minute?, max_delegates?, approval_above?}`, each ≤ the caller's (a cap left out is the caller's); `allow` ⊆ the caller's (left out: the caller's, copied); `fund` atomic units, `"0"` for none. Refused before anything happens if the nesting rule, the count, or the caller's own caps on `fund` say no. Then `create_account` (an index any agent ever held is skipped: indices are never reused), the identity `delegateIdentitySeed(K, i, 0)` with the policy's `recovery_commitment`, a random token, a signed `delegate` line holding the token's **hash** and `"kdf": "delegate/1"`, and, if `fund` > 0, a transfer from the caller's account to the delegate's (i, 0) through the ordinary `/pay` path — it counts against the caller's caps and rate, and above its `approval_above` waits for an approval like any pay. Answers `200 {name, account, address, did, genesis, identity_seed_hex, url, token, shown_once, fund}` — the token is in this answer and nowhere else. `fund` is `null` for `"0"`, else `{http, …}`: `http` is the status `/pay` would have answered and the rest is that answer's body, unchanged (e.g. `{http: 200, ref, txid, fee, receipt}`, `{http: 202, status: "approval_needed", code: "approval", ref, error, approval_request}`, `{http: 403, error, code, facts?}`); the delegate exists whatever `fund.http` says |
 | `POST /fund {name, amount, ref?}` | the caller pays its own live delegate's (i, 0): an ordinary spend of the caller, idempotent like `/pay`, answered exactly as `/pay` answers (status and body) |
 | `POST /revoke {name}` | any strict ancestor. A signed `revoke` line (unless one already covers it): the delegate's token and its whole subtree's stop working at once. Then every account in that subtree is swept **one hop** to the revoker's (r, 0): `get_balance`; nothing unlocked → skipped (`empty` or `locked`); else `sweep_all {address, account_index, subaddr_indices_all: true, priority, unlock_time: 0, do_not_relay: true, get_tx_metadata: true}`, skipped as dust when its amount ≤ its fee, else an `intent` line per transaction, `relay_tx`, and a `relayed`/`relay_failed` line, under the revoked delegate's name. Re-running it writes no second line and sweeps whatever unlocked or arrived since; the keeper never sweeps on its own |
 | `GET /delegates` | every delegate below the caller, live, revoked or orphaned, with its clamped caps and allowlist and its account's balance; a dead one still holding funds has `holds_funds: true` |
@@ -657,6 +706,7 @@ checks the fixed ones against this table):
 | `wallet_slow`: the wallet was still building the payment when the keeper's 180 s build wait ran out (a slow daemon link); built with `do_not_relay`, so what it finishes later is never sent, and the same command later builds afresh and pays once | 2 | `TRY LATER: the wallet is still working on that payment (a slow network); nothing was sent. Run the same command in a few minutes.` |
 | `wallet`: any other wallet failure, nothing relayed | 2 | `TRY LATER: the wallet could not do that right now; nothing was sent. Run the same command later.` |
 | `clock_behind`: the keeper's clock is behind its own log, or before its build (a host booted without the time) | 2 | `TRY LATER: the wallet service's clock is not set yet; nothing was sent. Run the same command later.` |
+| `busy`: more than 32 requests already wait in the keeper's one-at-a-time lane (503, `Retry-After: 1`); nothing was done | 2 | `TRY LATER: the wallet service is busy with other requests; nothing was sent. Run the same command in a few seconds.` |
 | `approval`: approval needed | 3 | `WAITING FOR APPROVAL (ref <ref>): tell your operator, then run the same command again.` |
 | `relay_failed`, or an intent with no outcome | 4 | `UNCERTAIN: the payment may have gone out (txid <txid>). Do not pay again; tell your operator.` |
 | `timeout`: `pay` (or `fund`) got no answer in time — the keeper may have relayed it after the CLI stopped waiting | 4 | ``UNCERTAIN: the request timed out; the payment may have gone out. Run `sigelo-wallet history` before paying again.`` |
@@ -750,6 +800,17 @@ the approval on file until its `exp`.
   (see "What a running keeper re-reads"); a delegate's is revoked with `POST /revoke` by any ancestor (the
   Owner revokes through a root's token). A delegate's token is shown once and stored only as
   its hash.
+- **Loopback is not an authorisation boundary.** Every process on the host, and every web page
+  in a browser on it, can reach 127.0.0.1. The keeper answers only a loopback `Host`
+  (`127.0.0.1`, `localhost`, `[::1]`, with its own port; a DNS-rebound page sends its own name),
+  refuses any request with an `Origin` header (`null` included: a sandboxed frame or a file://
+  page sends `null`; no keeper client sends one) as `403 origin`, and any POST that is not
+  `Content-Type: application/json` as `415` (a page can post `text/plain` cross-origin without
+  a preflight, never JSON). On `/pay`, `/delegate`, `/fund` and `/revoke` the token is checked
+  (constant-time) before the body is read or the request waits in the one-at-a-time lane, so a
+  token-less flood never delays a real payment (review 2026-10-19: 50 posts held one 10 s; now
+  none). The lane holds at most 32 requests (4 of them token-less `/approve`); past that, `503
+  busy` with `Retry-After: 1`.
 - **The tree is only as sound as `spend.key` and `spend.log`.** A tree line must verify under
   the keeper key, so appending to the log without the key mints nobody; deleting a `revoke`
   line from the log would revive a subtree, so the log's integrity is part of the policy.
@@ -795,7 +856,8 @@ G5 adds the delegation tree (pure: clamping after a root tightens, every nesting
 count rule, cascade and idempotent revoke, never-reused indices and names, replay refusals,
 and 300 generated asks none of which yields a delegate above its delegator in any cap, allow
 or count) and delegation over HTTP and `sigelo-wallet` against the mock wallet: credentials
-once, the identity checked against `agentIdentitySeed(K, i, 0)` from `spend.key`, funding as a
+once, the identity checked against `delegateIdentitySeed(K, i, 0)` from `spend.key` (and not
+enrolled worker `i`'s `agentIdentitySeed(K, i, 0)`), funding as a
 spend of the delegator, restart rebuilding the tree, a forged tree line refusing the start,
 cascade revoke with `sweep_all` to the revoker's (r, 0), re-revoke sweeping late funds, dust
 and locked skips. `sweep_all` and `create_account` have never been called on a real wallet

@@ -76,7 +76,7 @@ await new Promise((r) => keeper.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${keeper.address().port}`;
 
 const IDENTITY_TOOLS = ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'];
-const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_forget_contact', 'sigelo_inbox', 'sigelo_invite', 'sigelo_send', 'sigelo_send_file', 'sigelo_set_tier'];
+const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_forget_contact', 'sigelo_history', 'sigelo_inbox', 'sigelo_invite', 'sigelo_send', 'sigelo_send_file', 'sigelo_set_tier'];
 // Present here only if sigelo-contact resolves, as the server decides it (contact.mjs load).
 const sidecar = await import('../../adapters/moadim/sigelo-agent-contact.ts');
 const HAS_CONTACT = await sidecar.contactLib().then(() => true, (e) => { if (sidecar.absent(e)) return false; throw e; });
@@ -110,7 +110,7 @@ try {
   ok(bad.error?.code === -32022 && bad.error.data.requested === '2099-01-01', 'unsupported modern version → -32022');
   ok((await c.rpc('ping')).result !== undefined, 'ping');
   const list = (await c.rpc('tools/list')).result.tools.map((t) => t.name).sort();
-  ok(list.join() === LISTED.join(), `tools/list without keeper = 9 identity tools${HAS_CONTACT ? ' + 6 contact tools' : ''}`, list.join());
+  ok(list.join() === LISTED.join(), `tools/list without keeper = ${IDENTITY_TOOLS.length} identity tools${HAS_CONTACT ? ` + ${CONTACT_TOOLS.length} contact tools` : ''}`, list.join());
 
   let r = await c.call('sigelo_whoami');
   ok(r.isError && /sigelo_init/.test(r.text), 'whoami before init points at sigelo_init');
@@ -436,7 +436,7 @@ ${code.slice(60)}
       r = await a.call('sigelo_inbox', { wait: 2 });
       const fi = r.data?.messages?.[0];
       ok(r.data?.messages.length === 1 && fi.type === 'file' && fi.name === 'notes.txt' && fi.size === fileBytes.length && fi.sha256 === createHash('sha256').update(fileBytes).digest('hex')
-        && fi.path === join(dir, 'alice.local.files', 'bob', `${fi.sha256.slice(0, 8)}-notes.txt`) && readFileSync(fi.path, 'utf8') === fileBytes && (statSync(fi.path).mode & 0o777) === 0o600,
+        && fi.path === join(dir, 'alice.local.files', `bob-${createHash('sha256').update(bDid).digest('hex').slice(0, 16)}`, `${fi.sha256.slice(0, 8)}-notes.txt`) && readFileSync(fi.path, 'utf8') === fileBytes && (statSync(fi.path).mode & 0o777) === 0o600,
         'relay: sigelo_inbox returns {type: file, name, size, sha256, path}; the file is there, byte-exact, 0600', r.text.slice(0, 400));
 
       // An inbox past one result: a contact's 150,000-character message must not take the other

@@ -444,6 +444,23 @@ func (cr *conformance) vectors(d any) {
 	_, err = Verify(at(N, "bundle_rotations_not_array", "bundle"), NOW, nil)
 	cr.rejects("neg bundle_rotations_not_array", err, "not an array")
 
+	// MONERO.md §2: a delegate's seed has its own label, never an enrolled worker's.
+	kd := obj(P, "key_derivation_delegate")
+	root, _ := hex.DecodeString(str_(kd, "root_hex"))
+	j, _ := at(kd, "keeper").(int64)
+	acct, _ := at(kd, "account").(int64)
+	n, _ := at(kd, "rotation").(int64)
+	kr, kerr := KeeperRoot(root, uint64(j))
+	ds, derr := DelegateIdentitySeed(kr[:], uint64(acct), uint64(n))
+	ws, werr := AgentIdentitySeed(kr[:], uint64(acct), uint64(n))
+	pd, _ := K(kr[:], str_(kd, "delegate_path"))
+	pw, _ := K(kr[:], str_(kd, "worker_path"))
+	cr.check("key_derivation_delegate keeper root, delegate seed and key, worker seed",
+		kerr == nil && derr == nil && werr == nil && hx32(kr) == str_(kd, "keeper_root_hex") &&
+			hx32(ds) == str_(kd, "delegate_seed_hex") && ds == pd && PublicKey(ds) == str_(kd, "delegate_key") &&
+			hx32(ws) == str_(kd, "worker_seed_hex") && ws == pw)
+	cr.check("key_derivation_delegate the delegate and the worker at the same account hold different keys", ds != ws)
+
 	if cr.monero == nil {
 		fmt.Fprintln(cr.w, "SKIP monero section: no monero-vectors.json given")
 		return
@@ -614,3 +631,5 @@ func (cr *conformance) moneroSection(d any, P Object, NOW int64) {
 	cr.check("monero verifiers return false on junk rather than raising",
 		!VerifyMessage([]byte("x"), "not-an-address", "SigV2nope").Good && !VerifySigeloMoneroSigAddr(Object{}, "nope", 42).Good)
 }
+
+func hx32(b [32]byte) string { return hex.EncodeToString(b[:]) }

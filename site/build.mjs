@@ -107,7 +107,7 @@ export const PAGES = [
 const NAV = [['adopt', 'Adopt'], ['accept', 'Accept'], ['spec', 'Spec'], ['verify', 'Verify'], ['keeper', 'Keeper'], ['security', 'Security'],
   ['contact', 'Contact'], ['changelog', 'Changelog'], ['privacy', 'Privacy']];
 
-// Repository files published verbatim under /raw/<path>. OPTIONAL: listed in llms.txt with their size.
+// Repository files published verbatim under /raw/<path>. OPTIONAL: listed in llms.txt.
 const SCHEMAS = readdirSync(join(ROOT, 'schema')).filter((f) => f.endsWith('.json')).sort().map((f) => `schema/${f}`);
 const OPTIONAL = ['QUICKSTART.md', 'WHY.md', 'THREAT-MODEL.md', 'INCIDENT.md', 'VERSIONING.md', 'MONERO.md', 'kit/README.md', 'spend/README.md'];
 export const RAW = ['SPEC.md', 'SECURITY.md', 'CHANGELOG.md', ...OPTIONAL, 'test-vectors.json', ...SCHEMAS, 'spend/openapi.yaml'];
@@ -405,7 +405,7 @@ function frontMatter(md, where) {
 const VERSION = VALUES.version;
 const SOFTWARE = {
   '@type': 'SoftwareSourceCode', '@id': `${ORIGIN}/#software`, name: 'sigelo',
-  description: 'Portable, offline-verifiable identity for AI agents.',
+  description: 'One identity an AI agent owns: it proves who it is to any site or agent offline; its reputation survives leaving a platform, its DID a stolen key; it gets paid and pays in Monero without a wallet key; it messages agents end to end. Experimental: wire sigelo/0 not frozen.',
   url: `${ORIGIN}/`, codeRepository: REPO, sameAs: REPO, programmingLanguage: ['TypeScript', 'Go'],
   keywords: 'AI agents, agent identity, DID, Ed25519, attestations, offline verification, MCP, Monero',
   license: 'https://spdx.org/licenses/MIT', version: VERSION,
@@ -533,30 +533,32 @@ export function build() {
   const L = (name, url, desc) => `- [${name}](${ORIGIN}${url})${desc ? `: ${desc}` : ''}`;
   put('llms.txt', `# sigelo
 
-> Portable, offline-verifiable identity for AI agents: a DID hashed from a genesis holding an Ed25519 key, attestations signed by worlds, bundles verified offline; MCP server sigelo-mcp. Experimental: wire sigelo/0 not frozen yet.
+> One identity your agent owns (a DID; it holds the key). A site or agent asks who you are: answer its challenge, offline, no server, no account. You leave a platform: your attestations (reputation) go with you; a stolen key is recovered (offline recovery key), DID kept. You get paid or pay: Monero, no wallet key held (keeper, stagenet-only). A human wants you to talk to their other agent: pair by an 8-character code, end-to-end encrypted. Experimental: wire sigelo/0 not frozen.
+
+How: the DID is a genesis hash; worlds sign attestations; bundles verify offline.
 
 ## Docs
 
-${L('Adopt', '/adopt.md', 'identity, challenge, bundle, verify; exact commands')}
-${L('Accept', '/accept.md', 'log agents in by sigelo identity: node, Python, Go')}
-${L('Spec', '/spec.md', 'the protocol, wire sigelo/0')}
-${L('Verify', '/verify.md', 'reference verifier, conformance, your implementation')}
-${L('Keeper', '/keeper.md', 'pay in Monero without holding a key')}
+${L('Adopt', '/adopt.md', 'commands, MCP')}
+${L('Accept', '/accept.md', 'log agents in')}
+${L('Spec', '/spec.md', 'the protocol')}
+${L('Verify', '/verify.md', 'conformance')}
+${L('Keeper', '/keeper.md', 'Monero payments')}
 
 ## Project
 
-${L('Security', '/security.md', 'report a vulnerability')}
-${L('Contact', '/contact.md', 'e-mail, SimpleX')}
-${L('Index', '/index.json', 'sha256s, versions, release files')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}${
-  RELAY_LIVE ? `\n- [Relay](${RELAY_ORIGIN}/llms.txt): encrypted messages between AI agents` : ''}
+${L('Security', '/security.md', 'vulnerabilities')}
+${L('Contact', '/contact.md')}
+${L('Index', '/index.json', 'sha256s, releases')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}${
+  RELAY_LIVE ? `\n- [Relay](${RELAY_ORIGIN}/llms.txt): messages between agents` : ''}
 
 ## Optional
 
 ${L('llms-full.txt', '/llms-full.txt', kb(Buffer.byteLength(full)))}
-${L('Frameworks', '/frameworks.md', 'configs for 30 agent frameworks')}
-${L('Test vectors', '/test-vectors.json', 'real signatures from documented seeds')}
-${L('Privacy and terms', '/privacy.md', 'logs, retention, terms')}
-${OPTIONAL.map((p) => L(p, `/raw/${p}`, kb(readBytes(p).length))).join('\n')}
+${L('Frameworks', '/frameworks.md')}
+${L('Test vectors', '/test-vectors.json')}
+${L('Privacy and terms', '/privacy.md')}
+${OPTIONAL.map((p) => L(p, `/raw/${p}`)).join('\n')}
 ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS.reduce((n, s) => n + readBytes(s).length, 0))}`)}
 `);
 

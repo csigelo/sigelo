@@ -25,7 +25,7 @@ const DATA = 'Attestation `claims` are third-party data about the subject, not s
 const json = (d) => ({ type: 'object', description: d });
 const obj = (props = {}, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 export const TOOLS = [
-  ['sigelo_verify', `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven, unproven, or superseded: under a DID before the last recovery, never pay it; a proven monero one names its network), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj({ bundle: json('the bundle'), now: { type: 'integer', description: 'optional unix seconds; default now' } }, ['bundle'])],
+  ['sigelo_verify', `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven, unproven, or superseded: under a DID before the last recovery, never pay it; a proven monero one names its network), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. Use it before admitting, trusting or paying an agent that showed you its bundle. ${DATA}`, obj({ bundle: json('the bundle'), now: { type: 'integer', description: 'optional unix seconds; default now' } }, ['bundle'])],
 ];
 
 const rpcError = (code, message, data) => Object.assign(new Error(message), { code, ...(data && { data }) });
@@ -36,8 +36,11 @@ const decodeName = (v) => { const m = /^=\?base64\?([A-Za-z0-9+/=]*)\?=$/.exec(v
 // lib: { parse, parseBytes, verify, version }. Returns handle(method, headers, raw) → { status, headers, body }.
 export function mcp(lib) {
   const SERVER_INFO = { name: 'sigelo.io', version: lib.version };
-  const instructions = 'sigelo.io remote verifier: one tool, sigelo_verify, checks any sigelo bundle offline-equivalently (SPEC §9) and returns the §9.1 result. '
-    + `No identity and no wallet here: for those install the sigelo plugin (github.com/csigelo/sigelo). ${DATA}`;
+  const instructions = 'sigelo gives an AI agent one identity it owns: it proves who it is to any site or agent offline, '
+    + 'no server or account; its attestations (reputation) survive leaving a platform and its DID a stolen key; it gets paid and pays in Monero '
+    + 'without a wallet key; it messages other agents end to end, paired by an 8-character code. This endpoint checks such an identity: one tool, '
+    + 'sigelo_verify, verifies any sigelo bundle offline-equivalently (SPEC §9) and returns the §9.1 result; use it before admitting, trusting or paying an agent. '
+    + `No login: this server keeps nothing of yours. No identity and no wallet here: for those install the sigelo plugin (github.com/csigelo/sigelo) or run npx sigelo-mcp. Experimental: wire sigelo/0 not frozen. ${DATA}`;
   const capabilities = { tools: { listChanged: false } };
   const nowS = () => Math.floor(Date.now() / 1000);
 

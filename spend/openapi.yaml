@@ -7,7 +7,7 @@ openapi: 3.1.0
 # dialect), so a sigelo bundle or §6.3 invoice here is exactly the SPEC object.
 info:
   title: sigelo-spend keeper
-  version: 0.1.8
+  version: 0.1.9
   summary: The bounded-spending keeper (MONERO.md §4) — loopback HTTP, one agent per bearer token.
   license: { name: MIT, identifier: MIT }
   description: |
@@ -31,7 +31,18 @@ info:
     (`wallet`, `wallet_locked`, `wallet_funds`, `wallet_offline`, `wallet_slow`) — and, on `/pay` and `/fund`, UNCERTAIN (`code:
     relay_failed`: the money may have moved; never retry) · 503 the keeper's clock is behind the
     newest line it signed, or before its build's floor (`clock_behind`, every route that signs:
-    nothing was signed, logged or sent; try later).
+    nothing was signed, logged or sent; try later), or (`busy`, with `Retry-After: 1`) more
+    than 32 requests already wait in the one-at-a-time lane (`/pay`, `/delegate`, `/fund`,
+    `/revoke`, `/approve`; at most 4 of them `/approve`): nothing was done, try again in seconds.
+
+    **Who may call (every route, before any token or body).** The `Host` header must be
+    `127.0.0.1`, `localhost` or `[::1]`, with this keeper's port if a port is given; any `Origin`
+    header (`null` included) is refused: both **403, `code: origin`** — browsers send `Origin` on
+    every POST and a DNS-rebound page sends its own `Host`; no keeper client sends either. A POST
+    must be `Content-Type: application/json` (else **415**, `code: request`): a web page can post
+    `text/plain` to 127.0.0.1 without a CORS preflight, never JSON. On the lane routes but
+    `/approve` the token is checked before the body is read or the request waits, so a
+    token-less post never delays a real one; it is checked again when the request's turn comes.
 
     **Free and paid (`licence_required`).** A keeper without a valid licence (spend/README.md
     "Install") is the free tier: one keeper, one agent, that agent's whole policy. The paid
@@ -357,7 +368,7 @@ paths:
                   address: { type: string, description: The account's (i, 0) subaddress, where funding goes. }
                   did: { $ref: '../schema/common.json#/$defs/did' }
                   genesis: { $ref: '../schema/genesis.json' }
-                  identity_seed_hex: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  identity_seed_hex: { type: string, pattern: '^[0-9a-f]{64}$', description: 'delegateIdentitySeed(K, account, 0) = HKDF-SHA256(spend.key, "", "sigelo/v1/delegate/<account>/ed25519/0"), MONERO.md §2; the delegate line carries "kdf": "delegate/1".' }
                   url: { type: string, format: uri }
                   token: { type: string, pattern: '^[0-9a-f]{64}$' }
                   shown_once: { type: string }
@@ -708,7 +719,8 @@ components:
             invoice, amount, per_tx_max, per_period_max, rate_per_minute, repeat, approval,
             relay_failed, wallet, wallet_locked, wallet_funds, wallet_offline, wallet_slow, log, body, route, bind, delegate,
             fund, revoke, dry_run, licence_required (403: a paid verb on a keeper without a valid
-            licence), clock_behind (503), internal (the catch-all 500), service (a
+            licence), clock_behind (503), busy (503: the lane is full), origin (403: a foreign
+            Host or an Origin header), internal (the catch-all 500), service (a
             reason with no prefix). Not closed: new checks add values.
           examples: [allowlist, per_period_max, wallet_locked, licence_required]
         facts: { $ref: '#/components/schemas/Facts' }

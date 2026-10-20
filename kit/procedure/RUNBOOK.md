@@ -100,14 +100,14 @@ Bring units back only on the new directory, the wallet-rpc first: `{{restore_uni
 
 ## 5. Recovery-rotate every identity under that keeper
 
-Every agent (`agentIdentitySeed(K_j, i, n)`, any `n`), the keeper's own identity, and, on keeper 0, the root identity. Genesis files: a root agent's from `policy.json` `agents.<name>`, a delegate's from its signed `delegate` line in the burnt `spend.log` (its `account` is the delegate's `i`; DRILL.md step 5.1 has the two one-liners that cut them out). For each agent, on the offline box, one line:
+Every agent (`agentIdentitySeed(K_j, i, n)`, any `n`), every delegate (`delegateIdentitySeed(K_j, i, n)`; one whose `delegate` line has no `kdf` was minted with the agent label), the keeper's own identity, and, on keeper 0, the root identity. Genesis files: a root agent's from `policy.json` `agents.<name>`, a delegate's from its signed `delegate` line in the burnt `spend.log` (its `account` is the delegate's `i`; DRILL.md step 5.1 has the two one-liners that cut them out). For each agent, on the offline box, one line:
 
 ```sh
 sigelo-offline recover --genesis <name>.genesis.json --backup backup.age --identity <file> --net {{net}} \
   --agent <i> --keeper <j+1> --n 0 > <name>.recovery.local.json
 ```
 
-(root identity: `--identity-n <n+1>`; same keeper: `--keeper j --n <n+1>`.) The agent applies it with `sigelo-agent adopt --rotation <file>`; shred every copy. The recovery rotation beats any voluntary rotation the attacker made at that node, whatever its `iat` (SPEC §7.1). The `did`/`genesis` fields of the new `policy.json`: by hand. **The keeper's own identity:** see INCIDENT.md §5 for its current state. As of T14 it could not be recovery-rotated (its recovery key derived from `spend.key`, which the thief holds): only abandoned, the new keeper DID announced out of band, signed by the root identity, the old one retired from the start of the compromise window.
+(a delegate: `--delegate <i>` instead of `--agent <i>`, never `--agent`, which is worker `i`'s key; root identity: `--identity-n <n+1>`; same keeper: `--keeper j --n <n+1>`.) The agent applies it with `sigelo-agent adopt --rotation <file>`; shred every copy. The recovery rotation beats any voluntary rotation the attacker made at that node, whatever its `iat` (SPEC §7.1). The `did`/`genesis` fields of the new `policy.json`: by hand. **The keeper's own identity:** see INCIDENT.md §5 for its current state. As of T14 it could not be recovery-rotated (its recovery key derived from `spend.key`, which the thief holds): only abandoned, the new keeper DID announced out of band, signed by the root identity, the old one retired from the start of the compromise window.
 
 ## 6. Re-attest and re-bind
 

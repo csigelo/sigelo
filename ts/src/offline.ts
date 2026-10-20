@@ -9,7 +9,7 @@
  *                           [--fingerprint fingerprint.txt]) --net <net> [--reveal-all]
  *   sigelo-offline new      [--net <net>]
  *   sigelo-offline derive   <25 words | 64 hex> [--net <net>] [--keepers N] [--reveal-all]
- *   sigelo-offline recover  --genesis <file> <root> [--agent i [--keeper j] --n m | --identity-n n | --new-keeper <j|random>]
+ *   sigelo-offline recover  --genesis <file> <root> [(--agent i | --delegate i) [--keeper j] --n m | --identity-n n | --new-keeper <j|random>]
  *                           [--next-recovery <z…|sha256:…|none>] [--iat <unix>]
  *
  * `ceremony` is §4.5: `S` never reaches stdout or a file other than the Owner's encrypted
@@ -55,12 +55,13 @@ const USAGE = `sigelo-offline — root seed for sigelo × Monero (MONERO.md §2,
   sigelo-offline new      [--net <net>]
   sigelo-offline derive   <25 words | 64 hex> [--net <net>] [--keepers N] [--reveal-all]
   sigelo-offline recover  --genesis <file> (--backup <f> --identity <f> --net <net> | --restored <f> | - | <25 words>)
-                          [--agent i [--keeper j] --n m | --identity-n n | --new-keeper <j|random>]
+                          [(--agent i | --delegate i) [--keeper j] --n m | --identity-n n | --new-keeper <j|random>]
                           [--next-recovery <z…|sha256:…|none>] [--iat <unix>]
       signs the SPEC §7 recovery rotation from --genesis (the agent's LAST HONEST genesis, or a
       file holding one as "genesis": whoami, a /delegate answer); prints { did, rotation,
       identity_seed_hex } for \`sigelo-agent adopt --rotation\`. New key: agentIdentitySeed(K_j, i, m)
-      with --agent (keeper j default 0), identitySeed(S, n) with --identity-n, else random.
+      with --agent (keeper j default 0), delegateIdentitySeed(K_j, i, m) with --delegate (a
+      /delegate one), identitySeed(S, n) with --identity-n, else random.
       --new-keeper: a keeper's own DID; --genesis is its identity.json (bundle) or genesis; the new
       key is identitySeed(K', 0), K' = keeperRoot(S, j) or random; prints { did, current, rotation,
       keeper_root_hex, bundle } for \`sigelo-spend init --adopt\` (INCIDENT.md §5).
@@ -159,13 +160,13 @@ function cmdNew(net: Net): void {
 
 function cmdRecover(args: string[]): void {
   const { f, words, net, int } = parse('recover', args,
-    ['genesis', 'backup', 'identity', 'net', 'restored', 'agent', 'keeper', 'n', 'identity-n', 'next-recovery', 'iat', 'new-keeper'], []);
+    ['genesis', 'backup', 'identity', 'net', 'restored', 'agent', 'delegate', 'keeper', 'n', 'identity-n', 'next-recovery', 'iat', 'new-keeper'], []);
   if (!f['genesis']) die(`recover: --genesis <file> is required — the agent's last honest genesis (SPEC §7.1)\n\n${USAGE}`);
   const g = parseBytes(readFileSync(f['genesis']!)) as (Genesis | Bundle) & { genesis?: Genesis };
   const from = g.typ === 'genesis' ? g : g.genesis ?? die(`recover: ${f['genesis']} holds neither a genesis nor a "genesis" field`);
   const nk = f['new-keeper'];
   if (nk !== undefined && !/^(\d+|random)$/.test(nk)) die('recover: --new-keeper is a keeper index (the next unused j) or random');
-  if (nk !== undefined && ['agent', 'keeper', 'n', 'identity-n', 'next-recovery'].some((x) => f[x] !== undefined)) die('recover: --new-keeper names the new key itself; it takes none of --agent, --keeper, --n, --identity-n, --next-recovery');
+  if (nk !== undefined && ['agent', 'delegate', 'keeper', 'n', 'identity-n', 'next-recovery'].some((x) => f[x] !== undefined)) die('recover: --new-keeper names the new key itself; it takes none of --agent, --delegate, --keeper, --n, --identity-n, --next-recovery');
   const sources = [f['backup'] !== undefined, f['restored'] !== undefined, words.length > 0].filter(Boolean).length;
   if (sources !== 1) die('recover: give the root exactly one way: --backup/--identity/--net, --restored <file>, - (stdin) or the 25 words');
   let S: Uint8Array | undefined, recoverySecret: Uint8Array | undefined;
@@ -194,10 +195,11 @@ function cmdRecover(args: string[]): void {
     console.log(JSON.stringify(out, null, 2));
     return;
   }
-  const agent = int('agent'), idn = int('identity-n');
-  if (agent !== undefined && idn !== undefined) die('recover: --agent and --identity-n name two different new keys; pick one');
-  if (agent !== undefined && int('n') === undefined) die('recover: --agent needs --n <rotation index> — the next unused one, never the stolen key\'s');
+  const agent = int('agent'), dlg = int('delegate'), idn = int('identity-n');
+  if ([agent, dlg, idn].filter((x) => x !== undefined).length > 1) die('recover: --agent, --delegate and --identity-n name different new keys; pick one');
+  if ((agent !== undefined || dlg !== undefined) && int('n') === undefined) die(`recover: --${agent !== undefined ? 'agent' : 'delegate'} needs --n <rotation index> — the next unused one, never the stolen key's`);
   const next: NextKey = agent !== undefined ? { kind: 'agent', keeper: int('keeper') ?? 0, agent, n: int('n')! }
+    : dlg !== undefined ? { kind: 'delegate', keeper: int('keeper') ?? 0, delegate: dlg, n: int('n')! }
     : idn !== undefined ? { kind: 'identity', n: idn } : { kind: 'random' };
   const nr = f['next-recovery'];
   const out = recover({ from: from as Genesis, S, recoverySecret, next, nextRecovery: nr === undefined ? undefined : nr === 'none' ? null : nr, iat });

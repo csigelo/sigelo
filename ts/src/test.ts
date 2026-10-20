@@ -18,7 +18,7 @@ import { bytesToHex, concatBytes, hexToBytes, utf8ToBytes } from '@noble/hashes/
 import { Age, ceremony, IMPORT_REFUSED, importRoot, keeperLastHonest, openTty, recover, recoverKeeper, restore, restoreWords, roles } from './ceremony.js';
 import { JcsError, RawNumber } from './jcs.js';
 import {
-  agentIdentitySeed, decodeMoneroWords, deriveIdentity, deriveRoot, encodeMoneroWords, identitySeed, k, keeperRoot,
+  agentIdentitySeed, decodeMoneroWords, delegateIdentitySeed, deriveIdentity, deriveRoot, encodeMoneroWords, identitySeed, k, keeperRoot,
   mnemonicFromRoot, newRoot, parseRoot, recoveryCommitment, recoveryPublicKey, recoverySeed, rootFromMnemonic,
   vaultFromRoot, walletFromRoot,
 } from './keys.js';
@@ -935,10 +935,21 @@ t('keys agentIdentitySeed fixed vector: (K_0, i=0, n=0)',
 t('keys agentIdentitySeed fixed vector: (K_0, i=1, n=0)',
   bytesToHex(agentIdentitySeed(K0, 1, 0)) === '36ca4e02c29c9131344139b99be1d894c30d43fab762a1dd4e37720e08c5e2df' &&
   bytesToHex(agentIdentitySeed(K0, 1, 0)) === bytesToHex(k(K0, 'sigelo/v1/identity/1/ed25519/0')));
+// A delegate (POST /delegate) has its own label: under the treasury keeper's K_1 the delegate at
+// account i and the worker enrolled at index i must not share a key (review of 2026-10-19).
+const KD = P.key_derivation_delegate, K1d = keeperRoot(hexToBytes(KD.root_hex), KD.keeper);
+t('keys key_derivation_delegate vector: keeper root, delegate seed and key, worker seed',
+  bytesToHex(K1d) === KD.keeper_root_hex && bytesToHex(delegateIdentitySeed(K1d, KD.account, KD.rotation)) === KD.delegate_seed_hex &&
+  bytesToHex(k(K1d, KD.delegate_path)) === KD.delegate_seed_hex && encodeKey(ed.getPublicKey(delegateIdentitySeed(K1d, KD.account, KD.rotation))) === KD.delegate_key &&
+  bytesToHex(agentIdentitySeed(K1d, KD.account, KD.rotation)) === KD.worker_seed_hex && bytesToHex(k(K1d, KD.worker_path)) === KD.worker_seed_hex);
+t('keys a delegate and the worker at the same account under K_1 hold different keys (i = 0..7, n = 0..1)',
+  [0, 1, 2, 3, 4, 5, 6, 7].every((i) => [0, 1].every((n) => bytesToHex(delegateIdentitySeed(keeperRoot(S1, 1), i, n)) !== bytesToHex(agentIdentitySeed(keeperRoot(S1, 1), i, n)))));
+rejects('keys a negative delegate index is rejected', () => delegateIdentitySeed(K0, -1, 0), 'non-negative integer');
 // Domain separation: a keeper root is not an identity seed, and an agent path never collides
 // with the keeper's own identity path or with another (account, rotation) pair.
 const sep = [K0, keeperRoot(S1, 1), identitySeed(S1, 0), identitySeed(K0, 0), agentIdentitySeed(K0, 0, 0),
-  agentIdentitySeed(K0, 1, 0), agentIdentitySeed(K0, 0, 1), agentIdentitySeed(keeperRoot(S1, 1), 0, 0)].map(bytesToHex);
+  agentIdentitySeed(K0, 1, 0), agentIdentitySeed(K0, 0, 1), agentIdentitySeed(keeperRoot(S1, 1), 0, 0),
+  delegateIdentitySeed(K0, 0, 0), delegateIdentitySeed(K0, 1, 0), delegateIdentitySeed(K0, 0, 1), delegateIdentitySeed(keeperRoot(S1, 1), 0, 0)].map(bytesToHex);
 t('keys keeper, root-identity and agent paths are domain-separated', new Set(sep).size === sep.length);
 // deriveRoot emits K_0..K_{keepers-1} and nothing else moves: rootSummary above omits them.
 const dk = deriveRoot(S1, 'stagenet', 0, 2);
@@ -1417,6 +1428,9 @@ try {
     t('recover: --agent derives agentIdentitySeed(K_j, i, n) and carries the commitment', r.identity_seed_hex === bytesToHex(agentIdentitySeed(KC0, 3, 1)) &&
       r.rotation.next_genesis.recovery === g0.genesis.recovery && r.rotation.next_genesis.key === encodeKey(ed.getPublicKey(agentIdentitySeed(KC0, 3, 1))));
     t('recover: output holds no S and no recovery secret', !leaks(JSON.stringify(r), SChex, scWords, recHex));
+    const rd = recover({ from: g0.genesis, S: SC, next: { kind: 'delegate', keeper: 0, delegate: 3, n: 1 }, iat: T0 + 100 });
+    t('recover: --delegate derives delegateIdentitySeed(K_j, i, n), never worker i\'s agentIdentitySeed', rd.identity_seed_hex === bytesToHex(delegateIdentitySeed(KC0, 3, 1)) &&
+      rd.identity_seed_hex !== r.identity_seed_hex && rd.rotation.next_genesis.key === encodeKey(ed.getPublicKey(delegateIdentitySeed(KC0, 3, 1))));
     const bundle = { v: VERSION, typ: 'bundle', genesis: g0.genesis, rotations: [...thief, r.rotation], bindings: [], attestations: [att], issuers: [world.genesis] } as unknown as Bundle;
     rejects('recover: without the recovery the thief\'s two rotations are a fork', () => verify({ ...bundle, rotations: thief } as Bundle, T0 + 300), 'fork');
     const res = verify(bundle, T0 + 300);
@@ -1440,6 +1454,10 @@ try {
       c1.code === 0 && o1.identity_seed_hex === r.identity_seed_hex && same(Object.keys(o1).sort(), ['did', 'identity_seed_hex', 'rotation']) &&
       o1.rotation.body.recovery_key === recoveryPublicKey(SC) && verify({ ...bundle, rotations: [...thief, o1.rotation] } as Bundle, T0 + 300).did === o1.did &&
       !leaks(c1.out + c1.err, SChex, scWords, recHex));
+    const c1d = run(['--genesis', gFile, '-', '--delegate', '3', '--n', '1', '--iat', String(T0 + 100)], scWords + '\n');
+    const c1x = run(['--genesis', gFile, '-', '--delegate', '3', '--agent', '3', '--n', '1'], scWords + '\n');
+    t('recover CLI: --delegate i --n m → delegateIdentitySeed(K_0, i, m); with --agent too, refused',
+      c1d.code === 0 && JSON.parse(c1d.out).identity_seed_hex === rd.identity_seed_hex && c1x.code === 2 && c1x.err.includes('pick one'));
     const restored = join(recTmp, 'restored.json');
     writeFileSync(restored, JSON.stringify(roles(deriveRoot(SC, 'stagenet'), 'stagenet', true)));
     const c2 = run(['--genesis', gFile, '--restored', restored, '--identity-n', '5']);

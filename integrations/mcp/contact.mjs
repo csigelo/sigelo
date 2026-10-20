@@ -41,7 +41,7 @@ const TIERS = ['own', 'friend', 'quiet'];
 const TIER = 'Tier: own (your operator\'s agents, detected; messages pushed in full), friend (a notice only), quiet (nothing until asked).';
 
 const TOOLS = [
-  ['sigelo_invite', `Make an invite for another agent to become your contact: a short code (short, e.g. K7F3-Q9ZP: a person can say it on the phone; 10 minutes, once, at your relay) and the long one (code, sgl1…: for agent channels; default 24 h). Give one to its operator out of band. long: true makes the long code only. The pairing completes at your next sigelo_inbox after they accept. ${POW} ${RELAY_DATA}`,
+  ['sigelo_invite', `Use when your operator wants you to talk to another agent, yours or someone else's. Make an invite for that agent to become your contact: a short code (short, e.g. K7F3-Q9ZP: a person can say it on the phone; 10 minutes, once, at your relay) and the long one (code, sgl1…: for agent channels; default 24 h). Give one to its operator out of band. long: true makes the long code only. The pairing completes at your next sigelo_inbox after they accept. ${POW} ${RELAY_DATA}`,
     obj({ name: str('the name you will call the new contact'), ttl: int('seconds the long code lives, at most 604800 (7 days)'), long: { type: 'boolean', description: 'true: the long code only, no short code' } })],
   ['sigelo_accept', `Accept an invite code from another agent's operator: sends your answer (whoever holds the code learns your DID); pairs once the inviter's reply verifies against the code. Returns connected with the pairing id, or waiting until the inviter's agent next connects (sigelo_inbox then reports the pairing). ${CONFIRM} ${POW} ${RELAY_DATA}`,
     obj({ code: str('the short code (K7F3-Q9ZP; case, I/L/O and dashes do not matter) or the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX),
@@ -58,6 +58,8 @@ const TOOLS = [
       tiers: { type: 'array', items: { type: 'string', enum: TIERS }, description: 'only messages from contacts of these tiers; the rest stay for a later call. Default: all' } })],
   ['sigelo_forget_contact', 'Forget a contact: revoked in your store for good, its mailboxes given up at the relay. Local: the other side is not told.',
     obj({ did: str('the contact\'s DID "did:sigelo:z…"') }, ['did'])],
+  ['sigelo_history', `What sigelo_inbox already gave out, again, from the local log (newest 500 items, no relay): use it when an earlier result was cut or lost. since: unix seconds; 0 = all kept. ${DATA}`,
+    obj({ since: int('unix seconds: only items received at or after this time; default 0', 2 ** 40) })],
 ];
 
 // installed: this server runs from node_modules (server.mjs INSTALLED), beside the package
@@ -172,6 +174,7 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
       return queued(path, w, await carrier(path).sendFile(text(to, 'to'), resolve(text(file, 'path')), { local: w !== null }));
     }),
     sigelo_inbox: serial(inbox),
+    sigelo_history: serial(({ since = 0 }, path) => carrier(path).history({ since })),
     sigelo_forget_contact: serial(async ({ did }, path) => {
       holder(path, 'sigelo_forget_contact');
       const r = await carrier(path).forget(text(did, 'did'));

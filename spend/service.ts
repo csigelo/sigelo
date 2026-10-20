@@ -11,12 +11,12 @@ import { chmodSync, closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, 
 import { Agent as HttpAgent, createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { canonicalize, decodeKey, did, keygen, sign, parse, structure, verify, verifySig, type Bundle, type Genesis } from 'sigelo';
-import { agentIdentitySeed, deriveIdentity, identitySeed as identitySeedOf, recoveryCommitment } from 'sigelo/dist/keys.js';
+import { deriveIdentity, identitySeed as identitySeedOf, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { decodeAddress, verifySigeloMoneroSigAddr, type Net } from 'sigelo/dist/monero.js';
 import { affordable, agentOf, evaluate, invoiceKey, parseAllow, parsePolicy, plain, tokenHash, type Decision, type PayRequest, type Plan, type Policy, type Prior, type Spent, type Status } from './policy.js';
 import { approvalRequest, checkApproval, type ApprovalBody, type Approved } from './approval.js';
 import { describe as describeLicence, LICENCE_FILE, licenceRefusal, readLicence, type LicenceStatus } from './licence.js';
-import { asTreeEntry, chain, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry, type TreeEntry } from './tree.js';
+import { asTreeEntry, chain, DELEGATE_KDF, delegateSeed, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry, type TreeEntry } from './tree.js';
 
 /**
  * The two-phase spend (MONERO.md §4.1) writes up to two lines per transaction, each a signed
@@ -63,7 +63,19 @@ export interface ServeOptions {
   daemons?: string[];
   /** The fallback's clock, milliseconds (default `Date.now`). For tests. */
   daemonClock?: () => number;
+  /** How many requests may wait in the one-at-a-time lane (default `LANE_MAX`); past it, 503 busy. */
+  laneMax?: number;
 }
+/**
+ * The one-at-a-time lane's bound. Only a request with a live token (or, for /approve, a licensed
+ * keeper) gets this far, so the lane fills only through an agent's own traffic; past the bound
+ * the keeper answers `503 busy` with `Retry-After` instead of queueing without end. Token-less
+ * /approve posts (the approver holds no token) get `APPROVE_MAX` of the lane at most.
+ */
+export const LANE_MAX = 32;
+export const APPROVE_MAX = 4;
+/** The Host names a loopback client sends; anything else is a page whose name was pointed at 127.0.0.1 (DNS rebinding). */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 export interface Service {
   port: number; close(): Promise<void>; policy: Policy; did: string; key: string;
   /** The keeper's identity (identity.json, or the legacy genesis): `identity.recoverable` is false for the latter. */
@@ -500,8 +512,9 @@ function dropLock(path: string): void {
  * `keeper_root_hex`, or, on a keeper set up before the ceremony, a random root created 0600
  * on first run. Both are 32 bytes, used the same way: the keeper's own signing identity is
  * `identitySeed(K, 0)` (via `deriveIdentity`, so a receipt is checkable by anyone holding the
- * keeper's genesis), and each delegate's identity is `agentIdentitySeed(K, i, 0)` for its
- * account `i` — the keeper can re-derive any agent's seed, and nothing else can.
+ * keeper's genesis), and each delegate's identity is `delegateIdentitySeed(K, i, 0)` for its
+ * account `i` (`agentIdentitySeed` on a line from before `kdf`, tree.ts `delegateSeed`) — the
+ * keeper can re-derive any delegate's seed, and nothing else can.
  */
 export function loadRoot(policyPath: string): Uint8Array {
   const path = keyPath(policyPath);
@@ -946,17 +959,65 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     ['POST /revoke', (q, r, b) => revoke(q, r, b)], ['POST /approve', (q, r, b) => approve(q, r, b)],
   ]);
 
+  /**
+   * Who may talk to the keeper at all, before any token, body or lane (external review
+   * 2026-10-19). Loopback is not an authorisation boundary: a browser page on this host can
+   * post to 127.0.0.1, and one whose name was re-pointed at 127.0.0.1 (DNS rebinding) is even
+   * same-origin. So: (1) the Host must be a loopback name, with this keeper's port if it has
+   * one — a rebound page sends its own name; (2) any `Origin` header is refused, `null` included
+   * (a sandboxed frame or a file:// page sends `null`): browsers send it on every POST and no
+   * keeper client does; (3) a POST must be `Content-Type: application/json` — a page can post
+   * `text/plain` cross-origin without a CORS preflight, never `application/json`.
+   */
+  const unwelcome = (req: IncomingMessage): { status: number; reason: string } | undefined => {
+    const host = (req.headers['host'] ?? '').toLowerCase();
+    const m = /^(\[[^\]]*\]|[^:]*)(?::([0-9]+))?$/.exec(host);
+    if (m === null || !LOOPBACK_HOSTS.has(m[1]!) || (m[2] !== undefined && Number(m[2]) !== port)) {
+      return { status: 403, reason: `origin: Host ${JSON.stringify(host)} is not this keeper's loopback address (127.0.0.1:${port}, localhost:${port} or [::1]:${port})` };
+    }
+    if (req.headers['origin'] !== undefined) return { status: 403, reason: 'origin: a request with an Origin header comes from a web page; the keeper answers local programs only' };
+    if (req.method === 'POST' && !/^application\/json\s*(;|$)/i.test(req.headers['content-type'] ?? '')) {
+      return { status: 415, reason: 'request: Content-Type must be application/json' };
+    }
+    return undefined;
+  };
+  // Requests in the lane, waiting or running (`LANE_MAX`), and how many of them are /approve.
+  const laneMax = opts.laneMax ?? LANE_MAX;
+  let laneUsed = 0, approvesUsed = 0;
+
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const no = unwelcome(req);
+    // The body is never read: close the connection with the answer.
+    if (no !== undefined) { res.setHeader('Connection', 'close'); return fail(res, no.status, no.reason); }
     refreshTokens(); // before any token is looked at: a rotated token is dead from this request on
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const route = `${req.method} ${url.pathname}`;
     const job = lane.get(route);
     if (job !== undefined) {
+      const isApprove = route === 'POST /approve';
+      // The token BEFORE the body and the lane: a token-less post never waits in it, never reads
+      // the log, and never delays an agent's pay (review 2026-10-19: 50 of them held a real pay
+      // 10 s). agentOf is constant-time. The token is checked again in the lane (policy.ts):
+      // a token revoked while its request waited is dead there too. /approve holds no token
+      // (its signature is the authorisation); it is refused here only when unlicensed.
+      if (!isApprove && authorized(req) === undefined) {
+        res.setHeader('Connection', 'close');
+        const t = bearer(req.headers['authorization']);
+        return fail(res, 401, t === undefined || t === '' ? 'token: no bearer token presented' : 'token: this wallet is not set up for you (unknown or revoked token). Tell your operator.');
+      }
+      if (isApprove) { const lic = unlicensed('approvals (POST /approve)'); if (lic !== undefined) { res.setHeader('Connection', 'close'); return fail(res, 403, lic); } }
+      if (laneUsed >= laneMax || (isApprove && approvesUsed >= APPROVE_MAX)) {
+        res.setHeader('Connection', 'close');
+        res.setHeader('Retry-After', '1');
+        return fail(res, 503, `busy: ${laneUsed} requests are already waiting for the keeper's one-at-a-time lane — nothing was done; run the same command again in a few seconds`);
+      }
+      laneUsed++; if (isApprove) approvesUsed++;
+      const leave = (): void => { laneUsed--; if (isApprove) approvesUsed--; };
       const raw = await bodyOrFail(req, res);
-      if (raw === undefined) return;
+      if (raw === undefined) { leave(); return; }
       let gone = false;
       res.on('close', () => { if (!res.writableFinished) gone = true; });
-      return oneAtATime(async () => {
+      const run = async (): Promise<void> => {
         if (gone || res.destroyed || req.socket.destroyed) return;
         // Every route in the lane signs a line or may spend: none of them runs on a clock set back.
         const behind = clockBehind(clock());
@@ -967,7 +1028,8 @@ export async function serve(opts: ServeOptions): Promise<Service> {
         if (unsaved) { unsaved = false; await store(); }
         // Then the daemon fallback: after the answer, so a switch never delays or changes one.
         await daemonCheck();
-      });
+      };
+      return oneAtATime(async () => { try { await run(); } finally { leave(); } });
     }
     // The read-only routes are not harmless: /log is every destination, purpose and amount
     // this service ever paid, /health is the allowance balance and the wallet's height. They
@@ -1443,14 +1505,16 @@ export async function serve(opts: ServeOptions): Promise<Service> {
       if (d.net !== policy.net || d.kind !== 'subaddress') throw new Error(`a ${d.net} ${d.kind} address`);
     } catch (e) { return fail(res, 502, `wallet: create_account answered address ${address} for account ${account}, not a ${policy.net} subaddress (${why(e)})`); }
 
-    // Its identity: `agentIdentitySeed(K, i, 0)`, the root's recovery commitment. The genesis
-    // goes into the signed line, so the DID is reproducible from the log and the seed from K.
-    const seed = agentIdentitySeed(K, account, 0);
+    // Its identity: `delegateIdentitySeed(K, i, 0)`, the root's recovery commitment. Never
+    // `agentIdentitySeed(K, i, 0)`: that is enrolled worker i's key under the same K, and this
+    // seed goes to the delegating agent. The genesis and `kdf` go into the signed line, so the
+    // DID is reproducible from the log and the seed from K.
+    const seed = delegateSeed(K, { account, kdf: DELEGATE_KDF });
     const id = keygen({ seed, recovery: policy.recovery_commitment });
     const tok = randomBytes(32).toString('hex');
     const entry: DelegateEntry = {
       kind: 'delegate', ts: now, name, parent: who, account, address, did: id.did, genesis: id.genesis,
-      token_hash: tokenHash(tok), caps: plan.caps, allow: plan.allow, max_delegates: plan.max_delegates, approval_above: plan.approval_above,
+      token_hash: tokenHash(tok), caps: plan.caps, allow: plan.allow, max_delegates: plan.max_delegates, approval_above: plan.approval_above, kdf: DELEGATE_KDF,
     };
     try { writeTree(entry); } catch (e) { return fail(res, 500, `log: delegate line not written (${why(e)}) — no delegate was created (wallet account ${account} stays empty and unused)`); }
     const credentials = {

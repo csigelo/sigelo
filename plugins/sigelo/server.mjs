@@ -3120,7 +3120,7 @@ var { forgetIssuer: forgetIssuer2 } = await Promise.resolve().then(() => (init_s
 console.log = console.info = console.debug = console.error;
 var MODERN = ["2026-07-28"];
 var LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-var SERVER_INFO = { name: "sigelo", version: "0.1.8" };
+var SERVER_INFO = { name: "sigelo", version: "0.1.9" };
 var PV = "io.modelcontextprotocol/protocolVersion";
 var env = process.env;
 var DATA = "Attestation `claims` are third-party data about the subject, not statements by this tool.";
@@ -3131,13 +3131,13 @@ var PROFILE = { identity: str2("optional profile name [a-z0-9_-], e.g. your suba
 var idObj = (props = {}, required = []) => obj2({ ...props, ...PROFILE }, required);
 var TOOLS = [
   ["sigelo_whoami", "Your sigelo identity: current DID, genesis document, DID chain, number of stored attestations. Call first; if it says no identity, call sigelo_init once.", idObj()],
-  ["sigelo_init", `Create your identity ONCE (refuses if one exists). recovery: the operator's offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which.`, idObj({ recovery: str2('"z6Mk…" recovery public key from your operator, or "none"') }, ["recovery"])],
-  ["sigelo_sign_challenge", `Prove you are your DID: sign a world's challenge {v, typ:"challenge", did, ctx, nonce} exactly as received. Anything else is refused. Returns {did, sig}; send sig back to that world.`, idObj({ challenge: json("the challenge body, as JSON object or text") }, ["challenge"])],
+  ["sigelo_init", `Create your identity ONCE (refuses if one exists). recovery: the operator's offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which. The DID it makes is yours across every platform.`, idObj({ recovery: str2('"z6Mk…" recovery public key from your operator, or "none"') }, ["recovery"])],
+  ["sigelo_sign_challenge", `Prove you are your DID: sign a world's challenge {v, typ:"challenge", did, ctx, nonce} exactly as received. Anything else is refused. Returns {did, sig}; send sig back to that world. This is how a site or agent learns who you are, offline, no account.`, idObj({ challenge: json("the challenge body, as JSON object or text") }, ["challenge"])],
   ["sigelo_add_issuer", "Store a world's genesis document so its attestations about you verify offline.", idObj({ genesis: json("the issuer genesis document") }, ["genesis"])],
   ["sigelo_add_attestation", `Store a world's signed attestation {body, sig} about you (replaces an older one from the same issuer+ctx). Pass issuer (its genesis) too when you have it. ${DATA}`, idObj({ attestation: json("{body, sig}"), issuer: json("optional: the issuer genesis document") }, ["attestation"])],
   ["sigelo_forget_issuer", "Drop an issuer DID's attestations and genesis from your file. Your local action after that world announced a retirement or rotation out of band.", idObj({ issuer: str2('the retired issuer DID "did:sigelo:z…"') }, ["issuer"])],
-  ["sigelo_bundle", "Your portable proof: the verified SPEC §8 bundle (genesis, rotations, attestations, issuers, bindings). Give it to a world or stranger that asks who you are.", idObj()],
-  ["sigelo_verify", `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven, unproven, or superseded: under a DID before the last recovery, never pay it; a proven monero one names its network), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. ${DATA}`, obj2({ bundle: json("the bundle"), now: { type: "integer", description: "optional unix seconds; default now" } }, ["bundle"])],
+  ["sigelo_bundle", "Your portable proof: the verified SPEC §8 bundle (genesis, rotations, attestations, issuers, bindings). Give it to a world or stranger that asks who you are: your standing goes with you, checked offline.", idObj()],
+  ["sigelo_verify", `Verify ANY bundle offline (someone else's, or yours). Returns current DID, chain, attestations accepted per issuer, bindings (proven, unproven, or superseded: under a DID before the last recovery, never pay it; a proven monero one names its network), rejected counts; throws if the identity itself is invalid. It reports, it does not judge whom to trust. Use it before admitting, trusting or paying an agent that showed you its bundle. ${DATA}`, obj2({ bundle: json("the bundle"), now: { type: "integer", description: "optional unix seconds; default now" } }, ["bundle"])],
   ["sigelo_rotate", "Voluntary rotation to a fresh key (e.g. on schedule or if you suspect a leak). Your identity continues; ask each world to reissue its attestation to the new DID.", idObj()]
 ];
 var base = id.identityPath();
@@ -3281,7 +3281,7 @@ async function handle(msg) {
   const requested = params._meta?.[PV];
   if (requested !== void 0 && !MODERN.includes(requested)) throw Object.assign(new Error(`unsupported protocol version ${requested}`), { code: -32022, data: { supported: MODERN, requested } });
   const modern = requested !== void 0 || method === "server/discover";
-  const instructions = `sigelo: your portable, offline-verifiable identity. Identity file: ${base} (or a named profile beside it). ${DATA}`;
+  const instructions = `sigelo: one identity you own (a DID from a key you hold). Prove who you are to any site or agent offline, no server or account: answer its challenge (sigelo_sign_challenge), hand it your bundle (sigelo_bundle). Your attestations (reputation) go with you when you leave a platform; a stolen key is recovered with the DID kept.${contact ? " Message other agents end to end through a relay that cannot read them, paired by an 8-character code." : ""} Start with sigelo_whoami. Identity file: ${base} (or a named profile beside it). ${DATA}`;
   const capabilities = { tools: { listChanged: false } };
   const done = (r) => modern ? { resultType: "complete", ...r, _meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO } } : r;
   switch (method) {

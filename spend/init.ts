@@ -2,7 +2,7 @@
 /**
  * sigelo-spend — the installer and its doctor (spend/README.md "Install").
  *
- *   sigelo-spend init [--dir D] [--net stagenet|mainnet] (--wallet-rpc URL | --create-wallet-rpc ...)
+ *   sigelo-spend init [--dir D] [--net stagenet|mainnet] (--wallet-rpc URL | --create-wallet-rpc ...) [--agent-token-file PATH]
  *                     [--keeper-package keeper-<j>.json | --recovery-commitment sha256:… | --adopt <recovered.json> [--key F]] [...]
  *   sigelo-spend doctor [--dir D] [--notify]
  *   sigelo-spend licence show|install <file> [--dir D]
@@ -10,14 +10,14 @@
  *
  * `init` sets up ONE keeper on THIS host, over the operator's own monero-wallet-rpc and wallet:
  * a keeper root (spend.key) and the keeper's identity (identity.json, whose recovery key is one the
- * host never holds — INCIDENT.md §5), the first agent's token, policy.json from a template (one
+ * host never holds — INCIDENT.md §5), the first agent's token (in the agent's own file, never the keeper directory), policy.json from a template (one
  * root agent, modest caps, approval_above off, an allowlist only of what --allow names), a
- * frozen copy of this package for the units to run, and systemd --user units. Nothing is
+ * frozen copy of this package for the units to run, and systemd units (--user; system units with User= when run as root, the two-user layout). Nothing is
  * hosted, nothing leaves the host, and the vendor never sees a key: there is no managed mode.
  * Interactive-free: every choice is a flag, and a refusal says which one.
  */
 import { randomBytes } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
+import { chmodSync, chownSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -37,7 +37,26 @@ const why = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 const iso = (t: number): string => new Date(t * 1000).toISOString().replace('.000Z', 'Z');
 const now = (): number => Math.floor(Date.now() / 1000);
 export const DEFAULT_DIR = (): string => join(process.env['XDG_DATA_HOME'] || join(homedir(), '.local', 'share'), 'sigelo-spend', 'keeper');
-const unitDir = (): string => join(process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config'), 'systemd', 'user');
+const configHome = (): string => process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config');
+const unitDir = (): string => join(configHome(), 'systemd', 'user');
+const SYSTEM_UNITS = '/etc/systemd/system';
+/** `p` is `dir` or inside it. */
+const inside = (p: string, dir: string): boolean => p === dir || p.startsWith(dir.endsWith('/') ? dir : dir + '/');
+/** /etc/passwd's name and home for `uid`, or undefined. */
+function passwdOf(uid: number): { name: string; home: string } | undefined {
+  let text = '';
+  try { text = readFileSync('/etc/passwd', 'utf-8'); } catch { return undefined; }
+  for (const l of text.split('\n')) {
+    const f = l.split(':');
+    if (f.length >= 7 && Number(f[2]) === uid && f[2] !== '') return { name: f[0]!, home: f[5]! };
+  }
+  return undefined;
+}
+/** Every file and directory under `p` (dereferenced: the frozen copy has no links) to uid:gid. */
+function chownR(p: string, uid: number, gid: number): void {
+  chownSync(p, uid, gid);
+  if (statSync(p).isDirectory()) for (const n of readdirSync(p)) chownR(join(p, n), uid, gid);
+}
 const INSTALL = 'install.json', TOKEN = 'agent.token', WALLET_CONF = 'wallet-rpc.conf';
 
 /** MONERO.md §4.2 — the whole prompt snippet a harness gives a weak agent; "10 minutes" is dedupe_seconds 600. */
@@ -220,8 +239,21 @@ function walletRpcBin(given: string | undefined): string {
 
 export interface InitResult { dir: string; did: string; token: string; tokenPath: string; url: string; units: string[]; lines: string[] }
 
-export function init(argv: string[]): InitResult {
-  const f = flags(argv, ['--dir', '--net', '--wallet-rpc', '--wallet-rpc-login', '--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin',
+/**
+ * `sys.uid`: who runs init (default the process's uid; tests pass 0 to exercise the root path).
+ *
+ * Two layouts (README "Two users"). Run as ROOT, init sets up the recommended one: every file in
+ * the keeper directory belongs to the user who owns the directory's parent (the keeper's own
+ * user, never root), the units are system units with `User=` that user, and the agent's token is
+ * written to `--agent-token-file`, owned by the user who owns THAT file's directory — the agent's
+ * uid, which then reads its token and nothing of the keeper's. Run as an ordinary user, init sets
+ * up the single-user layout (a laptop): `--user` units, the token in the agent's file (default
+ * under ~/.config/sigelo-wallet/). The token is never in the keeper directory either way: a token
+ * there makes the agent run as the keeper's uid, beside policy.json (the wallet login) and spend.key.
+ */
+export function init(argv: string[], sys: { uid?: number } = {}): InitResult {
+  const uid = sys.uid ?? process.getuid?.() ?? -1, root = uid === 0;
+  const f = flags(argv, ['--agent-token-file', '--dir', '--net', '--wallet-rpc', '--wallet-rpc-login', '--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin',
     '--daemons', '--daemon-proxy', '--daemon-ssl-fingerprint', '--daemon-login-file', '--port', '--agent', '--account', '--allow', '--per-tx', '--per-day', '--licence', '--keeper-package', '--recovery-commitment', '--adopt', '--key'],
   ['--create-wallet-rpc', '--notify', '--no-systemd']);
   if (f.pos.length > 0) throw new Error(`init takes flags only, not ${JSON.stringify(f.pos[0])}`);
@@ -236,6 +268,31 @@ export function init(argv: string[]): InitResult {
   const create = f.on.has('--create-wallet-rpc'), systemd = !f.on.has('--no-systemd');
   const perTx = toAtomic(one(f, '--per-tx') ?? '0.1'), perDay = toAtomic(one(f, '--per-day') ?? '0.5');
   if (perTx === undefined || perDay === undefined) throw new Error('--per-tx and --per-day are XMR amounts, like 0.05');
+
+  // The agent's token: its own file, never in the keeper directory (review 2026-10-19, MEDIUM 2).
+  const givenTok = one(f, '--agent-token-file');
+  if (root && givenTok === undefined) throw new Error('as root, init needs --agent-token-file <path in the agent user\'s home>: the token goes to the agent\'s uid, never into the keeper directory');
+  const tokenPath = resolve(givenTok ?? join(configHome(), 'sigelo-wallet', `${slugOf(dir)}-${agent}.token`));
+  if (inside(tokenPath, dir)) throw new Error(`--agent-token-file ${tokenPath} is inside the keeper directory ${dir}: the agent would have to run as the keeper's user, beside policy.json (the wallet login) and spend.key; give a path in the agent's home`);
+  if (givenTok !== undefined && !existsSync(dirname(tokenPath))) throw new Error(`--agent-token-file ${tokenPath}: its directory ${dirname(tokenPath)} does not exist (create it, owned by the agent's user, mode 0700)`);
+  // As root: whose files are whose. The keeper's user owns the keeper directory's parent; the
+  // agent's owns its token file's directory. Neither may be root.
+  let owner: { uid: number; gid: number; name: string; home: string } | undefined, agentOwner: { uid: number; gid: number } | undefined;
+  if (root) {
+    const parent = dirname(dir);
+    if (!existsSync(parent)) throw new Error(`${parent} does not exist: as root, init gives the keeper directory to the user who owns its parent — create it (install -d -o sigelo-keeper -m 0700 ${parent})`);
+    const ps = statSync(parent), ts = statSync(dirname(tokenPath));
+    if (ps.uid === 0) throw new Error(`${parent} belongs to root: as root, init gives the keeper directory to the user who owns its parent, and the keeper never runs as root — create its user and give it ${parent} (README "Two users")`);
+    if (ts.uid === 0) throw new Error(`${dirname(tokenPath)} belongs to root: the agent's token goes to the user who owns its directory, and an agent never runs as root — use a directory the agent's user owns`);
+    const pw = passwdOf(ps.uid);
+    if (pw === undefined) throw new Error(`${parent} belongs to uid ${ps.uid}, which has no /etc/passwd entry: the units need a user name for User=`);
+    owner = { uid: ps.uid, gid: ps.gid, ...pw };
+    agentOwner = { uid: ts.uid, gid: ts.gid };
+    // The registry the keeper reads (licence seats) is its own user's, not root's.
+    if (process.env['SIGELO_SPEND_REGISTRY'] === undefined) process.env['SIGELO_SPEND_REGISTRY'] = join(owner.home, '.config', 'sigelo-spend', 'keepers.json');
+  }
+  const units0 = root ? SYSTEM_UNITS : unitDir();
+  const userLines = owner === undefined ? '' : `User=${owner.name}\nGroup=${owner.gid}\n`, wantedBy = root ? 'multi-user.target' : 'default.target';
 
   // Where the keeper's wallet-rpc is: an existing one (--wallet-rpc), or one these units run.
   let rpc: string, login: string | undefined, walletUnit: string | undefined, walletConf: string | undefined;
@@ -253,6 +310,8 @@ export function init(argv: string[]): InitResult {
     const file = one(f, '--wallet-file'), pw = one(f, '--password-file');
     if (file === undefined || pw === undefined) throw new Error('--create-wallet-rpc needs --wallet-file <your allowance wallet> and --password-file <its password file>: the wallet is yours, the installer makes none');
     if (!existsSync(resolve(file)) || !existsSync(resolve(pw))) throw new Error(`--wallet-file ${file} or --password-file ${pw} does not exist`);
+    // Two users: wallet-rpc runs as the keeper's user, which must be able to open them.
+    if (owner !== undefined) for (const x of [file, pw]) if (statSync(resolve(x)).uid !== owner.uid) throw new Error(`${resolve(x)} does not belong to ${owner.name}, who runs wallet-rpc: chown ${owner.name} ${resolve(x)}`);
     if (daemons.length === 0) throw new Error('--create-wallet-rpc needs --daemons a[,b,…]: the first is the wallet-rpc\'s --daemon-address, the rest the keeper\'s fallback');
     // The daemon: https:// means TLS required (never autodetect, which falls back to plaintext),
     // optionally pinned; .onion needs a SOCKS proxy (Tor); a daemon login comes from a file.
@@ -287,14 +346,14 @@ ExecStart=${[bin, ...(net === 'stagenet' ? ['--stagenet'] : []), '--wallet-file'
     ...(proxy !== undefined ? ['--proxy', proxy] : []),
     '--rpc-bind-ip', '127.0.0.1', '--rpc-bind-port', String(wport),
     '--config-file', join(dir, WALLET_CONF), '--non-interactive', '--log-file', join(dir, 'wallet-rpc.log')].map(arg).join(' ')}
-Restart=on-failure
+${userLines}Restart=on-failure
 RestartSec=30
 # wallet-rpc saves the wallet on SIGTERM; give it time.
 TimeoutStopSec=60
 UMask=0077
 
 [Install]
-WantedBy=default.target
+WantedBy=${wantedBy}
 `;
   } else {
     for (const x of ['--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin', ...daemonFlags]) if (f.v.has(x)) throw new Error(`${x} goes with --create-wallet-rpc`);
@@ -322,6 +381,7 @@ WantedBy=default.target
 
   // The directory: new or empty. Never over an existing keeper (its spend.key is its identity).
   if (existsSync(dir) && (!statSync(dir).isDirectory() || readdirSync(dir).length > 0)) throw new Error(`${dir} exists and is not empty — init never writes over a keeper; pick a new --dir`);
+  if (existsSync(tokenPath)) throw new Error(`--agent-token-file ${tokenPath} exists — init never writes over a token; pick another path`);
   const id = keeper;
   // A second keeper on this host is paid (multi-keeper): a licence issued to a keeper already
   // registered here, whose seats cover one more.
@@ -341,7 +401,7 @@ WantedBy=default.target
     licence = JSON.stringify(raw, null, 2) + '\n';
   } else if (f.v.has('--licence')) throw new Error('--licence is for a second keeper on this host; for this one, run `sigelo-spend licence install <file>` once the vendor has issued it to the keeper DID init prints');
   const units = [names.keeper, ...(walletUnit !== undefined ? [names.wallet] : []), ...(f.on.has('--notify') ? [`${names.check}.service`, `${names.check}.timer`] : [])];
-  if (systemd) for (const u of units) if (existsSync(join(unitDir(), u))) throw new Error(`${join(unitDir(), u)} exists — another keeper uses the name; pick another --dir basename`);
+  if (systemd) for (const u of units) if (existsSync(join(units0, u))) throw new Error(`${join(units0, u)} exists — another keeper uses the name; pick another --dir basename`);
 
   // Write: the directory 0700, every secret 0600.
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -350,7 +410,6 @@ WantedBy=default.target
   secret('spend.key', toHex(K) + '\n');
   secret(IDENTITY_FILE, JSON.stringify(keeper.bundle, null, 2) + '\n');
   secret('policy.json', JSON.stringify(policy, null, 2) + '\n');
-  secret(TOKEN, token + '\n');
   if (licence !== undefined) secret(LICENCE_FILE, licence);
   if (walletConf !== undefined) secret(WALLET_CONF, walletConf);
   const cli = copyApp(join(dir, 'app'));
@@ -364,12 +423,12 @@ ${walletUnit !== undefined ? `After=${names.wallet}\n` : ''}# It does not wait f
 Type=simple
 WorkingDirectory=${dir.replace(/%/g, '%%')}
 ${daemons.length > 0 ? `# The daemon fallback: the first is the wallet-rpc's own --daemon-address.\nEnvironment=${arg(`SIGELO_DAEMONS=${daemons.join(' ')}`)}\n` : ''}ExecStart=${[process.execPath, cli, 'serve', join(dir, 'policy.json'), '--port', String(keeperPort)].map(arg).join(' ')}
-Restart=always
+${userLines}Restart=always
 RestartSec=10
 UMask=0077
 
 [Install]
-WantedBy=default.target
+WantedBy=${wantedBy}
 `;
   const files: Record<string, string> = { [names.keeper]: keeperUnit };
   if (walletUnit !== undefined) files[names.wallet] = walletUnit;
@@ -380,7 +439,7 @@ Description=sigelo-spend doctor for keeper ${slug}: a line in alerts.log and a d
 [Service]
 Type=oneshot
 ExecStart=${[process.execPath, cli, 'doctor', '--dir', dir, '--notify'].map(arg).join(' ')}
-TimeoutStartSec=5min
+${userLines}TimeoutStartSec=5min
 UMask=0077
 `;
     files[`${names.check}.timer`] = `[Unit]
@@ -398,19 +457,32 @@ WantedBy=timers.target
   for (const [n, text] of Object.entries(files)) writeFileSync(join(sd, n), text, { mode: 0o600 });
   const lines: string[] = [];
   if (systemd) {
-    mkdirSync(unitDir(), { recursive: true });
-    for (const [n, text] of Object.entries(files)) writeFileSync(join(unitDir(), n), text, { mode: 0o600 });
-    const r = spawnSync('systemctl', ['--user', 'daemon-reload'], { encoding: 'utf-8' });
-    if (r.status !== 0) lines.push(`warning: systemctl --user daemon-reload failed (${(r.stderr ?? r.error?.message ?? '').trim()}); run it yourself`);
+    mkdirSync(units0, { recursive: true });
+    // System units are root's and world-readable, as systemd expects; they hold no secret.
+    for (const [n, text] of Object.entries(files)) writeFileSync(join(units0, n), text, { mode: root ? 0o644 : 0o600 });
+    const r = spawnSync('systemctl', [...(root ? [] : ['--user']), 'daemon-reload'], { encoding: 'utf-8' });
+    if (r.status !== 0) lines.push(`warning: systemctl ${root ? '' : '--user '}daemon-reload failed (${(r.stderr ?? r.error?.message ?? '').trim()}); run it yourself`);
   }
+  // The agent's token, in the agent's own file: 0600, and as root the agent's uid's.
+  if (givenTok === undefined) mkdirSync(dirname(tokenPath), { recursive: true, mode: 0o700 });
+  writeFileSync(tokenPath, token + '\n', { mode: 0o600 });
+  chmodSync(tokenPath, 0o600);
+  if (agentOwner !== undefined) chownSync(tokenPath, agentOwner.uid, agentOwner.gid);
   writeFileSync(join(dir, INSTALL), JSON.stringify({
     v: 1, net, port: keeperPort, agent, account, wallet_rpc: rpc, created_wallet_rpc: walletUnit !== undefined, daemons,
     ...(walletUnit !== undefined && { daemon_proxy: proxy ?? null, daemon_ssl_fingerprints: fingerprints, daemon_login_file: loginFile !== undefined ? resolve(loginFile) : null }),
-    systemd, unit_dir: systemd ? unitDir() : null, units, keeper_did: id.did, app: cli, node: process.execPath, created: iso(now()),
+    systemd, unit_dir: systemd ? units0 : null, units, keeper_did: id.did, app: cli, node: process.execPath, created: iso(now()),
+    agent_token_file: tokenPath, layout: owner === undefined ? 'single-user' : owner.uid === agentOwner!.uid ? 'single-user (root install)' : 'two-user',
+    ...(owner !== undefined && { keeper_user: owner.name }),
   }, null, 2) + '\n', { mode: 0o600 });
   register({ dir, did: id.did, genesis: id.genesis });
+  if (owner !== undefined) {
+    chownR(dir, owner.uid, owner.gid);
+    const reg = registryPath();
+    if (inside(reg, owner.home)) { for (let p = reg; inside(p, owner.home) && p !== owner.home; p = dirname(p)) chownSync(p, owner.uid, owner.gid); }
+  }
 
-  const url = `http://127.0.0.1:${keeperPort}`, tokenPath = join(dir, TOKEN);
+  const url = `http://127.0.0.1:${keeperPort}`;
   const st = readLicence(dir, id.genesis, now());
   const start = units.filter((u) => !u.endsWith('-check.service'));
   lines.unshift(
@@ -419,9 +491,11 @@ WantedBy=timers.target
     `  recovery      ${said}`,
     `  policy        ${join(dir, 'policy.json')}: agent ${JSON.stringify(agent)}, account ${account}, ${toXmr(perTx)} XMR per payment, ${toXmr(perDay)} XMR per day, approval_above off`,
     `  agent token   ${tokenPath} (0600, the only copy; \`sigelo-spend token new ${join(dir, 'policy.json')} ${agent}\` rotates it)`,
+    `  layout        ${owner === undefined ? 'single user: the agent runs as this user, which can also read policy.json (the wallet login) and edit it — the weaker layout; for an agent you do not fully trust, init as root (README "Two users")'
+      : owner.uid === agentOwner!.uid ? `one user (${owner.name}) for keeper and agent — the weaker layout: give the token file's directory to the agent's own user` : `two users: keeper and wallet-rpc as ${owner.name}, the token for uid ${agentOwner!.uid} only`}`,
     `  wallet-rpc    ${rpc}${walletUnit !== undefined ? ` (unit ${names.wallet}, over your wallet file, login in policy.json and ${WALLET_CONF})` : ' (yours, already running)'}`,
-    `  units         ${systemd ? `installed in ${unitDir()} (and kept in ${sd})` : `written to ${sd} only (--no-systemd): copy them to ${unitDir()} to use them`}`,
-    `  start         systemctl --user enable --now ${start.join(' ')}`,
+    `  units         ${systemd ? `installed in ${units0} (and kept in ${sd})` : `written to ${sd} only (--no-systemd): copy them to ${units0} to use them`}`,
+    `  start         systemctl ${root ? '' : '--user '}enable --now ${start.join(' ')}`,
     `  check         sigelo-spend doctor --dir ${dir}`,
     '  Runs on this host with your wallet and your keys; nothing is hosted, and nothing is sent to anyone.',
   );
@@ -483,13 +557,22 @@ export async function doctor(dir: string, at = now(), timeoutMs = 5000): Promise
     if (!id.recoverable) warn(`identity: no ${IDENTITY_FILE} — this keeper's genesis commits to a recovery key derived from spend.key, so after a host compromise its DID can only be abandoned (INCIDENT.md §5); init a new keeper to fix it`);
     else ok(`identity: ${IDENTITY_FILE} verifies; recovery ${id.bundle.rotations.at(-1)?.next_genesis.recovery ?? id.genesis.recovery} is held off this host`);
   } catch (e) { fail(`spend.key: ${why(e)}`); }
+  // The agent's token: its own file (install.json agent_token_file; agent.token in the keeper
+  // directory for a keeper set up before 2026-10-20). Inside the keeper directory it makes the
+  // agent run as the keeper's uid, beside policy.json (the wallet login) and spend.key.
+  const tokFile = typeof inst['agent_token_file'] === 'string' ? inst['agent_token_file'] : join(dir, TOKEN);
+  let agentToken: string | undefined;
+  if (inside(resolve(tokFile), dir)) warn(`agent token: ${tokFile} is inside the keeper directory — the agent must run as the keeper's user, so a prompt injection with file access reads policy.json (the wallet login) or edits it; move the token to the agent's own user (spend/README.md "Two users")`);
   try {
-    const t = readFileSync(join(dir, TOKEN), 'utf-8').trim();
-    mode(join(dir, TOKEN), TOKEN);
-    const name = policy === undefined ? undefined : Object.entries(policy.agents).find(([, a]) => a.token_hash === tokenHash(t))?.[0];
-    if (policy !== undefined && name === undefined) warn(`${TOKEN}: matches no agent in policy.json (rotated with token new? then this file is stale)`);
-    else if (name !== undefined) ok(`${TOKEN}: the token of ${JSON.stringify(name)}`);
-  } catch (e) { warn(`${TOKEN}: ${why(e)}`); }
+    agentToken = readFileSync(tokFile, 'utf-8').trim();
+    mode(tokFile, 'agent token');
+    const name = policy === undefined ? undefined : Object.entries(policy.agents).find(([, a]) => a.token_hash === tokenHash(agentToken!))?.[0];
+    if (policy !== undefined && name === undefined) warn(`agent token: ${tokFile} matches no agent in policy.json (rotated with token new? then this file is stale)`);
+    else if (name !== undefined) ok(`agent token: ${tokFile}, the token of ${JSON.stringify(name)}`);
+  } catch (e) {
+    if ((e as { code?: unknown })?.code === 'EACCES') ok(`agent token: ${tokFile} is not readable by this user (the agent's own uid: the two-user layout)`);
+    else warn(`agent token: ${why(e)}`);
+  }
 
   // The units: written, installed where init said, runnable, loopback.
   const units = Array.isArray(inst['units']) ? (inst['units'] as unknown[]).map(String) : [];
@@ -586,11 +669,12 @@ export async function doctor(dir: string, at = now(), timeoutMs = 5000): Promise
   }
   // The keeper itself, if it runs: /health with the agent's token.
   try {
-    const t = readFileSync(join(dir, TOKEN), 'utf-8').trim();
-    const r = await fetch(`http://127.0.0.1:${String(inst['port'])}/health`, { headers: { Authorization: `Bearer ${t}` }, signal: AbortSignal.timeout(timeoutMs) });
+    const r = await fetch(`http://127.0.0.1:${String(inst['port'])}/health`, { headers: agentToken === undefined ? {} : { Authorization: `Bearer ${agentToken}` }, signal: AbortSignal.timeout(timeoutMs) });
     const b = await r.json() as Record<string, unknown>;
+    // Without the agent's token (two users) a 401 still says a keeper answers; its DID is not checked.
     const svc = b['service'] as Record<string, unknown> | undefined;
-    if (svc?.['did'] !== did) warn(`keeper: 127.0.0.1:${String(inst['port'])} answers as ${String(svc?.['did'])}, not ${did}`);
+    if (agentToken === undefined && r.status === 401) ok(`keeper: answering on 127.0.0.1:${String(inst['port'])} (its DID unchecked: the agent's token is not readable here)`);
+    else if (svc?.['did'] !== did) warn(`keeper: 127.0.0.1:${String(inst['port'])} answers as ${String(svc?.['did'])}, not ${did}`);
     else ok(`keeper: answering on 127.0.0.1:${String(inst['port'])}${r.status === 200 ? '' : ` (its wallet: ${String(b['error'])})`}`);
   } catch { warn(`keeper not answering: nothing on 127.0.0.1:${String(inst['port'])} (start its unit)`); }
   if (genesis !== undefined) ok(`licence: ${describe(readLicence(dir, genesis, at))}`);

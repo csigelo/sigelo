@@ -20,6 +20,8 @@ declare const process: {
   on(event: 'SIGINT' | 'SIGTERM' | 'SIGHUP', cb: () => void): void;
   /** init.ts: the node binary the systemd units run. */
   execPath: string;
+  /** init.ts: run as root (the two-user layout) or not. Absent on Windows. */
+  getuid?: () => number;
 };
 declare function setTimeout(fn: () => void, ms: number): { unref(): unknown };
 declare function clearTimeout(t: unknown): void;
@@ -73,7 +75,9 @@ declare module 'node:fs' {
   export function chmodSync(path: string, mode: number): void;
   export function mkdtempSync(prefix: string): string;
   export function rmSync(path: string, opts: { recursive: boolean; force: boolean }): void;
-  export function statSync(path: string): { mode: number; isDirectory(): boolean };
+  export function statSync(path: string): { mode: number; uid: number; gid: number; isDirectory(): boolean };
+  /** init.ts as root: the keeper's files to the keeper's user, the agent's token to the agent's. */
+  export function chownSync(path: string, uid: number, gid: number): void;
   export function statSync(path: string, opts: { bigint: true }): { ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint };
   export function unlinkSync(path: string): void;
   export function readdirSync(path: string): string[];

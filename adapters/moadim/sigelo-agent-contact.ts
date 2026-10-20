@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * The contact verbs of the sidecar (design/relay-plan.md §2): invite, accept, contacts, tier, send,
- * send-file, inbox, forget; and the argv of recovery-key, recover and erase-request (sigelo-agent-recovery.ts), which cli.ts
+ * send-file, inbox, history, forget; and the argv of recovery-key, recover and erase-request (sigelo-agent-recovery.ts), which cli.ts
  * dispatches here with them. Two agents swap a one-line code and become contacts, then exchange end-to-end
  * encrypted messages through a relay that sees ciphertext only. The work is the carrier of
  * sigelo-contact, a dependency of this package (contact/ of the repository); this file is argv and
@@ -50,6 +50,7 @@ const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, numb
   send: { flags: { '--label': true, '--lines': false }, args: [2, Infinity] },
   'send-file': { flags: {}, args: [2, 2] },
   inbox: { flags: { '--wait': true, '--expect': false, '--tier': true, '--quiet-too': false }, args: [0, 0] },
+  history: { flags: { '--since': true }, args: [0, 0] },
   forget: { flags: {}, args: [1, 1] },
   pro: { flags: {}, args: [2, 4] },
   'recovery-key': { flags: { '--out': true }, args: [0, 0] },
@@ -72,10 +73,12 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
   send <did|name> <text|-> [--label <l>]   an encrypted message; - reads it from stdin
        [--lines]                           with -: each line of stdin is a message, one login
   send-file <did|name> <path>              a file, at most 8 MiB, end-to-end encrypted, one login;
-                                           inbox saves one received to <identity>.files/<contact>/ (0600)
+                                           inbox saves one received to <identity>.files/<contact>-<id>/ (0600)
   inbox [--wait <s>] [--expect]            messages and events since the last call (shown once), waiting up
        [--tier own,friend] [--quiet-too]   to 0 to 300 s for a message; --expect: exit 3 if none came;
                                            --tier: only from those tiers, the rest stay; --quiet-too: and quiet
+  history [--since <iso|s>]                what inbox gave out, again, from <identity>.inbox.log (0600, the
+                                           newest 500), no relay; --since: an ISO time, or seconds ago
   forget <did>                             revoke a contact here, for good
   pro redeem <PRO-XXXX-XXXX>               a gift code: this identity's pool is Pro for its months; run it
                                            with the operator's identity file (prints the new Pro expiry)
@@ -110,12 +113,13 @@ interface Carrier {
   sendAll(to: string, texts: string[], o: { label?: string; local?: boolean }): Promise<{ status: string }[]>;
   sendFile(to: string, path: string, o?: { local?: boolean }): Promise<{ status: string; name: string; detail?: string; file: FileSent }>;
   inbox(o: { wait?: number; tiers?: string[]; local?: boolean }): Promise<Batch>;
+  history(o: { since?: number }): { messages: unknown[] };
   forget(did: string): Promise<unknown>;
   redeemGift(code: string): Promise<{ exp: number; months: number }>;
 }
 interface CarrierLib {
   Carrier: new (o: object) => Carrier;
-  pathsFor(identityFile: string): { store: string; state: string };
+  pathsFor(identityFile: string): { store: string; state: string; log?: string };
   optionsFromEnv(): object;
   endpointOf(relay: string, endpoints?: object): { mqtt: string; http: string };
   readCode(text: string, now: number, how?: string): { did: string };
@@ -295,7 +299,7 @@ export function lockHolder(identity: string): { pid: number; kind: 'ui' | 'watch
  *  times), one string past V8's limit threw, and the batch, already taken from the carrier, was
  *  lost. Compact, JSON grows only by escaping, and no piece holds more than one message.
  *  → false when a write failed: the reader went away. */
-async function printInbox(r: Batch): Promise<boolean> {
+async function printInbox(r: Batch | { messages: unknown[] }): Promise<boolean> {
   const write = (s: string): Promise<boolean> => new Promise((res) => { process.stdout.write(s, (e) => res(!e)); });
   // A failed write also comes as an 'error' event; unheard, it ends the process before the batch is
   // put back. The callbacks report it.
@@ -303,7 +307,7 @@ async function printInbox(r: Batch): Promise<boolean> {
   const { messages, ...rest } = r;
   if (!(await write('{"messages":['))) return false;
   for (let i = 0; i < messages.length; i++) if (!(await write(`${i ? ',' : ''}\n${safeJson(JSON.stringify(messages[i]))}`))) return false;
-  return write(`\n],${safeJson(JSON.stringify(rest)).slice(1)}\n`);
+  return write(Object.keys(rest).length === 0 ? '\n]}\n' : `\n],${safeJson(JSON.stringify(rest)).slice(1)}\n`);
 }
 
 // A refusal plus what to do when it means a lockout: the relay follows a later rotation of this
@@ -533,7 +537,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
           kicked();
           return results.some((r) => r.status === 'refused') ? 1 : 0;
         }
-        const text = args[1] === '-' && args.length === 2 ? readFileSync(0, 'utf8').replace(/\n$/, '') : args.slice(1).join(' ');
+        // stdin as read, but one line end at the very end (what echo and a heredoc add): LF or CRLF.
+        const text = args[1] === '-' && args.length === 2 ? readFileSync(0, 'utf8').replace(/\r?\n$/, '') : args.slice(1).join(' ');
         if (text === '') throw misuse('send <did|name> <text|->: the text is empty');
         const r = await c.send(args[0]!, text, { label, ...queuedFor }) as { status: string; detail?: string };
         out(r);
@@ -586,6 +591,21 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
           if (r.messages.length === 0) return 1;
         }
         if (flags.has('--expect') && r.messages.length === 0) { note(`inbox: no message came${wait ? ` within ${wait} s` : ''} (--expect)`); return 3; }
+        return 0;
+      }
+      case 'history': {
+        // What inbox (or watch, ui, MCP) already gave out, from the log the carrier writes before it
+        // does: a reader that filtered or lost its output reads it again. No relay, nothing taken.
+        const v = flags.get('--since');
+        let since = 0;
+        if (v !== undefined) {
+          if (/^\d+$/.test(v)) since = Math.max(0, Math.floor(Date.now() / 1000) - Number(v));
+          else if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2}))?$/.test(v) && Number.isFinite(Date.parse(v))) since = Math.max(0, Math.floor(Date.parse(v) / 1000));
+          else throw misuse(`--since: an ISO time (2026-10-19T08:00:00Z) or whole seconds ago, not ${JSON.stringify(v)}`);
+        }
+        const r = c.history({ since });
+        if (!(await printInbox(r))) { note('stdout: the history did not arrive (the reader went away); it is still in the log'); return 1; }
+        if (r.messages.length === 0) note(`history: nothing in ${paths.log ?? 'the inbox log'}${v === undefined ? '' : ` since ${new Date(since * 1000).toISOString().replace('.000', '')}`}`);
         return 0;
       }
       case 'pro': {

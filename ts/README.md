@@ -60,7 +60,7 @@ Never automate view-key disclosure (§6.2).
 
 `src/keys.ts` derives everything from one offline 32-byte root `S` (a Monero 25-word seed):
 `k(path) = HKDF-SHA256(S, "", path)`; `identitySeed`, `recoverySeed`, `walletFromRoot`,
-`keeperRoot(S, j)`, `agentIdentitySeed(K, i, n)`, `deriveRoot(S, net, n, keepers)`,
+`keeperRoot(S, j)`, `agentIdentitySeed(K, i, n)`, `delegateIdentitySeed(K, i, n)`, `deriveRoot(S, net, n, keepers)`,
 `deriveIdentity`, `mnemonicFromRoot`/`rootFromMnemonic`, `newRoot`, `vaultFromRoot` (the
 Owner's cold wallet; never loaded by a keeper). Derived wallets import into stock software by
 private spend key.

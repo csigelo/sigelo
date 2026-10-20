@@ -4,7 +4,7 @@ description: Exact commands: install sigelo, make an agent DID with a recovery k
 ---
 # Adopt: create a DID for your AI agent
 
-Give your AI agent its own ID (a DID), step by step.
+One identity your agent owns. Asked who you are: answer its challenge offline (step 2). Leaving a platform: attestations go with you; stolen key taken back, DID kept. Paid or paying, no wallet key: [Keeper](/keeper.html). Asked to reach another agent: `sigelo-agent invite` (relay, below).
 
 Node ≥ 22.18, POSIX shell. Download [`sigelo-verify`](/verify.html) and [`SHA256SUMS`]({{release_url}}SHA256SUMS) from [/releases/{{release_tag}}/]({{release_url}}) into `$d`.
 
@@ -18,7 +18,7 @@ v=$d/sigelo-verify-linux-amd64           # or linux-arm64, darwin-amd64, darwin-
 
 ## 1. Identity
 
-Recovery key, to take the ID back after a theft, chosen first: none (`--no-recovery`; a theft is then permanent), the operator's `sha256:…` commitment, or a dedicated key pair kept offline (below).
+Recovery key first: none (`--no-recovery`; a theft is then permanent), the operator's `sha256:…` commitment, or a key pair kept offline (below).
 
 ```sh
 sigelo-agent init --recovery "$(sigelo-agent recovery-key)"   # writes recovery.key and recovery.pub
@@ -29,7 +29,7 @@ Keep `recovery.key` and `recovery.pub` off the agent's host.
 
 ## 2. Answer a challenge
 
-A platform (a "world") sends `challenge.json`; you sign it; it answers with `issued.json`, a signed statement about you (an attestation). No world? Run the [mock world](/examples/world.mjs) here:
+A platform (a "world") sends `challenge.json`; you sign it; it answers with `issued.json`, an attestation about you. No world? Run the [mock world](/examples/world.mjs):
 
 ```sh
 node -e 'fetch("https://sigelo.io/examples/world.mjs").then(r=>r.text()).then(t=>require("fs").writeFileSync("world.mjs",t))'
@@ -58,10 +58,10 @@ Pass: exit 0 and `attestations` lists the world's DID. A statement's `claims` ar
 
 ## From an MCP client
 
-- Remote, verify only: `https://sigelo.io/mcp` (Streamable HTTP, one tool `sigelo_verify`, no identity or wallet there).
+- Remote, verify only: `https://sigelo.io/mcp` (one tool, `sigelo_verify`).
 - Claude Code plugin, identity tools and skill: `claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo` ([plugins](https://github.com/csigelo/sigelo/tree/main/plugins)).
 - Hermes Agent: 9 lines of `config.yaml`, zero code — identity and wallet through its MCP client ([adapters/hermes](https://github.com/csigelo/sigelo/tree/main/adapters/hermes)).
 
-[`sigelo-mcp`](https://www.npmjs.com/package/sigelo-mcp) (registry name `io.github.csigelo/sigelo`) exposes the same steps as tools; one config line for each of 30 frameworks: [Works with](/frameworks.html).
+[`sigelo-mcp`](https://www.npmjs.com/package/sigelo-mcp) exposes the same steps as tools; configs for 30 frameworks: [Works with](/frameworks.html).
 
 [Spec](/spec.html) · [Verify your own implementation](/verify.html){{relay_link}}

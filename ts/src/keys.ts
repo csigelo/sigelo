@@ -11,6 +11,7 @@
  * wallet   = b = sc_reduce32(k("sigelo/v1/monero/<w>"))            a = H_s(b), B = bG, A = aG
  * keeper   = K_j = k("sigelo/v1/keeper/<j>")                        j = keeper index
  * agent    = Ed25519 seed  k(K, "sigelo/v1/identity/<i>/ed25519/<n>")  i = account, on K not S
+ * delegate = Ed25519 seed  k(K, "sigelo/v1/delegate/<i>/ed25519/<n>")  i = its account, minted by POST /delegate
  * ```
  *
  * Ed25519 takes its seed raw; only the Monero branch reduces mod l. The path string is the
@@ -72,6 +73,17 @@ export const keeperRoot = (S: Uint8Array, j: number): Uint8Array => k(S, `sigelo
  */
 export const agentIdentitySeed = (K: Uint8Array, i: number, n: number): Uint8Array =>
   k(K, `sigelo/v1/identity/${index('agent', i)}/ed25519/${index('agent rotation', n)}`);
+
+/**
+ * Ed25519 seed for the delegate a keeper's `POST /delegate` mints at account `i`, rotation `n`,
+ * under keeper root `K`. Its own label, not `agentIdentitySeed`'s: an enrolled worker `i` under
+ * the same `K` (`sigelo-agent enrol`, contact/enrol.mjs) holds `agentIdentitySeed(K, i, n)`, and
+ * a delegating agent that receives its delegate's seed must not receive a worker's key. Spend
+ * log lines carry `"kdf": "delegate/1"` for this; a line without it was minted before, with
+ * `agentIdentitySeed` (spend/tree.ts `delegateSeed`).
+ */
+export const delegateIdentitySeed = (K: Uint8Array, i: number, n: number): Uint8Array =>
+  k(K, `sigelo/v1/delegate/${index('delegate', i)}/ed25519/${index('delegate rotation', n)}`);
 
 /** A path index: a safe non-negative integer, so `${v}` is plain decimal with no exponent. */
 function index(what: string, v: number): number {
