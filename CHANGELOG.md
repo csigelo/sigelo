@@ -5,8 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
-- **sigelo-agent:** every verb takes `--identity <file>` or `--operator` (`$SIGELO_HUMAN`, else me.local.json); `SIGELO_IDENTITY`
-  naming your own file is taken as yours, not refused; a file in an agents' directory is refused.
+- **sigelo-agent:** every verb takes `--identity <file>` or `--operator` (`$SIGELO_HUMAN`, else me.local.json);
+  `SIGELO_IDENTITY` naming your own file counts as yours; a file in an agents' directory is refused.
 - **Site, sandboxes:** new `/sandboxes`: the one host dialled (the relay, 8883 else 443), where to allow it in cloud
   sandboxes, CI, TLS proxies and containers; `watch` for conversing agents; verifying needs no egress.
 - **Site, adopt:** the first block is the three commands (init with recovery, sign-challenge, bundle) after a one-line
