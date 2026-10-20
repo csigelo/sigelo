@@ -133,12 +133,15 @@ ok "npx -p sigelo-spend sigelo-spend starts (prints its usage)"
 #      (--no-systemd: unit files only), doctor says the install is valid and the wallet
 #      unreachable (exit 2), licence show says free, and the frozen copy init made runs alone.
 kd=$work/keeper
-out=$(npx -p sigelo-spend sigelo-spend init --dir "$kd" --no-systemd --wallet-rpc http://127.0.0.1:1 2>&1) || fail "sigelo-spend init: $out"
+out=$(npx -p sigelo-spend sigelo-spend init --dir "$kd" --no-systemd --wallet-rpc http://127.0.0.1:1 --agent-token-file "$work/agent.token" 2>&1) || fail "sigelo-spend init: $out"
 printf '%s' "$out" | grep -q '^  keeper DID    did:sigelo:' || fail "sigelo-spend init printed no keeper DID: $out"
 printf '%s' "$out" | grep -qx 'You have a Monero wallet. Use only the `sigelo-wallet` command. You never see or need keys.' || fail "sigelo-spend init printed no agent snippet: $out"
-for f in policy.json spend.key agent.token install.json systemd/sigelo-keeper-keeper.service app/node_modules/sigelo-spend/dist/cli.js app/node_modules/sigelo/dist/sigelo.js; do
+for f in policy.json spend.key install.json systemd/sigelo-keeper-keeper.service app/node_modules/sigelo-spend/dist/cli.js app/node_modules/sigelo/dist/sigelo.js; do
 	[ -f "$kd/$f" ] || fail "sigelo-spend init wrote no $f"
 done
+# the agent's token lives outside the keeper directory (--agent-token-file), 0600
+[ -f "$work/agent.token" ] || fail "sigelo-spend init wrote no agent token at --agent-token-file"
+[ -e "$kd/agent.token" ] && fail "sigelo-spend init wrote the agent token inside the keeper directory"
 [ -e "$HOME/.config/systemd" ] && fail "sigelo-spend init --no-systemd wrote under \$HOME/.config/systemd"
 ok "npx -p sigelo-spend sigelo-spend init --dir … --no-systemd --wallet-rpc http://127.0.0.1:1 (policy, key, token, unit, frozen copy)"
 set +e; out=$(npx -p sigelo-spend sigelo-spend doctor --dir "$kd" 2>&1); rc=$?; set -e
