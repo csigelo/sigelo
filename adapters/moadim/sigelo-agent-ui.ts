@@ -19,11 +19,14 @@
  * Referer), sent back as X-Sigelo-Token: a custom header forces a CORS preflight this server never
  * grants. Host is checked (DNS rebinding), Origin on writes, no cookies; CSP default-src 'self'.
  * The JSON API is UI-API.md. Key: the file key (decision 6; K1-K2 before a public release).
+ * `--remote`: a second listener on the LAN, `POST /r` only, sealed per control (sigelo-agent-remote.ts),
+ * into the same routes, within the control's scope; `/api/devices/*` never.
  */
 import { spawn } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { appendFileSync, chmodSync, closeSync, existsSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { isIPv4 } from 'node:net';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { did, verify, VERSION, type Attestation, type Genesis } from 'sigelo';
@@ -31,12 +34,14 @@ import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import { enrolInto, keeperPath, workersOf } from './sigelo-agent-enrol.ts';
+import { CONTROL_NAME, controlLine, defaultAddress, deviceRoute, isScope, loadAead, newControl, openRequest, R_BODY_MAX, SCOPES, sealAnswer, type Control, type Scope } from './sigelo-agent-remote.ts';
 import { agentsDirFor, busyText, contactLib, humanPath, insideAgents, operatorFile, lockHolder, lockPath, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
 
 export const OPERATOR_CTX = 'sigelo-relay/operator';
 const DAY = 86400, OPERATOR_DAYS = 90, RENEW_DAYS = 14, TAG_MAX = 20, NAME_MAX = 64, TEXT_MAX = 100_000, BODY_MAX = 256 * 1024;
 const STATIC: Record<string, [string, string]> = {
   '/': ['ui.html', 'text/html'], '/ui.html': ['ui.html', 'text/html'], '/ui.js': ['ui.js', 'text/javascript'], '/ui.css': ['ui.css', 'text/css'],
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/sw.js': ['sw.js', 'text/javascript'], '/icon.svg': ['icon.svg', 'image/svg+xml'],
 };
 const HERE = dirname(fileURLToPath(import.meta.url));
 const nowS = (): number => Math.floor(Date.now() / 1000);
@@ -106,13 +111,34 @@ interface Car {
 }
 interface StoreFile { contacts: Record<string, { revoked: boolean }> }
 interface Rec { n: number; at: number; kind: 'in' | 'out' | 'status' | 'event'; did?: string; id?: string | null; text?: unknown; label?: string; status?: string; code?: string; detail?: string; type?: string; name?: string }
-interface UiData { tags: Record<string, string[]>; checked: Record<string, string>; read: Record<string, number> }
+interface UiData { tags: Record<string, string[]>; checked: Record<string, string>; read: Record<string, number>; controls: Record<string, Control>; remote?: { port: number } }
 interface Agent { name: string; file: string; did?: string; chain?: string[]; mine?: { exp: number; days_left: number } | null; error?: string; bundle?: object }
 type Fail = Error & { check?: string; long?: string; status?: number };
 const refuse = (status: number, check: string, message: string): never => { throw Object.assign(new Error(message), { check, status }); };
 
-export interface UiOptions { identity: string; agents?: string; carrier?: Record<string, unknown>; port?: number }
-export interface Ui { url: string; port: number; token: string; close(): Promise<void> }
+export interface UiOptions {
+  identity: string; agents?: string; carrier?: Record<string, unknown>; port?: number;
+  /** A LAN listener for remote controls: on `listen` (else the default route's address); `name` made if new, in `scope` (chat). */
+  remote?: { listen?: string; name?: string; scope?: Scope };
+}
+export interface Ui { url: string; port: number; token: string; remote: { ip: string; port: number; name: string | null; line: string | null } | null; close(): Promise<void> }
+
+const dataPath = (identity: string): string => `${resolve(identity).replace(/\.json$/, '')}.ui.json`;
+/** `ui --controls`: name, scope, created, last used; never the key. */
+export function listControls(identity: string): { name: string; scope: Scope; created: number; last_used: number | null }[] {
+  const d = readJson<Partial<UiData>>(dataPath(identity), {});
+  return Object.entries(d.controls ?? {}).map(([name, c]) => ({ name, scope: c.scope, created: c.created, last_used: c.last_used })).sort((a, b) => a.name.localeCompare(b.name));
+}
+/** `ui --revoke-control <name>`: its key forgotten. The page owns ui.json: refused while one runs on the file (stop it: its listener goes with it). */
+export function revokeControl(identity: string, name: string): boolean {
+  const h = uiHolder(identity);
+  if (h !== null) refuse(409, 'busy', busy(identity, h, 'revoking a control here (stop the page: its remote listener stops with it, then revoke)'));
+  const f = dataPath(identity), d = readJson<Partial<UiData>>(f, {});
+  if (!d.controls?.[name]) return false;
+  delete d.controls[name];
+  writePrivate(f, JSON.stringify(d));
+  return true;
+}
 
 export async function startUi(o: UiOptions): Promise<Ui> {
   const path = resolve(o.identity), agentsDir = resolve(o.agents ?? agentsDirFor(path));
@@ -121,6 +147,16 @@ export async function startUi(o: UiOptions): Promise<Ui> {
   if (!existsSync(path)) refuse(400, 'identity', `no identity at ${path}: make it once from your 25 words: sigelo-agent keeper --from-words`);
   const loadMe = (): id.Store => { try { return id.load(path); } catch (e) { throw unreadable(path, e); } };
   loadMe();
+  // --remote: checked before anything is taken.
+  let remoteIp: string | null = null;
+  if (o.remote) {
+    const r = o.remote;
+    if (r.name !== undefined && !CONTROL_NAME.test(r.name)) refuse(400, 'remote', `control name: 1 to 20 of a-z 0-9 _ -, starting with a letter or digit`);
+    if (r.scope !== undefined && !isScope(r.scope)) refuse(400, 'remote', 'scope: read, chat or all');
+    if (r.listen !== undefined && (!isIPv4(r.listen) || r.listen === '0.0.0.0')) refuse(400, 'remote', `--listen: one IPv4 address of this machine, not ${JSON.stringify(r.listen)}`);
+    remoteIp = r.listen ?? await defaultAddress() ?? refuse(400, 'remote', 'no LAN address found: give one with --listen <ip>');
+    await loadAead();
+  }
   const release = takeLock(path);
   const { lib, short } = await contactLib();
   const base = path.replace(/\.json$/, ''), historyFile = `${base}.history.jsonl`, dataFile = `${base}.ui.json`;
@@ -143,10 +179,17 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     return full;
   };
   if (existsSync(historyFile)) chmodSync(historyFile, 0o600);
-  const data = readJson<UiData>(dataFile, { tags: {}, checked: {}, read: {} });
-  for (const k of ['tags', 'checked', 'read'] as const) data[k] ??= {};
+  const data = readJson<UiData>(dataFile, { tags: {}, checked: {}, read: {}, controls: {} });
+  for (const k of ['tags', 'checked', 'read', 'controls'] as const) data[k] ??= {};
   delete (data as { waiting?: unknown }).waiting;   // kept by an earlier page; the carrier says it now (contacts: prekeys, waiting)
   const saveData = (): void => writePrivate(dataFile, JSON.stringify(data));
+  if (o.remote) {
+    // A new control by name; an existing one keeps its key and scope (revoke it to change them).
+    const name = o.remote.name ?? (Object.keys(data.controls).length === 0 ? 'phone' : undefined), had = name === undefined ? undefined : data.controls[name];
+    if (had && o.remote.scope !== undefined && had.scope !== o.remote.scope) { release(); refuse(409, 'remote', `control ${name} has scope ${had.scope}: revoke it (ui --revoke-control ${name}) to make it again with ${o.remote.scope}`); }
+    if (name !== undefined && !had) { data.controls[name] = newControl(o.remote.scope ?? 'chat', nowS()); saveData(); }
+    o = { ...o, remote: { ...o.remote, ...(name !== undefined && { name }) } };
+  }
 
   // ---- live status, not kept
   const live = { online: new Set<string>(), pow: null as null | { bits: number; since: number }, powDone: null as number | null, error: null as string | null };
@@ -475,6 +518,15 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     });
     req.on('error', no);
   });
+  // One handler for both listeners: the route's answer as [status, JSON value].
+  async function dispatch(method: string, url: URL, b: Record<string, unknown>): Promise<[number, unknown]> {
+    const route = routes[`${method} ${url.pathname}`];
+    if (!route) return [404, { error: { check: 'route', message: `no ${method} ${url.pathname}` } }];
+    try { return [200, await route(b, url.searchParams)]; } catch (e) {
+      const f = e as Fail;
+      return [f.status ?? (f.check ? 409 : 500), { error: { check: f.check ?? 'internal', message: f.message, ...(f.long !== undefined && { long: f.long }) } }];
+    }
+  }
   const server = createServer((req, res) => {
     secure(res);
     void (async () => {
@@ -494,27 +546,76 @@ export async function startUi(o: UiOptions): Promise<Ui> {
         if (req.headers.origin === undefined || !hosts().has(req.headers.origin.replace(/^http:\/\//, '')) || !req.headers.origin.startsWith('http://')) return deny(res, 'origin');
         if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) return deny(res, 'content-type');
       }
-      const route = routes[`${req.method} ${url.pathname}`];
-      if (!route) return json(res, 404, { error: { check: 'route', message: `no ${req.method} ${url.pathname}` } });
-      try {
-        const b = req.method === 'POST' ? await body(req) : {};
-        json(res, 200, await route(b, url.searchParams));
-      } catch (e) {
+      if (!routes[`${req.method} ${url.pathname}`]) return json(res, 404, { error: { check: 'route', message: `no ${req.method} ${url.pathname}` } });
+      let b: Record<string, unknown> = {};
+      try { if (req.method === 'POST') b = await body(req); } catch (e) {
         const f = e as Fail;
-        json(res, f.status ?? (f.check ? 409 : 500), { error: { check: f.check ?? 'internal', message: f.message, ...(f.long !== undefined && { long: f.long }) } });
+        return json(res, f.status ?? 400, { error: { check: f.check ?? 'body', message: f.message } });
       }
+      json(res, ...(await dispatch(req.method!, url, b)));
     })().catch(() => { try { res.destroy(); } catch {} });
   });
-  await new Promise<void>((ok, no) => { server.once('error', no); server.listen(o.port ?? 0, '127.0.0.1', () => ok()); });
-  port = (server.address() as { port: number }).port;
+
+  // ---- the LAN listener (--remote): POST /r, sealed; everything else a status and no body.
+  const bare = (res: ServerResponse, status: number): void => { res.writeHead(status, { 'Content-Length': '0' }); res.end(); };
+  const lan = o.remote ? createServer((req, res) => {
+    // One request per connection: no idle socket outlives a page that stopped.
+    res.setHeader('Cache-Control', 'no-store'); res.setHeader('Connection', 'close');
+    if (req.method !== 'POST' || req.url !== '/r') { req.resume(); return bare(res, 404); }
+    void (async () => {
+      const parts: Buffer[] = [];
+      let n = 0;
+      for await (const d of req as AsyncIterable<Buffer>) { n += d.length; if (n > R_BODY_MAX) return bare(res, 413); parts.push(d); }
+      let raw: unknown;
+      try { raw = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { return bare(res, 400); }
+      const r = openRequest(data.controls, raw);
+      if (r === null) return bare(res, 403);
+      // Kept before the call runs: the same request never runs twice, even across a restart.
+      r.c.ctr = r.ctr; r.c.last_used = nowS(); saveData();
+      let status: number, answer: unknown;
+      let url: URL | null = null;
+      try { url = new URL(r.msg.path, 'http://remote'); } catch {}
+      const b = r.msg.body === undefined ? {} : r.msg.body;
+      if (url === null || !url.pathname.startsWith('/api/') || url.origin !== 'http://remote') [status, answer] = [404, { error: { check: 'route', message: 'not a route' } }];
+      else if (deviceRoute(url.pathname)) [status, answer] = [403, { error: { check: 'remote', message: 'device routes are never remote: moving keys needs a human at the computer' } }];
+      else if (!SCOPES[r.c.scope].has(`${r.msg.method} ${url.pathname}`)) {
+        [status, answer] = routes[`${r.msg.method} ${url.pathname}`] ? [403, { error: { check: 'scope', message: `${r.msg.method} ${url.pathname} is outside this control's scope (${r.c.scope})` } }]
+          : [404, { error: { check: 'route', message: `no ${r.msg.method} ${url.pathname}` } }];
+      } else if (typeof b !== 'object' || b === null || Array.isArray(b)) [status, answer] = [400, { error: { check: 'body', message: 'a JSON object' } }];
+      else [status, answer] = await dispatch(r.msg.method, url, b as Record<string, unknown>);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(sealAnswer(r.c, r.ctr, safeJson(JSON.stringify({ status, body: answer }))));
+    })().catch(() => { try { res.destroy(); } catch {} });
+  }) : null;
+
+  const listen = (srv: ReturnType<typeof createServer>, p: number, ip: string): Promise<number> => new Promise((ok, no) => {
+    srv.once('error', (e: Error & { code?: string }) => no(e.code === 'EADDRINUSE' ? Object.assign(new Error(`port ${p} on ${ip} is taken: another program (or another page) has it`), { check: 'port_taken', status: 409 }) : e));
+    srv.listen(p, ip, () => ok((srv.address() as { port: number }).port));
+  });
+  const stopAll = async (): Promise<void> => {
+    clearInterval(clockTimer); clearInterval(drainTimer);
+    for (const srv of [server, lan]) if (srv?.listening) { srv.closeAllConnections(); await new Promise<void>((ok) => srv.close(() => ok())); }
+    try { await carrier.stop(); } finally { release(); }
+  };
+  let remote: Ui['remote'] = null;
+  try {
+    port = await listen(server, o.port ?? 0, '127.0.0.1');
+    if (lan && o.remote && remoteIp !== null) {
+      let rp: number;
+      // The port is kept, so a control's text stays valid; taken now: a new one, and the texts must be shown again.
+      try { rp = await listen(lan, data.remote?.port ?? 0, remoteIp); } catch (e) {
+        if ((e as Fail).check !== 'port_taken' || data.remote === undefined) throw e;
+        note(`remote: port ${data.remote.port} is taken; a new one: show each control's text again (ui --remote --name <name>)`);
+        rp = await listen(lan, 0, remoteIp);
+      }
+      if (data.remote?.port !== rp) { data.remote = { port: rp }; saveData(); }
+      const name = o.remote.name ?? null, c = name === null ? null : data.controls[name]!;
+      remote = { ip: remoteIp, port: rp, name, line: c ? controlLine(remoteIp, rp, c) : null };
+    }
+  } catch (e) { await stopAll(); throw e; }
   return {
-    url: `http://127.0.0.1:${port}/#t=${token}`, port, token,
-    async close() {
-      clearInterval(clockTimer); clearInterval(drainTimer);
-      server.closeAllConnections();
-      await new Promise<void>((ok) => server.close(() => ok()));
-      try { await carrier.stop(); } finally { release(); }
-    },
+    url: `http://127.0.0.1:${port}/#t=${token}`, port, token, remote,
+    close: stopAll,
   };
 }
 
@@ -523,23 +624,49 @@ function openBrowser(url: string): void {
   try { const c = spawn(cmd as string, args as string[], { detached: true, stdio: 'ignore' }); c.on('error', () => {}); c.unref(); } catch {}
 }
 
-/** `sigelo-agent ui [--no-open]`. Runs until SIGINT/SIGTERM. */
+const USAGE = 'ui [--no-open] [--identity <file>] [--port <p>] [--remote [--listen <ip>] [--name <control>] [--scope read|chat|all]] | ui --controls | ui --revoke-control <name>';
+/** `sigelo-agent ui [--no-open] [--port <p>] [--remote …]`. Runs until SIGINT/SIGTERM. `--controls`, `--revoke-control <name>`: print, exit. */
 export async function main(rest: string[]): Promise<number> {
-  let noOpen = false, flag: string | undefined;
+  let noOpen = false, flag: string | undefined, port: number | undefined, remote = false, listen: string | undefined, name: string | undefined, scope: string | undefined;
+  let list = false, revoke: string | undefined;
+  const value = (i: number): string | undefined => (rest[i + 1] !== undefined && !rest[i + 1]!.startsWith('--') ? rest[i + 1] : undefined);
   for (let i = 0; i < rest.length; i++) {
-    const a = rest[i]!;
+    const a = rest[i]!, v = value(i);
     if (a === '--no-open') noOpen = true;
-    else if (a === '--identity' && rest[i + 1] !== undefined && flag === undefined) flag = rest[++i];
+    else if (a === '--identity' && v !== undefined && flag === undefined) { flag = v; i++; }
     else if (a === '--operator') continue;
-    else { note(`ui: unexpected ${JSON.stringify(a)}: ui [--no-open] [--identity <file>]${a.includes('recovery') ? '. Your identity comes from your 25 words: sigelo-agent keeper --from-words' : ''}`); return 2; }
+    else if (a === '--port' && v !== undefined && /^\d{1,5}$/.test(v) && Number(v) >= 1 && Number(v) <= 65535 && port === undefined) { port = Number(v); i++; }
+    else if (a === '--remote') remote = true;
+    else if (a === '--listen' && v !== undefined && listen === undefined) { listen = v; i++; }
+    else if (a === '--name' && v !== undefined && name === undefined) { name = v; i++; }
+    else if (a === '--scope' && v !== undefined && scope === undefined) { scope = v; i++; }
+    else if (a === '--controls') list = true;
+    else if (a === '--revoke-control' && v !== undefined && revoke === undefined) { revoke = v; i++; }
+    else { note(`ui: unexpected ${JSON.stringify(a)}: ${USAGE}${a.includes('recovery') ? '. Your identity comes from your 25 words: sigelo-agent keeper --from-words' : ''}`); return 2; }
   }
+  if (!remote && (listen ?? name ?? scope) !== undefined) { note(`ui: --listen, --name and --scope go with --remote: ${USAGE}`); return 2; }
+  if (scope !== undefined && !isScope(scope)) { note('ui: --scope read, chat or all'); return 2; }
+  if ((list || revoke !== undefined) && (remote || port !== undefined || (list && revoke !== undefined))) { note(`ui: --controls and --revoke-control stand alone: ${USAGE}`); return 2; }
   let path: string;
   try { path = operatorFile('ui', flag); } catch (e) { note((e as Error).message); return 2; }
   if (!existsSync(path)) { note(`ui: no identity at ${path}: make it once from your 25 words (it is their root identity, so they restore it): sigelo-agent keeper --from-words`); return 2; }
+  if (list) { console.log(safeJson(JSON.stringify(listControls(path), null, 2))); return 0; }
+  if (revoke !== undefined) {
+    try { if (!revokeControl(path, revoke)) { note(`ui: no control ${JSON.stringify(revoke)} (ui --controls lists them)`); return 1; } } catch (e) { note((e as Error).message); return 1; }
+    note(`control ${revoke} revoked: its key is forgotten here; a device holding it controls nothing`);
+    return 0;
+  }
   let ui: Ui;
-  try { ui = await startUi({ identity: path }); } catch (e) { note((e as Error).message); return 1; }
+  try {
+    ui = await startUi({ identity: path, ...(port !== undefined && { port }), ...(remote && { remote: { ...(listen !== undefined && { listen }), ...(name !== undefined && { name }), ...(scope !== undefined && { scope: scope as Scope }) } }) });
+  } catch (e) { note((e as Error).message); return (e as Fail).status === 400 ? 2 : 1; }
   console.log(ui.url);
   note(`your page (experimental): ${ui.url} (this machine only; the link is its key: do not share it). Ctrl-C stops it.`);
+  if (ui.remote) {
+    if (ui.remote.line !== null) console.log(ui.remote.line);
+    const names = listControls(path).map((c) => `${c.name} (${c.scope})`).join(', ');
+    note(`remote: ${ui.remote.ip}:${ui.remote.port}, POST /r sealed; controls: ${names || 'none'}.${ui.remote.line !== null ? ` Scan or paste the SIGELO:UI: line on the device for ${ui.remote.name}: whoever holds it controls this page within its scope until revoked (ui --revoke-control ${ui.remote.name}).` : ''}`);
+  }
   if (!noOpen) openBrowser(ui.url);
   await new Promise<void>((ok) => { process.once('SIGINT', () => ok()); process.once('SIGTERM', () => ok()); });
   await ui.close();

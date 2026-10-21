@@ -160,6 +160,10 @@ wire to gate on, and adding one to the prekeys frame would break those agents.
 
 A genesis that copies a victim's public commitment cannot rotate into the victim's genesis: every rotation is countersigned by the next key (`sig_next`, SPEC §7; wire change of 2026-10-19). Residual: a thief holding the victim's key can graft before the recovery; after it, a §5.2 answer for the head fails.
 
+### 2.14 Closed relays
+
+A closed relay (`RELAY_CLOSED_OPERATOR`) refuses every login that is neither an operator's nor carries that operator's current-key attestation for this host: outsiders get no account, mailbox, invite topic or short code there, and pay no proof of work to learn it. It does not hide the relay or its operators (`/stats` names them; `GET /park/<hash>` is open: a fetched code is useless without an admitted login). It does not protect against the operator, nor against anyone holding an admitted key until its attestation expires (at most 90 days; the session ends then). An attestation by a key the operator rotated away from keeps admitting until the operator logs in after the rotation; if the relay's database is lost, the head reverts to the operator's original DID until its next login (the nightly backup carries neither `closed_members` nor an unlicensed operator's chain).
+
 ## 3. Attacks NOT defended — read this section
 
 ### 3.1 Sybil
@@ -244,6 +248,10 @@ timestamp cannot vary, and anyone reading the genesis can tell the identity is d
 **Workers of one operator link.** Every worker derived from one keeper root carries the operator's
 recovery commitment in its genesis, so two workers' bundles link to each other and to the operator
 without any attestation: an unlinkable worker is not possible today. Known limitation.
+
+### 3.11 Remote control of the page (`ui --remote`, `sigelo-remote/0`)
+
+`ui --remote` opens a second listener on one LAN address that answers only `POST /r`. A control is an 8-byte id and a 32-byte key, shown once as a `SIGELO:UI:` text (a QR later) and kept in plaintext in `.ui.json` (0600, §3.9). Requests are sealed with XChaCha20-Poly1305 and counted; a replayed, reordered, tampered or wrongly keyed request is refused with no body, and the count is kept before the call runs, so a replay fails across a restart too. Device routes are never remote. The controlling device holds no account key. Not defended: no TLS, so the LAN sees addresses, sizes and timing; whoever holds the text controls the page within its scope (read; chat: send, accept, invite, words, including forget through words; all: forget, tier, history, agents) while `ui --remote` runs, until `ui --revoke-control`, which needs the page stopped (it owns the file) and so closes the listener as well.
 
 ## 4. Prompt injection
 

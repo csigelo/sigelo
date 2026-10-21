@@ -70,8 +70,8 @@ build epoch) and timesyncd synced at 14:58. What the units do instead:
   the behaviour seen at every crash-boot), so the first tick after sync runs at once, on the right
   time. `Persistent=true` stays: a tick missed while the host was *off* still runs once.
 - the keeper does not wait: its read-only routes and TRY LATER answers are useful at once, and
-  on a clock set back it signs nothing (`clock_behind`, spend/README.md "The clock guard"; not in
-  the live 6df3b67 `app/`).
+  on a clock set back it signs nothing (`clock_behind`, spend/README.md "The clock guard"; in the
+  live 7ba0c4e `app/`).
 - the check timer does not wait either: a clock set back is something it reports (a log `ts` in
   the future, no tick for an hour).
 
@@ -147,6 +147,8 @@ root.token      soak-root's bearer token
 env.sh          `. env.sh` → sigelo-wallet / sigelo-spend on PATH, acting as soak-root
 state.json      the agent's state, including the live delegate's token
 soak.log  soak-stats.json
+wallet/         a named soak only: allowance-<n> (its own stagenet wallet), password (0600), wallet-rpc.log
+keeper/         a named soak only: wallet-rpc.conf (0600, rpc-login), install.json, systemd/ (its units)
 soak-alerts.log check.mjs --notify: one line per UNHEALTHY run, one on recovery
 ```
 
@@ -179,9 +181,56 @@ since the hostile-JSON differential, rejects the genesis of any soak keyed befor
 passed hex strings as nonces, and the library stored them verbatim). `setup.sh` therefore runs
 `gen-keys.mjs compat` first and refuses to redeploy over a live soak this code would not accept:
 a keeper restarted on such code would refuse its own policy. The way out is a **new** soak
-directory (`SIGELO_SOAK_DIR=<new> node gen-keys.mjs && sh setup.sh`) with its own keys, DIDs and
-day-0, or keeping the deployed revision (`app/REVISION`) until the rehearsal is done. `gen-keys.mjs`
+with its own keys, DIDs and day-0 — beside the live one, "A second soak" below — or keeping the
+deployed revision (`app/REVISION`) until the rehearsal is done. `setup.sh` refuses a
+`SIGELO_SOAK_DIR` other than the default without `SIGELO_SOAK_NAME`: the default units name the
+default directory, and the copy would have replaced the live soak's units and licence drop-in. `gen-keys.mjs`
 also refuses to overwrite a `keys/approver.json` whose DID it would not derive now.
+
+### A second soak (side by side, the 0.1.9 layout)
+
+New keeper code is exercised live without touching the running soak: `SIGELO_SOAK_NAME=<n>` gives
+`setup.sh` its own directory, ports, wallet and units (header of `setup.sh`). What it runs that the
+default soak does not: wallet-rpc **RPC login on** (digest; the default soak's
+`--disable-rpc-login` hides the nonce bug class), the login in a 0600 `--config-file`
+(`keeper/wallet-rpc.conf`) and `policy.json` `wallet.login`, the wallet password by
+`--password-file`, nothing secret on argv; the agent token outside the keeper directory
+(`root.token`, `install.json` `agent_token_file`); an `install.json` so `sigelo-spend doctor`
+vets the units. The keeper code (0.1.9 on) adds the 64-request lane, `/pay` token-before-queue
+and delegates on their own label (`"kdf": "delegate/1"` lines). Daemons: the default soak's four,
+the test host's public stagenet nodes (no own node here). `agent.mjs`, `check.mjs` and
+`gen-keys.mjs` read the wallet login from `policy.json` / `wallet-rpc.conf` (the keeper's own
+digest client); `node wallet-rpc.mjs <url> <conf> <method> [params]` is one call by hand.
+
+```sh
+export SIGELO_SOAK_NAME=019 SIGELO_SOAK_DIR=~/.local/share/sigelo-soak-019     # keeper :38210, wallet-rpc :38093
+node gen-keys.mjs && sh setup.sh --no-systemd      # keys, a NEW empty wallet (temporary --offline wallet-rpc), units in keeper/systemd
+. $SIGELO_SOAK_DIR/env.sh && sigelo-spend doctor --dir $SIGELO_SOAK_DIR/keeper   # WARN only: wallet-rpc, keeper not up; registry
+sh setup.sh                                        # install the units into ~/.config/systemd/user (enables nothing)
+systemctl --user enable --now sigelo-wallet-rpc-soak-019.service                # 1. the wallet (first sync: minutes)
+systemctl --user enable --now sigelo-keeper-soak-019.service                    # 2. the keeper
+systemctl --user enable --now sigelo-soak-agent-019.timer sigelo-soak-check-019.timer   # 3. once funded and unlocked
+SIGELO_SOAK_NAME=019 node $SIGELO_SOAK_DIR/app/spend/soak/check.mjs           # its check
+```
+
+Funding: the new wallet starts empty; the default soak's came from the stagenet faucet (MONERO.md,
+`GET https://stagenet-faucet.xmr-tw.org/send_tx/?addr=<addr>`, 0.1 XMR on 2026-09-23), and so
+does this one: its primary address is `wallet/allowance-<n>.address.txt`. Not from the live
+soak's keeper: its policy pays only bob and carol (its own subaddresses) up to 0.0005, and a
+transfer by hand around the keeper would break its "drop vs fees logged" = 0. Agent ticks before
+the funds unlock (10 blocks) are TRY LATERs.
+
+Rollback (the default soak is never touched):
+
+```sh
+systemctl --user disable --now sigelo-soak-agent-019.timer sigelo-soak-check-019.timer sigelo-keeper-soak-019.service sigelo-wallet-rpc-soak-019.service
+cd ~/.config/systemd/user && rm -f sigelo-wallet-rpc-soak-019.service sigelo-keeper-soak-019.service sigelo-soak-agent-019.service sigelo-soak-agent-019.timer sigelo-soak-check-019.service sigelo-soak-check-019.timer
+systemctl --user daemon-reload && rm -rf ~/.local/share/sigelo-soak-019        # the wallet goes with it: sweep funds first if wanted
+```
+
+An incident on it: `SIGELO_SOAK_DIR=… SIGELO_FREEZE_KEEPER_UNIT=sigelo-keeper-soak-019.service
+SIGELO_FREEZE_WALLET_UNIT=sigelo-wallet-rpc-soak-019.service sh freeze.sh`. Updating its code:
+the same `SIGELO_SOAK_NAME=… sh setup.sh`, then restart its keeper.
 
 ## Healthy
 
@@ -191,7 +240,11 @@ rule below counts from it. The soak keyed 2026-09-23 (day 0 19:48:36Z) ended in 
 rehearsal (incident #5) and is evidence now; so is its successor (c2c9cdc/9516622, day 0
 2026-10-01 14:00:16Z), ended by drill 2 (incident #6). The current soak is a new directory on
 REVISION 7ba0c4e (code = c929667), keeper live 2026-10-02 18:46:08Z, `started` at its first tick
-(`soak-stats.json`); the 14 days of T6 count from there.
+(`soak-stats.json`: 2026-10-02T19:00:16Z); the 14 days of T6 count from there. **T6 is complete
+for it as of 2026-10-16 19:00Z** (14 days from `started`; read-only `check.mjs` on 2026-10-21:
+HEALTHY, 891 ticks, 2116 `spend.log` lines all verifying; 12 mismatches over the run: 7 `balance`
+TRY LATERs in daemon stalls, 4 UNCERTAIN `relay_failed` (ticks 96, 178; operator-checked
+2026-10-07), 1 carol rent abandoned; the soak keeps running).
 
 `check.mjs` prints `HEALTHY` when the keeper and the timer are active, a tick ran in the last
 hour, no command was UNCERTAIN, every `spend.log` line verifies under the keeper key (derived
@@ -222,8 +275,8 @@ lasts. The first HEALTHY run after an UNHEALTHY line logs `HEALTHY again` and se
 notification; HEALTHY with nothing to clear writes nothing, so the check stays read-only on a
 healthy soak. A crash of `check.mjs` itself (a missing `spend.key`, say) is reported as UNHEALTHY
 `check.mjs crashed: …`. The unit also exits 1 while UNHEALTHY (`systemctl --user --failed`).
-`setup.sh` copies the units but, as with the others, enables nothing; the live `app/` (6df3b67)
-predates `--notify`, so the timer is worth enabling only after a redeploy. Tested 2026-09-29 on a
+`setup.sh` copies the units but, as with the others, enables nothing; the live `app/` (7ba0c4e)
+has `--notify` and the timer is enabled. Tested 2026-09-29 on a
 copy of the soak cut at 10:31Z (inside the incident): UNHEALTHY (no tick for 1 h 57 m, no payment
 for 1 d 10 h, height stuck at 2217326), notify-send exit 0, one alerts line; the live soak the same
 minute: HEALTHY, nothing written.

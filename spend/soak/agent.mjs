@@ -32,7 +32,12 @@ const { sign, verify } = await import(pathToFileURL(join(TS, 'sigelo.js')).href)
 const DATA = process.env.SIGELO_SOAK_DIR ?? join(homedir(), '.local/share/sigelo-soak');
 const KEEPER = join(DATA, 'keeper'), POLICY = join(KEEPER, 'policy.json');
 const URL_ = `http://127.0.0.1:${process.env.SIGELO_SOAK_PORT ?? '38200'}`;
-const WALLET_RPC = process.env.SIGELO_SOAK_WALLET_RPC ?? 'http://127.0.0.1:38083/json_rpc';
+// The wallet-rpc: SIGELO_SOAK_WALLET_RPC, else policy.json's; its login (a soak whose wallet-rpc has
+// RPC login on, setup.sh SIGELO_SOAK_NAME) is policy.json's wallet.login, sent as HTTP digest by the
+// keeper's own client (spend/dist/service.js walletRpc).
+const { walletRpc: keeperWalletRpc } = await import(pathToFileURL(join(SPEND, 'dist', 'service.js')).href);
+const WALLET = (() => { try { return JSON.parse(readFileSync(POLICY, 'utf-8')).wallet ?? {}; } catch { return {}; } })();
+const WALLET_RPC = process.env.SIGELO_SOAK_WALLET_RPC ?? WALLET.rpc ?? 'http://127.0.0.1:38083/json_rpc';
 const LOG = join(DATA, 'soak.log'), STATS = join(DATA, 'soak-stats.json'), STATE = join(DATA, 'state.json');
 const RATE_GAP_MS = Number(process.env.SOAK_RATE_GAP_MS ?? 62_000); // rate_per_minute 2: space root spends
 const CAROL_EVERY = 6 * 3600 - 600, CAROL_GIVE_UP = 3 * 3600;
@@ -106,12 +111,7 @@ function wallet(who, token, args, expect) {
   return { ...o, got, verdict: v, exit: r.status };
 }
 
-async function walletRpc(method, params = {}) {
-  const r = await fetch(WALLET_RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: '0', method, params }), signal: AbortSignal.timeout(90_000) });
-  const j = await r.json();
-  if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error)}`);
-  return j.result;
-}
+const walletRpc = (method, params = {}) => keeperWalletRpc({ wallet: { rpc: WALLET_RPC, ...(WALLET.login !== undefined && { login: WALLET.login }) } }, method, params, 90_000);
 
 async function keeperDid() {
   const r = await fetch(URL_ + '/health', { headers: { Authorization: `Bearer ${ROOT}` }, signal: AbortSignal.timeout(60_000) });

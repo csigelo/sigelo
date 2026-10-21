@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The key agent's wire protocol, sigelo-key-agent/0 (design/key-providers.md §4.2): one JSON object
+// The key agent's wire protocol, sigelo-key-agent/0 (KEYS.md): one JSON object
 // per line, UTF-8, read with sigelo's strict parser (duplicate keys refused), one reply per request.
 // At most 2 MiB a line, not the plan's 64 KB: a message body the agent signs is up to 1 MiB padded
 // (contact/envelope.mjs MAX_PADDED), and 64 KB refused every file chunk and long message. Each op has exactly its fields; anything else is `request_invalid`. No request

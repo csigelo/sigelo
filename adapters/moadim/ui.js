@@ -3,6 +3,10 @@
 // Every string from a contact, a relay or a file goes in by textContent, its controls and bidi
 // overrides escaped (safeText), never as HTML. The token comes in the fragment and goes back as
 // X-Sigelo-Token; no cookie, no storage but this tab's sessionStorage (it survives a reload).
+// The seam: every call goes through backend.call(method, path, body) → the UI-API.md answer, or
+// throws {message, check, long, status}. One backend is wired, `http` (fetch to this server with
+// the token). Later ones answer the same routes with the same JSON: `local` (an in-page router over
+// a carrier running in the page) and `remote` (sigelo-remote/0, sealed to a computer's `ui --remote`).
 'use strict';
 (() => {
   const TOKEN = (() => {
@@ -35,17 +39,20 @@
     .map((k) => (k instanceof Node ? k : document.createTextNode(safeText(k)))));
   const badge = (text, kind) => h('span', { class: `badge${kind ? ' ' + kind : ''}` }, text);
 
-  async function api(method, path, body) {
-    const r = await fetch(path, {
-      method, credentials: 'omit', cache: 'no-store',
-      headers: { 'X-Sigelo-Token': TOKEN ?? '', ...(method === 'POST' && { 'Content-Type': 'application/json' }) },
-      ...(method === 'POST' && { body: JSON.stringify(body ?? {}) }),
-    });
-    let data = null;
-    try { data = await r.json(); } catch {}
-    if (!r.ok) throw Object.assign(new Error(data?.error?.message ?? `HTTP ${r.status}`), { check: data?.error?.check, long: data?.error?.long, status: r.status });
-    return data;
-  }
+  const http = {
+    async call(method, path, body) {
+      const r = await fetch(path, {
+        method, credentials: 'omit', cache: 'no-store',
+        headers: { 'X-Sigelo-Token': TOKEN ?? '', ...(method === 'POST' && { 'Content-Type': 'application/json' }) },
+        ...(method === 'POST' && { body: JSON.stringify(body ?? {}) }),
+      });
+      let data = null;
+      try { data = await r.json(); } catch {}
+      if (!r.ok) throw Object.assign(new Error(data?.error?.message ?? `HTTP ${r.status}`), { check: data?.error?.check, long: data?.error?.long, status: r.status });
+      return data;
+    },
+  };
+  const backend = http;
 
   // ---- state
   const S = { snap: null, view: 'contacts', update: () => {}, contact: null, pair: null, msgsSeq: -1, me: null, agents: null, note: null, fatal: null };
@@ -157,7 +164,7 @@
   // ---- PAIR
   async function invite(o = {}) {
     show('pair', { mode: 'invite', busy: true });
-    try { const r = await api('POST', '/api/invite', o); S.pair = { mode: 'invite', id: r.id, inv: r }; } catch (e) { S.pair = { mode: 'invite', error: e }; }
+    try { const r = await backend.call('POST', '/api/invite', o); S.pair = { mode: 'invite', id: r.id, inv: r }; } catch (e) { S.pair = { mode: 'invite', error: e }; }
     await poll();
   }
   function wordsBlock(c) {
@@ -168,8 +175,8 @@
       h('div', null, 'Compare aloud:'),
       h('div', { class: 'words' }, c.words.split(' ').map((w) => h('span', null, w))),
       h('div', { class: 'bar' },
-        h('button', { class: 'primary', onclick: () => act(() => api('POST', '/api/words', { contact: c.did, match: true })) }, 'They match'),
-        h('button', { class: 'danger', onclick: () => { if (confirm(`Forget and block ${safeText(c.name)}? Different words mean someone else may have used the code.`)) act(() => api('POST', '/api/words', { contact: c.did, match: false }), () => show('contacts')); } }, "They don't")),
+        h('button', { class: 'primary', onclick: () => act(() => backend.call('POST', '/api/words', { contact: c.did, match: true })) }, 'They match'),
+        h('button', { class: 'danger', onclick: () => { if (confirm(`Forget and block ${safeText(c.name)}? Different words mean someone else may have used the code.`)) act(() => backend.call('POST', '/api/words', { contact: c.did, match: false }), () => show('contacts')); } }, "They don't")),
       h('details', null, h('summary', null, 'more'), h('p', { class: 'did' }, `pair id ${c.pair ?? ''}`), h('p', { class: 'muted' }, 'The same 32 digits on both sides is the strong check.')));
   }
   function viewPair(arg) {
@@ -178,7 +185,7 @@
     let input = null, nameIn = null, tierPick = null, tier = 'friend';
     const enter = async (code) => {
       S.pair.busy = true; S.pair.error = null; S.pair.result = null; S.update();
-      try { S.pair.result = await api('POST', '/api/accept', { code, name: nameIn.value.trim(), ...(tier === 'quiet' && { tier }) }); } catch (e) { S.pair.error = e; }
+      try { S.pair.result = await backend.call('POST', '/api/accept', { code, name: nameIn.value.trim(), ...(tier === 'quiet' && { tier }) }); } catch (e) { S.pair.error = e; }
       S.pair.busy = false;
       await poll();
     };
@@ -215,7 +222,7 @@
           } else out.push(h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Your long code, once, until ', when(inv.exp)), h('div', { class: 'long' }, inv.code)));
           const cp = h('button', { onclick: () => copy(inv.code, cp) }, 'Copy long code');
           out.push(h('div', { class: 'bar' }, cp, inv.short && !live ? h('button', { class: 'primary', onclick: () => invite() }, 'New code') : null,
-            h('button', { onclick: () => act(() => api('POST', '/api/invite/cancel', { id: inv.id }), () => show('contacts')) }, 'Cancel')));
+            h('button', { onclick: () => act(() => backend.call('POST', '/api/invite/cancel', { id: inv.id }), () => show('contacts')) }, 'Cancel')));
           out.push(h('ul', { class: 'steps' }, h('li', null, inv.short ? `✓ code parked at your relay (${safeText(inv.relay)})` : '✓ long code made'), h('li', null, '… waiting for them to enter it')),
             h('p', { class: 'muted' }, 'Their agent must use the same relay for the short code; else send them the long code.'));
         } else if (inv) out.push(h('p', { class: 'muted' }, 'This code is no longer pending.'), h('button', { class: 'primary', onclick: () => invite() }, 'New code'));
@@ -257,7 +264,7 @@
       const t = text.value;
       if (!t.trim()) return;
       sendBtn.disabled = true;
-      await act(() => api('POST', '/api/send', { to: did, text: t }), () => { text.value = ''; S.msgsSeq = -1; });
+      await act(() => backend.call('POST', '/api/send', { to: did, text: t }), () => { text.value = ''; S.msgsSeq = -1; });
       sendBtn.disabled = false;
     };
     text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
@@ -278,25 +285,25 @@
       if (panelFor !== did + c.name + c.tags.join()) { panelFor = did + c.name + c.tags.join(); rename.value = c.name; tagIn.value = c.tags.map((t) => '#' + t).join(' '); }
       if (!panel.hidden) {
         put(panel, h('div', { class: 'card' },
-          h('label', null, 'Name'), rename, h('div', { class: 'bar' }, h('button', { onclick: () => act(() => api('POST', '/api/rename', { contact: did, name: rename.value })) }, 'Rename')),
+          h('label', null, 'Name'), rename, h('div', { class: 'bar' }, h('button', { onclick: () => act(() => backend.call('POST', '/api/rename', { contact: did, name: rename.value })) }, 'Rename')),
           h('label', null, 'Their messages'),
           h('div', { class: 'bar', role: 'group', 'aria-label': 'Tier' }, ['own', 'friend', 'quiet'].map((t) => h('button', { 'aria-pressed': String(c.tier === t), class: c.tier === t ? 'primary' : '',
-            title: TIER_SAYS[t], onclick: () => act(() => api('POST', '/api/tier', { contact: did, tier: t })) }, t))),
+            title: TIER_SAYS[t], onclick: () => act(() => backend.call('POST', '/api/tier', { contact: did, tier: t })) }, t))),
           h('p', { class: 'muted' }, TIER_SAYS[c.tier] ?? ''),
           h('label', null, 'Tags (up to 20 characters each)'), tagIn,
-          h('div', { class: 'bar' }, h('button', { onclick: () => act(() => api('POST', '/api/tag', { contact: did, tags: tagIn.value.split(/[\s,]+/).map((t) => t.replace(/^#/, '')).filter(Boolean) })) }, 'Save tags')),
+          h('div', { class: 'bar' }, h('button', { onclick: () => act(() => backend.call('POST', '/api/tag', { contact: did, tags: tagIn.value.split(/[\s,]+/).map((t) => t.replace(/^#/, '')).filter(Boolean) })) }, 'Save tags')),
           h('p', { class: 'did' }, c.did),
-          h('div', { class: 'bar' }, h('button', { class: 'danger', onclick: () => { if (confirm(`Forget and block ${safeText(c.name)}? This is permanent: they can never pair with you again.`)) act(() => api('POST', '/api/forget', { contact: did }), () => show('contacts')); } }, 'Forget and block'))));
+          h('div', { class: 'bar' }, h('button', { class: 'danger', onclick: () => { if (confirm(`Forget and block ${safeText(c.name)}? This is permanent: they can never pair with you again.`)) act(() => backend.call('POST', '/api/forget', { contact: did }), () => show('contacts')); } }, 'Forget and block'))));
       }
       const al = [errorCard(S.note)];
       if (c.status === 'pair_again') al.push(h('div', { class: 'card' }, h('p', { class: 'warn' }, c.re_pair === 'own_recovery' ? 'You recovered your identity: pair again.' : 'They recovered their identity: pair again.'), h('button', { class: 'primary', onclick: () => invite({ name: c.name }) }, 'Pair again')));
       else if (c.status === 'waiting') al.push(h('div', { class: 'card' }, 'Waiting for their side: messages go once their keys come.'));
-      if (c.not_collected) al.push(h('div', { class: 'card' }, h('p', null, 'Not collected yet: their side has not been online since.'), h('button', { onclick: () => act(() => api('POST', '/api/sync')) }, 'Retry now')));
+      if (c.not_collected) al.push(h('div', { class: 'card' }, h('p', null, 'Not collected yet: their side has not been online since.'), h('button', { onclick: () => act(() => backend.call('POST', '/api/sync')) }, 'Retry now')));
       if (!c.words_checked && c.words) al.push(wordsBlock(c));
       put(alerts, ...al.filter(Boolean));
       if (S.snap.seq !== S.msgsSeq) {
         S.msgsSeq = S.snap.seq;
-        const r = await api('GET', `/api/messages?contact=${encodeURIComponent(did)}`).catch(() => null);
+        const r = await backend.call('GET', `/api/messages?contact=${encodeURIComponent(did)}`).catch(() => null);
         if (!r) return;
         const atEnd = window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
         put(list, ...(r.messages.length ? r.messages.map((m) => {
@@ -314,9 +321,9 @@
     const body = h('div'), how = h('p', { class: 'did' });
     how.hidden = true;
     put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show('contacts') }, '‹'), h('h1', null, 'Me')), body);
-    api('GET', '/api/me').then((m) => { S.me = m; S.update(); }).catch((e) => { S.note = e; });
+    backend.call('GET', '/api/me').then((m) => { S.me = m; S.update(); }).catch((e) => { S.note = e; });
     return async () => {
-      S.agents = await api('GET', '/api/agents').catch(() => S.agents);
+      S.agents = await backend.call('GET', '/api/agents').catch(() => S.agents);
       const m = S.me;
       if (!m) return;
       const cp = h('button', { onclick: () => copy(m.did, cp) }, 'Copy');
@@ -329,12 +336,12 @@
         h('h2', null, 'Agents on this machine'),
         (S.agents ?? []).length ? S.agents.map((a) => h('div', { class: 'row' }, h('span', { class: 'main' }, h('div', { class: 'name' }, a.name),
           h('div', { class: 'sub' }, a.error ? a.error : a.mine ? `run by me · ${a.mine.days_left} d left` : 'not mine', a.worker !== null ? ` · worker ${a.worker}` : a.error ? '' : ' · not from your words', a.contact ? ' · paired' : '')),
-          a.error ? null : a.worker !== null ? (a.renew ? h('button', { onclick: () => act(() => api('POST', '/api/agents/enrol', { agent: a.name })) }, 'Renew') : null)
-            : h('button', { onclick: () => { if (!a.contacts || confirm(`${a.contacts} contact(s) know its old DID and must pair again. Enrol?`)) act(() => api('POST', '/api/agents/enrol', { agent: a.name }), (r) => { if (r.warning) S.note = { message: r.warning }; }); } }, 'Enrol'),
-          a.error || a.contact ? null : h('button', { onclick: (ev) => { ev.target.disabled = true; ev.target.textContent = 'Pairing…'; act(() => api('POST', '/api/agents/pair', { agent: a.name })); } }, 'Pair')))
+          a.error ? null : a.worker !== null ? (a.renew ? h('button', { onclick: () => act(() => backend.call('POST', '/api/agents/enrol', { agent: a.name })) }, 'Renew') : null)
+            : h('button', { onclick: () => { if (!a.contacts || confirm(`${a.contacts} contact(s) know its old DID and must pair again. Enrol?`)) act(() => backend.call('POST', '/api/agents/enrol', { agent: a.name }), (r) => { if (r.warning) S.note = { message: r.warning }; }); } }, 'Enrol'),
+          a.error || a.contact ? null : h('button', { onclick: (ev) => { ev.target.disabled = true; ev.target.textContent = 'Pairing…'; act(() => backend.call('POST', '/api/agents/pair', { agent: a.name })); } }, 'Pair')))
           : h('p', { class: 'muted' }, 'None found.'),
         h('h2', null, 'History'),
-        h('div', { class: 'bar' }, h('button', { class: 'danger', onclick: () => { if (confirm('Clear the message history kept on this machine?')) act(() => api('POST', '/api/history/clear')); } }, 'Clear history')),
+        h('div', { class: 'bar' }, h('button', { class: 'danger', onclick: () => { if (confirm('Clear the message history kept on this machine?')) act(() => backend.call('POST', '/api/history/clear')); } }, 'Clear history')),
         h('div', { class: 'bar' }, h('button', { onclick: () => { how.hidden = !how.hidden; } }, 'Delete my relay data: how')), how);
     };
   }
@@ -351,12 +358,14 @@
   async function poll() {
     if (polling) return;
     polling = true;
-    try { S.snap = await api('GET', `/api/state?since=${S.snap?.seq ?? 0}`); S.fatal = null; } catch (e) { S.fatal = e; }
+    try { S.snap = await backend.call('GET', `/api/state?since=${S.snap?.seq ?? 0}`); S.fatal = null; } catch (e) { S.fatal = e; }
     polling = false;
     if (S.fatal?.status === 403) { put(app, h('p', { class: 'card err' }, 'This page has no key: open the link sigelo-agent ui printed.')); return; }
     try { await S.update(); } catch {}
   }
   setInterval(() => { for (const el of document.querySelectorAll('.countdown')) el.textContent = left(Number(el.dataset.exp)); }, 1000);
+  // Installable on this machine (manifest.webmanifest, sw.js: the three files, never /api/).
+  if (backend === http && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   if (!TOKEN) { put(app, h('p', { class: 'card err' }, 'This page has no key: open the link sigelo-agent ui printed.')); return; }
   show('contacts');
   poll();

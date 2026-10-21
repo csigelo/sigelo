@@ -60,3 +60,18 @@ pairing view. `answers`: codes this side answered, waiting for the inviter until
 `pairing_failed` of the last day (`code_expired`: expired before they replied).
 
 **Files:** one received is an `in` message, `file <name> (<size> bytes), saved at <path>`. Sending one: not yet (the disabled 📎).
+
+## Remote
+
+`ui --remote [--listen <ip>] [--name <control>] [--scope read|chat|all]` adds a listener on a LAN address
+(default: the default route's) that answers only `POST /r`; anything else is `404` with no body. It prints
+`SIGELO:UI:<ip>:<port>:<base45 of id (8 bytes) ‖ key (32)>` for the named control (new: scope `chat`), kept in `.ui.json` `controls{}`.
+A request `{id, ctr, nonce, box}` (≤ 1 MiB; `id` hex; `nonce`, `box` base64url): `box` = XChaCha20-Poly1305(key, nonce,
+aad `"sigelo-remote/0 req"` ‖ id ‖ u64be(ctr), JCS `{method, path, body?}`). The answer `{nonce, box}` under aad `"… res"` ‖ id ‖ ctr
+holds `{status, body}`, what this listener would answer. `ctr` must exceed the last one kept (one call at a time):
+a replay, a wrong key or an unknown id get `403` and no body. **Scopes:** `read`: state, me, messages; `chat`: + send,
+accept, invite, invite/cancel, words, rename, tag, sync; `all`: + forget, tier, history/clear, agents. Outside it: `403 scope`;
+`/api/devices/*` never (`403 remote`). `ui --controls` lists them (never a key); `ui --revoke-control <name>` forgets one
+(stop the page first: it owns the file). No TLS: the LAN sees sizes and timing; the text is page control until revoked.
+Client: `remote-client.mjs`. **Install:** `ui --port <p>` keeps the origin (taken: `port_taken`); `manifest.webmanifest`
+and `sw.js` keep `ui.html`, `ui.js`, `ui.css` only, never `/api/`.

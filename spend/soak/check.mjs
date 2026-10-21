@@ -25,7 +25,15 @@ const { identitySeed } = await import(pathToFileURL(join(TS, 'keys.js')).href);
 const DATA = process.env.SIGELO_SOAK_DIR ?? join(homedir(), '.local/share/sigelo-soak');
 const KEEPER = join(DATA, 'keeper');
 const URL_ = `http://127.0.0.1:${process.env.SIGELO_SOAK_PORT ?? '38200'}`;
-const WALLET_RPC = process.env.SIGELO_SOAK_WALLET_RPC ?? 'http://127.0.0.1:38083/json_rpc';
+// The wallet-rpc: SIGELO_SOAK_WALLET_RPC, else policy.json's; with policy.json's wallet.login (HTTP
+// digest, the keeper's own client) when the soak's wallet-rpc has RPC login on.
+const { walletRpc } = await import(pathToFileURL(join(HERE, '..', 'dist', 'service.js')).href);
+const WALLET = (() => { try { return JSON.parse(readFileSync(join(KEEPER, 'policy.json'), 'utf-8')).wallet ?? {}; } catch { return {}; } })();
+const WALLET_RPC = process.env.SIGELO_SOAK_WALLET_RPC ?? WALLET.rpc ?? 'http://127.0.0.1:38083/json_rpc';
+// Unit names: the default soak's, or a side-by-side soak's (setup.sh SIGELO_SOAK_NAME=<n>).
+const NAME = process.env.SIGELO_SOAK_NAME ?? '';
+const U = NAME === '' ? { keeper: 'sigelo-soak-keeper.service', agent: 'sigelo-soak-agent.timer', wallet: 'monero-wallet-rpc-stagenet.service' }
+  : { keeper: `sigelo-keeper-soak-${NAME}.service`, agent: `sigelo-soak-agent-${NAME}.timer`, wallet: `sigelo-wallet-rpc-soak-${NAME}.service` };
 const EVIDENCE = process.argv.includes('--evidence');
 const SKEW = 300; // seconds a log's newest ts may be ahead of this host's clock (spend/README.md, the clock guard)
 const xmr = (a) => { const n = BigInt(a), s = (n < 0n ? -n : n).toString().padStart(13, '0'); return `${n < 0n ? '-' : ''}${s.slice(0, -12)}.${s.slice(-12)}`.replace(/\.?0+$/, '') || '0'; };
@@ -72,10 +80,10 @@ if (NOTIFY) process.on('uncaughtException', (e) => finish([...unhealthy, `check.
 if (EVIDENCE) console.log(`evidence    ${DATA}: the live host (units, /health, wallet-rpc) and the liveness rules are not checked`);
 const unit = (u) => { try { return execFileSync('systemctl', ['--user', 'is-active', u], { encoding: 'utf-8' }).trim(); } catch (e) { return String(e.stdout ?? 'unknown').trim(); } };
 if (!EVIDENCE) {
-  const units = Object.fromEntries(['sigelo-soak-keeper.service', 'sigelo-soak-agent.timer', 'monero-wallet-rpc-stagenet.service'].map((u) => [u, unit(u)]));
+  const units = Object.fromEntries([U.keeper, U.agent, U.wallet].map((u) => [u, unit(u)]));
   console.log('units       ' + Object.entries(units).map(([u, s]) => `${u.replace(/\.service$/, '')}=${s}`).join('  '));
-  if (units['sigelo-soak-keeper.service'] !== 'active') unhealthy.push('keeper not active');
-  if (units['sigelo-soak-agent.timer'] !== 'active') unhealthy.push('agent timer not active');
+  if (units[U.keeper] !== 'active') unhealthy.push('keeper not active');
+  if (units[U.agent] !== 'active') unhealthy.push('agent timer not active');
 }
 
 // ---- agent stats
@@ -164,8 +172,7 @@ if (torn.length) console.log(`            torn tails moved aside at start: ${tor
 // ---- wallet trend (the agent's per-tick snapshots, plus one now)
 const snaps = log.filter((r) => r.kind === 'wallet');
 if (!EVIDENCE) try {
-  const r = await fetch(WALLET_RPC, { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: '0', method: 'get_accounts' }), signal: AbortSignal.timeout(30_000) });
-  const a = (await r.json()).result;
+  const a = await walletRpc({ wallet: { rpc: WALLET_RPC, ...(WALLET.login !== undefined && { login: WALLET.login }) } }, 'get_accounts', {}, 30_000);
   snaps.push({ ts: new Date().toISOString(), total: String(a.total_balance), total_unlocked: String(a.total_unlocked_balance), now: true });
 } catch (e) {
   // A wallet-rpc that blocks on a daemon it cannot reach is the phone being offline, not the soak

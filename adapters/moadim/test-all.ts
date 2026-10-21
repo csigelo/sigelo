@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
-const FILES = ['test-identity.ts', 'test-keys.ts', 'test-keychain.ts', 'test-contact.ts', 'test-ui.ts', 'test-watch.ts', 'test-enrol.ts'];
+const FILES = ['test-identity.ts', 'test-keys.ts', 'test-keychain.ts', 'test-contact.ts', 'test-ui.ts', 'test-remote.ts', 'test-watch.ts', 'test-enrol.ts'];
 const lines: string[] = [];
 let total = 0, failed = 0;
 for (const f of FILES) {

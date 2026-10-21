@@ -45,6 +45,10 @@ The human's page (UI-API.md):
   ui [--no-open] [--identity <file>]     a page on 127.0.0.1 for your own DID: contacts, codes, the four
                                          words, messages, your agents; $SIGELO_HUMAN, else
                                          ~/.config/sigelo/me.local.json (made by keeper --from-words)
+  ui --port <p>                          keep one port (an installed page keeps its origin); taken: port_taken
+  ui --remote [--listen <ip>] [--name <control>] [--scope read|chat|all]
+                                         also a LAN listener, sealed per control; prints the control's SIGELO:UI: text
+  ui --controls | --revoke-control <name>  list the controls (never a key); forget one (the page stopped)
 
 Staying connected (WATCH.md):
   ${watch.USAGE.replaceAll('\n', '\n  ')}

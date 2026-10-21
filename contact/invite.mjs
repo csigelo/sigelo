@@ -77,7 +77,8 @@ function b58decode(s) {
   return Uint8Array.from([...new Array(zeros).fill(0), ...out.reverse()]);
 }
 
-function checkRelay(relay) {
+/** A relay as a code names it: a lowercase host[:port], at most RELAY_MAX characters; else throws code_relay. */
+export function checkRelay(relay) {
   const m = typeof relay === 'string' ? RELAY.exec(relay) : null;
   if (!m || relay.length > RELAY_MAX || (m[1] !== undefined && Number(m[1]) > 65535)) {
     fail('code_relay', `${JSON.stringify(relay)} is not a lowercase host[:port] of at most ${RELAY_MAX} characters`);

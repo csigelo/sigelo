@@ -1032,7 +1032,7 @@ try {
     const id = await import(pathToFileURL(join(HERE, '..', 'adapters', 'moadim', 'sigelo-agent.ts')).href);
     const env = { SIGELO_RELAY: HOST, SIGELO_RELAY_ENDPOINTS: JSON.stringify(endpoints) };
     const tools = await mcp.load({ installed: false, id, env, clock: () => now });
-    ok(tools && tools.tools.map(([n]) => n).join() === 'sigelo_invite,sigelo_accept,sigelo_contacts,sigelo_set_tier,sigelo_send,sigelo_send_file,sigelo_inbox,sigelo_forget_contact', 'the MCP module lists the eight tools');
+    ok(tools && tools.tools.map(([n]) => n).join() === 'sigelo_invite,sigelo_accept,sigelo_contacts,sigelo_set_tier,sigelo_send,sigelo_send_file,sigelo_inbox,sigelo_forget_contact,sigelo_history', 'the MCP module lists the nine tools');
     ok(tools.tools.every(([, d, s]) => typeof d === 'string' && s.type === 'object' && s.additionalProperties === false && s.properties.identity), 'each with a closed schema and the profile argument');
     const daveFile = join(dir, 'dave.local.json');
     id.init(daveFile, keygen({ seed: seed('dave recovery'), recovery: 'sha256:' + '0'.repeat(64) }).key);

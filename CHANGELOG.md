@@ -5,6 +5,14 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Remote page:** `ui --remote` answers `POST /r` on the LAN, sealed per control
+  (sigelo-remote/0; scopes read, chat, all; device routes never); `ui --controls`, `--revoke-control`, `--port`; the page installs.
+- **Closed relay:** `RELAY_CLOSED_OPERATOR=<DIDs>` admits only its operators and identities carrying their
+  `sigelo-relay/operator` attestation; others are refused `closed`: no proof of work, mailbox or short code.
+- **Relay per invite:** `invite --relay <host>` names the pairing's relay and parks the short code there;
+  `accept --relay <host>` fetches it there; the contact keeps that relay. MCP invite/accept take `relay`.
+- **KEYS.md** (adapters/moadim): where the identity key rests, file, keychain or key agent; what each protects against,
+  how to choose, per-OS notes, rotation and recovery per provider.
 - **sigelo-agent:** every verb takes `--identity <file>` or `--operator` (`$SIGELO_HUMAN`, else me.local.json);
   `SIGELO_IDENTITY` naming your own file counts as yours; a file in an agents' directory is refused.
 - **Site, sandboxes:** new `/sandboxes`: the one host dialled (the relay, 8883 else 443), where to allow it in cloud

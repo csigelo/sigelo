@@ -1,6 +1,6 @@
 {
   "v": "sigelo-key-agent/0",
-  "about": "sigelo-key-agent/0 request and reply lines (design/key-providers.md §4.2-4.3), replayed in order per session through one agent with a plain store. A session with \"continues\" runs on the store the named session left. Randomness: draw n (from 0, counted across the file) is the first bytes of SHA-256(\"sigelo-key-agent-fixture/0 \" + n), 32 for a seed then 16 for a genesis nonce; clock: now (ms). A request is sent as UTF-8 bytes, or in its \"encoding\" (latin1: to carry a byte that is not UTF-8).",
+  "about": "sigelo-key-agent/0 request and reply lines (KEYS.md), replayed in order per session through one agent with a plain store. A session with \"continues\" runs on the store the named session left. Randomness: draw n (from 0, counted across the file) is the first bytes of SHA-256(\"sigelo-key-agent-fixture/0 \" + n), 32 for a seed then 16 for a genesis nonce; clock: now (ms). A request is sent as UTF-8 bytes, or in its \"encoding\" (latin1: to carry a byte that is not UTF-8).",
   "now": 1790000000000,
   "sessions": [
     {
@@ -110,27 +110,27 @@
         {
           "name": "sign a genesis: policy_typ",
           "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"}}",
-          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/0\\\" \\\"genesis\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/0\\\" \\\"genesis\\\" is not a body this agent signs (KEYS.md)\"}"
         },
         {
           "name": "sign a bundle: policy_typ",
           "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/0\",\"typ\":\"bundle\",\"genesis\":{\"v\":\"sigelo/0\",\"typ\":\"genesis\",\"key\":\"z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG\",\"recovery\":\"sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3\",\"created\":\"2026-09-07T00:00:00Z\",\"nonce\":\"zLxcqwJdGqcLsrCWP55q8LQ\"},\"rotations\":[],\"bindings\":[],\"attestations\":[],\"issuers\":[]}}",
-          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/0\\\" \\\"bundle\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/0\\\" \\\"bundle\\\" is not a body this agent signs (KEYS.md)\"}"
         },
         {
           "name": "sign a probe body: policy_typ",
           "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-keys/0\",\"typ\":\"probe\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\"}}",
-          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo-keys/0\\\" \\\"probe\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo-keys/0\\\" \\\"probe\\\" is not a body this agent signs (KEYS.md)\"}"
         },
         {
           "name": "sign an enrol request: policy_typ",
           "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo-enrol/1\",\"typ\":\"enrol-request\",\"proof\":{}}}",
-          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo-enrol/1\\\" \\\"enrol-request\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo-enrol/1\\\" \\\"enrol-request\\\" is not a body this agent signs (KEYS.md)\"}"
         },
         {
           "name": "sign a challenge under v sigelo/1: policy_typ",
           "request": "{\"op\":\"sign\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"body\":{\"v\":\"sigelo/1\",\"typ\":\"challenge\",\"did\":\"did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG\",\"ctx\":\"1f916.ai\",\"nonce\":\"zVtK1aCTZHfuBYaDyoFv5VS\"}}",
-          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/1\\\" \\\"challenge\\\" is not a body this agent signs (design/key-providers.md §4.3)\"}"
+          "reply": "{\"ok\":false,\"code\":\"policy_typ\",\"detail\":\"\\\"sigelo/1\\\" \\\"challenge\\\" is not a body this agent signs (KEYS.md)\"}"
         },
         {
           "name": "sign a challenge with an extra field: policy_typ",

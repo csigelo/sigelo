@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// sigelo-key-agent, milestone K3 (design/key-providers.md §4, §7). `node test.mjs` → ALL PASS or exit 1.
+// sigelo-key-agent, milestone K3 (KEYS.md). `node test.mjs` → ALL PASS or exit 1.
 //   1. fixtures/protocol-v0.json: every request and refusal of §4.2–4.3 as byte-exact request/reply
 //      lines, replayed through the agent in-process (fixed randomness and clock); signatures equal
 //      test-vectors.json where a vector exists. `node test.mjs --write` regenerates it.
@@ -155,7 +155,7 @@ function build() {
     kept[s.name] = { dir, state: rot && { rotation: JSON.parse(rot.reply).rotation } };
     out.push({ name: s.name, flags: s.flags, ...(s.after && { continues: s.after }), pairs });
   }
-  return { v: PROTOCOL, about: 'sigelo-key-agent/0 request and reply lines (design/key-providers.md §4.2-4.3), replayed in order per session through one agent with a plain store. A session with "continues" runs on the store the named session left. Randomness: draw n (from 0, counted across the file) is the first bytes of SHA-256("sigelo-key-agent-fixture/0 " + n), 32 for a seed then 16 for a genesis nonce; clock: now (ms). A request is sent as UTF-8 bytes, or in its \"encoding\" (latin1: to carry a byte that is not UTF-8).', now: NOW, sessions: out };
+  return { v: PROTOCOL, about: 'sigelo-key-agent/0 request and reply lines (KEYS.md), replayed in order per session through one agent with a plain store. A session with "continues" runs on the store the named session left. Randomness: draw n (from 0, counted across the file) is the first bytes of SHA-256("sigelo-key-agent-fixture/0 " + n), 32 for a seed then 16 for a genesis nonce; clock: now (ms). A request is sent as UTF-8 bytes, or in its \"encoding\" (latin1: to carry a byte that is not UTF-8).', now: NOW, sessions: out };
 }
 {
   const warn = console.warn;

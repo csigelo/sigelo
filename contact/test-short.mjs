@@ -3,7 +3,10 @@
 // short.mjs, gen-short.mjs --check, the word list's hash; then, with the relay checkout beside
 // contact/ (SIGELO_RELAY_DIR, else ../relay), the whole flow on a loopback relay: invite → short
 // code → accept by the short code → paired → the same four words on both sides; one use; a wrong
-// code; an expired one.
+// code; an expired one. Then a company relay (closed: relay/closed.mjs) beside it: invite --relay
+// parks the short code there; an accept at the default relay is told to name it; accept --relay
+// pairs, the contact keeps that relay and a message goes over it with the default relay gone; a
+// stranger's accept and invite there are refused `closed`.
 //   node contact/test-short.mjs   → ALL PASS (n)
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -11,7 +14,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { keygen } from 'sigelo';
+import { attest, keygen } from 'sigelo';
 import { BIP39_SHA256, WORDS } from './bip39-english.mjs';
 import { makeInvite } from './invite.mjs';
 import { ALPHABET, GIFT_V, SHORT_TTL, codeHash, codeKind, fingerprint, formatGift, formatShort, giftHash, isShort, makeShort, normaliseGift, normaliseShort } from './short.mjs';
@@ -140,6 +143,7 @@ const make = (a) => {
   return new Carrier({ identity: () => ({ secret: a.secret, bundle: a.bundle }), ...pathsFor(join(dir, `${a.label}.local.json`)), relay: HOST, endpoints,
     clock: () => now, onEvent: (e) => events[a.label].push(e), keep: true, backoff: [100, 400], retentionDays: 7 });
 };
+let homeClosed = false;
 const failure = async (f) => { try { await f(); return { check: 'accepted', message: 'accepted' }; } catch (e) { return e; } };
 const refused = async (f) => { try { await f(); return 'accepted'; } catch (e) { return e.check ?? `exception ${e.message}`; } };
 try {
@@ -272,8 +276,51 @@ try {
   const dump = readFileSync(join(dir, 'relay.db')).toString('latin1') + (existsSync(join(dir, 'relay.db-wal')) ? readFileSync(join(dir, 'relay.db-wal')).toString('latin1') : '');
   ok(![inv.short, normaliseShort(inv.short), codeHash(inv.short), inv.code, late.code].some((s) => dump.includes(s)), 'the relay\'s database files hold no code, no hash, no parked invite');
   for (const c of [cb, cc]) await c.stop();
+
+  // ---- a company relay: closed to all but its operator's agents (relay/closed.mjs)
+  // A fresh lookup window at the default relay: the brake above spent this one.
+  now += 600;
+  const CORP = 'corp.test', boss = agent('boss');
+  const corp = await startRelay({ host: CORP, db: join(dir, 'corp.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => now, diskUsed: () => 0.1,
+    log: () => {}, closed: [boss.did], policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+  try {
+    endpoints[CORP] = { mqtt: `mqtt://127.0.0.1:${corp.ports.tcp}`, http: `http://127.0.0.1:${corp.ports.http}` };
+    const staff = (label) => {
+      const a = agent(label);
+      const att = attest({ secret: boss.secret, iss: boss.did, sub: a.did, iat: now - 60, exp: now + 30 * 86400, ctx: 'sigelo-relay/operator', admission: 'invite', admission_by: boss.did, claims: { relay: CORP } });
+      a.bundle = { ...a.bundle, attestations: [att], issuers: [boss.bundle.genesis] };
+      return a;
+    };
+    const ann = staff('ann'), ben = staff('ben'), outsider = agent('outsider');
+    const cn = make(ann), cbn = make(ben), co = make(outsider);
+    const parkedHome = relay.park.size();
+    const ci = await cn.invite({ name: 'ben', short: true, relay: CORP });
+    ok(ci.relay === CORP && corp.park.size() === 1 && relay.park.size() === parkedHome, `invite --relay ${CORP}: the code names it and the short code is parked there, not at ${HOST}`);
+    const miss = await failure(() => cbn.accept(ci.short, { wait: 1 }));
+    ok(miss.check === 'park_unknown' && miss.message.includes(`no invite waits under it at ${HOST}`) && miss.message.includes('accept it with --relay <that relay>'), `a short code from ${CORP} accepted at the default relay: park_unknown, told to name the relay (${miss.message})`);
+    const wrong = await failure(() => cbn.accept(ci.code, { wait: 1, relay: HOST }));
+    ok(wrong.check === 'code_relay' && wrong.message.includes(`the code names ${CORP}, not ${HOST} (--relay)`), `a long code with --relay naming another relay: code_relay (${wrong.message})`);
+    await cn.start();
+    const ca2 = await cbn.accept(ci.short, { name: 'ann', wait: 20, relay: CORP });
+    ok(ca2.status === 'connected' && ca2.contact?.did === ann.did && corp.park.size() === 0, `accept --relay ${CORP}: connected, the short code spent there (${ca2.status})`);
+    await cn.stop();
+    const relayOf = (c, did) => c.contacts().contacts.find((x) => x.did === did)?.relay;
+    ok(relayOf(cn, ben.did) === CORP && relayOf(cbn, ann.did) === CORP, `contacts: the pairing's relay is ${CORP} on both sides`);
+    // The default relay goes away: the contact still talks, over the company relay.
+    await relay.close(); homeClosed = true;
+    const sent = await cbn.send('ann', 'over the company relay');
+    const got = await cn.inbox({ wait: 10 });
+    ok(sent.status === 'sent' && got.messages.some((m) => m.content === 'over the company relay'), `a message over ${CORP} with ${HOST} down (${sent.status}, ${got.messages.length} messages)`);
+    // A stranger: its answer to a company code and its own invite there are refused closed.
+    const ci2 = await cn.invite({ name: 'x', short: false, relay: CORP });
+    const so = await failure(() => co.accept(ci2.code, { wait: 3 }));
+    ok(so.check === 'closed' && so.message.includes('this relay admits only identities its operator vouches for') && so.message.includes('withdrawn'), `a stranger accepting a company code: closed, the answer withdrawn (${so.message})`);
+    const si = await failure(() => co.invite({ name: 'y', short: true, relay: CORP }));
+    ok(si.check === 'closed' && corp.park.size() === 0, `a stranger's invite --relay ${CORP}: closed, nothing parked (${si.message})`);
+    for (const c of [cn, cbn, co]) await c.stop();
+  } finally { await corp.close(); }
 } finally {
-  await relay.close();
+  if (!homeClosed) await relay.close();
   rmSync(dir, { recursive: true, force: true });
 }
 report();

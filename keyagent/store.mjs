@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The key agent's store (design/key-providers.md §4.4): a 0700 directory, one 0600 file per
+// The key agent's store (adapters/moadim/KEYS.md): a 0700 directory, one 0600 file per
 // identity, written atomically (temp sibling + rename):
 //   { v: "sigelo-key-agent/0", did, chain: { genesis, rotations }, secret, pending? }
 // `did` is the identity's first DID here (the head genesis it was created or imported with);

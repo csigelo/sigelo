@@ -88,13 +88,15 @@ function identities() {
 
 const SUBADDR_RE = /^<subaddress 0\/(\d+) of the soak wallet: gen-keys\.mjs policy fills it>$/;
 
-async function subaddress(rpc, i) {
-  const r = await fetch(rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: '0', method: 'get_address', params: { account_index: 0, address_index: [i] } }) });
-  const j = await r.json();
-  if (j.error || !j.result?.addresses?.[0]) throw new Error(`get_address (0,${i}): ${JSON.stringify(j.error ?? j)} — create it with create_address {account_index: 0} first`);
-  return j.result.addresses[0].address;
+// wallet = policy.json's {rpc, login?}: the keeper's own client (HTTP digest when login is set).
+async function subaddress(m, wallet, i) {
+  const r = await m.walletRpc({ wallet }, 'get_address', { account_index: 0, address_index: [i] }, 60_000);
+  if (!r.addresses?.[0]) throw new Error(`get_address (0,${i}): ${JSON.stringify(r)} — create it with create_address {account_index: 0} first`);
+  return r.addresses[0].address;
 }
+// A side-by-side soak (setup.sh SIGELO_SOAK_NAME) runs its wallet-rpc with an RPC login, kept in the
+// 0600 <dir>/wallet-rpc.conf (rpc-login=user:pass, sigelo-spend init's layout); policy.json gets it as wallet.login.
+const confLogin = (dir) => { try { return /^rpc-login=(\S+)$/m.exec(readFileSync(join(dir, 'wallet-rpc.conf'), 'utf-8'))?.[1]; } catch { return undefined; } };
 
 // The identity fields keys/ decides; the template carries a placeholder in each.
 const identityOf = (id) => ({ approver: id.approver.did, recovery_commitment: id.RC, root_did: id.root.did, root_genesis: id.root.genesis });
@@ -233,13 +235,15 @@ if (mode === undefined) {
     const t = JSON.parse(readFileSync(TEMPLATE, 'utf-8')), a = t.agents['soak-root'];
     t.approvers[0].did = id.approver.did; t.recovery_commitment = id.RC; a.did = id.root.did; a.genesis = id.root.genesis;
     if (process.env.SIGELO_SOAK_WALLET_RPC) t.wallet.rpc = process.env.SIGELO_SOAK_WALLET_RPC;
+    const login = confLogin(dir);
+    if (login !== undefined) t.wallet.login = login;
     for (const agent of Object.values(t.agents)) for (const e of agent.allow ?? []) {
-      const m = SUBADDR_RE.exec(e.addr);
-      if (m) e.addr = await subaddress(t.wallet.rpc, Number(m[1]));
+      const x = SUBADDR_RE.exec(e.addr);
+      if (x) e.addr = await subaddress(m, t.wallet, Number(x[1]));
     }
     const left = JSON.stringify(t).match(/"<[^"]*>"/g);
     if (left) { console.error(`gen-keys: ${TEMPLATE}: unfilled placeholder(s) ${left.join(', ')}`); process.exit(1); }
     writeFileSync(pol, JSON.stringify(t, null, 2) + '\n', { mode: 0o600 });
-    console.log(`wrote ${pol} (soak-root ${id.root.did}; allowlist: ${Object.values(t.agents).flatMap((x) => (x.allow ?? []).map((e) => e.label)).join(', ')} from ${t.wallet.rpc})`);
+    console.log(`wrote ${pol} (soak-root ${id.root.did}; allowlist: ${Object.values(t.agents).flatMap((x) => (x.allow ?? []).map((e) => e.label)).join(', ')} from ${t.wallet.rpc}${login !== undefined ? ', wallet.login from wallet-rpc.conf' : ''})`);
   }
 } else { console.error('usage: gen-keys.mjs [check [<dir>] | policy <dir> | licence [<dir>] [--reissue | --rekey-vendor] | compat <dir>]'); process.exit(1); }

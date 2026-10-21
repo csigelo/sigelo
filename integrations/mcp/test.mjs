@@ -281,6 +281,12 @@ try {
     ok(r.structured?.code === 'code_checksum' && r.text.includes('read as a long code'), 'contact: a refusal of a long code says it was read as one (code code_checksum)', r.text);
     r = await c5.call('sigelo_accept', { code: 'K7F3-Q9Z' });
     ok(r.isError && r.structured?.code === 'short_code' && r.text.includes('read as a short code') && r.text.includes('7 characters, a short code has 8'), 'contact: 7 characters: short_code, read as a short code, not code_checksum', r.text);
+    // relay: optional on sigelo_invite and sigelo_accept (invite --relay, accept --relay); a malformed one refused before anything connects.
+    const schemas = Object.fromEntries((await c5.rpc('tools/list')).result.tools.map((t) => [t.name, t.inputSchema]));
+    ok(['sigelo_invite', 'sigelo_accept'].every((t) => schemas[t]?.properties?.relay?.type === 'string' && !schemas[t].required?.includes('relay')), 'contact: sigelo_invite and sigelo_accept take an optional relay');
+    r = await c5.call('sigelo_invite', { relay: 'Corp Relay' });
+    const r2 = await c5.call('sigelo_accept', { code: 'K7F3-Q9ZP', relay: 'Corp Relay' });
+    ok(r.isError && r.structured?.code === 'relay' && r2.isError && r2.structured?.code === 'relay' && r2.text.includes('want a lowercase host[:port]'), 'contact: a malformed relay: refused relay, before anything connects', r.text + r2.text);
     const { makeInvite } = await import('../../contact/invite.mjs');
     const code = makeInvite({ did: worldDid, relay: 'relay.test', now: Math.floor(Date.now() / 1000) }).text;
     r = await c5.call('sigelo_accept', { code: `  ${code.slice(0, 60)}

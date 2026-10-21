@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: MIT -->
-<!-- sigelo-key-agent as a LaunchAgent (design/key-providers.md §4.4). Written by
+<!-- sigelo-key-agent as a LaunchAgent (adapters/moadim/KEYS.md). Written by
      `sigelo-key-agent install-unit` into ~/Library/LaunchAgents, which fills in the arguments;
      nothing installs or starts it by default. Then: launchctl bootstrap gui/$(id -u) <this file> -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

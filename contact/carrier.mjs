@@ -4,13 +4,16 @@
 // sees random topics and ciphertext; everything here that decides who someone is runs offline.
 //
 //   const c = new Carrier({ identity, store, state, relay, endpoints, retentionDays, clock, onEvent, keep, transport })
-//   await c.invite({ name, ttl, short })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first;
-//                                            short: the long code is also parked at the relay under a short one
-//   await c.unpark(short)                  → the long code parked under a short one, taken from the relay (one use)
+//   await c.invite({ name, ttl, short, relay })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first;
+//                                            short: the long code is also parked at the relay under a short one;
+//                                            relay: the relay the code names and the short code is parked at (default: this agent's)
+//   await c.unpark(short, { relay })       → the long code parked under a short one, taken from the relay (one use;
+//                                            default: this agent's relay, where a short code with no relay named is looked up)
 //   await c.redeemGift(code)               → { exp, months }: a gift code (PRO-K7F3-Q9ZP) redeemed at this agent's relay;
 //                                            this identity is the operator whose pool is Pro until exp (relay/gifts.mjs)
-//   await c.accept(code, { name, wait })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
-//                                            (refused after a short code was fetched: .long, keepLong)
+//   await c.accept(code, { name, wait, relay })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
+//                                            (refused after a short code was fetched: .long, keepLong); relay: where a
+//                                            short code was parked, when not at this agent's relay (the inviter's --relay)
 //   await c.cancelInvite(code)             → { cancelled, name }: an unanswered invite of this agent's withdrawn
 //   c.rename(who, name)                    the owner's name for a contact (store.mjs rename) → { did, name }
 //   c.contacts()                           → { contacts, invites, answers, failed }   each contact with its four words (fingerprint),
@@ -209,7 +212,7 @@ import { concatBytes, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes
 import { connect } from 'mqtt';
 import { canonicalize, commitmentOf, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
 import { KIND, acceptPrekeys, expire, header, open, pad, prekeysMissing, restartEpoch, send, session, unpad } from './envelope.mjs';
-import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, inviteKeys, keyOf, makeInvite, parseInvite } from './invite.mjs';
+import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, checkRelay, inviteKeys, keyOf, makeInvite, parseInvite } from './invite.mjs';
 import { MsgError, checkNow, fail, hex, isoWeek, pairId, signAs, topic } from './kdf.mjs';
 import { Prekeys, exact, kemDecapsulate, kemEncapsulate, kemKey } from './prekeys.mjs';
 import { Contacts, OPERATOR_CTX, TIERS } from './store.mjs';
@@ -289,12 +292,12 @@ const TICK = 3600 * 1000, BACKOFF = [1000, 60000];
 // relay that accepts and closes at once is dialled ever more slowly, as one that refuses is.
 const STABLE_MS = 60000;
 // Login refusals no retry can fix.
-const PERMANENT = new Set(['password', 'bundle', 'sig', 'client_id', 'challenge', 'relay', 'identity']);
+const PERMANENT = new Set(['password', 'bundle', 'sig', 'client_id', 'closed', 'challenge', 'relay', 'identity']);
 // A refusal by one of these is this process failing, not a message: the delivery is not acknowledged.
 const INTERNAL = new Set(['lock', 'state', 'store', 'identity', 'time']);
 // The login checks relay/auth.mjs names on POST /check. Any other word from the relay is `connect`:
 // a check name decides what this client does next, so a relay cannot pick one.
-const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challenge_expired', 'bundle', 'sig', 'client_id', 'pow', 'relay_full']);
+const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challenge_expired', 'bundle', 'sig', 'client_id', 'closed', 'pow', 'relay_full']);
 // Refusals of an invite reply that a later round may get past: the reply stays queued.
 const REPLY_RETRY = new Set(['rate', 'relay_full', 'quota_messages']);
 // $sigelo/notice codes that refuse the publish, or the SUBSCRIBE, in flight (relay-plan §3 "Errors").
@@ -462,6 +465,8 @@ export function publicRelay(relay) {
 }
 
 const retentionOk = (n) => Number.isSafeInteger(n) && n >= 1 && n <= RETENTION_MAX_DAYS;
+// A relay named by the operator (invite, unpark, accept --relay): a host[:port] as a code names it.
+const relayArg = (relay) => { try { checkRelay(relay); } catch { fail('relay', `--relay ${JSON.stringify(relay)}: want a lowercase host[:port], as relay.example.org`); } return relay; };
 
 /** The free tier's retention in days that a relay's relay.json states (limits.free.retention_days), or null. */
 export function retentionOf(info) {
@@ -807,6 +812,8 @@ const LOGIN_NEXT = {
   relay_full: 'the relay is full: try again later',
   challenge_expired: 'the login took longer than its challenge lives (a slow proof of work): try again',
   challenge_unknown: 'try again',
+  // A closed relay (relay/closed.mjs) admits its operators and the identities they attest for it.
+  closed: 'this relay admits only identities its operator vouches for: ask that operator for an attestation for this relay (sigelo-agent add-attestation), or pair through an open relay',
   connect: 'try again later',
 };
 
@@ -2332,9 +2339,12 @@ export class Carrier {
   // short: the long code is parked at the relay (POST /park, relay/park.mjs) under a short code
   // (short.mjs) for SHORT_TTL seconds, one fetch; refused, the invite is withdrawn as when its topic
   // is. A login of its own: the relay checks that the parked code is this agent's.
-  async invite({ name, ttl, short = false } = {}) {
+  // relay: the relay the code names (a company relay for colleagues, a public one for outsiders);
+  // the short code is parked there, and the pairing talks over it.
+  async invite({ name, ttl, short = false, relay } = {}) {
+    const at = relay === undefined ? this.relay : relayArg(relay);
     const code = this.#locked(({ now, me, store }) => {
-      const code = makeInvite({ did: me.current_did, relay: this.relay, now, ...(ttl !== undefined && { ttl }) });
+      const code = makeInvite({ did: me.current_did, relay: at, now, ...(ttl !== undefined && { ttl }) });
       store.addInvite(code, name ?? `invite-${code.nonce.slice(1, 9)}`, now);
       return code;
     });
@@ -2367,19 +2377,21 @@ export class Carrier {
     }
   }
 
-  // The long code parked under a short one, at this agent's own relay (a short code names none):
-  // GET /park/<code hash>, which the relay answers once. Whatever it answers is a code to parse
-  // like any other (accept); the four words show whether the pairing is the inviter's.
-  async unpark(text) {
-    const shown = formatShort(normaliseShort(text)), ep = endpointOf(this.relay, this.endpoints);
+  // The long code parked under a short one: GET /park/<code hash>, which the relay answers once,
+  // at `relay` (the inviter's --relay), else at this agent's own (an eight-character code names no
+  // relay). Whatever it answers is a code to parse like any other (accept), and it must name the
+  // relay it came from; the four words show whether the pairing is the inviter's.
+  async unpark(text, { relay } = {}) {
+    const at = relay === undefined ? this.relay : relayArg(relay);
+    const shown = formatShort(normaliseShort(text)), ep = endpointOf(at, this.endpoints);
     const r = await http(`${ep.http}/park/${codeHash(text)}`);
-    if (r.status === 429) refuse('rate', `the relay ${this.relay} looks up no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to 10 minutes')}, or ask for the long code (invite --long)`, r);
+    if (r.status === 429) refuse('rate', `the relay ${at} looks up no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to 10 minutes')}, or ask for the long code (invite --long)`, r);
     if (r.status === 404 && r.body?.check === 'park_unknown') {
-      refuse('park_unknown', `short code ${shown}: no invite waits under it at ${this.relay}. It expired (a short code lives 10 minutes), was used already (once only), or is mistyped; ask the inviter for a new one. If the inviter's agent uses another relay than ${this.relay} (SIGELO_RELAY), ask for the long code (invite --long)`, r);
+      refuse('park_unknown', `short code ${shown}: no invite waits under it at ${at}. It expired (a short code lives 10 minutes), was used already (once only), or is mistyped; ask the inviter for a new one. If the inviter made it on another relay (invite --relay), accept it with --relay <that relay>, or ask for the long code (invite --long)`, r);
     }
-    if (r.status === 404 || r.status === 405) refuse('park', `the relay ${this.relay} takes no short codes: ask the inviter for the long code (invite --long)`, r);
-    if (r.status !== 200) refuse('connect', `${this.relay}: ${statusWhy(r, 'GET /park')}`, r);
-    if (r.body?.ok !== true || typeof r.body.invite !== 'string') refuse('connect', `${this.relay}: GET /park answered 200 without a parked code: try again later; SIGELO_DEBUG=1 shows the answer`, r);
+    if (r.status === 404 || r.status === 405) refuse('park', `the relay ${at} takes no short codes: ask the inviter for the long code (invite --long)`, r);
+    if (r.status !== 200) refuse('connect', `${at}: ${statusWhy(r, 'GET /park')}`, r);
+    if (r.body?.ok !== true || typeof r.body.invite !== 'string') refuse('connect', `${at}: GET /park answered 200 without a parked code: try again later; SIGELO_DEBUG=1 shows the answer`, r);
     return r.body.invite;
   }
 
@@ -2402,20 +2414,25 @@ export class Carrier {
     return { exp: r.body.exp, months: r.body.months };
   }
 
+  // relay: the relay a short code was parked at (unpark), and the one a code must name (a long
+  // code names its own: one naming another is refused code_relay).
   async accept(text, opts = {}) {
     // Short or long by the input's shape, before either parser runs (short.mjs codeKind).
     const how = codeKind(text) === 'short' ? 'parked' : 'long';
     if (how !== 'parked') return this.#answer(text, how, opts);
-    const long = await this.unpark(text);
-    try { return await this.#answer(long, how, opts); } catch (e) { throw keepLong(e, long); }
+    const long = await this.unpark(text, { relay: opts.relay });
+    // A parked code names the relay it was parked at (relay/park.mjs refuses any other).
+    try { return await this.#answer(long, how, { ...opts, relay: opts.relay ?? this.relay }); } catch (e) { throw keepLong(e, long); }
   }
 
-  async #answer(text, how, { name, wait = 10, tier } = {}) {
+  async #answer(text, how, { name, wait = 10, tier, relay } = {}) {
     if (tier !== undefined && !TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
+    const named = relay === undefined ? undefined : relayArg(relay);
     const { code, id, entry } = this.#locked(({ now, me, store, st }) => {
       const code = readCode(text, now, how);
-      // This agent's own relay, and those its operator configured, are the operator's choice.
-      if (code.relay !== this.relay && !Object.hasOwn(this.endpoints ?? {}, code.relay) && !publicRelay(code.relay)) {
+      if (named !== undefined && code.relay !== named) fail('code_relay', `the code names ${code.relay}, not ${named} (--relay): leave --relay out, or ask the inviter which relay it used`);
+      // This agent's own relay, those its operator configured, and one it named (--relay) are the operator's choice.
+      if (code.relay !== this.relay && code.relay !== named && !Object.hasOwn(this.endpoints ?? {}, code.relay) && !publicRelay(code.relay)) {
         fail('code_relay', `the code names ${code.relay}, an address or a local name, not a public relay: allow it in SIGELO_RELAY_ENDPOINTS if it is yours`);
       }
       const k = kemKey();

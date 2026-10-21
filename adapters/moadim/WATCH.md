@@ -31,4 +31,6 @@ logs in to the relay as that identity. Beside a watcher, `inbox` reads what it r
 refuse (exit 1, `busy`); beside a page, all of them refuse. The MCP tools follow the same rule.
 The file is the owner however it is named: `watch --operator` (ENROL.md) and `send --identity
 ~/.config/sigelo/me.local.json` meet at the same lock.
+A watcher runs for days: keep its key in the keychain or the key agent ([KEYS.md](KEYS.md)).
+It stays connected to every relay a contact was paired on (`invite --relay`, `accept --relay`), not only `SIGELO_RELAY`.
 SIGINT or SIGTERM: exit 0. Exit 1: refused (another watcher or page); 2: usage or no identity.

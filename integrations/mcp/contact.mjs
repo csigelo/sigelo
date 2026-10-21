@@ -42,10 +42,12 @@ const TIER = 'Tier: own (your operator\'s agents, detected; messages pushed in f
 
 const TOOLS = [
   ['sigelo_invite', `Use when your operator wants you to talk to another agent, yours or someone else's. Make an invite for that agent to become your contact: a short code (short, e.g. K7F3-Q9ZP: a person can say it on the phone; 10 minutes, once, at your relay) and the long one (code, sgl1…: for agent channels; default 24 h). Give one to its operator out of band. long: true makes the long code only. The pairing completes at your next sigelo_inbox after they accept. ${POW} ${RELAY_DATA}`,
-    obj({ name: str('the name you will call the new contact'), ttl: int('seconds the long code lives, at most 604800 (7 days)'), long: { type: 'boolean', description: 'true: the long code only, no short code' } })],
+    obj({ name: str('the name you will call the new contact'), ttl: int('seconds the long code lives, at most 604800 (7 days)'), long: { type: 'boolean', description: 'true: the long code only, no short code' },
+      relay: str('optional relay host for this pairing, e.g. your company relay for a colleague (default SIGELO_RELAY); a short code made there is accepted with that relay') })],
   ['sigelo_accept', `Accept an invite code from another agent's operator: sends your answer (whoever holds the code learns your DID); pairs once the inviter's reply verifies against the code. Returns connected with the pairing id, or waiting until the inviter's agent next connects (sigelo_inbox then reports the pairing). ${CONFIRM} ${POW} ${RELAY_DATA}`,
     obj({ code: str('the short code (K7F3-Q9ZP; case, I/L/O and dashes do not matter) or the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX),
-      tier: { type: 'string', enum: ['friend', 'quiet'], description: 'how its messages reach your operator: friend (default) or quiet; own is detected' } }, ['code'])],
+      tier: { type: 'string', enum: ['friend', 'quiet'], description: 'how its messages reach your operator: friend (default) or quiet; own is detected' },
+      relay: str('the relay the inviter named, when a short code was made on a relay other than yours (SIGELO_RELAY)') }, ['code'])],
   ['sigelo_contacts', `Your contacts (name, original DID, current DID, revoked, relay, messages queued for them, pairing id, four words, re_pair, ours: yours by key, tier), your pending invites and answers, and failed pairings (code_expired: ask for a new code). re_pair not null = after a recovery (own_recovery: yours; contact_recovery: theirs) the pairing key may be a thief's: nothing is sent to that contact until you pair again (sigelo_invite, they accept). tier: own, friend or quiet (sigelo_set_tier). ${CONFIRM}`, obj()],
   ['sigelo_set_tier', `Set a contact's tier, by name or DID, when your operator asks. ${TIER}`,
     obj({ contact: str('contact name or DID'), tier: { type: 'string', enum: TIERS, description: 'own, friend or quiet' } }, ['contact', 'tier'])],
@@ -150,17 +152,17 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
     return { text, isError: false };
   };
   const handlers = {
-    sigelo_invite: serial(({ name, ttl, long }, path) => {
+    sigelo_invite: serial(({ name, ttl, long, relay }, path) => {
       if (long !== undefined && typeof long !== 'boolean') throw usage('long: true or false');
       holder(path, 'sigelo_invite');
-      return carrier(path).invite({ name, ttl, short: long !== true });
+      return carrier(path).invite({ name, ttl, short: long !== true, ...(relay !== undefined && { relay: text(relay, 'relay') }) });
     }),
     // A code never contains whitespace; one pasted from a wrapped mail line may, and a short one
     // typed as heard ("k7f3 q9zp"). carrier.accept tells the two apart by shape.
-    sigelo_accept: serial(async ({ code, name, wait, tier }, path) => {
+    sigelo_accept: serial(async ({ code, name, wait, tier, relay }, path) => {
       if (tier !== undefined && tier !== 'friend' && tier !== 'quiet') throw usage('tier: friend or quiet (own is detected; sigelo_set_tier after)');
       holder(path, 'sigelo_accept');
-      const c = carrier(path), r = await c.accept(text(code, 'code').replace(/\s+/g, ''), { name, wait: seconds(wait, 'wait', 10), ...(tier && { tier }) });
+      const c = carrier(path), r = await c.accept(text(code, 'code').replace(/\s+/g, ''), { name, wait: seconds(wait, 'wait', 10), ...(tier && { tier }), ...(relay !== undefined && { relay: text(relay, 'relay') }) });
       return r.contact ? { ...r, contact: { ...r.contact, pair: pairOf(path, r.contact.did), tier: c.contacts().contacts.find((x) => x.did === r.contact.did)?.tier } } : r;
     }),
     sigelo_contacts: (_, path) => { const r = carrier(path).contacts(); return { ...r, contacts: r.contacts.map((c) => ({ ...c, pair: pairOf(path, c.did) })) }; },

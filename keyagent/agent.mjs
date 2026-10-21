@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
-// sigelo-key-agent (design/key-providers.md §4): holds identity keys and signs known sigelo bodies
+// sigelo-key-agent (KEYS.md): holds identity keys and signs known sigelo bodies
 // over a local socket, as ssh-agent does, so the model and the MCP server hold a socket path and an
 // identity file saying {"provider":"agent"}, never the key. No network listener, no request that
 // returns a key, no dependency beyond sigelo, sigelo-agent and node: modules.

@@ -54,7 +54,8 @@ either side offline, run `sigelo-agent enrol --finish` on each side in turn (pen
 
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
 443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
-Allow that hostname on 443; install needs the npm registry. Per environment:
+Allow that hostname on 443; install needs the npm registry. A company relay that is closed
+(relay/deploy/README.md "Closed relay") admits workers enrolled with `SIGELO_RELAY` set to it. Per environment:
 [sandboxes, CI, proxies](https://sigelo.io/sandboxes.html).
 
 ## Low-trust own agents
@@ -79,6 +80,7 @@ derivation is the same rotation; your contact follows it at the re-pair. If a th
 recover with the words offline: `sigelo-offline recover --agent i --keeper 1 --n <m>`.
 
 Do not run `sigelo-agent rotate` on a worker: that key would not come from K.
+Where a worker's key rests (plain file, keychain, key agent): [KEYS.md](KEYS.md).
 
 On the page (`sigelo-agent ui`), **Enrol** on a local agent does `enrol --here` into its own file: worker
 i replaces its key (its old files set aside; its contacts must pair again), or, on a worker, renews the

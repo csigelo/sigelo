@@ -32,6 +32,7 @@
  * (THREAT-MODEL.md §2.10). The JSON keeps the 32-digit id (`pair`) for all 128 bits.
  */
 import { existsSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -44,8 +45,8 @@ import { eraseRequest, pubPath, recoverWith, recoveryKey } from './sigelo-agent-
 // refused before anything connects: `inbox --wiat 30` ran at once without the wait, and
 // `invite --help` minted a code.
 const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, number] }> = {
-  invite: { flags: { '--name': true, '--ttl': true, '--json': false, '--long': false }, args: [0, 0] },
-  accept: { flags: { '--name': true, '--wait': true, '--tier': true }, args: [1, Infinity] },
+  invite: { flags: { '--name': true, '--ttl': true, '--json': false, '--long': false, '--relay': true }, args: [0, 0] },
+  accept: { flags: { '--name': true, '--wait': true, '--tier': true, '--relay': true }, args: [1, Infinity] },
   contacts: { flags: {}, args: [0, 0] },
   tier: { flags: {}, args: [2, 2] },
   send: { flags: { '--label': true, '--lines': false }, args: [2, Infinity] },
@@ -65,10 +66,12 @@ export const VERBS = Object.keys(SPEC);
 export const USAGE = `sigelo-agent contacts — talk to other agents through a relay
 
   invite [--name <n>] [--json] [--long]    prints a short code (K7F3-Q9ZP, 10 minutes, once) to say or
-       [--ttl <s>]                         send to another agent's operator; --long: the one-line code
-                                           (sgl1…; --ttl, default a day); --json: both, DID, relay, expiry
+       [--ttl <s>] [--relay <host>]        send to another agent's operator; --long: the one-line code
+                                           (sgl1…; --ttl, default a day); --json: both, DID, relay, expiry;
+                                           --relay: the pairing's relay (default $SIGELO_RELAY)
   accept <code> [--name <n>] [--wait <s>]  become that agent's contact (wait 0 to 300 s, default 10);
        [--tier friend|quiet]               --tier: how its messages reach you (default friend; own is detected)
+       [--relay <host>]                    --relay: the relay the inviter named (a short code made there)
   contacts                                 contacts (four words to check; re_pair: pair again; ours: yours by key;
                                            tier: how far you trust it), pending codes and answers
   tier <did|name> own|friend|quiet         own: messages pushed in full (watch --on-message); friend: a notice
@@ -109,9 +112,9 @@ export interface Batch { messages: unknown[]; events: unknown[]; dropped: Record
 interface Carrier {
   relay: string;
   lastError?: unknown;
-  invite(o: { name?: string; ttl?: number; short?: boolean }): Promise<unknown>;
-  unpark(code: string): Promise<string>;
-  accept(code: string, o: { name?: string; wait?: number; tier?: string }): Promise<{ status?: string; did?: string; contact?: Contact }>;
+  invite(o: { name?: string; ttl?: number; short?: boolean; relay?: string }): Promise<unknown>;
+  unpark(code: string, o?: { relay?: string }): Promise<string>;
+  accept(code: string, o: { name?: string; wait?: number; tier?: string; relay?: string }): Promise<{ status?: string; did?: string; contact?: Contact }>;
   contacts(): { contacts: Contact[]; failed?: Failed[] };
   setTier(who: string, tier: string): { did: string; name: string; tier: string; ours?: boolean };
   send(to: string, text: string, o: { label?: string; local?: boolean }): Promise<unknown>;
@@ -123,6 +126,7 @@ interface Carrier {
   redeemGift(code: string): Promise<{ exp: number; months: number }>;
 }
 interface CarrierLib {
+  DEFAULT_RELAY: string;
   Carrier: new (o: object) => Carrier;
   pathsFor(identityFile: string): { store: string; state: string; log?: string };
   optionsFromEnv(): object;
@@ -190,6 +194,12 @@ export async function contactLib(): Promise<{ lib: CarrierLib; kdf: Kdf; short: 
     if (absent(e)) throw notFound(`sigelo-contact is incomplete: ${(e as Error).message.split('\n')[0]}`);
     throw e;
   }
+}
+
+/** A dependency of sigelo-contact (`@noble/ciphers/chacha.js`), resolved from its directory, checked as contactLib checks it. */
+export async function contactModule(spec: string): Promise<unknown> {
+  await contactLib();
+  return import(pathToFileURL(createRequire(join(contactDir(), 'package.json')).resolve(spec)).href);
 }
 
 // JSON.stringify escapes the C0 controls but leaves DEL, the C1 controls (U+0080-U+009F, which some
@@ -515,31 +525,34 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         // The bare code by default, as connect.html says it prints: the short one, to say or send;
         // --long, the one-line code to paste anywhere.
         const long = flags.has('--long');
-        const r = await c.invite({ name, ttl: seconds(flags.get('--ttl'), '--ttl'), short: !long }) as { code: string; exp: number; short?: string; short_exp?: number };
+        const relay = flags.get('--relay');
+        const r = await c.invite({ name, ttl: seconds(flags.get('--ttl'), '--ttl'), short: !long, ...(relay !== undefined && { relay }) }) as { code: string; exp: number; relay: string; short?: string; short_exp?: number };
         const until = (t: number): string => new Date(t * 1000).toISOString().replace('.000', '');
         if (flags.has('--json')) out(r); else console.log(r.short ?? r.code);
         note(r.short !== undefined
-          ? `say it, text it or write it down: good for 10 minutes (until ${until(r.short_exp!)}), once. Their agent runs sigelo-agent accept ${r.short} --name <your name>`
+          ? `say it, text it or write it down: good for 10 minutes (until ${until(r.short_exp!)}), once. Their agent runs sigelo-agent accept ${r.short}${r.relay !== lib.DEFAULT_RELAY ? ` --relay ${r.relay}` : ''} --name <your name>`
           : `one-time code, good until ${until(r.exp)}: send it to the other operator; their agent runs sigelo-agent accept <code> --name <your name>`);
         break;
       }
       case 'accept': {
         // A pasted code may come in pieces, or with line breaks (a mail client wraps long lines); a
         // code never contains whitespace, and a real typo still fails code_checksum. A short code
-        // ("K7F3 Q9ZP" as two words, too) is fetched first: one use, at this agent's relay.
-        const typed = args.join('').replace(/\s+/g, ''), wait = seconds(flags.get('--wait'), '--wait', WAIT_MAX) ?? 10, tier = flags.get('--tier');
+        // ("K7F3 Q9ZP" as two words, too) is fetched first: one use, at this agent's relay or --relay's.
+        const typed = args.join('').replace(/\s+/g, ''), wait = seconds(flags.get('--wait'), '--wait', WAIT_MAX) ?? 10, tier = flags.get('--tier'), relay = flags.get('--relay');
         // own is detected (an operator attestation), never claimed at accept: tier <name> own after.
         if (tier !== undefined && tier !== 'friend' && tier !== 'quiet') throw misuse(`--tier: friend or quiet, not ${JSON.stringify(tier)} (own is detected; set it later with tier <name> own)`);
         // Short or long by its shape (contact/short.mjs codeKind), before either parser runs: each
         // refusal then says how the code was read.
         const how = short.codeKind(typed) === 'short' ? 'parked' : 'long';
-        const code = how === 'parked' ? await c.unpark(typed) : typed;
+        // --relay: a short code is looked up there (the inviter's invite --relay), not at $SIGELO_RELAY.
+        const code = how === 'parked' ? await c.unpark(typed, { ...(relay !== undefined && { relay }) }) : typed;
+        const at = relay ?? (how === 'parked' ? c.relay : undefined);
         let r;
         try {
           // Said before the answer goes: an answer left queued by a failure goes at a later
           // connection, and the operator has still seen whom it answers.
           note(`the code names ${lib.readCode(code, Math.floor(Date.now() / 1000), how).did}: check it with the inviter's operator`);
-          r = await c.accept(code, { name, wait, ...(tier !== undefined && { tier }) });
+          r = await c.accept(code, { name, wait, ...(tier !== undefined && { tier }), ...(at !== undefined && { relay: at }) });
         } catch (e) {
           // The short code is spent: a refusal from here on prints the long code it stood for.
           throw how === 'parked' ? lib.keepLong(e, code) : e;

@@ -327,6 +327,42 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   }
 }
 
+// ── invite --relay, accept --relay: a pairing on a relay other than SIGELO_RELAY ───────────
+// Both agents' SIGELO_RELAY is relay.test; op invites on corp.test. The short code is parked there,
+// so an accept without --relay looks at relay.test and is told to name the relay; with --relay
+// corp.test it pairs, contacts shows corp.test, and a message goes over it.
+{
+  if (!hasRelay()) console.log(`SKIP invite --relay: ${NO_RELAY}`);
+  else {
+    const H = tmpHome('corp'), home = await startTestRelay(H), corp = await startTestRelay(H, 'corp.test');
+    const endpoints = JSON.stringify({ ...home.endpoints, ...corp.endpoints });
+    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA });
+    const cli = (n: string, ...args: string[]) => cliIn(envOf(n), H)(...args);
+    try {
+      for (const n of ['rev', 'op']) await cli(n, 'init', '--no-recovery');
+      const bad = await cli('op', 'invite', '--relay', 'Corp Test');
+      ok('invite --relay with no host: exit 1, the relay check, before anything connects', bad.status === 1 && bad.stderr.includes('--relay "Corp Test": want a lowercase host[:port]'), bad.stderr);
+      const inv = await cli('op', 'invite', '--relay', 'corp.test', '--json', '--name', 'rev'), j = JSON.parse(inv.stdout || '{}') as { short?: string; relay?: string };
+      ok('invite --relay corp.test: a short code, the code names corp.test, and the accept line says --relay corp.test',
+        inv.status === 0 && /^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(j.short ?? '') && j.relay === 'corp.test' && inv.stderr.includes(`accept ${j.short} --relay corp.test --name`), inv.stderr);
+      const miss = await cli('rev', 'accept', j.short!, '--wait', '0');
+      ok('accept of it without --relay: looked up at relay.test, park_unknown, told to accept with --relay', miss.status === 1 && miss.stderr.includes('park_unknown')
+        && miss.stderr.includes('no invite waits under it at relay.test') && miss.stderr.includes('accept it with --relay <that relay>'), miss.stderr);
+      const acc = await cli('rev', 'accept', j.short!, '--relay', 'corp.test', '--name', 'operator', '--wait', '0');
+      await cli('op', 'inbox'); await cli('rev', 'inbox');
+      const listed = (JSON.parse((await cli('op', 'contacts')).stdout || '{}') as { contacts?: { relay?: string }[] }).contacts ?? [];
+      const theirs = (JSON.parse((await cli('rev', 'contacts')).stdout || '{}') as { contacts?: { relay?: string }[] }).contacts ?? [];
+      ok('accept --relay corp.test: paired, and contacts shows corp.test on both sides', acc.status === 0 && listed.length === 1 && listed[0]?.relay === 'corp.test' && theirs[0]?.relay === 'corp.test', acc.stderr);
+      const sent = await cli('rev', 'send', 'operator', 'over corp');
+      const got = JSON.parse((await cli('op', 'inbox', '--wait', '10')).stdout || '{}') as { messages?: { content: unknown }[] };
+      ok('a message goes over corp.test', sent.status === 0 && got.messages?.[0]?.content === 'over corp', sent.stderr);
+    } finally {
+      await home.close?.(); await corp.close?.();
+      rmSync(H, { recursive: true, force: true });
+    }
+  }
+}
+
 // ── one rule for which identity (ENROL.md "Which identity") ───────────────────────────────
 // The operator runs contact verbs on their own file while the shell names an agent (SIGELO_IDENTITY):
 // --identity <file>, or --operator ($SIGELO_HUMAN, else ~/.config/sigelo/me.local.json). Beside a
