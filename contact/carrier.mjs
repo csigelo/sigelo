@@ -7,8 +7,10 @@
 //   await c.invite({ name, ttl, short, relay })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first;
 //                                            short: the long code is also parked at the relay under a short one;
 //                                            relay: the relay the code names and the short code is parked at (default: this agent's)
-//   await c.unpark(short, { relay })       → the long code parked under a short one, taken from the relay (one use;
-//                                            default: this agent's relay, where a short code with no relay named is looked up)
+//   await c.unpark(short, { relay })       → the long code parked under a short one, taken from the relay (one use);
+//                                            relay: named, else relayForShort's (unparkFrom: { invite, relay })
+//   await c.relayForShort(short, { relay }) → { relay, from }: where a short code is parked: 8 characters, shortRelay
+//                                            (relay.sigelo.ai); 12, the relay its tag resolves to (relays.mjs), or relay_tag
 //   await c.redeemGift(code)               → { exp, months }: a gift code (PRO-K7F3-Q9ZP) redeemed at this agent's relay;
 //                                            this identity is the operator whose pool is Pro until exp (relay/gifts.mjs)
 //   await c.accept(code, { name, wait, relay })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
@@ -216,7 +218,8 @@ import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, checkRelay,
 import { MsgError, checkNow, fail, hex, isoWeek, pairId, signAs, topic } from './kdf.mjs';
 import { Prekeys, exact, kemDecapsulate, kemEncapsulate, kemKey } from './prekeys.mjs';
 import { Contacts, OPERATOR_CTX, TIERS } from './store.mjs';
-import { SHORT_TTL, codeHash, codeKind, fingerprint, formatShort, giftHash, makeShort, normaliseShort } from './short.mjs';
+import { SHORT_TTL, codeHash, codeKind, fingerprint, formatShort, giftHash, makeShort, normaliseShort, relayTag, tagOf } from './short.mjs';
+import { REGISTRY_URL, RELEASE_DID, loadRegistry, readTable, remember, resolveTag } from './relays.mjs';
 import { FILE_LABEL, MAX_FILE, assemble, checkChunk, checkManifest, chunkHead, isManifest, safeName, splitFile } from './file.mjs';
 
 export const V = 'sigelo-carrier/0';
@@ -474,10 +477,14 @@ export function retentionOf(info) {
   return retentionOk(n) ? n : null;
 }
 
-/** SIGELO_RELAY (the relay new invites name), SIGELO_RELAY_ENDPOINTS (JSON, as endpointOf), SIGELO_RELAY_RETENTION_DAYS, SIGELO_RELAY_TRANSPORT. */
+/** SIGELO_RELAY (the relay new invites name), SIGELO_RELAY_ENDPOINTS (JSON, as endpointOf), SIGELO_RELAY_RETENTION_DAYS, SIGELO_RELAY_TRANSPORT,
+ *  SIGELO_SHORT_RELAY (the relay of an eight-character code: relay.sigelo.ai; a network of one's own, or a test, names its own),
+ *  SIGELO_RELAY_REGISTRY (the registry's URL, default https://sigelo.ai/relays.json; "off": the cache only). */
 export function optionsFromEnv(env = process.env) {
   const o = {};
   if (env.SIGELO_RELAY) o.relay = env.SIGELO_RELAY;
+  if (env.SIGELO_SHORT_RELAY) { try { checkRelay(env.SIGELO_SHORT_RELAY); } catch { fail('relay', 'SIGELO_SHORT_RELAY: want a lowercase host[:port]'); } o.shortRelay = env.SIGELO_SHORT_RELAY; }
+  if (env.SIGELO_RELAY_REGISTRY) o.registry = env.SIGELO_RELAY_REGISTRY === 'off' ? false : env.SIGELO_RELAY_REGISTRY;
   if (env.SIGELO_RELAY_ENDPOINTS) {
     try { o.endpoints = JSON.parse(env.SIGELO_RELAY_ENDPOINTS); } catch { fail('relay', 'SIGELO_RELAY_ENDPOINTS is not JSON: want {"<relay>": {"mqtt": "mqtts://…", "http": "https://…"}}'); }
   }
@@ -751,7 +758,7 @@ export function readCode(text, now, how = 'long') {
   try { return parseInvite(text, now); } catch (e) {
     if (!(e instanceof MsgError) || !['code_checksum', 'code_length', 'code_version'].includes(e.check)) throw e;
     const as = how === 'parked' ? 'the long code the relay holds for this short code does not parse; ask the inviter for a new one'
-      : `read as a long code (it starts sgl1, or has more than 12 characters; a short code has 8, like K7F3-Q9ZP): ${reason(e)}`;
+      : `read as a long code (it starts sgl1, or has more than 12 characters; a short code has 8, like K7F3-Q9ZP, or 12): ${reason(e)}`;
     throw new MsgError(e.check, how === 'parked' ? `${as} (${reason(e)})` : as, { cause: e });
   }
 }
@@ -924,7 +931,7 @@ export class Carrier {
   #mineMemo = null; #clocks = new Map();
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
-    onEvent, keep, backoff = BACKOFF, tick = TICK, files, log, transport = 'auto' }) {
+    onEvent, keep, backoff = BACKOFF, tick = TICK, files, log, transport = 'auto', shortRelay = DEFAULT_RELAY, registry = REGISTRY_URL, registryPin = RELEASE_DID, relays, registryFile }) {
     if (!TRANSPORTS.includes(transport)) throw new TypeError(`transport: ${TRANSPORTS.join(', ')}`);
     this.transport = transport;
     if (typeof identity !== 'function') throw new TypeError('identity: a function returning { sign, bundle }');
@@ -943,6 +950,17 @@ export class Carrier {
     // The inbox log: log, else beside the state as pathsFor names it (x.carrier.json → x.inbox.log); false: none.
     if (log !== undefined && log !== false && typeof log !== 'string') throw new TypeError('log: a file path (pathsFor(identityFile)) or false');
     this.logPath = log === false ? null : resolve(log ?? state.replace(/(\.carrier)?\.json$/, '') + '.inbox.log');
+    // Short codes (relayForShort): an eight-character one is parked at shortRelay, a twelve-character
+    // one names its relay by tag, resolved from the relays this agent knows, the local table
+    // (relays: relays.local.json beside the identity), then the registry (registry: its URL, false:
+    // none; cached in registryFile: relays.cache.local.json beside the identity), relays.mjs.
+    checkRelay(shortRelay);
+    if (registry !== false) {
+      let u;
+      try { u = new URL(registry); } catch { throw new TypeError('registry: a URL, or false'); }
+      if (u.protocol !== 'https:' && !(u.protocol === 'http:' && LOOPBACK.has(u.hostname))) throw new TypeError('registry: an https:// URL (http:// only to a loopback address)');
+    }
+    Object.assign(this, { shortRelay, registry, registryPin, relaysPath: resolve(relays ?? join(dirname(state), 'relays.local.json')), registryPath: resolve(registryFile ?? join(dirname(state), 'relays.cache.local.json')) });
   }
 
   // Items given out (inbox, take), appended to the log before they are: a reader that loses its
@@ -2357,7 +2375,8 @@ export class Carrier {
         fail(r?.code ?? 'subscribe', `the relay did not let this agent claim the invite's topic${r ? ` (${relaySays(r.detail)})` : ''}`);
       }
       if (!short) return { code: code.text, did: code.did, relay: code.relay, exp: code.exp };
-      const s = makeShort(), exp = Math.min(checkNow(this.clock()) + SHORT_TTL, code.exp), ep = endpointOf(code.relay, this.endpoints);
+      // Eight characters on the public relay; on any other, twelve: the last four its relay tag.
+      const s = makeShort(undefined, code.relay === this.shortRelay ? null : relayTag(code.relay)), exp = Math.min(checkNow(this.clock()) + SHORT_TTL, code.exp), ep = endpointOf(code.relay, this.endpoints);
       const creds = await this.#credentials(code.relay, ep);
       const r = await http(`${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: codeHash(s), invite: code.text, exp }) });
       const check = typeof r.body?.check === 'string' ? r.body.check : null;
@@ -2377,22 +2396,53 @@ export class Carrier {
     }
   }
 
+  // Where a short code is parked → { relay, from }: `relay` when named (the inviter's --relay; a
+  // twelve-character code's tag must be its tag), else an eight-character code's shortRelay
+  // (relay.sigelo.ai), else the host its relay tag resolves to (relays.mjs resolveTag): this agent's
+  // own relay, its contacts' relays, the relay its operator attestation names,
+  // the local table; then the registry; else the person is asked (relay_tag). Nothing else asks.
+  async relayForShort(text, { relay } = {}) {
+    const norm = normaliseShort(text), tag = tagOf(norm), shown = formatShort(norm);
+    if (relay !== undefined) {
+      relayArg(relay);
+      if (tag !== null && relayTag(relay) !== tag) fail('code_relay', `short code ${shown}: its relay tag ${tag} is not ${relay}'s (${relayTag(relay)}): check the relay with the inviter, or leave --relay out`);
+      return { relay, from: 'named' };
+    }
+    if (tag === null) return { relay: this.shortRelay, from: 'short' };
+    const known = [{ host: this.relay, from: 'own' }];
+    try { for (const c of this.contacts().contacts) if (typeof c.relay === 'string') known.push({ host: c.relay, from: 'contact' }); } catch {}
+    try {
+      for (const a of this.identity().bundle.attestations ?? []) {
+        if (a?.body?.ctx === OPERATOR_CTX && typeof a.body.claims?.relay === 'string') known.push({ host: a.body.claims.relay, from: 'operator' });
+      }
+    } catch {}
+    for (const host of readTable(this.relaysPath)) known.push({ host, from: 'table' });
+    const r = await resolveTag(tag, { known, shown, registry: () => loadRegistry({ file: this.registryPath, url: this.registry, pin: this.registryPin, now: checkNow(this.clock()), get: (u) => http(u) }) });
+    return { relay: r.host, from: r.from };
+  }
+
   // The long code parked under a short one: GET /park/<code hash>, which the relay answers once,
-  // at `relay` (the inviter's --relay), else at this agent's own (an eight-character code names no
-  // relay). Whatever it answers is a code to parse like any other (accept), and it must name the
-  // relay it came from; the four words show whether the pairing is the inviter's.
-  async unpark(text, { relay } = {}) {
-    const at = relay === undefined ? this.relay : relayArg(relay);
+  // at the relay relayForShort names. Whatever it answers is a code to parse like any other
+  // (accept), and it must name the relay it came from; the four words show whether the pairing is
+  // the inviter's. A twelve-character code found at a relay the person named goes into the local
+  // table: they are asked once.
+  async unpark(text, { relay } = {}) { return (await this.unparkFrom(text, { relay })).invite; }
+  // The same → { invite, relay }: the relay it was parked at, which the code it gives must name.
+  async unparkFrom(text, { relay } = {}) { return this.#unpark(text, relay); }
+
+  async #unpark(text, relay) {
+    const { relay: at, from } = await this.relayForShort(text, { relay });
     const shown = formatShort(normaliseShort(text)), ep = endpointOf(at, this.endpoints);
     const r = await http(`${ep.http}/park/${codeHash(text)}`);
     if (r.status === 429) refuse('rate', `the relay ${at} looks up no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to 10 minutes')}, or ask for the long code (invite --long)`, r);
     if (r.status === 404 && r.body?.check === 'park_unknown') {
-      refuse('park_unknown', `short code ${shown}: no invite waits under it at ${at}. It expired (a short code lives 10 minutes), was used already (once only), or is mistyped; ask the inviter for a new one. If the inviter made it on another relay (invite --relay), accept it with --relay <that relay>, or ask for the long code (invite --long)`, r);
+      refuse('park_unknown', `short code ${shown}: no invite waits under it at ${at}. It expired (a short code lives 10 minutes), was used already (once only), or is mistyped; ask the inviter for a new one. If the inviter made it on another relay (invite --relay) with an older sigelo, accept it with --relay <that relay>, or ask for the long code (invite --long)`, r);
     }
     if (r.status === 404 || r.status === 405) refuse('park', `the relay ${at} takes no short codes: ask the inviter for the long code (invite --long)`, r);
     if (r.status !== 200) refuse('connect', `${at}: ${statusWhy(r, 'GET /park')}`, r);
     if (r.body?.ok !== true || typeof r.body.invite !== 'string') refuse('connect', `${at}: GET /park answered 200 without a parked code: try again later; SIGELO_DEBUG=1 shows the answer`, r);
-    return r.body.invite;
+    if (from === 'named' && tagOf(normaliseShort(text)) !== null) try { remember(this.relaysPath, at); } catch {}
+    return { invite: r.body.invite, relay: at };
   }
 
   // A gift code redeemed at this agent's own relay (POST /gift, relay/gifts.mjs): the relay gets the
@@ -2420,9 +2470,9 @@ export class Carrier {
     // Short or long by the input's shape, before either parser runs (short.mjs codeKind).
     const how = codeKind(text) === 'short' ? 'parked' : 'long';
     if (how !== 'parked') return this.#answer(text, how, opts);
-    const long = await this.unpark(text, { relay: opts.relay });
+    const { invite: long, relay: at } = await this.#unpark(text, opts.relay);
     // A parked code names the relay it was parked at (relay/park.mjs refuses any other).
-    try { return await this.#answer(long, how, { ...opts, relay: opts.relay ?? this.relay }); } catch (e) { throw keepLong(e, long); }
+    try { return await this.#answer(long, how, { ...opts, relay: at }); } catch (e) { throw keepLong(e, long); }
   }
 
   async #answer(text, how, { name, wait = 10, tier, relay } = {}) {

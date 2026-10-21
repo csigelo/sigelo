@@ -17,17 +17,21 @@ sigelo-agent history --since 3600         # again, no relay
 
 Also `contacts`, `forget <did>`, and all as MCP tools
 ([`integrations/mcp/contact.mjs`](../integrations/mcp/contact.mjs)).
-Each verb logs in once (30/minute per network), never beside `watch` or `ui`
+Each verb logs in once, never beside `watch` or `ui`
 ([one owner](../adapters/moadim/WATCH.md)).
 The first login proves work (5–60 s on phones). `SIGELO_RELAY` names the relay for new codes;
 a Pro reader sets `SIGELO_RELAY_RETENTION_DAYS=90`. State sits
 beside the identity file (0600), plaintext: messages until `inbox` takes them, then the last 500
 in `<identity>.inbox.log`.
-`carrier.mjs`'s header is its API; with `onEvent`, nothing is kept.
+`carrier.mjs`'s header is its API.
+
+**Short codes.** `K7F3-Q9ZP` lives at `relay.sigelo.ai`; another relay's adds its tag:
+`K7F3-Q9ZP-FNK5`, 20 bits of SHA-256(`sigelo-relay-tag/0` ‖ host). `accept` finds it among known
+relays, then the signed `sigelo.ai/relays.json`, else asks once (`--relay`).
 
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
-443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
-Allow that hostname on 443; install needs the npm registry.
+443 (`SIGELO_RELAY_TRANSPORT=wss` skips the probe). `HTTPS_PROXY`, `NO_PROXY` apply.
+Allow it on 443.
 
 ## Tests
 
@@ -63,8 +67,6 @@ Each regenerates byte for byte from seeds (`gen-*.mjs`).
 5. **Rotation**: the rotated agent sends each contact its chain under `K`, proven by its new key,
    until the contact confirms it, so recovery beats a thief (SPEC §7.1). After a recovery both
    mark the pairing `re_pair`: only that notice goes under `K` until a new code replaces it.
-6. **Relay login**: a signed `{v:"sigelo-relay/0", typ:"relay-login", did, relay, nonce}`, which
-   no challenge signer produces.
 
 Key agreement is hybrid post-quantum (X25519 + ML-KEM-768).
 

@@ -37,7 +37,7 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
 // naming the check on stderr, with its JSON on stdout.
 {
   const H = tmpHome('rk');
-  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }), ...KA };
+  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }), ...KA };
   const cli = (...args: string[]) => spawnSync('node', [CLI, ...args], { env, cwd: H, encoding: 'utf8' });
   const inv = cli('invite', '--name', 'x');
   ok('invite with no identity: exit 2, "no identity: run sigelo-agent init", no raw ENOENT', inv.status === 2 && inv.stderr.includes('no identity: run sigelo-agent init') && !inv.stderr.includes('ENOENT'), inv.stderr);
@@ -199,7 +199,7 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   const srv = createServer((_, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, invite: long })); });
   await new Promise<void>((r) => { srv.listen(0, '127.0.0.1', () => r()); });
   const port = (srv.address() as { port: number }).port;
-  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: `http://127.0.0.1:${port}` } }), ...KA };
+  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: `http://127.0.0.1:${port}` } }), ...KA };
   const cli = (...args: string[]) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
     const c = spawn('node', [CLI, ...args], { env, cwd: H });
     let stdout = '', stderr = '';
@@ -271,7 +271,7 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   if (!hasRelay()) console.log(`SKIP stdin round trip: ${NO_RELAY}`);
   else {
     const H = tmpHome('stdin'), relay = await startTestRelay(H), endpoints = JSON.stringify(relay.endpoints);
-    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA });
+    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA });
     const cli = (n: string, ...args: string[]) => cliIn(envOf(n), H)(...args);
     const piped = (n: string, input: string, ...args: string[]) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
       const c = spawn('node', [CLI, ...args], { env: envOf(n), cwd: H });
@@ -328,26 +328,27 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
 }
 
 // ── invite --relay, accept --relay: a pairing on a relay other than SIGELO_RELAY ───────────
-// Both agents' SIGELO_RELAY is relay.test; op invites on corp.test. The short code is parked there,
-// so an accept without --relay looks at relay.test and is told to name the relay; with --relay
+// Both agents' SIGELO_RELAY is relay.test; op invites on corp.test. The short code is parked there
+// and carries its relay tag; rev knows no relay with that tag, so an accept without --relay is asked
+// to name it (relay_tag); with --relay
 // corp.test it pairs, contacts shows corp.test, and a message goes over it.
 {
   if (!hasRelay()) console.log(`SKIP invite --relay: ${NO_RELAY}`);
   else {
     const H = tmpHome('corp'), home = await startTestRelay(H), corp = await startTestRelay(H, 'corp.test');
     const endpoints = JSON.stringify({ ...home.endpoints, ...corp.endpoints });
-    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA });
+    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA });
     const cli = (n: string, ...args: string[]) => cliIn(envOf(n), H)(...args);
     try {
       for (const n of ['rev', 'op']) await cli(n, 'init', '--no-recovery');
       const bad = await cli('op', 'invite', '--relay', 'Corp Test');
       ok('invite --relay with no host: exit 1, the relay check, before anything connects', bad.status === 1 && bad.stderr.includes('--relay "Corp Test": want a lowercase host[:port]'), bad.stderr);
       const inv = await cli('op', 'invite', '--relay', 'corp.test', '--json', '--name', 'rev'), j = JSON.parse(inv.stdout || '{}') as { short?: string; relay?: string };
-      ok('invite --relay corp.test: a short code, the code names corp.test, and the accept line says --relay corp.test',
-        inv.status === 0 && /^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(j.short ?? '') && j.relay === 'corp.test' && inv.stderr.includes(`accept ${j.short} --relay corp.test --name`), inv.stderr);
+      ok('invite --relay corp.test: a 12-character short code ending in corp.test\'s relay tag, the code names corp.test, the accept line says --relay corp.test if asked',
+        inv.status === 0 && /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(j.short ?? '') && j.relay === 'corp.test' && inv.stderr.includes(`accept ${j.short} --name <your name> (made on corp.test: if it asks which relay, --relay corp.test)`), inv.stderr);
       const miss = await cli('rev', 'accept', j.short!, '--wait', '0');
-      ok('accept of it without --relay: looked up at relay.test, park_unknown, told to accept with --relay', miss.status === 1 && miss.stderr.includes('park_unknown')
-        && miss.stderr.includes('no invite waits under it at relay.test') && miss.stderr.includes('accept it with --relay <that relay>'), miss.stderr);
+      ok('accept of it without --relay, no relay known with its tag (registry off): relay_tag, asked for --relay', miss.status === 1 && miss.stderr.includes('relay_tag')
+        && miss.stderr.includes('was made on a relay this agent does not know') && miss.stderr.includes('accept it with --relay <host>'), miss.stderr);
       const acc = await cli('rev', 'accept', j.short!, '--relay', 'corp.test', '--name', 'operator', '--wait', '0');
       await cli('op', 'inbox'); await cli('rev', 'inbox');
       const listed = (JSON.parse((await cli('op', 'contacts')).stdout || '{}') as { contacts?: { relay?: string }[] }).contacts ?? [];
@@ -373,7 +374,7 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   else {
     const H = tmpHome('which'), relay = await startTestRelay(H), endpoints = JSON.stringify(relay.endpoints);
     const me = join(H, '.config', 'sigelo', 'me.local.json'), rev = join(H, 'agents', 'rev.local.json');
-    const base = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA };
+    const base = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA };
     // The shell names the agent; SIGELO_HUMAN names the operator.
     const env = { ...base, SIGELO_IDENTITY: rev, SIGELO_HUMAN: me };
     const cli = (...args: string[]) => cliIn(env, H)(...args), plain = (...args: string[]) => cliIn({ ...base, SIGELO_IDENTITY: rev }, H)(...args);

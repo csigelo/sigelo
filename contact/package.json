@@ -58,6 +58,7 @@
     "invite.mjs",
     "kdf.mjs",
     "prekeys.mjs",
+    "relays.mjs",
     "short.mjs",
     "store.mjs",
     "fixtures/carrier-v0.json",

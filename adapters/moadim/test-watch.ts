@@ -21,7 +21,7 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
     const H = tmpHome('watch'), relay = await startTestRelay(H), endpoints = JSON.stringify(relay.endpoints);
     const OUT = join(H, 'hooks');
     mkdirSync(OUT);
-    const envOf = (n: string): Record<string, string> => ({ PATH: process.env['PATH'] ?? '', SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: endpoints, WOUT: OUT });
+    const envOf = (n: string): Record<string, string> => ({ PATH: process.env['PATH'] ?? '', SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: endpoints, WOUT: OUT });
     const cli = (n: string, ...args: string[]) => cliIn(envOf(n), H)(...args);
     const watcher = (...args: string[]) => {
       const c = spawn('node', [CLI, 'watch', ...args], { env: envOf('alice'), cwd: H });

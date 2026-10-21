@@ -15,6 +15,14 @@
 // spaces and dashes (any of the dashes a phone's keyboard substitutes) are ignored. U is no digit
 // and is refused, as is anything else outside the alphabet.
 //
+// A code made on a relay other than the public one (relay.sigelo.ai) carries that relay: four more
+// characters, its relay tag, K7F3-Q9ZP-4WXN. The tag is the first 20 bits of SHA-256(UTF-8
+// "sigelo-relay-tag/0" ‖ UTF-8 the relay's name as a long code carries it, host[:port]) in the same
+// alphabet: anyone computes it, nobody hands it out. 20 bits tell relays apart, they do not
+// authenticate one: the accepter resolves the tag to a host it knows (carrier.mjs relayForShort),
+// and a wrong host only yields park_unknown or a code that names its own relay, checked as ever.
+// The 12 characters are hashed whole (codeHash); the secret part is still the first 8 (40 bits).
+//
 // The four words: once a pairing completes, both sides derive them from `pair` (kdf.pairId, which
 // binds the pairing key K and so both original DIDs): HKDF-SHA256(pair's 16 bytes, salt
 // "sigelo-fingerprint/0", empty info, 6 bytes); the first 44 bits, 11 at a time, index the BIP-39
@@ -31,6 +39,8 @@ export const PARK_V = 'sigelo-park/0', FINGERPRINT_LABEL = 'sigelo-fingerprint/0
 export const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 // Seconds a parked code lives at the relay; it goes at its first fetch before that.
 export const SHORT_TTL = 600, SHORT_LENGTH = 8;
+// A relay tag: 4 characters (20 bits) after the 8, on a code made on a relay that is not the public one.
+export const TAG_LABEL = 'sigelo-relay-tag/0', TAG_LENGTH = 4, TAGGED_LENGTH = SHORT_LENGTH + TAG_LENGTH;
 const FOLD = { I: '1', L: '1', O: '0' };
 // Whitespace, and the hyphen with every dash a phone or a word processor puts in its place.
 const SEPARATORS = /[\s\-\u2010-\u2015\u2212]+/g, SEPARATOR = /^[\s\-\u2010-\u2015\u2212]$/;
@@ -39,6 +49,7 @@ const MAX_INPUT = 64;
 // Short or long is decided on the input's shape, before either parser runs: a short code mistyped
 // (7 characters, a U, a full stop after it) read as a long code was refused as "does not start
 // with sgl1", which tells the person nothing. A long code is about 126 characters and starts sgl1.
+// SHORT_MAX is the 12 of a code with a relay tag.
 export const SHORT_MAX = 12;
 /** 'short' when `text`, without spaces and dashes, is at most SHORT_MAX characters and does not
  *  start with sgl1; else 'long'. Says how the code is read, not whether it is good. */
@@ -47,10 +58,12 @@ export function codeKind(text) {
   return s.length <= SHORT_MAX && !/^sgl1/i.test(s) ? 'short' : 'long';
 }
 const READ = 'read as a short code (12 characters or fewer, no sgl1)';
+const TAGGED = `${TAGGED_LENGTH} with a relay tag (like K7F3-Q9ZP-4WXN)`;
 const AGAIN = 'check it with whoever gave it to you';
 
-/** The canonical form of a short code ("K7F3Q9ZP"), or throws short_code naming the character at fault. */
-export function normaliseShort(text) {
+/** The canonical form of a short code: 8 characters ("K7F3Q9ZP"), or 12 with a relay tag
+ *  ("K7F3Q9ZP4WXN"); else throws short_code naming the character at fault. tagged false: 8 only. */
+export function normaliseShort(text, { tagged = true } = {}) {
   if (typeof text !== 'string' || text.length > MAX_INPUT) fail('short_code', 'not a short code');
   const shown = JSON.stringify(text.trim());
   // Positions count the characters a person typed, separators left out: "character 5" of K7F3-U9ZP is the U.
@@ -64,10 +77,26 @@ export function normaliseShort(text) {
     }
   }
   const s = text.replace(SEPARATORS, '').toUpperCase().replace(/[ILO]/g, (c) => FOLD[c]);
-  if (s.length !== SHORT_LENGTH) {
-    fail('short_code', `${shown} ${READ}: ${s.length} characters, a short code has ${SHORT_LENGTH} (like K7F3-Q9ZP): ${Math.abs(SHORT_LENGTH - s.length)} ${s.length < SHORT_LENGTH ? 'missing' : 'too many'}; ${AGAIN}`);
+  if (s.length !== SHORT_LENGTH && !(tagged && s.length === TAGGED_LENGTH)) {
+    const n = s.length, off = Math.abs(SHORT_LENGTH - n);
+    // Between 8 and 12: either a character too many, or a tag's missing.
+    const or = tagged && n > SHORT_LENGTH && n < TAGGED_LENGTH ? `, or ${TAGGED}: ${TAGGED_LENGTH - n} missing` : tagged && n > TAGGED_LENGTH ? `, or ${TAGGED}: ${n - TAGGED_LENGTH} too many` : '';
+    fail('short_code', `${shown} ${READ}: ${n} characters, a short code has ${SHORT_LENGTH} (like K7F3-Q9ZP): ${off} ${n < SHORT_LENGTH ? 'missing' : 'too many'}${or}; ${AGAIN}`);
   }
   return s;
+}
+
+/** The relay tag of a normalised short code (its last 4 of 12), or null for an 8-character one. */
+export const tagOf = (norm) => (norm.length === TAGGED_LENGTH ? norm.slice(SHORT_LENGTH) : null);
+
+/** The relay tag of relay `host[:port]`: the first 20 bits of SHA-256("sigelo-relay-tag/0" ‖ relay), 4 characters. */
+export function relayTag(relay) {
+  if (typeof relay !== 'string' || relay === '') fail('relay', 'a relay tag is of a relay name, host[:port]');
+  const h = sha256(concatBytes(utf8ToBytes(TAG_LABEL), utf8ToBytes(relay)));
+  const x = (h[0] << 12) | (h[1] << 4) | (h[2] >> 4);
+  let out = '';
+  for (let i = TAG_LENGTH - 1; i >= 0; i--) out += ALPHABET[(x >> (5 * i)) & 31];
+  return out;
 }
 
 /** Whether `text` reads as a short code (a long code starts sgl1 and runs to about 126 characters). */
@@ -75,18 +104,20 @@ export function isShort(text) {
   try { normaliseShort(text); return true; } catch { return false; }
 }
 
-/** "K7F3Q9ZP" → "K7F3-Q9ZP", how it is shown. */
-export const formatShort = (norm) => `${norm.slice(0, 4)}-${norm.slice(4)}`;
+/** "K7F3Q9ZP" → "K7F3-Q9ZP", "K7F3Q9ZP4WXN" → "K7F3-Q9ZP-4WXN": how it is shown. */
+export const formatShort = (norm) => norm.match(/.{1,4}/g).join('-');
 
-/** A new short code from 5 random bytes, 5 bits a character, most significant first. → its canonical form. */
-export function makeShort(rng = randomBytes) {
+/** A new short code from 5 random bytes, 5 bits a character, most significant first, then `tag`
+ *  (relayTag of the relay it is parked at) unless that is the public relay (null). → its canonical form. */
+export function makeShort(rng = randomBytes, tag = null) {
+  if (tag !== null && !(typeof tag === 'string' && tag.length === TAG_LENGTH && [...tag].every((c) => ALPHABET.includes(c)))) fail('short_code', 'a relay tag is 4 characters of the alphabet (relayTag)');
   const b = rng(5);
   if (!(b instanceof Uint8Array) || b.length !== 5) fail('short_code', 'the random source must give 5 bytes');
   let x = 0n;
   for (const v of b) x = (x << 8n) | BigInt(v);
   let out = '';
   for (let i = SHORT_LENGTH - 1; i >= 0; i--) out += ALPHABET[Number((x >> BigInt(5 * i)) & 31n)];
-  return out;
+  return out + (tag ?? '');
 }
 
 /** The key the relay parks under: hex SHA-256("sigelo-park/0" ‖ the normalised code). */
@@ -105,7 +136,7 @@ export function normaliseGift(text) {
   const bare = text.replace(SEPARATORS, '');
   // The prefix, its O folded as a code's is, on anything longer than a code.
   const rest = bare.length > SHORT_LENGTH && bare.slice(0, GIFT_PREFIX.length).toUpperCase().replace('0', 'O') === GIFT_PREFIX ? bare.slice(GIFT_PREFIX.length) : bare;
-  try { return normaliseShort(rest); } catch (e) {
+  try { return normaliseShort(rest, { tagged: false }); } catch (e) {
     // The short code's reason (the character at fault, the count), without the input it quotes.
     fail('gift_code', `not a gift code (like PRO-K7F3-Q9ZP: PRO, then 8 characters of 0-9 and A-Z without I, L, O, U): ${e.message.replace(/^short_code: (?:"[^"]*" read as a short code \([^)]*\): )?/, '').replaceAll('a short code', 'a gift code').replace('(like K7F3-Q9ZP)', 'after PRO')}`);
   }

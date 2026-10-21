@@ -32,6 +32,16 @@ const made = ['a', 'b', 'c', 'd'].map((l) => {
 made.push({ label: 'zeros', rng: '0000000000', code: '0000-0000', normalised: '00000000', code_hash: hashOf('00000000') });
 made.push({ label: 'ones', rng: 'ffffffffff', code: 'ZZZZ-ZZZZ', normalised: 'ZZZZZZZZ', code_hash: hashOf('ZZZZZZZZ') });
 
+// Relay tags: the first 20 bits of SHA-256("sigelo-relay-tag/0" ‖ relay), 4 digits; a code made on
+// such a relay is its 8 digits, then the tag.
+const TAG = 'sigelo-relay-tag/0';
+const tagOf = (relay) => sha(Buffer.from(TAG + relay, 'utf8')).toString('hex').slice(0, 5).split('').map((h) => parseInt(h, 16).toString(2).padStart(4, '0')).join('').match(/.{5}/g).map((b) => CROCKFORD[parseInt(b, 2)]).join('');
+const relay_tags = ['corp.example.com', 'relay.sigelo.ai', 'relay.test', '127.0.0.1:8443', 'xn--bcher-kva.example'].map((relay) => ({ relay, sha256_20: sha(Buffer.from(TAG + relay, 'utf8')).toString('hex').slice(0, 5), tag: tagOf(relay) }));
+const tagged = ['e', 'f'].map((l, i) => {
+  const bytes = rng(l), code = encode(bytes) + relay_tags[i].tag;
+  return { label: l, rng: bytes.toString('hex'), relay: relay_tags[i].relay, code: code.match(/.{4}/g).join('-'), normalised: code, code_hash: hashOf(code) };
+});
+
 const K = made[0].normalised, k = K.toLowerCase();
 const normalise = [
   { case: 'as shown', input: `${K.slice(0, 4)}-${K.slice(4)}`, normalised: K },
@@ -44,6 +54,9 @@ const normalise = [
   { case: 'U is no digit', input: 'U000-0000', error: 'short_code' },
   { case: 'seven characters', input: `${K.slice(0, 4)}-${K.slice(4, 7)}`, error: 'short_code' },
   { case: 'nine characters', input: `${K}0`, error: 'short_code' },
+  { case: 'twelve characters: a relay tag', input: `${k.slice(0, 4)} ${k.slice(4)} 4wxn`, normalised: `${K}4WXN` },
+  { case: 'ten characters', input: `${K}4W`, error: 'short_code' },
+  { case: 'thirteen characters', input: `${K}4WXN0`, error: 'short_code' },
   { case: 'a symbol', input: 'K7F3_Q9ZP', error: 'short_code' },
   { case: 'a long code', input: 'sgl1' + '2'.repeat(122), error: 'short_code' },
 ];
@@ -69,12 +82,15 @@ export function build() {
     alphabet: CROCKFORD,
     rules: {
       code: '8 characters of the alphabet from 5 random bytes, 5 bits each, most significant first; shown as XXXX-XXXX; lives 600 s, one fetch',
-      normalise: 'drop whitespace and dashes (U+002D, U+2010 to U+2015, U+2212); uppercase; I and L → 1, O → 0; then exactly 8 characters of the alphabet, else short_code',
+      normalise: 'drop whitespace and dashes (U+002D, U+2010 to U+2015, U+2212); uppercase; I and L → 1, O → 0; then exactly 8 (or 12, with a relay tag) characters of the alphabet, else short_code',
+      relay_tag: 'the first 20 bits of SHA-256(UTF-8 "sigelo-relay-tag/0" ‖ UTF-8 relay host[:port]), 5 bits a character; a code made on a relay other than relay.sigelo.ai is its 8 characters then the tag, shown XXXX-XXXX-TTTT, hashed whole',
       code_hash: 'hex(SHA-256(UTF-8 "sigelo-park/0" ‖ UTF-8 normalised code))',
       fingerprint: 'HKDF-SHA256(16 bytes of the pair id, salt "sigelo-fingerprint/0", empty info, 6 bytes); the first 44 bits, 11 at a time, index the BIP-39 English list (sha256 of the list one word a line: ' + BIP39_SHA256 + ')',
       rng: 'rng(label) = first 5 bytes of SHA-256(UTF-8 "sigelo-park/0 " + label)',
     },
     codes: made,
+    relay_tags,
+    tagged,
     normalise,
     fingerprints,
   };

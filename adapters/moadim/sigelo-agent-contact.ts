@@ -19,7 +19,8 @@
  * login.
  *
  * invite prints a short code (K7F3-Q9ZP: ten minutes, one use) that a person can say on the
- * phone; the long code is parked under it at the relay (contact/short.mjs). --long prints the long
+ * phone; the long code is parked under it at the relay (contact/short.mjs). Made on a relay other
+ * than relay.sigelo.ai it has 12 characters, the last 4 the relay's tag (contact/relays.mjs). --long prints the long
  * code (sgl1…) for agent channels, parking nothing. accept takes either.
  *
  * Whoever holds a code can answer it, once: a leaked code pairs the inviter with a stranger. So
@@ -71,7 +72,7 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
                                            --relay: the pairing's relay (default $SIGELO_RELAY)
   accept <code> [--name <n>] [--wait <s>]  become that agent's contact (wait 0 to 300 s, default 10);
        [--tier friend|quiet]               --tier: how its messages reach you (default friend; own is detected)
-       [--relay <host>]                    --relay: the relay the inviter named (a short code made there)
+       [--relay <host>]                    --relay: the inviter's relay, when asked (relay_tag)
   contacts                                 contacts (four words to check; re_pair: pair again; ours: yours by key;
                                            tier: how far you trust it), pending codes and answers
   tier <did|name> own|friend|quiet         own: messages pushed in full (watch --on-message); friend: a notice
@@ -114,6 +115,7 @@ interface Carrier {
   lastError?: unknown;
   invite(o: { name?: string; ttl?: number; short?: boolean; relay?: string }): Promise<unknown>;
   unpark(code: string, o?: { relay?: string }): Promise<string>;
+  unparkFrom(code: string, o?: { relay?: string }): Promise<{ invite: string; relay: string }>;
   accept(code: string, o: { name?: string; wait?: number; tier?: string; relay?: string }): Promise<{ status?: string; did?: string; contact?: Contact }>;
   contacts(): { contacts: Contact[]; failed?: Failed[] };
   setTier(who: string, tier: string): { did: string; name: string; tier: string; ours?: boolean };
@@ -530,7 +532,7 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         const until = (t: number): string => new Date(t * 1000).toISOString().replace('.000', '');
         if (flags.has('--json')) out(r); else console.log(r.short ?? r.code);
         note(r.short !== undefined
-          ? `say it, text it or write it down: good for 10 minutes (until ${until(r.short_exp!)}), once. Their agent runs sigelo-agent accept ${r.short}${r.relay !== lib.DEFAULT_RELAY ? ` --relay ${r.relay}` : ''} --name <your name>`
+          ? `say it, text it or write it down: good for 10 minutes (until ${until(r.short_exp!)}), once. Their agent runs sigelo-agent accept ${r.short} --name <your name>${r.short!.length > 9 ? ` (made on ${r.relay}: if it asks which relay, --relay ${r.relay})` : ''}`
           : `one-time code, good until ${until(r.exp)}: send it to the other operator; their agent runs sigelo-agent accept <code> --name <your name>`);
         break;
       }
@@ -544,9 +546,11 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         // Short or long by its shape (contact/short.mjs codeKind), before either parser runs: each
         // refusal then says how the code was read.
         const how = short.codeKind(typed) === 'short' ? 'parked' : 'long';
-        // --relay: a short code is looked up there (the inviter's invite --relay), not at $SIGELO_RELAY.
-        const code = how === 'parked' ? await c.unpark(typed, { ...(relay !== undefined && { relay }) }) : typed;
-        const at = relay ?? (how === 'parked' ? c.relay : undefined);
+        // Where a short code is parked: --relay (the inviter's invite --relay), else relay.sigelo.ai for
+        // 8 characters, else the relay its last 4 (a relay tag) resolve to (contact/relays.mjs).
+        const got = how === 'parked' ? await c.unparkFrom(typed, { ...(relay !== undefined && { relay }) }) : null;
+        const code = got ? got.invite : typed;
+        const at = relay ?? got?.relay;
         let r;
         try {
           // Said before the answer goes: an answer left queued by a failure goes at a later

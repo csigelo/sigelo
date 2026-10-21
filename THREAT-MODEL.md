@@ -140,6 +140,8 @@ browses the web or reads untrusted repositories carries whatever injected it; pu
 (tier own) into another agent's context, its content is a prompt-injection path that the key and
 attestation do nothing against. `enrol --tier friend|quiet` keeps it ours with notices only.
 
+A relay tag (the last four characters of a 12-character code) is 20 public bits that tell relays apart, not proof of one; the secret part of a short code is still its first 40 bits. A wrong host, from a collision or a stale registry, gets `park_unknown`, or a long code that must name the relay it came from and still passes the four words.
+
 ### 2.12 Operator hints: own agents find each other (contact/carrier.mjs, `sigelo-operator/0`)
 **Claim:** a contact becomes `own` only by an unexpired `sigelo-relay/operator` attestation, from me
 or my operator, on its own chain; own messages reach the operator in full (`watch --on-message`),
@@ -163,6 +165,8 @@ A genesis that copies a victim's public commitment cannot rotate into the victim
 ### 2.14 Closed relays
 
 A closed relay (`RELAY_CLOSED_OPERATOR`) refuses every login that is neither an operator's nor carries that operator's current-key attestation for this host: outsiders get no account, mailbox, invite topic or short code there, and pay no proof of work to learn it. It does not hide the relay or its operators (`/stats` names them; `GET /park/<hash>` is open: a fetched code is useless without an admitted login). It does not protect against the operator, nor against anyone holding an admitted key until its attestation expires (at most 90 days; the session ends then). An attestation by a key the operator rotated away from keeps admitting until the operator logs in after the rotation; if the relay's database is lost, the head reverts to the operator's original DID until its next login (the nightly backup carries neither `closed_members` nor an unlicensed operator's chain).
+
+Clients resolve a relay tag first from relays they already know (their own, their contacts', their operator attestation's), so a registry entry cannot redirect a colleague whose contacts or operator attestation name the company relay. The registry (`sigelo.ai/relays.json`) is first-come under the release identity's signature; two known hosts with one tag are never guessed between. Long-code pairing and verification never read the registry: offline stays offline; a lost or forged registry only costs a question to the person.
 
 ## 3. Attacks NOT defended — read this section
 

@@ -143,7 +143,7 @@ function agent(label, store) {
   const a = { label, s: store ?? { v: 'sigelo/0', secret: hex(k.secret), genesis: k.genesis, rotations: [], attestations: [], issuers: [] } };
   a.did = didOf(a.s.genesis);
   a.carrier = new Carrier({ identity: () => ({ secret: Buffer.from(a.s.secret, 'hex'), bundle: { v: 'sigelo/0', typ: 'bundle', genesis: a.s.genesis, rotations: a.s.rotations, bindings: [], attestations: a.s.attestations, issuers: a.s.issuers } }),
-    ...pathsFor(join(dir, `${label}.local.json`)), relay: HOST, endpoints, keep: true, backoff: [100, 400], retentionDays: 7 });
+    ...pathsFor(join(dir, `${label}.local.json`)), relay: HOST, shortRelay: HOST, registry: false, endpoints, keep: true, backoff: [100, 400], retentionDays: 7 });
   return a;
 }
 const fileOf = (a) => enrolPath(join(dir, `${a.label}.local.json`));

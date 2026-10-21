@@ -80,7 +80,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui: closing removes the pid lock', !existsSync(ui.lockPath(human)));
 
   // The CLI: no identity → keeper --from-words, once; then the page, for the DID of the words.
-  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify(unreachable.endpoints) };
+  const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify(unreachable.endpoints) };
   const bare = spawnSync('node', [CLI, 'ui', '--no-open'], { env, encoding: 'utf8' });
   ok('ui (CLI), first run with no identity: exit 2, points to keeper --from-words', bare.status === 2 && bare.stderr.includes('sigelo-agent keeper --from-words'), bare.stderr);
   const oldFlag = spawnSync('node', [CLI, 'ui', '--no-recovery', '--no-open'], { env, encoding: 'utf8' });
@@ -116,7 +116,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       mkdirSync(join(d, 'agents'), { recursive: true, mode: 0o700 });
       const words = newRoot();
       fromWords(join(d, 'me.local.json'), words);
-      const u = await ui.startUi({ identity: join(d, 'me.local.json'), agents: join(d, 'agents'), carrier: { relay: 'relay.test', endpoints } });
+      const u = await ui.startUi({ identity: join(d, 'me.local.json'), agents: join(d, 'agents'), carrier: { relay: 'relay.test', shortRelay: 'relay.test', registry: false, endpoints } });
       const call = async (method: string, path: string, body?: unknown): Promise<Record<string, any>> => {
         const r = await http(u.port, method, path, method === 'POST' ? { 'X-Sigelo-Token': u.token, Origin: `http://127.0.0.1:${u.port}`, 'Content-Type': 'application/json' } : { 'X-Sigelo-Token': u.token }, body ?? (method === 'POST' ? {} : undefined));
         return { ...(JSON.parse(r.body) as object), http: r.status };

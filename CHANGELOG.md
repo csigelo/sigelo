@@ -7,6 +7,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 - **Remote page:** `ui --remote` answers `POST /r` on the LAN, sealed per control
   (sigelo-remote/0; scopes read, chat, all; device routes never); `ui --controls`, `--revoke-control`, `--port`; the page installs.
+- **Short codes name their relay:** made off relay.sigelo.ai, a code has 12 characters, the last 4 its relay tag
+  (SHA-256 of `sigelo-relay-tag/0` ‖ host, 20 bits); `accept` resolves it, else asks `--relay`.
+- **Relay registry:** `sigelo.ai/relays.json`, tag → host, signed by the release identity, cached daily; relays join
+  via a signed `/.well-known/sigelo-relay.json`, first host per tag. Long codes never read it.
 - **Closed relay:** `RELAY_CLOSED_OPERATOR=<DIDs>` admits only its operators and identities carrying their
   `sigelo-relay/operator` attestation; others are refused `closed`: no proof of work, mailbox or short code.
 - **Relay per invite:** `invite --relay <host>` names the pairing's relay and parks the short code there;

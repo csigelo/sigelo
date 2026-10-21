@@ -17,13 +17,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attest, keygen } from 'sigelo';
 import { BIP39_SHA256, WORDS } from './bip39-english.mjs';
 import { makeInvite } from './invite.mjs';
-import { ALPHABET, GIFT_V, SHORT_TTL, codeHash, codeKind, fingerprint, formatGift, formatShort, giftHash, isShort, makeShort, normaliseGift, normaliseShort } from './short.mjs';
+import { ALPHABET, GIFT_V, SHORT_TTL, TAG_LABEL, codeHash, codeKind, fingerprint, formatGift, formatShort, giftHash, isShort, makeShort, normaliseGift, normaliseShort, relayTag, tagOf } from './short.mjs';
+import { RELEASE_DID, REGISTRY_CTX, REGISTRY_URL, checkRegistry, loadRegistry, readTable, remember, resolveTag } from './relays.mjs';
+import { createServer } from 'node:http';
+import { did as didOf, parse as parseJson } from 'sigelo';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let count = 0;
 const fails = [];
 const ok = (cond, what) => { count++; if (!cond) fails.push(what); };
 const messageOf = (f) => { try { f(); return 'accepted'; } catch (e) { return e.message; } };
+const failure = async (f) => { try { await f(); return { check: 'accepted', message: 'accepted' }; } catch (e) { return e; } };
 const checkOf = (f) => { try { f(); return 'accepted'; } catch (e) { return e.check ?? `exception ${e.constructor.name}: ${e.message}`; } };
 const report = () => {
   for (const f of fails) console.log('FAIL ' + f);
@@ -57,6 +61,71 @@ const report = () => {
   for (let i = 0; i < 1000; i++) seen.add(makeShort());
   ok(seen.size === 1000 && [...seen].every((s) => /^[0-9A-HJKMNP-TV-Z]{8}$/.test(s)), 'makeShort: 1,000 codes from the CSPRNG, all 8 Crockford digits, no repeat');
   ok(SHORT_TTL === 600, 'a short code lives 10 minutes');
+  // Relay tags (ROADMAP §9.3): the first 20 bits of SHA-256("sigelo-relay-tag/0" ‖ relay), 4 characters.
+  ok(TAG_LABEL === 'sigelo-relay-tag/0' && relayTag('corp.example.com') === 'FNK5'
+    && createHash('sha256').update('sigelo-relay-tag/0corp.example.com').digest('hex').slice(0, 5) === '7d665', 'relay tag vector: corp.example.com → SHA-256 prefix 7d665 → FNK5');
+  for (const t of F.relay_tags) ok(relayTag(t.relay) === t.tag, `relay tag ${t.relay}: ${relayTag(t.relay)}, expected ${t.tag}`);
+  for (const c of F.tagged) {
+    const norm = makeShort(() => new Uint8Array(Buffer.from(c.rng, 'hex')), relayTag(c.relay));
+    ok(norm === c.normalised && formatShort(norm) === c.code && codeHash(c.code) === c.code_hash && tagOf(norm) === relayTag(c.relay) && codeKind(c.code) === 'short',
+      `tagged code ${c.label} (${c.relay}): ${formatShort(norm)}, expected ${c.code}; hashed whole; read as short`);
+  }
+  ok(tagOf('K7F3Q9ZP') === null && checkOf(() => makeShort(undefined, 'ABC')) === 'short_code' && checkOf(() => makeShort(undefined, 'ABCU')) === 'short_code', 'an 8-character code has no tag; a tag is 4 characters of the alphabet');
+  ok([...Array(200)].every(() => /^[0-9A-HJKMNP-TV-Z]{12}$/.test(makeShort(undefined, relayTag('corp.test')))), 'makeShort with a tag: 12 Crockford digits');
+  ok(checkOf(() => normaliseGift('PRO-K7F3-Q9ZP-4WXN')) === 'gift_code', 'a gift code is 8 characters: a tagged shape is no gift code');
+  const pin = join(HERE, '..', 'release', 'release-identity.json');
+  if (existsSync(pin)) ok(didOf(parseJson(readFileSync(pin, 'utf8'))) === RELEASE_DID, `relays.mjs RELEASE_DID is release/release-identity.json's DID (${RELEASE_DID})`);
+  ok(REGISTRY_URL === 'https://sigelo.ai/relays.json' && REGISTRY_CTX === 'sigelo.ai/relays', 'the registry: https://sigelo.ai/relays.json, ctx sigelo.ai/relays');
+}
+
+// ================================================================ the registry and tag resolution (relays.mjs)
+// A stand-in release identity signs; checkRegistry takes its DID as the pin.
+const regKey = keygen({ seed: new Uint8Array(32).fill(7), recovery: 'sha256:' + '1'.repeat(64), created: '2026-10-01T00:00:00Z', nonce: new Uint8Array(16).fill(7) });
+const signRegistry = (relays, { iat, exp, key = regKey } = {}) => ({ v: 'sigelo/0', typ: 'bundle', genesis: key.genesis, rotations: [], bindings: [],
+  attestations: [attest({ secret: key.secret, iss: key.did, sub: key.did, iat, exp, ctx: REGISTRY_CTX, admission: 'open', claims: { relays } })], issuers: [key.genesis] });
+// Two hosts with one tag: 20 bits collide within a few thousand names.
+const collide = (() => { const seen = new Map(); for (let i = 0; ; i++) { const h = `c${i}.test`, t = relayTag(h); if (seen.has(t)) return [seen.get(t), h, t]; seen.set(t, h); } })();
+{
+  const t0 = Date.parse('2026-10-14T12:00:00Z') / 1000, opt = { iat: t0 - 60, exp: t0 + 365 * 86400 };
+  const good = signRegistry({ [relayTag('corp.example.com')]: { host: 'corp.example.com', tier: 'enterprise', note: 'run by sigelo' }, ABCD: { host: 'not.its.tag' } }, opt);
+  const r = checkRegistry(good, t0, regKey.did);
+  ok(r.relays.size === 1 && r.relays.get('FNK5')?.host === 'corp.example.com' && r.relays.get('FNK5')?.tier === 'enterprise' && r.dropped === 1, `checkRegistry: the entry whose tag is its host's kept (tier, note), the one whose is not dropped (${r.dropped})`);
+  ok(checkOf(() => checkRegistry(good, t0)) === 'registry', 'checkRegistry: a registry signed by anyone but the pinned release identity is refused');
+  const forged = JSON.parse(JSON.stringify(good));
+  forged.attestations[0].body.claims.relays.FNK5.host = 'evil.example';
+  ok(checkOf(() => checkRegistry(forged, t0, regKey.did)) === 'registry', 'checkRegistry: an entry changed after signing: refused');
+  ok(checkOf(() => checkRegistry(good, t0 + 366 * 86400, regKey.did)) === 'registry', 'checkRegistry: past its exp: refused');
+  // loadRegistry: fetched at most once a day, cached beside the identity, a failed fetch falls back.
+  const d = mkdtempSync(join(tmpdir(), 'sigelo-reg-')), file = join(d, 'relays.cache.local.json');
+  let gets = 0, answer = { status: 200, body: good };
+  const get = async () => { gets++; if (answer === null) throw new Error('down'); return answer; };
+  const a = await loadRegistry({ file, url: 'https://x.test/relays.json', now: t0, get, pin: regKey.did });
+  const b = await loadRegistry({ file, url: 'https://x.test/relays.json', now: t0 + 3600, get, pin: regKey.did });
+  ok(a.get('FNK5')?.host === 'corp.example.com' && b.get('FNK5')?.host === 'corp.example.com' && gets === 1, `loadRegistry: fetched once, then the cache for a day (${gets} fetches)`);
+  answer = null;
+  const c = await loadRegistry({ file, url: 'https://x.test/relays.json', now: t0 + 2 * 86400, get, pin: regKey.did });
+  ok(gets === 2 && c.get('FNK5')?.host === 'corp.example.com', 'loadRegistry: a day on, fetched again; the fetch failing, the cache that still verifies');
+  answer = { status: 200, body: forged };
+  const e = await loadRegistry({ file, url: 'https://x.test/relays.json', now: t0 + 3 * 86400, get, pin: regKey.did });
+  ok(gets === 3 && e.get('FNK5')?.host === 'corp.example.com' && JSON.parse(readFileSync(file, 'utf8')).registry.attestations[0].body.claims.relays.FNK5.host === 'corp.example.com', 'loadRegistry: a forged answer is not cached; the good cache stays');
+  ok((await loadRegistry({ file: join(d, 'none.json'), url: false, now: t0, get, pin: regKey.did })).size === 0 && gets === 3, 'loadRegistry with no URL and no cache: empty, no fetch');
+  // The local table: hosts only, the tag computed; added once.
+  const table = join(d, 'relays.local.json');
+  ok(readTable(table).length === 0 && remember(table, 'corp.test') && !remember(table, 'corp.test') && readTable(table).join() === 'corp.test', 'the local table: empty, then corp.test, added once');
+  ok(checkOf(() => remember(table, 'Not A Host')) === 'code_relay', 'the local table takes a host[:port] only');
+  // Resolution: known relays first, the registry only when none fits, else asked; a collision asked.
+  let asked = 0;
+  const registry = async () => { asked++; return new Map([[relayTag('reg.test'), { host: 'reg.test' }], [relayTag('corp.test'), { host: 'other-corp.test' }]]); };
+  const known = [{ host: 'relay.test', from: 'own' }, { host: 'corp.test', from: 'contact' }];
+  ok((await resolveTag(relayTag('corp.test'), { known, registry, shown: 'x' })).host === 'corp.test' && asked === 0, 'resolveTag: a known relay, the registry not consulted');
+  ok((await resolveTag(relayTag('reg.test'), { known, registry, shown: 'x' })).from === 'registry' && asked === 1, 'resolveTag: none known, the registry');
+  const unknown = await failure(() => resolveTag(relayTag('nobody.test'), { known, registry, shown: 'AAAA-AAAA-' + relayTag('nobody.test') }));
+  ok(unknown.check === 'relay_tag' && unknown.message.includes('accept it with --relay <host>') && unknown.message.includes(relayTag('nobody.test')), `resolveTag: nothing has it: relay_tag, asked for --relay (${unknown.message})`);
+  const [h1, h2, tag] = collide;
+  const both = await failure(() => resolveTag(tag, { known: [{ host: h1, from: 'contact' }, { host: h2, from: 'table' }], registry, shown: 'x' }));
+  ok(both.check === 'relay_tag' && both.message.includes(`${h1} and ${h2}`) && both.message.includes('it does not guess') && asked === 2, `two known hosts, one tag (${h1}, ${h2}: ${tag}): refused, both named, asked (${both.message})`);
+  ok((await resolveTag(tag, { known: [{ host: h1, from: 'contact' }, { host: h1, from: 'table' }], registry, shown: 'x' })).host === h1, 'one host known twice: no collision');
+  rmSync(d, { recursive: true, force: true });
 }
 
 // ================================================================ refusals a person can act on
@@ -140,11 +209,10 @@ function agent(label) {
 const events = {};
 const make = (a) => {
   events[a.label] = [];
-  return new Carrier({ identity: () => ({ secret: a.secret, bundle: a.bundle }), ...pathsFor(join(dir, `${a.label}.local.json`)), relay: HOST, endpoints,
+  return new Carrier({ identity: () => ({ secret: a.secret, bundle: a.bundle }), ...pathsFor(join(dir, `${a.label}.local.json`)), relay: HOST, shortRelay: HOST, registry: false, endpoints,
     clock: () => now, onEvent: (e) => events[a.label].push(e), keep: true, backoff: [100, 400], retentionDays: 7 });
 };
 let homeClosed = false;
-const failure = async (f) => { try { await f(); return { check: 'accepted', message: 'accepted' }; } catch (e) { return e; } };
 const refused = async (f) => { try { await f(); return 'accepted'; } catch (e) { return e.check ?? `exception ${e.message}`; } };
 try {
   const alice = agent('alice'), bob = agent('bob'), carol = agent('carol');
@@ -152,6 +220,22 @@ try {
   // alice: a short code by default, the long code beside it.
   const inv = await ca.invite({ name: 'bob', short: true });
   ok(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(inv.short ?? '') && /^sgl1/.test(inv.code) && inv.short_exp === now + SHORT_TTL, 'invite: a short code K7F3-Q9ZP, 10 minutes, beside the long one', JSON.stringify(inv));
+  // The same relay, not the public one (shortRelay left at relay.sigelo.ai): twelve characters, the last four its tag.
+  {
+    const pub = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice.local.json')), relay: HOST, registry: false, endpoints,
+      clock: () => now, keep: true, backoff: [100, 400], retentionDays: 7 });
+    const i12 = await pub.invite({ name: 'twelve', short: true });
+    ok(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(i12.short) && i12.short.endsWith(`-${relayTag(HOST)}`), `invite on ${HOST}, not the public relay: 12 characters ending in its tag ${relayTag(HOST)} (${i12.short})`);
+    ok((await pub.relayForShort(i12.short)).relay === HOST && (await pub.relayForShort(formatShort(makeShort()))).relay === 'relay.sigelo.ai', 'relayForShort: the 12-character code at its own relay (its tag), an 8-character one at relay.sigelo.ai');
+    await pub.cancelInvite(i12.code); await pub.stop();
+    // Two relays this agent knows share a tag (its own and one in its table): it refuses to guess.
+    const [h1, h2, tag] = collide, cdir = mkdtempSync(join(tmpdir(), 'sigelo-collide-'));
+    remember(join(cdir, 'relays.local.json'), h2);
+    const twin = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(cdir, 'alice.local.json')), relay: h1, registry: false, clock: () => now });
+    const tw = await failure(() => twin.accept(formatShort(makeShort(undefined, tag)), { wait: 1 }));
+    ok(tw.check === 'relay_tag' && tw.message.includes(`${h1} and ${h2}`), `accept of a code whose tag fits two known relays (${h1}, its own; ${h2}, its table): relay_tag, neither dialled (${tw.message})`);
+    rmSync(cdir, { recursive: true, force: true });
+  }
   ok(!lines.some((l) => l.includes(inv.short) || l.includes(normaliseShort(inv.short)) || l.includes(codeHash(inv.short)) || l.includes(inv.code)), 'the relay log holds neither the code, nor its hash, nor the long code');
   // bob types it as heard: lowercase, no dash, an O for a 0 where there is one.
   const typed = inv.short.toLowerCase().replace('-', ' ').replace(/0/g, 'o');
@@ -180,7 +264,7 @@ try {
   now += SHORT_TTL;
   ok(await refused(() => cc.accept(late.short, { wait: 1 })) === 'park_unknown', 'a short code after its 10 minutes: park_unknown');
   // An inviter whose clock runs a minute ahead of the relay's still parks (relay/park.mjs PARK_SKEW).
-  const ahead = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice.local.json')), relay: HOST, endpoints,
+  const ahead = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice.local.json')), relay: HOST, shortRelay: HOST, registry: false, endpoints,
     clock: () => now + 60, keep: true, backoff: [100, 400], retentionDays: 7 });
   let fastInv = {}, fast = 'accepted';
   try { fastInv = await ahead.invite({ name: 'carol', short: true }); } catch (e) { fast = e.check ?? `exception ${e.message}`; }
@@ -188,7 +272,7 @@ try {
   ok(fastInv.short_exp === now + SHORT_TTL, `short_exp is the relay's exp (${now + SHORT_TTL}), not the fast clock's (${now + 60 + SHORT_TTL}): ${fastInv.short_exp}`);
   await ahead.stop();
   // An inviter's clock an hour ahead: the relay refuses the parking, and the refusal says the clock.
-  const far = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice.local.json')), relay: HOST, endpoints,
+  const far = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice.local.json')), relay: HOST, shortRelay: HOST, registry: false, endpoints,
     clock: () => now + 3600, keep: true, backoff: [100, 400], retentionDays: 7 });
   const fa = await failure(() => far.invite({ name: 'carol', short: true }));
   ok(fa.check === 'park' && fa.message.includes('this machine\'s clock may be off (date -u)'), `an inviter's clock an hour ahead: park refused, the clock named (${fa.message})`);
@@ -196,7 +280,7 @@ try {
   // A short code is spent once fetched: a refusal after that carries the long code it stood for.
   // erin's clock is an hour ahead, past the long code's two minutes: code_expired after the fetch.
   const erin = agent('erin'), brief = await ca.invite({ name: 'erin', ttl: 120, short: true });
-  const skewed = new Carrier({ identity: () => ({ secret: erin.secret, bundle: erin.bundle }), ...pathsFor(join(dir, 'erin.local.json')), relay: HOST, endpoints,
+  const skewed = new Carrier({ identity: () => ({ secret: erin.secret, bundle: erin.bundle }), ...pathsFor(join(dir, 'erin.local.json')), relay: HOST, shortRelay: HOST, registry: false, endpoints,
     clock: () => now + 3600, keep: true, backoff: [100, 400], retentionDays: 7 });
   const kept = await failure(() => skewed.accept(brief.short, { wait: 1 }));
   ok(kept.check === 'code_expired' && kept.long === brief.code && kept.message.includes(`its long code: ${brief.code} (keep this; accept it with the long code)`),
@@ -296,13 +380,19 @@ try {
     const parkedHome = relay.park.size();
     const ci = await cn.invite({ name: 'ben', short: true, relay: CORP });
     ok(ci.relay === CORP && corp.park.size() === 1 && relay.park.size() === parkedHome, `invite --relay ${CORP}: the code names it and the short code is parked there, not at ${HOST}`);
-    const miss = await failure(() => cbn.accept(ci.short, { wait: 1 }));
-    ok(miss.check === 'park_unknown' && miss.message.includes(`no invite waits under it at ${HOST}`) && miss.message.includes('accept it with --relay <that relay>'), `a short code from ${CORP} accepted at the default relay: park_unknown, told to name the relay (${miss.message})`);
+    ok(ci.short.length === 14 && ci.short.endsWith(`-${relayTag(CORP)}`), `a short code made on ${CORP}: 12 characters, its relay tag last (${ci.short})`);
+    // The outsider knows no relay with that tag (registry off): asked, nothing fetched.
+    const miss = await failure(() => co.accept(ci.short, { wait: 1 }));
+    ok(miss.check === 'relay_tag' && miss.message.includes(`relay tag ${relayTag(CORP)}`) && miss.message.includes('accept it with --relay <host>') && corp.park.size() === 1, `a 12-character code from a relay nobody here knows: relay_tag, asked for --relay, the code not spent (${miss.message})`);
+    const wrongTag = await failure(() => co.accept(ci.short, { wait: 1, relay: HOST }));
+    ok(wrongTag.check === 'code_relay' && wrongTag.message.includes(`its relay tag ${relayTag(CORP)} is not ${HOST}'s`) && corp.park.size() === 1, `--relay naming a relay with another tag: code_relay, the code not spent (${wrongTag.message})`);
     const wrong = await failure(() => cbn.accept(ci.code, { wait: 1, relay: HOST }));
     ok(wrong.check === 'code_relay' && wrong.message.includes(`the code names ${CORP}, not ${HOST} (--relay)`), `a long code with --relay naming another relay: code_relay (${wrong.message})`);
+    // ben's operator attestation names the company relay: the tag resolves to it, no --relay.
+    ok((await cbn.relayForShort(ci.short)).from === 'operator', 'relayForShort: ben\'s tag resolved by his operator attestation\'s claims.relay');
     await cn.start();
-    const ca2 = await cbn.accept(ci.short, { name: 'ann', wait: 20, relay: CORP });
-    ok(ca2.status === 'connected' && ca2.contact?.did === ann.did && corp.park.size() === 0, `accept --relay ${CORP}: connected, the short code spent there (${ca2.status})`);
+    const ca2 = await cbn.accept(ci.short, { name: 'ann', wait: 20 });
+    ok(ca2.status === 'connected' && ca2.contact?.did === ann.did && corp.park.size() === 0, `accept of the 12-character code, no --relay: connected over ${CORP}, the short code spent there (${ca2.status})`);
     await cn.stop();
     const relayOf = (c, did) => c.contacts().contacts.find((x) => x.did === did)?.relay;
     ok(relayOf(cn, ben.did) === CORP && relayOf(cbn, ann.did) === CORP, `contacts: the pairing's relay is ${CORP} on both sides`);
@@ -317,6 +407,35 @@ try {
     ok(so.check === 'closed' && so.message.includes('this relay admits only identities its operator vouches for') && so.message.includes('withdrawn'), `a stranger accepting a company code: closed, the answer withdrawn (${so.message})`);
     const si = await failure(() => co.invite({ name: 'y', short: true, relay: CORP }));
     ok(si.check === 'closed' && corp.park.size() === 0, `a stranger's invite --relay ${CORP}: closed, nothing parked (${si.message})`);
+    // Asked once: the outsider names the relay; the code is found there (then refused closed) and
+    // the relay goes into the local table, so its next code from there resolves.
+    const ci3 = await cn.invite({ name: 'x3', short: true, relay: CORP });
+    const named = await failure(() => co.accept(ci3.short, { wait: 3, relay: CORP }));
+    const table = join(dir, 'relays.local.json');
+    ok(named.check === 'closed' && readTable(table).includes(CORP), `accept --relay ${CORP} of a 12-character code: fetched there (closed to a stranger), ${CORP} remembered in relays.local.json (${named.check})`);
+    const ci4 = await cn.invite({ name: 'x4', short: true, relay: CORP });
+    const again4 = await co.relayForShort(ci4.short);
+    ok(again4.from === 'table' && again4.relay === CORP, `the next code from that relay resolves from the table: not asked again (${JSON.stringify(again4)})`);
+    await cn.cancelInvite(ci4.code);
+    // The registry: a signed list served on loopback; an agent that knows nothing else resolves by
+    // it, fetched once a day; nothing in a long code's pairing touches it.
+    let hits = 0;
+    const regBody = Buffer.from(JSON.stringify(signRegistry({ [relayTag(CORP)]: { host: CORP, tier: 'enterprise' } }, { iat: now - 60, exp: now + 365 * 86400 })));
+    const reg = createServer((q, res) => { hits++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(regBody); });
+    await new Promise((r) => reg.listen(0, '127.0.0.1', r));
+    const elsewhere = mkdtempSync(join(tmpdir(), 'sigelo-dora-')), dora = agent('dora');
+    const cdora = new Carrier({ identity: () => ({ secret: dora.secret, bundle: dora.bundle }), ...pathsFor(join(elsewhere, 'dora.local.json')), relay: HOST, shortRelay: HOST, endpoints,
+      registry: `http://127.0.0.1:${reg.address().port}/relays.json`, registryPin: regKey.did, clock: () => now, keep: true, backoff: [100, 400], retentionDays: 7 });
+    try {
+      // A long code: paired with nothing fetched from the registry (offline stays offline).
+      const lc = await cn.invite({ name: 'dora', short: false, relay: CORP });
+      const dl = await failure(() => cdora.accept(lc.code, { wait: 2 }));
+      ok(hits === 0 && dl.check === 'closed', `accept of a long code: the registry never fetched (${hits} fetches; ${dl.check})`);
+      const c5 = await cn.invite({ name: 'dora', short: true, relay: CORP });
+      ok((await cdora.relayForShort(c5.short)).from === 'registry' && hits === 1 && existsSync(join(elsewhere, 'relays.cache.local.json')), `a 12-character code nothing else resolves: the registry, fetched once and cached beside the identity (${hits})`);
+      const d5 = await failure(() => cdora.accept(c5.short, { wait: 2 }));
+      ok(d5.check === 'closed' && hits === 1 && d5.long === c5.code, `accept by the registry's host: fetched at ${CORP} (closed to dora), the registry not fetched again the same day (${hits}; ${d5.check})`);
+    } finally { await cdora.stop(); reg.close(); rmSync(elsewhere, { recursive: true, force: true }); }
     for (const c of [cn, cbn, co]) await c.stop();
   } finally { await corp.close(); }
 } finally {

@@ -57,7 +57,7 @@ const proxy = (port: number): Promise<{ s: Server; port: number }> => new Promis
 });
 const [pm, ph] = [await proxy(relay.ports.tcp), await proxy(relay.ports.http)];
 const endpoints = JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${pm.port}`, http: `http://127.0.0.1:${ph.port}` } });
-const env = (home: string, extra: Record<string, string> = {}): Record<string, string> => ({ PATH: process.env['PATH'] ?? '', SIGELO_KEY_PROVIDER: 'file', HOME: home, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: endpoints, ...extra });
+const env = (home: string, extra: Record<string, string> = {}): Record<string, string> => ({ PATH: process.env['PATH'] ?? '', SIGELO_KEY_PROVIDER: 'file', HOME: home, SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: endpoints, ...extra });
 type Run = { status: number | null; stdout: string; stderr: string };
 const cli = (home: string, args: string[], o: { onLine?: (l: string) => void; input?: string; extra?: Record<string, string> } = {}) => new Promise<Run>((resolve) => {
   const c = spawn('node', [CLI, ...args], { env: env(home, o.extra), cwd: home });

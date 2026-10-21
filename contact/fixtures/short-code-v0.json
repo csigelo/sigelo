@@ -3,7 +3,8 @@
   "alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
   "rules": {
     "code": "8 characters of the alphabet from 5 random bytes, 5 bits each, most significant first; shown as XXXX-XXXX; lives 600 s, one fetch",
-    "normalise": "drop whitespace and dashes (U+002D, U+2010 to U+2015, U+2212); uppercase; I and L → 1, O → 0; then exactly 8 characters of the alphabet, else short_code",
+    "normalise": "drop whitespace and dashes (U+002D, U+2010 to U+2015, U+2212); uppercase; I and L → 1, O → 0; then exactly 8 (or 12, with a relay tag) characters of the alphabet, else short_code",
+    "relay_tag": "the first 20 bits of SHA-256(UTF-8 \"sigelo-relay-tag/0\" ‖ UTF-8 relay host[:port]), 5 bits a character; a code made on a relay other than relay.sigelo.ai is its 8 characters then the tag, shown XXXX-XXXX-TTTT, hashed whole",
     "code_hash": "hex(SHA-256(UTF-8 \"sigelo-park/0\" ‖ UTF-8 normalised code))",
     "fingerprint": "HKDF-SHA256(16 bytes of the pair id, salt \"sigelo-fingerprint/0\", empty info, 6 bytes); the first 44 bits, 11 at a time, index the BIP-39 English list (sha256 of the list one word a line: 2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda)",
     "rng": "rng(label) = first 5 bytes of SHA-256(UTF-8 \"sigelo-park/0 \" + label)"
@@ -50,6 +51,51 @@
       "code": "ZZZZ-ZZZZ",
       "normalised": "ZZZZZZZZ",
       "code_hash": "d64ebd4f29ed60b23dc016c34c92a9ad0dd43f134ae3578206d6e06894938898"
+    }
+  ],
+  "relay_tags": [
+    {
+      "relay": "corp.example.com",
+      "sha256_20": "7d665",
+      "tag": "FNK5"
+    },
+    {
+      "relay": "relay.sigelo.ai",
+      "sha256_20": "223fe",
+      "tag": "48ZY"
+    },
+    {
+      "relay": "relay.test",
+      "sha256_20": "48d92",
+      "tag": "93CJ"
+    },
+    {
+      "relay": "127.0.0.1:8443",
+      "sha256_20": "50450",
+      "tag": "A12G"
+    },
+    {
+      "relay": "xn--bcher-kva.example",
+      "sha256_20": "b6b51",
+      "tag": "PTTH"
+    }
+  ],
+  "tagged": [
+    {
+      "label": "e",
+      "rng": "e38194267e",
+      "relay": "corp.example.com",
+      "code": "WE0S-89KY-FNK5",
+      "normalised": "WE0S89KYFNK5",
+      "code_hash": "e9a44901a62f8bf1c54a2cf9a21a62accedbc239b1325d11155c43740f121676"
+    },
+    {
+      "label": "f",
+      "rng": "4cd7db0c41",
+      "relay": "relay.sigelo.ai",
+      "code": "9KBX-P321-48ZY",
+      "normalised": "9KBXP32148ZY",
+      "code_hash": "77c03ac7297f6f16ccd86348452c54c5d7c8cb0196189d60c4e2b4284ad77888"
     }
   ],
   "normalise": [
@@ -101,6 +147,21 @@
     {
       "case": "nine characters",
       "input": "FGSGF1PC0",
+      "error": "short_code"
+    },
+    {
+      "case": "twelve characters: a relay tag",
+      "input": "fgsg f1pc 4wxn",
+      "normalised": "FGSGF1PC4WXN"
+    },
+    {
+      "case": "ten characters",
+      "input": "FGSGF1PC4W",
+      "error": "short_code"
+    },
+    {
+      "case": "thirteen characters",
+      "input": "FGSGF1PC4WXN0",
       "error": "short_code"
     },
     {

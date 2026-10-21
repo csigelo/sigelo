@@ -258,7 +258,7 @@ try {
     await new Promise((res) => closed.listen(0, '127.0.0.1', res));
     const port = closed.address().port;
     await new Promise((res) => closed.close(res));
-    const c5 = client({ SIGELO_IDENTITY: join(dir, 'contact.local.json'), SIGELO_RELAY: 'relay.test',
+    const c5 = client({ SIGELO_IDENTITY: join(dir, 'contact.local.json'), SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off',
       SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${port}`, http: `http://127.0.0.1:${port}` } }) });
     await c5.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
     ok(!(await c5.call('sigelo_init', { recovery: rec.key })).isError, 'contact: init');
@@ -301,7 +301,7 @@ ${code.slice(60)}
     const expired = makeInvite({ did: worldDid, relay: 'relay.test', now: Math.floor(Date.now() / 1000) - 2 * 86400 }).text;
     const parker = createServer((_, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, invite: expired })); });
     await new Promise((res) => parker.listen(0, '127.0.0.1', res));
-    const c14 = client({ SIGELO_IDENTITY: join(dir, 'contact.local.json'), SIGELO_RELAY: 'relay.test',
+    const c14 = client({ SIGELO_IDENTITY: join(dir, 'contact.local.json'), SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off',
       SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${port}`, http: `http://127.0.0.1:${parker.address().port}` } }) });
     await c14.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
     r = await c14.call('sigelo_accept', { code: 'K7F3-Q9ZP' });
@@ -317,7 +317,7 @@ ${code.slice(60)}
     const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
     const relay = await startRelay({ host: 'relay.test', db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, log: () => {},
       policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024 }) });
-    const env = { SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } }) };
+    const env = { SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } }) };
     const a = client({ ...env, SIGELO_IDENTITY: join(dir, 'alice.local.json') }), b = client({ ...env, SIGELO_IDENTITY: join(dir, 'bob.local.json') });
     try {
       for (const x of [a, b]) {
