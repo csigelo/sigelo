@@ -100,7 +100,7 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs'))) {
 // ================================================================ the flow, on a loopback relay
 const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
 const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
-const { Carrier, LOG_MAX, contactDir, pathsFor } = await import('./carrier.mjs');
+const { Carrier, DEVICE_LABEL, DEVICE_SEND, LOG_MAX, contactDir, pathsFor } = await import('./carrier.mjs');
 setTimeout(() => { console.log(`FAIL the run did not finish in 300 s (${count} checks so far)`); process.exit(1); }, 300000).unref();
 
 const HOST = 'relay.test', CREATED = '2026-10-01T00:00:00Z';
@@ -216,14 +216,19 @@ try {
   now += 60;
   await ca.sendAll('bob', ['kept 1', 'kept 2'], {});
   await ca.send('bob', { secret: 'a worker key' }, { label: 'sigelo-identity/0' });
+  ok(await refused(() => ca.send('bob', { secret: 'device material' }, { label: 'sigelo-device/1' })) === 'body', 'the label sigelo-device/1 without the device verbs\' own token: refused (body)');
+  await ca.send('bob', { secret: 'device material' }, { label: DEVICE_LABEL, internal: DEVICE_SEND });
   now += 60;
   const broken = new Carrier({ identity: () => ({ secret: bob.secret, bundle: bob.bundle }), ...pathsFor(join(dir, 'bob.local.json')), log: join(dir, 'no-such-dir', 'x.log'),
     relay: HOST, endpoints, clock: () => now, keep: true, retentionDays: 7 });
   ok(await refused(() => broken.inbox()) !== 'accepted', 'a log that cannot be written: inbox throws');
   const kb = await cb.inbox();
   ok(kb.messages.map((m) => m.content?.secret ?? m.content).join() === 'kept 1,kept 2,a worker key', `…and nothing was taken: the next inbox has them (${kb.messages.length})`);
+  const dv = cb.takeDevices();
+  ok(dv.length === 1 && dv[0].content.secret === 'device material' && dv[0].label === DEVICE_LABEL && cb.takeDevices().length === 0, 'the sigelo-device/1 message: never an inbox message, kept apart for takeDevices (once)');
   const hist = cb.history().messages.map((m) => m.content);
-  ok(hist.includes('kept 1') && hist.includes('kept 2') && !readFileSync(bobLog, 'utf8').includes('a worker key'), 'logged once each; a sigelo-identity/0 message (a worker key) never');
+  ok(hist.includes('kept 1') && hist.includes('kept 2') && !readFileSync(bobLog, 'utf8').includes('a worker key') && !readFileSync(bobLog, 'utf8').includes('device material'),
+    'logged once each; a sigelo-identity/0 message (a worker key) and a sigelo-device/1 one (device material) never');
   ok(cb.history({ since: now + 1 }).messages.length === 0 && cb.history({ since: now - 60 }).messages.length === 2, 'history since: by received');
   now += 60;
   await ca.send('bob', 'taken by take');

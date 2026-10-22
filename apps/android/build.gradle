@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: MIT
+// The Android Gradle Plugin, pinned; Gradle itself is pinned by the wrapper (distributionSha256Sum).
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}

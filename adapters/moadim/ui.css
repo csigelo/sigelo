@@ -10,7 +10,7 @@ button, .btn { font: inherit; min-height: 44px; min-width: 44px; padding: 8px 14
 button.primary { background: var(--acc); border-color: var(--acc); color: var(--bg); font-weight: 600; }
 button.danger { color: var(--bad); border-color: var(--bad); }
 button:disabled { opacity: .45; cursor: not-allowed; }
-input, textarea { font: inherit; width: 100%; min-height: 44px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+input, textarea, select { font: inherit; width: 100%; min-height: 44px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
 textarea { resize: vertical; min-height: 44px; max-height: 40vh; }
 .status { font-size: .9rem; color: var(--mut); padding: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .warn { color: var(--bad); }
@@ -49,3 +49,5 @@ h2 { font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: 
 label { display: block; font-size: .85rem; color: var(--mut); margin: 10px 0 4px; }
 details summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--mut); }
 .did { font: .85rem ui-monospace, Menlo, Consolas, monospace; word-break: break-all; }
+.qr { display: block; margin: 8px auto; max-width: 100%; height: auto; image-rendering: pixelated; background: #fff; }
+video.scan:not([hidden]) { display: block; width: 100%; max-height: 50vh; border-radius: 12px; background: #000; }

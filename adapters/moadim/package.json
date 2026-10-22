@@ -35,17 +35,20 @@
     "INTEGRATION.md",
     "UI-API.md",
     "WATCH.md",
-    "ENROL.md"
+    "ENROL.md",
+    "LINKS.md",
+    "DEVICES.md",
+    "APPS.md"
   ],
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
     "typecheck": "tsc",
-    "build": "tsc -p tsconfig.build.json && node -e \"for(const f of ['ui.html','ui.js','ui.css','manifest.webmanifest','sw.js','icon.svg'])require('fs').copyFileSync(f,'dist/'+f)\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"for(const f of ['ui.html','ui.js','ui.css','manifest.webmanifest','sw.js','icon.svg','shim-zlib.mjs','shim-kdf.mjs'])require('fs').copyFileSync(f,'dist/'+f)\"",
     "pretest": "node -e \"const [a,b]=process.versions.node.split('.').map(Number);if(a<22||(a===22&&b<18)||(a===23&&b<6)){console.error('sigelo-agent: node '+process.version+' cannot run .ts files; it needs node >= 22.18 (or >= 23.6). On an older node: npm run build, then node dist/cli.js');process.exit(1)}\"",
     "test": "node test-all.ts",
-    "prepack": "tsc -p tsconfig.build.json && node -e \"for(const f of ['ui.html','ui.js','ui.css','manifest.webmanifest','sw.js','icon.svg'])require('fs').copyFileSync(f,'dist/'+f)\" && node ../../release/prepack.mjs pre",
+    "prepack": "tsc -p tsconfig.build.json && node -e \"for(const f of ['ui.html','ui.js','ui.css','manifest.webmanifest','sw.js','icon.svg','shim-zlib.mjs','shim-kdf.mjs'])require('fs').copyFileSync(f,'dist/'+f)\" && node ../../release/prepack.mjs pre",
     "postpack": "node ../../release/prepack.mjs post",
     "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publishing is a release step (release/RELEASE.md); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
   },

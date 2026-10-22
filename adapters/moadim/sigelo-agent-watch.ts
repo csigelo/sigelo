@@ -18,14 +18,21 @@
  * and MCP inbox read the state without a session (what the watcher received), send and send-file
  * queue in the state and touch `<identity>.ui.kick`, which makes it sync at once (polled every
  * KICK_MS); every other session verb refuses. Every SYNC_MS a round picks up the rest.
+ * Links (LINKS.md, contact/link.mjs): link messages never reach a hook or a line; the watcher handles
+ * them by code (handle) at each `link` or `paired` event, each round and each kick (links accept),
+ * and says what it did. An introduction from a contact that is not quiet here → --on-notice CMD with
+ * {type: "link", id, from, name, peer, peer_name, purpose, note} (purpose and note are data).
+ * Devices (DEVICES.md): device messages are handled by code at each `device` event and each round; on
+ * the operator's file the watcher starts only at the seat, and stops once it gave the seat away.
  */
 import { spawn } from 'node:child_process';
 import { existsSync, rmSync, unwatchFile, watchFile } from 'node:fs';
 import { resolve } from 'node:path';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
-import { actingFile, contactLib, debug, kickPath, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
+import { actingFile, contactLib, debug, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
 import { takeLock } from './sigelo-agent-ui.ts';
+import { deviceRound, seatGate } from './sigelo-agent-device.ts';
 
 const HOOK_MS = 120_000, SYNC_MS = 60_000, KICK_MS = 1000, NOTICE_MS = 300, TEXT_MAX = 200;
 // A lost connection (the network, a relay restart, another copy of the identity logging in elsewhere):
@@ -48,7 +55,7 @@ export interface WatchOptions {
   print?: (line: string) => void;
   syncMs?: number;
 }
-export interface Watch { relay: string; close(): Promise<void>; idle(): Promise<void> }
+export interface Watch { relay: string; close(): Promise<void>; idle(): Promise<void>; /** Resolves when the watcher stopped by itself: the seat went to another device. */ ended: Promise<string> }
 
 // The same stored message: inbox items carry no id; sender, signing time, label and content do.
 const same = (a: Item, b: Item): boolean => a.from === b.from && a.iat === b.iat && a.received === b.received && a.label === b.label
@@ -77,9 +84,11 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
   const path = resolve(o.identity);
   if (!existsSync(path)) throw Object.assign(new Error(noIdentity(path)), { usage: true });
   try { id.load(path); } catch (e) { throw unreadable(path, e); }
+  // The operator's seat: this machine's device inbox first; elsewhere, refused (seat_elsewhere).
+  await seatGate(path, 'watch');
   const release = takeLock(path, 'watch');
   try {
-    const { lib } = await contactLib();
+    const { lib, link } = await contactLib();
     const print = o.print ?? ((l: string) => { process.stdout.write(`${safeText(l)}\n`); });
     const say = (l: string): void => { if (!o.quiet) print(l); };
     const base = { SIGELO_IDENTITY: path };
@@ -133,7 +142,27 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
       if (e.type === 'paired') say(`paired ${name} (${did}): check the words with them: ${String(e['fingerprint'] ?? '')}`);
       else say(`pairing failed ${name}: ${String(e['code'] ?? '')}: ${String(e['detail'] ?? '')}`);
     }
+    // Links: one round at a time, in the queue with everything else.
+    const linkRound = (): void => later(async () => {
+      const r = await link.handle({ carrier, file: link.linksPath(path) });
+      for (const l of linkNotes(r, { received: false })) say(l);
+      for (const x of r.received.filter((y) => y.notice)) {
+        if (o.onNotice === undefined) { say(introText(x)); continue; }
+        const n = { type: 'link', id: x.id, from: x.from, name: x.name, peer: x.peer, peer_name: x.peer_name, purpose: x.purpose, note: x.note };
+        await hook(o.onNotice, n, { ...base, SIGELO_TYPE: 'link', SIGELO_FROM: x.from, SIGELO_NAME: x.name });
+      }
+    });
+    // Device messages: by code, in the queue. The seat given away: the watcher stops (it no longer logs in as you).
+    let endWith: (why: string) => void = () => {};
+    const ended = new Promise<string>((r) => { endWith = r; });
+    const deviceTurn = (): void => later(async () => {
+      const r = await deviceRound(carrier, path, undefined, say);
+      if (r.gave !== undefined) { say(`the seat went to ${r.gave}: this watcher stops`); endWith(`seat: ${r.gave}`); }
+      if (r.wiped) endWith('wiped');
+    });
     const onEvent = (e: Ev): void => {
+      if (e.type === 'link' || e.type === 'paired') linkRound();
+      if (e.type === 'device') deviceTurn();
       switch (e.type) {
         case 'message': case 'file': { const m = e as unknown as Item; later(() => onMessage(m)); break; }
         case 'paired': case 'pairing_failed': later(() => onPairing(e)); break;
@@ -151,14 +180,16 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
     // What waited before this start: own pushed, one notice per friend.
     for (const m of carrier.peek()) if (m.tier === 'own' || m.tier === 'friend') later(() => onMessage(m));
     await carrier.start();
-    const timer = setInterval(() => { carrier.sync().catch(() => {}); }, o.syncMs ?? SYNC_MS);
+    linkRound();
+    deviceTurn();
+    const timer = setInterval(() => { carrier.sync().then(() => { linkRound(); deviceTurn(); }, () => {}); }, o.syncMs ?? SYNC_MS);
     timer.unref();
     // A CLI or MCP send beside us queued something: send it now.
-    const kicks = kickPath(path), onKick = (): void => { carrier.sync().catch(() => {}); };
+    const kicks = kickPath(path), onKick = (): void => { carrier.sync().then(linkRound, () => {}); };
     watchFile(kicks, { interval: KICK_MS, persistent: false }, onKick);
     let closed = false;
     return {
-      relay: carrier.relay,
+      relay: carrier.relay, ended,
       idle: async () => { await new Promise((r) => setTimeout(r, NOTICE_MS + 50)); await queue; },
       async close() {
         if (closed) return;
@@ -198,7 +229,7 @@ export async function main(rest: string[]): Promise<number> {
     return (e as { usage?: boolean }).usage ? 2 : 1;
   }
   note(`watching ${resolve(path)} at ${w.relay}${o.onMessage || o.onNotice || o.onPairing ? '' : ': a line per event'}. Ctrl-C stops it.`);
-  await new Promise<void>((ok) => { process.once('SIGINT', () => ok()); process.once('SIGTERM', () => ok()); });
+  await Promise.race([new Promise<void>((ok) => { process.once('SIGINT', () => ok()); process.once('SIGTERM', () => ok()); }), w.ended]);
   await w.close();
   return 0;
 }

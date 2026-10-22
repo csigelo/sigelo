@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # sigelo-contact
 
-Two agents swap a short code, then send each other end-to-end encrypted
+Two agents swap a short code, then exchange end-to-end encrypted
 messages through a relay that holds them while one is offline and cannot read them. Each checks
 the other's sigelo chain offline; a key rotation keeps the contact. MIT; the relay,
 [sigelo-relay](https://github.com/csigelo/sigelo-relay), is AGPL-3.0.
@@ -15,7 +15,7 @@ sigelo-agent inbox                        # what came since last time
 sigelo-agent history --since 3600         # again, no relay
 ```
 
-Also `contacts`, `forget <did>`, and all as MCP tools
+Also `contacts`, `forget <did>`; all as MCP tools
 ([`integrations/mcp/contact.mjs`](../integrations/mcp/contact.mjs)).
 Each verb logs in once, never beside `watch` or `ui`
 ([one owner](../adapters/moadim/WATCH.md)).
@@ -27,17 +27,19 @@ in `<identity>.inbox.log`.
 
 **Short codes.** `K7F3-Q9ZP` lives at `relay.sigelo.ai`; another relay's adds its tag:
 `K7F3-Q9ZP-FNK5`, 20 bits of SHA-256(`sigelo-relay-tag/0` ‖ host). `accept` finds it among known
-relays, then the signed `sigelo.ai/relays.json`, else asks once (`--relay`).
+relays, then the signed `sigelo.ai/relays.json`, else asks (`--relay`).
 
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
 443 (`SIGELO_RELAY_TRANSPORT=wss` skips the probe). `HTTPS_PROXY`, `NO_PROXY` apply.
 Allow it on 443.
 
+**Platforms.** `new Carrier({ platform })`: files, lock, network, PoW; `platform-node.mjs` by default.
+
 ## Tests
 
 ```sh
 node test-invite.mjs && node test-envelope.mjs
-node test-carrier.mjs && node test-ws.mjs        # with ../relay, on loopback
+node test-carrier.mjs && node test-ws.mjs        # ../relay, loopback
 sh ../demo/two-machines.sh
 ```
 
@@ -53,29 +55,29 @@ Each regenerates byte for byte from seeds (`gen-*.mjs`).
 
 ## How it works
 
-1. **Code**: the inviter's current DID digest, a one-time secret (yielding both invite topics and
+1. **Code**: the inviter's current DID digest, a one-time secret (both invite topics and
    their key), expiry, relay, checksum.
 2. **Handshake**: bob answers with his chain, a proof for this code and a one-time X-Wing key;
    alice checks it and replies with her chain, prekeys and the encapsulation, all signed.
    `K = HKDF(secret ‖ X-Wing secret)`; each keeps the other under its original DID.
 3. **Mailboxes**: one topic per direction per ISO week, from `K`, held from retention to a week
    ahead.
-4. **Envelope**: signed by the identity key, encrypted (XChaCha20-Poly1305) under a chain begun
-   on a recipient's single-use prekey, padded to whole 256-byte blocks. Until the sender
+4. **Envelope**: signed by the identity key, encrypted (XChaCha20-Poly1305) under a chain from
+   a single-use prekey, padded to 256-byte blocks. Until the sender
    reads a reply, each envelope repeats the encapsulation: a reader offline past retention loses
    those messages, not the epoch. Prekeys travel under `K`, replaced weekly.
 5. **Rotation**: the rotated agent sends each contact its chain under `K`, proven by its new key,
    until the contact confirms it, so recovery beats a thief (SPEC §7.1). After a recovery both
    mark the pairing `re_pair`: only that notice goes under `K` until a new code replaces it.
 
-Key agreement is hybrid post-quantum (X25519 + ML-KEM-768).
+Key agreement: hybrid post-quantum (X25519 + ML-KEM-768).
 
 ## What it does not do
 
 - Find anyone (codes travel out of band), hide who talks to whom, or deny.
 - Heal inside an epoch after a key theft (no double ratchet): a stolen state file reads what
-  contacts write until the next weekly prekey replacement.
+  contacts write until the weekly prekey replacement.
 - Confirm delivery (the relay acknowledges, not the contact): a relay withholding an epoch's key
-  agreement loses what follows until fresh prekeys restart it.
+  agreement loses what follows until prekeys restart it.
 - Check where a stranger's relay resolves.
 - Push, groups, direct delivery, unsend.

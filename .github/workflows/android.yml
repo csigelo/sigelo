@@ -1,0 +1,70 @@
+name: android
+# The Android app (apps/android, design/apps.md §8), built from this commit. No secret is used:
+# the release APK is left unsigned (the operator signs it offline, design/apps.md §11); the debug
+# APK is signed with a key made in this job and gone with it. Both, and their SHA-256, are uploaded.
+on:
+  push:
+    branches: [main]
+    paths: ['apps/**', 'contact/**', 'ts/**', 'adapters/moadim/**', 'relay/**', '.github/workflows/android.yml']
+  pull_request:
+    paths: ['apps/**', 'contact/**', 'ts/**', 'adapters/moadim/**', 'relay/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        with: { persist-credentials: false }
+      # The wrapper jar in the repository is Gradle's own (checksums published by Gradle).
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
+        with: { node-version: '22' }
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with: { distribution: temurin, java-version: '17' }
+      - name: the page's sources (ts/dist; contact, relay and adapter dependencies)
+        run: |
+          (cd ts && npm ci --ignore-scripts && npx tsc)
+          (cd contact && npm ci --ignore-scripts)
+          (cd relay && npm ci --ignore-scripts)
+          (cd adapters/moadim && npm ci --ignore-scripts)
+      - name: the page's tests (the web app; the Android page side over a fake shell)
+        run: |
+          node apps/web/test-web.mjs
+          node apps/web/test-shell.mjs
+      - name: the page into the APK's assets, and the project checked
+        run: |
+          node apps/android/assets.mjs
+          node apps/android/check.mjs
+      - name: an ephemeral debug key (this job only)
+        run: |
+          pw=$(openssl rand -hex 24)
+          echo "::add-mask::$pw"
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/debug.p12" -storetype PKCS12 -alias debug \
+            -keyalg RSA -keysize 3072 -validity 30 -dname "CN=sigelo debug build (ephemeral)" -storepass "$pw" -keypass "$pw"
+          echo "SIGELO_DEBUG_PW=$pw" >> "$GITHUB_ENV"
+      - name: build (release unsigned, debug)
+        working-directory: apps/android
+        run: ./gradlew --no-daemon --stacktrace assembleRelease assembleDebug -Psigelo.debugKeystore="$RUNNER_TEMP/debug.p12" -Psigelo.debugPassword="$SIGELO_DEBUG_PW"
+      - name: the APKs and their SHA-256
+        run: |
+          rm -f "$RUNNER_TEMP/debug.p12"
+          mkdir -p out
+          short=${GITHUB_SHA::12}
+          cp apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "out/sigelo-$short-release-unsigned.apk"
+          cp apps/android/app/build/outputs/apk/debug/app-debug.apk "out/sigelo-$short-debug.apk"
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$tools/apksigner" verify --print-certs "out/sigelo-$short-debug.apk"
+          if "$tools/apksigner" verify "out/sigelo-$short-release-unsigned.apk" 2>/dev/null; then echo '::error::the release APK is signed'; exit 1; fi
+          (cd out && sha256sum *.apk > SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (tag v7)
+        with:
+          name: sigelo-android
+          path: out/
+          if-no-files-found: error
+          retention-days: 30

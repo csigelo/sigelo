@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">sigelo</string>
+    <string name="unlock_identity">Unlock the identity this phone holds</string>
+    <string name="reload">Reload</string>
+    <string name="switch_to_remote">Switch to: a computer</string>
+    <string name="switch_to_self">Switch to: this phone</string>
+    <string name="forget_computer">Forget the computer</string>
+    <string name="switch_title">Switch what this phone does?</string>
+    <string name="switch_from_self">This erases the identity this phone holds, its contacts and its messages, from this app. Keep its file, or the 25 words, on your computer before you go on.</string>
+    <string name="switch_from_remote">This erases the computer\'s text from this app. Revoke it on the computer too: sigelo-agent ui --revoke-control &lt;name&gt;.</string>
+    <string name="erase_and_switch">Erase and switch</string>
+    <string name="forget">Forget</string>
+</resources>

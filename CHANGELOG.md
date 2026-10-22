@@ -5,12 +5,26 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **App releases:** the Android APK is signed offline by its own key; `release.json` signs its SHA-256 and certificate; `release/apk-check.sh` checks an APK before install. APPS.md: the three forms, install.
+- **Android app** (apps/android): this phone's identity or a computer's page, picked at first start; the relay over native HTTPS and TLS (no Origin), the key in AndroidKeyStore. CI builds the APKs (release unsigned).
+- **Self-contained app** (apps/web): the page runs its own carrier in a browser (IndexedDB, Web Locks, MQTT over WebSocket, PoW in a Worker); same routes and JSON as `ui`. Nothing is sent before it is saved.
+- **Contact platform:** `new Carrier({ platform })` takes files, lock, network and proof of work from one object (`platform-node.mjs` by default, unchanged); `sendFile` also takes `{ bytes, name }`.
+- **GTK phone app** (apps/gtk, Linux phones): this phone's page through `ui --app`, or a computer's page sealed over the LAN
+  (scan, image or paste); no account key on the phone. `install.sh` into ~/.local.
+- **Remote over the relay:** `ui --remote --relay` prints `SIGELO:CTL:`; the app pairs a control key of its own (four words), requests go end to end, the state is pushed, never polled. Both phone apps.
 - **Remote page:** `ui --remote` answers `POST /r` on the LAN, sealed per control
   (sigelo-remote/0; scopes read, chat, all; device routes never); `ui --controls`, `--revoke-control`, `--port`; the page installs.
 - **Short codes name their relay:** made off relay.sigelo.ai, a code has 12 characters, the last 4 its relay tag
   (SHA-256 of `sigelo-relay-tag/0` ‖ host, 20 bits); `accept` resolves it, else asks `--relay`.
 - **Relay registry:** `sigelo.ai/relays.json`, tag → host, signed by the release identity, cached daily; relays join
   via a signed `/.well-known/sigelo-relay.json`, first host per tag. Long codes never read it.
+- **Links:** `sigelo-agent link A B --purpose "…" --operator` pairs two of your agents through a one-use code, never shown; both keep the purpose (`links`, `sigelo_links`); `unlink` or `--days` forgets. Never own.
+- **Links in the page:** Link two contacts, the links you made, Unlink; introductions to answer (accept, refuse, tell, always allow), with a banner. `/api/link*`; remote: list read, answer chat, the rest all.
+- **Devices:** `sigelo-agent device add|scan` moves the account by QR: SAFE (an own agent) or `--full` (your identity and keeper root too), online after four words or offline under six; `revoke [--lost]`. DEVICES.md.
+- **Device seat, page:** one FULL device logs in as you, others refuse `seat_elsewhere`; `device seat give|take [--force]` moves it with a sealed snapshot. The page's Devices view: add SAFE, scan, revoke; never remote.
+- **Device seat, MCP:** the MCP server reads this device's inbox before logging in as you; on a standby every relay tool refuses `seat_elsewhere`, naming the seat; whoami, bundle, signing still work.
+- **External links:** `link A <contact>` introduces your agent to another operator's; it waits for that operator's `links accept` (or an `allow` rule) and lands at quiet; refusal is silent unless `--tell`.
+- **Links, agent rule:** the skills, `sigelo_inbox` and `sigelo_links` say it: a linked contact not own may ask, only the operator instructs; outside the purpose the agent refuses and tells its operator; never own.
 - **Closed relay:** `RELAY_CLOSED_OPERATOR=<DIDs>` admits only its operators and identities carrying their
   `sigelo-relay/operator` attestation; others are refused `closed`: no proof of work, mailbox or short code.
 - **Relay per invite:** `invite --relay <host>` names the pairing's relay and parks the short code there;

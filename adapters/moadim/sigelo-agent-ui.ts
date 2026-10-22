@@ -21,9 +21,18 @@
  * The JSON API is UI-API.md. Key: the file key (decision 6; K1-K2 before a public release).
  * `--remote`: a second listener on the LAN, `POST /r` only, sealed per control (sigelo-agent-remote.ts),
  * into the same routes, within the control's scope; `/api/devices/*` never.
+ * `--app`: for a shell that shows the page itself (apps/gtk): no browser opened, and the page stops when
+ * stdin ends, so a shell that dies takes its page (and the file's lock) with it.
+ * Links (LINKS.md, contact/link.mjs): the page owns the session, so it runs link.mjs handle() as `watch`
+ * does (at each `link` or `paired` event, each minute, after each link route): the operator's links
+ * complete here, introductions to this identity wait for an answer (`/api/links*`). Never in the history.
+ * Devices (DEVICES.md, sigelo-agent-device.ts devicePage): `/api/devices*` over this carrier, SAFE only; the
+ * enrolment messages its inbox hands over are kept apart for the device rounds (after each drain), never in
+ * the history. The page reads QR codes itself: contact/qr.mjs and qr-decode.mjs are served with two shims
+ * (ui.html's import map, allowed by its hash in the CSP; shim-*.mjs).
  */
 import { spawn } from 'node:child_process';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { appendFileSync, chmodSync, closeSync, existsSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isIPv4 } from 'node:net';
@@ -34,16 +43,28 @@ import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import { enrolInto, keeperPath, workersOf } from './sigelo-agent-enrol.ts';
-import { CONTROL_NAME, controlLine, defaultAddress, deviceRoute, isScope, loadAead, newControl, openRequest, R_BODY_MAX, SCOPES, sealAnswer, type Control, type Scope } from './sigelo-agent-remote.ts';
-import { agentsDirFor, busyText, contactLib, humanPath, insideAgents, operatorFile, lockHolder, lockPath, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
+import { deviceRound, hasTty, seatGate, seatInfo, terminalQr, ttyLine, ttyWrite, type DevMsg } from './sigelo-agent-device.ts';
+import { CONTROL_NAME, controlLine, defaultAddress, isRelay, isScope, lanControls, loadAead, newControl, openRequest, R_BODY_MAX, remoteCall, sealAnswer, type AnyControl, type Control, type Scope } from './sigelo-agent-remote.ts';
+import { relayControls, type RelayCarrier, type Relays } from './sigelo-agent-control.ts';
+import { devicePage, type DevicePage } from './sigelo-agent-device.ts';
+import { agentsDirFor, busyText, contactDir, contactLib, contactModule, humanPath, insideAgents, operatorFile, lockHolder, lockPath, safeJson, safeText, unreadable, type LinkLib } from './sigelo-agent-contact.ts';
 
 export const OPERATOR_CTX = 'sigelo-relay/operator';
-const DAY = 86400, OPERATOR_DAYS = 90, RENEW_DAYS = 14, TAG_MAX = 20, NAME_MAX = 64, TEXT_MAX = 100_000, BODY_MAX = 256 * 1024;
+const DAY = 86400, OPERATOR_DAYS = 90, RENEW_DAYS = 14, BODY_MAX = 256 * 1024;
 const STATIC: Record<string, [string, string]> = {
   '/': ['ui.html', 'text/html'], '/ui.html': ['ui.html', 'text/html'], '/ui.js': ['ui.js', 'text/javascript'], '/ui.css': ['ui.css', 'text/css'],
   '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/sw.js': ['sw.js', 'text/javascript'], '/icon.svg': ['icon.svg', 'image/svg+xml'],
+  '/shim-zlib.mjs': ['shim-zlib.mjs', 'text/javascript'], '/shim-kdf.mjs': ['shim-kdf.mjs', 'text/javascript'],
+  // QR reading and drawing in the page (design/devices.md §6.4): sigelo-contact's own files, as they are.
+  '/qr.mjs': ['contact:qr.mjs', 'text/javascript'], '/qr-decode.mjs': ['contact:qr-decode.mjs', 'text/javascript'],
 };
 const HERE = dirname(fileURLToPath(import.meta.url));
+const staticFile = (f: string): string => (f.startsWith('contact:') ? join(contactDir(), f.slice(8)) : join(HERE, f));
+// The page's one inline script, its import map (node:zlib and kdf.mjs → the shims): allowed by its hash.
+const IMPORT_MAP = ((): string => {
+  const m = /<script type="importmap">([\s\S]*?)<\/script>/.exec(readFileSync(join(HERE, 'ui.html'), 'utf8'));
+  return m ? ` 'sha256-${createHash('sha256').update(m[1]!).digest('base64')}'` : '';
+})();
 const nowS = (): number => Math.floor(Date.now() / 1000);
 const note = (s: string): void => console.error(`sigelo-agent: ${safeText(s)}`);
 
@@ -91,6 +112,7 @@ const readJson = <T>(file: string, empty: T): T => { try { return JSON.parse(rea
 interface Contact {
   name: string; did: string; current_did: string; chain: string[]; revoked: boolean; relay: string; queued: number; re_pair: string | null; fingerprint: string | null;
   pair: string | null; ours: boolean; tier: string; tier_by: string | null; prekeys: boolean; waiting: string | null;
+  link?: { id: string; purpose: string; linked_by: string; expires: number | null } | null;
 }
 type Ev = Record<string, unknown> & { type?: string };
 interface Car {
@@ -110,32 +132,65 @@ interface Car {
   start(): Promise<void>; stop(): Promise<void>; sync(o?: { wait?: number }): Promise<void>;
 }
 interface StoreFile { contacts: Record<string, { revoked: boolean }> }
-interface Rec { n: number; at: number; kind: 'in' | 'out' | 'status' | 'event'; did?: string; id?: string | null; text?: unknown; label?: string; status?: string; code?: string; detail?: string; type?: string; name?: string }
-interface UiData { tags: Record<string, string[]>; checked: Record<string, string>; read: Record<string, number>; controls: Record<string, Control>; remote?: { port: number } }
+interface UiData { tags: Record<string, string[]>; checked: Record<string, string>; read: Record<string, number>; controls: Record<string, AnyControl>; remote?: { port: number } }
 interface Agent { name: string; file: string; did?: string; chain?: string[]; mine?: { exp: number; days_left: number } | null; error?: string; bundle?: object }
 type Fail = Error & { check?: string; long?: string; status?: number };
+type Route = (b: Record<string, unknown>, q: URLSearchParams) => unknown;
+/** contact/page.mjs: the routes over the carrier, shared with the self-contained app. */
+interface PageLib {
+  makePage(o: {
+    makeCarrier: (onEvent: (e: Ev) => void) => unknown; link: LinkLib; linksFile: string; codeKind: (t: string) => string; unlogged: RegExp;
+    store: { readHistory(): string | null; append(line: string): void; clearHistory(): void; readData(): string | null; writeData(text: string): void };
+    hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string };
+      agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean };
+  }): {
+    carrier: unknown; routes: Record<string, Route>; dispatch(method: string, url: URL, b: Record<string, unknown>): Promise<[number, unknown]>;
+    start(): Promise<void>; halt(): Promise<void>; serial<T>(f: () => Promise<T>): Promise<T>; data: unknown; saveData(): void;
+    live: { online: Set<string>; seatGone: string | null }; seen(did: string): number | null; setDevices(d: DevicePage): void; onChange(f: () => void): () => void;
+  };
+}
 const refuse = (status: number, check: string, message: string): never => { throw Object.assign(new Error(message), { check, status }); };
 
 export interface UiOptions {
   identity: string; agents?: string; carrier?: Record<string, unknown>; port?: number;
-  /** A LAN listener for remote controls: on `listen` (else the default route's address); `name` made if new, in `scope` (chat). */
-  remote?: { listen?: string; name?: string; scope?: Scope };
+  /** A LAN listener for remote controls: on `listen` (else the default route's address); `name` made if new, in `scope` (chat).
+   *  relay: no listener; `name` is a relay control (sigelo-agent-control.ts): its SIGELO:CTL: code when it is not paired yet. */
+  remote?: { listen?: string; name?: string; scope?: Scope; relay?: boolean };
 }
-export interface Ui { url: string; port: number; token: string; remote: { ip: string; port: number; name: string | null; line: string | null } | null; close(): Promise<void> }
+/** The relay controls of a running page: the code made at start, pairings as they come, the words confirmed, revoke. */
+export interface UiRelay {
+  name: string | null; line: string | null; exp: number | null;
+  /** The next pairing of a control (its name, its four words). */
+  paired(): Promise<{ name: string; words: string | null }>;
+  /** Another control's code (null: paired already). */
+  issue(name: string, scope: Scope): Promise<{ line: string; exp: number } | null>;
+  confirm(name: string, match: boolean): Promise<boolean>; revoke(name: string): Promise<boolean>;
+}
+export interface Ui { url: string; port: number; token: string; remote: { ip: string; port: number; name: string | null; line: string | null } | null; relay: UiRelay; close(): Promise<void> }
 
 const dataPath = (identity: string): string => `${resolve(identity).replace(/\.json$/, '')}.ui.json`;
 /** `ui --controls`: name, scope, created, last used; never the key. */
-export function listControls(identity: string): { name: string; scope: Scope; created: number; last_used: number | null }[] {
+export function listControls(identity: string): { name: string; scope: Scope; created: number; last_used: number | null; relay?: { paired: boolean; confirmed: boolean } }[] {
   const d = readJson<Partial<UiData>>(dataPath(identity), {});
-  return Object.entries(d.controls ?? {}).map(([name, c]) => ({ name, scope: c.scope, created: c.created, last_used: c.last_used })).sort((a, b) => a.name.localeCompare(b.name));
+  return Object.entries(d.controls ?? {}).map(([name, c]) => ({ name, scope: c.scope, created: c.created, last_used: c.last_used, ...(isRelay(c) && { relay: { paired: c.did !== null, confirmed: c.confirmed } }) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
-/** `ui --revoke-control <name>`: its key forgotten. The page owns ui.json: refused while one runs on the file (stop it: its listener goes with it). */
-export function revokeControl(identity: string, name: string): boolean {
+/**
+ * `ui --revoke-control <name>`: a LAN control's key forgotten; a relay control's contact forgotten (its
+ * identity can reach this computer no more). The page owns ui.json: refused while one runs on the file.
+ */
+export async function revokeControl(identity: string, name: string, carrierOptions: Record<string, unknown> = {}): Promise<boolean> {
   const h = uiHolder(identity);
   if (h !== null) refuse(409, 'busy', busy(identity, h, 'revoking a control here (stop the page: its remote listener stops with it, then revoke)'));
   const f = dataPath(identity), d = readJson<Partial<UiData>>(f, {});
-  if (!d.controls?.[name]) return false;
-  delete d.controls[name];
+  const c = d.controls?.[name];
+  if (!c) return false;
+  if (isRelay(c) && c.did !== null) {
+    const { lib } = await contactLib(), path = resolve(identity);
+    const car = new lib.Carrier({ identity: () => { const s = id.load(path); return { sign: signer(path, s).sign, bundle: id.bundleOf(s) }; }, ...lib.pathsFor(path), ...lib.optionsFromEnv(), ...carrierOptions }) as unknown as Car;
+    try { await car.forget(c.did); } catch (e) { if ((e as Fail).check !== 'not_contact') throw e; } finally { await car.stop(); }
+  }
+  delete d.controls![name];
   writePrivate(f, JSON.stringify(d));
   return true;
 }
@@ -153,127 +208,101 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     const r = o.remote;
     if (r.name !== undefined && !CONTROL_NAME.test(r.name)) refuse(400, 'remote', `control name: 1 to 20 of a-z 0-9 _ -, starting with a letter or digit`);
     if (r.scope !== undefined && !isScope(r.scope)) refuse(400, 'remote', 'scope: read, chat or all');
+    if (r.relay && r.listen !== undefined) refuse(400, 'remote', '--relay: no LAN listener, so no --listen');
     if (r.listen !== undefined && (!isIPv4(r.listen) || r.listen === '0.0.0.0')) refuse(400, 'remote', `--listen: one IPv4 address of this machine, not ${JSON.stringify(r.listen)}`);
-    remoteIp = r.listen ?? await defaultAddress() ?? refuse(400, 'remote', 'no LAN address found: give one with --listen <ip>');
-    await loadAead();
+    if (!r.relay) {
+      remoteIp = r.listen ?? await defaultAddress() ?? refuse(400, 'remote', 'no LAN address found: give one with --listen <ip>');
+      await loadAead();
+    }
   }
+  // The operator's seat (DEVICES.md): this machine's device inbox first; elsewhere the page does not start.
+  try { await seatGate(path, 'ui'); } catch (e) { refuse(409, (e as Fail).check ?? 'seat_elsewhere', (e as Error).message); }
   const release = takeLock(path);
-  const { lib, short } = await contactLib();
+  const { lib, short, link: L } = await contactLib();
+  // The routes over the carrier, shared with the self-contained app (contact/page.mjs, apps/web/router.mjs).
+  const P = await contactModule<PageLib>('page');
+  const linksFile = L.linksPath(path);
+  const UNLOGGED = (lib as unknown as { UNLOGGED: RegExp }).UNLOGGED;
+  let devices: DevicePage | null = null, relay: Relays | null = null, handling = Promise.resolve();
   const base = path.replace(/\.json$/, ''), historyFile = `${base}.history.jsonl`, dataFile = `${base}.ui.json`;
   const paths = lib.pathsFor(path), opts = { ...lib.optionsFromEnv(), ...o.carrier } as { endpoints?: object };
-
-  // ---- history: every message and pairing event, one JSON line each; status lines fold into their message
-  const recs: Rec[] = [], outById = new Map<string, Rec>();
-  let seq = 0;
-  const fold = (r: Rec): void => {
-    seq = Math.max(seq, r.n);
-    if (r.kind !== 'status') { recs.push(r); if (r.kind === 'out' && r.id) outById.set(r.id, r); return; }
-    const m = r.id ? outById.get(r.id) : undefined;
-    if (m) Object.assign(m, { status: r.status, code: r.code, detail: r.detail, n: r.n });
-  };
-  if (existsSync(historyFile)) for (const l of readFileSync(historyFile, 'utf8').split('\n')) { try { if (l) fold(JSON.parse(l) as Rec); } catch {} }
-  const record = (r: Omit<Rec, 'n' | 'at'>): Rec => {
-    const full = { n: seq + 1, at: nowS(), ...r } as Rec;
-    appendFileSync(historyFile, JSON.stringify(full) + '\n', { mode: 0o600 });
-    fold(full);
-    return full;
-  };
-  if (existsSync(historyFile)) chmodSync(historyFile, 0o600);
-  const data = readJson<UiData>(dataFile, { tags: {}, checked: {}, read: {}, controls: {} });
-  for (const k of ['tags', 'checked', 'read', 'controls'] as const) data[k] ??= {};
-  delete (data as { waiting?: unknown }).waiting;   // kept by an earlier page; the carrier says it now (contacts: prekeys, waiting)
-  const saveData = (): void => writePrivate(dataFile, JSON.stringify(data));
-  if (o.remote) {
-    // A new control by name; an existing one keeps its key and scope (revoke it to change them).
-    const name = o.remote.name ?? (Object.keys(data.controls).length === 0 ? 'phone' : undefined), had = name === undefined ? undefined : data.controls[name];
-    if (had && o.remote.scope !== undefined && had.scope !== o.remote.scope) { release(); refuse(409, 'remote', `control ${name} has scope ${had.scope}: revoke it (ui --revoke-control ${name}) to make it again with ${o.remote.scope}`); }
-    if (name !== undefined && !had) { data.controls[name] = newControl(o.remote.scope ?? 'chat', nowS()); saveData(); }
-    o = { ...o, remote: { ...o.remote, ...(name !== undefined && { name }) } };
-  }
-
-  // ---- live status, not kept
-  const live = { online: new Set<string>(), pow: null as null | { bits: number; since: number }, powDone: null as number | null, error: null as string | null };
-  const invites = new Map<string, { id: string; name: string; code: string; exp: number; short?: string; short_exp?: number; paired?: string }>();
-  // What the carrier's inbox() hands over, as every client takes it: messages and the events it
-  // keeps (pairings, failures, rotations), into the history. Taken at once after any event, and
-  // every minute for what no event announced.
-  let draining: Promise<void> | null = null, again = false;
-  function take(b: { messages: Ev[]; events: Ev[]; dropped: Record<string, number> }): void {
-    for (const m of b.messages) {
-      if (m['type'] === 'file') record({ kind: 'in', did: m['from'] as string, name: m['contact'] as string, label: m['label'] as string, text: `file ${String(m['name'])} (${String(m['size'])} bytes), saved at ${String(m['path'])}` });
-      else record({ kind: 'in', did: m['from'] as string, name: m['name'] as string, text: m['content'], label: m['label'] as string });
-    }
-    const named = new Set<string>();
-    for (const e of b.events) {
-      const d = (e['did'] ?? e['from'] ?? e['peer']) as string | undefined;
-      switch (e.type) {
-        case 'paired': {
-          const inv = [...invites.values()].find((x) => x.name === e['name'] && !x.paired);
-          if (inv && d) inv.paired = d;
-          record({ kind: 'event', type: 'paired', did: d, name: e['name'] as string });
-          break;
-        }
-        // A refusal of one of my messages (it has an id) is its status, from onEvent.
-        case 'refused': if (e['id'] === undefined) record({ kind: 'event', type: 'refused', did: d, name: e['name'] as string, code: e['code'] as string, detail: e['detail'] as string }); break;
-        case 'pairing_failed': case 're_pair': case 'rotated': case 'dropped':
-          if (e.type === 'dropped') named.add(String(e['check']));
-          record({ kind: 'event', type: e.type, did: d, name: e['name'] as string, code: (e['code'] ?? e['check']) as string, detail: e['detail'] as string });
-          break;
-      }
-    }
-    for (const [check, n] of Object.entries(b.dropped)) if (!named.has(check)) record({ kind: 'event', type: 'dropped', code: check, detail: `${n} dropped` });
-  }
-  function drain(): Promise<void> {
-    if (draining) { again = true; return draining; }
-    draining = (async () => {
-      try { do { again = false; take(await carrier.inbox({ local: true })); } while (again); } catch (err) { live.error = `inbox: ${(err as Error).message}`; }
-      finally { draining = null; }
-    })();
-    return draining;
-  }
-  // Inside the carrier's lock for some events: the inbox waits for it to be released.
-  const soon = (): void => { setImmediate(() => void drain()); };
-  const onEvent = (e: Ev): void => {
-    try {
-      const d = (e['did'] ?? e['from'] ?? e['peer']) as string | undefined;
-      switch (e.type) {
-        case 'sent': case 'queued': case 'refused': {
-          if (e['control'] !== undefined) break;
-          // Before send returns, its own result says the same: only later ones are recorded.
-          const st = e.type, i = e['id'] as string | undefined;
-          if (i && outById.has(i)) { record({ kind: 'status', id: i, status: st, code: e['code'] as string, detail: e['detail'] as string }); break; }
-          // A message queued by a send that failed has no id here: the oldest such one to this peer.
-          const orphan = recs.find((r) => r.kind === 'out' && !r.id && r.did === d && r.status === 'queued');
-          if (orphan && i && st === 'sent') { orphan.id = i; outById.set(i, orphan); record({ kind: 'status', id: i, status: st }); break; }
-          if (st === 'refused' && !i) soon();
-          break;
-        }
-        case 'pow': live.pow = { bits: Number(e['bits']), since: Date.now() }; break;
-        case 'pow_done': live.pow = null; live.powDone = Number(e['ms']); break;
-        case 'connected': live.online.add(String(e['relay'])); live.error = null; void checkClock(); break;
-        case 'disconnected': live.online.delete(String(e['relay'])); break;
-        case 'error': live.error = `${e['check']}: ${e['detail']}`; break;
-        case 'notice': break;
-        default: soon();
-      }
-    } catch (err) { live.error = `history: ${(err as Error).message}`; }
-  };
-  const carrier = new lib.Carrier({
-    identity: () => { const s = loadMe(); return { sign: signer(path, s).sign, bundle: id.bundleOf(s) }; },
-    ...paths, ...opts, keep: true, onEvent,
-  }) as unknown as Car;
   const me = (): { store: id.Store; did: string; original: string; chain: string[]; geneses: Record<string, Genesis> } => {
     const store = loadMe(), chain = id.chainOf(store), gs = [store.genesis, ...store.rotations.map((r) => r.next_genesis)];
     return { store, did: did(id.head(store)), original: chain[0]!, chain, geneses: Object.fromEntries(gs.map((g) => [did(g), g])) };
   };
-  async function checkClock(): Promise<void> { try { await carrier.checkClock(); } catch {} }
-  void checkClock();
-  const clockTimer = setInterval(() => void checkClock(), 600_000); clockTimer.unref();
-  const drainTimer = setInterval(() => void drain(), 60_000); drainTimer.unref();
-  await carrier.start();
-  await drain();
+  if (existsSync(historyFile)) chmodSync(historyFile, 0o600);
+  // History (`.history.jsonl`, appended, 0600) and the page's data (`.ui.json`, written whole): this host's files.
+  const page = P.makePage({
+    makeCarrier: (onEvent) => new lib.Carrier({
+      identity: () => { const s = loadMe(); return { sign: signer(path, s).sign, bundle: id.bundleOf(s) }; },
+      ...paths, ...opts, keep: true, onEvent,
+    }),
+    link: L, linksFile, codeKind: (t) => short.codeKind(t), unlogged: UNLOGGED,
+    store: {
+      readHistory: () => (existsSync(historyFile) ? readFileSync(historyFile, 'utf8') : null),
+      append: (line) => appendFileSync(historyFile, line, { mode: 0o600 }),
+      clearHistory: () => writePrivate(historyFile, ''),
+      readData: () => { try { return readFileSync(dataFile, 'utf8'); } catch { return null; } },
+      writeData: (text) => writePrivate(dataFile, text),
+    },
+    hooks: {
+      me: () => me(),
+      meInfo: () => ({ identity_file: path, recovery: id.head(loadMe()).recovery === null ? 'none' : 'set', key: 'file',
+        erase: `SIGELO_IDENTITY=${path} sigelo-agent erase-request --recovery-key <your recovery.key>   (on the machine holding the recovery key)` }),
+      agents: () => agents(),
+      // The seat (DEVICES.md); device messages after each drain: wiped answers, a standby asking for the seat.
+      seat: () => seatInfo(path),
+      // The relay controls' requests are split from the device messages first (sigelo-agent-control.ts).
+      deviceRound: async () => {
+        const msgs = (page.carrier as { takeDevices(): DevMsg[] }).takeDevices();
+        const [mine, rest] = relay ? relay.split(msgs) as [DevMsg[], DevMsg[]] : [[], msgs];
+        const r = await deviceRound(page.carrier, path, undefined, (l) => note(l), rest);
+        if (relay) {
+          for (const p of relay.look()) paired(p);
+          if (r.gave !== undefined) await relay.refuseAll(mine, r.gave);
+          else if (mine.length) { const rl = relay; handling = handling.then(() => rl.handle(mine)).catch((e: Error) => note(`remote: ${e.message}`)); }
+          relay.changed();
+        }
+        return r;
+      },
+      defer: (f) => { setImmediate(f); },
+      hidden: (x) => relay?.hidden(x) ?? false,
+    },
+  });
+  const { routes, dispatch, serial } = page, data = page.data as UiData, saveData = page.saveData;
+  const carrier = page.carrier as unknown as Car;
+  // Relay controls: always answered while the page runs (a paired control is no flag of this run).
+  const inviteLib = await contactModule<{ parseInvite(t: string, now: number): { nonce: string } }>('invite');
+  const waiters: ((p: { name: string; words: string | null }) => void)[] = [], early: { name: string; words: string | null }[] = [];
+  const paired = (p: { name: string; words: string | null }): void => { const w = waiters.shift(); if (w) w(p); else early.push(p); };
+  relay = await relayControls({
+    carrier: page.carrier as RelayCarrier, controls: data.controls, save: () => saveData(), routes, dispatch, serial,
+    seatElsewhere: () => { if (page.live.seatGone !== null) return page.live.seatGone; const st = seatInfo(path); return st && !st.here ? st.holder : null; },
+    lib: lib as unknown as { DEVICE_LABEL: string; DEVICE_SEND: symbol; DEFAULT_RELAY: string }, nonceOf: (code) => inviteLib.parseInvite(code, nowS()).nonce, note,
+  });
+  page.onChange(() => relay?.changed());
+  if (o.remote && !o.remote.relay) {
+    // A new control by name; an existing one keeps its key and scope (revoke it to change them).
+    const name = o.remote.name ?? (Object.keys(data.controls).length === 0 ? 'phone' : undefined), had = name === undefined ? undefined : data.controls[name];
+    if (isRelay(had)) { release(); refuse(409, 'remote', `control ${name} is a relay control: pick another --name for the LAN, or ui --remote --relay --name ${name}`); }
+    if (had && o.remote.scope !== undefined && had.scope !== o.remote.scope) { release(); refuse(409, 'remote', `control ${name} has scope ${had.scope}: revoke it (ui --revoke-control ${name}) to make it again with ${o.remote.scope}`); }
+    if (name !== undefined && !had) { data.controls[name] = newControl(o.remote.scope ?? 'chat', nowS()); saveData(); }
+    o = { ...o, remote: { ...o.remote, ...(name !== undefined && { name }) } };
+  }
+  // Devices (sigelo-agent-device.ts): before the first inbox, so its enrolment messages are kept apart.
+  devices = await devicePage({ op: path, agentsDir, carrier, online: () => page.live.online.has(carrier.relay), seen: page.seen });
+  page.setDevices(devices);
+  await page.start();
+  let relayLine: { name: string; line: string | null; exp: number | null } | null = null;
+  if (o.remote?.relay) {
+    const name = o.remote.name ?? 'phone';
+    try { const r = await relay.issue(name, o.remote.scope ?? 'chat'); relayLine = { name, line: r?.line ?? null, exp: r?.exp ?? null }; } catch (e) {
+      await page.halt(); try { await carrier.stop(); } finally { release(); }
+      throw e;
+    }
+  }
 
-  // ---- reads
+  // ---- the agents' directory: this host's own routes
   const agentCache = new Map<string, { mtime: number; a: Agent }>();
   function agents(): Agent[] {
     let files: string[] = [];
@@ -296,63 +325,6 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       return a;
     });
   }
-  const textOf = (v: unknown): string => (typeof v === 'string' ? v : JSON.stringify(v));
-  function state(since: number): unknown {
-    const t = nowS(), c = carrier.contacts(), local = agents(), clock = carrier.clockOffset();
-    const live_ = c.contacts.filter((x) => !x.revoked).map((x) => {
-      const pair = x.pair, agent = local.find((a) => a.did !== undefined && x.chain.includes(a.did));
-      const mine = agent?.mine ?? null;
-      // My agent on this machine, its attestation in its file: own, unless I chose otherwise (store.mjs observe).
-      let tier = x.tier;
-      if (mine && agent?.bundle && tier !== 'own' && x.tier_by !== 'owner') { try { tier = carrier.observe(agent.bundle)?.tier ?? tier; } catch {} }
-      // Their keys not here yet (an invitee who has not read our reply, or a bundle run out), or why messages wait.
-      const waiting = x.waiting ?? (x.prekeys ? null : 'their keys have not come: their side has not read the reply yet, or has been away');
-      const msgs = recs.filter((r) => (r.kind === 'in' || r.kind === 'out') && r.did === x.did);
-      const last = msgs.at(-1), read = data.read[x.did] ?? 0;
-      const queued = msgs.filter((r) => r.kind === 'out' && r.status === 'queued');
-      return {
-        did: x.did, name: x.name, current_did: x.current_did, relay: x.relay, re_pair: x.re_pair, words: x.fingerprint, pair,
-        words_checked: pair !== null && data.checked[x.did] === pair, tags: data.tags[x.did] ?? [],
-        local: agent?.name ?? null, mine, unread: msgs.filter((r) => r.kind === 'in' && r.n > read).length,
-        last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: last.status ?? null } : null,
-        waiting, not_collected: queued.length, queued: x.queued,
-        status: x.re_pair ? 'pair_again' : waiting ? 'waiting' : queued.length ? 'not_collected' : 'ok', ours: x.ours === true || mine !== null, tier,
-      };
-    });
-    // Mine: ours by key, whatever the tier (an own agent set to friend is still mine), or tier own.
-    const isMine = (x: { ours: boolean; tier: string }): boolean => x.ours || x.tier === 'own';
-    const mineGroup = live_.filter(isMine), rest = live_.filter((x) => !isMine(x));
-    const pendingInvites = c.invites.map((p) => {
-      const ours = [...invites.values()].find((x) => x.name === p.name);
-      return { name: p.name, exp: p.exp, relay: p.relay, ...(ours && { id: ours.id, short: ours.short ?? null, short_exp: ours.short_exp ?? null, code: ours.code }) };
-    });
-    const paired = [...invites.values()].filter((x) => x.paired).map((x) => ({ id: x.id, name: x.name, paired: x.paired }));
-    const failed = recs.filter((r) => r.kind === 'event' && r.type === 'pairing_failed' && r.at > t - DAY).slice(-5).map((r) => ({ name: r.name, did: r.did, code: r.code, detail: r.detail, at: r.at }));
-    const m = me();
-    return {
-      seq, now: t,
-      me: {
-        did: m.did, relay: carrier.relay, online: live.online.has(carrier.relay), clock_offset: clock?.offset ?? null, clock_checked: clock?.checked ?? null,
-        retention_days: carrier.retentionDays, error: live.error, pow_done_ms: live.powDone,
-        pow: live.pow && { bits: live.pow.bits, elapsed_s: Math.round((Date.now() - live.pow.since) / 1000), expected_s: Math.ceil(2 ** live.pow.bits / 180000) },
-      },
-      groups: { mine: mineGroup, contacts: rest },
-      pending: { invites: pendingInvites, paired, answers: c.answers, failed },
-      events: recs.filter((r) => r.kind === 'event' && r.n > since).slice(-50),
-    };
-  }
-
-  // ---- writes
-  let chain = Promise.resolve() as Promise<unknown>;
-  const serial = <T>(fn: () => Promise<T>): Promise<T> => { const p = chain.then(fn, fn); chain = p.catch(() => {}); return p; };
-  const contactOf = (d: unknown): Contact => {
-    if (typeof d !== 'string') refuse(400, 'body', 'contact: a DID');
-    return carrier.contacts().contacts.find((x) => !x.revoked && x.did === d) ?? refuse(404, 'not_contact', `${String(d)} is not a contact`);
-  };
-  const cleanName = (v: unknown, what: string): string => {
-    if (typeof v !== 'string' || v.trim() === '' || [...v.trim()].length > NAME_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(v)) refuse(400, 'body', `${what}: 1 to ${NAME_MAX} characters, no controls`);
-    return (v as string).trim();
-  };
   const rosterOrNull = (): Map<string, number> | null => { try { return workersOf(path); } catch (e) { return refuse(409, 'keeper', (e as Error).message); } };
   const contactsOf = (file: string): number => {
     try { return Object.values(readJson<StoreFile>(lib.pathsFor(file).store, { contacts: {} }).contacts).filter((c) => !c.revoked).length; } catch { return 0; }
@@ -362,87 +334,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     if (a.error) refuse(409, 'agent', `${a.file}: ${a.error}`);
     return a;
   };
-  const routes: Record<string, (b: Record<string, unknown>, q: URLSearchParams) => unknown> = {
-    'GET /api/state': async (_, q) => { if (draining) await draining; return state(Number(q.get('since') ?? 0) || 0); },
-    'GET /api/me': () => {
-      const m = me(), recovery = id.head(m.store).recovery;
-      return { did: m.did, original: m.original, chain: m.chain, identity_file: path, recovery: recovery === null ? 'none' : 'set', key: 'file', relay: carrier.relay, retention_days: carrier.retentionDays,
-        erase: `SIGELO_IDENTITY=${path} sigelo-agent erase-request --recovery-key <your recovery.key>   (on the machine holding the recovery key)` };
-    },
-    'POST /api/invite': (b) => serial(async () => {
-      const name = b['name'] === undefined || b['name'] === '' ? `contact-${randomBytes(2).toString('hex')}` : cleanName(b['name'], 'name');
-      const r = await carrier.invite({ name, short: b['long'] !== true });
-      const inv = { id: randomBytes(6).toString('hex'), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp! }) };
-      invites.set(inv.id, inv);
-      return { ...inv, relay: r.relay };
-    }),
-    'POST /api/invite/cancel': (b) => serial(async () => {
-      const inv = invites.get(String(b['id'])) ?? refuse(404, 'invite', 'no such invite');
-      await carrier.cancelInvite(inv.code);
-      invites.delete(inv.id);
-      return { cancelled: true };
-    }),
-    'POST /api/accept': (b) => serial(async () => {
-      if (typeof b['code'] !== 'string' || b['code'].trim() === '') refuse(400, 'body', 'code: the short code (K7F3-Q9ZP) or the long one (sgl1…)');
-      const text = b['code'] as string, code = short.codeKind(text) === 'short' ? text : text.replace(/\s+/g, '');
-      const name = b['name'] === undefined || b['name'] === '' ? undefined : cleanName(b['name'], 'name');
-      // friend or quiet, the human's choice; own is detected, never asked (store.mjs tiers).
-      const tier = b['tier'];
-      if (tier !== undefined && tier !== 'friend' && tier !== 'quiet') refuse(400, 'body', 'tier: friend or quiet');
-      const r = await carrier.accept(code, { ...(name !== undefined && { name }), wait: 10, ...(tier !== undefined && { tier: tier as string }) });
-      const now = r.contact ? carrier.contacts().contacts.find((x) => x.did === r.contact!.did) : undefined;
-      return r.contact ? { status: r.status, contact: { ...r.contact, pair: now?.pair ?? null, tier: now?.tier ?? null } }
-        : { ...r, exp: carrier.contacts().answers.find((x) => x.did === r.did)?.exp ?? null };
-    }),
-    'POST /api/words': (b) => serial(async () => {
-      const c = contactOf(b['contact']);
-      if (b['match'] === true) { data.checked[c.did] = c.pair ?? ''; saveData(); return { checked: true }; }
-      if (b['match'] !== false) refuse(400, 'body', 'match: true or false');
-      return forget(c);
-    }),
-    'POST /api/rename': (b) => serial(async () => {
-      // A name another live contact holds is refused (409 name_taken): `send <name>` would refuse both.
-      return carrier.rename(contactOf(b['contact']).did, cleanName(b['name'], 'name'));
-    }),
-    'POST /api/tier': (b) => serial(async () => {
-      const c = contactOf(b['contact']), tier = b['tier'];
-      if (tier !== 'own' && tier !== 'friend' && tier !== 'quiet') refuse(400, 'body', 'tier: own, friend or quiet');
-      return carrier.setTier(c.did, tier as string);
-    }),
-    'POST /api/tag': (b) => serial(async () => {
-      const c = contactOf(b['contact']), tags = b['tags'];
-      if (!Array.isArray(tags) || tags.length > 8) refuse(400, 'body', 'tags: a list of at most 8');
-      const clean = [...new Set((tags as unknown[]).map((x) => cleanName(x, 'tag').replace(/^#/, '')))];
-      if (clean.some((x) => [...x].length > TAG_MAX)) refuse(400, 'body', `a tag has at most ${TAG_MAX} characters`);
-      data.tags[c.did] = clean; saveData();
-      return { tags: clean };
-    }),
-    'POST /api/forget': (b) => serial(async () => forget(contactOf(b['contact']))),
-    'POST /api/send': (b) => serial(async () => {
-      const c = contactOf(b['to']), text = b['text'];
-      if (typeof text !== 'string' || text.trim() === '' || text.length > TEXT_MAX) refuse(400, 'body', `text: 1 to ${TEXT_MAX} characters`);
-      let r: Awaited<ReturnType<Car['sendAll']>>[number];
-      try { [r] = (await carrier.sendAll(c.did, [text], { label: '' })) as [typeof r]; } catch (e) {
-        // The session failed: the message stays queued in the carrier and goes at a later connection.
-        const f = e as Fail;
-        if (!/queued/.test(f.message)) throw e;
-        return record({ kind: 'out', did: c.did, id: null, text, status: 'queued', code: f.check, detail: f.message });
-      }
-      const out = record({ kind: 'out', did: c.did, id: r.id, text, status: r.status, code: r.code, detail: r.detail });
-      return out;
-    }),
-    'GET /api/messages': (_, q) => {
-      const d = contactOf(q.get('contact')).did, since = Number(q.get('since') ?? 0) || 0;
-      const msgs = recs.filter((r) => (r.kind === 'in' || r.kind === 'out') && r.did === d && r.n > since).slice(-200);
-      // Read: the page has shown them.
-      if ((data.read[d] ?? 0) < seq) { data.read[d] = seq; saveData(); }
-      return { seq, messages: msgs.map((r) => ({ n: r.n, dir: r.kind, at: r.at, text: textOf(r.text), label: r.label ?? '', status: r.status ?? null, code: r.code ?? null, detail: r.detail ?? null })) };
-    },
-    'POST /api/sync': () => serial(async () => { await carrier.sync(); return { synced: true }; }),
-    'POST /api/history/clear': () => serial(async () => {
-      writePrivate(historyFile, ''); recs.length = 0; outById.clear(); data.read = {}; saveData();
-      return { cleared: true };
-    }),
+  Object.assign(routes, {
     'GET /api/agents': () => {
       const cs = carrier.contacts().contacts, workers = rosterOrNull();
       return agents().map((a) => {
@@ -453,7 +345,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     },
     // Enrol (ENROL.md): worker i of the keeper root into the agent's file, so the 25 words restore it;
     // a worker already only has its operator attestation renewed. Nothing here attests a random key.
-    'POST /api/agents/enrol': (b) => serial(async () => {
+    'POST /api/agents/enrol': (b: Record<string, unknown>) => serial(async () => {
       const a = agentOf(b['agent']), m = me(), t = nowS(), workers = rosterOrNull();
       if (workers === null) refuse(400, 'keeper', `no keeper root at ${keeperPath(path)}: run sigelo-agent keeper --from-words once (your 25 words, read from the terminal)`);
       const holder = lockHolder(a.file);
@@ -472,7 +364,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       return { agent: a.name, worker: r.worker, renewed: false, did: r.did, old: r.old, exp: r.exp, days_left: OPERATOR_DAYS, contacts: r.contacts,
         ...(r.contacts > 0 && { warning: `${r.contacts} contact(s) of ${a.name} know its old DID ${r.old}: they must pair again` }) };
     }),
-    'POST /api/agents/pair': (b) => serial(async () => {
+    'POST /api/agents/pair': (b: Record<string, unknown>) => serial(async () => {
       const a = agentOf(b['agent']);
       const holder = uiHolder(a.file);
       if (holder !== null) refuse(409, 'busy', busy(a.file, holder, 'pairing here'));
@@ -486,19 +378,87 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       if (c) { data.checked[c.did] = c.pair ?? ''; saveData(); }
       return { status: 'connected', contact: c ? { did: c.did, name: c.name } : null };
     }),
-  };
-  async function forget(c: Contact): Promise<unknown> {
-    const r = await carrier.forget(c.did);
-    delete data.tags[c.did]; delete data.checked[c.did]; saveData();
-    return { forgotten: c.did, offline: r.offline ?? null };
-  }
+  });
+  // Devices: the writes through this carrier one at a time; a scan runs its own (another identity file).
+  for (const [k, f] of Object.entries(devices.routes)) routes[k] = k.startsWith('POST ') && k !== 'POST /api/devices/scan' ? (b) => serial(async () => f(b)) : (b) => f(b);
 
-  // ---- HTTP
-  const token = randomBytes(16).toString('hex'), tokenBytes = Buffer.from(token);
+  // ---- HTTP: the page's listener (pageServer) over this page's routes
   let port = 0;
-  const hosts = (): Set<string> => new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+  const { server, token } = pageServer({ port: () => port, has: (k) => routes[k] !== undefined, dispatch, onPost: () => relay?.changed() });
+
+  // ---- the LAN listener (--remote): POST /r, sealed; everything else a status and no body.
+  const bare = (res: ServerResponse, status: number): void => { res.writeHead(status, { 'Content-Length': '0' }); res.end(); };
+  const lan = o.remote ? createServer((req, res) => {
+    // One request per connection: no idle socket outlives a page that stopped.
+    res.setHeader('Cache-Control', 'no-store'); res.setHeader('Connection', 'close');
+    if (req.method !== 'POST' || req.url !== '/r') { req.resume(); return bare(res, 404); }
+    void (async () => {
+      const parts: Buffer[] = [];
+      let n = 0;
+      for await (const d of req as AsyncIterable<Buffer>) { n += d.length; if (n > R_BODY_MAX) return bare(res, 413); parts.push(d); }
+      let raw: unknown;
+      try { raw = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { return bare(res, 400); }
+      const r = openRequest(lanControls(data.controls), raw);
+      if (r === null) return bare(res, 403);
+      // Kept before the call runs: the same request never runs twice, even across a restart.
+      r.c.ctr = r.ctr; r.c.last_used = nowS(); saveData();
+      const [status, answer] = await remoteCall(r.c.scope, r.msg, routes, dispatch);
+      relay?.changed();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(sealAnswer(r.c, r.ctr, safeJson(JSON.stringify({ status, body: answer }))));
+    })().catch(() => { try { res.destroy(); } catch {} });
+  }) : null;
+
+  const listen = (srv: ReturnType<typeof createServer>, p: number, ip: string): Promise<number> => new Promise((ok, no) => {
+    srv.once('error', (e: Error & { code?: string }) => no(e.code === 'EADDRINUSE' ? Object.assign(new Error(`port ${p} on ${ip} is taken: another program (or another page) has it`), { check: 'port_taken', status: 409 }) : e));
+    srv.listen(p, ip, () => ok((srv.address() as { port: number }).port));
+  });
+  const stopAll = async (): Promise<void> => {
+    relay?.stop();
+    await page.halt();
+    for (const srv of [server, lan]) if (srv?.listening) { srv.closeAllConnections(); await new Promise<void>((ok) => srv.close(() => ok())); }
+    try { await carrier.stop(); } finally { release(); }
+  };
+  let remote: Ui['remote'] = null;
+  try {
+    port = await listen(server, o.port ?? 0, '127.0.0.1');
+    if (lan && o.remote && remoteIp !== null) {
+      let rp: number;
+      // The port is kept, so a control's text stays valid; taken now: a new one, and the texts must be shown again.
+      try { rp = await listen(lan, data.remote?.port ?? 0, remoteIp); } catch (e) {
+        if ((e as Fail).check !== 'port_taken' || data.remote === undefined) throw e;
+        note(`remote: port ${data.remote.port} is taken; a new one: show each control's text again (ui --remote --name <name>)`);
+        rp = await listen(lan, 0, remoteIp);
+      }
+      if (data.remote?.port !== rp) { data.remote = { port: rp }; saveData(); }
+      const name = o.remote.name ?? null, c = name === null ? null : data.controls[name]! as Control;
+      remote = { ip: remoteIp, port: rp, name, line: c ? controlLine(remoteIp, rp, c) : null };
+    }
+  } catch (e) { await stopAll(); throw e; }
+  const rl = relay;
+  return {
+    url: `http://127.0.0.1:${port}/#t=${token}`, port, token, remote,
+    relay: {
+      name: relayLine?.name ?? null, line: relayLine?.line ?? null, exp: relayLine?.exp ?? null,
+      paired: () => (early.length ? Promise.resolve(early.shift()!) : new Promise((ok) => { waiters.push(ok); })),
+      confirm: async (name, match) => { const r = await rl.confirm(name, match); rl.changed(); return r; },
+      revoke: (name) => rl.revoke(name),
+      issue: (name, scope) => { if (!CONTROL_NAME.test(name)) refuse(400, 'remote', 'control name: 1 to 20 of a-z 0-9 _ -'); return rl.issue(name, scope); },
+    },
+    close: stopAll,
+  };
+}
+
+/**
+ * The page's listener on 127.0.0.1 (`ui`, and `control ui` for a relay control, sigelo-agent-control.ts):
+ * the static files, `/api/*` with the token in X-Sigelo-Token, Host checked, Origin and JSON on writes,
+ * no cookies, the CSP. has(METHOD path): whether the route exists; dispatch: its answer.
+ */
+export function pageServer(o: { port(): number; has(key: string): boolean; dispatch(method: string, url: URL, b: Record<string, unknown>): Promise<[number, unknown]>; onPost?(): void }): { server: ReturnType<typeof createServer>; token: string } {
+  const token = randomBytes(16).toString('hex'), tokenBytes = Buffer.from(token);
+  const hosts = (): Set<string> => new Set([`127.0.0.1:${o.port()}`, `localhost:${o.port()}`]);
   const secure = (res: ServerResponse): void => {
-    res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'${IMPORT_MAP}; media-src 'self' mediastream: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY'); res.setHeader('Cache-Control', 'no-store'); res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
@@ -518,15 +478,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     });
     req.on('error', no);
   });
-  // One handler for both listeners: the route's answer as [status, JSON value].
-  async function dispatch(method: string, url: URL, b: Record<string, unknown>): Promise<[number, unknown]> {
-    const route = routes[`${method} ${url.pathname}`];
-    if (!route) return [404, { error: { check: 'route', message: `no ${method} ${url.pathname}` } }];
-    try { return [200, await route(b, url.searchParams)]; } catch (e) {
-      const f = e as Fail;
-      return [f.status ?? (f.check ? 409 : 500), { error: { check: f.check ?? 'internal', message: f.message, ...(f.long !== undefined && { long: f.long }) } }];
-    }
-  }
+  // One handler for both listeners (contact/page.mjs dispatch): the route's answer as [status, JSON value].
   const server = createServer((req, res) => {
     secure(res);
     void (async () => {
@@ -537,7 +489,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
         const f = STATIC[url.pathname];
         if (req.method !== 'GET' || f === undefined) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('not found'); }
         res.writeHead(200, { 'Content-Type': `${f[1]}; charset=utf-8` });
-        return res.end(readFileSync(join(HERE, f[0])));
+        return res.end(readFileSync(staticFile(f[0])));
       }
       const given = Buffer.from(String(req.headers['x-sigelo-token'] ?? ''));
       if (given.length !== tokenBytes.length || !timingSafeEqual(given, tokenBytes)) return deny(res, 'token');
@@ -546,77 +498,17 @@ export async function startUi(o: UiOptions): Promise<Ui> {
         if (req.headers.origin === undefined || !hosts().has(req.headers.origin.replace(/^http:\/\//, '')) || !req.headers.origin.startsWith('http://')) return deny(res, 'origin');
         if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) return deny(res, 'content-type');
       }
-      if (!routes[`${req.method} ${url.pathname}`]) return json(res, 404, { error: { check: 'route', message: `no ${req.method} ${url.pathname}` } });
+      if (!o.has(`${req.method} ${url.pathname}`)) return json(res, 404, { error: { check: 'route', message: `no ${req.method} ${url.pathname}` } });
       let b: Record<string, unknown> = {};
       try { if (req.method === 'POST') b = await body(req); } catch (e) {
         const f = e as Fail;
         return json(res, f.status ?? 400, { error: { check: f.check ?? 'body', message: f.message } });
       }
-      json(res, ...(await dispatch(req.method!, url, b)));
+      json(res, ...(await o.dispatch(req.method!, url, b)));
+      if (req.method === 'POST') o.onPost?.();
     })().catch(() => { try { res.destroy(); } catch {} });
   });
-
-  // ---- the LAN listener (--remote): POST /r, sealed; everything else a status and no body.
-  const bare = (res: ServerResponse, status: number): void => { res.writeHead(status, { 'Content-Length': '0' }); res.end(); };
-  const lan = o.remote ? createServer((req, res) => {
-    // One request per connection: no idle socket outlives a page that stopped.
-    res.setHeader('Cache-Control', 'no-store'); res.setHeader('Connection', 'close');
-    if (req.method !== 'POST' || req.url !== '/r') { req.resume(); return bare(res, 404); }
-    void (async () => {
-      const parts: Buffer[] = [];
-      let n = 0;
-      for await (const d of req as AsyncIterable<Buffer>) { n += d.length; if (n > R_BODY_MAX) return bare(res, 413); parts.push(d); }
-      let raw: unknown;
-      try { raw = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { return bare(res, 400); }
-      const r = openRequest(data.controls, raw);
-      if (r === null) return bare(res, 403);
-      // Kept before the call runs: the same request never runs twice, even across a restart.
-      r.c.ctr = r.ctr; r.c.last_used = nowS(); saveData();
-      let status: number, answer: unknown;
-      let url: URL | null = null;
-      try { url = new URL(r.msg.path, 'http://remote'); } catch {}
-      const b = r.msg.body === undefined ? {} : r.msg.body;
-      if (url === null || !url.pathname.startsWith('/api/') || url.origin !== 'http://remote') [status, answer] = [404, { error: { check: 'route', message: 'not a route' } }];
-      else if (deviceRoute(url.pathname)) [status, answer] = [403, { error: { check: 'remote', message: 'device routes are never remote: moving keys needs a human at the computer' } }];
-      else if (!SCOPES[r.c.scope].has(`${r.msg.method} ${url.pathname}`)) {
-        [status, answer] = routes[`${r.msg.method} ${url.pathname}`] ? [403, { error: { check: 'scope', message: `${r.msg.method} ${url.pathname} is outside this control's scope (${r.c.scope})` } }]
-          : [404, { error: { check: 'route', message: `no ${r.msg.method} ${url.pathname}` } }];
-      } else if (typeof b !== 'object' || b === null || Array.isArray(b)) [status, answer] = [400, { error: { check: 'body', message: 'a JSON object' } }];
-      else [status, answer] = await dispatch(r.msg.method, url, b as Record<string, unknown>);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(sealAnswer(r.c, r.ctr, safeJson(JSON.stringify({ status, body: answer }))));
-    })().catch(() => { try { res.destroy(); } catch {} });
-  }) : null;
-
-  const listen = (srv: ReturnType<typeof createServer>, p: number, ip: string): Promise<number> => new Promise((ok, no) => {
-    srv.once('error', (e: Error & { code?: string }) => no(e.code === 'EADDRINUSE' ? Object.assign(new Error(`port ${p} on ${ip} is taken: another program (or another page) has it`), { check: 'port_taken', status: 409 }) : e));
-    srv.listen(p, ip, () => ok((srv.address() as { port: number }).port));
-  });
-  const stopAll = async (): Promise<void> => {
-    clearInterval(clockTimer); clearInterval(drainTimer);
-    for (const srv of [server, lan]) if (srv?.listening) { srv.closeAllConnections(); await new Promise<void>((ok) => srv.close(() => ok())); }
-    try { await carrier.stop(); } finally { release(); }
-  };
-  let remote: Ui['remote'] = null;
-  try {
-    port = await listen(server, o.port ?? 0, '127.0.0.1');
-    if (lan && o.remote && remoteIp !== null) {
-      let rp: number;
-      // The port is kept, so a control's text stays valid; taken now: a new one, and the texts must be shown again.
-      try { rp = await listen(lan, data.remote?.port ?? 0, remoteIp); } catch (e) {
-        if ((e as Fail).check !== 'port_taken' || data.remote === undefined) throw e;
-        note(`remote: port ${data.remote.port} is taken; a new one: show each control's text again (ui --remote --name <name>)`);
-        rp = await listen(lan, 0, remoteIp);
-      }
-      if (data.remote?.port !== rp) { data.remote = { port: rp }; saveData(); }
-      const name = o.remote.name ?? null, c = name === null ? null : data.controls[name]!;
-      remote = { ip: remoteIp, port: rp, name, line: c ? controlLine(remoteIp, rp, c) : null };
-    }
-  } catch (e) { await stopAll(); throw e; }
-  return {
-    url: `http://127.0.0.1:${port}/#t=${token}`, port, token, remote,
-    close: stopAll,
-  };
+  return { server, token };
 }
 
 function openBrowser(url: string): void {
@@ -624,19 +516,21 @@ function openBrowser(url: string): void {
   try { const c = spawn(cmd as string, args as string[], { detached: true, stdio: 'ignore' }); c.on('error', () => {}); c.unref(); } catch {}
 }
 
-const USAGE = 'ui [--no-open] [--identity <file>] [--port <p>] [--remote [--listen <ip>] [--name <control>] [--scope read|chat|all]] | ui --controls | ui --revoke-control <name>';
-/** `sigelo-agent ui [--no-open] [--port <p>] [--remote …]`. Runs until SIGINT/SIGTERM. `--controls`, `--revoke-control <name>`: print, exit. */
+const USAGE = 'ui [--no-open | --app] [--identity <file>] [--port <p>] [--remote [--relay | --listen <ip>] [--name <control>] [--scope read|chat|all]] | ui --controls | ui --revoke-control <name>';
+/** `sigelo-agent ui [--no-open | --app] [--port <p>] [--remote …]`. Runs until SIGINT/SIGTERM (`--app`: or stdin's end). `--controls`, `--revoke-control <name>`: print, exit. */
 export async function main(rest: string[]): Promise<number> {
-  let noOpen = false, flag: string | undefined, port: number | undefined, remote = false, listen: string | undefined, name: string | undefined, scope: string | undefined;
-  let list = false, revoke: string | undefined;
+  let noOpen = false, app = false, flag: string | undefined, port: number | undefined, remote = false, listen: string | undefined, name: string | undefined, scope: string | undefined;
+  let list = false, revoke: string | undefined, viaRelay = false;
   const value = (i: number): string | undefined => (rest[i + 1] !== undefined && !rest[i + 1]!.startsWith('--') ? rest[i + 1] : undefined);
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!, v = value(i);
     if (a === '--no-open') noOpen = true;
+    else if (a === '--app') app = true;
     else if (a === '--identity' && v !== undefined && flag === undefined) { flag = v; i++; }
     else if (a === '--operator') continue;
     else if (a === '--port' && v !== undefined && /^\d{1,5}$/.test(v) && Number(v) >= 1 && Number(v) <= 65535 && port === undefined) { port = Number(v); i++; }
     else if (a === '--remote') remote = true;
+    else if (a === '--relay') viaRelay = true;
     else if (a === '--listen' && v !== undefined && listen === undefined) { listen = v; i++; }
     else if (a === '--name' && v !== undefined && name === undefined) { name = v; i++; }
     else if (a === '--scope' && v !== undefined && scope === undefined) { scope = v; i++; }
@@ -644,21 +538,22 @@ export async function main(rest: string[]): Promise<number> {
     else if (a === '--revoke-control' && v !== undefined && revoke === undefined) { revoke = v; i++; }
     else { note(`ui: unexpected ${JSON.stringify(a)}: ${USAGE}${a.includes('recovery') ? '. Your identity comes from your 25 words: sigelo-agent keeper --from-words' : ''}`); return 2; }
   }
+  if (viaRelay && (!remote || listen !== undefined)) { note(`ui: --relay goes with --remote, without --listen: ${USAGE}`); return 2; }
   if (!remote && (listen ?? name ?? scope) !== undefined) { note(`ui: --listen, --name and --scope go with --remote: ${USAGE}`); return 2; }
   if (scope !== undefined && !isScope(scope)) { note('ui: --scope read, chat or all'); return 2; }
-  if ((list || revoke !== undefined) && (remote || port !== undefined || (list && revoke !== undefined))) { note(`ui: --controls and --revoke-control stand alone: ${USAGE}`); return 2; }
+  if ((list || revoke !== undefined) && (app || remote || port !== undefined || (list && revoke !== undefined))) { note(`ui: --controls and --revoke-control stand alone: ${USAGE}`); return 2; }
   let path: string;
   try { path = operatorFile('ui', flag); } catch (e) { note((e as Error).message); return 2; }
   if (!existsSync(path)) { note(`ui: no identity at ${path}: make it once from your 25 words (it is their root identity, so they restore it): sigelo-agent keeper --from-words`); return 2; }
   if (list) { console.log(safeJson(JSON.stringify(listControls(path), null, 2))); return 0; }
   if (revoke !== undefined) {
-    try { if (!revokeControl(path, revoke)) { note(`ui: no control ${JSON.stringify(revoke)} (ui --controls lists them)`); return 1; } } catch (e) { note((e as Error).message); return 1; }
-    note(`control ${revoke} revoked: its key is forgotten here; a device holding it controls nothing`);
+    try { if (!await revokeControl(path, revoke)) { note(`ui: no control ${JSON.stringify(revoke)} (ui --controls lists them)`); return 1; } } catch (e) { note((e as Error).message); return 1; }
+    note(`control ${revoke} revoked: its key (or, over the relay, its contact) is forgotten here; a device holding it controls nothing`);
     return 0;
   }
   let ui: Ui;
   try {
-    ui = await startUi({ identity: path, ...(port !== undefined && { port }), ...(remote && { remote: { ...(listen !== undefined && { listen }), ...(name !== undefined && { name }), ...(scope !== undefined && { scope: scope as Scope }) } }) });
+    ui = await startUi({ identity: path, ...(port !== undefined && { port }), ...(remote && { remote: { ...(listen !== undefined && { listen }), ...(name !== undefined && { name }), ...(scope !== undefined && { scope: scope as Scope }), ...(viaRelay && { relay: true }) } }) });
   } catch (e) { note((e as Error).message); return (e as Fail).status === 400 ? 2 : 1; }
   console.log(ui.url);
   note(`your page (experimental): ${ui.url} (this machine only; the link is its key: do not share it). Ctrl-C stops it.`);
@@ -667,8 +562,34 @@ export async function main(rest: string[]): Promise<number> {
     const names = listControls(path).map((c) => `${c.name} (${c.scope})`).join(', ');
     note(`remote: ${ui.remote.ip}:${ui.remote.port}, POST /r sealed; controls: ${names || 'none'}.${ui.remote.line !== null ? ` Scan or paste the SIGELO:UI: line on the device for ${ui.remote.name}: whoever holds it controls this page within its scope until revoked (ui --revoke-control ${ui.remote.name}).` : ''}`);
   }
-  if (!noOpen) openBrowser(ui.url);
-  await new Promise<void>((ok) => { process.once('SIGINT', () => ok()); process.once('SIGTERM', () => ok()); });
+  if (viaRelay) void relayTerminal(ui, path);
+  if (!noOpen && !app) openBrowser(ui.url);
+  await new Promise<void>((ok) => {
+    process.once('SIGINT', () => ok()); process.once('SIGTERM', () => ok());
+    if (app) { process.stdin.once('end', () => ok()).once('error', () => ok()).resume(); }
+  });
   await ui.close();
   return 0;
+}
+
+/** `ui --remote --relay`: the control's code (stdout, and a QR on the terminal), then each pairing's four words, confirmed here. */
+async function relayTerminal(ui: Ui, path: string): Promise<void> {
+  const r = ui.relay, tty = hasTty();
+  if (r.line !== null) {
+    console.log(r.line);
+    if (tty) { try { await ttyWrite((await terminalQr(r.line)).join('\n') + '\n'); } catch {} }
+    note(`remote over the relay: scan or type the SIGELO:CTL: code in the app for ${r.name} within 10 minutes; then compare the four words here. The app holds a key of its own, no account key; ui --revoke-control ${r.name} forgets it.`);
+  } else if (r.name !== null) note(`remote over the relay: ${r.name} is paired already (ui --controls); to pair another app, --name <another>`);
+  // Paired before, its words never confirmed (no terminal then): asked now.
+  const had = r.name === null ? undefined : readJson<Partial<UiData>>(dataPath(path), {}).controls?.[r.name];
+  let first: { name: string; words: string | null } | null = r.line === null && isRelay(had) && had.did !== null && !had.confirmed ? { name: r.name!, words: had.words } : null;
+  for (;;) {
+    const p = first ?? await r.paired();
+    first = null;
+    note(`${p.name} paired over the relay; its four words: ${p.words ?? '(none)'}`);
+    if (!tty) { note(`no terminal to confirm them: ${p.name} answers nothing until they are confirmed (run ui --remote --relay --name ${p.name} in a terminal)`); continue; }
+    const yes = /^y(es)?$/i.test((await ttyLine(`Does the app show the same four words (${p.words})? [y/N] `)).trim());
+    await r.confirm(p.name, yes);
+    note(yes ? `${p.name} confirmed: it controls this page (its scope) while the page runs` : `${p.name} refused and forgotten: someone else may have used the code`);
+  }
 }

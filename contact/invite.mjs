@@ -6,10 +6,9 @@
 // No network here. The carrier encrypts answer and reply under inviteKeys(secret).key and posts
 // them on its two topics; it parses what it decrypts with sigelo's parseBytes (duplicate keys).
 // Fixture and runner: fixtures/invite-v0.json, test-invite.mjs, gen-invite.mjs.
-import { randomBytes } from 'node:crypto';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex, concatBytes, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
+import { bytesToHex, concatBytes, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize, did as didOf, multibase, verify, verifySig } from 'sigelo';
 import { MsgError, pairKey, signAs } from './kdf.mjs';
 

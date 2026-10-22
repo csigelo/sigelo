@@ -635,6 +635,27 @@ try {
       `uma reads the reply: paired, and both answers are spent, the reply topic having died with it (${ub.offline ?? 'online'})`);
   }
 
+  // ================================================================ fresh epochs (devices.md §4.3: a snapshot's state imported)
+  {
+    // The seat moved with a copy of this state, or took it by force: every session starts afresh.
+    const Fa = agent('fay'), Gu = agent('gus'), fay = make(Fa), gus = make(Gu);
+    const code = (await fay.invite({ name: 'gus' })).code;
+    await gus.accept(code, { name: 'fay', wait: 0.3 });
+    await fay.inbox(); await gus.inbox(); await fay.inbox();
+    await fay.send('gus', say('fay before')); await gus.inbox({ wait: 2 });
+    await gus.send('fay', say('gus before')); await fay.inbox({ wait: 2 });
+    const had = stateOf(Fa).peers[Gu.original].session.out.epoch;
+    ok(fay.freshEpochs({ only: ['did:sigelo:znobody'] }).length === 0, 'freshEpochs: only a DID that is no contact: nothing restarted');
+    const r = fay.freshEpochs({ retire: true }), st = stateOf(Fa).peers[Gu.original], pk = st.session.out.prekeys;
+    ok(had !== null && r.join() === Gu.original && st.session.out.epoch === null && st.prekeys_resend === true && st.renew === true
+      && pk.keys.every(([id]) => st.session.out.used.includes(id)), 'freshEpochs (retire): the outgoing epoch ended, gus\'s one-time prekeys spent here, a fresh bundle of ours owed (every one-time key replaced)');
+    await fay.inbox(); await gus.inbox({ wait: 2 });
+    await fay.send('gus', say('fay after')); const gb = await gus.inbox({ wait: 2 });
+    await gus.send('fay', say('gus after')); const fb = await fay.inbox({ wait: 2 });
+    ok(gb.messages.some((m) => m.content === 'fay after') && fb.messages.some((m) => m.content === 'gus after'), 'after it, messages go both ways on new epochs');
+    await Promise.allSettled([fay.stop(), gus.stop()]);
+  }
+
   // ================================================================ the owner's verbs: cancel an invite, rename a contact
   {
     const V = agent('vera'), vera = make(V);
@@ -1032,7 +1053,7 @@ try {
     const id = await import(pathToFileURL(join(HERE, '..', 'adapters', 'moadim', 'sigelo-agent.ts')).href);
     const env = { SIGELO_RELAY: HOST, SIGELO_RELAY_ENDPOINTS: JSON.stringify(endpoints) };
     const tools = await mcp.load({ installed: false, id, env, clock: () => now });
-    ok(tools && tools.tools.map(([n]) => n).join() === 'sigelo_invite,sigelo_accept,sigelo_contacts,sigelo_set_tier,sigelo_send,sigelo_send_file,sigelo_inbox,sigelo_forget_contact,sigelo_history', 'the MCP module lists the nine tools');
+    ok(tools && tools.tools.map(([n]) => n).join() === 'sigelo_invite,sigelo_accept,sigelo_contacts,sigelo_set_tier,sigelo_send,sigelo_send_file,sigelo_inbox,sigelo_forget_contact,sigelo_links,sigelo_history', 'the MCP module lists the ten tools');
     ok(tools.tools.every(([, d, s]) => typeof d === 'string' && s.type === 'object' && s.additionalProperties === false && s.properties.identity), 'each with a closed schema and the profile argument');
     const daveFile = join(dir, 'dave.local.json');
     id.init(daveFile, keygen({ seed: seed('dave recovery'), recovery: 'sha256:' + '0'.repeat(64) }).key);

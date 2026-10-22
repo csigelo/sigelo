@@ -85,3 +85,8 @@ Where a worker's key rests (plain file, keychain, key agent): [KEYS.md](KEYS.md)
 On the page (`sigelo-agent ui`), **Enrol** on a local agent does `enrol --here` into its own file: worker
 i replaces its key (its old files set aside; its contacts must pair again), or, on a worker, renews the
 attestation.
+
+## Devices
+
+A phone or a second computer gets a worker of its own by QR, online or offline:
+`sigelo-agent device add --name phone`, then `device scan` on it. See [DEVICES.md](DEVICES.md).

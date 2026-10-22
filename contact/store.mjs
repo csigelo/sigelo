@@ -5,7 +5,7 @@
 //   { v, self, invites: { nonce: { secret, exp, name, peer, relay } },
 //              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as, named?, tier? } },
 //              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key, re_pair?,
-//                                          tier, tier_by, operator_exp? } },
+//                                          tier, tier_by, operator_exp?, link? } },
 //              preset?: { original DID: tier } }
 // invites: codes this owner handed out, keyed by inviteNonce(code bytes); peer: the original DID of
 // the contact a re-key code is for, null on a new contact's code. accepts: codes this owner
@@ -22,20 +22,26 @@
 // a merge and a rename keep all of it. Ours (oursOf) is that mark alone, whatever the tier: an own
 // agent the owner set to friend or quiet is ours and low trust. preset: the owner's tier for a DID
 // not yet a contact (an agent enrolled before it pairs), filed by the admit that makes it one.
+// link (link.mjs, sigelo-link/1): {id, purpose, linked_by, expires, tier, prior?}, the operator's
+// introduction this contact came with (prior: {tier, tier_by}, the pairing was there before: an end
+// restores them instead of forgetting). Kept by a re-pair, a merge and a rename; gone with revoke. A
+// link never writes operator_exp, so never ours; while it lasts a contact that is not ours cannot be
+// set own (link_tier).
 // The file holds one-time secrets, Bob's one-time key and
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
-import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
+import { files as nodeFiles } from './platform-node.mjs';
 import { canonicalize, verify } from 'sigelo';
 import { SKEW, TTL_MAX, V, attempt, checkTime, fail, hex, keyOf } from './invite.mjs';
 
 export const TIERS = ['own', 'friend', 'quiet'];
+// UTF-8 as readFileSync(…, 'utf8') reads it: a byte order mark is kept (JSON.parse refuses it).
+const UTF8 = new TextDecoder('utf-8', { ignoreBOM: true });
 export const OPERATOR_CTX = 'sigelo-relay/operator';
 // The longest name rename() gives a contact, in characters.
 export const NAME_MAX = 64;
 // What a record keeps of its tier through admit (a re-pair, a merged notice).
-const TIER_KEYS = ['tier', 'tier_by', 'operator_exp'];
+const TIER_KEYS = ['tier', 'tier_by', 'operator_exp', 'link'];
 
 export class Contacts {
   /**
@@ -43,9 +49,10 @@ export class Contacts {
    * mine: () → { chain, operators }: this identity's DIDs and those of the operators attesting it
    * (the carrier's, from its bundle), for tiers; without it nobody is own by attestation.
    */
-  constructor(path, self, { mine } = {}) {
+  // files: the platform's (platform-node.mjs files, by default): the file is read and written by name.
+  constructor(path, self, { mine, files = nodeFiles } = {}) {
     if (typeof self !== 'string' || !self.startsWith('did:sigelo:z')) throw new TypeError('Contacts: self must be the owner\'s original DID');
-    this.path = path; this.self = self; this.mine = mine ?? null; this.load();
+    this.path = path; this.self = self; this.mine = mine ?? null; this.files = files; this.load();
   }
 
   // ---- tiers (the header)
@@ -95,9 +102,30 @@ export class Contacts {
   setTier(who, tier, now) {
     if (!TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
     const c = this.#find(who);
+    if (tier === 'own' && c.link && !this.oursOf(c, now)) fail('link_tier', `${c.name} came by link ${c.link.id} and is not yours by key: a link never makes a contact own (unlink it first)`);
     c.tier = tier; c.tier_by = 'owner';
     this.save();
     return { did: c.did, name: c.name, tier: this.tierOf(c, now), ours: this.oursOf(c, now) };
+  }
+
+  /**
+   * The link record of a contact (who: a name or any DID of its chain), link.mjs's: an object
+   * {id, purpose, linked_by, expires, tier, prior?}, or null to drop it (prior: its tier and tier_by
+   * restored). Another link already there: link_exists. → the contact's { did, name, link }.
+   */
+  setLink(who, link, now) {
+    const c = this.#find(who);
+    if (link === null) {
+      const p = c.link?.prior;
+      if (p) { if (p.tier_by === undefined) { delete c.tier; delete c.tier_by; } else { c.tier = p.tier; c.tier_by = p.tier_by; } this.#settle(c, now); }
+      delete c.link;
+    } else {
+      if (typeof link !== 'object' || typeof link.id !== 'string' || typeof link.linked_by !== 'string') fail('link_message', 'a link record is {id, purpose, linked_by, expires, tier}');
+      if (c.link && (c.link.id !== link.id || c.link.linked_by !== link.linked_by)) fail('link_exists', `${c.name} is linked already (${c.link.id}: ${c.link.purpose})`);
+      c.link = link;
+    }
+    this.save();
+    return { did: c.did, name: c.name, link: c.link ?? null };
   }
 
   /**
@@ -159,7 +187,8 @@ export class Contacts {
   // Not while writes are held (hold): the change in memory is the one to keep.
   load() {
     if (this.held) return this;
-    this.s = existsSync(this.path) ? JSON.parse(readFileSync(this.path, 'utf8')) : { v: V, self: this.self, invites: {}, accepts: {}, contacts: {} };
+    const raw = this.files.read(this.path);
+    this.s = raw !== null ? JSON.parse(UTF8.decode(raw)) : { v: V, self: this.self, invites: {}, accepts: {}, contacts: {} };
     if (this.s.v !== V || this.s.self !== this.self) fail('store', `${this.path} is not the ${V} store of ${this.self}`);
     return this;
   }
@@ -168,9 +197,7 @@ export class Contacts {
   // wider mode, a symlink) is never written through. As adapters/moadim/sigelo-agent.ts save().
   save() {
     if (this.held) { this.dirty = true; return; }
-    const tmp = join(dirname(this.path), `.${basename(this.path)}.${randomBytes(8).toString('hex')}.tmp`);
-    writeFileSync(tmp, JSON.stringify(this.s, null, 2), { mode: 0o600, flag: 'wx' });
-    renameSync(tmp, this.path);
+    this.files.write(this.path, utf8ToBytes(JSON.stringify(this.s, null, 2)));
   }
 
   // The carrier (carrier.mjs #onAnswer, #onReply) saves its own state file first and this file
@@ -282,7 +309,7 @@ export class Contacts {
   /** Local and final for this store: the pairing key goes, and pending codes to or from the contact die with it. */
   revoke(did) {
     const c = this.lookup(did) ?? fail('not_contact', `${did} is not a contact`);
-    c.revoked = true; c.pair_key = null;
+    c.revoked = true; c.pair_key = null; delete c.link;
     for (const [n, p] of Object.entries(this.s.accepts)) if (c.chain.includes(p.code_did)) delete this.s.accepts[n];
     for (const [n, p] of Object.entries(this.s.invites)) if (p.peer === c.did) delete this.s.invites[n];
     this.save(); return c;

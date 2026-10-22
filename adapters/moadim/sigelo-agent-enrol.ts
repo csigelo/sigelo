@@ -20,6 +20,7 @@ import { did, keygen, parseBytes, VERSION } from 'sigelo';
 import { keeperRoot, parseRoot, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { bundleOf, head, identityPath, load, save, type Store } from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
+import * as keychain from './sigelo-agent-keychain.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import { absent, agentFileFor, agentsDirFor, contactLib, debug, heldPath, holderFor, humanPath, lockHolder, MISSING, operatorFile, putBack, safeJson, safeText, trustOf, unreadable, type Batch } from './sigelo-agent-contact.ts';
 
@@ -41,14 +42,14 @@ export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of
 Operator identity: --identity, else $SIGELO_HUMAN, else ~/.config/sigelo/me.local.json; never in the agents'
 directory (SIGELO_IDENTITY's, unless it names this file, and the default's). Exit 3: still pending when the wait ended.`;
 
-interface Placed { id: string; name: string; did: string; original: string; i?: number; n?: number; ours?: boolean | null; tier?: string; temp: string | null; released?: boolean; exp: number;
+export interface Placed { id: string; name: string; did: string; original: string; i?: number; n?: number; ours?: boolean | null; tier?: string; temp: string | null; released?: boolean; exp: number;
   worker?: number | null; operator?: string; status?: string | null; contact?: { fingerprint?: string } | null }
-interface Out { delivered: { id: string; name: string; temp: string; did: string }[]; placed: Placed[]; refused: { check: string; detail: string; from?: string }[];
+export interface Out { delivered: { id: string; name: string; temp: string; did: string }[]; placed: Placed[]; refused: { check: string; detail: string; from?: string }[];
   sent: { did: string }[]; rest: Batch; offline?: string; lastError?: unknown }
-interface Carrier { relay: string; stop(): Promise<void>; unpark(code: string): Promise<string>; inbox(o: object): Promise<Batch>;
+export interface Carrier { relay: string; stop(): Promise<void>; unpark(code: string, o?: { relay: string }): Promise<string>; inbox(o: object): Promise<Batch>;
   accept(code: string, o: object): Promise<{ status: string; contact?: { did: string; name: string; fingerprint?: string } }>;
   contacts(): { answers: unknown[]; contacts: { did: string; revoked: boolean; ours: boolean; tier: string }[] }; presetTier(did: string, tier: string): { tier: string } }
-interface Enrol {
+export interface Enrol {
   enrolPath(identity: string): string;
   pending<T>(file: string, now: number, fn?: (s: { issued: Record<string, { done?: unknown; temp?: string }>; joining: Record<string, { temp?: string }> }) => T): T;
   issue(o: object): Promise<{ short: string; short_exp: number; id: string; did: string; original: string }>;
@@ -61,7 +62,7 @@ interface Enrol {
   workerIdentity(o: object): Store;
   operatorAttestation(o: object): { body: { exp: number } };
 }
-interface Libs { lib: { Carrier: new (o: object) => Carrier; pathsFor(p: string): { store: string; state: string }; optionsFromEnv(): { relay?: string }; DEFAULT_RELAY: string;
+export interface Libs { lib: { Carrier: new (o: object) => Carrier; pathsFor(p: string): { store: string; state: string }; optionsFromEnv(): { relay?: string }; DEFAULT_RELAY: string;
   readCode(t: string, now: number): unknown; keepLong(e: unknown, long: string): unknown }; short: { codeKind(t: string): string }; kdf: { MsgError: new (c: string, w: string) => Error }; enrol: Enrol }
 
 const WAIT_MAX = 300, JOIN_WAIT = 120, KEEPER_V = 'sigelo-keeper-hot/0', NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -86,18 +87,18 @@ export const operatorPath = (flag: string | undefined, env: Record<string, strin
 const agentsDir = (op: string): string => agentsDirFor(op);
 // The MCP server signs with any `sigelo.<name>.local.json` in the agents' directory, for any caller:
 // an operator key there, or K beside it, would be every agent's (operatorFile refuses it).
-function checkOperator(path: string, mayBeAbsent = false, what = 'enrol'): void {
+export function checkOperator(path: string, mayBeAbsent = false, what = 'enrol'): void {
   operatorFile(what, path);
   if (!mayBeAbsent && !existsSync(path)) throw usageError(`${what}: no operator identity at ${path}: make it once from your 25 words: sigelo-agent keeper --from-words (read from the terminal, never the command line)`);
 }
 
-async function libs(): Promise<Libs> {
+export async function libs(): Promise<Libs> {
   try { return await contactLib() as never; } catch (e) {
     const why = (e as Error).message.split('\n')[0]!;
     throw new Error(absent(e) ? `enrol ${MISSING}: ${why}` : why, { cause: e });
   }
 }
-function carrierFor(lib: Libs['lib'], path: string): Carrier {
+export function carrierFor(lib: Libs['lib'], path: string): Carrier {
   return new lib.Carrier({
     identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: bundleOf(s) }; },
     ...lib.pathsFor(path), ...lib.optionsFromEnv(), keep: true,
@@ -114,18 +115,22 @@ function carrierFor(lib: Libs['lib'], path: string): Carrier {
 interface Me { n: number; did: string; original: string }
 /** The operator identity file: seed-derived, marked so `rotate` refuses a random key (cli.ts). */
 type MeStore = Store & { derived?: { path: string; n: number } };
-interface Keeper { v: string; keeper: number; root_hex: string; recovery: string; me?: Me; workers: Record<string, { name: string; n: number; did: string; original: string; placed: string; at: number }> }
+// root_hex: K plain (0600); or root: K sealed in the OS keychain (a FULL device's, DEVICES.md), provider "keychain".
+export interface Keeper { v: string; keeper: number; root_hex?: string; root?: keychain.WrappedSecret; provider?: string; recovery: string; me?: Me;
+  workers: Record<string, { name: string; n: number; did: string; original: string; placed: string; at: number; rank?: string; via?: string; revoked?: number; attestation?: { body: { exp: number; iat: number }; sig: string }; until?: number }> }
 export const keeperPath = (op: string): string => op.replace(/\.json$/, '') + '.keeper.json';
-function readKeeper(op: string): Keeper {
+export function readKeeper(op: string): Keeper {
   const f = keeperPath(op);
   if (!existsSync(f)) throw usageError(`enrol: no keeper root at ${f}: make it once from your 25 words: sigelo-agent keeper --from-words (read from the terminal, never the command line)`);
   let k: Keeper;
   try { k = parseBytes(readFileSync(f)) as never; } catch (e) { throw new Error(`keeper: ${f} does not parse (${(e as Error).message}): make it again with sigelo-agent keeper --from-words`, { cause: e }); }
-  if (k?.v !== KEEPER_V || !/^[0-9a-f]{64}$/.test(k.root_hex ?? '') || typeof k.workers !== 'object') throw new Error(`keeper: ${f} is not a ${KEEPER_V} file: make it again with sigelo-agent keeper --from-words`);
+  const sealed = k?.root !== undefined && k.root_hex === undefined && (k.root as { provider?: unknown }).provider === 'keychain';
+  if (k?.v !== KEEPER_V || !(sealed || /^[0-9a-f]{64}$/.test(k.root_hex ?? '')) || typeof k.workers !== 'object') throw new Error(`keeper: ${f} is not a ${KEEPER_V} file: make it again with sigelo-agent keeper --from-words`);
   return k;
 }
-const rootOf = (k: Keeper): { K: Uint8Array; recovery: string } => ({ K: Uint8Array.from(Buffer.from(k.root_hex, 'hex')), recovery: k.recovery });
-const writeKeeper = (op: string, fn: (k: Keeper) => void): Keeper => withLock(keeperPath(op), () => { const k = readKeeper(op); fn(k); save(keeperPath(op), k as never); return k; });
+export const rootOf = (k: Keeper): { K: Uint8Array; recovery: string } =>
+  ({ K: k.root_hex !== undefined ? Uint8Array.from(Buffer.from(k.root_hex, 'hex')) : keychain.unwrapRoot(k.root!, k.keeper, k.recovery), recovery: k.recovery });
+export const writeKeeper = (op: string, fn: (k: Keeper) => void): Keeper => withLock(keeperPath(op), () => { const k = readKeeper(op); fn(k); save(keeperPath(op), k as never); return k; });
 
 /** The 25 words from the terminal, not echoed, or from stdin when it is not one. Never argv. */
 async function readWords(): Promise<string> {
@@ -227,7 +232,7 @@ export async function keeperMain(rest: string[]): Promise<number> {
       const K = keeperRoot(S, j), recovery = recoveryCommitment(S), file = keeperPath(op), hex = Buffer.from(K).toString('hex');
       try {
         const old = existsSync(file) ? readKeeper(op) : undefined;
-        if (old && old.root_hex !== hex) throw Object.assign(new Error(`keeper: ${file} holds another keeper root (K_${old.keeper} of other words, or another index): delete it first if you mean to replace it; its workers stay placed but cannot be restored from it`), { check: 'keeper_exists' });
+        if (old && Buffer.from(rootOf(old).K).toString('hex') !== hex) throw Object.assign(new Error(`keeper: ${file} holds another keeper root (K_${old.keeper} of other words, or another index): delete it first if you mean to replace it; its workers stay placed but cannot be restored from it`), { check: 'keeper_exists' });
         me = placeMe(enrol, S, op, old?.me?.n, f.has('--replace-me'), f.has('--rotate-me'));
         withLock(file, () => { if (!existsSync(file)) save(file, { v: KEEPER_V, keeper: j, root_hex: hex, recovery, workers: {} } as never); });
       } finally { S.fill(0); K.fill(0); }
@@ -267,7 +272,7 @@ export async function enrolInto(op: string, file: string, name: string, relay: s
 
 // ---------------------------------------------------------------- enrol
 
-function flags(rest: string[], value: string[], bare: string[]): Map<string, string> {
+export function flags(rest: string[], value: string[], bare: string[]): Map<string, string> {
   const m = new Map<string, string>();
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
@@ -288,7 +293,7 @@ function failed(e: unknown): number {
 const restored = (w: string): string => `the contacts of the lost copy are gone: it starts with you only. Any contact that invites it again, or that it re-pairs with, sees the same DID ${w}`;
 
 // What a run did, one line each; the rest of the inbox goes back for `inbox`.
-function report(path: string, r: Out, said?: string): void {
+export function report(path: string, r: Out, said?: string): void {
   putBack(heldPath(path), r.rest);
   for (const e of r.rest.events as { type?: string; name?: string; did?: string; fingerprint?: string | null }[]) {
     if (e.type === 'paired' && e.fingerprint && e.did !== said) note(`paired with ${e.name ?? e.did}. Check with them: ${e.fingerprint}`);
@@ -317,6 +322,8 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
   const restore = f.has('--restore'), here = f.has('--here'), wait = seconds(f.get('--wait'), 0), tier = f.get('--tier');
   // By a code, the operator identity logs in: not beside its page or watcher (the page enrols too).
   if (!here) holderFor(opPath, 'enrol');
+  // A worker index is allocated at the seat only (DEVICES.md): a standby refuses seat_elsewhere.
+  await (await import('./sigelo-agent-device.ts')).seatGate(opPath, 'enrol');
   let i: number, n: number, name = f.get('--name');
   if (name !== undefined && !NAME.test(name)) throw usageError(`--name: lowercase letters, digits, _ and -, at most 64 (it names the file sigelo.<name>.local.json), not ${JSON.stringify(name)}`);
   if (restore) {
@@ -373,7 +380,7 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
 }
 
 // The machine: the temporary identity's files, all of them (identity, contacts, carrier, held, files).
-function dropTemp(temp: string): void {
+export function dropTemp(temp: string): void {
   const base = basename(temp).replace(/\.json$/, '');
   for (const f of readdirSync(dirname(temp))) if (f === basename(temp) || f.startsWith(`${base}.`)) rmSync(join(dirname(temp), f), { recursive: true, force: true });
 }
@@ -390,12 +397,7 @@ const placer = (l: Libs, path: string, name: string | undefined, wait: () => num
 
 /** The machine, after the code: the temporary identity runs the enrolment until placed or `wait`. */
 async function asMachine(l: Libs, path: string, temp: string, name: string | undefined, wait: number, said?: string): Promise<number> {
-  const end = Date.now() + wait * 1000, left = (): number => Math.max(0, Math.ceil((end - Date.now()) / 1000));
-  const c = carrierFor(l.lib, temp);
-  let res: Out;
-  try {
-    res = await l.enrol.complete({ carrier: c, file: l.enrol.enrolPath(path), temp, wait: left(), until: (o: Out) => o.placed.length > 0, place: placer(l, path, name, left) });
-  } finally { await c.stop(); }
+  const res = await runMachine(l, path, temp, name, wait);
   report(temp, res, said);
   const p = res.placed[0];
   if (p) {
@@ -404,9 +406,18 @@ async function asMachine(l: Libs, path: string, temp: string, name: string | und
     if (p.status !== 'connected') { note('enrol: the worker\'s pairing with the operator completes when the operator runs sigelo-agent enrol --finish; then here too'); return 3; }
     return 0;
   }
-  if (res.offline !== undefined) { debug(res.lastError, { identity: temp, relay: c.relay }); return 1; }
+  if (res.offline !== undefined) { debug(res.lastError, { identity: temp, relay: l.lib.optionsFromEnv().relay ?? l.lib.DEFAULT_RELAY }); return 1; }
   note('enrol: not done yet; kept 24 hours: once the operator has run sigelo-agent enrol --finish, run it here too');
   return 3;
+}
+
+/** The machine's enrolment rounds as its temporary identity, until placed or `wait` s (also the page's device scan). */
+export async function runMachine(l: Libs, path: string, temp: string, name: string | undefined, wait: number): Promise<Out> {
+  const end = Date.now() + wait * 1000, left = (): number => Math.max(0, Math.ceil((end - Date.now()) / 1000));
+  const c = carrierFor(l.lib, temp);
+  try {
+    return await l.enrol.complete({ carrier: c, file: l.enrol.enrolPath(path), temp, wait: left(), until: (o: Out) => o.placed.length > 0, place: placer(l, path, name, left) });
+  } finally { await c.stop(); }
 }
 
 /** Whatever is pending here: the operator's issued, the machine's joining, a worker's own pairing. */
@@ -419,6 +430,7 @@ async function finish(opFlag: string | undefined, wait: number): Promise<number>
   if (temps.length === 0 && !issued && !answering) { note('enrol: nothing pending here'); return 0; }
   if (temps.length > 0 || answering) holderFor(agentPath, 'enrol --finish');
   if (issued) holderFor(opPath, 'enrol --finish');
+  if (issued) await (await import('./sigelo-agent-device.ts')).seatGate(opPath, 'enrol --finish');
   let code = 0;
   for (const t of temps) code = Math.max(code, await asMachine(l, agentPath, t, undefined, left()));
   if (answering) {
@@ -470,7 +482,8 @@ export async function initEnrol(path: string, code: string, rest: string[]): Pro
     l = await libs();
     const temp = path.replace(/\.json$/, '') + `.enrol-${randomBytes(4).toString('hex')}.json`;
     // The short code is spent here (one fetch): from now on a refusal prints the long code.
-    long = l.short.codeKind(code) === 'short' ? await carrierFor(l.lib, temp).unpark(code) : code.replace(/\s+/g, '');
+    const relay = flag('--relay');
+    long = l.short.codeKind(code) === 'short' ? await carrierFor(l.lib, temp).unpark(code, ...(relay ? [{ relay }] : [])) : code.replace(/\s+/g, '');
     l.lib.readCode(long, nowS());
     // Temporary: it only pairs. Its recovery commits to a random key nobody keeps; it lives minutes.
     const t = keygen({ recovery: 'sha256:' + randomBytes(32).toString('hex') });

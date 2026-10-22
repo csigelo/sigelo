@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: MIT
+// The `local` backend of the page (design/apps.md §3): adapters/moadim/UI-API.md's route table in the
+// page, over a carrier running in it on the browser platform (platform-web.mjs). The routes are
+// contact/page.mjs's, the ones `sigelo-agent ui` serves, so every answer is the same JSON; what this
+// app has not (an agents' directory, devices to add, a seat) answers as an empty list or a refusal.
+//
+//   const r = makeRouter({ platform, identity, mode, options })
+//   await r.start()                    one owner per identity (navigator.locks), the session, the first drain
+//   await r.call(method, path, body)   → { status, body }: the route's JSON, as the HTTP backend answers it
+//   r.onChange(fn)                     fn() after anything that changes /api/state (events pushed; the same `since`)
+//   r.mode()                           { kind: 'safe' | 'full', worker?, standby? }: the page's banner
+//   await r.stop()
+//
+// identity(): the identity file as sigelo-agent writes it ({ secret, genesis, rotations,
+// attestations, issuers }), read at every operation. Its files live under the name `app/me.local.json`
+// in the platform's files (contacts, carrier state, history, the page's data, links).
+import { did as didOf } from 'sigelo';
+import { Carrier, UNLOGGED, pathsFor } from './vendor/contact/carrier.mjs';
+import * as L from './vendor/contact/link.mjs';
+import { makePage, refuse } from './vendor/contact/page.mjs';
+import { codeKind } from './vendor/contact/short.mjs';
+
+export const IDENTITY = 'app/me.local.json';
+const unhex = (s) => {
+  if (typeof s !== 'string' || !/^[0-9a-f]{64}$/.test(s)) refuse(409, 'identity', 'this app holds no usable key (secret: 32 bytes as hex)');
+  return Uint8Array.from(s.match(/../g), (h) => parseInt(h, 16));
+};
+const bundleOf = (s) => ({ v: 'sigelo/0', typ: 'bundle', genesis: s.genesis, rotations: s.rotations ?? [], bindings: s.bindings ?? [], attestations: s.attestations ?? [], issuers: s.issuers ?? [] });
+const headOf = (s) => (s.rotations ?? []).at(-1)?.next_genesis ?? s.genesis;
+const utf8 = (s) => new TextEncoder().encode(s);
+const text = (b) => (b === null ? null : new TextDecoder().decode(b));
+
+const DEVICES_HERE = 'devices are added, scanned and revoked on the operator\'s computer (sigelo-agent ui), not in this app';
+
+export function makeRouter({ platform, identity, mode = { kind: 'safe' }, options = {} }) {
+  const { files } = platform;
+  const paths = pathsFor(IDENTITY), base = IDENTITY.replace(/\.json$/, '');
+  const historyFile = `${base}.history.jsonl`, dataFile = `${base}.ui.json`, linksFile = L.linksPath(IDENTITY);
+  const me = () => {
+    const s = identity(), chain = [didOf(s.genesis), ...(s.rotations ?? []).map((r) => didOf(r.next_genesis))];
+    return { did: didOf(headOf(s)), original: chain[0], chain };
+  };
+  const env = Object.fromEntries(Object.entries(platform.env ?? {}).filter(([k, v]) => v !== undefined && v !== null && ['relay', 'endpoints', 'retentionDays', 'shortRelay', 'registry'].includes(k)));
+  const page = makePage({
+    makeCarrier: (onEvent) => new Carrier({
+      identity: () => { const s = identity(); return { secret: unhex(s.secret), bundle: bundleOf(s) }; },
+      ...paths, ...env, ...options, keep: true, onEvent, platform,
+    }),
+    link: L, linksFile, codeKind, unlogged: UNLOGGED,
+    // The history and the page's data: files of the platform (IndexedDB behind them), written whole.
+    store: {
+      readHistory: () => text(files.read(historyFile)),
+      append: (line) => { const had = files.read(historyFile); files.write(historyFile, had === null ? utf8(line) : concat(had, utf8(line))); },
+      clearHistory: () => files.write(historyFile, new Uint8Array(0)),
+      readData: () => text(files.read(dataFile)),
+      writeData: (t) => files.write(dataFile, utf8(t)),
+    },
+    hooks: {
+      me,
+      meInfo: () => ({ identity_file: IDENTITY, recovery: headOf(identity()).recovery === null ? 'none' : 'set', key: 'browser',
+        erase: 'On the machine holding the recovery key, with this identity\'s file: SIGELO_IDENTITY=<file> sigelo-agent erase-request --recovery-key <your recovery.key>' }),
+      agents: () => [],
+      seat: () => null,
+      defer: (f) => { setTimeout(f, 0); },
+    },
+  });
+  const { routes, serial } = page;
+  // No agents' directory here: the list is empty, and naming one is naming none.
+  routes['GET /api/agents'] = () => [];
+  for (const r of ['POST /api/agents/enrol', 'POST /api/agents/pair']) routes[r] = (b) => refuse(404, 'agent', `no agent ${JSON.stringify(b['agent'])} in this app`);
+  routes['GET /api/devices'] = () => ({ devices: [], list: null, adding: [], joining: null });
+  for (const r of ['add', 'confirm', 'words', 'scan', 'revoke', 'sync']) routes[`POST /api/devices/${r}`] = () => serial(async () => refuse(409, 'not_here', DEVICES_HERE));
+
+  let owned = null;
+  return {
+    platform, carrier: page.carrier, page,
+    async start() {
+      owned = await platform.owner(me().original);
+      try { await page.start(); } catch (e) { owned.release(); owned = null; throw e; }
+    },
+    async stop() {
+      await page.halt();
+      try { await page.carrier.stop(); } finally { owned?.release(); owned = null; }
+    },
+    /** A call as ui.js makes it: → { status, body }, body the JSON value the HTTP backend would send. */
+    async call(method, path, body) {
+      let url;
+      try { url = new URL(path, 'http://app'); } catch { return { status: 404, body: { error: { check: 'route', message: 'not a route' } } }; }
+      if (url.origin !== 'http://app' || !url.pathname.startsWith('/api/')) return { status: 404, body: { error: { check: 'route', message: `no ${method} ${url.pathname}` } } };
+      if (!routes[`${method} ${url.pathname}`]) return { status: 404, body: { error: { check: 'route', message: `no ${method} ${url.pathname}` } } };
+      const b = body === undefined || body === null ? {} : body;
+      if (method === 'POST' && (typeof b !== 'object' || Array.isArray(b))) return { status: 400, body: { error: { check: 'body', message: 'a JSON object' } } };
+      const [status, value] = await page.dispatch(method, url, method === 'POST' ? JSON.parse(JSON.stringify(b)) : {});
+      // As it would arrive over HTTP: JSON, nothing shared with the router's own objects.
+      return { status, body: JSON.parse(JSON.stringify(value)) };
+    },
+    onChange: (f) => page.onChange(f),
+    mode: () => ({ ...mode }),
+  };
+}
+
+function concat(a, b) { const o = new Uint8Array(a.length + b.length); o.set(a); o.set(b, a.length); return o; }

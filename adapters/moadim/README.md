@@ -27,6 +27,9 @@ Identity file: `$SIGELO_IDENTITY`, else
 **Key agent:** `keys to-agent` moves the key into [`sigelo-key-agent`](../../keyagent/README.md);
 the file then says `{"provider":"agent"}` and signatures go over `SIGELO_KEY_AGENT`'s socket.
 
+**Phone:** your page on a phone, self-contained or driving the computer's ([APPS.md](APPS.md));
+the account on a second device ([DEVICES.md](DEVICES.md)).
+
 ## Commands
 
 `<json|->`: inline JSON, `-` for stdin, or a file path.

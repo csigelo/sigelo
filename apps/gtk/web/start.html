@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>sigelo</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="start.css">
+<script type="importmap">{"imports": {"node:zlib": "./shim-zlib.mjs", "sigelo-app://app/kdf.mjs": "./shim-kdf.mjs"}}</script>
+<script type="module" src="start.js"></script>
+</head>
+<body>
+<main id="app">
+  <p id="note" class="card err" hidden></p>
+  <section class="card">
+    <h2>This phone</h2>
+    <p class="muted">The page of this phone's own identity (sigelo-agent ui runs here).</p>
+    <div class="bar"><button id="self" class="primary">Open this phone's page</button></div>
+  </section>
+  <section class="card">
+    <h2>A computer</h2>
+    <p class="muted">Drive the page of a computer running <code>sigelo-agent ui --remote</code> on this network (SIGELO:UI:), or from anywhere with <code>ui --remote --relay</code> (SIGELO:CTL:). This phone holds no account key.</p>
+    <div id="saved" class="bar" hidden><button id="resume" class="primary">Reconnect</button><button id="forget">Forget it</button></div>
+    <div class="bar"><button id="camera">Scan its QR</button><button id="file">From an image</button></div>
+    <video id="video" muted playsinline hidden></video>
+    <input id="pick" type="file" accept="image/*" hidden>
+    <div id="paired" hidden><p>The four words: <strong id="words"></strong></p><p class="muted">Answer y on the computer only if it shows the same; then open its page.</p>
+      <div class="bar"><button id="open" class="primary">Open the computer's page</button></div></div>
+    <label for="text">Or paste its SIGELO:UI: or SIGELO:CTL: text (or a screenshot of the QR)</label>
+    <textarea id="text" rows="2" autocomplete="off" spellcheck="false"></textarea>
+    <div class="bar"><button id="go">Connect</button></div>
+    <p id="status" class="muted"></p>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- The self-contained app (design/apps.md §3): ui.js over the in-page router (router.mjs), a carrier on the browser platform. Files: README.md. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-DDKDZFb3FPyDpkru0+q7Qo3KJbOgjbPtXfFXD5+p+xA='; connect-src 'self' https: wss:; worker-src 'self'; media-src 'self' mediastream: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>sigelo</title>
+<link rel="stylesheet" href="./vendor/ui.css">
+<link rel="icon" href="./vendor/icon.svg" type="image/svg+xml">
+<script type="importmap">{"imports": {"sigelo": "./vendor/sigelo/sigelo.js", "sigelo/dist/": "./vendor/sigelo/", "@noble/hashes/": "./vendor/@noble/hashes/", "@noble/ciphers/": "./vendor/@noble/ciphers/", "@noble/curves/": "./vendor/@noble/curves/", "@noble/post-quantum/": "./vendor/@noble/post-quantum/", "@noble/ed25519": "./vendor/@noble/ed25519/index.js", "node:zlib": "./vendor/shim-zlib.mjs", "./vendor/contact/platform-node.mjs": "./platform-stub.mjs", "/qr.mjs": "./vendor/contact/qr.mjs", "/qr-decode.mjs": "./vendor/contact/qr-decode.mjs"}}</script>
+<script type="module" src="./app.mjs"></script>
+<script src="./vendor/ui.js" defer></script>
+</head>
+<body>
+<main id="app"><p class="muted">Loading…</p></main>
+<section id="setup" hidden></section>
+<noscript>This app needs JavaScript.</noscript>
+</body>
+</html>

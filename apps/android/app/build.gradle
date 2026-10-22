@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: MIT
+// sigelo for Android (design/apps.md §8): a WebView around apps/web, no dependency but the platform.
+// The page's files are not in the repository: `node apps/android/assets.mjs` puts them in
+// src/main/assets/web/ (apps/web/copy.mjs's vendoring, copied as they are) before a build.
+//   ./gradlew assembleRelease    unsigned: the operator signs it offline (design/apps.md §11)
+//   ./gradlew assembleDebug -Psigelo.debugKeystore=<p12> -Psigelo.debugPassword=<pw>
+//                                signed with a throwaway key (CI makes one per job); without them, the SDK's debug key
+plugins {
+    id 'com.android.application'
+}
+
+def debugKeystore = providers.gradleProperty('sigelo.debugKeystore')
+def debugPassword = providers.gradleProperty('sigelo.debugPassword')
+
+android {
+    namespace 'io.sigelo.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.sigelo.app'
+        minSdk 28
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    signingConfigs {
+        if (debugKeystore.isPresent()) {
+            ephemeral {
+                storeFile file(debugKeystore.get())
+                storeType 'pkcs12'
+                storePassword debugPassword.get()
+                keyAlias 'debug'
+                keyPassword debugPassword.get()
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (debugKeystore.isPresent()) {
+                signingConfig signingConfigs.ephemeral
+            }
+        }
+        // release: no signing config, so app-release-unsigned.apk; not minified (the bridge's
+        // @JavascriptInterface methods are called by name).
+        release {
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig false
+    }
+
+    // No dependency metadata block in the APK (it would be encrypted to one store's key).
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+}
+
+// Without the page there is no app: refuse to build an empty shell.
+tasks.named('preBuild') {
+    def index = file('src/main/assets/web/index.html')
+    doFirst {
+        if (!index.exists()) {
+            throw new GradleException('src/main/assets/web/ is empty: run `node apps/android/assets.mjs` from the repository first')
+        }
+    }
+}

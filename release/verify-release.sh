@@ -12,7 +12,10 @@
 #      chain starts at the pinned release identity (release/release-identity.json), holding one
 #      ctx "sigelo.io/release" attestation from its current DID about itself whose claims name
 #      this tag, the tag's commit, sha256(SHA256SUMS) and exactly SHA256SUMS's files;
-#   3. the tag's SSH signature against release/allowed_signers (fetched from origin if absent).
+#   3. the tag's SSH signature against release/allowed_signers (fetched from origin if absent);
+#   4. if the claims name an Android APK (release/apk-ceremony.md): the file's SHA-256 and version
+#      as signed, and its signing certificate's SHA-256 with apksigner when there is one
+#      ($SIGELO_APKSIGNER overrides; without it, said so: release/apk-check.sh does it on its own).
 # The pins are read from THIS checkout, not from the release: compare them once with
 # https://sigelo.io/.well-known/sigelo-release-signers and /.well-known/sigelo-release-identity.json.
 # SIGELO_RELEASE_GENESIS and SIGELO_ALLOWED_SIGNERS override the two pins.
@@ -22,6 +25,7 @@ set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 tag=$1
 src=${2:-}
+got=
 pin=${SIGELO_RELEASE_GENESIS:-$root/release/release-identity.json}
 signers=${SIGELO_ALLOWED_SIGNERS:-$root/release/allowed_signers}
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -33,7 +37,6 @@ case $src in
 '' | http://* | https://*)
 	dir=$(mktemp -d)
 	trap 'rm -rf "$dir"' EXIT
-	got=
 	for base in ${src:-https://sigelo.io/releases/$tag https://github.com/csigelo/sigelo/releases/download/$tag}; do
 		base=${base%/}
 		if fetch "$base/SHA256SUMS" "$dir/SHA256SUMS" 2>/dev/null && fetch "$base/release.json" "$dir/release.json" 2>/dev/null; then got=$base; break; fi
@@ -55,13 +58,14 @@ fi
 signer=$(printf '%s\n' "$out" | sed -n 's/^Good "git" signature for \(.*\)$/\1/p' | head -1)
 
 verifier=${SIGELO_VERIFY:-$(command -v sigelo-verify || true)}
-node --input-type=module - "$root" "$tag" "$commit" "$dir" "$pin" "$verifier" "$signer" <<'EOF'
-import { readFileSync } from 'node:fs';
+apksigner=${SIGELO_APKSIGNER:-$(command -v apksigner || true)}
+node --input-type=module - "$root" "$tag" "$commit" "$dir" "$pin" "$verifier" "$signer" "$got" "$apksigner" <<'EOF'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-const [root, tag, commit, dir, pinPath, verifier, signer] = process.argv.slice(2);
+const [root, tag, commit, dir, pinPath, verifier, signer, base, apksigner] = process.argv.slice(2);
 const fail = (m) => { console.error(`FAIL: ${m}`); process.exit(1); };
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const lib = join(root, 'ts/dist/sigelo.js');
@@ -101,6 +105,32 @@ if (c.commit !== commit) fail(`release.json: signs commit ${c.commit}, the tag p
 if (c.sha256sums_sha256 !== sha(sums)) fail('release.json: signs another SHA256SUMS');
 const want = Object.keys(files).sort(), have = Object.keys(c.files ?? {}).sort();
 if (want.join('\n') !== have.join('\n') || want.some((f) => c.files[f] !== files[f])) fail('release.json: its file list differs from SHA256SUMS');
+
+// 4. The Android APK, when the release names one: signed outside SHA256SUMS, so checked here.
+let apkLine = '';
+if (c.apk !== undefined) {
+  const p = c.apk ?? {};
+  if (typeof p.file !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*\.apk$/.test(p.file) || !/^[0-9a-f]{64}$/.test(p.sha256 ?? '') ||
+    !/^[0-9a-f]{64}$/.test(p.cert_sha256 ?? '') || p.version !== tag.replace(/^v/, '')) fail('release.json: a malformed apk entry');
+  if (p.file in files) fail(`release.json: ${p.file} is in SHA256SUMS too`);
+  const at = join(dir, p.file);
+  if (!existsSync(at) && base) {
+    const res = await fetch(`${base}/${p.file}`).catch((e) => fail(`download ${base}/${p.file}: ${e.message}`));
+    if (!res.ok) fail(`download ${base}/${p.file}: ${res.status}`);
+    writeFileSync(at, Buffer.from(await res.arrayBuffer()));
+  }
+  let got; try { got = sha(readFileSync(at)); } catch { fail(`${p.file}: missing`); }
+  if (got !== p.sha256) fail(`${p.file}: sha256 ${got} is not the signed ${p.sha256}`);
+  let certs = 'not checked (no apksigner: run release/apk-check.sh)';
+  if (apksigner) {
+    let out; try { out = execFileSync(apksigner, ['verify', '--print-certs', at], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) { fail(`${p.file}: apksigner verify refuses it: ${(e.stderr || e.message).trim()}`); }
+    const seen = [...out.matchAll(/^Signer #\d+ certificate SHA-256 digest: *([0-9a-fA-F:]+)\s*$/gm)].map((m) => m[1].replace(/:/g, '').toLowerCase());
+    if (seen.length !== 1 || seen[0] !== p.cert_sha256) fail(`${p.file}: signed by certificate(s) ${seen.join(' ') || 'none'}, not the release's ${p.cert_sha256}`);
+    certs = 'certificate matches';
+  }
+  apkLine = `; ${p.file} ${p.version} matches, ${certs}`;
+}
 console.log(`OK ${tag} (${commit.slice(0, 12)}): ${want.length} files match SHA256SUMS; release.json signed ${new Date(iat * 1000).toISOString().slice(0, 10)} by ${r.did}${
-  r.chain.length > 1 ? ` (rotated from ${pinned})` : ''} [${verifier ? 'sigelo-verify' : 'ts library'}]; tag signed by ${signer || 'an allowed signer'}`);
+  r.chain.length > 1 ? ` (rotated from ${pinned})` : ''} [${verifier ? 'sigelo-verify' : 'ts library'}]; tag signed by ${signer || 'an allowed signer'}${apkLine}`);
 EOF

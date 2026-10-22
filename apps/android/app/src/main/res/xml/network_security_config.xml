@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TLS to the relays, verified against the system's certificate authorities only (no user CA).
+     Plain http is permitted to the platform because the remote form talks to a computer's
+     sigelo-agent ui (its remote listener) on the LAN, which has no certificate; every such call is
+     sealed in the page (sigelo-remote/0), and SigeloBridge.java sends http only to a private IPv4
+     address. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

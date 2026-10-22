@@ -1,0 +1,217 @@
+{
+ "v": "sigelo-app-vendor/0",
+ "files": {
+  "vendor/@noble/ciphers/_arx.js": {
+   "from": "contact/node_modules/@noble/ciphers/_arx.js",
+   "sha256": "ead142ba410404c0698bb80e0d6f77780799bb77a9e3b098cf0f9fca1c486e37"
+  },
+  "vendor/@noble/ciphers/_poly1305.js": {
+   "from": "contact/node_modules/@noble/ciphers/_poly1305.js",
+   "sha256": "5d2afd73b40dbafb7b6740c6e6388e7123c79a4e57306861b28c5734925fa84d"
+  },
+  "vendor/@noble/ciphers/chacha.js": {
+   "from": "contact/node_modules/@noble/ciphers/chacha.js",
+   "sha256": "5f1c00575e227b75163f4bac50b79442dec50ee3047c46c18887808ba8af0a69"
+  },
+  "vendor/@noble/ciphers/utils.js": {
+   "from": "contact/node_modules/@noble/ciphers/utils.js",
+   "sha256": "a443ec1f60d1aaa25d1b7d8c102d33c0e8e6d683ada1ad17be9c32e69170ff95"
+  },
+  "vendor/@noble/curves/abstract/curve.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/curve.js",
+   "sha256": "dbaeee3b41ff47efb76b78e14170fe4dda7c7ecdc387c402f16c5118e0bac356"
+  },
+  "vendor/@noble/curves/abstract/der.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/der.js",
+   "sha256": "7f80d698611b131368ecf732b8740bb97f72cd42fef77c4b0bb923e2e2d44159"
+  },
+  "vendor/@noble/curves/abstract/edwards.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/edwards.js",
+   "sha256": "f24a9c221a549a8fff259eb8f245ab0dc17679b13c532c3970d91acc4df9fffd"
+  },
+  "vendor/@noble/curves/abstract/fft.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/fft.js",
+   "sha256": "a4b2ff7ca33f4acc85d61f0e83ec3303c3f6b38ecc19b20d0f6462d820e518cf"
+  },
+  "vendor/@noble/curves/abstract/frost.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/frost.js",
+   "sha256": "9a95f1fdf7e17b9d93a16049db675ee2967ed2a04cf59b1bd981d4662acbedf5"
+  },
+  "vendor/@noble/curves/abstract/hash-to-curve.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/hash-to-curve.js",
+   "sha256": "e3c97e7d0827b728b14e3311ed11d8e386d8a70d8fc77e0b9fd2a3090f19d955"
+  },
+  "vendor/@noble/curves/abstract/modular.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/modular.js",
+   "sha256": "9ced3aa10598277a735e54f7b61d88e929d565da884ba5385f9006ebb3b6aab2"
+  },
+  "vendor/@noble/curves/abstract/montgomery.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/montgomery.js",
+   "sha256": "cdafa8816dad5a24475ec51952c5f71fdd5d1b46880ab982694c4f8ff605fc46"
+  },
+  "vendor/@noble/curves/abstract/oprf.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/oprf.js",
+   "sha256": "2ca36b3e4930092db1f91559410e86975816c036e248067bc65a8055aa1c504c"
+  },
+  "vendor/@noble/curves/abstract/weierstrass.js": {
+   "from": "contact/node_modules/@noble/curves/abstract/weierstrass.js",
+   "sha256": "d007e949c0d5b912e8c54132983219c8ff8f69bda058a70563b5cc7a8783331c"
+  },
+  "vendor/@noble/curves/ed25519.js": {
+   "from": "contact/node_modules/@noble/curves/ed25519.js",
+   "sha256": "e13f6c50c36feb0d18bf7986d5f881bcefb5f1f5b16de3cc5ee7693254c7a0b5"
+  },
+  "vendor/@noble/curves/nist.js": {
+   "from": "contact/node_modules/@noble/curves/nist.js",
+   "sha256": "0a692b98e22c56c0354f78eb1759cfbf6aec89eafc78cd2984a4f2e8428081e6"
+  },
+  "vendor/@noble/curves/utils.js": {
+   "from": "contact/node_modules/@noble/curves/utils.js",
+   "sha256": "be9ff86aef76419376e4d66cf01a134f3117f1f8dd62d81f1b79100145503367"
+  },
+  "vendor/@noble/ed25519/index.js": {
+   "from": "contact/node_modules/@noble/ed25519/index.js",
+   "sha256": "a4f631d1876b5d9e43a86cd71194ca27b5e1451edf4ba4db9a418f40a475569a"
+  },
+  "vendor/@noble/hashes/_md.js": {
+   "from": "contact/node_modules/@noble/hashes/_md.js",
+   "sha256": "60cf3010fda89e3e4d3f0e7ff1ce249e9c467f34b4fd41b6fd6101d9f69be763"
+  },
+  "vendor/@noble/hashes/_u64.js": {
+   "from": "contact/node_modules/@noble/hashes/_u64.js",
+   "sha256": "b09da8c07fe8187c07649494cdb7cd0bcf13df90b506a9473d19e4d5f8c2e102"
+  },
+  "vendor/@noble/hashes/hkdf.js": {
+   "from": "contact/node_modules/@noble/hashes/hkdf.js",
+   "sha256": "ccb942a8008f974018965eeb1e33b8f4739bf767c6f95f2ceb06f5873a302f67"
+  },
+  "vendor/@noble/hashes/hmac.js": {
+   "from": "contact/node_modules/@noble/hashes/hmac.js",
+   "sha256": "fec9f8f3aeda785ea2de91cc4c059d54ef98196261c026c43f48341007ae52c9"
+  },
+  "vendor/@noble/hashes/sha2.js": {
+   "from": "contact/node_modules/@noble/hashes/sha2.js",
+   "sha256": "471746bba6ec4c6238ca41358d1d3b40b6ff31cf3363f0b4d550c649c1a8e83b"
+  },
+  "vendor/@noble/hashes/sha3.js": {
+   "from": "contact/node_modules/@noble/hashes/sha3.js",
+   "sha256": "9a81e1edb24eae27b335533220167609cfb58008c5690e140ce478acdc669f32"
+  },
+  "vendor/@noble/hashes/utils.js": {
+   "from": "contact/node_modules/@noble/hashes/utils.js",
+   "sha256": "037ad49adb78168b6b699598fd33f85f7877456b1d28b4d032e2a1a16807947c"
+  },
+  "vendor/@noble/post-quantum/_crystals.js": {
+   "from": "contact/node_modules/@noble/post-quantum/_crystals.js",
+   "sha256": "f8a50221e4d2e7e849e8e4f7443ecff2f722581aef592c907ed57a5480c72885"
+  },
+  "vendor/@noble/post-quantum/hybrid.js": {
+   "from": "contact/node_modules/@noble/post-quantum/hybrid.js",
+   "sha256": "7a9592e94b22ecf91bd7f01c2a5c019ac453f15798ecfa33d2bca2901db33c49"
+  },
+  "vendor/@noble/post-quantum/ml-kem.js": {
+   "from": "contact/node_modules/@noble/post-quantum/ml-kem.js",
+   "sha256": "e5f1a3fa994f663c48f64b0583cf29ddbb2cfb7f3dd63fe18a7beb7aa9c12541"
+  },
+  "vendor/@noble/post-quantum/utils.js": {
+   "from": "contact/node_modules/@noble/post-quantum/utils.js",
+   "sha256": "01e9046ea3e45fe7569d3ae2881515d0a9446882d602255ab7627915aa0fd2af"
+  },
+  "vendor/contact/bip39-english.mjs": {
+   "from": "contact/bip39-english.mjs",
+   "sha256": "23c9c1d9239b6e0f596da9cba79ade3bd11285333902fb525e0ed2ec3f0936ec"
+  },
+  "vendor/contact/carrier.mjs": {
+   "from": "contact/carrier.mjs",
+   "sha256": "322b4a88eaf56e26aeb38fb00f2ebfdc47ff617d32c78d18a8da768d1cecffa6"
+  },
+  "vendor/contact/control.mjs": {
+   "from": "contact/control.mjs",
+   "sha256": "66f453a554be7d010fb0b12b78e135e43afbb4020c7d7e5168ca5492c88ddff2"
+  },
+  "vendor/contact/envelope.mjs": {
+   "from": "contact/envelope.mjs",
+   "sha256": "355ea1260a7fd4e3465abc25d5f274ac84d901f33d207ce58489818f4a8bc796"
+  },
+  "vendor/contact/file.mjs": {
+   "from": "contact/file.mjs",
+   "sha256": "162f20e739d4e184c9558f19efb65fa2754e85fef1ccad4dcf1d136a567e9428"
+  },
+  "vendor/contact/invite.mjs": {
+   "from": "contact/invite.mjs",
+   "sha256": "adc4a5909c55dafd4c845659e1d1d4f35b7770122166dbc655a537a592fd0c7b"
+  },
+  "vendor/contact/kdf.mjs": {
+   "from": "contact/kdf.mjs",
+   "sha256": "1393072d33f1af8f036ad6523d649de3127354a353cc0c8334eaca634515860e"
+  },
+  "vendor/contact/link.mjs": {
+   "from": "contact/link.mjs",
+   "sha256": "3856dcbab57477a6bd946df3f60445e71715855f5d5dd6abcc2580da0340bd71"
+  },
+  "vendor/contact/page.mjs": {
+   "from": "contact/page.mjs",
+   "sha256": "2a4e8e9e6d1d81059f062942ee052ad36944b3d03d574717fa72ded3aa0c491b"
+  },
+  "vendor/contact/prekeys.mjs": {
+   "from": "contact/prekeys.mjs",
+   "sha256": "1935a535d62bcdf23e0c2c181005b16a20b83d1d5cf3192032aadc51130938c4"
+  },
+  "vendor/contact/qr-decode.mjs": {
+   "from": "contact/qr-decode.mjs",
+   "sha256": "5a491751f74af6a405ab5bfbc5b0a4740168e1e22229e4ded114474bab9c1bc3"
+  },
+  "vendor/contact/qr.mjs": {
+   "from": "contact/qr.mjs",
+   "sha256": "73717e5d2a706015d1ec3e4c5c81664c454d5b895da215c395f36e477e4ed9a1"
+  },
+  "vendor/contact/relays.mjs": {
+   "from": "contact/relays.mjs",
+   "sha256": "424ea83d7cfae63d9b457eb9af5f207edb4a02fe5ff80677d432133e3f5fc9de"
+  },
+  "vendor/contact/short.mjs": {
+   "from": "contact/short.mjs",
+   "sha256": "972c77bd1fd5869008cea5fda6a4facac234c408287c88a50684c7099dd4f1ea"
+  },
+  "vendor/contact/store.mjs": {
+   "from": "contact/store.mjs",
+   "sha256": "b36ddb9718d4b0f2be198d372e16950f5f6a1fe129c53987390d8568b0083077"
+  },
+  "vendor/icon.svg": {
+   "from": "adapters/moadim/icon.svg",
+   "sha256": "592c2e4e82d9bbd0808c6a00ce28c94d37f40f50a0ae39b28f114d0e70ff7bbc"
+  },
+  "vendor/mqtt.esm.js": {
+   "from": "contact/node_modules/mqtt/dist/mqtt.esm.js",
+   "sha256": "6e009e77fc644cbf7b46ea37ba77fbdaf5780452389a57f2b4a676437c2defdd"
+  },
+  "vendor/remote-client.mjs": {
+   "from": "adapters/moadim/remote-client.mjs",
+   "sha256": "c0f00a280526d737bda10ab0c2ba55594cf968bd72cc0fa05474e86a33989724"
+  },
+  "vendor/shim-zlib.mjs": {
+   "from": "adapters/moadim/shim-zlib.mjs",
+   "sha256": "a6d4c05a5ecf9b0734468f46d9bcc3db0336c48c31fcebc0eeda94e5f1bfa011"
+  },
+  "vendor/sigelo/jcs.js": {
+   "from": "ts/dist/jcs.js",
+   "sha256": "3baef3a8f3c032581b2d892ad4fa58e0eaa456dfb5302cbcbaab668bdbdeb9f9"
+  },
+  "vendor/sigelo/monero.js": {
+   "from": "ts/dist/monero.js",
+   "sha256": "361ff98ed70172b6b01c99a60276c8cc482550017ccbeb265c847937d0c12098"
+  },
+  "vendor/sigelo/sigelo.js": {
+   "from": "ts/dist/sigelo.js",
+   "sha256": "453f6efb1574b3977ab3c557778fe883ff3af86fc783b9068fa7ff090ee7cb02"
+  },
+  "vendor/ui.css": {
+   "from": "adapters/moadim/ui.css",
+   "sha256": "3bc427546c5a02183be08546ced12eca487de15bc7c842f3085b6acb6d50dc6d"
+  },
+  "vendor/ui.js": {
+   "from": "adapters/moadim/ui.js",
+   "sha256": "20212aef30d53e2a79835b607e618622f039d388aef11b45fefbfef019d5f0ef"
+  }
+ }
+}

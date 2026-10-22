@@ -6,8 +6,9 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
 1. Private repo: every package.json, lockfile and `integrations/mcp/server.json` at `<v>`; go/go.mod
    `toolchain` at the latest Go patch (build.sh enforces it);
    CHANGELOG.md `## v<v> — <date>`; VERSIONING.md status line; ROADMAP §6 step 8; site
-   footnotes. `node site/build.mjs && node site/test/run.mjs` and `node plugins/build.mjs --check`
-   pass. Commit.
+   footnotes; apps/android/app/build.gradle `versionName '<v>'`, `versionCode` + 1.
+   `node site/build.mjs && node site/test/run.mjs`, `node plugins/build.mjs --check` and
+   `sh release/test-release.sh` pass. Commit.
 2. Sync and push (the commands under "Sync commands").
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a` must end
@@ -17,9 +18,11 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    `TZ=UTC GIT_COMMITTER_DATE="$(date -u +%s) +0000" git -c user.name=csigelo -c
    user.email=contact@sigelo.io -c gpg.format=ssh -c user.signingkey=~/.ssh/sigelo_release_signing tag -s v<v> -m '…'`.
    `git cat-file -p v<v>` must show `+0000`. `git push origin v<v> go/v<v>`.
-   Then `sh release/sign-release.sh v<v> $S/a` writes `$S/a/release.json`.
+   The Android APK: CI on the tag, signed offline into `$S/a/sigelo-<v>.apk` (apk-ceremony.md,
+   "Each release"). Then `sh release/sign-release.sh v<v> $S/a --apk $S/a/sigelo-<v>.apk
+   <cert_sha256>` writes `$S/a/release.json` (without the APK: drop `--apk …`).
 5. `gh release create v<v> --repo csigelo/sigelo --prerelease --title 'sigelo v<v> (draft)'
-   --notes-file $S/notes.md $S/a/*` — every file build.sh wrote. Notes (≤ 40 lines): status,
+   --notes-file $S/notes.md $S/a/*` — every file build.sh wrote, release.json, the APK. Notes (≤ 40 lines): status,
    install lines, SHA256SUMS, CHANGELOG link. Drop `--prerelease` when final.
 6. Prove it from nothing: in a scratch GOPATH/GOMODCACHE,
    `GOFLAGS=-mod=mod go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v<v>`
@@ -59,7 +62,9 @@ desktop notification a day, success none.
   `{tag, commit, sha256sums_sha256, files}`. An attestation, not a new `typ`, so shipped verifiers
   check it with no wire change.
 - **Check**: `release/verify-release.sh <tag> [dir | url]`: SHA256SUMS, release.json at its `iat`,
-  the tag against allowed_signers.
+  the tag against allowed_signers, the APK if named. One APK: `release/apk-check.sh <apk> release.json`.
+- **APK**: its own RSA key (Android takes no Ed25519), made once offline; `release.json` signs
+  `apk: {file, sha256, cert_sha256, version}` (release/apk-ceremony.md).
 - The long-term release key is to be derived as `k(S, "sigelo/v1/release/ed25519/<n>")` and enter
   as a voluntary rotation, so the pinned genesis holds. Its recovery key
   (`~/.config/sigelo/release-recovery.key`) is kept offline.

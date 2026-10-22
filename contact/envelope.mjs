@@ -106,6 +106,7 @@ export const EPOCHS_MAX = 64, ENDED_MAX = 1024;
 // §11), the hold of a session that names none. A carrier passes its reader's own retention.
 export const HOLD = 90 * 86400;
 const HEAD = 22, KEM = 16 + 1120, NONCE = 24, TAG = 16;
+const sameBytes = (a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
 const BODY = ['v', 'typ', 'from', 'to', 'pair', 'epoch', 'n', 'iat', 'label', 'content'];
 
 // kem: the prekey id and X-Wing ciphertext (16 + 1,120 bytes) when the header carries them, else
@@ -450,7 +451,7 @@ function check(s, env, mk, t) {
   if (!exact(signed, ['body', 'sig']) || typeof signed.sig !== 'string') fail('plaintext', 'not exactly {body, sig}');
   let jcs;
   try { jcs = canonicalize(signed); } catch (e) { fail('body', `not canonical JSON: ${e.message}`); }
-  if (Buffer.compare(utf8ToBytes(jcs), text) !== 0) fail('plaintext', 'not the JCS form of {body, sig}');
+  if (!sameBytes(utf8ToBytes(jcs), text)) fail('plaintext', 'not the JCS form of {body, sig}');
   const b = signed.body;
   if (!exact(b, BODY)) fail('body', `fields are not exactly ${BODY.join(' ')}`);
   if (b.v !== MSG_V || b.typ !== 'message') fail('body', `v must be "${MSG_V}" and typ "message"`);

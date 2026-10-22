@@ -16,16 +16,20 @@ import { randomBytes } from 'node:crypto';
 import { createSocket } from 'node:dgram';
 import { isIPv4 } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import { contactModule } from './sigelo-agent-contact.ts';
+import { contactDependency } from './sigelo-agent-contact.ts';
 
 export const REMOTE = 'sigelo-remote/0', R_BODY_MAX = 1024 * 1024, CONTROL_NAME = /^[a-z0-9][a-z0-9_-]{0,19}$/;
 export type Scope = 'read' | 'chat' | 'all';
 export interface Control { id: string; key: string; scope: Scope; ctr: number; created: number; last_used: number | null }
 
-// The scope table (design: read ⊂ chat ⊂ all). A route in none of them is never remote.
-const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages'];
-const CHAT = [...READ, 'POST /api/send', 'POST /api/accept', 'POST /api/invite', 'POST /api/invite/cancel', 'POST /api/words', 'POST /api/rename', 'POST /api/tag', 'POST /api/sync'];
-const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/history/clear', 'GET /api/agents', 'POST /api/agents/enrol', 'POST /api/agents/pair'];
+// The scope table (design: read ⊂ chat ⊂ all). A route in none of them is never remote. Links: the list
+// is read; answering an introduction pairs as accept does (chat); making or ending a link and an allow
+// rule set who the agents talk to and at what trust, as tier and forget do (all).
+const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages', 'GET /api/links'];
+const CHAT = [...READ, 'POST /api/send', 'POST /api/accept', 'POST /api/invite', 'POST /api/invite/cancel', 'POST /api/words', 'POST /api/rename', 'POST /api/tag', 'POST /api/sync',
+  'POST /api/links/answer'];
+const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/history/clear', 'GET /api/agents', 'POST /api/agents/enrol', 'POST /api/agents/pair',
+  'POST /api/link', 'POST /api/unlink', 'POST /api/links/allow'];
 export const SCOPES: Record<Scope, ReadonlySet<string>> = { read: new Set(READ), chat: new Set(CHAT), all: new Set(ALL) };
 export const isScope = (s: unknown): s is Scope => s === 'read' || s === 'chat' || s === 'all';
 /** Moving keys needs a human at the computer: never remote, whatever the scope. */
@@ -43,6 +47,33 @@ export function base45(b: Uint8Array): string {
   return s;
 }
 
+/** A relay control (design/apps.md §6.3, sigelo-agent-control.ts): no key here, a paired control identity. */
+export interface RelayControl { relay: true; scope: Scope; created: number; last_used: number | null; did: string | null; nonce: string | null; exp: number | null; words: string | null; confirmed: boolean }
+export type AnyControl = Control | RelayControl;
+export const isRelay = (c: AnyControl | undefined): c is RelayControl => (c as RelayControl | undefined)?.relay === true;
+/** The LAN controls among them (the same objects: openRequest's ctr goes into ui.json). */
+export const lanControls = (all: Record<string, AnyControl>): Record<string, Control> => Object.fromEntries(Object.entries(all).filter(([, c]) => !isRelay(c))) as Record<string, Control>;
+
+type Dispatch = (method: string, url: URL, b: Record<string, unknown>) => Promise<[number, unknown]>;
+/**
+ * One opened call within a scope, as the local listener answers it: [status, JSON]. The LAN path
+ * (sealed) and the relay path (sigelo-device/1 request) both come here: not a route, a device route
+ * (never remote), outside the scope, a body that is not an object, else the route itself.
+ */
+export async function remoteCall(scope: Scope, msg: { method: string; path: string; body?: unknown }, routes: Record<string, unknown>, dispatch: Dispatch): Promise<[number, unknown]> {
+  let url: URL | null = null;
+  try { url = new URL(msg.path, 'http://remote'); } catch {}
+  const b = msg.body === undefined ? {} : msg.body;
+  if (url === null || !url.pathname.startsWith('/api/') || url.origin !== 'http://remote') return [404, { error: { check: 'route', message: 'not a route' } }];
+  if (deviceRoute(url.pathname)) return [403, { error: { check: 'remote', message: 'device routes are never remote: moving keys needs a human at the computer' } }];
+  if (!SCOPES[scope].has(`${msg.method} ${url.pathname}`)) {
+    return routes[`${msg.method} ${url.pathname}`] ? [403, { error: { check: 'scope', message: `${msg.method} ${url.pathname} is outside this control's scope (${scope})` } }]
+      : [404, { error: { check: 'route', message: `no ${msg.method} ${url.pathname}` } }];
+  }
+  if (typeof b !== 'object' || b === null || Array.isArray(b)) return [400, { error: { check: 'body', message: 'a JSON object' } }];
+  return dispatch(msg.method, url, b as Record<string, unknown>);
+}
+
 /** The text a control travels as (a QR later). */
 export const controlLine = (ip: string, port: number, c: Control): string =>
   `SIGELO:UI:${ip}:${port}:${base45(Buffer.concat([Buffer.from(c.id, 'hex'), Buffer.from(c.key, 'hex')]))}`;
@@ -56,7 +87,7 @@ const aad = (dir: 'req' | 'res', id: Buffer, ctr: number): Uint8Array => {
 type Aead = (key: Uint8Array, nonce: Uint8Array, aad: Uint8Array) => { encrypt(p: Uint8Array): Uint8Array; decrypt(c: Uint8Array): Uint8Array };
 let aead: Aead | undefined;
 /** XChaCha20-Poly1305 from @noble/ciphers, sigelo-contact's own dependency. */
-export async function loadAead(): Promise<void> { aead ??= ((await contactModule('@noble/ciphers/chacha.js')) as { xchacha20poly1305: Aead }).xchacha20poly1305; }
+export async function loadAead(): Promise<void> { aead ??= ((await contactDependency('@noble/ciphers/chacha.js')) as { xchacha20poly1305: Aead }).xchacha20poly1305; }
 
 const B64 = /^[A-Za-z0-9_-]+$/;
 /** A request opened: its control's name, ctr and message; or null (the caller answers with no body). */

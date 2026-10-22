@@ -9,7 +9,8 @@
 // The receiver keeps the chunks until all have come, then checks size and SHA-256 (assemble); what
 // is still incomplete at its retention goes (carrier.mjs). The name is the sender's word: the
 // receiver keeps safeName of it only, and never opens or runs what it saves.
-import { createHash, randomBytes } from 'node:crypto';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, concatBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { fail } from './kdf.mjs';
 
 export const FILE_LABEL = 'sigelo-file/0';
@@ -18,12 +19,19 @@ export const CHUNK = 256 * 1024, MAX_FILE = 8 * 1024 * 1024, MAX_CHUNKS = MAX_FI
 // receiver puts 9 characters of hash in front). A manifest's name past NAME_MAX_IN is refused.
 export const NAME_MAX = 200, NAME_MAX_IN = 1024;
 const ID = /^[0-9a-f]{32}$/, HEX64 = /^[0-9a-f]{64}$/;
-const b64 = (b) => Buffer.from(b.buffer, b.byteOffset, b.byteLength).toString('base64');
+// Base64 over btoa and atob, which every runtime has (Buffer is Node's).
+const b64 = (b) => {
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+const unb64 = (s) => { let t; try { t = atob(s); } catch { return null; } const u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
+const utf8Length = (s) => utf8ToBytes(s).length;
 const int = (n, lo, hi) => Number.isSafeInteger(n) && n >= lo && n <= hi;
 const keysAre = (o, keys) => o !== null && typeof o === 'object' && !Array.isArray(o)
   && Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
 
-export const sha256Hex = (b) => createHash('sha256').update(b).digest('hex');
+export const sha256Hex = (b) => bytesToHex(sha256(b));
 /** How many chunks a file of n bytes goes in. */
 export const chunksOf = (n) => Math.ceil(n / CHUNK);
 
@@ -38,9 +46,9 @@ export const chunksOf = (n) => Math.ceil(n / CHUNK);
 export function safeName(raw) {
   let s = String(raw ?? '').split(/[\\/]/).pop();
   s = s.replace(/[\p{Cc}\p{Cf}\u2028\u2029<>:"|?*]/gu, '').replace(/^[.\s]+/, '');
-  if (Buffer.byteLength(s) > NAME_MAX) {
+  if (utf8Length(s) > NAME_MAX) {
     let n = 0, cut = '';
-    for (const ch of s) { n += Buffer.byteLength(ch); if (n > NAME_MAX) break; cut += ch; }
+    for (const ch of s) { n += utf8Length(ch); if (n > NAME_MAX) break; cut += ch; }
     s = cut;
   }
   s = s.replace(/[.\s]+$/, '').trim();
@@ -56,7 +64,7 @@ export function safeName(raw) {
 export function splitFile(bytes, name, { id } = {}) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('bytes: a Uint8Array');
   if (bytes.length > MAX_FILE) fail('file_too_large', `${bytes.length} bytes, at most ${MAX_FILE} (8 MiB) a file`);
-  id ??= randomBytes(16).toString('hex');
+  id ??= bytesToHex(randomBytes(16));
   if (!ID.test(id)) throw new TypeError('id: 32 lowercase hex digits');
   const n = chunksOf(bytes.length);
   const manifest = { id, name: safeName(name), size: bytes.length, sha256: sha256Hex(bytes), chunks: n };
@@ -95,15 +103,15 @@ export function checkChunk(c, m) {
   if (i >= m.chunks) fail('file_chunk', `chunk ${i} of a file in ${m.chunks}`);
   const want = Math.min(CHUNK, m.size - i * CHUNK);
   if (typeof c.data !== 'string' || c.data.length !== 4 * Math.ceil(want / 3)) fail('file_chunk', `chunk ${i}: ${want} bytes as base64 expected`);
-  const bytes = Buffer.from(c.data, 'base64');
-  if (bytes.length !== want || b64(bytes) !== c.data) fail('file_chunk', `chunk ${i}: not canonical base64 of ${want} bytes`);
-  return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.length);
+  const bytes = unb64(c.data);
+  if (bytes === null || bytes.length !== want || b64(bytes) !== c.data) fail('file_chunk', `chunk ${i}: not canonical base64 of ${want} bytes`);
+  return bytes;
 }
 
 /** The file of manifest m from its chunks in order; refused (file_hash) unless size and SHA-256 match. */
 export function assemble(m, parts) {
   if (!Array.isArray(parts) || parts.length !== m.chunks) fail('file_hash', `${parts?.length} chunks of ${m.chunks}`);
-  const bytes = Buffer.concat(parts);
+  const bytes = concatBytes(...parts);
   if (bytes.length !== m.size) fail('file_hash', `${bytes.length} bytes, the manifest says ${m.size}`);
   if (sha256Hex(bytes) !== m.sha256) fail('file_hash', 'the SHA-256 of the chunks is not the manifest\'s: a chunk was altered');
   return bytes;

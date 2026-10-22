@@ -144,6 +144,31 @@ export function unwrap(s: Store, kc: Keychain = systemKeychain()): Uint8Array {
   return seed;
 }
 
+/**
+ * A keeper root K_j sealed the same way (design/devices.md §5.1, a FULL device's keeper file): under the
+ * file key of `account` (the operator's original DID, the item its identity's wrap uses), AAD
+ * "sigelo-wrap/1\nkeeper <j>\n<recovery commitment>", so a sealed root opens for that keeper only.
+ * Read back before it is returned; nothing checks K itself (the caller derives a known worker from it).
+ */
+const rootAad = (j: number, recovery: string): Buffer => Buffer.from(`${V}\nkeeper ${j}\n${recovery}`, 'utf8');
+export function wrapRoot(root: Uint8Array, account: string, j: number, recovery: string, kc: Keychain = systemKeychain()): WrappedSecret {
+  const old = held(kc, account), key = old ?? randomBytes(32);
+  let out: WrappedSecret;
+  try {
+    const dpapiBlob = old ? undefined : kc.write(account, key), nonce = randomBytes(12);
+    out = { provider: 'keychain', v: V, store: kc.store, account, nonce: b64u(nonce), ct: b64u(seal(key, nonce, root, rootAad(j, recovery))), ...(dpapiBlob && { dpapi: dpapiBlob }) };
+  } finally { key.fill(0); }
+  unwrapRoot(out, j, recovery, kc).fill(0);
+  return out;
+}
+/** The keeper root of a sealed one; the caller zeroes it after use. */
+export function unwrapRoot(w: Partial<WrappedSecret>, j: number, recovery: string, kc: Keychain = systemKeychain()): Uint8Array {
+  if (w.v !== V) refuse('key_provider_unknown', `keychain root ${JSON.stringify(w.v)}; this sigelo-agent reads ${V}`);
+  if (w.store !== kc.store) missing(kc.store, String(w.account));
+  const nonce = unb64u(w.nonce, 12, 'nonce'), ct = unb64u(w.ct, 48, 'ct'), key = kc.read(acct(w.account), w.dpapi);
+  try { return open(key, nonce, ct, rootAad(j, recovery), `the ${kc.store} item for ${w.account}`); } finally { key.fill(0); }
+}
+
 /** `keys wrap` and `keys unwrap --plain`: file <-> keychain under the file's lock, one atomic write; unwrap removes the item only after the plain file is saved. */
 export function move(path: string, verb: 'wrap' | 'unwrap', plain: boolean, kc: Keychain = systemKeychain()): object {
   if (verb === 'unwrap' && !plain) refuse('usage', 'keys unwrap writes the key back to the file as plain hex: say so with --plain');

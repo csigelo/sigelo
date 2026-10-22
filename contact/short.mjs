@@ -28,10 +28,9 @@
 // "sigelo-fingerprint/0", empty info, 6 bytes); the first 44 bits, 11 at a time, index the BIP-39
 // English list. The same words on both sides = no mix-up and no casual swap; a relay that invests
 // GPU time in one is caught by the pair id (THREAT-MODEL.md §2.10).
-import { randomBytes } from 'node:crypto';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex, concatBytes, utf8ToBytes } from '@noble/hashes/utils.js';
+import { bytesToHex, concatBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { WORDS } from './bip39-english.mjs';
 import { fail, unhex } from './kdf.mjs';
 

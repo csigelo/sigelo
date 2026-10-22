@@ -12,13 +12,14 @@
 //             rotation, never a fork.
 //   operator: issue({ carrier, file, i, n, name, keeper })  → a short code (short.mjs, 10 minutes,
 //             once) for a normal invite, and a pending enrolment kept in `file` for 24 hours, with
-//             the operator attestation signed now (≤ 90 days)
+//             the operator attestation signed now (`days`, ≤ 90; a device's 14)
 //   machine:  accept({ carrier, file, code, temp })  → `carrier` is a TEMPORARY identity (`temp`, its
 //             file): it fetches the code, pairs, and once paired sends a request, label LABEL_ENROL,
 //             {v, typ: "enrol-request", proof}
-//   both:     complete({ carrier, file, wait, until, keeper | place, temp }) → one inbox or more:
+//   both:     complete({ carrier, file, wait, until, keeper | place, temp, confirm }) → one inbox or more:
 //             the operator answers a request whose proof matches an enrolment it issued with the
-//             worker's identity, label LABEL_IDENTITY, end to end, once per enrolment, with a long
+//             worker's identity, label LABEL_IDENTITY, end to end, once per enrolment (after
+//             confirm({ words, … }) says yes, when given: the device words gate), with a long
 //             invite the worker accepts; once the worker has paired, the operator files it (observe:
 //             ours by the attestation; tier own unless the operator chose one) and forgets the
 //             temporary DID. The machine takes the identity only from the DID it paired with
@@ -52,9 +53,6 @@
 //                                   temp?, invite?, done? } },
 //         joining: { invite nonce: { key, code_did, relay, exp, sent, temp } } }
 // Entries go at exp, 24 hours after they were made, whatever their state.
-import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -63,7 +61,8 @@ import { canonicalize, decodeKey, did as didOf, keygen, rotate, sign, structure,
 import { agentIdentitySeed, identitySeed, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { keepLong, readCode } from './carrier.mjs';
 import { MsgError, checkNow, fail, pairId, signAs, unhex } from './kdf.mjs';
-import { codeKind } from './short.mjs';
+import { codeKind, fingerprint } from './short.mjs';
+import { platform as nodePlatform } from './platform-node.mjs';
 
 export const ENROL_V = 'sigelo-enrol/1';
 export const LABEL_ENROL = 'sigelo-enrol/1', LABEL_IDENTITY = 'sigelo-identity/0';
@@ -83,7 +82,7 @@ const SKEW = 300, WAIT_STEP = 300;
 function pinnedGenesis(seed, recovery) {
   if (!/^sha256:[0-9a-f]{64}$/.test(recovery ?? '')) fail('keeper', 'the recovery commitment must be sha256:<64 hex> (the seed\'s recovery key, keys.ts recoveryCommitment)');
   const key = keygen({ seed, recovery, created: PINNED_CREATED, nonce: new Uint8Array(16) }).key;
-  const nonce = new Uint8Array(createHash('sha256').update(decodeKey(key)).digest().subarray(0, 16));
+  const nonce = sha256(decodeKey(key)).slice(0, 16);
   return { seed, ...keygen({ seed, recovery, created: PINNED_CREATED, nonce }) };
 }
 // Rotations 0 → n of seedAt(m), voluntary, iat pinned: the same bytes at every derivation.
@@ -93,6 +92,9 @@ function pinnedChain(seedAt, n, recovery) {
   const rotations = g.slice(1).map((x, m) => rotate({ genesis: g[m].genesis, next_genesis: x.genesis, iat: ROTATION_IAT, reason: 'voluntary', secret: g[m].seed, next_secret: x.seed }));
   return { genesis: g[0].genesis, rotations, secret: g[n].seed, original: g[0].did, did: g[n].did };
 }
+
+/** The pinned genesis of any seed (`created` fixed, the nonce from the key): { seed, genesis, did, … }. device.mjs rebuilds with it. */
+export const pinnedIdentity = (seed, recovery) => pinnedGenesis(seed, recovery);
 
 /** Rotation `n` of worker `i` under K: keys.ts agentIdentitySeed, its genesis pinned. */
 export const workerGenesis = (K, i, n, recovery) => pinnedGenesis(agentIdentitySeed(K, i, n), recovery);
@@ -191,46 +193,36 @@ export function checkIdentity(content, { operator, relay, now }) {
 /** The pending file beside an identity file: x.json → x.enrol.json. */
 export const enrolPath = (identityFile) => identityFile.replace(/\.json$/, '') + '.enrol.json';
 
-const LOCK_TRIES = 200, LOCK_MS = 25;
-function withLock(path, fn) {
-  const lock = `${path}.lock`, idle = new Int32Array(new SharedArrayBuffer(4));
-  for (let i = 0; ; i++) {
-    try { closeSync(openSync(lock, 'wx', 0o600)); break; } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      if (i === LOCK_TRIES) fail('lock', `${lock} is still held after ${(LOCK_TRIES * LOCK_MS) / 1000} s: another sigelo process holds it, or one was killed holding it; delete the file to continue`);
-      Atomics.wait(idle, 0, 0, LOCK_MS);
-    }
-  }
-  try { return fn(); } finally { rmSync(lock, { force: true }); }
-}
-const writeJson = (path, value) => {
-  const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(8).toString('hex')}.tmp`);
-  writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600, flag: 'wx' });
-  renameSync(tmp, path);
-};
+// UTF-8 as readFileSync(…, 'utf8') reads it: a byte order mark is kept (JSON.parse refuses it).
+const UTF8 = new TextDecoder('utf-8', { ignoreBOM: true });
 
-/** Load, purge what is past its 24 hours, change (fn), save: under the file's lock. → fn's result. */
-export function pending(file, now, fn = () => undefined) {
+/** Load, purge what is past its 24 hours, change (fn), save: under the file's lock (platform: the
+ *  carrier's, platform-node.mjs by default). → fn's result. */
+export function pending(file, now, fn = () => undefined, platform = nodePlatform) {
   checkNow(now);
-  return withLock(file, () => {
+  return platform.transact(file, () => {
     let s = { v: ENROL_V, issued: {}, joining: {} };
-    if (existsSync(file)) {
-      try { s = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { fail('enrol_file', `${file} does not parse (${e.message}): delete it to drop the pending enrolments`); }
+    const raw = platform.files.read(file);
+    if (raw !== null) {
+      try { s = JSON.parse(UTF8.decode(raw)); } catch (e) { fail('enrol_file', `${file} does not parse (${e.message}): delete it to drop the pending enrolments`); }
       if (s?.v !== ENROL_V || !isObject(s.issued) || !isObject(s.joining)) fail('enrol_file', `${file} is not a ${ENROL_V} file: delete it to drop the pending enrolments`);
     }
     const before = canonicalize(s);
     for (const k of ['issued', 'joining']) for (const [id, e] of Object.entries(s[k])) if (!(e.exp > now)) delete s[k][id];
     const out = fn(s);
-    if (canonicalize(s) !== before) writeJson(file, s);
+    if (canonicalize(s) !== before) platform.files.write(file, utf8ToBytes(JSON.stringify(s, null, 2)));
     return out;
-  });
+  }, 'sigelo');
 }
 
 // ---------------------------------------------------------------- the flows
 
 const isObject = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
 const nowOf = (carrier) => checkNow(carrier.clock());
-const readStore = (carrier) => (existsSync(carrier.storePath) ? JSON.parse(readFileSync(carrier.storePath, 'utf8')) : { contacts: {} });
+const platformOf = (carrier) => carrier.platform ?? nodePlatform;
+const readStore = (carrier) => { const raw = platformOf(carrier).files.read(carrier.storePath); return raw !== null ? JSON.parse(UTF8.decode(raw)) : { contacts: {} }; };
+// The pending file under the carrier's platform.
+const pendingOf = (carrier) => (file, now, fn) => pending(file, now, fn, platformOf(carrier));
 const pairOf = (c) => pairId(unhex(c.pair_key, 32, 'store'));
 // The carrier's identity, verified: original DID, current DID and its genesis, and sign(body).
 function self(carrier, now) {
@@ -251,15 +243,15 @@ const checkKeeper = (k) => {
  * stands for (24 hours). The operator attestation is signed here, at derivation time.
  * → { short, short_exp, code, id, did (the worker's current DID), original }.
  */
-export async function issue({ carrier, file, i, n, name, keeper }) {
+export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR_DAYS }) {
   checkKeeper(keeper);
   const w = workerChain(keeper.K, i, n, keeper.recovery);
   // The temporary identity's contact, named apart from the worker's (forgotten once it has paired).
   const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true });
   const now = nowOf(carrier), code = readCode(r.code, now), me = self(carrier, now);
-  const attestation = operatorAttestation({ sign: me.sign, iss: me.did, sub: w.original, relay: code.relay, now });
+  const attestation = operatorAttestation({ sign: me.sign, iss: me.did, sub: w.original, relay: code.relay, now, days });
   const old = liveHolding(carrier, w.original);
-  pending(file, now, (s) => {
+  pendingOf(carrier)(file, now, (s) => {
     s.issued[code.nonce] = { key: bytesToHex(enrolKey(code.secret)), i, n, name: name ?? null, did: w.did, original: w.original, old_pair: old ? pairOf(old) : null,
       relay: code.relay, exp: now + PENDING_TTL, attestation, issuer: me.genesis };
   });
@@ -276,7 +268,7 @@ export async function accept({ carrier, file, code: text, name, wait = 10, temp 
   const short = codeKind(text) === 'short', long = short ? await carrier.unpark(text) : text;
   try {
     const now = nowOf(carrier), code = readCode(long, now, short ? 'parked' : 'long');
-    pending(file, now, (s) => { s.joining[code.nonce] = { key: bytesToHex(enrolKey(code.secret)), code_did: code.did, relay: code.relay, exp: now + PENDING_TTL, sent: false, temp: temp ?? null }; });
+    pendingOf(carrier)(file, now, (s) => { s.joining[code.nonce] = { key: bytesToHex(enrolKey(code.secret)), code_did: code.did, relay: code.relay, exp: now + PENDING_TTL, sent: false, temp: temp ?? null }; });
     const r = await carrier.accept(long, { name, wait });
     return { ...r, did: code.did, id: code.nonce, ...(short && { long }) };
   } catch (e) { throw short ? keepLong(e, long) : e; }
@@ -292,7 +284,7 @@ export async function accept({ carrier, file, code: text, name, wait = 10, temp 
  * → { delivered: [{ id, name, temp, did }], placed: [{ id, name, did, original, … }], refused: [{ check, detail, from }],
  *     sent: [{ did }], rest: the batch without what was handled, offline? }
  */
-export async function complete({ carrier, file, wait = 0, until = () => false, keeper = null, place = null, temp = null }) {
+export async function complete({ carrier, file, wait = 0, until = () => false, keeper = null, place = null, temp = null, confirm = null }) {
   if (keeper) checkKeeper(keeper);
   const out = { delivered: [], placed: [], refused: [], sent: [], rest: { messages: [], events: [], dropped: {} } };
   const end = Date.now() + wait * 1000;
@@ -304,7 +296,7 @@ export async function complete({ carrier, file, wait = 0, until = () => false, k
     out.rest.events.push(...batch.events);
     for (const [k, n] of Object.entries(batch.dropped ?? {})) out.rest.dropped[k] = (out.rest.dropped[k] ?? 0) + n;
     for (const m of batch.messages) {
-      if (m?.label === LABEL_ENROL && keeper) await onRequest(carrier, file, keeper, m, out);
+      if (m?.label === LABEL_ENROL && keeper) await onRequest(carrier, file, keeper, m, out, confirm);
       else if (m?.label === LABEL_IDENTITY && place && await onIdentity(carrier, file, temp, m, out, place)) continue;
       else out.rest.messages.push(m);
     }
@@ -322,13 +314,13 @@ export async function complete({ carrier, file, wait = 0, until = () => false, k
 // and that has not sent one; at a first round, again for those sent before without an answer (the
 // operator's inbox may have gone to another reader).
 async function sendRequests(carrier, file, temp, out, first) {
-  const todo = pending(file, nowOf(carrier), (s) => Object.entries(s.joining).filter(([, j]) => j.temp === temp && (!j.sent || first)));
+  const todo = pendingOf(carrier)(file, nowOf(carrier), (s) => Object.entries(s.joining).filter(([, j]) => j.temp === temp && (!j.sent || first)));
   for (const [id, j] of todo) {
     const c = liveHolding(carrier, j.code_did);
     if (!c) continue;
     try {
       const r = await carrier.send(c.did, request(hexToBytes(j.key), pairOf(c)), { label: LABEL_ENROL });
-      pending(file, nowOf(carrier), (s) => { if (s.joining[id]) s.joining[id].sent = true; });
+      pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.joining[id]) s.joining[id].sent = true; });
       out.sent.push({ did: c.did, status: r.status });
     } catch (e) {
       out.refused.push({ check: e.check ?? 'error', detail: `the enrolment request to ${c.name} did not go (${e.message}): it goes at the next sigelo-agent enrol --finish`, from: c.did });
@@ -339,14 +331,14 @@ async function sendRequests(carrier, file, temp, out, first) {
 // The operator: a request from a contact. Answered only when its proof matches an enrolment this
 // operator issued, over that contact's own pairing, and only when that contact is the DID that
 // paired through the enrolment's code (the header's "The marker").
-async function onRequest(carrier, file, keeper, m, out) {
+async function onRequest(carrier, file, keeper, m, out, confirm) {
   const now = nowOf(carrier), c = readStore(carrier).contacts[m.from];
   const who = `${m.name ?? m.from} (${m.from})`;
   if (!c || c.revoked || !c.pair_key) { out.refused.push({ check: 'enrol_contact', detail: `an enrolment request from ${who}, no live contact: ignored`, from: m.from }); return; }
   const pair = pairOf(c);
   // Who paired through each code, read before the pending file's lock (the carrier takes its own).
-  const answered = Object.fromEntries(pending(file, now, (s) => Object.keys(s.issued)).map((id) => [id, carrier.answeredBy(id)]));
-  const r = pending(file, now, (s) => {
+  const answered = Object.fromEntries(pendingOf(carrier)(file, now, (s) => Object.keys(s.issued)).map((id) => [id, carrier.answeredBy(id)]));
+  const r = pendingOf(carrier)(file, now, (s) => {
     const hit = Object.entries(s.issued).find(([, e]) => matches(m.content, hexToBytes(e.key), pair));
     if (!hit) return { check: 'enrol_proof', detail: `${who} asked to be enrolled, but its request matches no enrolment code this operator issued in the last 24 hours (a plain contact, or an expired code): nothing sent` };
     const [id, e] = hit, by = answered[id] ?? null;
@@ -359,12 +351,20 @@ async function onRequest(carrier, file, keeper, m, out) {
   });
   if (r.check) { out.refused.push({ ...r, from: m.from }); return; }
   const { id, e } = r;
+  // The words gate (devices.md §5.1): the human compares the pairing's four words on this side
+  // before the key goes. Declined: the enrolment is dropped, nothing is ever sent for it.
+  if (confirm && !e.confirmed && !(await confirm({ id, name: e.name, i: e.i, did: e.did, temp: c.did, words: fingerprint(pair) }))) {
+    pendingOf(carrier)(file, nowOf(carrier), (s) => { delete s.issued[id]; });
+    out.refused.push({ check: 'device_words', detail: `the four words of ${who} were not confirmed: worker ${e.i} not sent, the code is dropped; make a new one`, from: m.from });
+    return;
+  }
+  if (confirm) pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].confirmed = true; });
   try {
     // The worker's own invite, made once per enrolment: a repeated request gets the same.
     let invite = e.invite;
     if (!invite) {
       invite = (await carrier.invite({ name: e.name ?? undefined, ttl: Math.max(60, e.exp - now) })).code;
-      pending(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].invite = invite; });
+      pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].invite = invite; });
     }
     const identity = workerIdentity({ K: keeper.K, i: e.i, n: e.n, recovery: keeper.recovery, attestation: e.attestation, issuer: e.issuer });
     if (didOf([identity.genesis, ...identity.rotations.map((x) => x.next_genesis)].at(-1)) !== e.did) fail('keeper', `worker ${e.i} derives to another DID than at enrol: the keeper root changed since (sigelo-agent keeper)`);
@@ -379,7 +379,7 @@ async function onRequest(carrier, file, keeper, m, out) {
 // The operator: each enrolment whose worker has paired with this operator since it was issued
 // (a new pairing key): filed own by the attestation, its temporary DID forgotten.
 async function settle(carrier, file, keeper, out) {
-  const todo = pending(file, nowOf(carrier), (s) => Object.entries(s.issued).filter(([, e]) => e.temp && !e.done));
+  const todo = pendingOf(carrier)(file, nowOf(carrier), (s) => Object.entries(s.issued).filter(([, e]) => e.temp && !e.done));
   for (const [id, e] of todo) {
     const c = liveHolding(carrier, e.original);
     if (!c || pairOf(c) === e.old_pair) continue;
@@ -388,7 +388,7 @@ async function settle(carrier, file, keeper, out) {
     const seen = carrier.observe(bundle), tier = seen?.tier ?? null, ours = seen?.ours ?? null;
     let released = false;
     try { released = (await carrier.forget(e.temp)).released; } catch (x) { if (!(x instanceof MsgError) || x.check !== 'not_contact') throw x; }
-    pending(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].done = nowOf(carrier); });
+    pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].done = nowOf(carrier); });
     out.placed.push({ id, name: c.name, did: c.current_did, original: c.did, i: e.i, n: e.n, ours, tier, temp: e.temp, released, exp: e.attestation.body.exp });
   }
 }
@@ -398,7 +398,7 @@ async function settle(carrier, file, keeper, out) {
 // the inbox.
 async function onIdentity(carrier, file, temp, m, out, place) {
   const now = nowOf(carrier), c = readStore(carrier).contacts[m.from];
-  const s = pending(file, now, (x) => x);
+  const s = pendingOf(carrier)(file, now, (x) => x);
   const hit = c && !c.revoked ? Object.entries(s.joining).find(([, j]) => j.temp === temp && c.chain.includes(j.code_did)) : undefined;
   if (!hit) {
     out.refused.push({ check: 'enrol_from', detail: `a worker identity from ${m.name ?? m.from} (${m.from}), not the DID this machine enrolled with through a code: not taken`, from: m.from });
@@ -411,7 +411,7 @@ async function onIdentity(carrier, file, temp, m, out, place) {
     // The temporary identity is done: the operator is forgotten on it, its mailboxes given up.
     let released = false, offline;
     try { ({ released, offline } = await carrier.forget(c.did)); } catch (e) { if (!(e instanceof MsgError)) throw e; offline = e.message; }
-    pending(file, nowOf(carrier), (y) => { delete y.joining[id]; });
+    pendingOf(carrier)(file, nowOf(carrier), (y) => { delete y.joining[id]; });
     out.placed.push({ id, did: x.did, original: x.original, worker: x.worker, exp: x.exp, operator: c.current_did, name: c.name, status: r?.status ?? null, contact: r?.contact ?? null, temp: tempDid, temp_file: temp, released, ...(offline && { temp_offline: offline }) });
   } catch (e) {
     if (!(e instanceof MsgError)) throw e;

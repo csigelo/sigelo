@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { join } from 'node:path';
 import { did, verifySig, VERSION, type Genesis } from 'sigelo';
 import * as keys from './sigelo-agent-keys.ts';
-import { answers, inject, seal, systemKeychain, unwrap, wrap, type Keychain, type Run, type WrappedSecret } from './sigelo-agent-keychain.ts';
+import { answers, inject, seal, systemKeychain, unwrap, unwrapRoot, wrap, wrapRoot, type Keychain, type Run, type WrappedSecret } from './sigelo-agent-keychain.ts';
 import { load, save, type Store } from './sigelo-agent.ts';
 import { CLI, ROOT, done, ok, tmpHome } from './test-helpers.ts';
 
@@ -164,6 +164,11 @@ for (const [platform, store, tool] of [['darwin', 'macos', 'security'], ['linux'
   const secrets = [SEED, Buffer.from(SEED, 'hex').toString('base64url'), ...e.calls.flatMap((c) => [c.input, c.stdout].map((x) => x.trim()).filter((x) => x.length >= 32 && !x.startsWith('security'))), w.dpapi ?? ''].filter(Boolean);
   ok(`${store}: no secret in any argv or environment (${e.calls.length} calls)`, secrets.length > 1 && e.calls.every((c) => !secrets.some((x) => c.args.some((a) => a.includes(x)) || Object.values(c.env).some((v) => v?.includes(x)))));
   ok(`${store}: the environment passed is the caller's`, e.calls.every((c) => JSON.stringify(c.env) === JSON.stringify(ENV)));
+  // A keeper root (a FULL device's keeper file, DEVICES.md): sealed under the same item, for keeper j of one seed only.
+  const K = Buffer.alloc(32, 0x4b), acc = did(s.genesis), wr = wrapRoot(K, acc, 1, COMMIT, kc);
+  ok(`${store}: a keeper root sealed and opened; not for another keeper index or seed; not plain in the file`, hex(unwrapRoot(wr, 1, COMMIT, kc)) === hex(K) && code(() => unwrapRoot(wr, 2, COMMIT, kc)) === 'wrap_auth'
+    && code(() => unwrapRoot(wr, 1, 'sha256:' + '0'.repeat(64), kc)) === 'wrap_auth' && !JSON.stringify(wr).includes(hex(K)) && wr.account === acc);
+  ok(`${store}: a sealed root, its ciphertext changed: wrap_auth`, code(() => unwrapRoot({ ...wr, ct: (wr.ct[0] === 'A' ? 'B' : 'A') + wr.ct.slice(1) }, 1, COMMIT, kc)) === 'wrap_auth');
   e.down = true;
   ok(`${store}: the tool absent: keychain_unavailable; answers() false`, code(() => unwrap(s, kc)) === 'keychain_unavailable' && !answers(kc));
   e.down = false;

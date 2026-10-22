@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// sigelo-agent ui --remote (sigelo-agent-remote.ts, remote-client.mjs, UI-API.md "Remote"), --port, the
-// installable page.   node test-remote.ts   (the end-to-end part SKIPs without relay/ and its node_modules)
+// sigelo-agent ui --remote (sigelo-agent-remote.ts, remote-client.mjs, UI-API.md "Remote"), --port, --app,
+// the installable page.   node test-remote.ts   (the end-to-end part SKIPs without relay/ and its node_modules)
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, statSync, mkdirSync } from 'node:fs';
 import { createServer, request } from 'node:http';
@@ -28,6 +28,7 @@ const http = (port: number, method: string, path: string, headers: Record<string
   r.on('error', (e) => ((e as { code?: string }).code === 'ECONNRESET' || (e as { code?: string }).code === 'EPIPE' ? resolve({ status: -1, headers: {}, body: '' }) : reject(e)));
   r.end(body);
 });
+const uiJson2 = (d: string): { controls: Record<string, any> } => JSON.parse(readFileSync(join(d, 'me.local.ui.json'), 'utf8'));
 const dir = (n: string): string => { const d = join(H, n); mkdirSync(join(d, 'agents'), { recursive: true, mode: 0o700 }); fromWords(join(d, 'me.local.json')); return d; };
 
 // ── base45 (RFC 9285 §4.2 examples) and the control's text
@@ -62,6 +63,9 @@ ok('remote: GET /api/messages sealed, query kept → 404 not_contact, as locally
 const out = await tab.call('POST', '/api/send', { to: 'did:sigelo:zNope', text: 'x' });
 ok('remote: scope read: POST /api/send → sealed 403 scope', out.status === 403 && out.body.error.check === 'scope', JSON.stringify(out));
 ok('remote: scope read: clear, forget, agents → 403 scope', (await Promise.all([['POST', '/api/history/clear'], ['POST', '/api/forget'], ['GET', '/api/agents']].map(([m, p]) => tab.call(m!, p!)))).every((r) => r.status === 403 && r.body.error.check === 'scope'));
+const lks = await tab.call('GET', '/api/links'), lka = await tab.call('POST', '/api/links/answer', { id: 'K7F3Q9ZP', accept: true }), lkl = await tab.call('POST', '/api/link', { a: 'x', b: 'y', purpose: 'p' });
+ok('remote: scope read: GET /api/links → the local answer; links/answer and link → 403 scope', lks.status === 200 && JSON.stringify(lks.body) === JSON.stringify(await local('/api/links'))
+  && lka.status === 403 && lka.body.error.check === 'scope' && lkl.status === 403 && lkl.body.error.check === 'scope', JSON.stringify([lks, lka, lkl]));
 const dev = await tab.call('GET', '/api/devices/list'), dev2 = await tab.call('POST', '/api/../api/devices/add', {});
 ok('remote: /api/devices/* → sealed 403 remote, also through ..', dev.status === 403 && dev.body.error.check === 'remote' && dev2.status === 403 && dev2.body.error.check === 'remote', JSON.stringify([dev, dev2]));
 const nope = await tab.call('GET', '/api/nothing'), stat = await tab.call('GET', '/ui.js');
@@ -116,8 +120,17 @@ ok('remote: restarted, the LAN port kept; the old request still refused', page.r
 tab = await rc.remoteClient(line, { ctr: next + 10 });
 ok('remote: the first control still answers after a restart', (await tab.call('GET', '/api/state')).status === 200);
 const full = await rc.remoteClient(page.remote!.line!);
-ok('remote: scope all: forget, tier, agents in scope (404 not_contact / 200), devices still refused', (await full.call('POST', '/api/forget', { contact: 'did:sigelo:zNope' })).body.error.check === 'not_contact'
+ok('remote: scope all: forget, tier, agents, link, links/allow in scope (404 not_contact / 200), devices still refused', (await full.call('POST', '/api/forget', { contact: 'did:sigelo:zNope' })).body.error.check === 'not_contact'
+  && (await full.call('POST', '/api/link', { a: 'did:sigelo:zNope', b: 'did:sigelo:zNope2', purpose: 'p' })).body.error.check === 'not_contact'
+  && (await full.call('POST', '/api/links/allow', { contact: 'did:sigelo:zNope', allow: true })).body.error.check === 'not_contact'
   && (await full.call('GET', '/api/agents')).status === 200 && (await full.call('GET', '/api/devices')).body.error.check === 'remote');
+// D4: the device routes are real here (the page's Devices view), and still never remote, at any scope (apps.md §6.2).
+const DEV: [string, string, object?][] = [['GET', '/api/devices'], ['POST', '/api/devices/add', { name: 'phone' }], ['POST', '/api/devices/confirm', { id: 'x', match: true }], ['POST', '/api/devices/words', { id: 'x' }],
+  ['POST', '/api/devices/scan', { text: 'K7F3-Q9ZP' }], ['POST', '/api/devices/revoke', { name: 'phone', lost: true }], ['POST', '/api/devices/sync']];
+const devLocal = await http(page.port, 'GET', '/api/devices', { 'X-Sigelo-Token': page.token }), devRemote = await Promise.all(DEV.map(([m, p, b]) => full.call(m, p, b)));
+ok('remote: every device route (list, add, confirm, words, scan, revoke, sync) → sealed 403 remote at scope all, while the local page answers GET /api/devices 200; nothing added',
+  devLocal.status === 200 && devRemote.every((r) => r.status === 403 && r.body.error.check === 'remote') && (JSON.parse((await http(page.port, 'GET', '/api/devices', { 'X-Sigelo-Token': page.token })).body) as { adding: unknown[] }).adding.length === 0,
+  JSON.stringify(devRemote.map((r) => r.status)));
 await page.close();
 let changed = '';
 try { await ui.startUi({ identity: human, agents: join(A, 'agents'), carrier: unreachable, remote: { listen: '127.0.0.1', name: 'tab', scope: 'all' } }); } catch (e) { changed = (e as Error).message; }
@@ -132,10 +145,13 @@ await page.close();
 
 // ── the scope table covers every route of UI-API.md; read ⊂ chat ⊂ all
 {
-  const routes = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/]+)`/gm)].map((m) => m[1]!);
+  const all = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/]+)`/gm)].map((m) => m[1]!);
+  // The device routes (D4) are documented too, and in no scope: deviceRoute refuses them before any scope.
+  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x));
   const [r, c, a] = [rm.SCOPES.read, rm.SCOPES.chat, rm.SCOPES.all];
-  ok('remote: every UI-API.md route is in scope all, none is a device route; read ⊂ chat ⊂ all', routes.length >= 17 && routes.every((x) => a.has(x)) && a.size === routes.length
-    && [...r].every((x) => c.has(x)) && [...c].every((x) => a.has(x)) && !routes.some((x) => rm.deviceRoute(x.split(' ')[1]!)), JSON.stringify(routes.filter((x) => !a.has(x))));
+  ok('remote: every UI-API.md route but the device ones is in scope all; read ⊂ chat ⊂ all', routes.length >= 17 && routes.every((x) => a.has(x)) && a.size === routes.length
+    && [...r].every((x) => c.has(x)) && [...c].every((x) => a.has(x)), JSON.stringify(routes.filter((x) => !a.has(x))));
+  ok('remote: the device routes of UI-API.md (list, add, confirm, words, scan, revoke, sync) are in no scope', devices.length === 7 && !devices.some((x) => a.has(x) || c.has(x) || r.has(x)), JSON.stringify(devices));
 }
 
 // ── --port: kept, and a taken one fails port_taken (the lock released)
@@ -152,6 +168,11 @@ await page.close();
   await p2.close();
   const bad = [cli('--port', '70000'), cli('--name', 'x'), cli('--remote', '--scope', 'root'), cli('--remote', '--name', 'Bad Name', '--no-open'), cli('--controls', '--remote')];
   ok('ui (CLI): --port 70000, --name without --remote, a bad scope, a bad name, --controls with --remote → exit 2', bad.every((x) => x.status === 2), bad.map((x) => `${x.status} ${x.stderr}`).join('\n'));
+  const rel = [cli('--relay'), cli('--remote', '--relay', '--listen', '127.0.0.1')];
+  const ctlCli = (...a: string[]) => spawnSync('node', [CLI, 'control', ...a], { env: { ...env, SIGELO_CONTROL: join(H, 'none.control.json') }, encoding: 'utf8' });
+  const cbad = [ctlCli('pair', 'SIGELO:UI:1.2.3.4:5:AB'), ctlCli('pair'), ctlCli('ui', '--app'), ctlCli('nope')];
+  ok('ui --relay without --remote, or with --listen; control pair of a text not SIGELO:CTL:, without one; control ui unpaired; an unknown verb → exit 2', [...rel, ...cbad].every((x) => x.status === 2)
+    && cbad[2]!.stderr.includes('control pair'), [...rel, ...cbad].map((x) => `${x.status} ${x.stderr}`).join('\n'));
 }
 
 // ── the CLI: `ui --remote` prints the page's URL, then the control's text
@@ -164,12 +185,39 @@ await page.close();
   const end = Date.now() + 20000;
   while (!/SIGELO:UI:/.test(so) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
   const [u, t] = so.split('\n');
-  let answer = 0;
-  try { answer = (await (await rc.remoteClient(t!)).call('POST', '/api/send', { to: 'did:sigelo:zNope', text: 'x' })).status; } catch {}
+  let answer = 0, links: unknown[] = [];
+  try {
+    const cc = await rc.remoteClient(t!);
+    answer = (await cc.call('POST', '/api/send', { to: 'did:sigelo:zNope', text: 'x' })).status;
+    links = await Promise.all([cc.call('POST', '/api/links/answer', { id: 'K7F3Q9ZP', accept: false }), cc.call('POST', '/api/unlink', { id: 'K7F3Q9ZP' })]).then((x) => x.map((y) => [y.status, y.body.error?.check]));
+  } catch {}
   const closed = new Promise((r) => c.on('close', r));
   c.kill('SIGTERM'); await closed;
   ok('ui --remote (CLI): stdout the URL, then SIGELO:UI:; stderr names the controls; scope chat sends (404 not_contact)', /^http:\/\/127\.0\.0\.1:\d+\/#t=/.test(u ?? '') && /^SIGELO:UI:127\.0\.0\.1:/.test(t ?? '')
     && se.includes('cli (chat)') && answer === 404, `${so}\n${se}`);
+  ok('ui --remote, scope chat: links/answer in scope (404 link_unknown), unlink outside it (403 scope)', JSON.stringify(links) === JSON.stringify([[404, 'link_unknown'], [403, 'scope']]), JSON.stringify(links));
+}
+
+// ── `ui --app` (a shell shows the page): stdout the URL, no browser; stdin's end stops it and frees the file
+{
+  const { spawn } = await import('node:child_process');
+  const c = spawn('node', [CLI, 'ui', '--identity', human, '--app'], { env: { ...env, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_ENDPOINTS: JSON.stringify(unreachable.endpoints) }, stdio: ['pipe', 'pipe', 'pipe'] });
+  let so = '';
+  c.stdout.on('data', (d) => { so += d; }); c.stderr.on('data', () => {});
+  const end = Date.now() + 20000;
+  while (!so.includes('\n') && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+  const m = /^http:\/\/127\.0\.0\.1:(\d+)\/#t=([0-9a-f]{32})\n/.exec(so);
+  const me = m ? await http(Number(m[1]), 'GET', '/api/me', { 'X-Sigelo-Token': m[2]! }) : null;
+  const lock = human.replace(/\.json$/, '.ui.pid'), held = (() => { try { statSync(lock); return true; } catch { return false; } })();
+  const closed = new Promise<number | null>((r) => c.on('close', r)), t0 = Date.now();
+  c.stdin.end();
+  const code = await Promise.race([closed, new Promise<string>((r) => setTimeout(() => r('timeout'), 10000))]);
+  if (code === 'timeout') c.kill('SIGKILL');
+  let pid = true;
+  try { statSync(lock); } catch { pid = false; }
+  ok('ui --app: stdout the URL with its token, the page answers; stdin closed → exit 0, lock file gone', me?.status === 200 && held && code === 0 && !pid, `${so} ${me?.status} ${code} ${Date.now() - t0}ms`);
+  const r = spawnSync('node', [CLI, 'ui', '--identity', human, '--app', '--controls'], { env, encoding: 'utf8' });
+  ok('ui --app --controls refused (exit 2)', r.status === 2);
 }
 
 // ── end to end: every route in scope, sealed, against the relay the contact tests use
@@ -207,12 +255,156 @@ else {
     spawnSync('node', [CLI, 'init', '--no-recovery'], { env: { ...env, SIGELO_IDENTITY: join(Ad, 'agents', 'sigelo.bot.local.json') } });
     const ag = await call('GET', '/api/agents'), en = await call('POST', '/api/agents/enrol', { agent: 'bot' }), pr = await call('POST', '/api/agents/pair', { agent: 'bot' });
     ok('remote e2e: agents, enrol, pair (scope all) → 200', ag.status === 200 && en.status === 200 && en.body.worker === 0 && pr.status === 200 && pr.body.status === 'connected', JSON.stringify([en, pr]).slice(0, 300));
+    // Links, sealed: B links its agent helper to A (external for B: A is not B's); A answers from the phone.
+    const relayEnv = { ...env, SIGELO_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify(relay.endpoints) } as Record<string, string>;
+    const helper = join(Bd, 'agents', 'sigelo.helper.local.json');
+    spawnSync('node', [CLI, 'init', '--no-recovery'], { env: { ...env, SIGELO_IDENTITY: helper } });
+    const hen = await bcall('POST', '/api/agents/enrol', { agent: 'helper' }), hpr = await bcall('POST', '/api/agents/pair', { agent: 'helper' });
+    const { spawn } = await import('node:child_process');
+    const hw = spawn('node', [CLI, 'watch', '--identity', helper], { env: relayEnv });
+    let hwOut = '';
+    hw.stdout.on('data', (d) => { hwOut += d; }); hw.stderr.on('data', (d) => { hwOut += d; });
+    try {
+      await until(async () => (hwOut.includes('watching ') ? true : undefined));
+      const aOrig = (await call('GET', '/api/me')).body.original as string;
+      await call('POST', '/api/tier', { contact: bob!.did, tier: 'friend' });
+      const bl = await bcall('POST', '/api/link', { a: hpr.contact.did, b: aOrig, purpose: 'compare notes' });
+      const ban = await until(async () => ((await call('GET', '/api/state')).body.introductions as { id: string; purpose: string }[]).find((x) => x.id === bl.id), 30000);
+      const rec = (await call('GET', '/api/links')).body.received as { id: string; peer: string; purpose: string }[];
+      ok('remote e2e links: the other page links its agent to me; the sealed state carries the introduction (banner); GET /api/links lists it', hen.worker === 0 && bl.status === 'pending'
+        && ban?.purpose === 'compare notes' && rec.some((x) => x.id === bl.id && x.peer === hpr.contact.did), JSON.stringify([bl, ban]) + hwOut);
+      const yes = await call('POST', '/api/links/answer', { id: bl.id, accept: true });
+      const filed = await until(async () => ((await call('GET', '/api/state')).body.groups.contacts as { did: string; tier: string; link: { id: string } | null }[]).find((c) => c.link?.id === bl.id), 30000);
+      const linked = await until(async () => ((await bcall('GET', '/api/links')).made as { id: string; status: string }[]).find((x) => x.id === bl.id && x.status === 'linked'), 30000);
+      ok('remote e2e links: accepted from the phone → the helper filed at quiet (the default) with the link; the other page: linked', yes.status === 200 && filed?.tier === 'quiet' && filed.did === hpr.contact.did
+        && linked !== undefined, JSON.stringify([yes, filed]));
+      const al = await call('POST', '/api/link', { a: pr.body.contact.did, b: bob!.did, purpose: 'share the calendar' });
+      const un = await call('POST', '/api/unlink', { id: al.body.id });
+      const ok1 = await call('POST', '/api/links/allow', { contact: bob!.did, allow: true }), ok2 = await call('POST', '/api/links/allow', { contact: bob!.did, allow: false });
+      ok('remote e2e links: link, unlink, allow, deny sealed (scope all)', al.status === 200 && al.body.kind === 'external' && un.body.status === 'ended' && ok1.body.tier === 'quiet' && ok2.body.had === true, JSON.stringify([al, un, ok1, ok2]));
+    } finally {
+      const closed = new Promise((x) => hw.on('close', x));
+      hw.kill('SIGTERM'); await closed;
+    }
     const me2 = await call('GET', '/api/me'), fg = await call('POST', '/api/forget', { contact: bob!.did }), cl = await call('POST', '/api/history/clear');
     ok('remote e2e: me, forget, history/clear → 200', me2.status === 200 && fg.body.forgotten === bob!.did && cl.body.cleared === true);
     const all = [...rm.SCOPES.all], missed = all.filter((x) => done_.get(x) !== 200);
     ok(`remote e2e: every route in scope all answered 200 sealed (${all.length})`, missed.length === 0, JSON.stringify(missed));
   } finally {
     await pa.close(); await pb.close(); await relay.close?.();
+  }
+}
+// ── over the relay (design/apps.md §6.3): a control identity, SIGELO:CTL:, request/response/events
+if (!hasRelay()) console.log(`SKIP remote over the relay: ${NO_RELAY}`);
+else {
+  const { writeFileSync, unlinkSync } = await import('node:fs');
+  const hexToBytes = (h: string): Uint8Array => new Uint8Array(Buffer.from(h, 'hex'));
+  const C = await import('sigelo-contact/control.mjs' as string) as any, L = await import('sigelo-contact/carrier.mjs' as string) as any;
+  const { did: didOf, canonicalize } = await import('sigelo');
+  mkdirSync(join(H, 'r3'), { recursive: true });
+  const relay = await startTestRelay(join(H, 'r3')), carrier = { relay: 'relay.test', endpoints: relay.endpoints };
+  const Pd = dir('p3'), op = join(Pd, 'me.local.json');
+  const T3 = (pg: { token: string }) => ({ 'X-Sigelo-Token': pg.token });
+  const until = async <V>(f: () => Promise<V | undefined> | V | undefined, ms = 15000): Promise<V | undefined> => { const e = Date.now() + ms; for (;;) { const v = await f(); if (v || Date.now() > e) return v; await new Promise((s) => setTimeout(s, 100)); } };
+  const apps: { car: any; ctl: any }[] = [];
+  // The app's side, as apps/web/shell.mjs does it: a new control identity, the code accepted, the client.
+  const app = async (line: string, tag: string, timeout = 15000) => {
+    const t = C.readControlText(line), idf = C.newControlIdentity(), file = join(Pd, `control-${tag}.local.json`);
+    writeFileSync(file, JSON.stringify(idf), { mode: 0o600 });
+    const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: idf.genesis, rotations: [], bindings: [], attestations: [], issuers: [] };
+    let ctl: any = null;
+    const car = new L.Carrier({ identity: () => ({ secret: hexToBytes(idf.secret), bundle }), ...L.pathsFor(file), ...carrier, onEvent: (e: { type: string }) => ctl?.onEvent(e) });
+    const r = await car.accept(t.code, { relay: t.relay ?? undefined, name: 'computer', wait: 15 });
+    const opDid = r.contact?.did as string;
+    ctl = C.makeControl({ operator: opDid, timeout });
+    await car.start(); ctl.attach(car);
+    let sent = 0;
+    const send = car.send.bind(car);
+    car.send = (...a: unknown[]) => { sent++; return send(...a); };
+    const x = { car, ctl, did: didOf(idf.genesis), words: car.contacts().contacts.find((c: { did: string }) => c.did === opDid)?.fingerprint as string, status: r.status, get sent() { return sent; } };
+    apps.push(x);
+    return x;
+  };
+  let pr = await ui.startUi({ identity: op, agents: join(Pd, 'agents'), carrier, remote: { relay: true, name: 'phone', scope: 'read' } });
+  try {
+    const line = pr.relay.line ?? '';
+    ok('relay: ui --remote --relay prints SIGELO:CTL:<short code>:<HOST> (8 characters, 12 with a relay tag; ≤ 60 characters), no LAN listener', /^SIGELO:CTL:[0-9A-Z]{4}-[0-9A-Z]{4}(-[0-9A-Z]{4})?:RELAY\.TEST$/.test(line) && line.length <= 60 && pr.remote === null, line);
+    const pend = JSON.parse((await http(pr.port, 'GET', '/api/state', T3(pr))).body);
+    ok('relay: the control\'s code waiting is not among the page\'s invites', !JSON.stringify(pend.pending.invites).includes('control:'));
+    const a = await app(line, 'phone');
+    const p = await until(() => Promise.race([pr.relay.paired(), new Promise<undefined>((r) => setTimeout(() => r(undefined), 15000))]));
+    ok('relay: the app pairs by the code; the computer sees the same four words', a.status === 'connected' && p?.name === 'phone' && typeof p.words === 'string' && p.words.split(' ').length === 4 && p.words === a.words, JSON.stringify([p, a.words]));
+    const kept = uiJson2(Pd).controls['phone'];
+    ok('relay: ui.json controls{phone}: relay, scope read, the control DID, no key, not confirmed', kept?.relay === true && kept.scope === 'read' && kept.did === a.did && kept.key === undefined && kept.confirmed === false, JSON.stringify(kept));
+    const early = await a.ctl.call('GET', '/api/me');
+    ok('relay: before the words are confirmed on the computer → 403 words', early.status === 403 && early.body.error.check === 'words', JSON.stringify(early));
+    await pr.relay.confirm('phone', true);
+    const me = await a.ctl.call('GET', '/api/me'), localMe = JSON.parse((await http(pr.port, 'GET', '/api/me', T3(pr))).body);
+    ok('relay: confirmed: GET /api/me over the relay → the local answer (JCS: the same value)', me.status === 200 && canonicalize(me.body) === canonicalize(localMe), JSON.stringify(me).slice(0, 200));
+    const st = await a.ctl.call('GET', '/api/state');
+    ok('relay: GET /api/state → 200; the control\'s own contact is not in the page (groups, contactOf)', st.status === 200 && !JSON.stringify(st.body.groups).includes(a.did)
+      && JSON.parse((await http(pr.port, 'GET', `/api/messages?contact=${encodeURIComponent(a.did)}`, T3(pr))).body).error?.check === 'not_contact', JSON.stringify(st.body.groups));
+    const sc = await a.ctl.call('POST', '/api/send', { to: 'did:sigelo:zNope', text: 'x' }), dv = await a.ctl.call('GET', '/api/devices');
+    ok('relay: scope read: POST /api/send → 403 scope; GET /api/devices → 403 remote (never remote)', sc.status === 403 && sc.body.error.check === 'scope' && dv.status === 403 && dv.body.error.check === 'remote', JSON.stringify([sc, dv]));
+    // Events: pushed on change, read without a relay message, the same since.
+    const seq0 = st.body.seq as number;
+    let pushed = 0;
+    a.ctl.onChange(() => { pushed++; });
+    const sent0 = a.sent;
+    const inv = JSON.parse((await http(pr.port, 'POST', '/api/invite', { ...T3(pr), Origin: `http://127.0.0.1:${pr.port}`, 'Content-Type': 'application/json' }, JSON.stringify({ name: 'carol' }))).body);
+    await until(() => (pushed > 0 ? true : undefined), 10000);
+    const st2 = await a.ctl.call('GET', `/api/state?since=${seq0}`);
+    ok('relay: a change on the computer (an invite made there) → events pushed; GET /api/state answered from them, no relay message', pushed > 0 && st2.status === 200
+      && st2.body.pending.invites.some((x: { name: string }) => x.name === 'carol') && a.sent === sent0, JSON.stringify([pushed, a.sent, sent0, inv.name]));
+    await new Promise((r) => setTimeout(r, 2500));
+    ok('relay: nothing changed → nothing pushed (no polling either way)', pushed === 1 && a.sent === sent0, String(pushed));
+    // chat and all, each its own control
+    const issue = async (name: string, scope: 'chat' | 'all') => {
+      const r = await pr.relay.issue(name, scope), x = await app(r!.line, name);
+      const q = await Promise.race([pr.relay.paired(), new Promise<undefined>((s) => setTimeout(() => s(undefined), 15000))]);
+      await pr.relay.confirm(name, q?.words === x.words);
+      return x;
+    };
+    const chat = await issue('tab', 'chat'), all = await issue('desk', 'all');
+    const c1 = await chat.ctl.call('POST', '/api/send', { to: 'did:sigelo:zNope', text: 'x' }), c2 = await chat.ctl.call('POST', '/api/forget', { contact: 'did:sigelo:zNope' });
+    const a1 = await all.ctl.call('POST', '/api/forget', { contact: 'did:sigelo:zNope' }), a2 = await all.ctl.call('GET', '/api/agents'), a3 = await all.ctl.call('POST', '/api/devices/add', { name: 'x' });
+    ok('relay: scope chat: send in scope (404 not_contact), forget outside (403 scope)', c1.status === 404 && c1.body.error.check === 'not_contact' && c2.status === 403 && c2.body.error.check === 'scope', JSON.stringify([c1, c2]));
+    ok('relay: scope all: forget in scope (404 not_contact), agents 200; devices/add still 403 remote', a1.status === 404 && a2.status === 200 && a3.status === 403 && a3.body.error.check === 'remote', JSON.stringify([a1.status, a2.status, a3]));
+    const cinv = await chat.ctl.call('POST', '/api/invite', { name: 'dave' });
+    ok('relay: scope chat: POST /api/invite over the relay → 200, a short code', cinv.status === 200 && typeof cinv.body.short === 'string', JSON.stringify(cinv).slice(0, 200));
+    // Wrong words: the computer says no → the control is forgotten, its requests unanswered.
+    const bad = await (async () => { const r = await pr.relay.issue('bad', 'all'), x = await app(r!.line, 'bad'); await pr.relay.paired(); await pr.relay.confirm('bad', false); return x; })();
+    const bq = await bad.ctl.call('GET', '/api/me');
+    ok('relay: words refused on the computer → the control forgotten (not in ui.json), its request never answered 200', bq.status !== 200 && uiJson2(Pd).controls['bad'] === undefined, JSON.stringify(bq));
+    // Seat elsewhere: the list names another device the seat.
+    const lp = op.replace(/\.json$/, '.devices.json'), t0 = Math.floor(Date.now() / 1000);
+    writeFileSync(lp, JSON.stringify({ v: 'sigelo-devices/1', operator: 'did:sigelo:zOp', seq: 1, iat: t0, devices: [{ name: 'other', worker: 0, did: 'did:sigelo:zOther', rank: 'full', added: t0, by: 'did:sigelo:zOp' }], seat: { holder: 'did:sigelo:zOther', epoch: 1, iat: t0 }, sig: 'x' }), { mode: 0o600 });
+    const se = await all.ctl.call('GET', '/api/me'), se2 = await chat.ctl.call('POST', '/api/send', { to: 'did:sigelo:zNope', text: 'x' });
+    unlinkSync(lp);
+    ok('relay: the seat elsewhere → 409 seat_elsewhere naming the holder (the app shows the banner)', se.status === 409 && se.body.error.check === 'seat_elsewhere' && se.body.error.message.includes('other') && se2.status === 409, JSON.stringify([se, se2]));
+    // The rate cap: a burst of 10, then one 429 told, the rest dropped.
+    const many = await Promise.all(Array.from({ length: 14 }, () => all.ctl.call('GET', '/api/me')));
+    const n200 = many.filter((r) => r.status === 200).length, n429 = many.filter((r) => r.status === 429).length;
+    ok('relay: rate cap: of 14 at once, about 10 answered, one 429 rate, the rest dropped (no answer)', n200 >= 9 && n200 <= 12 && n429 === 1 && many.find((r) => r.status === 429)?.body.error.check === 'rate', JSON.stringify(many.map((r) => r.status)));
+    // Revoke: the contact forgotten; the app's requests go unanswered.
+    const rv = await pr.relay.revoke('phone');
+    const after = await a.ctl.call('POST', '/api/sync');  // 15 s: nobody answers
+    ok('relay: revoke → forgotten here (ui.json, the contact), further requests never answered 200', rv && uiJson2(Pd).controls['phone'] === undefined && after.status !== 200, JSON.stringify(after));
+    const lc = ui.listControls(op);
+    ok('ui --controls: relay controls marked (paired, confirmed), never a key', lc.some((x) => x.name === 'tab' && x.relay?.paired === true && x.relay.confirmed === true) && !JSON.stringify(lc).includes('"key"'), JSON.stringify(lc));
+    // Restarted: a paired control still answers (no flag needed), the CLI revokes it while the page is down.
+    await pr.close();
+    pr = await ui.startUi({ identity: op, agents: join(Pd, 'agents'), carrier });
+    const again = await chat.ctl.call('GET', '/api/me');
+    ok('relay: the page restarted without --relay: a paired control still answers', again.status === 200, JSON.stringify(again));
+    await pr.close();
+    const gone = await ui.revokeControl(op, 'tab', carrier);
+    pr = await ui.startUi({ identity: op, agents: join(Pd, 'agents'), carrier });
+    const revoked = await chat.ctl.call('GET', '/api/me');
+    ok('relay: ui --revoke-control tab (page stopped): forgotten; restarted, its requests unanswered', gone && revoked.status !== 200 && uiJson2(Pd).controls['tab'] === undefined, JSON.stringify(revoked));
+  } finally {
+    for (const x of apps) { x.ctl.stop(); await x.car.stop(); }
+    await pr.close(); await relay.close?.();
   }
 }
 rmSync(H, { recursive: true, force: true });

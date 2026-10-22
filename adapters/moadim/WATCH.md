@@ -33,4 +33,7 @@ The file is the owner however it is named: `watch --operator` (ENROL.md) and `se
 ~/.config/sigelo/me.local.json` meet at the same lock.
 A watcher runs for days: keep its key in the keychain or the key agent ([KEYS.md](KEYS.md)).
 It stays connected to every relay a contact was paired on (`invite --relay`, `accept --relay`), not only `SIGELO_RELAY`.
+It handles links by code (LINKS.md): the operator's introductions complete while it runs; no hook sees them.
+Anyone else's introduction (unless that contact is quiet here) → `--on-notice` with `{type: "link", id, from,
+name, peer, peer_name, purpose, note}`; `links accept <id>` beside it is carried out by the watcher.
 SIGINT or SIGTERM: exit 0. Exit 1: refused (another watcher or page); 2: usage or no identity.

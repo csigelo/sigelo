@@ -4,9 +4,12 @@
 // overrides escaped (safeText), never as HTML. The token comes in the fragment and goes back as
 // X-Sigelo-Token; no cookie, no storage but this tab's sessionStorage (it survives a reload).
 // The seam: every call goes through backend.call(method, path, body) → the UI-API.md answer, or
-// throws {message, check, long, status}. One backend is wired, `http` (fetch to this server with
-// the token). Later ones answer the same routes with the same JSON: `local` (an in-page router over
-// a carrier running in the page) and `remote` (sigelo-remote/0, sealed to a computer's `ui --remote`).
+// throws {message, check, long, status}. `http`: fetch to this server with the token. `shell`: the
+// page served by the GTK phone app (apps/gtk, sigelo-app:), which seals each call to a computer's
+// `ui --remote` (sigelo-remote/0) and answers {status, body}; the page never sees the control's key.
+// `local`: the self-contained app (apps/web): an in-page router over a carrier running in the page
+// (globalThis.sigeloLocal, apps/web/app.mjs), the same routes and JSON, its changes pushed (onChange).
+// The mode banner says what this page holds: SAFE worker, FULL standby, or remote of a computer.
 'use strict';
 (() => {
   const TOKEN = (() => {
@@ -52,10 +55,30 @@
       return data;
     },
   };
-  const backend = http;
+  const SHELL = location.protocol === 'sigelo-app:' ? globalThis.webkit?.messageHandlers?.sigelo : undefined;
+  const shell = {
+    async call(method, path, body) {
+      const r = await SHELL.postMessage({ op: 'call', method, path, ...(body !== undefined && { body }) });
+      if (r.status >= 200 && r.status < 300) return r.body;
+      const e = r.body?.error;
+      throw Object.assign(new Error(e?.message ?? `HTTP ${r.status}`), { check: e?.check, long: e?.long, status: r.status });
+    },
+  };
+  const LOCAL = SHELL ? undefined : globalThis.sigeloLocal;
+  const local = {
+    async call(method, path, body) {
+      const r = await LOCAL.call(method, path, body);
+      if (r.status >= 200 && r.status < 300) return r.body;
+      const e = r.body?.error;
+      throw Object.assign(new Error(e?.message ?? `HTTP ${r.status}`), { check: e?.check, long: e?.long, status: r.status });
+    },
+    mode: () => LOCAL.mode(),
+  };
+  shell.mode = () => ({ kind: 'remote' });
+  const backend = SHELL ? shell : LOCAL ? local : http;
 
   // ---- state
-  const S = { snap: null, view: 'contacts', update: () => {}, contact: null, pair: null, msgsSeq: -1, me: null, agents: null, note: null, fatal: null };
+  const S = { snap: null, view: 'contacts', update: () => {}, contact: null, pair: null, msgsSeq: -1, me: null, agents: null, note: null, fatal: null, links: null, introSeen: new Set() };
   const relayNow = () => Date.now() / 1000 + (S.snap?.me?.clock_offset ?? 0);
   const left = (exp) => {
     const s = Math.max(0, Math.round(exp - relayNow()));
@@ -77,6 +100,8 @@
     await poll();
   }
   const errorCard = (e) => e && h('div', { class: 'card err' }, e.message);
+  // The last error, unless the seat banner (in the status line) already says it.
+  const noteCard = () => (S.note?.check === 'seat_elsewhere' ? '' : errorCard(S.note) ?? '');
 
   // ---- the header line: relay, clock, the one-time proof of work (§3)
   function statusLine() {
@@ -86,8 +111,12 @@
     if (off === null) parts.push(h('span', { class: 'muted' }, 'clock not checked'));
     else if (Math.abs(off) > 60) parts.push(h('span', { class: 'warn' }, `Your clock is ${Math.abs(off)} s ${off < 0 ? 'ahead of' : 'behind'} the relay's: set it right, or codes fail`));
     else parts.push(h('span', { class: 'good' }, 'clock ok'));
-    const box = h('div', null, h('div', { class: 'status' }, parts));
+    const mode = backend.mode?.(), banner = !mode ? null : mode.kind === 'remote' ? `Remote control of a computer${mode.via === 'relay' ? ', over the relay' : ''}: this phone holds no account key`
+      : mode.kind === 'full' ? 'This phone holds: FULL, standby' : `This phone holds: SAFE worker${Number.isInteger(mode.worker) ? ` ${mode.worker}` : ''}`;
+    const box = h('div', null, banner ? h('div', { class: 'status mode' }, banner) : null, h('div', { class: 'status' }, parts));
     if (me.pow) box.append(powBar(me.pow));
+    const seat = seatBanner();
+    if (seat) box.append(seat);
     return box;
   }
   function powBar(p) {
@@ -115,6 +144,7 @@
     else if (c.status === 'not_collected') badges.push(badge('not collected yet', 'alert'));
     if (c.words_checked) badges.push(badge('✓ words', 'ok'));
     else if (c.words) badges.push(badge('check words', 'alert'));
+    if (c.link) badges.push(badge(`linked: ${c.link.purpose}`));
     const sub = c.tier === 'quiet' ? '' : c.tier === 'friend' ? (unread ? `new message${unread === 1 ? '' : 's'}` : '')
       : c.last ? `${c.last.dir === 'out' ? 'me: ' : ''}${c.last.text}` : 'no messages yet';
     return h('button', { class: 'row', onclick: () => show('chat', c.did) },
@@ -147,11 +177,11 @@
   function viewContacts() {
     const top = h('div'), list = h('div');
     put(app,
-      h('header', null, h('h1', null, 'Contacts'), h('button', { onclick: () => show('me') }, 'Me'), h('button', { class: 'primary', 'aria-label': 'Invite', onclick: () => invite() }, '+')),
+      h('header', null, h('h1', null, 'Contacts'), h('button', { onclick: () => show('links') }, 'Links'), SHELL || LOCAL ? null : h('button', { onclick: () => show('devices') }, 'Devices'), h('button', { onclick: () => show('me') }, 'Me'), h('button', { class: 'primary', 'aria-label': 'Invite', onclick: () => invite() }, '+')),
       top, list,
       h('div', { class: 'foot' }, h('div', { class: 'inner' }, h('button', { class: 'primary', onclick: () => invite() }, 'Invite'), h('button', { onclick: () => show('pair', { mode: 'enter' }) }, 'Enter a code'))));
     return () => {
-      put(top, statusLine(), errorCard(S.note) ?? '');
+      put(top, statusLine(), introBanner() ?? '', noteCard());
       if (!S.snap) return;
       const { mine, contacts } = S.snap.groups, pending = pendingRows(S.snap.pending);
       put(list,
@@ -281,7 +311,7 @@
       const c = contactBy(did);
       if (!c) { title.textContent = 'Gone'; put(alerts, h('p', { class: 'muted' }, 'Not a contact (forgotten).')); return; }
       title.textContent = safeText(c.name);
-      put(tags, tierChip(c.tier), ...c.tags.map((t) => badge('#' + t)), c.local ? badge('on this machine') : '', c.mine ? badge(`run by me · ${c.mine.days_left} d`) : '', c.words_checked ? badge('✓ words', 'ok') : '');
+      put(tags, tierChip(c.tier), ...c.tags.map((t) => badge('#' + t)), c.local ? badge('on this machine') : '', c.mine ? badge(`run by me · ${c.mine.days_left} d`) : '', c.words_checked ? badge('✓ words', 'ok') : '', c.link ? badge(`linked: ${c.link.purpose}`) : '');
       if (panelFor !== did + c.name + c.tags.join()) { panelFor = did + c.name + c.tags.join(); rename.value = c.name; tagIn.value = c.tags.map((t) => '#' + t).join(' '); }
       if (!panel.hidden) {
         put(panel, h('div', { class: 'card' },
@@ -316,6 +346,285 @@
     };
   }
 
+  // ---- LINKS (LINKS.md): introduce two contacts, one of them yours; the links made; introductions to answer
+  const DAYS = [['', 'no end'], ['1', '1 day'], ['7', '7 days'], ['30', '30 days'], ['90', '90 days']];
+  // A new introduction (its introducer not quiet here): a banner until opened or put off.
+  function introBanner() {
+    const fresh = (S.snap?.introductions ?? []).filter((x) => !S.introSeen.has(x.id));
+    if (!fresh.length || S.view === 'links') return null;
+    const x = fresh[0];
+    return h('div', { class: 'card' }, h('p', null, fresh.length === 1 ? `${safeText(x.name)} introduces an agent to you, for: ${safeText(x.purpose)}` : `${fresh.length} introductions wait for your answer`),
+      h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => show('links') }, 'See'), h('button', { onclick: () => { for (const y of fresh) S.introSeen.add(y.id); S.update(); } }, 'Later')));
+  }
+  const select = (label, options, value) => {
+    const el = h('select', { 'aria-label': label }, options.map(([v, t]) => h('option', { value: v }, t)));
+    el.value = value;
+    return el;
+  };
+  function viewLinks() {
+    const top = h('div'), intro = h('div'), made = h('div'), mine = h('div'), rules = h('div'), result = h('div');
+    const aSel = h('select', { 'aria-label': 'First' }), bSel = h('select', { 'aria-label': 'Second' });
+    const purpose = h('input', { autocomplete: 'off', maxlength: '120', placeholder: 'review the pull requests', 'aria-label': 'Purpose' });
+    const note = h('textarea', { rows: 2, maxlength: '280', placeholder: 'optional', 'aria-label': 'Note for them' });
+    const days = select('Ends', DAYS, '30'), tierA = select('How yours files the other', [['', 'as usual'], ['friend', 'friend'], ['quiet', 'quiet']], '');
+    const tierB = select('How the second files the first', [['', 'as usual'], ['friend', 'friend'], ['quiet', 'quiet']], '');
+    const extra = h('div');
+    let names = '';
+    const pick = () => [contactBy(aSel.value), contactBy(bSel.value)];
+    // External (one of them not yours): a note, their tier is theirs to choose; own: both tiers.
+    const shape = () => {
+      const [a, b] = pick(), external = a && b && a.ours !== b.ours, none = a && b && !a.ours && !b.ours;
+      put(extra, none ? h('p', { class: 'warn' }, 'One of the two must be yours (run by you).') : null,
+        h('label', null, 'How yours files the other'), tierA,
+        external ? [h('label', null, 'Note for them (they see it, with your agent\'s identity)'), note] : [h('label', null, 'How the second files the first'), tierB]);
+    };
+    aSel.addEventListener('change', shape); bSel.addEventListener('change', shape);
+    const go = async () => {
+      const [a, b] = pick();
+      if (!a || !b || a.did === b.did || !purpose.value.trim()) { S.note = { message: 'Pick two different contacts and say what for.' }; S.update(); return; }
+      const external = a.ours !== b.ours, theirs = external ? (a.ours ? b : a) : null, yours = external ? (a.ours ? a : b) : null;
+      if (!confirm(`Link ${a.name} and ${b.name} for: ${purpose.value.trim()}?${theirs ? `\n${theirs.name} learns ${yours.name}'s identity, the purpose and your note.` : ''}`)) return;
+      await act(() => backend.call('POST', '/api/link', { a: a.did, b: b.did, purpose: purpose.value.trim(), ...(days.value && { days: Number(days.value) }),
+        ...(tierA.value && { tier_a: tierA.value }), ...(!external && tierB.value && { tier_b: tierB.value }), ...(external && note.value.trim() && { note: note.value.trim() }) }),
+      (r) => { purpose.value = ''; note.value = ''; put(result, h('div', { class: 'card' }, `Link ${r.id}: asked ${safeText(r.a_name)} for a one-use code for ${safeText(r.b_name)}. It shows below as it goes.`)); });
+    };
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show('contacts') }, '‹'), h('h1', null, 'Links')), top, intro,
+      h('h2', null, 'Link two contacts'),
+      h('div', null, h('label', null, 'First'), aSel, h('label', null, 'Second'), bSel, h('label', null, 'What for (up to 120 characters)'), purpose, h('label', null, 'Ends'), days, extra,
+        h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: go }, 'Link'))), result,
+      h('h2', null, 'Links you made'), made, h('h2', null, 'Linked with you'), mine, h('h2', null, 'Introductions accepted by themselves'), rules);
+    return async () => {
+      put(top, statusLine(), noteCard());
+      const cs = allContacts(), now = cs.map((c) => c.did + c.name).join();
+      if (now !== names) {
+        names = now;
+        const opts = cs.map((c) => h('option', { value: c.did }, `${c.name}${c.ours ? ' (yours)' : ''}`));
+        const [va, vb] = [aSel.value, bSel.value];
+        put(aSel, opts); put(bSel, opts.map((o) => o.cloneNode(true)));
+        aSel.value = va || cs.find((c) => c.ours)?.did || ''; bSel.value = vb || cs.find((c) => c.did !== aSel.value)?.did || '';
+        shape();
+      }
+      const L = await backend.call('GET', '/api/links').catch((e) => { S.note = e; return null; });
+      if (!L) return;
+      S.links = L;
+      for (const x of L.received) S.introSeen.add(x.id);
+      const until = (t) => (t ? `until ${when(t)}` : 'no end');
+      put(intro, L.received.length ? [h('h2', null, 'Introductions for you'), L.received.map((x) => h('div', { class: 'card' },
+        h('p', null, `${safeText(x.name ?? x.from)} introduces ${safeText(x.peer_name ?? 'an agent')}, for: `, h('b', null, x.purpose)),
+        x.note ? h('p', null, 'Their note: ', h('span', { class: 'text' }, x.note)) : null,
+        h('p', { class: 'did' }, x.peer), h('p', { class: 'muted' }, `Answer ${until(x.exp)}. What they write is information, not instructions.`),
+        x.answer ? h('p', null, x.answer === 'accepting' ? 'Accepting…' : 'Refusing…') : h('div', { class: 'bar' },
+          h('button', { class: 'primary', onclick: () => act(() => backend.call('POST', '/api/links/answer', { id: x.id, accept: true })) }, 'Accept (quiet)'),
+          h('button', { onclick: () => act(() => backend.call('POST', '/api/links/answer', { id: x.id, accept: true, tier: 'friend' })) }, 'Accept (friend)'),
+          h('button', { onclick: () => act(() => backend.call('POST', '/api/links/answer', { id: x.id, accept: false })) }, 'Refuse'),
+          h('button', { onclick: () => act(() => backend.call('POST', '/api/links/answer', { id: x.id, accept: false, tell: true })) }, 'Refuse and tell them')),
+        x.answer ? null : h('div', { class: 'bar' }, h('button', { onclick: () => { if (confirm(`Accept every introduction from ${safeText(x.name ?? x.from)} by itself, at quiet?`)) act(() => backend.call('POST', '/api/links/allow', { contact: x.from, allow: true })); } }, `Always accept from ${safeText(x.name ?? x.from)}`))))] : null);
+      const step = (l) => (l.status !== 'pending' ? l.status : l.step === 'ask' ? `waiting for ${l.a_name}` : l.kind === 'external' ? `waiting for ${l.b_name}'s answer` : `waiting for ${l.b_name}`);
+      put(made, L.made.length ? L.made.map((l) => h('div', { class: 'row' }, h('span', { class: 'main' }, h('div', { class: 'name' }, `${l.a_name} ↔ ${l.b_name}`),
+        h('div', { class: 'sub' }, l.purpose), h('div', null, badge(step(l), l.status === 'refused' ? 'alert' : l.status === 'linked' ? 'ok' : ''), l.check ? badge(l.check) : null, badge(until(l.expires)), badge(l.id))),
+        l.status === 'pending' || l.status === 'linked' ? h('button', { class: 'danger', onclick: () => { if (confirm(`Unlink ${l.a_name} and ${l.b_name}? Both forget each other.`)) act(() => backend.call('POST', '/api/unlink', { id: l.id })); } }, 'Unlink') : null))
+        : h('p', { class: 'muted' }, 'None yet.'));
+      put(mine, L.links.length ? L.links.map((l) => h('div', { class: 'row' }, h('span', { class: 'main' }, h('div', { class: 'name' }, l.name), h('div', { class: 'sub' }, l.purpose),
+        h('div', null, tierChip(l.tier), badge(until(l.expires)))),
+        h('button', { class: 'danger', onclick: () => { if (confirm(`End the link with ${l.name}?`)) act(() => backend.call('POST', '/api/unlink', { id: l.id })); } }, 'Unlink')))
+        : h('p', { class: 'muted' }, 'None.'));
+      put(rules, L.allow.length ? L.allow.map((r) => h('div', { class: 'row' }, h('span', { class: 'main' }, h('div', { class: 'name' }, r.name ?? r.contact), h('div', { class: 'sub' }, `at ${r.tier}, ${until(r.until)}`)),
+        h('button', { onclick: () => act(() => backend.call('POST', '/api/links/allow', { contact: r.contact, allow: false })) }, 'Stop')))
+        : h('p', { class: 'muted' }, 'None: each introduction waits for your answer.'));
+    };
+  }
+
+  // ---- DEVICES (DEVICES.md): this account on a phone or a second computer, by QR. SAFE here (the device
+  // becomes an agent of yours); FULL moves your identity too, only in a terminal. QR codes are drawn and read
+  // here: contact/qr.mjs and qr-decode.mjs (served beside this page, as they are), BarcodeDetector first
+  // where the browser has it. What is scanned stays in this page's memory until it is sent.
+  // Never remote (a computer's page through the app): moving keys needs a human at that computer.
+  // The seat (one device logs in as you at a time): another device holding it (me.seat), or a refusal
+  // seat_elsewhere, shows here, in any view, once.
+  function seatBanner() {
+    const seat = S.snap?.me?.seat, e = [S.note, S.fatal].find((x) => x?.check === 'seat_elsewhere');
+    if (seat && !seat.here) return h('div', { class: 'card warn' }, `The seat is with ${seat.holder}: this page no longer logs in as you. Here: sigelo-agent device seat take.`);
+    return e ? h('div', { class: 'card warn' }, 'Another device holds your seat: ', e.message) : null;
+  }
+  const lazy = (path) => { let m; return async () => { if (m === undefined) { try { m = await import(path); } catch { m = null; } } return m; }; };
+  const qrLib = lazy('/qr.mjs'), qrDec = lazy('/qr-decode.mjs');
+  const qrCache = new Map();
+  /** A QR symbol of text on a canvas (level M, a quiet zone of 4), or null without qr.mjs. */
+  async function qrCanvas(text) {
+    if (qrCache.has(text)) return qrCache.get(text);
+    const lib = await qrLib();
+    if (!lib) return null;
+    const m = lib.encode(text, { ecc: 'M', maxVersion: 20 }), q = 4, n = m.size + 2 * q, k = Math.max(3, Math.floor(Math.min(360, window.innerWidth - 32) / n));
+    const cv = h('canvas', { class: 'qr', width: n * k, height: n * k, role: 'img', 'aria-label': 'QR code' }), g = cv.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, n * k, n * k); g.fillStyle = '#000';
+    m.modules.forEach((row, y) => row.forEach((dark, x) => { if (dark) g.fillRect((x + q) * k, (y + q) * k, k, k); }));
+    if (qrCache.size > 32) qrCache.clear();
+    qrCache.set(text, cv);
+    return cv;
+  }
+  /** Camera (where the browser has one), an image file or a pasted image, or the text: each text read goes to onText; true stops the camera. */
+  function scanner(onText) {
+    const status = h('p', { class: 'muted' }), video = h('video', { class: 'scan', muted: true, playsInline: true, 'aria-label': 'Camera' });
+    const pick = h('input', { type: 'file', accept: 'image/*', 'aria-label': 'An image of the QR' }), text = h('textarea', { rows: 2, autocomplete: 'off', spellcheck: 'false', 'aria-label': 'The QR\'s text or a code' });
+    video.hidden = pick.hidden = true;
+    const say = (t) => { status.textContent = t ?? ''; };
+    const canvas = document.createElement('canvas'), g = canvas.getContext('2d', { willReadFrequently: true });
+    let detector = null, stream = null, timer = 0, busy = false;
+    try { if ('BarcodeDetector' in window) detector = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch {}
+    async function decode(src, w, ht, max) {
+      if (detector) { try { const r = await detector.detect(src); if (r[0]?.rawValue) return r[0].rawValue; } catch {} }
+      const d = await qrDec();
+      if (!d) return null;
+      const k = Math.min(1, max / Math.max(w, ht));
+      canvas.width = Math.max(1, Math.round(w * k)); canvas.height = Math.max(1, Math.round(ht * k));
+      g.drawImage(src, 0, 0, canvas.width, canvas.height);
+      const px = g.getImageData(0, 0, canvas.width, canvas.height);
+      try { return d.jsQR(px.data, px.width, px.height)?.data ?? null; } catch { return null; }
+    }
+    const stop = () => { clearInterval(timer); timer = 0; stream?.getTracks().forEach((t) => t.stop()); stream = null; video.hidden = true; cam.textContent = 'Camera'; };
+    const give = async (t) => { if (await onText(t)) stop(); };
+    async function fromImage(blob) {
+      say('Reading the image…');
+      let bm;
+      try { bm = await createImageBitmap(blob); } catch { say('Not an image this page can read.'); return; }
+      const t = (await decode(bm, bm.width, bm.height, 1600)) ?? (await decode(bm, bm.width, bm.height, 800));
+      bm.close?.();
+      if (t) { say(''); await give(t); } else say('No QR code found in that image.');
+    }
+    const cam = h('button', { type: 'button', onclick: async () => {
+      if (stream) { stop(); say(''); return; }
+      try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }); } catch (e) { say(`No camera here (${e.name}): use an image, or paste the text.`); return; }
+      video.srcObject = stream; video.hidden = false; cam.textContent = 'Stop the camera';
+      await video.play().catch(() => {});
+      say('Point the camera at the QR.');
+      timer = setInterval(async () => {
+        if (busy || video.readyState < 2) return;
+        busy = true;
+        try { const t = await decode(video, video.videoWidth, video.videoHeight, 640); if (t) await give(t); } finally { busy = false; }
+      }, 200);
+    } }, 'Camera');
+    // Feature detection: no getUserMedia, or no camera listed (WebKitGTK on some phones): image and paste only.
+    if (!navigator.mediaDevices?.getUserMedia) cam.hidden = true;
+    else navigator.mediaDevices.enumerateDevices?.().then((ds) => { if (!ds.some((d) => d.kind === 'videoinput')) { cam.hidden = true; say('No camera found: take a photo or a screenshot and use "From an image", or paste the text.'); } }).catch(() => {});
+    pick.onchange = () => { const f = pick.files?.[0]; pick.value = ''; if (f) fromImage(f); };
+    text.addEventListener('paste', (ev) => {
+      const img = [...(ev.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
+      if (img) { ev.preventDefault(); fromImage(img.getAsFile()); }
+    });
+    const use = () => { const t = text.value; text.value = ''; if (t.trim()) give(t); };
+    const el = h('div', null, h('div', { class: 'bar' }, cam, h('button', { type: 'button', onclick: () => pick.click() }, 'From an image')), video, pick,
+      h('label', null, 'Or paste its text, a code, or a screenshot of it'), text, h('div', { class: 'bar' }, h('button', { type: 'button', onclick: use }, 'Use the text')), status);
+    el.stop = stop; el.say = say;
+    return el;
+  }
+  const STATE_SAYS = { code: 'waiting for the device to scan the code', words: 'compare the four words', sending: 'sending its key, end to end', done: 'added', refused: 'not added', expired: 'the code expired: add it again' };
+  function viewDevices() {
+    const top = h('div'), adding = h('div'), offline = h('div'), list = h('div'), joining = h('div'), frames = h('div'), words = h('div');
+    const name = h('input', { autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: '20', placeholder: 'phone', 'aria-label': 'Device name' });
+    const myName = h('input', { autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: '20', placeholder: 'device', 'aria-label': 'This device\'s name' });
+    const D = { got: new Map(), count: 0, need: false, offline: null, timer: 0, result: null };
+    // ---- the giving side
+    const addDevice = (off) => act(() => backend.call('POST', '/api/devices/add', { name: name.value.trim(), ...(off && { offline: true }) }), (r) => { name.value = ''; if (off) showFrames(r); });
+    function showFrames(r) {
+      clearInterval(D.timer);
+      D.offline = { ...r, at: 0 };
+      const cv = h('div'), label = h('p', { class: 'muted' });
+      const draw = async () => { const o = D.offline; if (!o?.frames) return; const c = await qrCanvas(o.frames[o.at]); put(cv, c ?? h('div', { class: 'long' }, o.frames[o.at])); label.textContent = `frame ${o.at + 1} of ${o.frames.length}`; };
+      const next = () => { if (!D.offline?.frames) return; D.offline.at = (D.offline.at + 1) % D.offline.frames.length; draw(); };
+      put(offline, h('div', { class: 'card' }, h('p', null, `${safeText(r.name)}: scan every frame on the device, any order (worker ${r.worker}).`), cv, label,
+        h('div', { class: 'bar' }, h('button', { onclick: next }, 'Next frame'), h('button', { class: 'primary', onclick: wordsNow }, 'All scanned: show the words'))));
+      draw();
+      if (r.frames.length > 1) D.timer = setInterval(next, 1000);
+    }
+    // The words never share the screen with the frames: those go first, and the words come once.
+    async function wordsNow() {
+      clearInterval(D.timer);
+      const o = D.offline;
+      D.offline = null;
+      put(offline, h('p', { class: 'muted' }, 'Getting the words…'));
+      let w = null;
+      try { w = (await backend.call('POST', '/api/devices/words', { id: o.id })).words; } catch (e) { put(offline, errorCard(e)); return; }
+      put(offline, h('div', { class: 'card' }, h('p', null, `Type these on ${safeText(o.name)} (shown once; never photograph them with the frames):`),
+        h('div', { class: 'words' }, w.split(' ').map((x) => h('span', null, x))), h('p', { class: 'did' }, `It shows worker ${o.worker}, ${o.did}`),
+        h('p', { class: 'muted' }, 'Its invite lives 7 days: keep this page open (or come back) once the device is online, so its answer is read.'),
+        h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => put(offline) }, 'Typed: hide them'))));
+      w = null;
+    }
+    // ---- this machine as the device
+    const send = async (texts, typed) => {
+      D.result = null;
+      try {
+        const r = await backend.call('POST', '/api/devices/scan', { texts, name: myName.value.trim() || 'device', ...(typed !== undefined && { words: typed }) });
+        if (r.kind === 'offline' && r.state === 'frames') { D.count = r.count; scan.say(`${r.have} of ${r.count} frames; still missing ${r.missing.join(', ')}`); return false; }
+        if (r.kind === 'offline' && r.state === 'words') { D.count = r.count; D.need = true; scan.say(`All ${r.count} frame(s) read.`); askWords(); return true; }
+        D.result = r; D.got.clear(); D.need = false; put(words); scan.say('');
+        if (r.kind === 'online') scan.say('Pairing with the giving side…');
+        await poll();
+        return true;
+      } catch (e) { scan.say(''); S.note = e; S.update(); return e.check !== 'device_frame' ? true : false; }
+    };
+    const scan = scanner(async (t) => {
+      const text = t.trim();
+      if (!/^SGD1/.test(text)) { D.got.clear(); return send([text]); }
+      const k = text.slice(4, 8);   // frame index and count: keep each once
+      if (D.got.get(k) === text) return false;
+      D.got.set(k, text);
+      return send([...D.got.values()]);
+    });
+    function askWords() {
+      const w = h('input', { type: 'password', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', 'aria-label': 'The words' });
+      const go = async () => { const typed = w.value; w.value = ''; await send([...D.got.values()], typed); if (D.need) w.focus(); };
+      w.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') go(); });
+      put(words, h('div', { class: 'card' }, h('label', null, 'Type the words the giving screen shows (not shown here)'), w, h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: go }, 'Open'))));
+      w.focus();
+    }
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => { scan.stop(); clearInterval(D.timer); show('contacts'); } }, '‹'), h('h1', null, 'Devices')), top,
+      h('h2', null, 'Add a device'),
+      h('div', null, h('label', null, 'Its name (a-z, 0-9, _ and -)'), name,
+        h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => addDevice(false) }, 'Add (online)'), h('button', { onclick: () => addDevice(true) }, 'Add offline')),
+        h('p', { class: 'muted' }, 'It becomes an agent of yours with its own key, attested 14 days and renewed. To give it your identity too (FULL), use a terminal: sigelo-agent device add --name <n> --full.')),
+      adding, offline,
+      h('h2', null, 'Your devices'), list,
+      h('div', { class: 'bar' }, h('button', { onclick: () => act(() => backend.call('POST', '/api/devices/sync')) }, 'Send the list to every device')),
+      h('h2', null, 'This is the new device'),
+      h('div', null, h('label', null, 'Name for this device'), myName, h('p', { class: 'muted' }, 'Scan the QR the other screen shows: the online code, or every frame of an offline one.'), scan, words, joining));
+    return async () => {
+      put(top, statusLine(), noteCard());
+      const L = await backend.call('GET', '/api/devices').catch((e) => { S.note = e; return null; });
+      if (!L) return;
+      const cards = [];
+      for (const a of L.adding) {
+        const kids = [h('p', null, h('b', null, a.name), ` · worker ${a.worker} · ${STATE_SAYS[a.state] ?? a.state}`)];
+        if (a.state === 'code') {
+          kids.push((await qrCanvas(a.qr)) ?? '', h('div', { class: 'long' }, a.qr), h('div', null, 'or type ', h('span', { class: 'code' }, a.short), ' · ', countdown(a.exp), ' left, once'));
+        } else if (a.state === 'words') {
+          kids.push(h('div', null, 'Do the device\'s four words read:'), a.words ? h('div', { class: 'words' }, a.words.split(' ').map((w) => h('span', null, w))) : h('p', { class: 'muted' }, '(not known yet)'),
+            h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => act(() => backend.call('POST', '/api/devices/confirm', { id: a.id, match: true })) }, 'They match: send its key'),
+              h('button', { class: 'danger', onclick: () => act(() => backend.call('POST', '/api/devices/confirm', { id: a.id, match: false })) }, 'They don\'t')));
+        }
+        if (a.check) kids.push(h('p', { class: 'warn' }, a.detail ?? a.check));
+        cards.push(h('div', { class: 'card' }, kids));
+      }
+      put(adding, cards);
+      put(list, L.devices.length ? L.devices.map((d) => h('div', { class: 'row' }, h('span', { class: 'main' },
+        h('div', { class: 'name' }, d.name), h('div', { class: 'sub' }, `worker ${d.worker} · added ${when(d.added)}${d.seen ? ` · seen ${when(d.seen)}` : ''}`),
+        h('div', null, badge(d.rank.toUpperCase(), d.rank === 'full' ? 'alert' : ''), d.revoked ? badge(`revoked ${when(d.revoked)}`, 'alert') : badge(d.paired ? 'paired' : 'not paired yet', d.paired ? 'ok' : ''), d.tier ? tierChip(d.tier) : null),
+        h('div', { class: 'did' }, d.did)),
+        d.revoked ? null : h('button', { onclick: () => { if (confirm(`Revoke ${d.name}? It is told to delete its keys, and forgotten here when it answers.`)) act(() => backend.call('POST', '/api/devices/revoke', { name: d.name })); } }, 'Revoke'),
+        h('button', { class: 'danger', onclick: () => { if (confirm(`${d.name} lost or stolen? It is revoked and forgotten now${d.rank === 'full' ? '; it held your identity: the steps with your 25 words follow' : ''}.`)) act(() => backend.call('POST', '/api/devices/revoke', { name: d.name, lost: true }), (r) => { if (r.steps) S.note = { message: [...r.steps.now.map((x) => `Done: ${x}`), 'With your 25 words:', ...r.steps.words.map((x, i) => `${i + 1}. ${x}`)].join('\n') }; }); } }, 'Lost')))
+        : h('p', { class: 'muted' }, L.list ? 'None left.' : 'None yet: Add a device.'));
+      const j = L.joining, r = D.result, out = [];
+      if (j) {
+        if (j.state === 'joining') out.push(h('p', null, 'Pairing with the giving side…'));
+        if (j.state === 'words') out.push(h('div', { class: 'card' }, h('p', null, 'The giving screen asks whether its words read:'), j.words ? h('div', { class: 'words' }, j.words.split(' ').map((w) => h('span', null, w))) : h('p', { class: 'muted' }, '(waiting for the pairing)'), h('p', { class: 'muted' }, 'Answer there; this device gets its key once you do.')));
+        if (j.state === 'done') out.push(h('p', { class: 'good' }, `✓ This device is worker ${j.worker ?? '?'} (${j.did}), in ${j.file}`));
+        if (j.state === 'failed') out.push(h('div', { class: 'card err' }, `${j.check}: ${j.message}`), j.long ? h('div', { class: 'long' }, j.long) : null);
+      }
+      if (r?.kind === 'offline' && r.state === 'done') out.push(h('p', { class: 'good' }, `✓ This device is worker ${r.worker} (${r.did}) of ${r.operator}, in ${r.file}${r.paired ? ', paired' : '; it pairs once the giving side is online'}. Check the DID against the giving screen.`));
+      put(joining, out);
+    };
+  }
+
   // ---- ME
   function viewMe() {
     const body = h('div'), how = h('p', { class: 'did' });
@@ -331,7 +640,7 @@
       put(body, errorCard(S.note) ?? '',
         h('div', { class: 'card' }, h('div', { class: 'did' }, m.did), h('div', { class: 'bar' }, cp)),
         h('p', null, m.recovery === 'set' ? 'Recovery key: set, offline' : h('span', { class: 'warn' }, 'Recovery key: none. Theft of this key is permanent.')),
-        h('p', null, 'Key: file (keychain: not yet)'),
+        h('p', null, m.key === 'browser' ? 'Key: in this app\'s storage, sealed under a key it cannot export' : 'Key: file (keychain: not yet)'),
         h('p', null, `Relay: ${m.relay} · keeps messages ${m.retention_days} days`),
         h('h2', null, 'Agents on this machine'),
         (S.agents ?? []).length ? S.agents.map((a) => h('div', { class: 'row' }, h('span', { class: 'main' }, h('div', { class: 'name' }, a.name),
@@ -347,7 +656,7 @@
   }
 
   // ---- routing and polling
-  const VIEWS = { contacts: viewContacts, pair: viewPair, chat: viewChat, me: viewMe };
+  const VIEWS = { contacts: viewContacts, pair: viewPair, chat: viewChat, me: viewMe, links: viewLinks, devices: viewDevices };
   function show(view, arg) {
     S.view = view; S.note = null;
     S.update = VIEWS[view](arg);
@@ -360,14 +669,17 @@
     polling = true;
     try { S.snap = await backend.call('GET', `/api/state?since=${S.snap?.seq ?? 0}`); S.fatal = null; } catch (e) { S.fatal = e; }
     polling = false;
-    if (S.fatal?.status === 403) { put(app, h('p', { class: 'card err' }, 'This page has no key: open the link sigelo-agent ui printed.')); return; }
+    if (S.fatal?.status === 403) { put(app, h('p', { class: 'card err' }, SHELL || LOCAL ? S.fatal.message : 'This page has no key: open the link sigelo-agent ui printed.')); return; }
     try { await S.update(); } catch {}
   }
   setInterval(() => { for (const el of document.querySelectorAll('.countdown')) el.textContent = left(Number(el.dataset.exp)); }, 1000);
   // Installable on this machine (manifest.webmanifest, sw.js: the three files, never /api/).
   if (backend === http && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  if (!TOKEN) { put(app, h('p', { class: 'card err' }, 'This page has no key: open the link sigelo-agent ui printed.')); return; }
+  if (!TOKEN && !SHELL && !LOCAL) { put(app, h('p', { class: 'card err' }, 'This page has no key: open the link sigelo-agent ui printed.')); return; }
   show('contacts');
   poll();
   setInterval(poll, 2000);
+  // local: what changes the state is pushed; the poll still reads it with the same `since`.
+  let pushed = null;
+  LOCAL?.onChange?.(() => { if (pushed === null) pushed = setTimeout(() => { pushed = null; poll(); }, 50); });
 })();

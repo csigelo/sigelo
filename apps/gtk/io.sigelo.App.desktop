@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=sigelo
+Comment=Your sigelo page: this phone's, or a computer's
+Exec=sigelo-app
+Icon=io.sigelo.App
+Terminal=false
+Categories=Network;InstantMessaging;
+Keywords=identity;messages;agents;
+StartupNotify=true
+X-Purism-FormFactor=Workstation;Mobile;

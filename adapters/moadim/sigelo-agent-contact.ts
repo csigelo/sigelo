@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * The contact verbs of the sidecar (design/relay-plan.md §2): invite, accept, contacts, tier, send,
- * send-file, inbox, history, forget; and the argv of recovery-key, recover and erase-request (sigelo-agent-recovery.ts), which cli.ts
+ * send-file, inbox, history, forget, link, links, unlink (LINKS.md); and the argv of recovery-key, recover and erase-request (sigelo-agent-recovery.ts), which cli.ts
  * dispatches here with them. Two agents swap a one-line code and become contacts, then exchange end-to-end
  * encrypted messages through a relay that sees ciphertext only. The work is the carrier of
  * sigelo-contact, a dependency of this package (contact/ of the repository); this file is argv and
@@ -55,6 +55,9 @@ const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, numb
   inbox: { flags: { '--wait': true, '--expect': false, '--tier': true, '--quiet-too': false }, args: [0, 0] },
   history: { flags: { '--since': true }, args: [0, 0] },
   forget: { flags: {}, args: [1, 1] },
+  link: { flags: { '--purpose': true, '--tier-a': true, '--tier-b': true, '--days': true, '--wait': true, '--finish': false, '--note': true, '--relay': true }, args: [0, 2] },
+  links: { flags: { '--tell': false, '--tier': true, '--days': true }, args: [0, 2] },
+  unlink: { flags: {}, args: [1, 1] },
   pro: { flags: {}, args: [2, 4] },
   'recovery-key': { flags: { '--out': true }, args: [0, 0] },
   recover: { flags: { '--recovery-key': true }, args: [0, 0] },
@@ -87,6 +90,16 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
   history [--since <iso|s>]                what inbox gave out, again, from <identity>.inbox.log (0600, the
                                            newest 500), no relay; --since: an ISO time, or seconds ago
   forget <did>                             revoke a contact here, for good
+  link <A> <B> --purpose <text> [--days n] as the operator (--operator): pair two of your agents, or one with a
+       [--tier-a|--tier-b friend|quiet]    contact of yours (external: B's operator decides; 30 days, --note
+       [--note <text>] [--relay <host>]    ≤ 280 for it); purpose ≤ 120; tier: how A files B, how B files A
+       [--wait <s>] | link --finish        (own never); wait 0 to 300 s (default 120); --finish: pending steps
+  links                                    this identity's links, introductions waiting for you, allow rules
+  links accept|refuse <id> [--tell]        an introduction: accept (quiet, or --tier friend), or refuse
+                                           (silent; --tell: the introducer learns it)
+  links allow|deny <contact> [--tier t]    introductions from that contact accepted by themselves (at quiet,
+       [--days n]                          or --tier friend; --days: for so long), or no longer
+  unlink <id>                              end a link: both sides forget (or drop the purpose) (LINKS.md)
   pro redeem <PRO-XXXX-XXXX>               a gift code: this identity's pool is Pro for its months; run it
                                            as the operator, --operator (prints the new Pro expiry)
 
@@ -126,6 +139,7 @@ interface Carrier {
   history(o: { since?: number }): { messages: unknown[] };
   forget(did: string): Promise<unknown>;
   redeemGift(code: string): Promise<{ exp: number; months: number }>;
+  takeLinks(): unknown[];
 }
 interface CarrierLib {
   DEFAULT_RELAY: string;
@@ -136,13 +150,44 @@ interface CarrierLib {
   readCode(text: string, now: number, how?: string): { did: string };
   keepLong(e: unknown, long: string): unknown;
 }
-interface Contact { name: string; did: string; re_pair?: string | null; fingerprint?: string | null; ours?: boolean; tier?: string }
+interface Contact { name: string; did: string; re_pair?: string | null; fingerprint?: string | null; ours?: boolean; tier?: string; link?: { id: string; purpose: string; expires: number | null } | null }
 interface FileSent { name: string; size: number; sha256: string; chunks: number }
 /** A file received whole (carrier.mjs #onFile), as an inbox item. */
 interface FileItem { type: 'file'; contact?: string | null; from: string; name: string; size: number; path: string }
 /** n bytes for people (contact/file.mjs sizeText). */
 const sizeText = (n: number): string => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KiB` : `${(n / 1024 / 1024).toFixed(1)} MiB`);
 interface Failed { type?: string; name?: string | null; did?: string; code?: string; detail?: string }
+/** contact/link.mjs, as the verbs use it. */
+/** An introduction received (link.mjs introduced): notice false when the introducer is quiet here. */
+export interface LinkReceived { id: string; from: string; name: string; peer: string; peer_name: string | null; purpose: string; note: string | null; exp: number; notice: boolean }
+export interface LinkOut { linked: { id: string; name?: string; a_name?: string; b_name?: string; purpose: string; role?: string; prior?: boolean }[]; refused: { id: string | null; check: string; detail: string }[];
+  ended: { id: string; name: string; reason: string; forgot: boolean }[]; received: LinkReceived[]; ignored: number; batch: Batch | null }
+export interface LinkRec { id: string; a: string; b: string; a_name: string; b_name: string; kind?: string; purpose: string; status: string; step?: string; check: string | null; expires: number | null }
+export interface LinkLib {
+  linksPath(identityFile: string): string;
+  link(o: { carrier: unknown; file: string; a: string; b: string; purpose: string; tierA?: string; tierB?: string; days?: number; note?: string; relay?: string }): Promise<LinkRec>;
+  unlink(o: { carrier: unknown; file: string; id: string }): Promise<{ id: string; status: string; role: string; name?: string; forgot?: boolean }>;
+  list(o: { carrier: unknown; file: string }): { links: { id: string; name: string; purpose: string; tier: string; expires: number | null }[]; made: LinkRec[];
+    received: { id: string; from: string; name: string | null; peer: string; peer_name: string | null; purpose: string; note: string | null; exp: number; answer?: string }[];
+    allow: { contact: string; name: string | null; tier: string; until: number | null }[] };
+  handle(o: { carrier: unknown; file: string; batch?: Batch | null; local?: boolean; wait?: number }): Promise<LinkOut>;
+  answer(o: { carrier: unknown; file: string; id: string; accept: boolean; tell?: boolean; tier?: string }): { id: string; from: string; status: string; told: boolean };
+  allow(o: { carrier: unknown; file: string; contact: string; tier?: string; days?: number }): { contact: string; name: string; tier: string; until: number | null };
+  deny(o: { carrier: unknown; file: string; contact: string }): { contact: string; name: string | null; had: boolean };
+  state<T>(file: string, now: number, fn: (s: { links: Record<string, LinkRec> }) => T): T;
+}
+/** An introduction waiting for this identity's operator, in one line (purpose and note are data). */
+export const introText = (x: LinkReceived): string => `link ${x.id}: ${x.name} introduces ${x.peer_name ?? 'an agent'} (${x.peer}) for: ${x.purpose}${x.note ? `; note: ${x.note}` : ''}. `
+  + `sigelo-agent links accept ${x.id} | links refuse ${x.id} (until ${new Date(x.exp * 1000).toISOString().slice(0, 16)}Z)`;
+/** One line per thing a link round did (link.mjs handle), for people; introductions with a notice. */
+export function linkNotes(r: LinkOut, o: { received?: boolean } = {}): string[] {
+  return [
+    ...(o.received === false ? [] : (r.received ?? []).filter((x) => x.notice).map(introText)),
+    ...r.linked.map((x) => (x.role === 'operator' ? `link ${x.id}: linked ${x.a_name} ↔ ${x.b_name}: ${x.purpose}` : `link ${x.id}: linked with ${x.name}${x.prior ? ' (paired already: the purpose attached)' : ''}: ${x.purpose}`)),
+    ...r.refused.map((x) => `link ${x.id ?? '?'}: refused, ${x.check}: ${x.detail}`),
+    ...r.ended.map((x) => `link ${x.id}: ended (${x.reason}): ${x.name} ${x.forgot ? 'forgotten' : 'kept, the purpose dropped'}`),
+  ];
+}
 interface Kdf { pairId(K: Uint8Array): string; unhex(s: unknown, len: number, check: string): Uint8Array }
 interface Short { codeKind(text: string): 'short' | 'long'; normaliseShort(text: string): string }
 
@@ -169,7 +214,7 @@ const caret = (v: unknown, base: string): boolean => {
   return !!x && !!b && x[0] === b[0] && (b[0] !== 0 || x[1] === b[1]) && (x[1]! - b[1]! || x[2]! - b[2]!) >= 0;
 };
 /** sigelo-contact's directory in this package's install; else an absent error naming where it looked. */
-function contactDir(): string {
+export function contactDir(): string {
   const homes: string[] = [];
   for (let x = PACKAGE; ; x = dirname(x)) {
     if (basename(x) !== 'node_modules') homes.push(join(x, 'node_modules'));
@@ -183,15 +228,15 @@ function contactDir(): string {
 }
 /** This package's version (sigelo-agent --version). */
 export const version = (): string => (JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8')) as { version: string }).version;
-export async function contactLib(): Promise<{ lib: CarrierLib; kdf: Kdf; short: Short; enrol: unknown }> {
+export async function contactLib(): Promise<{ lib: CarrierLib; kdf: Kdf; short: Short; enrol: unknown; link: LinkLib }> {
   const own = version();
   const dir = contactDir(), pkg = join(dir, 'package.json');
   const m = JSON.parse(readFileSync(pkg, 'utf8')) as { name?: unknown; version?: unknown } | null;
   if (m?.name !== 'sigelo-contact' || !caret(m.version, own)) throw new Error(`refusing ${pkg}: ${JSON.stringify(m?.name) ?? 'no name'} ${JSON.stringify(m?.version) ?? 'no version'}, not sigelo-contact ^${own}`);
   // By path, from the directory checked: by name, Node could find another first (dist/node_modules).
   try {
-    const [lib, kdf, short, enrol] = await Promise.all(['carrier', 'kdf', 'short', 'enrol'].map((f) => import(pathToFileURL(join(dir, `${f}.mjs`)).href))) as [CarrierLib, Kdf, Short, unknown];
-    return { lib, kdf, short, enrol };
+    const [lib, kdf, short, enrol, link] = await Promise.all(['carrier', 'kdf', 'short', 'enrol', 'link'].map((f) => import(pathToFileURL(join(dir, `${f}.mjs`)).href))) as [CarrierLib, Kdf, Short, unknown, LinkLib];
+    return { lib, kdf, short, enrol, link };
   } catch (e) {
     if (absent(e)) throw notFound(`sigelo-contact is incomplete: ${(e as Error).message.split('\n')[0]}`);
     throw e;
@@ -199,9 +244,18 @@ export async function contactLib(): Promise<{ lib: CarrierLib; kdf: Kdf; short: 
 }
 
 /** A dependency of sigelo-contact (`@noble/ciphers/chacha.js`), resolved from its directory, checked as contactLib checks it. */
-export async function contactModule(spec: string): Promise<unknown> {
+export async function contactDependency(spec: string): Promise<unknown> {
   await contactLib();
   return import(pathToFileURL(createRequire(join(contactDir(), 'package.json')).resolve(spec)).href);
+}
+
+/** Another module of the same sigelo-contact (device, qr, qr-decode, page), from the directory contactLib checks. */
+export async function contactModule<T = Record<string, unknown>>(name: 'device' | 'qr' | 'qr-decode' | 'page' | 'control' | 'invite'): Promise<T> {
+  await contactLib();
+  try { return await import(pathToFileURL(join(contactDir(), `${name}.mjs`)).href) as T; } catch (e) {
+    if (absent(e)) throw notFound(`sigelo-contact is incomplete: ${(e as Error).message.split('\n')[0]}`);
+    throw e;
+  }
 }
 
 // JSON.stringify escapes the C0 controls but leaves DEL, the C1 controls (U+0080-U+009F, which some
@@ -339,7 +393,7 @@ export function holderFor(identity: string, what: string, through = false): { pi
   throw Object.assign(new Error(busyText(identity, h, what)), { check: 'busy' });
 }
 // The contact verbs that log in, and those of them that go through a watcher.
-const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'inbox', 'forget', 'pro'], THROUGH = ['send', 'send-file', 'inbox'];
+const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'inbox', 'forget', 'pro', 'link', 'unlink'], THROUGH = ['send', 'send-file', 'inbox'];
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch (e) { return (e as { code?: string }).code === 'EPERM'; } };
 /** The live process holding the lock on this identity file, or null. */
 export function lockHolder(identity: string): { pid: number; kind: 'ui' | 'watch' } | null {
@@ -477,8 +531,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
     out({ did: r.did, chain: r.chain });
     return 0;
   }
-  let lib: CarrierLib, kdf: Kdf, short: Short;
-  try { ({ lib, kdf, short } = await contactLib()); } catch (e) {
+  let lib: CarrierLib, kdf: Kdf, short: Short, L: LinkLib;
+  try { ({ lib, kdf, short, link: L } = await contactLib()); } catch (e) {
     const why = (e as Error).message.split('\n')[0]!;
     note(absent(e) ? `the contact verbs ${MISSING}: ${why}` : why);
     debug(e);
@@ -489,6 +543,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
   let w: { pid: number; kind: 'ui' | 'watch' } | null = null;
   if (SESSION_VERBS.includes(cmd)) {
     try { w = holderFor(path, `a CLI ${cmd}`, THROUGH.includes(cmd)); } catch (e) { note((e as Error).message); return 1; }
+    // The operator's seat (DEVICES.md): this machine's device inbox first; elsewhere, seat_elsewhere.
+    if (w === null) { try { await (await import('./sigelo-agent-device.ts')).seatGate(path, `a CLI ${cmd}`); } catch (e) { note((e as Error).message); debug(e, { identity: path }); return 1; } }
   }
   const queuedFor = w && { local: true };
   const kicked = (): void => { if (w) { kick(path); note(`${cmd}: queued for sigelo-agent watch (pid ${w.pid}), which holds the relay session: it sends it now`); } };
@@ -574,7 +630,7 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         out({ ...r, contacts: r.contacts.map((x) => ({ ...x, pair: pairOf(x.did) })) });
         for (const x of r.contacts.filter((y) => y.fingerprint)) note(`${x.name}: Check with them: ${x.fingerprint}`);
         const roster = workersBeside(path);
-        for (const x of r.contacts.filter((y) => y.fingerprint)) note(trustOf(x.name, x.ours, x.tier, roster.get(x.did)));
+        for (const x of r.contacts.filter((y) => y.fingerprint)) note(trustOf(x.name, x.ours, x.tier, roster.get(x.did)) + (x.link ? `; linked (${x.link.id}): ${x.link.purpose}` : ''));
         for (const x of r.contacts.filter((y) => y.re_pair)) {
           note(`${x.name}: re-pair needed (${x.re_pair === 'own_recovery' ? 'this agent recovered its identity' : 'it recovered its identity'}): nothing goes to it until a new invite and accept`);
         }
@@ -624,7 +680,16 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         // A watcher on this file holds the session: what it received, read from the state, no login.
         if (w?.kind === 'watch') note(`inbox: sigelo-agent watch (pid ${w.pid}) holds the relay session: reading what it received`);
         // No wait while messages are held.
-        const fresh = await c.inbox({ wait: peekHeld(held).messages.length > 0 ? 0 : wait, ...(tiers && { tiers }), ...(w?.kind === 'watch' && { local: true }) });
+        const got = await c.inbox({ wait: peekHeld(held).messages.length > 0 ? 0 : wait, ...(tiers && { tiers }), ...(w?.kind === 'watch' && { local: true }) });
+        // Links (link.mjs): handled here, by code, before anything is printed; beside a watcher, by it.
+        let fresh = got;
+        try {
+          const h = await L.handle({ carrier: c, file: L.linksPath(path), batch: got, local: w?.kind === 'watch' });
+          fresh = h.batch ?? got;
+          for (const l of linkNotes(h)) note(l);
+          // Device messages (DEVICES.md): by code too; beside a watcher, by it.
+          if (w?.kind !== 'watch') fresh = (await (await import('./sigelo-agent-device.ts')).deviceRound(c, path, fresh)).batch ?? fresh;
+        } catch (e) { putBack(held, got); throw e; }
         const r = merge(takeHeld(held), fresh);
         if (!(await printInbox(r))) {
           putBack(held, r);
@@ -678,6 +743,95 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         const until = new Date(r.exp * 1000).toISOString().replace('.000', '');
         out({ relay: c.relay, operator, months: r.months, pro_until: until });
         note(`Pro until ${until} at ${c.relay} for the pool of ${operator} (${r.months} month${r.months === 1 ? '' : 's'} added): its agents pool with an operator attestation from it (https://sigelo.ai/agents.html#pro, step 5)`);
+        break;
+      }
+      case 'link': {
+        // The operator introduces two of its agents (LINKS.md, contact/link.mjs): an ask to A, then
+        // rounds of inbox + handle until both said linked, or --wait runs out (link --finish later).
+        // Other messages these rounds take wait in the held inbox for the next inbox.
+        const file = L.linksPath(path), finish = flags.has('--finish'), wait = seconds(flags.get('--wait'), '--wait', WAIT_MAX) ?? (finish ? 10 : 120);
+        if (finish ? args.length !== 0 : args.length !== 2) throw misuse(finish ? 'link --finish takes no contacts' : 'link <A> <B> --purpose <text>: two contacts');
+        let id: string | null = null;
+        if (!finish) {
+          const purpose = flags.get('--purpose');
+          if (purpose === undefined) throw misuse('link <A> <B> --purpose <text>: the purpose is required (≤ 120 characters)');
+          const d = flags.get('--days');
+          if (d !== undefined && !/^\d+$/.test(d)) throw misuse(`--days: whole days, 1 to 365, not ${JSON.stringify(d)}`);
+          const rec = await L.link({ carrier: c, file, a: args[0]!, b: args[1]!, purpose, ...(flags.has('--tier-a') && { tierA: flags.get('--tier-a')! }), ...(flags.has('--tier-b') && { tierB: flags.get('--tier-b')! }), ...(d !== undefined && { days: Number(d) }),
+            ...(flags.has('--note') && { note: flags.get('--note')! }), ...(flags.has('--relay') && { relay: flags.get('--relay')! }) });
+          id = rec.id;
+          note(`link ${id}: asked ${rec.a_name} for a one-use code for ${rec.b_name}${rec.kind === 'external' ? ` (external: ${rec.b_name}'s operator decides; ${rec.b_name} learns ${rec.a_name}'s identity, the purpose and your note)` : ''}`);
+        }
+        // External: once the offer went, its operator answers when it likes; waited for 15 s more
+        // (an allow rule there accepts it at once), then left pending.
+        let offered = 0;
+        const open = (): LinkRec[] => L.state(file, Math.floor(Date.now() / 1000), (s) => Object.values(s.links).filter((x) => (id === null ? x.status === 'pending' : x.id === id)));
+        const end = Date.now() + wait * 1000;
+        let refused = false;
+        for (;;) {
+          const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+          const batch = await c.inbox({ wait: Math.min(left, 5) });
+          const h = await L.handle({ carrier: c, file, batch });
+          putBack(heldPath(path), h.batch ?? batch);
+          for (const l of linkNotes(h)) note(l);
+          refused ||= h.refused.length > 0;
+          if (batch.offline !== undefined) { note(`link: offline: ${hint(batch.offline)}`); debug(c.lastError, ctx()); break; }
+          const pend = open().filter((x) => x.status === 'pending');
+          if (pend.length > 0 && pend.every((x) => x.kind === 'external' && x.step === 'offer')) offered ||= Date.now();
+          if (pend.length === 0 || Date.now() >= end || (offered && Date.now() - offered >= 15_000)) break;
+        }
+        const recs = id === null ? L.state(file, Math.floor(Date.now() / 1000), (s) => Object.values(s.links)) : open();
+        out(id === null ? recs : recs[0]);
+        const still = recs.filter((x) => x.status === 'pending');
+        if (still.length > 0) note(`link: ${still.map((x) => `${x.id} pending (${x.step === 'ask' ? `waiting for ${x.a_name}` : x.kind === 'external' ? `waiting for ${x.b_name}'s operator: links accept` : `waiting for ${x.b_name}`})`).join(', ')}: their agents finish it at their next inbox (or a watch); then sigelo-agent link --finish`);
+        if (id === null && recs.length === 0) note('link --finish: nothing pending');
+        return id !== null && recs[0]?.status === 'refused' ? 1 : id === null && refused ? 1 : 0;
+      }
+      case 'links': {
+        const file = L.linksPath(path), sub = args[0];
+        const day = (t: number | null): string => (t ? `until ${new Date(t * 1000).toISOString().slice(0, 10)}` : 'no expiry');
+        if (sub === undefined) {
+          if (flags.has('--tell') || flags.has('--tier') || flags.has('--days')) throw misuse('links: --tell, --tier and --days go with accept, refuse or allow');
+          const r = L.list({ carrier: c, file });
+          out(r);
+          for (const x of r.links) note(`${x.id} ${x.name} (${x.tier}, ${day(x.expires)}): ${x.purpose}`);
+          for (const x of r.made) note(`${x.id} ${x.a_name} ↔ ${x.b_name}: ${x.status}${x.check ? ` (${x.check})` : ''}, ${day(x.expires)}: ${x.purpose}`);
+          for (const x of r.received) note(x.answer ? `link ${x.id}: ${x.answer} (at the next inbox or watch round)` : introText({ ...x, name: x.name ?? x.from, notice: true }));
+          for (const x of r.allow) note(`allow ${x.name ?? x.contact}: introductions accepted at ${x.tier}, ${day(x.until)}`);
+          if (r.links.length + r.made.length + r.received.length + r.allow.length === 0) note('links: none');
+          break;
+        }
+        if (!['accept', 'refuse', 'allow', 'deny'].includes(sub) || args.length !== 2) throw misuse('links [accept|refuse <id> [--tell] | allow <contact> [--tier friend|quiet] [--days n] | deny <contact>]');
+        const tier = flags.get('--tier'), d = flags.get('--days');
+        if (tier !== undefined && !(sub === 'accept' || sub === 'allow')) throw misuse('--tier goes with accept or allow');
+        if (tier !== undefined && tier !== 'friend' && tier !== 'quiet') throw misuse(`--tier: friend or quiet, not ${JSON.stringify(tier)} (an introduced agent is never own)`);
+        if (d !== undefined && (sub !== 'allow' || !/^\d+$/.test(d))) throw misuse('--days: whole days, with allow');
+        if (flags.has('--tell') && sub !== 'refuse') throw misuse('--tell goes with refuse');
+        if (sub === 'allow' || sub === 'deny') {
+          const r = sub === 'allow' ? L.allow({ carrier: c, file, contact: args[1]!, ...(tier && { tier }), ...(d !== undefined && { days: Number(d) }) }) : L.deny({ carrier: c, file, contact: args[1]! });
+          out(r);
+          note(sub === 'allow' ? `allow ${r.name}: its introductions are accepted by themselves at ${(r as { tier: string }).tier}, ${day((r as { until: number | null }).until)} (links deny ${r.name} to stop)`
+            : (r as { had: boolean }).had ? `deny ${r.name ?? r.contact}: its introductions wait for you again` : `deny ${r.name ?? r.contact}: there was no rule`);
+          break;
+        }
+        // An answer that sends (accept; refuse --tell) needs the session: beside a watcher, it does it.
+        const sends = sub === 'accept' || flags.has('--tell');
+        let hw: { pid: number; kind: 'ui' | 'watch' } | null = null;
+        if (sends) { try { hw = holderFor(path, `links ${sub}`, true); } catch (e) { note((e as Error).message); return 1; } }
+        const r = L.answer({ carrier: c, file, id: args[1]!, accept: sub === 'accept', tell: flags.has('--tell'), ...(tier && { tier }) });
+        if (!sends) { out(r); note(`link ${r.id}: refused; nothing was told`); break; }
+        if (hw) { out(r); kick(path); note(`link ${r.id}: ${r.status}: sigelo-agent watch (pid ${hw.pid}) does it now`); break; }
+        const h = await L.handle({ carrier: c, file, wait: 10 });
+        for (const l of linkNotes(h)) note(l);
+        out({ ...r, linked: h.linked, refused: h.refused });
+        if (sub === 'accept') note(`link ${r.id}: accepted; it is linked once ${r.status === 'accepting' ? 'the pairing completes (your next inbox)' : 'done'}`);
+        else note(`link ${r.id}: refused, and told`);
+        return h.refused.some((x) => x.id === r.id && x.check !== 'link_refused') ? 1 : 0;
+      }
+      case 'unlink': {
+        const r = await L.unlink({ carrier: c, file: L.linksPath(path), id: args[0]! });
+        out(r);
+        note(r.role === 'operator' ? `link ${r.id}: ended; both agents forget each other at their next inbox` : `link ${r.id}: ended: ${r.name} ${r.forgot ? 'forgotten, and told' : 'kept, the purpose dropped'}`);
         break;
       }
       case 'forget': {

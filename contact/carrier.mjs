@@ -3,8 +3,9 @@
 // invite answers and replies and sigelo-msg/0 envelopes between contacts through a relay. The relay
 // sees random topics and ciphertext; everything here that decides who someone is runs offline.
 //
-//   const c = new Carrier({ identity, store, state, relay, endpoints, retentionDays, clock, onEvent, keep, transport })
-//   await c.invite({ name, ttl, short, relay })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first;
+//   const c = new Carrier({ identity, store, state, relay, endpoints, retentionDays, clock, onEvent, keep, transport, platform })
+//   await c.invite({ name, ttl, short, relay, local })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first
+//                                            (local: at the next login, no session now);
 //                                            short: the long code is also parked at the relay under a short one;
 //                                            relay: the relay the code names and the short code is parked at (default: this agent's)
 //   await c.unpark(short, { relay })       → the long code parked under a short one, taken from the relay (one use);
@@ -25,7 +26,7 @@
 //                                            failed: pairing_failed events (code_expired: an answer that outlived its code) until inbox
 //   await c.send(to, content, { label, local }) → { status: 'sent' | 'queued', … }, or throws the relay's code
 //   await c.sendAll(to, contents, { label, local }) → one result each ('refused' with its code), one login
-//   await c.sendFile(to, path, { local })  → { status, to, name, file: {id, name, size, sha256, chunks} }: a file of at most
+//   await c.sendFile(to, file, { local })  → { status, to, name, file: {id, name, size, sha256, chunks} }: file, a path or {bytes, name}, of at most
 //                                            8 MiB as FILE_LABEL messages (file.mjs), one login; throws as send does. Chunks
 //                                            queued wait in files/.out (0600), the state names them; gone once sent or refused.
 //                                            local (all three): no session, queued in the state file for a started carrier
@@ -41,6 +42,13 @@
 //                                            no session, nothing taken
 //   c.setTier(who, tier)                   the owner's tier for a contact (store.mjs setTier) → { did, name, tier, ours }
 //   c.presetTier(did, tier)                the same for an original DID not yet a contact, filed when it pairs
+//   c.takeLinks(), c.setLink(who, link)   link.mjs's: the sigelo-link/1 messages received (never in inbox(), the log
+//                                            or onEvent: a `link` event without content says one came), taken; a
+//                                            contact's link record (store.mjs setLink)
+//   c.takeDevices()                        device.mjs's: the sigelo-device/1 messages received (never in inbox(), the
+//                                            log or onEvent: a `device` event without content says one came), taken
+//   c.freshEpochs({ only, retire })        every session (or only's) afresh, as after a rotation (a snapshot's
+//                                            state imported where the seat moved, devices.md §4.3) → the DIDs
 //   c.answeredBy(nonce)                    the original DID that paired through this agent's code `nonce`, or null
 //                                            (kept in the state until a day after the code's exp; the inviter's
 //                                            paired event names the code as `invite`: its nonce, never its secret)
@@ -56,7 +64,8 @@
 // signature; sigelo-agent-keys.ts) and its SPEC §8 bundle, read again at every operation, so a
 // rotation made by another process is seen at once. { secret, bundle }, the seed itself, still works. store: the contact store
 // (store.mjs); state: this file's own JSON (sessions, outbox, inbox), both 0600 and written under one
-// lock file, `<state>.lock`. pathsFor(identityFile) names both beside the identity file. onEvent(e):
+// lock file, `<state>.lock`. pathsFor(identityFile) names both beside the identity file. platform: every
+// file, lock, network and proof-of-work call (design/apps.md §4.2); platform-node.mjs's by default. onEvent(e):
 // each event as it happens, messages included, and `pow` / `pow_done` around a proof-of-work search
 // (seconds to a minute on a phone: say so to the operator). keep: messages also wait in the state file for
 // inbox(), in plaintext, until taken (INBOX_MAX at most: the oldest go, counted as inbox_full); by
@@ -200,18 +209,11 @@
 //     a round stops at the first SUBSCRIBE refused "rate", and what is left waits for the next
 //     round, so topics are asked in the order they matter (#want). A refused topic is asked again
 //     at the next hourly round (ASK_AGAIN).
-import { createHash } from 'node:crypto';
-import { request as httpRequest } from 'node:http';
-import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
-import { connect as tlsConnect } from 'node:tls';
-import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { connect } from 'mqtt';
 import { canonicalize, commitmentOf, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
 import { KIND, acceptPrekeys, expire, header, open, pad, prekeysMissing, restartEpoch, send, session, unpad } from './envelope.mjs';
 import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, checkRelay, inviteKeys, keyOf, makeInvite, parseInvite } from './invite.mjs';
@@ -221,6 +223,9 @@ import { Contacts, OPERATOR_CTX, TIERS } from './store.mjs';
 import { SHORT_TTL, codeHash, codeKind, fingerprint, formatShort, giftHash, makeShort, normaliseShort, relayTag, tagOf } from './short.mjs';
 import { REGISTRY_URL, RELEASE_DID, loadRegistry, readTable, remember, resolveTag } from './relays.mjs';
 import { FILE_LABEL, MAX_FILE, assemble, checkChunk, checkManifest, chunkHead, isManifest, safeName, splitFile } from './file.mjs';
+// Every file, lock, network and CPU call goes through a platform (design/apps.md §4.2): Node's by default.
+import { platform as nodePlatform } from './platform-node.mjs';
+export { proxyFor } from './platform-node.mjs';
 
 export const V = 'sigelo-carrier/0';
 export const DEFAULT_RELAY = 'relay.sigelo.ai', MQTT_PORT = 8883, NOTICE = '$sigelo/notice';
@@ -261,9 +266,20 @@ const POISON_TRIES = 3;
 // Messages kept for it (keep), likewise.
 const EVENTS_MAX = 1000, INBOX_MAX = 1000;
 // The inbox log (the constructor's log): at most so many items and bytes, the oldest go first (the
-// newest is kept whatever its size). Labels it never holds: enrolment's, one of which carries a key.
+// newest is kept whatever its size). Labels it never holds: enrolment's, one of which carries a key,
+// devices', and links' (a live invite code).
 export const LOG_MAX = 500, LOG_BYTES = 4 * 1024 * 1024;
-const UNLOGGED = /^sigelo-(identity|enrol)\//;
+// Labels whose messages carry keys, device material or a live code (enrol, device, link): never logged.
+export const UNLOGGED = /^sigelo-(identity|enrol|device|link)\//;
+// Links (link.mjs, sigelo-link/1): never an inbox message. Kept apart in the state (st.links, at most
+// LINKS_MAX, the oldest go) for link.mjs handle(), which takeLinks() them; sent only by link.mjs
+// (send's internal: LINK_SEND), so a caller's label (an MCP client's, a model's) cannot forge one.
+export const LINK_LABEL = 'sigelo-link/1', LINK_SEND = Symbol('sigelo-link send');
+const LINKS_MAX = 64;
+// Devices (device.mjs, sigelo-device/1): the same, kept apart in st.devices for sigelo-agent's
+// `device` verbs (takeDevices); sent only with DEVICE_SEND: one carries the operator's keys.
+export const DEVICE_LABEL = 'sigelo-device/1', DEVICE_SEND = Symbol('sigelo-device send');
+const DEVICES_MAX = 16;
 // Received files of one name and hash prefix kept side by side, at most (#onFile).
 const FILE_COPIES = 64;
 // A contact's folder of received files: its name as safeName keeps it, and 16 hex digits of the
@@ -344,10 +360,20 @@ const LOCAL_NAME = /(^|\.)(localhost|local|localdomain|test|example|invalid|onio
 const IPV4_LIKE = /\.(?:[0-9]+|0x[0-9a-f]*)$/;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const b64 = (b) => Buffer.from(b).toString('base64');
-const unb64 = (s) => new Uint8Array(Buffer.from(s, 'base64'));
+// Base64 over btoa and atob, which every runtime has (Buffer is Node's).
+const b64 = (b) => {
+  const u = b instanceof Uint8Array ? b : Uint8Array.from(b);
+  let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+const unb64 = (s) => { const t = atob(s), u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
+const sameBytes = (a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
+// UTF-8 as readFileSync(…, 'utf8') reads it: a byte order mark is kept (JSON.parse refuses it, as before).
+const utf8 = new TextDecoder('utf-8', { ignoreBOM: true });
+const textOf = (bytes) => utf8.decode(bytes);
 const randomId = () => hex(randomBytes(8));
-const clientIdOf = (original) => 's' + createHash('sha256').update(original, 'utf8').digest('hex').slice(0, 24);
+const clientIdOf = (original) => 's' + hex(sha256(utf8ToBytes(original))).slice(0, 24);
 // Operators as hinted and proved: each with its attestation's expiry, so a renewal goes again.
 const opKey = (mine, ops) => [...ops].sort().map((d) => `${d} ${mine.exp.get(d)}`).join();
 // Whether a session as the state holds it (dumpSession) has a prekey bundle of contact c's that an
@@ -394,62 +420,6 @@ export function endpointOf(relay, endpoints = {}) {
   const http = o.http.replace(/\/+$/, '');
   if (o.ws !== undefined) check('ws', [['wss:', 'ws:']]);
   return { mqtt: o.mqtt, http, ws: o.ws ?? http.replace(/^http/, 'ws') + WS_PATH };
-}
-
-/**
- * The HTTP CONNECT proxy for url (https: or wss:), from HTTPS_PROXY or https_proxy, unless NO_PROXY
- * (or no_proxy) names its host: "*", a name (its subdomains too; a leading "." or "*." the same), an
- * address, each with an optional :port. → a URL, or null. Only an http:// proxy; TLS to the relay
- * runs inside the tunnel, verified as without one (NODE_EXTRA_CA_CERTS included).
- */
-export function proxyFor(url, env = process.env) {
-  const u = new URL(url);
-  const raw = env.HTTPS_PROXY || env.https_proxy;
-  if ((u.protocol !== 'https:' && u.protocol !== 'wss:') || !raw) return null;
-  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase(), port = u.port || '443';
-  for (const e of String(env.NO_PROXY || env.no_proxy || '').toLowerCase().split(/[\s,]+/).filter(Boolean)) {
-    if (e === '*') return null;
-    const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(e) ?? (e.split(':').length === 2 ? /^([^:]+):(\d+)$/.exec(e) : null);
-    const name = (m ? m[1] : e).replace(/^\*?\./, '.'), p = m?.[2];
-    if (p && p !== port) continue;
-    if (name.startsWith('.') ? host.endsWith(name) || host === name.slice(1) : host === name || host.endsWith(`.${name}`)) return null;
-  }
-  let p;
-  try { p = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`); } catch { fail('connect', 'HTTPS_PROXY is not a URL: want http://host:port'); }
-  if (p.protocol !== 'http:') fail('connect', `HTTPS_PROXY: ${p.protocol}// proxies are not supported; want http://host:port (HTTP CONNECT)`);
-  return p;
-}
-
-// An https.Agent whose every connection is a tunnel through proxy (HTTP CONNECT host:port), with
-// TLS to the relay inside it: for the HTTP calls (http) and for MQTT over WebSocket (ws's agent).
-class Tunnel extends HttpsAgent {
-  constructor(proxy) { super({ keepAlive: false }); this.proxy = proxy; }
-  createConnection(options, cb) {
-    const p = this.proxy, host = options.host.includes(':') ? `[${options.host}]` : options.host, target = `${host}:${options.port || 443}`;
-    const auth = p.username ? { 'proxy-authorization': `Basic ${Buffer.from(`${decodeURIComponent(p.username)}:${decodeURIComponent(p.password)}`).toString('base64')}` } : {};
-    const req = httpRequest({ host: p.hostname.replace(/^\[|\]$/g, ''), port: p.port || 80, method: 'CONNECT', path: target, agent: false, headers: { host: target, ...auth } });
-    req.setTimeout(HTTP_MS, () => req.destroy(new Error(`no answer within ${HTTP_MS / 1000} s`)));
-    req.once('connect', (res, sock) => {
-      req.setTimeout(0);
-      if (res.statusCode !== 200) { sock.destroy(); return cb(new Error(`the proxy ${p.host} answered ${res.statusCode} to CONNECT ${target}`)); }
-      cb(null, tlsConnect({ ...options, socket: sock, servername: options.servername || options.host }));
-    });
-    req.once('error', (e) => cb(new Error(`the proxy ${p.host}: ${e.code ?? e.message}`)));
-    req.end();
-  }
-}
-const tunnelFor = (url) => { const p = proxyFor(url); return p ? new Tunnel(p) : null; };
-
-// An HTTPS request through a tunnel, answered in the shape of fetch's Response as http() reads it.
-function viaTunnel(url, init, agent) {
-  return new Promise((resolve, reject) => {
-    const body = init.body === undefined ? undefined : Buffer.from(init.body);
-    const req = httpsRequest(url, { method: init.method ?? 'GET', agent, signal: init.signal, headers: body ? { 'content-type': 'text/plain;charset=UTF-8', 'content-length': body.length } : {} }, (res) => {
-      resolve({ status: res.statusCode, type: 'basic', body: res, headers: { get: (k) => { const v = res.headers[k.toLowerCase()]; return v === undefined ? null : String(v); } } });
-    });
-    req.once('error', (e) => reject(Object.assign(new Error(e.message), { cause: e })));
-    req.end(body);
-  });
 }
 
 /**
@@ -502,24 +472,12 @@ export function optionsFromEnv(env = process.env) {
 
 // ---------------------------------------------------------------- files
 
-// One lock file for the store and the state: every change is load, change, save inside it, so a
-// CLI verb and a long-running carrier on the same identity cannot undo each other. As
-// adapters/moadim/sigelo-agent-monero.ts withLock.
-const LOCK_TRIES = 200, LOCK_MS = 25;
-function withLock(path, fn) {
-  const lock = `${path}.lock`, idle = new Int32Array(new SharedArrayBuffer(4));
-  for (let i = 0; ; i++) {
-    try { closeSync(openSync(lock, 'wx', 0o600)); break; } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      if (i === LOCK_TRIES) fail('lock', `${lock} is still held after ${(LOCK_TRIES * LOCK_MS) / 1000} s: another sigelo-contact process holds it, or one was killed holding it; delete the file to continue`);
-      Atomics.wait(idle, 0, 0, LOCK_MS);
-    }
-  }
-  try { return fn(); } finally { rmSync(lock, { force: true }); }
-}
-
-function loadState(path, self) {
-  const s = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { v: V, self, relays: {}, peers: {}, pending: [], inbox: [], events: [], dropped: {}, failing: {}, answered: {} };
+// One lock for the store and the state (platform.transact: Node's is the lock file `<state>.lock`):
+// every change is load, change, save inside it, so a CLI verb and a long-running carrier on the same
+// identity cannot undo each other.
+function loadState(files, path, self) {
+  const raw = files.read(path);
+  const s = raw !== null ? JSON.parse(textOf(raw)) : { v: V, self, relays: {}, peers: {}, pending: [], inbox: [], events: [], dropped: {}, failing: {}, answered: {} };
   if (s.v !== V || s.self !== self) fail('state', `${path} is not the ${V} state of ${self}`);
   // Written by an earlier version of this file, which kept neither.
   s.events ??= []; s.failing ??= {}; s.answered ??= {};
@@ -527,11 +485,9 @@ function loadState(path, self) {
 }
 
 // The state holds chain keys and prekey secrets: 0600, a fresh temporary name created exclusively,
-// then renamed (store.mjs save()).
-function saveState(path, s) {
-  const tmp = join(dirname(path), `.${basename(path)}.${randomId()}.tmp`);
-  writeFileSync(tmp, JSON.stringify(s), { mode: 0o600, flag: 'wx' });
-  renameSync(tmp, path);
+// then renamed (store.mjs save(); platform files.write).
+function saveState(files, path, s) {
+  files.write(path, utf8ToBytes(JSON.stringify(s)));
 }
 
 // A session (envelope.mjs) as JSON: every key and counter, bytes as base64. Restored from the
@@ -604,7 +560,7 @@ export function seal(kind, key, t, value, rng = randomBytes) {
 /** Checks, in order: frame (header), aead, padding, plaintext (strict JSON that is its own JCS). Throws MsgError only. */
 export function unseal(kind, key, t, bytes) {
   const head = header(kind, ZERO_EPOCH, 1);
-  if (bytes.length < FRAME_HEAD + NONCE + 256 + 16 || Buffer.compare(bytes.subarray(0, FRAME_HEAD), head) !== 0) fail('frame', `not a kind ${kind} frame`);
+  if (bytes.length < FRAME_HEAD + NONCE + 256 + 16 || !sameBytes(bytes.subarray(0, FRAME_HEAD), head)) fail('frame', `not a kind ${kind} frame`);
   let pt;
   try { pt = xchacha20poly1305(key, bytes.subarray(FRAME_HEAD, FRAME_HEAD + NONCE), concatBytes(head, utf8ToBytes(t))).decrypt(bytes.subarray(FRAME_HEAD + NONCE)); } catch {
     fail('aead', 'does not decrypt: tampered, or not for this topic');
@@ -617,7 +573,7 @@ export function unseal(kind, key, t, bytes) {
   // this process failing, and the relay would deliver the frame again at every connection.
   let jcs;
   try { jcs = canonicalize(v); } catch (e) { fail('plaintext', `no canonical form: ${e.message}`); }
-  if (Buffer.compare(utf8ToBytes(jcs), text) !== 0) fail('plaintext', 'not the JCS form of its value');
+  if (!sameBytes(utf8ToBytes(jcs), text)) fail('plaintext', 'not the JCS form of its value');
   return v;
 }
 
@@ -676,36 +632,27 @@ function recovers(c, bundle, fresh) {
 
 // ---------------------------------------------------------------- relay login (plan §3 "Login")
 
-const zeroBits = (d) => { let n = 0; for (const x of d) { if (x !== 0) return n + Math.clz32(x) - 24; n += 8; } return n; };
-
 /**
  * The first c (0, 1, 2, …) with SHA-256("sigelo-relay-pow/0\n" ‖ host ‖ original DID ‖ nonce ‖ c)
  * starting with `bits` zero bits (relay-plan §3 "Proof of work"), or null once Date.now() passes
- * `deadline`. It yields to the event loop every 4,096 hashes (about 20 ms on a phone), so the
- * process's connections, keepalives and other identities carry on during a search of minutes.
+ * `deadline`. pow: the platform's search (Node's yields to the event loop every 4,096 hashes, about
+ * 20 ms on a phone, so the process's connections, keepalives and other identities carry on during
+ * a search of minutes).
  */
-export async function solvePow(host, original, nonce, bits, deadline = Infinity) {
-  const prefix = `sigelo-relay-pow/0\n${host}${original}${nonce}`;
-  for (let i = 0; ; i++) {
-    if (zeroBits(createHash('sha256').update(prefix + i, 'utf8').digest()) >= bits) return String(i);
-    if ((i & 0xfff) === 0xfff) {
-      if (Date.now() > deadline) return null;
-      await new Promise((r) => setImmediate(r));
-    }
-  }
+export function solvePow(host, original, nonce, bits, deadline = Infinity, pow = nodePlatform.pow) {
+  return pow(`sigelo-relay-pow/0\n${host}${original}${nonce}`, bits, { deadline });
 }
 
 // The answer body is read as it arrives and cut off past HTTP_MAX, whatever Content-Length says:
 // a chunked answer has none, and a code can name any host. A redirect is not followed: through
 // one, a relay would send this GET, or POST /check and the login in it, to any host, port and path,
 // past publicRelay's check on the code's host. A relay never needs one: `connect`.
-async function http(url, init = {}) {
+async function http(platform, url, init = {}) {
   let res;
   const at = where(url), http = { url, method: init.method ?? 'GET' };
   const t0 = Date.now();
   try {
-    const agent = tunnelFor(url);
-    res = agent ? await viaTunnel(url, { ...init, signal: AbortSignal.timeout(HTTP_MS) }, agent) : await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(HTTP_MS) });
+    res = await platform.fetch(url, { ...init, signal: AbortSignal.timeout(HTTP_MS) });
   } catch (e) {
     const why = e.name === 'TimeoutError' ? `no answer within ${HTTP_MS / 1000} s` : e.cause?.code ?? e.cause?.message ?? e.message;
     fail('connect', `cannot reach the relay at ${at} (${why}): check the network and SIGELO_RELAY / SIGELO_RELAY_ENDPOINTS, then try again`, { cause: e, http });
@@ -803,9 +750,9 @@ const noReader = (name) => `${name}'s agent does not hold its mailbox for this p
 
 // MQTT 3.1.1 says only "bad user name or password": POST /check with the same credentials names
 // the failing check (relay/auth.mjs).
-async function named(ep, creds, err) {
+async function named(platform, ep, creds, err) {
   try {
-    const r = await http(`${ep.http}/check`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password }) });
+    const r = await http(platform, `${ep.http}/check`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password }) });
     if (r.body?.ok === false && typeof r.body.check === 'string') {
       const check = LOGIN_CHECKS.has(r.body.check) ? r.body.check : 'connect';
       return new MsgError(check, `the relay refused the login (${relaySays(`${r.body.check}: ${r.body.detail}`)})${LOGIN_NEXT[check] ? `: ${LOGIN_NEXT[check]}` : ''}`, { cause: err, http: r.http });
@@ -854,13 +801,12 @@ export function limitPackets(stream, max, cut) {
   });
 }
 
-// url: mqtts://, or wss:// (MQTT over WebSocket: through the HTTPS proxy when one applies, proxyFor;
+// url: mqtts://, or wss:// (MQTT over WebSocket: through the HTTPS proxy when one applies, platform-node.mjs proxyFor;
 // a frame over the largest packet, its fixed header included, refused by ws before it is held).
-function mqttConnect(url, creds, link, onPacket, timeout = CONNECT_MS) {
+function mqttConnect(platform, url, creds, link, onPacket, timeout = CONNECT_MS) {
   return new Promise((resolve, reject) => {
-    const agent = /^wss?:/.test(url) ? tunnelFor(url) : null;
-    const client = connect(url, { protocolVersion: 4, clean: false, clientId: creds.clientId, username: creds.username, password: Buffer.from(creds.password, 'utf8'),
-      reconnectPeriod: 0, connectTimeout: timeout, keepalive: 60, resubscribe: false, wsOptions: { maxPayload: MAX_PACKET + 5, perMessageDeflate: false, ...(agent && { agent }) } });
+    const client = platform.mqtt(url, { protocolVersion: 4, clean: false, clientId: creds.clientId, username: creds.username, password: creds.password,
+      reconnectPeriod: 0, connectTimeout: timeout, keepalive: 60, resubscribe: false, wsOptions: { maxPayload: MAX_PACKET + 5, perMessageDeflate: false } });
     link.client = client;
     // connect() has built the socket and nothing has arrived yet. The cut is permanent at a relay
     // other than this agent's own (#retry, accept): it would send the same packet again.
@@ -870,8 +816,9 @@ function mqttConnect(url, creds, link, onPacket, timeout = CONNECT_MS) {
       client.stream.destroy();
     });
     // QoS 1: MQTT.js acknowledges once this calls back, so a delivery is acknowledged only after
-    // what it carried is saved. Packets are handled one at a time, in order.
-    client.handleMessage = (packet, done) => { onPacket(packet).then((ack) => { if (ack) done(); }, () => client.end(true)); };
+    // what it carried is saved, and committed (platform.flush: a browser's storage writes behind;
+    // a failed commit acknowledges nothing). Packets are handled one at a time, in order.
+    client.handleMessage = (packet, done) => { onPacket(packet).then(async (ack) => ack && (await platform.flush(), true)).then((ack) => { if (ack) done(); }, () => client.end(true)); };
     const cleanup = () => { client.off('connect', ok); client.off('error', no); client.off('close', closed); };
     const ok = () => { cleanup(); resolve(client); };
     const no = (e) => { cleanup(); client.end(true); reject(e); };
@@ -887,11 +834,11 @@ const FELL_BACK = new Map();
 // over wss:// (ws:// only to loopback), else ep.ws. A relay that could name any host would send the
 // login to it. Asked once per process and relay.
 const WS_INFO = new Map();
-async function wsEndpoint(ep) {
+async function wsEndpoint(platform, ep) {
   if (!WS_INFO.has(ep.http)) {
     let url = ep.ws;
     try {
-      const r = await http(`${ep.http}/relay.json`), w = new URL(r.body?.endpoints?.mqtt_ws), h = new URL(ep.http);
+      const r = await http(platform, `${ep.http}/relay.json`), w = new URL(r.body?.endpoints?.mqtt_ws), h = new URL(ep.http);
       if (r.status === 200 && w.hostname === h.hostname && (w.protocol === 'wss:' || (w.protocol === 'ws:' && LOOPBACK.has(w.hostname)))) url = w.href;
     } catch {}
     WS_INFO.set(ep.http, url);
@@ -931,9 +878,21 @@ export class Carrier {
   #mineMemo = null; #clocks = new Map();
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
-    onEvent, keep, backoff = BACKOFF, tick = TICK, files, log, transport = 'auto', shortRelay = DEFAULT_RELAY, registry = REGISTRY_URL, registryPin = RELEASE_DID, relays, registryFile }) {
+    onEvent, keep, backoff = BACKOFF, tick = TICK, files, log, transport = 'auto', shortRelay = DEFAULT_RELAY, registry = REGISTRY_URL, registryPin = RELEASE_DID, relays, registryFile,
+    platform = nodePlatform }) {
     if (!TRANSPORTS.includes(transport)) throw new TypeError(`transport: ${TRANSPORTS.join(', ')}`);
-    this.transport = transport;
+    // The platform (design/apps.md §4.2, platform-node.mjs): files, lock, network, proof of work.
+    if (typeof platform?.files?.read !== 'function' || typeof platform.transact !== 'function' || typeof platform.fetch !== 'function' || typeof platform.mqtt !== 'function'
+      || typeof platform.flush !== 'function' || !Array.isArray(platform.transports)) {
+      throw new TypeError('platform: { files, path, flush, transact, owner, fetch, mqtt, transports, pow, env } (platform-node.mjs)');
+    }
+    this.platform = platform;
+    const { join, dirname, resolve } = platform.path;
+    // What the platform can carry: a page has MQTT over WebSocket only (transports ['wss']), so
+    // auto is wss there, and mqtts is refused.
+    const carried = platform.transports;
+    if (transport !== 'auto' && !carried.includes(transport)) throw new TypeError(`transport: this platform carries ${carried.join(', ')}`);
+    this.transport = transport === 'auto' && !carried.includes('mqtts') ? 'wss' : transport;
     if (typeof identity !== 'function') throw new TypeError('identity: a function returning { sign, bundle }');
     if (typeof store !== 'string' || typeof state !== 'string') throw new TypeError('store, state: file paths (pathsFor(identityFile))');
     if (retentionDays !== undefined && !retentionOk(retentionDays)) throw new TypeError(`retentionDays: 1 to ${RETENTION_MAX_DAYS}`);
@@ -970,15 +929,13 @@ export class Carrier {
   #logOut(items) {
     const path = this.logPath, add = items.filter((m) => !(typeof m?.label === 'string' && UNLOGGED.test(m.label)));
     if (path === null || add.length === 0) return;
-    let lines = [];
-    try { lines = readFileSync(path, 'utf8').split('\n').filter((l) => l !== ''); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    const { files } = this.platform, raw = files.read(path);
+    let lines = raw === null ? [] : textOf(raw).split('\n').filter((l) => l !== '');
     const had = new Set(lines);
     for (const m of add) { const l = JSON.stringify(m); if (!had.has(l)) { had.add(l); lines.push(l); } }
-    let bytes = lines.reduce((n, l) => n + Buffer.byteLength(l) + 1, 0), cut = 0;
-    while (lines.length - cut > 1 && (lines.length - cut > LOG_MAX || bytes > LOG_BYTES)) bytes -= Buffer.byteLength(lines[cut++]) + 1;
-    const tmp = join(dirname(path), `.${basename(path)}.${randomId()}.tmp`);
-    writeFileSync(tmp, lines.slice(cut).map((l) => `${l}\n`).join(''), { mode: 0o600, flag: 'wx' });
-    renameSync(tmp, path);
+    let bytes = lines.reduce((n, l) => n + utf8ToBytes(l).length + 1, 0), cut = 0;
+    while (lines.length - cut > 1 && (lines.length - cut > LOG_MAX || bytes > LOG_BYTES)) bytes -= utf8ToBytes(lines[cut++]).length + 1;
+    files.write(path, utf8ToBytes(lines.slice(cut).map((l) => `${l}\n`).join('')));
   }
 
   // ---- files, under the lock
@@ -1002,17 +959,18 @@ export class Carrier {
   // The state is saved before the store's held writes (store.mjs hold: a handshake's), so a crash
   // or a full disk between the two leaves the store as it was and the delivery unacknowledged.
   #with(write, fn) {
-    return withLock(this.statePath, () => {
+    const { files } = this.platform;
+    return this.platform.transact(this.statePath, () => {
       const now = checkNow(this.clock()), me = this.#me(now);
-      const ctx = { now, me, store: new Contacts(this.storePath, me.did, { mine: () => this.#mine(me, now) }), st: loadState(this.statePath, me.did) };
+      const ctx = { now, me, store: new Contacts(this.storePath, me.did, { mine: () => this.#mine(me, now), files }), st: loadState(files, this.statePath, me.did) };
       // Before anything reads the store: a recovery made by another process (sigelo-agent recover)
       // is seen at once. The store's marks are written first; the state keeps the events.
-      if (this.#markRecovered(ctx)) saveState(this.statePath, ctx.st);
-      if (this.#lapse(ctx)) saveState(this.statePath, ctx.st);
+      if (this.#markRecovered(ctx)) saveState(files, this.statePath, ctx.st);
+      if (this.#lapse(ctx)) saveState(files, this.statePath, ctx.st);
       const out = fn(ctx);
       // Answers that fn's adds and takes found expired.
-      if (this.#lapse(ctx) && !write) saveState(this.statePath, ctx.st);
-      if (write) { saveState(this.statePath, ctx.st); ctx.store.commit(); }
+      if (this.#lapse(ctx) && !write) saveState(files, this.statePath, ctx.st);
+      if (write) { saveState(files, this.statePath, ctx.st); ctx.store.commit(); }
       return out;
     });
   }
@@ -1333,6 +1291,18 @@ export class Carrier {
         st.dropped[e.check] = (st.dropped[e.check] ?? 0) + 1;
         events.push({ type: 'dropped', check: e.check, detail: e.message });
       }
+    } else if (r.body.label === LINK_LABEL) {
+      // A link message (link.mjs): kept for handle(), never for inbox() nor onEvent's readers.
+      const l = (st.links ??= []);
+      l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
+      if (l.length > LINKS_MAX) { st.dropped.links_full = (st.dropped.links_full ?? 0) + l.length - LINKS_MAX; l.splice(0, l.length - LINKS_MAX); }
+      events.push({ type: 'link', from: c.did, name: c.name });
+    } else if (r.body.label === DEVICE_LABEL) {
+      // A device message (device.mjs): kept for the `device` verbs, never for inbox() nor onEvent's readers.
+      const l = (st.devices ??= []);
+      l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
+      if (l.length > DEVICES_MAX) { st.dropped.devices_full = (st.dropped.devices_full ?? 0) + l.length - DEVICES_MAX; l.splice(0, l.length - DEVICES_MAX); }
+      events.push({ type: 'device', from: c.did, name: c.name });
     } else {
       // last_resort: the epoch began on the last-resort prekey, which may serve many epochs: weaker
       // forward secrecy (plan §3 "Prekeys"), and routine for a while after a rotation (#next).
@@ -1439,9 +1409,9 @@ export class Carrier {
         p = st.files[key] ?? fail('file_chunk', 'a chunk of a file whose manifest has not come');
         const bytes = checkChunk(content, p);
         if (!p.got.includes(h.i)) {
-          const dir = this.#partDir(key);
-          mkdirSync(dir, { recursive: true, mode: 0o700 });
-          writeFileSync(join(dir, String(h.i)), bytes, { mode: 0o600 });
+          const dir = this.#partDir(key), { files, path } = this.platform;
+          files.folder(dir);
+          files.write(path.join(dir, String(h.i)), bytes, { how: 'plain' });
           p.got.push(h.i);
         }
       }
@@ -1449,32 +1419,24 @@ export class Carrier {
     if (p.got.length < p.chunks) return [];
     // Whole: checked, saved, and the parts gone whatever the check said.
     let bytes;
+    const { files } = this.platform, { join } = this.platform.path;
     try {
-      bytes = assemble(p, Array.from({ length: p.chunks }, (_, i) => readFileSync(join(this.#partDir(key), String(i)))));
+      bytes = assemble(p, Array.from({ length: p.chunks }, (_, i) => {
+        const at = join(this.#partDir(key), String(i)), b = files.read(at);
+        if (b === null) throw Object.assign(new Error(`ENOENT: no such file or directory, open '${at}'`), { code: 'ENOENT' });
+        return b;
+      }));
     } catch (e) {
       delete st.files[key];
-      rmSync(this.#partDir(key), { recursive: true, force: true });
+      files.remove(this.#partDir(key));
       return drop(e);
     }
     const dir = join(this.filesDir, contactDir(c));
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    chmodSync(this.filesDir, 0o700); chmodSync(dir, 0o700);
-    const tmp = join(dir, `.${randomId()}.tmp`);
-    writeFileSync(tmp, bytes, { mode: 0o600, flag: 'wx' });
-    let path = null;
-    try {
-      for (let n = 1; path === null && n <= FILE_COPIES; n++) {
-        const at = join(dir, `${p.sha256.slice(0, 8)}-${n === 1 ? '' : `${n}-`}${p.name}`);
-        try { linkSync(tmp, at); path = at; } catch (e) {
-          if (e.code === 'EEXIST') continue;
-          // No hard links here (FAT, some network file systems): written again, exclusively.
-          if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS'].includes(e.code)) throw e;
-          try { writeFileSync(at, bytes, { mode: 0o600, flag: 'wx' }); path = at; } catch (e2) { if (e2.code !== 'EEXIST') throw e2; }
-        }
-      }
-    } finally { rmSync(tmp, { force: true }); }
+    files.folder(dir, [this.filesDir, dir]);
+    // The first name not taken (files.add: never over a file).
+    const path = files.add(Array.from({ length: FILE_COPIES }, (_, i) => join(dir, `${p.sha256.slice(0, 8)}-${i === 0 ? '' : `${i + 1}-`}${p.name}`)), bytes);
     delete st.files[key];
-    rmSync(this.#partDir(key), { recursive: true, force: true });
+    files.remove(this.#partDir(key));
     if (path === null) return drop(new MsgError('file_exists', `${p.name}: ${FILE_COPIES} files of that name and hash are in ${dir} already; not saved`));
     const item = { type: 'file', from: c.did, contact: c.name, current_did: r.body.from, label: FILE_LABEL, name: p.name, size: p.size, sha256: p.sha256, path,
       iat: r.body.iat, received: now, last_resort: r.last_resort };
@@ -1486,32 +1448,35 @@ export class Carrier {
     return [item];
   }
 
-  #partDir(key) { return join(this.filesDir, '.partial', key); }
+  #partDir(key) { return this.platform.path.join(this.filesDir, '.partial', key); }
 
   // A file's chunks wait in filesDir/.out/<item id>.json (0600, directory 0700), not in the state:
   // base64 in an outbox item, 8 MiB were rewritten with the state at every chunk sent. The outbox
   // item keeps { id, label, spool: true }. A contact's name never starts with a dot (safeName), so
   // .out is no contact's directory. Written under the lock with the items that name them.
-  #spoolDir() { return join(this.filesDir, '.out'); }
+  #spoolDir() { return this.platform.path.join(this.filesDir, '.out'); }
   #spool(id, content) {
-    const dir = this.#spoolDir();
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    chmodSync(this.filesDir, 0o700); chmodSync(dir, 0o700);
-    writeFileSync(join(dir, `${id}.json`), JSON.stringify(content), { mode: 0o600, flag: 'wx' });
+    const dir = this.#spoolDir(), { files, path } = this.platform;
+    files.folder(dir, [this.filesDir, dir]);
+    files.write(path.join(dir, `${id}.json`), utf8ToBytes(JSON.stringify(content)), { how: 'new' });
   }
   #spooled(id) {
-    try { return JSON.parse(readFileSync(join(this.#spoolDir(), `${id}.json`), 'utf8')); } catch (e) {
+    try {
+      const b = this.platform.files.read(this.platform.path.join(this.#spoolDir(), `${id}.json`));
+      if (b === null) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      return JSON.parse(textOf(b));
+    } catch (e) {
       fail('file', `a queued part of a file is gone from ${this.#spoolDir()} (${e.code ?? e.message}): send the file again`);
     }
   }
   // Spooled parts no outbox or pending entry names any more (sent, refused, forgotten): removed.
   #sweepSpool(st) {
-    let names;
-    try { names = readdirSync(this.#spoolDir()); } catch { return; }
+    const { files, path } = this.platform, names = files.list(this.#spoolDir());
+    if (names.length === 0) return;
     const held = new Set();
     for (const e of Object.values(st.peers)) for (const x of e.outbox ?? []) if (x.spool) held.add(x.id);
     for (const p of st.pending) if (p.item?.spool) held.add(p.item.id);
-    for (const n of names) if (/^[0-9a-f]{16}\.json$/.test(n) && !held.has(n.slice(0, -5))) rmSync(join(this.#spoolDir(), n), { force: true });
+    for (const n of names) if (/^[0-9a-f]{16}\.json$/.test(n) && !held.has(n.slice(0, -5))) files.remove(path.join(this.#spoolDir(), n));
   }
 
   // Files still incomplete after the retention (the relay has dropped whatever of them was left to
@@ -1519,7 +1484,7 @@ export class Carrier {
   #sweepFiles(st, now) {
     for (const [key, p] of Object.entries(st.files ?? {})) {
       if (p.first + this.retention > now) continue;
-      rmSync(this.#partDir(key), { recursive: true, force: true });
+      this.platform.files.remove(this.#partDir(key));
       delete st.files[key];
       st.dropped.file_incomplete = (st.dropped.file_incomplete ?? 0) + 1;
       this.#emit(this.#note(st, now, { type: 'dropped', check: 'file_incomplete', from: p.from,
@@ -1971,10 +1936,13 @@ export class Carrier {
   // the relay writes a refusal's notice before the PUBACK (relay/mailbox.mjs). A notice naming
   // another packet id (`id`) is not this publish's: a late one taken for it misread the next
   // message as refused (its epoch restarted, its prekey put back, its contact marked absent).
+  // Nothing leaves before the state that sent it is committed (platform.flush): an envelope whose
+  // ratchet step a crash lost would be sent again under the same key, a replay at the reader.
   async #publish(link, t, bytes) {
+    await this.platform.flush();
     link.collect = [];
     try {
-      const id = await link.request('PUBACK', (cb) => link.client.publish(t, Buffer.from(bytes), { qos: 1 }, (err, packet) => (err ? cb(new MsgError('connect', err.message)) : cb(null, packet?.messageId))));
+      const id = await link.request('PUBACK', (cb) => link.client.publish(t, bytes, { qos: 1 }, (err, packet) => (err ? cb(new MsgError('connect', err.message)) : cb(null, packet?.messageId))));
       const mine = (n) => PUBLISH_CODES.has(n.code) && (n.id === undefined || n.id === id);
       for (const n of link.collect) if (!mine(n)) this.#emit({ type: 'notice', relay: link.relay, code: n.code, detail: n.detail });
       return link.collect.find(mine) ?? null;
@@ -2124,7 +2092,7 @@ export class Carrier {
   async #credentials(relay, ep) {
     const { me, proven } = this.#read(({ me, st }) => ({ me, proven: st.relays[relay]?.proven === true }));
     const powMax = relay === this.relay ? POW_MAX : POW_MAX_OTHER;
-    const r = await http(`${ep.http}/challenge?did=${encodeURIComponent(me.current_did)}`);
+    const r = await http(this.platform, `${ep.http}/challenge?did=${encodeURIComponent(me.current_did)}`);
     this.#clockFrom(relay, r);
     if (r.status === 429) refuse('rate', `the relay ${relay} turned the login away: too many logins from this network (${relaySays(r.body?.error ?? r.body?.detail)}): ${retryIn(r, 'a minute')}, then try again`, r);
     // Any other status is no answer about this agent (nginx says 502 while the relay restarts):
@@ -2166,7 +2134,7 @@ export class Carrier {
       });
       const t0 = Date.now();
       if (bits > 0) this.#emit({ type: 'pow', relay, bits });
-      pow = await solvePow(relay, me.did, ch.nonce, bits, t0 + POW_MS) ?? fail('pow', `no ${bits}-bit proof of work found within the challenge's 5 minutes on this machine: try again, or later (the relay raises it under load)`);
+      pow = await solvePow(relay, me.did, ch.nonce, bits, t0 + POW_MS, this.platform.pow) ?? fail('pow', `no ${bits}-bit proof of work found within the challenge's 5 minutes on this machine: try again, or later (the relay raises it under load)`);
       if (bits > 0) this.#emit({ type: 'pow_done', relay, bits, ms: Date.now() - t0 });
     }
     const password = canonicalize({ v: LOGIN_V, nonce: ch.nonce, sig, bundle: loginBundle(me.bundle, relay), ...(pow !== undefined && { pow }) });
@@ -2180,7 +2148,7 @@ export class Carrier {
   async #relayInfo(ep) {
     this.#ask = false;
     try {
-      const r = await http(`${ep.http}/relay.json`);
+      const r = await http(this.platform, `${ep.http}/relay.json`);
       this.#clockFrom(this.relay, r);
       const n = r.status === 200 ? retentionOf(r.body) : null;
       if (n !== null) this.retention = n * DAY;
@@ -2205,7 +2173,7 @@ export class Carrier {
 
   /** Measures the offset now at this agent's own relay (GET /relay.json). → clockOffset(); throws as a relay that does not answer does. */
   async checkClock() {
-    this.#clockFrom(this.relay, await http(`${endpointOf(this.relay, this.endpoints).http}/relay.json`));
+    this.#clockFrom(this.relay, await http(this.platform, `${endpointOf(this.relay, this.endpoints).http}/relay.json`));
     return this.clockOffset();
   }
 
@@ -2220,12 +2188,12 @@ export class Carrier {
     // either transport. Both are TLS; nothing falls back to a plain connection.
     const onPacket = (packet) => this.#onPacket(link, packet);
     const probe = this.transport === 'auto' && !FELL_BACK.has(ep.mqtt) && /^mqtts?:/.test(ep.mqtt);
-    let url = this.transport === 'wss' ? await wsEndpoint(ep) : this.transport === 'auto' ? FELL_BACK.get(ep.mqtt) ?? ep.mqtt : ep.mqtt;
+    let url = this.transport === 'wss' ? await wsEndpoint(this.platform, ep) : this.transport === 'auto' ? FELL_BACK.get(ep.mqtt) ?? ep.mqtt : ep.mqtt;
     // A cut connection is this client's own refusal: no POST /check may rename it.
-    try { await mqttConnect(url, creds, link, onPacket, probe ? PROBE_MS : CONNECT_MS); } catch (e) {
-      if (!probe || link.cut || typeof e.code === 'number') throw link.cut ?? await named(ep, creds, e);
-      url = await wsEndpoint(ep);
-      try { await mqttConnect(url, creds, link, onPacket); } catch (e2) { throw link.cut ?? await named(ep, creds, e2); }
+    try { await mqttConnect(this.platform, url, creds, link, onPacket, probe ? PROBE_MS : CONNECT_MS); } catch (e) {
+      if (!probe || link.cut || typeof e.code === 'number') throw link.cut ?? await named(this.platform, ep, creds, e);
+      url = await wsEndpoint(this.platform, ep);
+      try { await mqttConnect(this.platform, url, creds, link, onPacket); } catch (e2) { throw link.cut ?? await named(this.platform, ep, creds, e2); }
       FELL_BACK.set(ep.mqtt, url);
       this.#emit({ type: 'transport', relay, transport: 'wss', detail: `${ep.mqtt} gave no CONNACK within ${PROBE_MS / 1000} s (${e.message}): MQTT over WebSocket at ${url} for the rest of this process` });
     }
@@ -2359,13 +2327,19 @@ export class Carrier {
   // is. A login of its own: the relay checks that the parked code is this agent's.
   // relay: the relay the code names (a company relay for colleagues, a public one for outsiders);
   // the short code is parked there, and the pairing talks over it.
-  async invite({ name, ttl, short = false, relay } = {}) {
+  // local: no session: the code is made and kept only; its answer topic is claimed at this
+  // identity's next login (a device added offline, device.mjs), so connect once before it answers.
+  async invite({ name, ttl, short = false, relay, local = false } = {}) {
     const at = relay === undefined ? this.relay : relayArg(relay);
     const code = this.#locked(({ now, me, store }) => {
       const code = makeInvite({ did: me.current_did, relay: at, now, ...(ttl !== undefined && { ttl }) });
       store.addInvite(code, name ?? `invite-${code.nonce.slice(1, 9)}`, now);
       return code;
     });
+    if (local) {
+      if (short) fail('invite', 'a short code is parked at the relay: not with local');
+      return { code: code.text, did: code.did, relay: code.relay, exp: code.exp };
+    }
     // The answer topic is claimed before the code leaves: the relay drops what nobody reads.
     const t = inviteKeys(code.secret).answer_topic;
     try {
@@ -2378,7 +2352,7 @@ export class Carrier {
       // Eight characters on the public relay; on any other, twelve: the last four its relay tag.
       const s = makeShort(undefined, code.relay === this.shortRelay ? null : relayTag(code.relay)), exp = Math.min(checkNow(this.clock()) + SHORT_TTL, code.exp), ep = endpointOf(code.relay, this.endpoints);
       const creds = await this.#credentials(code.relay, ep);
-      const r = await http(`${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: codeHash(s), invite: code.text, exp }) });
+      const r = await http(this.platform, `${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: codeHash(s), invite: code.text, exp }) });
       const check = typeof r.body?.check === 'string' ? r.body.check : null;
       if (r.status === 429) refuse('rate', `the relay ${code.relay} parks no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to an hour')}, or use the long code (invite --long)`, r);
       if ((r.status === 404 || r.status === 405) && check === null) refuse('park', `the relay ${code.relay} takes no short codes: use the long code (invite --long)`, r);
@@ -2416,8 +2390,8 @@ export class Carrier {
         if (a?.body?.ctx === OPERATOR_CTX && typeof a.body.claims?.relay === 'string') known.push({ host: a.body.claims.relay, from: 'operator' });
       }
     } catch {}
-    for (const host of readTable(this.relaysPath)) known.push({ host, from: 'table' });
-    const r = await resolveTag(tag, { known, shown, registry: () => loadRegistry({ file: this.registryPath, url: this.registry, pin: this.registryPin, now: checkNow(this.clock()), get: (u) => http(u) }) });
+    for (const host of readTable(this.relaysPath, this.platform.files)) known.push({ host, from: 'table' });
+    const r = await resolveTag(tag, { known, shown, registry: () => loadRegistry({ file: this.registryPath, url: this.registry, pin: this.registryPin, now: checkNow(this.clock()), get: (u) => http(this.platform, u), files: this.platform.files }) });
     return { relay: r.host, from: r.from };
   }
 
@@ -2433,7 +2407,7 @@ export class Carrier {
   async #unpark(text, relay) {
     const { relay: at, from } = await this.relayForShort(text, { relay });
     const shown = formatShort(normaliseShort(text)), ep = endpointOf(at, this.endpoints);
-    const r = await http(`${ep.http}/park/${codeHash(text)}`);
+    const r = await http(this.platform, `${ep.http}/park/${codeHash(text)}`);
     if (r.status === 429) refuse('rate', `the relay ${at} looks up no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to 10 minutes')}, or ask for the long code (invite --long)`, r);
     if (r.status === 404 && r.body?.check === 'park_unknown') {
       refuse('park_unknown', `short code ${shown}: no invite waits under it at ${at}. It expired (a short code lives 10 minutes), was used already (once only), or is mistyped; ask the inviter for a new one. If the inviter made it on another relay (invite --relay) with an older sigelo, accept it with --relay <that relay>, or ask for the long code (invite --long)`, r);
@@ -2441,7 +2415,7 @@ export class Carrier {
     if (r.status === 404 || r.status === 405) refuse('park', `the relay ${at} takes no short codes: ask the inviter for the long code (invite --long)`, r);
     if (r.status !== 200) refuse('connect', `${at}: ${statusWhy(r, 'GET /park')}`, r);
     if (r.body?.ok !== true || typeof r.body.invite !== 'string') refuse('connect', `${at}: GET /park answered 200 without a parked code: try again later; SIGELO_DEBUG=1 shows the answer`, r);
-    if (from === 'named' && tagOf(normaliseShort(text)) !== null) try { remember(this.relaysPath, at); } catch {}
+    if (from === 'named' && tagOf(normaliseShort(text)) !== null) try { remember(this.relaysPath, at, this.platform.files); } catch {}
     return { invite: r.body.invite, relay: at };
   }
 
@@ -2451,7 +2425,7 @@ export class Carrier {
   async redeemGift(text) {
     const hash = giftHash(text), ep = endpointOf(this.relay, this.endpoints);
     const creds = await this.#credentials(this.relay, ep);
-    const r = await http(`${ep.http}/gift`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: hash }) });
+    const r = await http(this.platform, `${ep.http}/gift`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: hash }) });
     this.#clockFrom(this.relay, r);
     const check = typeof r.body?.check === 'string' ? r.body.check : null;
     if (r.status === 429) refuse('rate', `the relay ${this.relay} takes no more gift codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to an hour')}`, r);
@@ -2578,7 +2552,7 @@ export class Carrier {
           const e = st.peers[c.did], pair = c.revoked || !c.pair_key ? null : pairId(hexToBytes(c.pair_key));
           return { name: c.name, did: c.did, current_did: c.current_did, chain: c.chain, revoked: c.revoked, relay: c.relay, queued: e?.outbox.length ?? 0,
             re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key), pair, ours: store.oursOf(c, now), tier: store.tierOf(c, now), tier_by: c.tier_by ?? null,
-            prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null };
+            prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null, link: c.link ?? null };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
@@ -2588,8 +2562,8 @@ export class Carrier {
     });
   }
 
-  async send(to, content, { label = '', local = false } = {}) {
-    const [r] = await this.sendAll(to, [content], { label, local });
+  async send(to, content, { label = '', local = false, internal } = {}) {
+    const [r] = await this.#sendAll(to, [content], label, false, local, internal);
     // side: whose quota a quota_storage is (relay/allowance.mjs), on the error too.
     if (r.status === 'refused') throw Object.assign(new MsgError(r.code, `refused (${r.detail})`), r.side && { side: r.side });
     return r;
@@ -2602,9 +2576,11 @@ export class Carrier {
 
   // spool: every content after the first waits on disk (#spool), as a file's chunks do. local: queued
   // only, for the started carrier of this identity in another process (inbox's local, for sending).
-  async #sendAll(to, contents, label, spool, local = false) {
+  async #sendAll(to, contents, label, spool, local = false, internal = null) {
     if (typeof label !== 'string') fail('body', 'label must be a string');
     if (label === LABEL_PREKEYS || label === OPERATOR_LABEL) fail('body', `the label ${JSON.stringify(label)} is the carrier's own`);
+    if (label.startsWith('sigelo-link/') && internal !== LINK_SEND) fail('body', `the label ${JSON.stringify(label)} is the link handler's own (sigelo-agent link)`);
+    if (label.startsWith('sigelo-device/') && internal !== DEVICE_SEND) fail('body', `the label ${JSON.stringify(label)} is the device verbs' own (sigelo-agent device)`);
     if (!Array.isArray(contents) || contents.length === 0) fail('body', 'at least one message');
     for (const content of contents) {
       if (content === undefined) fail('body', 'content is required');
@@ -2651,31 +2627,22 @@ export class Carrier {
 
   // A file to a contact (file.mjs): its manifest and chunks in one sendAll, so one login. Read whole
   // first (at most MAX_FILE); this identity's own files (key, contacts, state, files received) are
-  // refused, so a confused or misled agent cannot send its key. A refusal of any part throws as
-  // send does: the contact gets no file, and what came of it there goes at its retention.
-  async sendFile(to, path, { local = false } = {}) {
-    if (typeof path !== 'string' || path === '') fail('file', 'a file path is required');
-    let real, bytes;
-    try {
-      real = realpathSync(path);
-      const s = statSync(real);
-      if (!s.isFile()) fail('file', `${path} is not a regular file`);
-      if (s.size > MAX_FILE) fail('file_too_large', `${path} is ${s.size} bytes, at most ${MAX_FILE} (8 MiB) a file`);
-    } catch (e) {
-      if (e instanceof MsgError) throw e;
-      fail('file', `cannot read ${path}: ${e.code === 'ENOENT' ? 'no such file' : e.code ?? e.message}`, { cause: e });
-    }
-    // Beside the identity: its own files (x.*) and any profile's (*.local.*, sigelo-agent's pattern).
-    const own = resolve(this.statePath.replace(/(\.carrier)?\.json$/, '')), files = (() => { try { return realpathSync(this.filesDir); } catch { return this.filesDir; } })();
-    let ownDir;
-    try { ownDir = realpathSync(dirname(own)); } catch { ownDir = dirname(own); }
-    const leaf = basename(real);
-    if (real.startsWith(files + sep) || real === this.logPath || (dirname(real) === ownDir && (leaf.startsWith(`${basename(own)}.`) || leaf.includes('.local.')))) {
-      fail('file', `${path} is one of this agent's identity files (key, contacts, state, files received, inbox log): not sent`);
-    }
-    try { bytes = readFileSync(real); } catch (e) { fail('file', `cannot read ${path}: ${e.code ?? e.message}`, { cause: e }); }
-    if (bytes.length > MAX_FILE) fail('file_too_large', `${path} is ${bytes.length} bytes, at most ${MAX_FILE} (8 MiB) a file`);
-    const { manifest, chunks } = splitFile(bytes, basename(real));
+  // refused, so a confused or misled agent cannot send its key (platform openPath). file: a path, or
+  // { bytes, name } (a page's file: no path to check). A refusal of any part throws as send does:
+  // the contact gets no file, and what came of it there goes at its retention.
+  async sendFile(to, file, { local = false } = {}) {
+    let bytes, leaf, what;
+    if (typeof file === 'string') {
+      if (file === '') fail('file', 'a file path is required');
+      if (typeof this.platform.openPath !== 'function') fail('file', 'this platform reads no paths: give { bytes, name }');
+      ({ bytes, name: leaf } = this.platform.openPath(file, { base: this.statePath.replace(/(\.carrier)?\.json$/, ''), files: this.filesDir, log: this.logPath }));
+      what = file;
+    } else if (file !== null && typeof file === 'object' && file.bytes instanceof Uint8Array && typeof file.name === 'string' && file.name !== '') {
+      ({ bytes, name: leaf } = file);
+      what = leaf;
+    } else fail('file', 'a file path is required');
+    if (bytes.length > MAX_FILE) fail('file_too_large', `${what} is ${bytes.length} bytes, at most ${MAX_FILE} (8 MiB) a file`);
+    const { manifest, chunks } = splitFile(bytes, leaf);
     const results = await this.#sendAll(to, [manifest, ...chunks], FILE_LABEL, true, local);
     const refused = results.find((x) => x.status === 'refused'), queued = results.find((x) => x.status === 'queued');
     if (refused) fail(refused.code, `refused (${refused.detail}): ${manifest.name} did not go whole; send it again once that is settled`);
@@ -2692,7 +2659,7 @@ export class Carrier {
     const want = tiers === undefined ? null : new Set(tiers);
     if (want && ![...want].every((t) => TIERS.includes(t))) fail('tier', `tiers: some of ${TIERS.join(', ')}`);
     const picks = (store, now) => { const t = want && store.tiers(now); return (m) => !want || want.has(t.get(m.from) ?? 'friend'); };
-    const ready = () => this.#read(({ now, store, st }) => st.inbox.some(picks(store, now)) || st.events.some((e) => e.type === 'pairing_failed' || (paired && e.type === 'paired')));
+    const ready = () => this.#read(({ now, store, st }) => st.inbox.some(picks(store, now)) || (st.links?.length ?? 0) > 0 || (st.devices?.length ?? 0) > 0 || st.events.some((e) => e.type === 'pairing_failed' || (paired && e.type === 'paired')));
     let offline = null;
     if (local) {
       for (const end = Date.now() + wait * 1000; Date.now() < end && !ready();) await sleep(250);
@@ -2734,8 +2701,7 @@ export class Carrier {
   history({ since = 0 } = {}) {
     if (!Number.isSafeInteger(since) || since < 0) throw new TypeError('since: unix seconds, a whole number');
     if (this.logPath === null) return { messages: [] };
-    let text = '';
-    try { text = readFileSync(this.logPath, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    const raw = this.platform.files.read(this.logPath), text = raw === null ? '' : textOf(raw);
     const messages = [];
     for (const l of text.split('\n')) {
       if (l === '') continue;
@@ -2749,6 +2715,35 @@ export class Carrier {
   setTier(who, tier) { return this.#locked(({ now, store }) => store.setTier(who, tier, now)); }
   // The owner's tier for an original DID before it is a contact (an enrolled worker): store.mjs presetTier.
   presetTier(did, tier) { return this.#locked(({ now, store }) => store.presetTier(did, tier, now)); }
+  // Links (link.mjs): the link messages received, taken; a contact's link record set (null: dropped).
+  takeLinks() { return this.#locked(({ st }) => { const l = st.links ?? []; st.links = []; return l; }); }
+  takeDevices() { return this.#locked(({ st }) => { const l = st.devices ?? []; st.devices = []; return l; }); }
+  // A copy of this state may have sent and received after it was taken (devices.md §4.3: the seat
+  // moved, the state came in a snapshot). Every session with `only`'s contacts (default: all live)
+  // starts afresh, as after a rotation: the outgoing epoch ends, the contact's one-time prekeys
+  // count as spent (epochs begin on its last-resort key until its fresh bundle comes), and a fresh
+  // bundle of ours goes at the next round. retire: ours are retired and every one-time key replaced
+  // (take --force: the other copy may be a thief's). No session needed. → the contacts restarted.
+  freshEpochs({ only, retire = false } = {}) {
+    return this.#locked(({ now, me, store, st }) => {
+      const want = only ? new Set(only) : null, done = [];
+      for (const c of Object.values(store.load().s.contacts)) {
+        if (c.revoked || !c.pair_key || (want && !want.has(c.did))) continue;
+        const s = this.#restore(st, store, me, c.did);
+        if (!s) continue;
+        restartEpoch(s);
+        if (s.out.prekeys) for (const k of s.out.prekeys.keys) s.out.used.add(k.id);
+        if (retire) s.in.prekeys.retire(now);
+        this.#persist(st, s);
+        const e = this.#entry(st, c.did);
+        e.prekeys_resend = true;
+        if (retire) e.renew = true;
+        done.push(c.did);
+      }
+      return done;
+    });
+  }
+  setLink(who, link) { return this.#locked(({ now, store }) => store.setLink(who, link, now)); }
   // The original DID that paired through this agent's code `nonce` (its inviteNonce, readCode().nonce),
   // or null: none yet, or the code's life plus a day is over (enrol.mjs answers only that DID).
   answeredBy(nonce) { return this.#read(({ now, st }) => { const a = Object.hasOwn(st.answered, nonce) ? st.answered[nonce] : null; return a && a.exp > now ? a.did : null; }); }

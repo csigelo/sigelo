@@ -14,6 +14,8 @@ import * as contact from './sigelo-agent-contact.ts';
 import * as ui from './sigelo-agent-ui.ts';
 import * as enrol from './sigelo-agent-enrol.ts';
 import * as watch from './sigelo-agent-watch.ts';
+import * as device from './sigelo-agent-device.ts';
+import * as control from './sigelo-agent-control.ts';
 
 const USAGE = `sigelo-agent — a portable sigelo/0 identity for an AI agent, and its contacts
 
@@ -48,7 +50,11 @@ The human's page (UI-API.md):
   ui --port <p>                          keep one port (an installed page keeps its origin); taken: port_taken
   ui --remote [--listen <ip>] [--name <control>] [--scope read|chat|all]
                                          also a LAN listener, sealed per control; prints the control's SIGELO:UI: text
+  ui --remote --relay [--name <control>] [--scope …]
+                                         over the relay instead: prints SIGELO:CTL:<code>, then the four words to confirm
   ui --controls | --revoke-control <name>  list the controls (never a key); forget one (the page stopped)
+  control pair <SIGELO:CTL:…> | control ui [--app] | control forget
+                                         the app's side of a relay control (a phone with sigelo-agent: apps/gtk)
 
 Staying connected (WATCH.md):
   ${watch.USAGE.replaceAll('\n', '\n  ')}
@@ -104,6 +110,8 @@ if (cmd === 'ui') await contact.exit(await ui.main(rest));
 if (cmd === 'enrol') await contact.exit(await enrol.main(rest));
 if (cmd === 'keeper') await contact.exit(await enrol.keeperMain(rest));
 if (cmd === 'watch') await contact.exit(await watch.main(rest));
+if (cmd === 'device') await contact.exit(await device.main(rest));
+if (cmd === 'control') await contact.exit(await control.controlMain(rest));
 const flag = (name: string): string | undefined => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
 /** A command line missing what it needs: exit 2, as an unknown command (USAGE). */
 function usage(why: string): never { note(why); process.exit(2); }
@@ -265,7 +273,7 @@ try {
       break;
     }
     default:
-      console.error(`${USAGE}\n\n${contact.USAGE}\n\n${enrol.USAGE}`);
+      console.error(`${USAGE}\n\n${contact.USAGE}\n\n${enrol.USAGE}\n\n${device.USAGE}`);
       process.exit(2);
   }
 } catch (e) {

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- apps/gtk/io.sigelo.App.svg (viewBox 512) centred in 768 = 512 × 108/72: the SVG's square is the
+     adaptive icon's 72 dp safe zone. The SVG's circle (256, 256, r 150) and check (M186 262 l50 50
+     l92 -104) moved by +128; stroke 44. apps/android/check.mjs checks these against the SVG. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="768"
+    android:viewportHeight="768">
+    <path
+        android:pathData="M234,384 a150,150 0 1,0 300,0 a150,150 0 1,0 -300,0"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="44" />
+    <path
+        android:pathData="M314,390 l50,50 l92,-104"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="44"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

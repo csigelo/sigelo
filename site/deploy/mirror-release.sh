@@ -5,8 +5,9 @@
 #   site/deploy/mirror-release.sh <tag> [user@host] [--origin URL] [--no-verify] [--dry-run]
 #
 #   1. `gh release download <tag>` into a scratch directory; every file must be named in the
-#      release's SHA256SUMS and every name there must have been downloaded, and `sha256sum -c`
-#      must pass: anything else and nothing is uploaded;
+#      release's SHA256SUMS (or be the APK release.json names, with its sha256) and every name
+#      there must have been downloaded, and `sha256sum -c` must pass: anything else and nothing
+#      is uploaded;
 #   2. writes site/src/releases/<tag>.SHA256SUMS in this tree (or checks it is the same): the
 #      site build reads the mirrored release from it (index.json release.files, /verify);
 #   3. uploads the files with a generated index.md listing to <webroot>/releases.incoming/<tag> on
@@ -68,8 +69,21 @@ for f in * .[!.]*; do
   printf '%s' "$f" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || die "file name not allowed: $f"
   [ -f "$f" ] || die "not a regular file: $f"
 done
+# The signed Android APK (release/apk-ceremony.md) is outside SHA256SUMS: release.json names it with
+# its sha256 (release/verify-release.sh and apk-check.sh check its signature and certificate).
+apk=
+if [ -f release.json ]; then
+  apk=$(node -e 'const fs=require("fs"),[t]=process.argv.slice(1);
+    const c=(JSON.parse(fs.readFileSync("release.json","utf8")).attestations||[]).map((a)=>a.body&&a.body.claims).find((c)=>c&&c.tag===t);
+    const p=c&&c.apk; if(!p){process.exit(0)}
+    if(!/^[A-Za-z0-9][A-Za-z0-9._-]*\.apk$/.test(p.file||"")){console.error("release.json: bad apk file name");process.exit(1)}
+    let h; try{h=require("crypto").createHash("sha256").update(fs.readFileSync(p.file)).digest("hex")}catch{console.error(p.file+": named by release.json, not in the release");process.exit(1)}
+    if(h!==p.sha256){console.error(p.file+": sha256 "+h+" is not release.json'"'"'s "+p.sha256);process.exit(1)}
+    console.log(p.file)' "$tag") || die "the APK release.json names does not match"
+  [ -z "$apk" ] || echo "$apk: sha256 as release.json signs it"
+fi
 listed=$(sed -E 's/^[0-9a-f]{64} [ *]//' SHA256SUMS | LC_ALL=C sort)
-present=$(ls | grep -vx -e SHA256SUMS -e release.json | LC_ALL=C sort)
+present=$(ls | grep -vx -e SHA256SUMS -e release.json ${apk:+-e "$apk"} | LC_ALL=C sort)
 grep -Evq '^[0-9a-f]{64} [ *][A-Za-z0-9][A-Za-z0-9._-]*$' SHA256SUMS && die "SHA256SUMS has a line that is not <sha256>  <file>"
 [ "$listed" = "$present" ] || die "SHA256SUMS and the downloaded files differ:
 listed:  $(echo $listed)
@@ -108,7 +122,9 @@ const files = readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n').map((
 });
 const sums = { name: 'SHA256SUMS', bytes: statSync(`${dir}/SHA256SUMS`).size, url: `${MIRROR}${tag}/SHA256SUMS` };
 const signed = existsSync(`${dir}/release.json`) ? [{ name: 'release.json', bytes: statSync(`${dir}/release.json`).size, url: `${MIRROR}${tag}/release.json` }] : [];
-const entry = { tag, url: `${MIRROR}${tag}/`, github: `${GH}/releases/tag/${tag}`, sha256sums: sums.url, ...(signed.length && { release_json: signed[0].url }), files };
+const claims = signed.length ? (JSON.parse(readFileSync(`${dir}/release.json`, 'utf8')).attestations || []).map((a) => a.body && a.body.claims).find((c) => c && c.tag === tag) : null;
+const apk = claims?.apk ? [{ name: claims.apk.file, bytes: statSync(`${dir}/${claims.apk.file}`).size, sha256: claims.apk.sha256, url: `${MIRROR}${tag}/${claims.apk.file}` }] : [];
+const entry = { tag, url: `${MIRROR}${tag}/`, github: `${GH}/releases/tag/${tag}`, sha256sums: sums.url, ...(signed.length && { release_json: signed[0].url }), ...(apk.length && { apk: { ...apk[0], cert_sha256: claims.apk.cert_sha256 } }), files };
 // The tag's listing: deterministic (no dates), so a re-run produces the same bytes.
 writeFileSync(`${dir}/index.md`, `# sigelo ${tag}
 
@@ -118,7 +134,7 @@ All releases: [/releases/](/releases/) and [/releases/index.json](/releases/inde
 
 | File | Bytes | SHA-256 |
 |---|---:|---|
-${[...files, sums, ...signed].map((f) => `| [${f.name}](${f.name}) | ${f.bytes} | ${f.sha256 ? `\`${f.sha256}\`` : ''} |`).join('\n')}
+${[...files, ...apk, sums, ...signed].map((f) => `| [${f.name}](${f.name}) | ${f.bytes} | ${f.sha256 ? `\`${f.sha256}\`` : ''} |`).join('\n')}
 `);
 let old = {}; try { old = JSON.parse(readFileSync(`${tmp}/old-index.json`, 'utf8') || '{}'); } catch { old = {}; }
 const v = (t) => t.slice(1).split(/[.-]/).slice(0, 3).map(Number);
@@ -162,7 +178,7 @@ else tar -C "$tmp/top" -cf - index.json index.md | $SSH "$target" "$remote2"; fi
 
 step "5/5 every file from $origin/releases/$tag/ against SHA256SUMS"
 if [ "$verify" = 0 ] || [ "$dry" = 1 ]; then echo "skipped"; exit 0; fi
-node - "$tmp/$tag" "$origin/releases/$tag/" <<'EOF'
+node - "$tmp/$tag" "$origin/releases/$tag/" "$apk" <<'EOF'
 const { readFileSync, existsSync } = require('node:fs');
 const { createHash } = require('node:crypto');
 const [dir, base] = process.argv.slice(2);
@@ -171,7 +187,8 @@ const lines = readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n').map((
 (async () => {
   let bad = 0;
   const h = (f) => createHash('sha256').update(readFileSync(`${dir}/${f}`)).digest('hex');
-  const all = [...lines, [h('SHA256SUMS'), 'SHA256SUMS'], ...(existsSync(`${dir}/release.json`) ? [[h('release.json'), 'release.json']] : [])];
+  const apk = process.argv[4] ? [[h(process.argv[4]), process.argv[4]]] : [];
+  const all = [...lines, ...apk, [h('SHA256SUMS'), 'SHA256SUMS'], ...(existsSync(`${dir}/release.json`) ? [[h('release.json'), 'release.json']] : [])];
   for (const [sha, name] of all) {
     const r = await fetch(base + name, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(120000) });
     const b = Buffer.from(await r.arrayBuffer());

@@ -31,12 +31,20 @@ const BODY = ['v', 'typ', 'did', 'pair', 'iat', 'exp', 'keys', 'last_resort'];
 
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const exact = (o, keys) => isObj(o) && Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
-const b64u = (b) => Buffer.from(b).toString('base64url');
+// Unpadded base64url over btoa and atob, which every runtime has (Buffer is Node's).
+const b64u = (b) => {
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
 function unb64u(s, len, check, what) {
-  // Buffer's decoder skips characters outside the alphabet; re-encoding is what makes it strict.
-  const b = typeof s === 'string' ? Buffer.from(s, 'base64url') : null;
-  if (b === null || b.length !== len || b.toString('base64url') !== s) fail(check, `${what}: expected ${len} bytes as unpadded base64url`);
-  return new Uint8Array(b);
+  // atob takes what base64url does not (+, /, padding, spaces); re-encoding is what makes it strict.
+  let b = null;
+  if (typeof s === 'string') {
+    try { const t = atob(s.replace(/-/g, '+').replace(/_/g, '/')); b = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) b[i] = t.charCodeAt(i); } catch {}
+  }
+  if (b === null || b.length !== len || b64u(b) !== s) fail(check, `${what}: expected ${len} bytes as unpadded base64url`);
+  return b;
 }
 
 // The holder's private half, one per contact. Secret keys stay here; only ids leave after use.

@@ -21,10 +21,9 @@
 // signed by relay/site/sign-relays.mjs. Here: SPEC §9 at now, the chain's first DID the pinned one,
 // one attestation of the identity about itself with that ctx; then every entry whose tag is not
 // relayTag(host), or whose host is no host[:port], is dropped (counted), never trusted.
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+// Files: the platform's (design/apps.md §4.2; the carrier passes its own), Node's by default.
 import { verify } from 'sigelo';
+import { files as nodeFiles } from './platform-node.mjs';
 import { checkRelay } from './invite.mjs';
 import { fail } from './kdf.mjs';
 import { ALPHABET, TAG_LENGTH, relayTag } from './short.mjs';
@@ -61,28 +60,27 @@ export function checkRegistry(bundle, now, pin = RELEASE_DID) {
   return { relays: out, dropped, iat: body.iat, exp: body.exp, did: r.did };
 }
 
-// Written whole to a fresh 0600 name, then renamed, as the carrier's state is.
-function save(path, value) {
-  const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`);
-  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
-  renameSync(tmp, path);
-}
-const readJson = (path) => {
-  if (!existsSync(path)) return null;
-  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
+// Written whole to a fresh 0600 name, then renamed, as the carrier's state is (files.write).
+const save = (files, path, value) => files.write(path, new TextEncoder().encode(JSON.stringify(value, null, 2) + '\n'));
+// UTF-8 as readFileSync(…, 'utf8') reads it: a byte order mark is kept (JSON.parse refuses it).
+const readJson = (files, path) => {
+  try {
+    const raw = files.read(path);
+    return raw === null ? null : JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(raw));
+  } catch { return null; }
 };
 
 /** The hosts of the local table (relays.local.json), well-formed ones only; [] when there is none. */
-export function readTable(path) {
-  const t = readJson(path);
+export function readTable(path, files = nodeFiles) {
+  const t = readJson(files, path);
   return Array.isArray(t?.relays) ? t.relays.filter(goodRelay).slice(0, TABLE_MAX) : [];
 }
 /** host added to the local table (the person named it once: accept --relay). → true if it was new. */
-export function remember(path, host) {
+export function remember(path, host, files = nodeFiles) {
   checkRelay(host);
-  const t = readJson(path), hosts = Array.isArray(t?.relays) ? t.relays : [];
+  const t = readJson(files, path), hosts = Array.isArray(t?.relays) ? t.relays : [];
   if (hosts.includes(host)) return false;
-  save(path, { ...(t && typeof t === 'object' && !Array.isArray(t) ? t : {}), relays: [...hosts, host].slice(-TABLE_MAX) });
+  save(files, path, { ...(t && typeof t === 'object' && !Array.isArray(t) ? t : {}), relays: [...hosts, host].slice(-TABLE_MAX) });
   return true;
 }
 
@@ -90,10 +88,10 @@ export function remember(path, host) {
  * The registry's entries (a Map, empty when there is none to be had): the cache when it was fetched
  * less than REGISTRY_EVERY ago and still verifies; else a fetch of url (get(url) → { status, body },
  * the carrier's http), verified, then cached. A fetch that fails falls back to a cache that still
- * verifies. url false: the cache only.
+ * verifies. url false: the cache only. files: the platform's (Node's by default).
  */
-export async function loadRegistry({ file, url = REGISTRY_URL, now, get, pin = RELEASE_DID }) {
-  const cached = readJson(file);
+export async function loadRegistry({ file, url = REGISTRY_URL, now, get, pin = RELEASE_DID, files = nodeFiles }) {
+  const cached = readJson(files, file);
   let fromCache = null;
   if (cached?.v === CACHE_V && Number.isSafeInteger(cached.fetched)) {
     try { fromCache = checkRegistry(cached.registry, now, pin).relays; } catch {}
@@ -104,7 +102,7 @@ export async function loadRegistry({ file, url = REGISTRY_URL, now, get, pin = R
     const r = await get(url);
     if (r.status !== 200) throw new Error(`answered ${r.status}`);
     const got = checkRegistry(r.body, now, pin).relays;
-    save(file, { v: CACHE_V, fetched: now, registry: r.body });
+    save(files, file, { v: CACHE_V, fetched: now, registry: r.body });
     return got;
   } catch { return fromCache ?? new Map(); }
 }
