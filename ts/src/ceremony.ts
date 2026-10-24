@@ -33,7 +33,7 @@ import * as ed from '@noble/ed25519';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize } from './jcs.js';
-import { agentIdentitySeed, delegateIdentitySeed, deriveRoot, identitySeed, keeperRoot, mnemonicFromRoot, newRoot, recoveryCommitment, recoverySeed, rootFromMnemonic, vendorSeed } from './keys.js';
+import { agentIdentitySeed, delegateIdentitySeed, deriveRoot, identitySeed, keeperRoot, mnemonicFromRoot, newRoot, recoverySeed, rootFromMnemonic, vendorRecoveryCommitment, vendorRecoverySeed, vendorSeed } from './keys.js';
 import { decodeAddress, Net } from './monero.js';
 import { Bundle, did, encodeKey, Genesis, Identity, keygen, rotate, Rotation, SigeloError, structure, verify, VERSION } from './sigelo.js';
 
@@ -300,9 +300,10 @@ export function recoverKeeper(o: { bundle: Bundle; S?: Uint8Array; recoverySecre
  * The vendor identity (keys.ts `vendorSeed`): the DID that signs licences, made from the 25 words
  * alone, so no secret exists that the words do not restore. Its genesis is pinned (SPEC §4 `nonce`:
  * `created` fixed, the nonce the first 16 bytes of SHA-256 of the raw key, as contact/enrol.mjs
- * pins the operator's) and commits to the root's recovery key (`recoveryCommitment(S)`, as the root
- * identity's does). Rotation m → m+1 is a RECOVERY rotation, signed with `recoverySeed(S)` at a
- * pinned `iat`: whoever holds the words holds the recovery key, a recovery supersedes any voluntary
+ * pins the operator's) and commits to the vendor's own recovery key (`vendorRecoveryCommitment(S)`),
+ * never the root's: the genesis is published, and the root's commitment would link the operator's
+ * whole fleet to the company. Rotation m → m+1 is a RECOVERY rotation, signed with
+ * `vendorRecoverySeed(S)` at a pinned `iat`: whoever holds the words holds the recovery key, a recovery supersedes any voluntary
  * rotation a thief signs with a stolen vendor key (SPEC §7.1), and pinned bytes make the chain
  * 0 → n the same at every derivation. One recovery per node, always from the derived head, so two
  * recoveries never tie (§7.3 step 2).
@@ -312,7 +313,7 @@ export const VENDOR_CREATED = '1970-01-01T00:00:00Z', VENDOR_IAT = 0, VENDOR_MAX
 /** Rotation `m`'s pinned genesis: the same bytes, hence the same DID, from the same words. */
 export function vendorGenesis(S: Uint8Array, m: number): Identity {
   const seed = vendorSeed(S, m);
-  return keygen({ seed, recovery: recoveryCommitment(S), created: VENDOR_CREATED, nonce: sha256(ed.getPublicKey(seed)).slice(0, 16) });
+  return keygen({ seed, recovery: vendorRecoveryCommitment(S), created: VENDOR_CREATED, nonce: sha256(ed.getPublicKey(seed)).slice(0, 16) });
 }
 
 export interface VendorChain { original: string; did: string; genesis: Genesis; rotations: Rotation[]; secret: Uint8Array; n: number }
@@ -320,7 +321,7 @@ export interface VendorChain { original: string; did: string; genesis: Genesis; 
 /** The vendor chain at rotation `n`: genesis 0, the recovery rotations 0 → n, the secret of `n`. */
 export function vendorChain(S: Uint8Array, n: number): VendorChain {
   if (!Number.isSafeInteger(n) || n < 0 || n > VENDOR_MAX_N) throw new SigeloError(`vendor: --n is the rotation counter, 0 to ${VENDOR_MAX_N}, got ${n}`);
-  const rec = recoverySeed(S);
+  const rec = vendorRecoverySeed(S);
   try {
     const g = Array.from({ length: n + 1 }, (_, m) => vendorGenesis(S, m));
     const rotations = g.slice(1).map((x, m) => rotate({ genesis: g[m]!.genesis, next_genesis: x.genesis, iat: VENDOR_IAT, reason: 'recovery', secret: rec, next_secret: x.secret }));

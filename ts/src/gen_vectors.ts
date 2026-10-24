@@ -30,7 +30,7 @@ import { bytesToHex, concatBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { writeFileSync } from 'node:fs';
 import { canonicalize, JcsError } from './jcs.js';
 import { vendorChain } from './ceremony.js';
-import { agentIdentitySeed, delegateIdentitySeed, identitySeed, k as kdf, keeperRoot, recoveryCommitment, vendorSeed } from './keys.js';
+import { agentIdentitySeed, delegateIdentitySeed, identitySeed, k as kdf, keeperRoot, recoveryCommitment, vendorRecoveryCommitment, vendorSeed } from './keys.js';
 import {
   encodeAddress, hashToScalar, keccak256, keysFromSpend, moneroBase58Encode, scReduce32,
   sigeloMoneroSigAddr, signMessageHash, subaddress, subaddressKeys,
@@ -809,20 +809,22 @@ P.key_derivation_delegate = {
 
 // The vendor identity (the key that signs licences) on the root itself: its own label, never the
 // root identity's or the release key's. Its genesis is pinned (created fixed, nonce = first 16 bytes
-// of SHA-256 of the raw key) and commits to the root's recovery key, so the root alone gives the DID;
-// rotation 0 -> 1 is a recovery rotation at iat 0 (ts/src/ceremony.ts vendorChain).
+// of SHA-256 of the raw key) and commits to the vendor's own recovery key, never the root's (the
+// genesis is published; the root's commitment would link the fleet to it), so the root alone gives
+// the DID; rotation 0 -> 1 is a recovery rotation at iat 0 (ts/src/ceremony.ts vendorChain).
 const VR = hex(DROOT), VC = vendorChain(VR, 1);
 P.key_derivation_vendor = {
   root_hex: DROOT,
   vendor_path: 'sigelo/v1/vendor/ed25519/0', vendor_seed_hex: bytesToHex(vendorSeed(VR, 0)),
-  vendor_key: encodeKey(ed.getPublicKey(vendorSeed(VR, 0))), recovery: recoveryCommitment(VR),
+  vendor_key: encodeKey(ed.getPublicKey(vendorSeed(VR, 0))),
+  recovery_path: 'sigelo/v1/vendor/recovery/ed25519', recovery: vendorRecoveryCommitment(VR), root_recovery: recoveryCommitment(VR),
   genesis: VC.genesis, did: VC.original,
   vendor_seed_1_hex: bytesToHex(vendorSeed(VR, 1)), rotation_1: VC.rotations[0], did_1: VC.did,
   identity_seed_hex: bytesToHex(identitySeed(VR, 0)), release_seed_hex: bytesToHex(kdf(VR, 'sigelo/v1/release/ed25519/0')),
-  note: 'vendor_seed_hex = HKDF-SHA256(root, "", vendor_path), Ed25519 raw. genesis: key = vendor_key, recovery = the root\'s ' +
-    'recovery commitment (HKDF path "sigelo/v1/recovery/ed25519"), created "1970-01-01T00:00:00Z", nonce = the first 16 bytes ' +
+  note: 'vendor_seed_hex = HKDF-SHA256(root, "", vendor_path), Ed25519 raw. genesis: key = vendor_key, recovery = the commitment ' +
+    'of the vendor recovery key (HKDF-SHA256(root, "", recovery_path), Ed25519 raw), never root_recovery (the root identity\'s), created "1970-01-01T00:00:00Z", nonce = the first 16 bytes ' +
     'of SHA-256 of the raw key; did = its DID. rotation_1: the recovery rotation to rotation 1 (seed vendor_seed_1_hex), iat 0, ' +
-    'signed by the root\'s recovery key. The vendor seed differs from the root identity\'s (identity_seed_hex) and the release key\'s (release_seed_hex).',
+    'signed by the vendor recovery key. The vendor seed differs from the root identity\'s (identity_seed_hex) and the release key\'s (release_seed_hex).',
 };
 
 // ---------------------------------------------------------------- output

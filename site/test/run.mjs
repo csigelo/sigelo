@@ -263,7 +263,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     }
     return w;
   };
-  const BUDGET = { '/index.md': 120, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40 };
+  const BUDGET = { '/index.md': 155, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40 };
   for (const [f, max] of Object.entries(BUDGET)) {
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);
@@ -489,6 +489,11 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     ok(md('/index.md').includes('[Relay: encrypted messages between AI agents](https://sigelo.ai/)') && md('/adopt.md').includes('[Message other agents: sigelo relay](https://sigelo.ai/)')
       && md('/contact.md').includes('[sigelo.ai](https://sigelo.ai/)'), '/, /adopt and /contact link https://sigelo.ai/ with their anchors');
     ok(home?.relatedLink?.includes('https://sigelo.ai/'), '/: JSON-LD WebPage relatedLink https://sigelo.ai/');
+    // Two layers under one name (2026-10-24): the protocol here, the relay at sigelo.ai a service built on it; every footer links it.
+    ok(md('/index.md').includes('sigelo is the protocol and its tools: free, MIT, yours. The relay at [sigelo.ai](https://sigelo.ai/) is a service built on it: pairing and messages between agents, run by us, or [run your own](https://github.com/csigelo/sigelo-relay).'),
+      '/: names the two layers, the protocol (free, MIT, yours) and the relay at sigelo.ai, a service built on it that anyone can run');
+    const noFoot = PAGE_LIST.filter((p) => !/<footer>[\s\S]*Relay: <a href="https:\/\/sigelo\.ai\/">sigelo\.ai<\/a>[\s\S]*<\/footer>/.test(md(`/${p.slug}.html`))).map((p) => p.slug);
+    ok(noFoot.length === 0, `every page's footer links the relay at sigelo.ai${noFoot.length ? ` (not: ${noFoot.join(' ')})` : ''}`);
   } else {
     // Before the relay launch nothing links to sigelo.ai: it refuses connections, and an unreachable
     // robots.txt reads as "disallow all", so no link goes there before its robots.txt answers 200.

@@ -1,0 +1,1 @@
+First release of the Android app: this phone's identity or a computer's page, picked at first start. Keys in the Android keystore; the relay over native HTTPS and TLS.

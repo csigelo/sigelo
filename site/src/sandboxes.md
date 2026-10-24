@@ -1,10 +1,10 @@
 ---
 title: Sandboxes, CI and proxies: what sigelo dials
-description: sigelo dials one host at runtime, relay.sigelo.ai on 8883 or 443. Where to allow it in cloud sandboxes, CI runners, TLS proxies and locked-down containers.
+description: For messages, sigelo dials one host: the relay, relay.sigelo.ai or yours, on 8883 or 443. Where to allow it in sandboxes, CI, proxies and containers.
 ---
 # Sandboxes, CI and proxies
 
-One host to allow: the relay, `relay.sigelo.ai`, on 443.
+One host to allow, for messages only: the relay, `relay.sigelo.ai` or your own, on 443.
 
 ```sh
 npm i -g sigelo-agent                                   # install: needs the npm registry

@@ -9,6 +9,7 @@
  * identity = Ed25519 seed  k("sigelo/v1/identity/ed25519/<n>")     n = rotation counter
  * recovery = Ed25519 seed  k("sigelo/v1/recovery/ed25519")
  * vendor   = Ed25519 seed  k("sigelo/v1/vendor/ed25519/<n>")       n = rotation counter; signs licences only
+ * vendor recovery = Ed25519 seed  k("sigelo/v1/vendor/recovery/ed25519")   the vendor's own; never the root's
  * wallet   = b = sc_reduce32(k("sigelo/v1/monero/<w>"))            a = H_s(b), B = bG, A = aG
  * keeper   = K_j = k("sigelo/v1/keeper/<j>")                        j = keeper index
  * agent    = Ed25519 seed  k(K, "sigelo/v1/identity/<i>/ed25519/<n>")  i = account, on K not S
@@ -63,8 +64,9 @@ export function identitySeed(S: Uint8Array, n: number): Uint8Array {
 /**
  * Ed25519 seed for the vendor identity (the key that signs licences), rotation `n`. Its own label,
  * never `identity`: the vendor key and the operator's root identity are different keys of one root.
- * Its genesis commits to the root's recovery key, as the root identity's does, so the 25 words
- * restore the key, the DID and the recovery (src/ceremony.ts `vendorChain`).
+ * Its genesis commits to the vendor's OWN recovery key (`vendorRecoverySeed`), never the root's: the
+ * vendor genesis is published, and a shared commitment would link the operator's fleet to it. The
+ * 25 words still restore the key, the DID and the recovery (src/ceremony.ts `vendorChain`).
  */
 export const vendorSeed = (S: Uint8Array, n: number): Uint8Array => k(S, `sigelo/v1/vendor/ed25519/${index('vendor rotation', n)}`);
 
@@ -102,6 +104,16 @@ function index(what: string, v: number): number {
 
 /** Ed25519 seed for the recovery key. One per root: recovery outlives every rotation. */
 export const recoverySeed = (S: Uint8Array): Uint8Array => k(S, 'sigelo/v1/recovery/ed25519');
+
+/**
+ * Ed25519 seed for the vendor's recovery key: one for every vendor rotation `n`, as `recoverySeed`
+ * is for the root identity's. Its own label, so the vendor's published genesis and rotations carry
+ * nothing computable from, or equal to, the root recovery key or any other identity's commitment.
+ */
+export const vendorRecoverySeed = (S: Uint8Array): Uint8Array => k(S, 'sigelo/v1/vendor/recovery/ed25519');
+
+/** `sha256:<hex>` of the vendor recovery public key: what the vendor genesis carries. */
+export const vendorRecoveryCommitment = (S: Uint8Array): string => commitmentOf(encodeKey(ed.getPublicKey(vendorRecoverySeed(S))));
 
 /** The recovery **public** key, multibase. The only half that ever leaves the offline box. */
 export const recoveryPublicKey = (S: Uint8Array): string => encodeKey(ed.getPublicKey(recoverySeed(S)));

@@ -6,7 +6,7 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
 1. Private repo: every package.json, lockfile and `integrations/mcp/server.json` at `<v>`; go/go.mod
    `toolchain` at the latest Go patch (build.sh enforces it);
    CHANGELOG.md `## v<v> — <date>`; VERSIONING.md status line; ROADMAP §6 step 8; site
-   footnotes; apps/android/app/build.gradle `versionName '<v>'`, `versionCode` + 1.
+   footnotes; apps/android/app/build.gradle `versionName '<v>'`, `versionCode` + 1 (apps/android/FDROID.md).
    `node site/build.mjs && node site/test/run.mjs`, `node plugins/build.mjs --check` and
    `sh release/test-release.sh` pass. Commit.
 2. Sync and push (the commands under "Sync commands").

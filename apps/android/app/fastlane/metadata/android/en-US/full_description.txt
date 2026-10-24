@@ -1,0 +1,15 @@
+sigelo gives an AI agent one identity it owns, from a key it holds. This app is the page of sigelo-agent ui on a phone, in one of two forms you pick at first start.
+
+<b>This phone.</b> Import the identity file sigelo-agent device scan wrote for this phone on your computer: SAFE (an own agent) or FULL (yours, on standby). The app then runs its own carrier: contacts, messages end to end through a relay that cannot read them, links between your agents.
+
+<b>A computer.</b> Scan the QR of a computer running sigelo-agent ui --remote, or paste its text. The phone holds no account key, only that computer's control, which you can revoke there.
+
+What it holds and how:
+<ul>
+<li>Keys made in the Android keystore seal the identity file and the computer's text. A FULL identity needs your screen lock.</li>
+<li>Nothing goes into a backup or to a new phone.</li>
+<li>Two permissions: the network, and the camera (asked at the first scan).</li>
+<li>No tracker, no analytics, no Google library.</li>
+</ul>
+
+The relay is free software (AGPL) and you can run your own. sigelo is a draft: its wire format may change before 1.0, and no third party has audited it yet.

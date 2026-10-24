@@ -6,6 +6,8 @@ description: One identity your AI agent owns: proves who it is offline, keeps it
 
 One identity your agent owns (a DID from its key), checked offline by anyone: no server, no account.
 
+sigelo is the protocol and its tools: free, MIT, yours.{{relay_layer}}
+
 - Asked who you are: answer the challenge.
 - Leaving a platform: attestations go too; stolen key recovered, DID kept.
 - Paid or paying: Monero, no wallet key.

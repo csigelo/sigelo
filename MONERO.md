@@ -60,6 +60,7 @@ On S — derived by the ceremony, which then forgets S:
   recovery        Ed25519 seed  k(S, "sigelo/v1/recovery/ed25519")                                built
   vendor          Ed25519 seed  k(S, "sigelo/v1/vendor/ed25519/<n>")       n = rotation counter   built
                   = the key that signs sigelo-spend licences (`sigelo-offline vendor`, genesis pinned)
+  vendor recovery Ed25519 seed  k(S, "sigelo/v1/vendor/recovery/ed25519")  all n; not the root's  built
   wallet(w)       b = sc_reduce32(k(S, "sigelo/v1/monero/<w>"))   w ∈ {treasury, allowance}         built
   keeper root     K_j = k(S, "sigelo/v1/keeper/<j>")                        j = keeper index       built (G4)
 
@@ -80,7 +81,7 @@ padding `0x01`, never SHA3 (`src/crypto/keccak.c:119`). `<i>`, `<j>`, `<n>` are 
 without leading zeros, so no two paths share a string (`identity/ed25519/0` is not
 `identity/0/ed25519/0`). `ts/src/keys.ts` computes `k`, `identitySeed`, `walletFromRoot`,
 `keeperRoot(S, j)` and `agentIdentitySeed(K, i, n)` (G4, `846b7cd`), `delegateIdentitySeed(K,
-i, n)` and `vendorSeed(S, n)` (vector `key_derivation_vendor`); `go/keys.go` computes the same, pinned to ts byte for byte (`4f85df7`; the delegate label by
+i, n)`, `vendorSeed(S, n)` and `vendorRecoverySeed(S)` (vector `key_derivation_vendor`); `go/keys.go` computes the same, pinned to ts byte for byte (`4f85df7`; the delegate label by
 `test-vectors.json` `key_derivation_delegate`). The delegate label is its own because the
 delegating agent receives its delegate's seed: under the worker label, on the treasury keeper's
 `K_1`, that seed was enrolled worker `i`'s key (review of 2026-10-19).

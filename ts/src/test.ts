@@ -20,7 +20,7 @@ import { JcsError, RawNumber } from './jcs.js';
 import {
   agentIdentitySeed, decodeMoneroWords, delegateIdentitySeed, deriveIdentity, deriveRoot, encodeMoneroWords, identitySeed, k, keeperRoot,
   mnemonicFromRoot, newRoot, parseRoot, recoveryCommitment, recoveryPublicKey, recoverySeed, rootFromMnemonic,
-  vaultFromRoot, vendorSeed, walletFromRoot,
+  vaultFromRoot, vendorRecoveryCommitment, vendorRecoverySeed, vendorSeed, walletFromRoot,
 } from './keys.js';
 import { MONERO_WORDS } from './monero-words.js';
 import {
@@ -958,13 +958,20 @@ t('keys vendorSeed fixed vectors: n = 0 and n = 1 of S1',
   bytesToHex(vendorSeed(S1, 1)) === 'a1e0a7e55f9a0e1d8e4bb8ca337b441c463abab116489206df7c819bca69554a' &&
   bytesToHex(vendorSeed(S1, 0)) === bytesToHex(k(S1, 'sigelo/v1/vendor/ed25519/0')));
 const vsep = [0, 1, 2].flatMap((n) => [vendorSeed(S1, n), identitySeed(S1, n), k(S1, `sigelo/v1/release/ed25519/${n}`), identitySeed(keeperRoot(S1, 1), n)])
-  .concat([recoverySeed(S1), K0, keeperRoot(S1, 1)]).map(bytesToHex);
+  .concat([recoverySeed(S1), vendorRecoverySeed(S1), K0, keeperRoot(S1, 1)]).map(bytesToHex);
 t('keys vendorSeed: another n is another key, and no vendor key is a root-identity, release, keeper or recovery key', new Set(vsep).size === vsep.length);
+// The vendor's own recovery key: the published vendor genesis must not carry the root's commitment.
+t('keys vendorRecoverySeed fixed vector of S1 (independent HKDF), its own path, not the root recovery key',
+  bytesToHex(vendorRecoverySeed(S1)) === '8aed63370ef43cbbb1d98560d992361f6cd2dcc6a28e13a3864c8e4e087fa73b' &&
+  bytesToHex(vendorRecoverySeed(S1)) === bytesToHex(k(S1, 'sigelo/v1/vendor/recovery/ed25519')) &&
+  vendorRecoveryCommitment(S1) === commitmentOf(encodeKey(ed.getPublicKey(vendorRecoverySeed(S1)))));
 rejects('keys a negative vendor rotation is rejected', () => vendorSeed(S1, -1), 'non-negative integer');
 const KV = P.key_derivation_vendor, VR = hexToBytes(KV.root_hex), VC1 = vendorChain(VR, 1);
 t('keys key_derivation_vendor vector: seed, key, pinned genesis and DID, rotation 1, distinct from identity and release',
   bytesToHex(vendorSeed(VR, 0)) === KV.vendor_seed_hex && bytesToHex(k(VR, KV.vendor_path)) === KV.vendor_seed_hex &&
-  encodeKey(ed.getPublicKey(vendorSeed(VR, 0))) === KV.vendor_key && KV.genesis.key === KV.vendor_key && KV.genesis.recovery === recoveryCommitment(VR) &&
+  encodeKey(ed.getPublicKey(vendorSeed(VR, 0))) === KV.vendor_key && KV.genesis.key === KV.vendor_key && KV.genesis.recovery === vendorRecoveryCommitment(VR) &&
+  KV.recovery === KV.genesis.recovery && KV.recovery !== recoveryCommitment(VR) && bytesToHex(k(VR, KV.recovery_path)) === bytesToHex(vendorRecoverySeed(VR)) &&
+  KV.rotation_1.body.recovery_key === encodeKey(ed.getPublicKey(vendorRecoverySeed(VR))) && KV.rotation_1.next_genesis.recovery === KV.recovery &&
   did(KV.genesis) === KV.did && VC1.original === KV.did && same(VC1.genesis, KV.genesis) && same(VC1.rotations[0], KV.rotation_1) && VC1.did === KV.did_1 &&
   bytesToHex(vendorSeed(VR, 1)) === KV.vendor_seed_1_hex && KV.rotation_1.body.reason === 'recovery' &&
   verify({ v: VERSION, typ: 'bundle', genesis: KV.genesis, rotations: [KV.rotation_1], bindings: [], attestations: [], issuers: [] } as Bundle, NOW).did === KV.did_1 &&
@@ -1564,12 +1571,12 @@ try {
     const init: Any = m.code === 0 ? JSON.parse(readFileSync(join(vout, 'vendor.init.json'), 'utf-8')) : {};
     t('vendor CLI: --n 0 with the words on stdin writes the three files and prints the DID and the genesis SHA-256, nothing secret',
       m.code === 0 && same(files, [...VENDOR_FILES].sort()) && o.did === did(pubG) && o.current === o.did && o.n === 0 &&
-      o.genesis_sha256 === bytesToHex(sha256(utf8ToBytes(canonicalize(pubG)))) && o.recovery_commitment === recoveryCommitment(SC) &&
+      o.genesis_sha256 === bytesToHex(sha256(utf8ToBytes(canonicalize(pubG)))) && o.recovery_commitment === vendorRecoveryCommitment(SC) &&
       o.vault === deriveRoot(SC, 'stagenet').vault.address && !leaks(m.out + m.err, SChex, scWords, recHex) && !m.out.includes(store.secret));
     t('vendor CLI: the identity file is sigelo-agent\'s (plain key of vendorSeed(S, 0), the published genesis, no rotations); init.json is {did, genesis, current, n}',
       store.v === VERSION && store.provider === 'file' && store.secret === bytesToHex(vendorSeed(SC, 0)) && same(store.genesis, pubG) && store.rotations.length === 0 &&
       same(Object.keys(store).sort(), ['attestations', 'genesis', 'issuers', 'provider', 'rotations', 'secret', 'v']) && init.did === o.did && same(init.genesis, pubG) &&
-      pubG.key === encodeKey(ed.getPublicKey(vendorSeed(SC, 0))) && pubG.recovery === recoveryCommitment(SC) && pubG.created === '1970-01-01T00:00:00Z' &&
+      pubG.key === encodeKey(ed.getPublicKey(vendorSeed(SC, 0))) && pubG.recovery === vendorRecoveryCommitment(SC) && pubG.created === '1970-01-01T00:00:00Z' &&
       readFileSync(join(vout, 'sigelo-vendor-identity.json'), 'utf-8') === JSON.stringify(pubG, null, 2) + '\n');
     if (process.platform === 'win32') console.log('SKIP vendor file modes (Windows has no POSIX modes)');
     else t('vendor CLI: vendor.local.json 0600, the public files 0644, the directory 0700',
@@ -1592,14 +1599,29 @@ try {
     const r1 = run(['recover', '--vendor', '--n', '1', '--genesis', join(vout, 'vendor.local.json'), '-'], scWords + '\n');
     const ro: Any = r1.code === 0 ? JSON.parse(r1.out) : {};
     const lib = recoverVendor({ S: SC, n: 1, known: store });
-    const thiefId = keygen({ seed: new Uint8Array(32).fill(9), recovery: recoveryCommitment(SC) });
+    const thiefId = keygen({ seed: new Uint8Array(32).fill(9), recovery: vendorRecoveryCommitment(SC) });
     const thiefRot = rotate({ genesis: pubG, next_genesis: thiefId.genesis, iat: NOW, reason: 'voluntary', secret: vendorSeed(SC, 0), next_secret: thiefId.secret });
     const chainOf = (rotations: unknown[]) => verify({ v: VERSION, typ: 'bundle', genesis: pubG, rotations, bindings: [], attestations: [], issuers: [] } as Bundle, NOW);
     t('recover --vendor --n 1: { did, rotation, identity_seed_hex, vendor } = the library\'s; a recovery rotation at iat 0 to vendorSeed(S, 1); the chain verifies, beating a thief\'s newer voluntary rotation',
       r1.code === 0 && same(Object.keys(ro).sort(), ['did', 'identity_seed_hex', 'rotation', 'vendor']) && same(ro, lib) && ro.vendor === o.did &&
       ro.identity_seed_hex === bytesToHex(vendorSeed(SC, 1)) && ro.rotation.body.reason === 'recovery' && ro.rotation.body.iat === 0 &&
-      ro.rotation.next_genesis.recovery === recoveryCommitment(SC) && chainOf([ro.rotation]).did === ro.did && chainOf([thiefRot, ro.rotation]).did === ro.did &&
-      !leaks(r1.out + r1.err, SChex, scWords, recHex));
+      ro.rotation.next_genesis.recovery === vendorRecoveryCommitment(SC) && ro.rotation.body.recovery_key === encodeKey(ed.getPublicKey(vendorRecoverySeed(SC))) &&
+      chainOf([ro.rotation]).did === ro.did && chainOf([thiefRot, ro.rotation]).did === ro.did &&
+      !leaks(r1.out + r1.err, SChex, scWords, recHex) && !(r1.out + r1.err).includes(bytesToHex(vendorRecoverySeed(SC))));
+    // Unlinkable: the vendor's chain carries no root-recovery value, and neither recovery key moves the other's chain.
+    const rootG = deriveIdentity(SC, 0).genesis, keeperG = keygen({ seed: identitySeed(KC0, 0), recovery: recoveryPublicKey(SC) }).genesis;
+    const vendorJson = readFileSync(join(vout, 'vendor.local.json'), 'utf-8') + JSON.stringify(ro.rotation) + m.out + m.err;
+    t('vendor unlinkable: its commitment differs from the root identity\'s and a keeper\'s; no root recovery key or commitment in its files, output or rotation',
+      pubG.recovery !== recoveryCommitment(SC) && pubG.recovery !== rootG.recovery && pubG.recovery !== keeperG.recovery && rootG.recovery === recoveryCommitment(SC) &&
+      ![recoveryCommitment(SC), recoveryPublicKey(SC), recHex, rootG.recovery.slice('sha256:'.length)].some((x) => vendorJson.includes(x)));
+    rejects('vendor unlinkable: the root recovery key cannot sign the vendor\'s recovery rotation',
+      () => rotate({ genesis: pubG, next_genesis: vendorChain(SC, 1).rotations[0]!.next_genesis, iat: 0, reason: 'recovery', secret: recoverySeed(SC), next_secret: vendorSeed(SC, 1) }), 'does not hash to the current commitment');
+    rejects('vendor unlinkable: plain recover (the root recovery key) is refused on the vendor genesis',
+      () => recover({ from: pubG, S: SC, next: { kind: 'identity', n: 1 }, iat: 0 }), 'does not hash to the current commitment');
+    rejects('vendor unlinkable: the vendor recovery key cannot recover the root identity',
+      () => recover({ from: rootG, recoverySecret: vendorRecoverySeed(SC), iat: 0 }), 'does not hash to the current commitment');
+    rejects('vendor unlinkable: nor a keeper',
+      () => recover({ from: keeperG, recoverySecret: vendorRecoverySeed(SC), iat: 0 }), 'does not hash to the current commitment');
     const v1 = run(['vendor', '--n', '1', '--out', join(vTmp, 'v1')], scWords + '\n');
     const s1: Any = v1.code === 0 ? JSON.parse(readFileSync(join(vTmp, 'v1', 'vendor.local.json'), 'utf-8')) : {};
     t('vendor CLI: --n 1 rebuilds the rotated file from the words alone: the same genesis, the same rotation, the new key',

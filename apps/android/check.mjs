@@ -6,8 +6,8 @@
 // icon as the GTK app's SVG), the Gradle files (AGP pinned, minSdk 28, targetSdk 35, no
 // dependency, braces balanced), the wrapper (its jar by SHA-256, the distribution pinned), the Java
 // (the bridge's operations as platform-android.mjs sends them, the WebView's settings, every asset
-// type served), the workflow (actions pinned by SHA, no secret, the outputs), and assets/web/ as
-// assets.mjs writes it when it is there.
+// type served), the F-Droid listing, icon and draft recipe (FDROID.md), the workflow (actions
+// pinned by SHA, no secret, the outputs), and assets/web/ as assets.mjs writes it when it is there.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -230,6 +230,55 @@ if (process.env.SIGELO_ANDROID_JAR) {
     const guarded = errors.every(([, f, l]) => /SDK_INT >= Build\.VERSION_CODES\.\w+\)/.test(read(f).split('\n')[Number(l) - 1]));
     ok(!/warning|error/.test(out) || (errors.length > 0 && guarded && !/warning/.test(out)), `javac against ${rel(process.env.SIGELO_ANDROID_JAR)}: ${errors.length ? `${errors.length} missing, each behind an SDK_INT check` : 'clean'} (${out.trim().split('\n').slice(0, 3).join(' | ')})`);
   } finally { rmSync(t, { recursive: true, force: true }); }
+}
+
+// ================================================================ F-Droid (FDROID.md)
+// The store listing F-Droid reads from <subdir>/fastlane (subdir: apps/android/app, so its version
+// check finds app/build.gradle), the icon it cannot take from our XML-only launcher icon, and the
+// draft recipe for fdroiddata: what it builds is what CI builds, without the relay or the tests.
+{
+  const FL = join(HERE, 'app', 'fastlane', 'metadata', 'android', 'en-US');
+  const txt = (f) => (existsSync(join(FL, f)) ? read(FL, f) : '');
+  const len = (s) => [...s.trimEnd()].length;
+  ok(len(txt('title.txt')) > 0 && len(txt('title.txt')) <= 50 && len(txt('short_description.txt')) > 0 && len(txt('short_description.txt')) <= 80
+    && len(txt('full_description.txt')) > 0 && len(txt('full_description.txt')) <= 4000,
+    `fastlane: title ≤ 50, short ≤ 80, full ≤ 4000 characters (${len(txt('title.txt'))}, ${len(txt('short_description.txt'))}, ${len(txt('full_description.txt'))})`);
+  const logs = existsSync(join(FL, 'changelogs')) ? readdirSync(join(FL, 'changelogs')) : [];
+  ok(logs.length > 0 && logs.every((f) => /^[1-9]\d*\.txt$/.test(f) && len(txt(`changelogs/${f}`)) > 0 && len(txt(`changelogs/${f}`)) <= 500), `fastlane: changelogs/<versionCode>.txt, each ≤ 500 characters (${logs})`);
+  ok(!/A2A|\bTODO\b/i.test(['title.txt', 'short_description.txt', 'full_description.txt', ...logs.map((f) => `changelogs/${f}`)].map(txt).join('\n')), 'fastlane: no placeholder, no protocol jargon in the listing');
+  let icon = '';
+  try { icon = execFileSync(process.execPath, [join(HERE, 'icon.mjs'), '--check'], { encoding: 'utf8' }); } catch (e) { icon = String(e.stdout); }
+  ok(/^ok /m.test(icon), `fastlane: images/icon.png is apps/gtk/io.sigelo.App.svg as icon.mjs draws it (${icon.trim()})`);
+
+  const yml = join(HERE, 'fdroid', 'io.sigelo.app.yml');
+  let d = null, why = '';
+  try {
+    d = JSON.parse(execFileSync('python3', ['-c', `import sys,yaml,json
+class L(yaml.SafeLoader): pass
+def m(loader, node, deep=False):
+    keys=[loader.construct_object(k, deep=deep) for k,_ in node.value]
+    if len(keys)!=len(set(map(str,keys))): raise SystemExit('duplicate key in '+str(node.start_mark))
+    return yaml.SafeLoader.construct_mapping(loader, node, deep)
+L.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, m)
+print(json.dumps(yaml.load(open(sys.argv[1]), Loader=L)))`, yml], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  } catch (e) { why = e.code === 'ENOENT' || /No module named/.test(String(e.stderr)) ? 'skip' : String(e.stderr || e.message); }
+  if (why === 'skip') console.log('note: no python3 with PyYAML here: the F-Droid draft not parsed');
+  else {
+    const app = read(MAIN, '..', '..', 'build.gradle'), code = Number(/versionCode (\d+)/.exec(app)?.[1]), b = d?.Builds?.at(-1) ?? {};
+    const steps = [...(b.sudo ?? []), ...(b.prebuild ?? []), ...(b.build ?? [])].join('\n');
+    ok(d !== null && /applicationId 'io\.sigelo\.app'/.test(app) && d.License === 'MIT' && /^MIT License/.test(read(REPO, 'LICENSE')) && d.RepoType === 'git'
+      && d.Repo === 'https://github.com/csigelo/sigelo.git' && d.SourceCode === 'https://github.com/csigelo/sigelo', `fdroid draft: io.sigelo.app, MIT, the public repository (${why.trim().slice(0, 200)})`);
+    ok(b.subdir === 'apps/android/app' && b.commit === `v${b.versionName}` && Number.isInteger(b.versionCode) && b.versionCode >= code
+      && d.CurrentVersion === b.versionName && d.CurrentVersionCode === b.versionCode && logs.includes(`${b.versionCode}.txt`),
+      `fdroid draft: subdir app, tag v<versionName>, versionCode ≥ build.gradle's (${b.versionCode} ≥ ${code}), current = last build, its changelog there`);
+    ok(d.AutoUpdateMode === 'Version' && /^Tags \^v/.test(d.UpdateCheckMode ?? '') && JSON.stringify(b.gradle) === '[true]' && !b.output && !b.scanignore && !b.scandelete && !b.srclibs,
+      'fdroid draft: Tags update check, auto-update on Version; the default flavour and output; no scanignore, scandelete or srclib');
+    const node = /N=node-v(\d+)\.(\d+)\.(\d+)-linux-x64\.tar\.xz/.exec(steps), wf = read(REPO, '.github', 'workflows', 'android.yml');
+    ok(node && new RegExp(`nodejs\\.org/dist/v${node[1]}\\.${node[2]}\\.${node[3]}/\\$N`).test(steps) && /H=[0-9a-f]{64}\n/.test(steps) && /sha256sum -c -/.test(steps)
+      && wf.includes(`node-version: '${node[1]}'`), `fdroid draft: Node pinned by SHA-256, the major CI uses (${node?.[1]})`);
+    ok((b.prebuild ?? []).every((s) => /^(cd [./a-z]+|npm ci --ignore-scripts)$/.test(s)) && /npx tsc/.test(steps) && /node apps\/android\/assets\.mjs/.test(steps)
+      && !/relay|adapters|test-|curl .*(npmjs|github)|git clone/.test(steps.replace(/nodejs\.org/, '')), 'fdroid draft: prebuild only fetches (npm ci, no script); build runs tsc and assets.mjs; no relay, adapter or test');
+  }
 }
 
 // ================================================================ the workflow

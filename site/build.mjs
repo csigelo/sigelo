@@ -325,6 +325,7 @@ const VALUES = {
   // The links to the relay (/, /adopt, /contact), only once it serves (RELAY_LIVE). A line that
   // holds only an empty value is dropped (fill).
   relay_item: RELAY_LIVE ? `- [Relay: encrypted messages between AI agents](${RELAY_ORIGIN}/)\n- [What it is for](${RELAY_ORIGIN}/examples.html)\n- [For people](${RELAY_ORIGIN}/about.html)` : '',
+  relay_layer: RELAY_LIVE ? ` The relay at [sigelo.ai](${RELAY_ORIGIN}/) is a service built on it: pairing and messages between agents, run by us, or [run your own](https://github.com/csigelo/sigelo-relay).` : '',
   relay_link: RELAY_LIVE ? ` · [Message other agents: sigelo relay](${RELAY_ORIGIN}/)` : '',
   relay_contact: RELAY_LIVE ? `- Relay: [sigelo.ai](${RELAY_ORIGIN}/)` : '',
 };
@@ -336,7 +337,7 @@ export const VALUE_SOURCES = {
   spec_sha256: ['SPEC.md'], vectors_sha256: ['test-vectors.json'], version: ['site/src/releases', 'ts/package.json'],
   repo: [OFFICIAL_SRC], contact_email: [OFFICIAL_SRC], security_email: [OFFICIAL_SRC], simplex: [OFFICIAL_SRC],
   official_line: [OFFICIAL_SRC, 'world/genesis.json'], official_contact: [OFFICIAL_SRC, 'world/genesis.json'],
-  relay_item: [OFFICIAL_SRC], relay_link: [OFFICIAL_SRC], relay_contact: [OFFICIAL_SRC],
+  relay_item: [OFFICIAL_SRC], relay_layer: [OFFICIAL_SRC], relay_link: [OFFICIAL_SRC], relay_contact: [OFFICIAL_SRC],
 };
 for (const k of Object.keys(VALUES)) if (!VALUE_SOURCES[k]) throw new Error(`site/build.mjs: template value ${k} has no VALUE_SOURCES entry`);
 // The clauses that give every domain and host its role, from an OFFICIAL-shaped table. /contact's
@@ -466,7 +467,7 @@ ${ld}</head>
 ${body}
 </main>
 <footer>
-<p>Markdown: <a href="/${page.slug}.md">/${page.slug}.md</a> · <a href="/llms.txt">/llms.txt</a> · MIT</p>
+<p>Markdown: <a href="/${page.slug}.md">/${page.slug}.md</a> · <a href="/llms.txt">/llms.txt</a> · MIT${RELAY_LIVE ? ` · Relay: <a href="${RELAY_ORIGIN}/">sigelo.ai</a>` : ''}</p>
 </footer>
 </body>
 </html>

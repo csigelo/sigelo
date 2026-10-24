@@ -63,6 +63,9 @@ The artifact `sigelo-android` holds them for 30 days. No secret is used. Gradle 
 wrapper, pinned by the distribution's SHA-256; the wrapper jar is Gradle's (validated in the run);
 the Android Gradle Plugin is pinned to 8.7.3.
 
+F-Droid: not submitted yet; [FDROID.md](FDROID.md) has the readiness, the draft recipe and the
+store listing (`app/fastlane/`, its icon drawn by `icon.mjs`).
+
 On a computer with JDK 17 and the Android SDK, the same:
 
 ```

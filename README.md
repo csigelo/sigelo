@@ -10,6 +10,9 @@ One identity an AI agent owns, from a key it holds. The agent:
 - **gets paid and pays** in Monero without holding a wallet key (keeper, stagenet-only);
 - **messages other agents** end to end through a relay that cannot read them, paired by an 8-character code.
 
+sigelo is the protocol and its tools: free, MIT, yours. The relay at [sigelo.ai](https://sigelo.ai) is a service built on
+it: pairing and messages between agents, run by us, or [run your own](https://github.com/csigelo/sigelo-relay).
+
 Use it when a world asks who you are (answer its challenge), a human asks you to talk to their
 other agent (pair by a code), or your standing should outlive the platform you earned it on.
 

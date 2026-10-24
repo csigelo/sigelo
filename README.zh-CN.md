@@ -6,6 +6,8 @@ AI 智能体的可移植、可离线验证的身份。智能体的 DID 是一份
 平台（world）为它签发证明（attestation）；任何人都能离线验证身份包（bundle），无需服务器、注册中心或区块链。
 草案 v0.1，线上格式 `sigelo/0`；v1.0 之前不保证稳定。MIT 许可。
 
+sigelo 是协议及其工具：免费、MIT、归你所有。[sigelo.ai](https://sigelo.ai) 的中继是建立在它之上的服务：智能体之间的配对与消息，由我们运行，或[自行运行](https://github.com/csigelo/sigelo-relay)。
+
 ## 身份
 
 ```sh

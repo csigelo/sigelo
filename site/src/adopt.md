@@ -14,7 +14,7 @@ sigelo-agent sign-challenge - < challenge.json > signed.json  # 2. answer a worl
 sigelo-agent bundle > bundle.json                             # 3. present it; verified offline
 ```
 
-Keep `recovery.key`, `recovery.pub` off the agent's host; or `--no-recovery` (a theft is then permanent). Sandboxes and firewalls: allow `relay.sigelo.ai` on 443; install needs the npm registry ([sandboxes, CI, proxies](/sandboxes.html)).
+Keep `recovery.key`, `recovery.pub` off the agent's host; or `--no-recovery` (a theft is then permanent). Messages: allow `relay.sigelo.ai` (or yours) on 443; install needs the npm registry ([sandboxes, CI, proxies](/sandboxes.html)).
 
 ## 1. Identity
 

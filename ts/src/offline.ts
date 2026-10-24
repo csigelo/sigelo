@@ -148,7 +148,7 @@ async function cmdVendor(args: string[]): Promise<void> {
   let r: ReturnType<typeof vendor>;
   try { r = vendor({ S, n: n!, out: f['out'] ?? '.' }); } finally { S.fill(0); }
   console.error(`vendor: wrote ${r.files.join(', ')} to ${f['out'] ?? '.'}. vendor.local.json (0600) is the vendor key: offline media only, never a synced folder or a host an agent runs on.\n` +
-    'Check recovery_commitment against fingerprint.txt (the words are the right ones); the words restore all three files: sigelo-offline vendor --n <current rotation>.');
+    'Check vault (pass --net) against the address the Owner\'s wallet shows: then the words are the right ones. recovery_commitment is the vendor\'s own, not fingerprint.txt\'s: nothing in the vendor\'s genesis links it to the root identity. The words restore all three files: sigelo-offline vendor --n <current rotation>.');
   console.log(JSON.stringify({ ...r, ...(vault !== undefined && { vault }) }, null, 2));
 }
 const NO_ARGV = (cmd: string): string => `${cmd}: unexpected argument — the 25 words never go on the command line (ps and shell history show them); ` +

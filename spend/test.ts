@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { attest, bind, canonicalize, commitmentOf, did as didOf, keygen, rotate, sign, verify, verifySig, type Binding, type Bundle, type Genesis, type Rotation } from 'sigelo';
 import { approvalRequest, checkApproval, stillValid, type ApprovalBody, type ApproveContext, type Approved } from './approval.js';
-import { agentIdentitySeed, delegateIdentitySeed, deriveIdentity, keeperRoot, mnemonicFromRoot, newRoot, recoveryCommitment, recoverySeed, rootFromMnemonic, walletFromRoot } from 'sigelo/dist/keys.js';
+import { agentIdentitySeed, delegateIdentitySeed, deriveIdentity, keeperRoot, mnemonicFromRoot, newRoot, recoveryCommitment, recoveryPublicKey, recoverySeed, rootFromMnemonic, walletFromRoot } from 'sigelo/dist/keys.js';
 import { ceremony } from 'sigelo/dist/ceremony.js';
 import { encodeAddress, hashToScalar, sigeloMoneroSigAddr, signMessage, subaddress, subaddressKeys, verifySigeloMoneroSigAddr } from 'sigelo/dist/monero.js';
 import { agentOf, evaluate, fingerprint, invoiceKey, parsePolicy, sameHash, tokenHash, type Destination, type PayRequest, type Policy, type Prior, type Spent } from './policy.js';
@@ -2618,6 +2618,16 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
       const byV1 = lic(dA, { iss: out.did, secret: v1secret, issuer: vfile.genesis, rotations: [out.rotation] });
       ok('licence, derived vendor: recover --vendor --n 1 gives a recovery rotation; a licence by the new key carrying it is pro, chain 2, pin unchanged',
         r1.status === 0 && out.rotation.body.reason === 'recovery' && out.vendor === vdid && (() => { const s = checkLicence(byV1, gA, dv, T, []); return s.tier === 'pro' && s.chain === 2; })(), r1.stderr + at(byV1, dv));
+      // Unlinkable: the vendor commits to its own recovery key, so the root's (which the operator's identity,
+      // keepers and agents commit to) neither appears in its genesis nor signs its recovery.
+      const rootRec = recoverySeed(seed(0x07)), rootRecKey = recoveryPublicKey(seed(0x07));
+      const forgedBody = { ...out.rotation.body, recovery_key: rootRecKey };
+      const forged = { ...out.rotation, body: forgedBody, sig: sign(rootRec, forgedBody), sig_next: sign(v1secret, forgedBody) } as Rotation;
+      const byForged = lic(dA, { iss: out.did, secret: v1secret, issuer: vfile.genesis, rotations: [forged] });
+      const df = mkdtempSync(join(scratch, 'kv-'));
+      ok('licence, derived vendor: its genesis commits to the vendor recovery key, not the root\'s; a recovery signed by the root recovery key does not move its chain, so the new key\'s licence is refused',
+        vfile.genesis.recovery !== recoveryCommitment(seed(0x07)) && !JSON.stringify(vfile.genesis).includes(rootRecKey) && out.rotation.body.recovery_key !== rootRecKey &&
+        r1.status === 0 && at(byForged, df) !== 'PRO' && (() => { try { return verify({ v: vfile.genesis.v, typ: 'bundle', genesis: vfile.genesis, rotations: [forged], bindings: [], attestations: [], issuers: [] } as Bundle, T).did === vdid; } catch { return true; } })() && checkLicence(byForged, gA, df, T, []).tier !== 'pro', at(byForged, df));
       rememberVendorChain(dv, byV1, gA, T, []);
       ok('licence, derived vendor: once the keeper has seen it, the rotation-0 key\'s licences are refused', at(byV0, dv).includes('shorter than the 2'), at(byV0, dv));
       const thief = keygen({ recovery: vfile.genesis.recovery, seed: seed(0x6a) });

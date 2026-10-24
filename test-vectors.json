@@ -1368,42 +1368,44 @@
       "vendor_path": "sigelo/v1/vendor/ed25519/0",
       "vendor_seed_hex": "544dae28a70cecdb84b1c652f71ee2df8b14bcbbe8fdcd180f3f1b53c51efcb9",
       "vendor_key": "z6Mkop1rHjJxKApHjwUWKZ6MYKvKicu4wywBTrxNSPrk6oRF",
-      "recovery": "sha256:cdd6b57b4d3d703430a97987e19f82ccf63d4742eabe247644fc86dcb64bb07d",
+      "recovery_path": "sigelo/v1/vendor/recovery/ed25519",
+      "recovery": "sha256:8c6d04ab0fb35e545d45ce9a4d520bfbfecf60f6cb68140a5bbf352d82cb1399",
+      "root_recovery": "sha256:cdd6b57b4d3d703430a97987e19f82ccf63d4742eabe247644fc86dcb64bb07d",
       "genesis": {
         "v": "sigelo/0",
         "typ": "genesis",
         "key": "z6Mkop1rHjJxKApHjwUWKZ6MYKvKicu4wywBTrxNSPrk6oRF",
-        "recovery": "sha256:cdd6b57b4d3d703430a97987e19f82ccf63d4742eabe247644fc86dcb64bb07d",
+        "recovery": "sha256:8c6d04ab0fb35e545d45ce9a4d520bfbfecf60f6cb68140a5bbf352d82cb1399",
         "created": "1970-01-01T00:00:00Z",
         "nonce": "z6quuL5a9eDfeXUiz4qivGk"
       },
-      "did": "did:sigelo:zDAtsmrLxXMvboDCCc8kr3s6YTt6t3BvdiGv6acvV75c9",
+      "did": "did:sigelo:zHdahCudhxTGXXfVFkuPn7UEQrrEpT3BiJEb3YcU67iwP",
       "vendor_seed_1_hex": "a1e0a7e55f9a0e1d8e4bb8ca337b441c463abab116489206df7c819bca69554a",
       "rotation_1": {
         "body": {
           "v": "sigelo/0",
           "typ": "rotation",
-          "id": "did:sigelo:zDAtsmrLxXMvboDCCc8kr3s6YTt6t3BvdiGv6acvV75c9",
-          "next": "did:sigelo:z4kVaJnCHy7KNvCAVGdE1vmyhtiWu5cpHGU2TZD9XhVHY",
+          "id": "did:sigelo:zHdahCudhxTGXXfVFkuPn7UEQrrEpT3BiJEb3YcU67iwP",
+          "next": "did:sigelo:zD6uTzHjSpjyQBUB9f9qsqQ33bUsRBiRjVYzoAEntcPRF",
           "iat": 0,
           "reason": "recovery",
-          "recovery_key": "z6MkrqZ2EqXr8HxquJpujTZYB1abAMNeEmHNE8tYiMwyeSWg"
+          "recovery_key": "z6MkgbZrYM9tZz3PPoF619EuEqhf32mGoE95Prc5nrK8QZRg"
         },
-        "sig": "z3r4HeNwahaqixTj9QCgzjHgjgz4CRPZ5d5bgUcxmT1PAgQFoM4x57UppPnH57Q4Saxp4QLpnumxVx9mQwkbrxBJa",
-        "sig_next": "z4VqiD2LXc3t3kXBYFjTQrRYZYbiW2ts5G5qpjMHpuNY43YToJrm2ECWhuq9P33FtJZuKQq6mCJBmJuQRu4R1KkG9",
+        "sig": "z2S7obXEGAZgJiZCFQWADMhuAr9ouMUAS1Xfk4gmSzBz3JcT5DYYHoKhAYgUugjSTf3o7ysV3ALt635QMTL9BMcCe",
+        "sig_next": "z2C2DV19XsFrTV5kLjMSdhmvdBVRZ2rTDRGrgyhyMB9nh3R1agRTd6wbwDhu6QiYYP9MmwtLT2GeGFCKnbYsKZ75f",
         "next_genesis": {
           "v": "sigelo/0",
           "typ": "genesis",
           "key": "z6MkiAsoffHxSkHMFbqsXYEyaQ6fv1yAE9DWNvLaguJingSb",
-          "recovery": "sha256:cdd6b57b4d3d703430a97987e19f82ccf63d4742eabe247644fc86dcb64bb07d",
+          "recovery": "sha256:8c6d04ab0fb35e545d45ce9a4d520bfbfecf60f6cb68140a5bbf352d82cb1399",
           "created": "1970-01-01T00:00:00Z",
           "nonce": "zW88KYyMJiMcvErft43sQiT"
         }
       },
-      "did_1": "did:sigelo:z4kVaJnCHy7KNvCAVGdE1vmyhtiWu5cpHGU2TZD9XhVHY",
+      "did_1": "did:sigelo:zD6uTzHjSpjyQBUB9f9qsqQ33bUsRBiRjVYzoAEntcPRF",
       "identity_seed_hex": "d701590b1694a79577d39fa47868069d1d594444eabfa6e09adcc19d2f1a7509",
       "release_seed_hex": "18c282ece17c70103bb3fcc9b70389a0af9ac5133d61cbc5efcd1c4eb32ee6d8",
-      "note": "vendor_seed_hex = HKDF-SHA256(root, \"\", vendor_path), Ed25519 raw. genesis: key = vendor_key, recovery = the root's recovery commitment (HKDF path \"sigelo/v1/recovery/ed25519\"), created \"1970-01-01T00:00:00Z\", nonce = the first 16 bytes of SHA-256 of the raw key; did = its DID. rotation_1: the recovery rotation to rotation 1 (seed vendor_seed_1_hex), iat 0, signed by the root's recovery key. The vendor seed differs from the root identity's (identity_seed_hex) and the release key's (release_seed_hex)."
+      "note": "vendor_seed_hex = HKDF-SHA256(root, \"\", vendor_path), Ed25519 raw. genesis: key = vendor_key, recovery = the commitment of the vendor recovery key (HKDF-SHA256(root, \"\", recovery_path), Ed25519 raw), never root_recovery (the root identity's), created \"1970-01-01T00:00:00Z\", nonce = the first 16 bytes of SHA-256 of the raw key; did = its DID. rotation_1: the recovery rotation to rotation 1 (seed vendor_seed_1_hex), iat 0, signed by the vendor recovery key. The vendor seed differs from the root identity's (identity_seed_hex) and the release key's (release_seed_hex)."
     }
   },
   "negative": {

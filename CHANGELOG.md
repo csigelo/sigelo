@@ -5,8 +5,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **F-Droid, prepared:** apps/android/FDROID.md, a draft recipe, the store listing and its icon; nothing submitted before a release ships the app.
+- **Two layers:** sigelo is the protocol and its tools (sigelo.io: free, MIT); the relay at sigelo.ai is a service built on it, run by us or by you. Both sites say so first and link each other.
 - **Site:** sigelo.online now redirects to sigelo.ai, like sigelo.net, on the sigelo.io certificate; sigelo.dev is reserved for a code forge (planned), no longer a pending redirect.
-- **Vendor from the words:** `sigelo-offline vendor --n <n>` derives the licence-signing identity, `k(S, "sigelo/v1/vendor/ed25519/<n>")`, genesis pinned; `recover --vendor` rotates it. Words never on argv.
+- **Vendor from the words:** `sigelo-offline vendor --n <n>` derives the licence signer, `k(S, "sigelo/v1/vendor/ed25519/<n>")`, genesis pinned, own recovery key (unlinkable to the root); `recover --vendor` rotates it.
 - **App releases:** the Android APK is signed offline by its own key; `release.json` signs its SHA-256 and certificate; `release/apk-check.sh` checks an APK before install. APPS.md: the three forms, install.
 - **Android app** (apps/android): this phone's identity or a computer's page, picked at first start; the relay over native HTTPS and TLS (no Origin), the key in AndroidKeyStore. CI builds the APKs (release unsigned).
 - **Self-contained app** (apps/web): the page runs its own carrier in a browser (IndexedDB, Web Locks, MQTT over WebSocket, PoW in a Worker); same routes and JSON as `ui`. Nothing is sent before it is saved.
