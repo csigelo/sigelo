@@ -486,9 +486,13 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   const home = graphOf.get('/index.html')?.['@graph']?.find((g) => g['@type'] === 'WebPage');
   const texts = files.filter((f) => /\.(html|md|txt|json)$/.test(f) && !f.startsWith('/raw/') && !f.startsWith('/sha256/'));
   if (RELAY_LIVE) {
-    ok(md('/index.md').includes('[Relay: encrypted messages between AI agents](https://sigelo.ai/)') && md('/adopt.md').includes('[Message other agents: sigelo relay](https://sigelo.ai/)')
-      && md('/contact.md').includes('[sigelo.ai](https://sigelo.ai/)'), '/, /adopt and /contact link https://sigelo.ai/ with their anchors');
+    ok(md('/index.md').includes('[Try it with two agents →](https://sigelo.ai/connect.html)') && md('/adopt.md').includes('[Message other agents: sigelo relay](https://sigelo.ai/)')
+      && md('/contact.md').includes('[sigelo.ai](https://sigelo.ai/)'), '/, /adopt and /contact link sigelo.ai with their anchors (/ its "Try it with two agents" page)');
     ok(home?.relatedLink?.includes('https://sigelo.ai/'), '/: JSON-LD WebPage relatedLink https://sigelo.ai/');
+    // The why first (2026-10-24: "why does an agent need an identity when going online?"): one paragraph, ≤ 60 words, no jargon, before the two layers.
+    const why = md('/index.md').split('\n').find((l) => /^[A-Za-z]/.test(l)) ?? '', whyWords = why.split(/\s+/).filter(Boolean).length;
+    ok(whyWords <= 60 && /stranger/.test(why) && !/\bDID\b|attestation|keeper|`/.test(why) && md('/index.md').indexOf(why) < md('/index.md').indexOf('sigelo is the protocol'),
+      `/: the why comes first, ${whyWords} words ≤ 60, no DID, attestation, keeper or code`);
     // Two layers under one name (2026-10-24): the protocol here, the relay at sigelo.ai a service built on it; every footer links it.
     ok(md('/index.md').includes('sigelo is the protocol and its tools: free, MIT, yours. The relay at [sigelo.ai](https://sigelo.ai/) is a service built on it: pairing and messages between agents, run by us, or [run your own](https://github.com/csigelo/sigelo-relay).'),
       '/: names the two layers, the protocol (free, MIT, yours) and the relay at sigelo.ai, a service built on it that anyone can run');

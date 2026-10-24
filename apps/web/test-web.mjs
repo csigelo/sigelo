@@ -144,6 +144,44 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   ok((await checkOf(() => new Carrier({ identity: ident, store: 's', state: 't' }))).startsWith('platform:'), 'web: in the page a carrier without a platform is refused (no Node default)');
 }
 
+// ================================================================ 2b. the relay setting (router.mjs, contact/page.mjs), no relay needed
+{
+  const { makeRouter: mk, presetRelay } = await import(pathToFileURL(join(HERE, 'router.mjs')).href);
+  const { keygen: kg } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
+  const k = kg({ seed: new Uint8Array(32).fill(3), recovery: 'sha256:' + '0'.repeat(64), created: '2026-10-01T00:00:00Z', nonce: new Uint8Array(16).fill(3) });
+  const store = { v: 'sigelo/0', secret: Buffer.from(k.secret).toString('hex'), genesis: k.genesis, rotations: [], attestations: [], issuers: [] };
+  const idb = new FakeIDB(), plat = () => W.webPlatform({ name: 'set', indexedDB: idb, mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
+  const p1 = await plat(), r1 = mk({ platform: p1, identity: () => store, options: { registry: false } });
+  const s0 = (await r1.call('GET', '/api/settings')).body;
+  ok(s0.relay === 'relay.sigelo.ai' && s0.fixed === null && r1.carrier.relay === 'relay.sigelo.ai', `settings: none kept → relay.sigelo.ai, nothing fixed (${JSON.stringify(s0)})`);
+  const bad = await r1.call('POST', '/api/settings', { relay: 'not a host' }), set = await r1.call('POST', '/api/settings', { relay: 'corp.example.com' });
+  ok(bad.status === 400 && bad.body.error.check === 'body' && set.status === 200 && set.body.relay === 'corp.example.com' && set.body.in_use === 'relay.sigelo.ai', `settings: a bad host 400; corp.example.com kept, in use at the next start (${JSON.stringify(set.body)})`);
+  // The next invite names the setting at once (the carrier's invite, watched: no relay needed).
+  let asked = null;
+  r1.carrier.invite = async (o) => { asked = o; return { code: 'sgl1x', did: k.did, relay: o.relay ?? r1.carrier.relay, exp: 1 }; };
+  const inv = await r1.call('POST', '/api/invite', { name: 'x' });
+  ok(inv.status === 200 && asked?.relay === 'corp.example.com' && inv.body.relay === 'corp.example.com', `settings: the next invite names corp.example.com at once (${JSON.stringify(asked)})`);
+  await p1.flush();
+  const p2 = await plat(), r2 = mk({ platform: p2, identity: () => store, options: { registry: false } });
+  const s2 = (await r2.call('GET', '/api/settings')).body;
+  ok(s2.relay === 'corp.example.com' && r2.carrier.relay === 'corp.example.com', `settings: kept across a reload (platform.files, IndexedDB): the carrier's own relay now (${JSON.stringify(s2)})`);
+  const r3 = mk({ platform: p2, identity: () => store, options: { registry: false, relay: 'relay.test' } });
+  const s3 = (await r3.call('GET', '/api/settings')).body;
+  ok(s3.fixed === 'relay.test' && s3.relay === 'corp.example.com' && r3.carrier.relay === 'relay.test', `settings: options.relay (or env.relay) is fixed and wins (${JSON.stringify(s3)})`);
+  const rel = await r2.call('GET', '/api/relays');
+  ok(rel.status === 200 && Array.isArray(rel.body.relays) && rel.body.relays.length === 0, 'GET /api/relays: no registry and no cache → []');
+  // The first-start form: presetRelay before any router.
+  const idb2 = new FakeIDB(), p4 = await W.webPlatform({ name: 'pre', indexedDB: idb2, mqtt: mqttEsm });
+  presetRelay(p4.files, ' Self.Example.org ');
+  const r4 = mk({ platform: p4, identity: () => store, options: { registry: false } });
+  ok(r4.carrier.relay === 'self.example.org' && (await r4.call('GET', '/api/settings')).body.relay === 'self.example.org', 'presetRelay: the first-start form\'s relay is the setting and the carrier\'s relay');
+  presetRelay(p4.files, 'relay.sigelo.ai');
+  ok(await checkOf(() => presetRelay(p4.files, 'not a host')) === 'code_relay' && (await mk({ platform: p4, identity: () => store, options: { registry: false } }).call('GET', '/api/settings')).body.relay === 'relay.sigelo.ai',
+    'presetRelay: the default keeps none; not a host refused');
+  const appSrc = readFileSync(join(HERE, 'app.mjs'), 'utf8');
+  ok(/presetRelay\(platform\.files, relay\.value\)/.test(appSrc) && /value: DEFAULT_RELAY/.test(appSrc) && appSrc.includes('A 12-character code always names its own relay'), 'app.mjs: the import form shows the relay, relay.sigelo.ai pre-filled');
+}
+
 // ================================================================ 3. router.mjs against the relay
 const RELAY_DIR = process.env.SIGELO_RELAY_DIR ?? join(REPO, 'relay');
 if (!existsSync(join(RELAY_DIR, 'server.mjs'))) report(': parts 1 and 2; SKIP the router, no relay checkout (set SIGELO_RELAY_DIR)');

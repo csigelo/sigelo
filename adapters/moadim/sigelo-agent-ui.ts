@@ -139,7 +139,7 @@ type Route = (b: Record<string, unknown>, q: URLSearchParams) => unknown;
 /** contact/page.mjs: the routes over the carrier, shared with the self-contained app. */
 interface PageLib {
   makePage(o: {
-    makeCarrier: (onEvent: (e: Ev) => void) => unknown; link: LinkLib; linksFile: string; codeKind: (t: string) => string; unlogged: RegExp;
+    makeCarrier: (onEvent: (e: Ev) => void, kept: { relay?: string }) => unknown; link: LinkLib; relayFixed: string | null; linksFile: string; codeKind: (t: string) => string; unlogged: RegExp;
     store: { readHistory(): string | null; append(line: string): void; clearHistory(): void; readData(): string | null; writeData(text: string): void };
     hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string };
       agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean };
@@ -225,7 +225,8 @@ export async function startUi(o: UiOptions): Promise<Ui> {
   const UNLOGGED = (lib as unknown as { UNLOGGED: RegExp }).UNLOGGED;
   let devices: DevicePage | null = null, relay: Relays | null = null, handling = Promise.resolve();
   const base = path.replace(/\.json$/, ''), historyFile = `${base}.history.jsonl`, dataFile = `${base}.ui.json`;
-  const paths = lib.pathsFor(path), opts = { ...lib.optionsFromEnv(), ...o.carrier } as { endpoints?: object };
+  // The relay new codes name: SIGELO_RELAY (or the caller's carrier.relay) wins over the page's setting (contact/page.mjs).
+  const paths = lib.pathsFor(path), opts = { ...lib.optionsFromEnv(), ...o.carrier } as { endpoints?: object; relay?: string };
   const me = (): { store: id.Store; did: string; original: string; chain: string[]; geneses: Record<string, Genesis> } => {
     const store = loadMe(), chain = id.chainOf(store), gs = [store.genesis, ...store.rotations.map((r) => r.next_genesis)];
     return { store, did: did(id.head(store)), original: chain[0]!, chain, geneses: Object.fromEntries(gs.map((g) => [did(g), g])) };
@@ -233,10 +234,11 @@ export async function startUi(o: UiOptions): Promise<Ui> {
   if (existsSync(historyFile)) chmodSync(historyFile, 0o600);
   // History (`.history.jsonl`, appended, 0600) and the page's data (`.ui.json`, written whole): this host's files.
   const page = P.makePage({
-    makeCarrier: (onEvent) => new lib.Carrier({
+    makeCarrier: (onEvent, kept) => new lib.Carrier({
       identity: () => { const s = loadMe(); return { sign: signer(path, s).sign, bundle: id.bundleOf(s) }; },
-      ...paths, ...opts, keep: true, onEvent,
+      ...paths, ...kept, ...opts, keep: true, onEvent,
     }),
+    relayFixed: typeof opts.relay === 'string' ? opts.relay : null,
     link: L, linksFile, codeKind: (t) => short.codeKind(t), unlogged: UNLOGGED,
     store: {
       readHistory: () => (existsSync(historyFile) ? readFileSync(historyFile, 'utf8') : null),

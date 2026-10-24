@@ -523,7 +523,12 @@ try {
     const pg = await U.startUi({ identity: human, agents: join(H, 'agents'), carrier: computer, remote: { relay: true, name: 'phone', scope: 'chat' } });
     const R = fakeShell({ mode: 'remote', hosts: globalThis.HOSTS, ca: globalThis.CA }), rb = await R.connect();
     const kept = new Map(), storage = { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), clear: () => kept.clear() };
-    const idb = new FakeIDB(), shellOpts = { storage, mqtt: mqttEsm, indexedDB: idb, pow: A.androidPow(W.workerPow(() => new FakeWorker())), options: { ...relayOpts, endpoints: appEnds } };
+    // The control's relay comes from its code, never from the page's relay setting (kept here first) nor a relay of its own.
+    const { relay: _own, ...codeNamesIt } = relayOpts;
+    const idb = new FakeIDB(), shellOpts = { storage, mqtt: mqttEsm, indexedDB: idb, pow: A.androidPow(W.workerPow(() => new FakeWorker())), options: { ...codeNamesIt, endpoints: appEnds } };
+    const { presetRelay } = await import(pathToFileURL(join(HERE, 'router.mjs')).href), { readControlText } = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'control.mjs')).href);
+    const pre = await W.webPlatform({ name: 'sigelo', indexedDB: idb, mqtt: mqttEsm });
+    presetRelay(pre.files, 'corp.example.com'); await pre.flush();
     let be = null;
     try {
       const line = pg.relay.line ?? '';
@@ -534,6 +539,8 @@ try {
       ok(held.operator === pr.operator && !JSON.stringify([...kept.values()]).includes('secret') && idb.dbs.get('sigelo').stores.get('files').has('identity.keystore'),
         'relay: the control identity sealed by the shell (identity.keystore), the operator\'s DID kept, no key in localStorage');
       be = await S.remoteBackend(rb, null, { ...shellOpts, timeout: 8000 });
+      ok(be.carrier.relay === HOST && readControlText('SIGELO:CTL:K7F3-Q9ZP').relay === null && (await be.carrier.relayForShort('K7F3-Q9ZP')).from === 'short',
+        `relay: the control's relay is the one its code names (${be.carrier.relay}), not the page's setting; an 8-character code is the public relay's (shortRelay)`);
       const early = await be.call('GET', '/api/me');
       ok(early.status === 403 && early.body.error.check === 'words' && be.mode().kind === 'remote' && be.mode().via === 'relay', `relay: before the words are confirmed on the computer: 403 words (${early.status})`);
       await pg.relay.confirm('phone', true);

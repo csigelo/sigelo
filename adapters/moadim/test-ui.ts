@@ -73,6 +73,18 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui links: unknown contacts 404 not_contact; no purpose 400; tier own 409 link_tier; bad days 400; unknown link or introduction 404 link_unknown; answer at own 400; allow unknown 404, without allow 400',
     JSON.stringify(refusals.map((r) => [r.status, r.check])) === JSON.stringify([[404, 'not_contact'], [400, 'body'], [409, 'link_tier'], [400, 'body'], [404, 'link_unknown'], [404, 'link_unknown'], [400, 'body'], [404, 'not_contact'], [400, 'body']]), JSON.stringify(refusals));
   ok('ui links: the state carries introductions (none yet)', Array.isArray((JSON.parse((await http(P, 'GET', '/api/state', T)).body) as { introductions: unknown[] }).introductions));
+  // The relay setting (UI-API.md Settings): the same token and Origin rules; the caller's relay wins (fixed).
+  type RelaySet = { relay: string; default: string; fixed: string | null; in_use: string; error?: { check: string } };
+  const sj = async (method: string, body?: unknown, h: Record<string, string> = method === 'POST' ? W : T): Promise<{ status: number } & RelaySet> => { const r = await http(P, method, '/api/settings', h, body); return { status: r.status, ...(JSON.parse(r.body) as RelaySet) }; };
+  const s0 = await sj('GET');
+  ok('ui settings: GET /api/settings without the token → 403; with it → relay.sigelo.ai, fixed by the caller\'s relay.test, in use',
+    (await http(P, 'GET', '/api/settings', {})).status === 403 && s0.status === 200 && s0.relay === 'relay.sigelo.ai' && s0.default === 'relay.sigelo.ai' && s0.fixed === 'relay.test' && s0.in_use === 'relay.test', JSON.stringify(s0));
+  const sNo = [await sj('POST', { relay: 'corp.example.com' }, { ...T, 'Content-Type': 'application/json' }), await sj('POST', { relay: 'corp.example.com' }, { ...W, 'X-Sigelo-Token': '' })];
+  const sBad = [await sj('POST', { relay: 'not a host' }), await sj('POST', {}), await sj('POST', { relay: 7 })];
+  ok('ui settings: POST without Origin or token → 403; not a host, none, a number → 400 body', sNo.every((r) => r.status === 403) && sBad.every((r) => r.status === 400 && r.error?.check === 'body'), JSON.stringify([sNo, sBad]));
+  const s1 = await sj('POST', { relay: ' Corp.Example.com ' });
+  ok('ui settings: POST {relay} → kept lower case in .ui.json settings; fixed still wins', s1.status === 200 && s1.relay === 'corp.example.com' && s1.fixed === 'relay.test'
+    && (JSON.parse(readFileSync(join(humanDir, 'me.local.ui.json'), 'utf8')) as { settings: { relay: string } }).settings.relay === 'corp.example.com', JSON.stringify(s1));
   // Devices (DEVICES.md, sigelo-agent-device.ts devicePage): the same token and Origin rules; SAFE only.
   const mod = (f: string): Promise<Record<string, any>> => import(pathToFileURL(join(import.meta.dirname, '..', '..', 'contact', f)).href);
   const dv = await mod('device.mjs'), qr = await mod('qr.mjs'), qd = await mod('qr-decode.mjs');
@@ -139,6 +151,21 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui: a human file in the agents\' directory is refused', inside.includes('agents\' directory'), inside);
   await page.close();
   ok('ui: closing removes the pid lock', !existsSync(ui.lockPath(human)));
+  // No relay from the caller or SIGELO_RELAY: the setting kept above is the carrier's own relay at the next start.
+  {
+    const noEnv = process.env['SIGELO_RELAY'];
+    delete process.env['SIGELO_RELAY'];
+    const ends = { 'relay.sigelo.ai': unreachable.endpoints['relay.test'], 'corp.example.com': unreachable.endpoints['relay.test'] };
+    const again = await ui.startUi({ identity: human, agents: agentsDir, carrier: { endpoints: ends, registry: false } });
+    try {
+      const g = async (path: string, method = 'GET', body?: unknown) => JSON.parse((await http(again.port, method, path, method === 'POST' ? { 'X-Sigelo-Token': again.token, Origin: `http://127.0.0.1:${again.port}`, 'Content-Type': 'application/json' } : { 'X-Sigelo-Token': again.token }, body)).body);
+      const st2 = await g('/api/settings'), me2 = await g('/api/me');
+      ok('ui settings: nothing fixed → the setting is the relay in use at the next start (me.relay corp.example.com)', st2.fixed === null && st2.in_use === 'corp.example.com' && me2.relay === 'corp.example.com', JSON.stringify([st2, me2.relay]));
+      const back = await g('/api/settings', 'POST', { relay: '' }), rel = await g('/api/relays');
+      ok('ui settings: "" → back to relay.sigelo.ai (in use until the next start: corp.example.com); GET /api/relays with no registry → []', back.relay === 'relay.sigelo.ai' && back.in_use === 'corp.example.com'
+        && Array.isArray(rel.relays) && rel.relays.length === 0, JSON.stringify([back, rel]));
+    } finally { await again.close(); if (noEnv !== undefined) process.env['SIGELO_RELAY'] = noEnv; }
+  }
 
   // The CLI: no identity → keeper --from-words, once; then the page, for the DID of the words.
   const env = { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify(unreachable.endpoints) };

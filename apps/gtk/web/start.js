@@ -84,7 +84,14 @@ $('text').addEventListener('paste', (ev) => {
 $('go').onclick = () => { const t = $('text').value.replace(/^\s+/, ''); $('text').value = ''; connect(t); };   // base45 has spaces: never trim the end
 
 // ---- this phone; a computer kept from before
-$('self').onclick = async () => { $('self').disabled = true; note('Starting this phone\'s page…'); const r = await ask('self'); $('self').disabled = false; if (!r.ok) note(r.message); };
+// The relay goes to the page's setting only when changed here (a kept setting is not reset to the default).
+let relayEdited = false;
+$('relay').addEventListener('input', () => { relayEdited = true; });
+$('self').onclick = async () => {
+  $('self').disabled = true; note('Starting this phone\'s page…');
+  const r = await ask('self', relayEdited ? { relay: $('relay').value.trim() } : {});
+  $('self').disabled = false; if (!r.ok) note(r.message);
+};
 $('resume').onclick = async () => { status('Connecting…'); const r = await ask('resume'); if (!r.ok) status(r.message); };
 $('forget').onclick = async () => { await ask('forget'); $('saved').hidden = true; status('Forgotten here. Revoke it on the computer too: sigelo-agent ui --revoke-control <name>.'); };
 const saved = await ask('saved');

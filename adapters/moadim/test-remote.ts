@@ -124,6 +124,11 @@ ok('remote: scope all: forget, tier, agents, link, links/allow in scope (404 not
   && (await full.call('POST', '/api/link', { a: 'did:sigelo:zNope', b: 'did:sigelo:zNope2', purpose: 'p' })).body.error.check === 'not_contact'
   && (await full.call('POST', '/api/links/allow', { contact: 'did:sigelo:zNope', allow: true })).body.error.check === 'not_contact'
   && (await full.call('GET', '/api/agents')).status === 200 && (await full.call('GET', '/api/devices')).body.error.check === 'remote');
+{
+  const [rs, rp, fs, fp] = [await tab.call('GET', '/api/settings'), await tab.call('POST', '/api/settings', { relay: 'corp.example.com' }), await full.call('GET', '/api/settings'), await full.call('POST', '/api/settings', { relay: '' })];
+  ok('remote: the relay setting is scope all: read → 403 scope (GET and POST); all → 200, the local answer', rs.status === 403 && rs.body.error.check === 'scope' && rp.status === 403 && rp.body.error.check === 'scope'
+    && fs.status === 200 && fs.body.relay === 'relay.sigelo.ai' && fs.body.fixed === 'relay.test' && fp.status === 200 && fp.body.relay === 'relay.sigelo.ai', JSON.stringify([rs, rp, fs, fp]));
+}
 // D4: the device routes are real here (the page's Devices view), and still never remote, at any scope (apps.md §6.2).
 const DEV: [string, string, object?][] = [['GET', '/api/devices'], ['POST', '/api/devices/add', { name: 'phone' }], ['POST', '/api/devices/confirm', { id: 'x', match: true }], ['POST', '/api/devices/words', { id: 'x' }],
   ['POST', '/api/devices/scan', { text: 'K7F3-Q9ZP' }], ['POST', '/api/devices/revoke', { name: 'phone', lost: true }], ['POST', '/api/devices/sync']];
@@ -223,7 +228,7 @@ await page.close();
 // ── end to end: every route in scope, sealed, against the relay the contact tests use
 if (!hasRelay()) console.log(`SKIP remote end to end: ${NO_RELAY}`);
 else {
-  const relay = await startTestRelay(H), carrier = { relay: 'relay.test', endpoints: relay.endpoints };
+  const relay = await startTestRelay(H), carrier = { relay: 'relay.test', endpoints: relay.endpoints, registry: false };
   const Ad = dir('a2'), Bd = dir('b2');
   const pa = await ui.startUi({ identity: join(Ad, 'me.local.json'), agents: join(Ad, 'agents'), carrier, remote: { listen: '127.0.0.1', name: 'phone', scope: 'all' } });
   const pb = await ui.startUi({ identity: join(Bd, 'me.local.json'), agents: join(Bd, 'agents'), carrier });
@@ -288,6 +293,9 @@ else {
     }
     const me2 = await call('GET', '/api/me'), fg = await call('POST', '/api/forget', { contact: bob!.did }), cl = await call('POST', '/api/history/clear');
     ok('remote e2e: me, forget, history/clear → 200', me2.status === 200 && fg.body.forgotten === bob!.did && cl.body.cleared === true);
+    const se = await call('GET', '/api/settings'), sp = await call('POST', '/api/settings', { relay: 'corp.example.com' }), rl = await call('GET', '/api/relays');
+    ok('remote e2e: settings and relays sealed (scope all): the setting kept, SIGELO_RELAY-like caller relay still fixed; no registry → []', se.status === 200 && sp.body.relay === 'corp.example.com' && sp.body.fixed === 'relay.test'
+      && rl.status === 200 && rl.body.relays.length === 0, JSON.stringify([se, sp, rl]));
     const all = [...rm.SCOPES.all], missed = all.filter((x) => done_.get(x) !== 200);
     ok(`remote e2e: every route in scope all answered 200 sealed (${all.length})`, missed.length === 0, JSON.stringify(missed));
   } finally {

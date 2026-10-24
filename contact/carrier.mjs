@@ -12,6 +12,7 @@
 //                                            relay: named, else relayForShort's (unparkFrom: { invite, relay })
 //   await c.relayForShort(short, { relay }) → { relay, from }: where a short code is parked: 8 characters, shortRelay
 //                                            (relay.sigelo.ai); 12, the relay its tag resolves to (relays.mjs), or relay_tag
+//   await c.registryRelays()               → [{ tag, host, did?, tier?, note? }]: the signed registry's relays, verified (relays.mjs)
 //   await c.redeemGift(code)               → { exp, months }: a gift code (PRO-K7F3-Q9ZP) redeemed at this agent's relay;
 //                                            this identity is the operator whose pool is Pro until exp (relay/gifts.mjs)
 //   await c.accept(code, { name, wait, relay })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
@@ -2391,8 +2392,15 @@ export class Carrier {
       }
     } catch {}
     for (const host of readTable(this.relaysPath, this.platform.files)) known.push({ host, from: 'table' });
-    const r = await resolveTag(tag, { known, shown, registry: () => loadRegistry({ file: this.registryPath, url: this.registry, pin: this.registryPin, now: checkNow(this.clock()), get: (u) => http(this.platform, u), files: this.platform.files }) });
+    const r = await resolveTag(tag, { known, shown, registry: () => this.#registry() });
     return { relay: r.host, from: r.from };
+  }
+  #registry() {
+    return loadRegistry({ file: this.registryPath, url: this.registry, pin: this.registryPin, now: checkNow(this.clock()), get: (u) => http(this.platform, u), files: this.platform.files });
+  }
+  /** The registry's relays, verified (relays.mjs loadRegistry: the cache of the day, else one fetch): [{ tag, host, did?, tier?, note? }], [] when none. */
+  async registryRelays() {
+    return [...(await this.#registry())].map(([tag, e]) => ({ tag, ...e }));
   }
 
   // The long code parked under a short one: GET /park/<code hash>, which the relay answers once,

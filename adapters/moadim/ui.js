@@ -631,6 +631,33 @@
     how.hidden = true;
     put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show('contacts') }, '‹'), h('h1', null, 'Me')), body);
     backend.call('GET', '/api/me').then((m) => { S.me = m; S.update(); }).catch((e) => { S.note = e; });
+    // The relay setting (UI-API.md Settings): kept out of the redraw so typing survives the poll.
+    const R = { s: null, list: null, say: '' };
+    const relayIn = h('input', { autocomplete: 'off', spellcheck: false, maxlength: '255', 'aria-label': 'Relay' });
+    const saveRelay = async (v) => {
+      try { R.s = await backend.call('POST', '/api/settings', { relay: v }); relayIn.value = R.s.relay; R.say = 'Saved.'; } catch (e) { R.say = e.message; }
+      S.update();
+    };
+    const pickList = async () => {
+      R.say = 'Reading the public registry…'; S.update();
+      try { R.list = (await backend.call('GET', '/api/relays')).relays; R.say = R.list.length ? '' : 'The registry lists no relays, or could not be read.'; } catch (e) { R.say = e.message; }
+      S.update();
+    };
+    backend.call('GET', '/api/settings').then((x) => { R.s = x; relayIn.value = x.relay; S.update(); }).catch(() => { R.s = false; });
+    const relayBlock = () => {
+      if (!R.s) return null;
+      const now = R.s.fixed ?? R.s.relay;
+      return [h('h2', null, 'Relay for new codes'), h('div', { class: 'card' },
+        h('p', null, `New codes use ${now}`),
+        R.s.fixed ? h('p', { class: 'muted' }, `SIGELO_RELAY on this computer sets ${R.s.fixed}: it wins over the setting below.`) : null,
+        h('label', null, 'Relay'), relayIn,
+        h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => saveRelay(relayIn.value.trim()) }, 'Save'),
+          h('button', { onclick: () => saveRelay('') }, `Back to ${R.s.default}`), h('button', { onclick: pickList }, 'Use the public registry')),
+        R.list ? R.list.map((x) => h('div', { class: 'row' }, h('span', { class: 'main' }, h('div', { class: 'name' }, x.host), h('div', { class: 'sub' }, [x.tier, x.note].filter(Boolean).join(' · '))),
+          h('button', { onclick: () => saveRelay(x.host) }, 'Use'))) : null,
+        R.say ? h('p', { class: 'muted' }, R.say) : null,
+        h('p', { class: 'muted' }, 'A 12-character code always names its own relay, whatever this says. Your own connection moves at the next start.'))];
+    };
     return async () => {
       S.agents = await backend.call('GET', '/api/agents').catch(() => S.agents);
       const m = S.me;
@@ -642,6 +669,7 @@
         h('p', null, m.recovery === 'set' ? 'Recovery key: set, offline' : h('span', { class: 'warn' }, 'Recovery key: none. Theft of this key is permanent.')),
         h('p', null, m.key === 'browser' ? 'Key: in this app\'s storage, sealed under a key it cannot export' : 'Key: file (keychain: not yet)'),
         h('p', null, `Relay: ${m.relay} · keeps messages ${m.retention_days} days`),
+        relayBlock(),
         h('h2', null, 'Agents on this machine'),
         (S.agents ?? []).length ? S.agents.map((a) => h('div', { class: 'row' }, h('span', { class: 'main' }, h('div', { class: 'name' }, a.name),
           h('div', { class: 'sub' }, a.error ? a.error : a.mine ? `run by me · ${a.mine.days_left} d left` : 'not mine', a.worker !== null ? ` · worker ${a.worker}` : a.error ? '' : ' · not from your words', a.contact ? ' · paired' : '')),

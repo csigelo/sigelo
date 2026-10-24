@@ -10,7 +10,8 @@ import mqtt from './vendor/mqtt.esm.js';
 import { parseBytes } from 'sigelo';
 import { loadIdentity, saveIdentity, webPlatform } from './platform-web.mjs';
 import { androidPlatform, connectBridge } from './platform-android.mjs';
-import { makeRouter } from './router.mjs';
+import { DEFAULT_RELAY } from './vendor/contact/carrier.mjs';
+import { makeRouter, presetRelay } from './router.mjs';
 import { pickMode, remoteBackend, wipeIfAsked } from './shell.mjs';
 
 const SETTINGS = 'app/settings.json';
@@ -31,7 +32,7 @@ const ready = (async () => {
   }
   const s = platform.files.read(SETTINGS), settings = s === null ? {} : JSON.parse(new TextDecoder().decode(s));
   const identity = parseBytes(raw);
-  router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' }, options: settings.relay ? { relay: settings.relay } : {} });
+  router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' } });
   await router.start();
   addEventListener('pagehide', () => { void router.stop(); });
   return router;
@@ -55,6 +56,8 @@ function setup(platform) {
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   const file = el('input', { type: 'file', accept: '.json,application/json' });
   const full = el('input', { type: 'checkbox' });
+  // The relay new codes name (the page's setting, changed later under Me): a self-hoster's before pairing.
+  const relay = el('input', { value: DEFAULT_RELAY, autocomplete: 'off', spellcheck: false, ariaLabel: 'Relay' });
   const say = el('p', { className: 'muted' });
   const go = el('button', { className: 'primary', textContent: 'Import' });
   go.addEventListener('click', async () => {
@@ -63,6 +66,7 @@ function setup(platform) {
     try {
       const bytes = new Uint8Array(await f.arrayBuffer()), s = parseBytes(bytes);
       if (typeof s?.secret !== 'string' || !/^[0-9a-f]{64}$/.test(s.secret) || typeof s.genesis !== 'object') throw new Error('not a sigelo identity file with its key in it');
+      presetRelay(platform.files, relay.value);
       await saveIdentity(platform, bytes, undefined, { full: full.checked });
       platform.files.write(SETTINGS, new TextEncoder().encode(JSON.stringify({ mode: full.checked ? { kind: 'full', standby: true } : { kind: 'safe' } })));
       await platform.flush();
@@ -72,6 +76,9 @@ function setup(platform) {
   box.replaceChildren(el('div', { className: 'card' },
     el('h2', { textContent: 'Import an identity' }),
     el('p', { textContent: `The file a computer wrote for this device (sigelo-agent device scan). It is sealed into this app's storage under a key ${platform.sealer ? 'of this phone\'s keystore (FULL: unlocked with your screen lock)' : 'the app cannot export'}.` }),
-    file, el('label', {}, full, ' This is the operator (FULL, standby)'), el('div', { className: 'bar' }, go), say));
+    file, el('label', {}, full, ' This is the operator (FULL, standby)'),
+    el('label', { textContent: 'Relay for new codes' }), relay,
+    el('p', { className: 'muted', textContent: 'Keep relay.sigelo.ai unless you run your own. A 12-character code always names its own relay.' }),
+    el('div', { className: 'bar' }, go), say));
   box.hidden = false;
 }

@@ -14,6 +14,9 @@ small bridge in Java for what a page cannot do. No AndroidX, no dependency but t
   same network. Scan its QR (camera), pick a screenshot of it, or paste its `SIGELO:UI:` text. The
   phone holds no account key, only that computer's text.
 
+The relay is configurable: relay.sigelo.ai by default, set when importing and under Me (codes
+name it; a 12-character code always names its own relay).
+
 The menu switches between them. Switching asks first, then erases what the app held for the form it
 leaves (its keys and its storage): keep the identity file or your 25 words on the computer. "Forget
 the computer" erases the computer's text; revoke it there too (`ui --revoke-control <name>`).

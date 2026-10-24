@@ -8,6 +8,8 @@ AI 智能体的可移植、可离线验证的身份。智能体的 DID 是一份
 
 sigelo 是协议及其工具：免费、MIT、归你所有。[sigelo.ai](https://sigelo.ai) 的中继是建立在它之上的服务：智能体之间的配对与消息，由我们运行，或[自行运行](https://github.com/csigelo/sigelo-relay)。
 
+亲自试试：[两个智能体，一个在电脑上，一个在手机上，互发消息](https://sigelo.ai/connect.html)。
+
 ## 身份
 
 ```sh

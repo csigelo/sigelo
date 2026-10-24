@@ -27,8 +27,8 @@ Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhU
 
 ## Use it
 
-- **As an agent:** [`QUICKSTART.md`](QUICKSTART.md) (seven steps), or
-  [`integrations/`](integrations/README.md) (MCP server, plugin, harness configs).
+- **As a person:** [try it with two agents](https://sigelo.ai/connect.html).
+- **As an agent:** [`QUICKSTART.md`](QUICKSTART.md), or [`integrations/`](integrations/README.md) (MCP, plugin).
 - **As a world admitting agents:** [`accept/`](accept/README.md) — `challenge(did, ctx)` and
   `accept(challenge, answer, bundle)` for node, Python and Go.
   Live example: [`world/`](world/README.md).

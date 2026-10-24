@@ -74,7 +74,11 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
 
 // ── this phone: `ui --app` spawned by the app, the page answers, the child ends with the app
 {
-  const r = await gjs({ SIGELO_APP_TEST: 'self', SIGELO_APP_IDENTITY: human, SIGELO_AGENT: JSON.stringify([process.execPath, CLI]) });
+  const start = readFileSync(join(S, 'web', 'start.html'), 'utf8');
+  ok('start page: this phone\'s form shows the relay field, relay.sigelo.ai pre-filled, and that a 12-character code names its own relay',
+    /<input id="relay" value="relay\.sigelo\.ai"/.test(start) && start.includes('12-character code always names its own relay') && readFileSync(join(S, 'web', 'start.js'), 'utf8').includes("ask('self', relayEdited"));
+  const r = await gjs({ SIGELO_APP_TEST: 'self', SIGELO_APP_IDENTITY: human, SIGELO_AGENT: JSON.stringify([process.execPath, CLI]), SIGELO_APP_RELAY: 'corp.example.com' });
+  ok('gjs, this phone: the relay set through the page (POST /api/settings) → 200, kept as corp.example.com', r.relay === 200 && r.setting === 'corp.example.com', JSON.stringify(r).slice(0, 400));
   ok('gjs, this phone: ui --app spawned, GET /api/me with its token → 200; stopped → exit 0', r.ok === true && r.me === 200 && r.exited === true && r.code === 0, JSON.stringify(r).slice(0, 400));
   ok('gjs, this phone: the page serves the device routes (GET /api/devices → 200, no devices yet) and the QR decoder', r.devices === 200 && r.devices_list === 0 && r.decoder === 200, JSON.stringify(r).slice(0, 400));
   const n = await gjs({ SIGELO_APP_TEST: 'self', SIGELO_APP_IDENTITY: join(H, 'none.local.json'), SIGELO_AGENT: JSON.stringify([process.execPath, CLI]) });

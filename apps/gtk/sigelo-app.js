@@ -13,6 +13,8 @@
 //                four words are compared with the computer's; then `sigelo-agent control ui --app`
 //                serves the computer's page here, every call a request over the relay (design/apps.md §6.3).
 // Start page (web/start.html): pick a form, or scan/paste a computer's SIGELO:UI: or SIGELO:CTL: text.
+// This phone's form shows the relay new codes name (the page's setting, relay.sigelo.ai pre-filled): changed
+// there, it is set through the page's own POST /api/settings once the page runs; SIGELO_RELAY still wins.
 // Headless checks (apps/gtk/test-gtk.mjs): SIGELO_APP_TEST=remote|self, no window.
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -132,6 +134,12 @@ async function pairRelay(text) {
   if (r.status !== 0) return { ok: false, message: (r.err.trim().split('\n').at(-1) ?? '').replace(/^sigelo-agent: /, '') || `sigelo-agent control pair ended (exit ${r.status})` };
   try { const j = JSON.parse(r.out); return { ok: true, words: j.words, operator: j.operator }; } catch { return { ok: false, message: r.out.slice(0, 300) }; }
 }
+/** The page's relay setting (POST /api/settings, contact/page.mjs) on this phone's page → {status, body}. */
+async function setRelay(port, url, relay) {
+  const token = /#t=(\w+)/.exec(url)[1], origin = `http://127.0.0.1:${port}`;
+  const r = await soupFetch(`${origin}/api/settings`, { method: 'POST', headers: { 'X-Sigelo-Token': token, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ relay }) });
+  return { status: r.status, body: JSON.parse(await r.text()) };
+}
 function stopSelf() {
   if (!child) return;
   try { child.get_stdin_pipe().close(null); } catch {}
@@ -170,9 +178,11 @@ if (TEST) {
       const me = await soupFetch(`http://127.0.0.1:${r.port}/api/me`, { headers: { 'X-Sigelo-Token': token } });
       const devices = await soupFetch(`http://127.0.0.1:${r.port}/api/devices`, { headers: { 'X-Sigelo-Token': token } });
       const qr = await soupFetch(`http://127.0.0.1:${r.port}/qr-decode.mjs`);
+      const relay = GLib.getenv('SIGELO_APP_RELAY') ? await setRelay(r.port, r.url, GLib.getenv('SIGELO_APP_RELAY')) : null;
       stopSelf();
       await new Promise((ok) => p.wait_async(null, () => ok()));
-      out = { ok: true, me: me.status, devices: devices.status, devices_list: JSON.parse(await devices.text()).devices?.length ?? null, decoder: qr.status, exited: p.get_if_exited(), code: p.get_exit_status() };
+      out = { ok: true, me: me.status, devices: devices.status, devices_list: JSON.parse(await devices.text()).devices?.length ?? null, decoder: qr.status, exited: p.get_if_exited(), code: p.get_exit_status(),
+        ...(relay && { relay: relay.status, setting: relay.body.relay ?? relay.body.error?.message }) };
     } else out = r;
   }
   print(JSON.stringify(out));
@@ -231,9 +241,13 @@ app.connect('activate', () => {
 
   // The bridge: only pages of sigelo-app://app/ may use it; ui.html only for `call`.
   const ops = {
-    async self() {
+    async self({ relay }) {
       const r = await startSelf(identity);
       if (!r.ok) return r;
+      if (typeof relay === 'string') {
+        const s = await setRelay(r.port, r.url, relay);
+        if (s.status !== 200) { stopSelf(); return { ok: false, message: s.body?.error?.message ?? `relay: HTTP ${s.status}` }; }
+      }
       selfOrigin = `http://127.0.0.1:${r.port}/`;
       GLib.idle_add(GLib.PRIORITY_DEFAULT, () => { view.load_uri(r.url); return GLib.SOURCE_REMOVE; });
       return { ok: true };

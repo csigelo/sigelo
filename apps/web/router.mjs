@@ -14,8 +14,12 @@
 // identity(): the identity file as sigelo-agent writes it ({ secret, genesis, rotations,
 // attestations, issuers }), read at every operation. Its files live under the name `app/me.local.json`
 // in the platform's files (contacts, carrier state, history, the page's data, links).
+// The relay new codes name: options.relay or the platform's env.relay when given (fixed, as SIGELO_RELAY
+// is for `sigelo-agent ui`), else the page's setting (GET/POST /api/settings, in the page's data),
+// else relay.sigelo.ai. presetRelay(files, host): the first-start form's choice, before any router.
 import { did as didOf } from 'sigelo';
-import { Carrier, UNLOGGED, pathsFor } from './vendor/contact/carrier.mjs';
+import { Carrier, DEFAULT_RELAY, UNLOGGED, pathsFor } from './vendor/contact/carrier.mjs';
+import { checkRelay } from './vendor/contact/invite.mjs';
 import * as L from './vendor/contact/link.mjs';
 import { makePage, refuse } from './vendor/contact/page.mjs';
 import { codeKind } from './vendor/contact/short.mjs';
@@ -30,22 +34,36 @@ const headOf = (s) => (s.rotations ?? []).at(-1)?.next_genesis ?? s.genesis;
 const utf8 = (s) => new TextEncoder().encode(s);
 const text = (b) => (b === null ? null : new TextDecoder().decode(b));
 
+const DATA_FILE = `${IDENTITY.replace(/\.json$/, '')}.ui.json`;
+/** The first-start form's relay into the page's data (what POST /api/settings keeps); relay.sigelo.ai or empty: none kept. */
+export function presetRelay(files, host) {
+  const raw = files.read(DATA_FILE);
+  let d = {};
+  try { d = raw === null ? {} : JSON.parse(new TextDecoder().decode(raw)) ?? {}; } catch {}
+  const h = String(host ?? '').trim().toLowerCase();
+  d.settings = { ...(d.settings ?? {}) };
+  if (h === '' || h === DEFAULT_RELAY) delete d.settings.relay;
+  else { checkRelay(h); d.settings.relay = h; }
+  files.write(DATA_FILE, utf8(JSON.stringify(d)));
+}
+
 const DEVICES_HERE = 'devices are added, scanned and revoked on the operator\'s computer (sigelo-agent ui), not in this app';
 
 export function makeRouter({ platform, identity, mode = { kind: 'safe' }, options = {} }) {
   const { files } = platform;
   const paths = pathsFor(IDENTITY), base = IDENTITY.replace(/\.json$/, '');
-  const historyFile = `${base}.history.jsonl`, dataFile = `${base}.ui.json`, linksFile = L.linksPath(IDENTITY);
+  const historyFile = `${base}.history.jsonl`, dataFile = DATA_FILE, linksFile = L.linksPath(IDENTITY);
   const me = () => {
     const s = identity(), chain = [didOf(s.genesis), ...(s.rotations ?? []).map((r) => didOf(r.next_genesis))];
     return { did: didOf(headOf(s)), original: chain[0], chain };
   };
   const env = Object.fromEntries(Object.entries(platform.env ?? {}).filter(([k, v]) => v !== undefined && v !== null && ['relay', 'endpoints', 'retentionDays', 'shortRelay', 'registry'].includes(k)));
   const page = makePage({
-    makeCarrier: (onEvent) => new Carrier({
+    makeCarrier: (onEvent, kept) => new Carrier({
       identity: () => { const s = identity(); return { secret: unhex(s.secret), bundle: bundleOf(s) }; },
-      ...paths, ...env, ...options, keep: true, onEvent, platform,
+      ...paths, ...kept, ...env, ...options, keep: true, onEvent, platform,
     }),
+    relayFixed: options.relay ?? env.relay ?? null,
     link: L, linksFile, codeKind, unlogged: UNLOGGED,
     // The history and the page's data: files of the platform (IndexedDB behind them), written whole.
     store: {

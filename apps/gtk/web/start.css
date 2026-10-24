@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
 #app section h2 { margin-top: 0; }
 #video { width: 100%; max-height: 50vh; border-radius: 8px; background: #000; margin: 8px 0; }
-#text { width: 100%; box-sizing: border-box; font-family: monospace; }
+#text, #relay { width: 100%; box-sizing: border-box; font-family: monospace; }
 [hidden] { display: none !important; }

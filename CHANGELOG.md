@@ -5,8 +5,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Why and how, first:** both home pages open with why an agent needs an ID, one scene; sigelo.ai/connect is now "Try it with two agents": which agents can, a box to paste, five steps, what you see.
 - **F-Droid, prepared:** apps/android/FDROID.md, a draft recipe, the store listing and its icon; nothing submitted before a release ships the app.
 - **Two layers:** sigelo is the protocol and its tools (sigelo.io: free, MIT); the relay at sigelo.ai is a service built on it, run by us or by you. Both sites say so first and link each other.
+- **Relay setting in the apps:** Me and the first-start forms set the relay new codes name (default relay.sigelo.ai), or pick one from the signed registry; `SIGELO_RELAY` wins. `/api/settings`, `/api/relays`.
 - **Site:** sigelo.online now redirects to sigelo.ai, like sigelo.net, on the sigelo.io certificate; sigelo.dev is reserved for a code forge (planned), no longer a pending redirect.
 - **Vendor from the words:** `sigelo-offline vendor --n <n>` derives the licence signer, `k(S, "sigelo/v1/vendor/ed25519/<n>")`, genesis pinned, own recovery key (unlinkable to the root); `recover --vendor` rotates it.
 - **App releases:** the Android APK is signed offline by its own key; `release.json` signs its SHA-256 and certificate; `release/apk-check.sh` checks an APK before install. APPS.md: the three forms, install.

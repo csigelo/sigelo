@@ -47,6 +47,9 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 | `POST /api/unlink` | `{id}` | `{id, status: "ended", role}` |
 | `POST /api/links/answer` | `{id, accept, tell?, tier?}` | `{id, from, status: "linked"\|"accepting"\|"refused"\|"failed", told}`; `tier` friend or quiet (default) |
 | `POST /api/links/allow` | `{contact, allow, tier?, days?}` | `{contact, name, allow, tier, until}`, or `{contact, allow: false, had}` |
+| `GET /api/settings` | | `{relay, default, fixed, in_use}`: the relay new codes name (default `relay.sigelo.ai`); `fixed`: `SIGELO_RELAY`'s host, which wins, or null; `in_use`: this session's own |
+| `POST /api/settings` | `{relay}` | the same; `relay` a host[:port], `""` or null for the default; kept in `.ui.json` `settings` |
+| `GET /api/relays` | | `{relays: [{tag, host, did?, tier?, note?}]}`: the signed `sigelo.ai/relays.json`, verified, fetched at most once a day |
 | `GET /api/devices` | | `{devices, list, adding, joining}` (DEVICES.md): `devices` `[{name, rank, worker, did, original, via, added, seen, paired, ours, tier, attested_until, revoked}]`; `list` `{seq, iat}` or null; `adding` (online adds) `[{id, name, worker, did, qr, short, exp, state, words}]`, `state` `code`, `words`, `sending`, `done`, `refused`, `expired`; `joining`: this machine's scan of an online code `{state, file, words, …}` or null |
 | `POST /api/devices/add` | `{name, offline?, tier?, days?, words?}` | online: an `adding` entry (`qr` `SIGELO:DEV:…`, 10 min); offline: `{id, name, worker, did, frames, list, exp}`. SAFE only: `full` → `409 device_full` (a terminal) |
 | `POST /api/devices/confirm` | `{id, match}` | the words gate: `true` sends its key; `false` drops it (`refused`); before the device answered `409 device_state` |
@@ -79,6 +82,10 @@ messages never reach the history. QR codes are drawn and read in the page with `
 beside it, with `shim-*.mjs`; the import map is its one inline script, allowed by hash in the CSP): camera where
 `getUserMedia` finds one, else an image file or paste. The six offline words come only from `/words`, after the frames.
 
+**Relay setting:** new codes name `SIGELO_RELAY` if set, else the setting, else `relay.sigelo.ai`; a change applies to the
+next invite and to this page's own connection at its next start. Codes accepted never read it: 8 characters are `relay.sigelo.ai`'s,
+12 name their relay by its tag (local table, then the registry).
+
 **Files:** one received is an `in` message, `file <name> (<size> bytes), saved at <path>`. Sending one: not yet (the disabled 📎).
 
 ## Remote
@@ -91,7 +98,7 @@ aad `"sigelo-remote/0 req"` ‖ id ‖ u64be(ctr), JCS `{method, path, body?}`).
 holds `{status, body}`, what this listener would answer. `ctr` must exceed the last one kept (one call at a time):
 a replay, a wrong key or an unknown id get `403` and no body. **Scopes:** `read`: state, me, messages, links; `chat`: + send,
 accept, invite, invite/cancel, words, rename, tag, sync, links/answer (pairs as accept does); `all`: + forget, tier, history/clear, agents,
-link, unlink, links/allow (who the agents talk to, as tier). Outside it: `403 scope`;
+link, unlink, links/allow (who the agents talk to, as tier), settings, relays. Outside it: `403 scope`;
 `/api/devices*` never (`403 remote`). `ui --controls` lists them (never a key); `ui --revoke-control <name>` forgets one
 (stop the page first: it owns the file). No TLS: the LAN sees sizes and timing; the text is page control until revoked.
 Client: `remote-client.mjs`. **Over the relay** (`ui --remote --relay [--name] [--scope]`, no listener): it prints

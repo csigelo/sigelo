@@ -5,8 +5,8 @@
 // and the other has not (the agents' directory, devices, the seat, the HTTP and LAN listeners)
 // comes in as hooks or as routes the host adds.
 //
-//   const p = makePage({ makeCarrier, link, codeKind, unlogged, store, hooks })
-//   p.carrier                        the carrier makeCarrier(onEvent) built (keep: true)
+//   const p = makePage({ makeCarrier, link, codeKind, unlogged, store, hooks, relayFixed })
+//   p.carrier                        the carrier makeCarrier(onEvent, { relay? }) built (keep: true); relay: the setting, when one is kept
 //   p.routes                         { 'METHOD /api/…': (body, query: URLSearchParams) → value | Promise }, the host adds its own
 //   await p.dispatch(method, url, b) → [status, JSON value]: the route's answer, or { error: { check, message, long? } }
 //   await p.start(), await p.halt()  timers, the carrier's session, the first drain; halt: timers off, links done (then carrier.stop())
@@ -22,14 +22,24 @@
 // (or none), note(line), defer(fn) (setImmediate on Node), every(fn, ms) → a timer, hidden({ did, name })
 // → true for what the page never shows nor names (the computer's relay controls: their contacts, their
 // pairing, their codes waiting; design/apps.md §6.3).
+//
+// The relay setting (UI-API.md "Settings"): the relay new codes name, kept in data.settings.relay.
+// Precedence: relayFixed (the host's environment: SIGELO_RELAY, or a relay the host was given) wins,
+// then the setting, then relay.sigelo.ai. The carrier is made with the setting; a change applies at
+// once to new codes (invite names it) and becomes the carrier's own relay at the next start. Codes
+// to accept never read it: a 12-character code names its relay by its tag, an 8-character one is
+// relay.sigelo.ai's (the carrier's relayForShort).
 import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
+import { DEFAULT_RELAY } from './carrier.mjs';
+import { checkRelay } from './invite.mjs';
 
 const DAY = 86400, TAG_MAX = 20, NAME_MAX = 64, TEXT_MAX = 100_000;
+const goodRelay = (h) => { try { checkRelay(h); return true; } catch { return false; } };
 const nowS = () => Math.floor(Date.now() / 1000);
 const hexOf = (n) => bytesToHex(randomBytes(n));
 export const refuse = (status, check, message) => { throw Object.assign(new Error(message), { check, status }); };
 
-export function makePage({ makeCarrier, link: L, linksFile, codeKind, unlogged, store, hooks = {} }) {
+export function makePage({ makeCarrier, link: L, linksFile, codeKind, unlogged, store, hooks = {}, relayFixed = null }) {
   const defer = hooks.defer ?? ((f) => setTimeout(f, 0));
   const every = hooks.every ?? ((f, ms) => { const t = setInterval(f, ms); t.unref?.(); return t; });
   const watchers = new Set();
@@ -55,8 +65,8 @@ export function makePage({ makeCarrier, link: L, linksFile, codeKind, unlogged, 
     return full;
   };
   let data;
-  try { data = JSON.parse(store.readData() ?? 'null') ?? { tags: {}, checked: {}, read: {}, controls: {} }; } catch { data = { tags: {}, checked: {}, read: {}, controls: {} }; }
-  for (const k of ['tags', 'checked', 'read', 'controls']) data[k] ??= {};
+  try { data = JSON.parse(store.readData() ?? 'null') ?? {}; } catch { data = {}; }
+  for (const k of ['tags', 'checked', 'read', 'controls', 'settings']) data[k] ??= {};
   delete data.waiting;   // kept by an earlier page; the carrier says it now (contacts: prekeys, waiting)
   const saveData = () => store.writeData(JSON.stringify(data));
 
@@ -154,7 +164,11 @@ export function makePage({ makeCarrier, link: L, linksFile, codeKind, unlogged, 
     } catch (err) { live.error = `history: ${err.message}`; }
     changed();
   };
-  const carrier = makeCarrier(onEvent);
+  const kept = () => (typeof data.settings.relay === 'string' && goodRelay(data.settings.relay) ? data.settings.relay : null);
+  const carrier = makeCarrier(onEvent, kept() !== null ? { relay: kept() } : {});
+  // The relay new codes name, as the precedence says.
+  const newCodes = () => relayFixed ?? kept() ?? DEFAULT_RELAY;
+  const settings = () => ({ relay: kept() ?? DEFAULT_RELAY, default: DEFAULT_RELAY, fixed: relayFixed, in_use: carrier.relay });
   async function checkClock() { try { await carrier.checkClock(); } catch {} }
   const seen = (d) => { let at = null; for (const r of recs) if (r.did === d && (r.kind === 'in' || r.kind === 'event')) at = r.at; return at; };
   let timers = [];
@@ -259,7 +273,8 @@ export function makePage({ makeCarrier, link: L, linksFile, codeKind, unlogged, 
     },
     'POST /api/invite': (b) => serial(async () => {
       const name = b['name'] === undefined || b['name'] === '' ? `contact-${hexOf(2)}` : cleanName(b['name'], 'name');
-      const r = await carrier.invite({ name, short: b['long'] !== true });
+      const at = newCodes();
+      const r = await carrier.invite({ name, short: b['long'] !== true, ...(at !== carrier.relay && { relay: at }) });
       const inv = { id: hexOf(6), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp }) };
       invites.set(inv.id, inv);
       changed();
@@ -331,6 +346,19 @@ export function makePage({ makeCarrier, link: L, linksFile, codeKind, unlogged, 
       changed();
       return { cleared: true };
     }),
+    // Settings: the relay new codes name (above). relay: a host[:port], or "" / null for relay.sigelo.ai.
+    'GET /api/settings': () => settings(),
+    'POST /api/settings': (b) => serial(async () => {
+      const v = b['relay'];
+      if (v === undefined) refuse(400, 'body', 'relay: a host[:port], or "" for the default');
+      if (v === null || v === '' || v === DEFAULT_RELAY) delete data.settings.relay;
+      else if (typeof v === 'string' && goodRelay(v.trim().toLowerCase())) data.settings.relay = v.trim().toLowerCase();
+      else refuse(400, 'body', `relay: a host name, as relay.example.org (a port after a colon if not the usual)`);
+      saveData(); changed();
+      return settings();
+    }),
+    // The signed registry's relays (sigelo.ai/relays.json, verified; fetched at most once a day): the page's picker.
+    'GET /api/relays': async () => ({ relays: await carrier.registryRelays() }),
     // Links (LINKS.md). The operator's: link, unlink, the list. This identity's introductions: answer, allow.
     'GET /api/links': () => linkCall(() => {
       const r = L.list({ carrier, file: linksFile }), cs = carrier.contacts().contacts;

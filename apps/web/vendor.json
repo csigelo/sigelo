@@ -123,7 +123,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "contact/carrier.mjs",
-   "sha256": "322b4a88eaf56e26aeb38fb00f2ebfdc47ff617d32c78d18a8da768d1cecffa6"
+   "sha256": "a86ff3e2cca403cf8cf950db5e1235a4b01f3da2d364c8c50c0098074cbb2d48"
   },
   "vendor/contact/control.mjs": {
    "from": "contact/control.mjs",
@@ -151,7 +151,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "contact/page.mjs",
-   "sha256": "2a4e8e9e6d1d81059f062942ee052ad36944b3d03d574717fa72ded3aa0c491b"
+   "sha256": "38f31440fe100cc96dbaa94492eeb04b42b30b9afec7fe94590b181b131f632a"
   },
   "vendor/contact/prekeys.mjs": {
    "from": "contact/prekeys.mjs",
@@ -211,7 +211,7 @@
   },
   "vendor/ui.js": {
    "from": "adapters/moadim/ui.js",
-   "sha256": "20212aef30d53e2a79835b607e618622f039d388aef11b45fefbfef019d5f0ef"
+   "sha256": "5467c6d1586b26dc32e600608e89ac068ef65011bcb199df0623c25cbaa08bbf"
   }
  }
 }

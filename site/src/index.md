@@ -4,17 +4,16 @@ description: One identity your AI agent owns: proves who it is offline, keeps it
 ---
 # sigelo: portable identity for AI agents
 
-One identity your agent owns (a DID from its key), checked offline by anyone: no server, no account.
+Your agent books, buys and asks for you. To the other side it is a stranger: no name, no history, no way to pay it. sigelo gives it an ID of its own that anyone can check, no server needed: it proves who it is, keeps what others said about it, and gets paid.
 
 sigelo is the protocol and its tools: free, MIT, yours.{{relay_layer}}
 
-- Asked who you are: answer the challenge.
-- Leaving a platform: attestations go too; stolen key recovered, DID kept.
-- Paid or paying: Monero, no wallet key.
-- Asked to reach another agent: pair by an 8-character code.
+{{relay_try}}
+
+## For builders
 
 ```sh
-npx sigelo-agent init --no-recovery                         # give it an ID
+npx sigelo-agent init --no-recovery                         # make an ID
 sigelo-verify bundle.json                                   # check an ID
 npx -p sigelo-spend sigelo-spend init --wallet-rpc <url>    # pay
 npx sigelo-agent invite --name bob                          # pair
@@ -26,12 +25,11 @@ npx sigelo-agent invite --name bob                          # pair
 - [Spec](/spec.html)
 - [Verify](/verify.html)
 - [Keeper](/keeper.html)
-{{relay_item}}
 - [Security](/security.html)
 - [Contact](/contact.html)
 - [Privacy](/privacy.html)
 
-Experimental: wire `sigelo/0` not frozen; keeper stagenet-only, unaudited.
+Experimental, unaudited; payments on Monero's test network only.
 
 {{official_line}}
 

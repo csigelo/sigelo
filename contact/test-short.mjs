@@ -435,6 +435,8 @@ try {
       ok((await cdora.relayForShort(c5.short)).from === 'registry' && hits === 1 && existsSync(join(elsewhere, 'relays.cache.local.json')), `a 12-character code nothing else resolves: the registry, fetched once and cached beside the identity (${hits})`);
       const d5 = await failure(() => cdora.accept(c5.short, { wait: 2 }));
       ok(d5.check === 'closed' && hits === 1 && d5.long === c5.code, `accept by the registry's host: fetched at ${CORP} (closed to dora), the registry not fetched again the same day (${hits}; ${d5.check})`);
+      const listed = await cdora.registryRelays();
+      ok(listed.length === 1 && listed[0].host === CORP && listed[0].tag === relayTag(CORP) && listed[0].tier === 'enterprise' && hits === 1, `registryRelays (the apps' picker): the verified list from the cache, not fetched again (${JSON.stringify(listed)}; ${hits})`);
     } finally { await cdora.stop(); reg.close(); rmSync(elsewhere, { recursive: true, force: true }); }
     for (const c of [cn, cbn, co]) await c.stop();
   } finally { await corp.close(); }

@@ -58,7 +58,12 @@ the poll reads it in the page and sends nothing; one request renews the push eve
   carrier's `auto` is `wss` and `mqtts` is refused. A shell passes its own socket (`createWebsocket`).
 - **pow:** `pow-worker.mjs` in a module Worker (a Worker gets no import map: it imports @noble by path),
   progress every 65,536 hashes, ended at the deadline or on abort.
-- **env:** from the page (`relay`, `endpoints`, `retentionDays`); no proxy.
+- **env:** from the page (`relay`, `endpoints`, `retentionDays`); no proxy. An `env.relay` (or the
+  router's `options.relay`) is fixed, as `SIGELO_RELAY` is for `ui`; else the page's setting.
+
+**Relay setting:** `GET/POST /api/settings` (UI-API.md), kept in the page's data; the import form
+pre-fills `relay.sigelo.ai` (`presetRelay`) so a self-hoster changes it before pairing. Precedence:
+fixed, then the setting, then `relay.sigelo.ai`. Codes accepted never read it.
 
 ## The identity
 
