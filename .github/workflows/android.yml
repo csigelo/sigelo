@@ -23,8 +23,9 @@ jobs:
         with: { persist-credentials: false }
       # The wrapper jar in the repository is Gradle's own (checksums published by Gradle).
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      # Node 24: the page's tests need navigator.locks (Web Locks), which Node 22 lacks.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
-        with: { node-version: '22' }
+        with: { node-version: '24' }
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with: { distribution: temurin, java-version: '17' }
       - name: the page's sources (ts/dist; contact, relay and adapter dependencies)
