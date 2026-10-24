@@ -25,6 +25,8 @@ export const PAGE = 'https://app.invalid/';
 const SOURCES = [
   ['vendor/contact/', 'contact/'],
   ['vendor/sigelo/', 'ts/dist/'],
+  // sigelo's own (ts/package.json); contact/ does not depend on it, so a clean install has it only in ts/.
+  ['vendor/@noble/ed25519/', 'ts/node_modules/@noble/ed25519/'],
   ['vendor/@noble/', 'contact/node_modules/@noble/'],
   ['vendor/mqtt.esm.js', 'contact/node_modules/mqtt/dist/mqtt.esm.js'],
   ['vendor/shim-zlib.mjs', 'adapters/moadim/shim-zlib.mjs'],

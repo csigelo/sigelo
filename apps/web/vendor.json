@@ -70,7 +70,7 @@
    "sha256": "be9ff86aef76419376e4d66cf01a134f3117f1f8dd62d81f1b79100145503367"
   },
   "vendor/@noble/ed25519/index.js": {
-   "from": "contact/node_modules/@noble/ed25519/index.js",
+   "from": "ts/node_modules/@noble/ed25519/index.js",
    "sha256": "a4f631d1876b5d9e43a86cd71194ca27b5e1451edf4ba4db9a418f40a475569a"
   },
   "vendor/@noble/hashes/_md.js": {

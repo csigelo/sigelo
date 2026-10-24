@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await f()) return true; await sleep(100); } return false; };
 
 // ================================================================ 1. the page
-execFileSync(process.execPath, [join(HERE, 'copy.mjs')], { stdio: 'ignore' });
+try { execFileSync(process.execPath, [join(HERE, 'copy.mjs')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { process.stdout.write(`${e.stdout ?? ''}${e.stderr ?? ''}`); throw e; } // copy.mjs's FAIL lines shown
 const C = await import(pathToFileURL(join(HERE, 'copy.mjs')).href);
 const html = readFileSync(join(HERE, 'index.html'), 'utf8'), map = C.importMap(html);
 {

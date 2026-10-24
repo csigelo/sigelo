@@ -48,7 +48,7 @@ const checkOf = async (f) => { try { await f(); return 'accepted'; } catch (e) {
 const listen = (server) => new Promise((r) => server.listen(0, '127.0.0.1', () => r(server.address().port)));
 
 // The page's modules through index.html's import map, as test-web.mjs loads them.
-execFileSync(process.execPath, [join(HERE, 'copy.mjs')], { stdio: 'ignore' });
+try { execFileSync(process.execPath, [join(HERE, 'copy.mjs')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { process.stdout.write(`${e.stdout ?? ''}${e.stderr ?? ''}`); throw e; } // copy.mjs's FAIL lines shown
 const C = await import(pathToFileURL(join(HERE, 'copy.mjs')).href);
 const map = C.importMap(), WEB = pathToFileURL(HERE + '/').href;
 registerHooks({
