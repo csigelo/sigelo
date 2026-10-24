@@ -97,6 +97,7 @@ declare module 'node:path' {
 declare module 'node:os' {
   export function tmpdir(): string;
   export function homedir(): string;
+  export function userInfo(): { username: string; homedir: string; uid: number };
 }
 declare module 'node:http' {
   export interface IncomingMessage {

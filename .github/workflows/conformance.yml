@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 jobs:
   # Its own job, so a missing secret or a hit never hides the test results of the other jobs.
   identity-strings:

@@ -18,7 +18,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { chmodSync, chownSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -46,15 +46,34 @@ const SYSTEM_UNITS = '/etc/systemd/system';
 const inside = (p: string, dir: string): boolean => { const r = relative(dir, p); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
 type Chown = (p: string, uid: number, gid: number) => void;
 
-/** /etc/passwd's name and home for `uid`, or undefined. */
-function passwdOf(uid: number): { name: string; home: string } | undefined {
+/** How a uid becomes a user name and home: /etc/passwd first, then the OS (directory services). */
+export interface UserLookup { passwd: () => string; current: () => { uid: number; username: string; homedir: string } | undefined; id: (uid: number) => string | undefined; home: (name: string) => string | undefined }
+const NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+const run = (cmd: string, args: string[]): string | undefined => { try { const r = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 10_000 }); return r.status === 0 ? r.stdout.trim() : undefined; } catch { return undefined; } };
+export const OS_USERS: UserLookup = {
+  passwd: () => readFileSync('/etc/passwd', 'utf-8'),
+  current: () => { if (typeof process.getuid !== 'function') return undefined; const u = userInfo(); return { uid: process.getuid(), username: u.username, homedir: u.homedir }; },
+  id: (uid) => run('id', ['-un', String(uid)]),
+  // ~name, expanded by the shell (getpwnam: directory services too); the name is checked first.
+  home: (name) => NAME.test(name) ? run('sh', ['-c', 'eval "printf %s ~$1"', 'sh', name]) : undefined,
+};
+/** The name and home for `uid`, or undefined: /etc/passwd's entry, else the OS lookup (the current
+ *  user by os.userInfo(), any other by `id -un` and its ~home) — macOS lists uid 501 in neither
+ *  /etc/passwd nor anything else this reads without it (the portability CI of 2026-10-21). */
+export function passwdOf(uid: number, u: UserLookup = OS_USERS): { name: string; home: string } | undefined {
   let text = '';
-  try { text = readFileSync('/etc/passwd', 'utf-8'); } catch { return undefined; }
+  try { text = u.passwd(); } catch { text = ''; }
   for (const l of text.split('\n')) {
     const f = l.split(':');
     if (f.length >= 7 && Number(f[2]) === uid && f[2] !== '') return { name: f[0]!, home: f[5]! };
   }
-  return undefined;
+  let cur: ReturnType<UserLookup['current']>;
+  try { cur = u.current(); } catch { cur = undefined; }
+  if (cur !== undefined && cur.uid === uid && cur.username !== '' && cur.homedir !== '') return { name: cur.username, home: cur.homedir };
+  const name = u.id(uid);
+  if (name === undefined || !NAME.test(name)) return undefined;
+  const home = u.home(name);
+  return home === undefined || !isAbsolute(home) ? undefined : { name, home };
 }
 /** Every file and directory under `p` (dereferenced: the frozen copy has no links) to uid:gid. */
 function chownR(p: string, uid: number, gid: number, chown: Chown): void {
@@ -294,7 +313,7 @@ export function init(argv: string[], sys: { uid?: number; chown?: Chown } = {}):
     if (ps.uid === 0) throw new Error(`${parent} belongs to root: as root, init gives the keeper directory to the user who owns its parent, and the keeper never runs as root — create its user and give it ${parent} (README "Two users")`);
     if (ts.uid === 0) throw new Error(`${dirname(tokenPath)} belongs to root: the agent's token goes to the user who owns its directory, and an agent never runs as root — use a directory the agent's user owns`);
     const pw = passwdOf(ps.uid);
-    if (pw === undefined) throw new Error(`${parent} belongs to uid ${ps.uid}, which has no /etc/passwd entry: the units need a user name for User=`);
+    if (pw === undefined) throw new Error(`${parent} belongs to uid ${ps.uid}, which has no /etc/passwd entry and no user the OS knows (id -un): the units need a user name for User=`);
     owner = { uid: ps.uid, gid: ps.gid, ...pw };
     agentOwner = { uid: ts.uid, gid: ts.gid };
     // The registry the keeper reads (licence seats) is its own user's, not root's.

@@ -31,6 +31,13 @@ jobs:
         run: |
           (cd ts && npm ci --ignore-scripts && npx tsc)
           (cd contact && npm ci --ignore-scripts)
+          # relay/ is its own public repository (csigelo/sigelo-relay, AGPL), not in this tree: the
+          # page's tests run the in-process relay from that repository at a pinned commit.
+          if [ ! -d relay ]; then
+            git init -q relay
+            git -C relay fetch -q --depth 1 https://github.com/csigelo/sigelo-relay bbb1dc028164f181871d19afef5c0863374bec7c # sigelo-relay 0.1.4
+            git -C relay checkout -q FETCH_HEAD
+          fi
           (cd relay && npm ci --ignore-scripts)
           (cd adapters/moadim && npm ci --ignore-scripts)
       - name: the page's tests (the web app; the Android page side over a fake shell)

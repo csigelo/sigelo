@@ -41,6 +41,9 @@ history, which is not public. This public history starts at the import of 2026-1
   `/approve` stays at 4, `503 busy` keeps `Retry-After: 1`.
 - **Keeper init:** `chown` runs only as root; a non-root test proves init chowns nothing (a setgid gid-0 TMPDIR made the
   root-path test's real chowns EPERM in a clean-clone run).
+- **Keeper init on macOS:** a uid /etc/passwd lacks (directory services, uid 501) is named by `os.userInfo()` for the current user, else `id -un` and its ~home; the portability CI ran red on it.
+- **CI:** android.yml fetches the test relay from csigelo/sigelo-relay at a pinned commit (relay/ is not in this tree); test-ui imports by file URL (Windows); conformance.yml can be run by hand.
+- **Export gate:** `publish.sh` refuses a workflow that uses a directory or script the export leaves out (workflow_paths), naming the file and line.
 - **Sim keeper-swarm:** `503 busy` is sent again after Retry-After (up to 10 sends or 30 s, then a finding); busy retries
   and peak in-flight lane posts are reported; `half_body` sends a loopback Host.
 

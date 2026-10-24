@@ -32,7 +32,7 @@ import { encodeAddress, hashToScalar, sigeloMoneroSigAddr, signMessage, subaddre
 import { agentOf, evaluate, fingerprint, invoiceKey, parsePolicy, sameHash, tokenHash, type Destination, type PayRequest, type Policy, type Prior, type Spent } from './policy.js';
 import { BUILD_TIMEOUT_MS, CLOCK_FLOOR, CLOCK_SKEW, DAEMON_FAILS, DAEMON_STALE_MS, DAEMON_SWITCH_MS, codeOf, keeperGenesis, keeperIdentity, loadKeeper, loadPolicy, loadRoot, parseDaemons, priorOf, readLog, serve as serveBare, spentOf, startOf, WALLET_TIMEOUT_MS, walletRpc, type Receipt, type ServeOptions } from './service.js';
 import { checkLicence, DEV_VENDOR_DID, describe as describeLicence, LICENCE_SKEW, licenceRefusal, readLicence, rememberVendorChain, TERM_MAX_DAYS, vendorDid, type KeeperEntry } from './licence.js';
-import { init as initKeeper, SNIPPET } from './init.js';
+import { init as initKeeper, passwdOf, SNIPPET, type UserLookup } from './init.js';
 import { explain, LINES, run, toAtomic, toXmr, type Outcome } from './wallet.js';
 import { asTreeEntry, covered, DELEGATE_KDF, delegateSeed, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry } from './tree.js';
 
@@ -2628,6 +2628,20 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     (JSON.parse(readFileSync(join(k1, 'install.json'), 'utf-8')) as Record<string, unknown>)['agent_token_file'] === tok1);
   onKeeperHost('init: the directory is 0700, spend.key, policy.json and the token file 0600', () => mode(k1) === 0o700 && ['spend.key', 'policy.json', 'install.json'].every((f) => mode(join(k1, f)) === 0o600) && mode(tok1) === 0o600);
   ok('init: as an ordinary user it says the layout is single-user, the weaker one', i1.out.includes('layout        single user:') && i1.out.includes('the weaker layout'), i1.out);
+  {
+    // A uid not in /etc/passwd (macOS: uid 501 lives in directory services, the CI of 2026-10-21):
+    // the current user from os.userInfo(), any other from `id -un` and its ~home, else undefined.
+    const ids: number[] = [];
+    const L = (o: Partial<UserLookup>): UserLookup => ({ passwd: () => 'root:x:0:0:root:/root:/bin/sh\nada:x:1000:1000::/home/ada:/bin/sh\n',
+      current: () => ({ uid: 501, username: 'runner', homedir: '/Users/runner' }), id: (u) => { ids.push(u); return u === 777 ? 'bob' : undefined; },
+      home: (n) => n === 'bob' ? '/Users/bob' : undefined, ...o });
+    const miss = L({ passwd: () => { throw new Error('ENOENT'); } });
+    ok('init: a uid is named by /etc/passwd first, the OS lookup never asked then',
+      JSON.stringify(passwdOf(1000, L({}))) === '{"name":"ada","home":"/home/ada"}' && ids.length === 0);
+    ok('init: a uid /etc/passwd misses: the current user by os.userInfo(), another by id -un and its ~home, and undefined when nothing knows it',
+      JSON.stringify(passwdOf(501, miss)) === '{"name":"runner","home":"/Users/runner"}' && JSON.stringify(passwdOf(777, miss)) === '{"name":"bob","home":"/Users/bob"}' &&
+      passwdOf(778, miss) === undefined && passwdOf(779, L({ id: () => 'eve', home: () => '~eve' })) === undefined && passwdOf(780, L({ id: () => 'x;rm -rf' })) === undefined, JSON.stringify(ids));
+  }
   if (WIN) skip('init as root: the two-user layout', NOT_A_KEEPER_HOST);
   else {
     // init as root (uid 0 passed in; every chown goes to this test's own uid, which needs no root).

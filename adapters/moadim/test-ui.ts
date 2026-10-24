@@ -4,6 +4,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { did } from 'sigelo';
 import { agentIdentitySeed, keeperRoot, newRoot, rootFromMnemonic } from 'sigelo/dist/keys.js';
 import { load } from './sigelo-agent.ts';
@@ -73,7 +74,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
     JSON.stringify(refusals.map((r) => [r.status, r.check])) === JSON.stringify([[404, 'not_contact'], [400, 'body'], [409, 'link_tier'], [400, 'body'], [404, 'link_unknown'], [404, 'link_unknown'], [400, 'body'], [404, 'not_contact'], [400, 'body']]), JSON.stringify(refusals));
   ok('ui links: the state carries introductions (none yet)', Array.isArray((JSON.parse((await http(P, 'GET', '/api/state', T)).body) as { introductions: unknown[] }).introductions));
   // Devices (DEVICES.md, sigelo-agent-device.ts devicePage): the same token and Origin rules; SAFE only.
-  const mod = (f: string): Promise<Record<string, any>> => import(join(import.meta.dirname, '..', '..', 'contact', f));
+  const mod = (f: string): Promise<Record<string, any>> => import(pathToFileURL(join(import.meta.dirname, '..', '..', 'contact', f)).href);
   const dv = await mod('device.mjs'), qr = await mod('qr.mjs'), qd = await mod('qr-decode.mjs');
   const dj = async (method: string, path: string, body?: unknown, h: Record<string, string> = method === 'POST' ? W : T): Promise<Record<string, any>> => { const r = await http(P, method, path, h, body); return { status: r.status, ...(JSON.parse(r.body) as Record<string, any>) }; };
   const d0 = await dj('GET', '/api/devices');
