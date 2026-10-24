@@ -347,10 +347,12 @@ export function domainClauses({ domains, hosts }) {
   const redirects = domains.filter((d) => d.role === 'redirect');
   const pending = redirects.filter((d) => !d.live);
   const parked = domains.filter((d) => d.role === 'parked').map((d) => d.name);
+  const reserved = domains.filter((d) => d.role === 'reserved');
   return [
     [...domains.filter((d) => d.role === 'content'), ...hosts].map((d) => `${d.name} (${d.what})`).join(', '),
     ...redirects.filter((d) => d.live).map((d) => `${d.name} redirects to ${d.to}`),
     ...(pending.length ? [`${and(pending.map((d) => `${d.name} (to ${d.to})`))} ${pending.length > 1 ? 'redirect once their' : 'redirects once its'} DNS points to us`] : []),
+    ...reserved.map((d) => `${d.name} is reserved (${d.what})`),
     ...(parked.length ? [`${and(parked)} ${parked.length > 1 ? 'are' : 'is'} ours and parked`] : []),
   ];
 }
@@ -370,7 +372,7 @@ function officialLines(issuerShort) {
   const bare = (u) => u.replace(/^https:\/\//, '');
   const tail = [...OFFICIAL.repositories.map((u) => `[${bare(u)}](${u})`), ...(issuerShort ? [`issuer \`${issuerShort}\``] : [])].join(' · ');
   const head = '[Official](/security.html#official-channels):';
-  // The content domains are links (each answers as ours: site/deploy/check.mjs); a redirect, parked
+  // The content domains are links (each answers as ours: site/deploy/check.mjs); a redirect, reserved or parked
   // domain or the broker host stays plain. On /contact the link takes the "(what)" with it, so the
   // clause still reads `name (what)` in the text site/test/run.mjs compares.
   const site = Object.fromEntries(OFFICIAL.domains.filter((d) => d.role === 'content').map((d) => [d.name, d.name === 'sigelo.io' ? '/' : `https://${d.name}/`]));
@@ -599,10 +601,11 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
       roles: Object.fromEntries([...OFFICIAL.domains.filter((d) => d.role === 'content'), ...OFFICIAL.hosts].map((d) => [d.name, d.what])),
       redirects: redirectsTo(true), redirects_pending_dns: redirectsTo(false),
       // The older field, kept for existing readers with its old meaning: every held domain that
-      // serves nothing of its own (live and pending redirects, parked), so `domains` minus
-      // `redirect_only` is still exactly the content domains. `redirects`, `redirects_pending_dns`
-      // and `parked` give the precise roles.
+      // serves nothing of its own (live and pending redirects, reserved, parked), so `domains` minus
+      // `redirect_only` is still exactly the content domains. `redirects`, `redirects_pending_dns`,
+      // `reserved` (name: what it is held for) and `parked` give the precise roles.
       redirect_only: OFFICIAL.domains.filter((d) => d.role !== 'content').map((d) => d.name),
+      reserved: Object.fromEntries(OFFICIAL.domains.filter((d) => d.role === 'reserved').map((d) => [d.name, d.what])),
       parked: OFFICIAL.domains.filter((d) => d.role === 'parked').map((d) => d.name),
       repository: REPO, repositories: OFFICIAL.repositories,
       releases: [`${REPO}/releases`, MIRROR], checksums: 'SHA256SUMS',

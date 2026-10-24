@@ -64,7 +64,7 @@ commit leaves `dist.prev` pointing at the real previous version.
 | `sigelo.io` | AAAA | the server's IPv6 (omit if it has none — nginx.conf listens on `[::]`; drop those lines if the kernel has IPv6 disabled) |
 | `www.sigelo.io` | A, AAAA | the same addresses (or a CNAME to `sigelo.io`) |
 | `sigelo.net`, `www.sigelo.net` | A, AAAA | the same addresses; both names 301 to `https://sigelo.ai` and sit on the same certificate (the Owner holds `.net` too) |
-| `sigelo.online`, `sigelo.dev` (apex and `www` each) | A | the same IPv4 as `sigelo.io`; redirect-only, one nginx server group each (see "More held domains"); `sigelo.org` is parked: no record here |
+| `sigelo.online`, `www.sigelo.online` | A | the same IPv4 as `sigelo.io`; both 301 to `https://sigelo.ai`, same certificate (see "More held domains"); `sigelo.dev` is reserved for a code forge and `sigelo.org` parked: no record here |
 | `sigelo.ai`, `www.sigelo.ai`, `relay.sigelo.ai` | A, AAAA | the relay's host, not this one ("The relay host") |
 | `sigelo.io` | CAA (optional) | `0 issue "letsencrypt.org"` — only Let's Encrypt may issue for the domain |
 
@@ -174,20 +174,19 @@ deploy, so installer edits would be overwritten; the certificate paths are writt
 instead. Renewal uses the same authenticator against the port-80 server block; if it ever fails,
 `certbot renew --webroot -w /var/www/acme` works with the same config.
 
-## More held domains: sigelo.online, .dev
+## More held domains: sigelo.online
 
-Each has its own port-80 and TLS server group in `nginx.conf` (a 301 with the path kept, HSTS on
-the redirect, no content): `.online`, like `.net`, to `https://sigelo.ai`, `.dev` to
-`https://sigelo.io` (`site/build.mjs` DOMAINS is the one table). `sigelo.ai` is the relay's, on its
-own host ("The relay host"); `sigelo.org` is parked, with no group. Their names join the
-`sigelo.io` certificate lineage only once their DNS points at the server: until then the deploy
-works, nginx serves them the `sigelo.io` certificate (clients refuse it), and `check.mjs` prints a
-`skip` for their redirect checks; once a name's A record matches `sigelo.io`'s, its check passes or
+`.online` has its own port-80 and TLS server group in `nginx.conf` (a 301 with the path kept, HSTS
+on the redirect, no content), like `.net`, to `https://sigelo.ai` (`site/src/official.mjs` DOMAINS
+is the one table). `sigelo.ai` is the relay's, on its own host ("The relay host"); `sigelo.dev` is
+reserved for a self-hosted code forge and `sigelo.org` is parked: no group for either. A name joins the
+`sigelo.io` certificate lineage only once its DNS points at the server: until then the deploy
+works, nginx serves it the `sigelo.io` certificate (clients refuse it), and `check.mjs` prints a
+`skip` for its redirect check; once a name's A record matches `sigelo.io`'s, its check passes or
 fails like `.net` (then mark it live in DOMAINS). Per domain in the registrar:
 A `@` and A `www` = `sigelo.io`'s address, CAA `0 issue "letsencrypt.org"`, TXT `@` `v=spf1 -all`,
 TXT `_dmarc` `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s; rua=mailto:security@sigelo.io`, no
-MX, no parking wildcard, DNSSEC on. `.dev` is HSTS-preloaded (browsers use HTTPS only; HTTP-01 on
-port 80 still works).
+MX, no parking wildcard, DNSSEC on.
 
 After any DNS change, in this order (deploy first: certbot needs the names in the port-80 server):
 

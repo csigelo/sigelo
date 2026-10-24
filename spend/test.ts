@@ -2589,6 +2589,46 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     const r6 = readLicence(d6, g6, T);
     ok('licence chain: readLicence (start, reload, each paid verb) records the chain of a valid licence', r6.tier === 'pro' && existsSync(join(d6, 'vendor-chain.json')), JSON.stringify(r6));
   }
+  {
+    // ---- the vendor derived from the 25 words (sigelo-offline vendor / recover --vendor, ts/src/ceremony.ts):
+    // its identity file signs licences this keeper takes once the pin is its genesis DID, and its rotation
+    // n → n+1 is a recovery rotation the keeper follows with the pin unchanged.
+    const offline = join(here, '..', 'node_modules', 'sigelo', 'dist', 'offline.js');
+    const words = mnemonicFromRoot(seed(0x07)), vdir = mkdtempSync(join(scratch, 'vendor-'));
+    const run = (args: string[]) => spawnSync(process.execPath, [offline, ...args], { input: words + '\n', encoding: 'utf-8' });
+    const minted = run(['vendor', '--n', '0', '--out', join(vdir, 'v')]);
+    const vfile = JSON.parse(readFileSync(join(vdir, 'v', 'vendor.local.json'), 'utf-8')) as { secret: string; genesis: Genesis; rotations: Rotation[] };
+    const unhex = (h: string): Uint8Array => Uint8Array.from((h.match(/../g) ?? []).map((x) => parseInt(x, 16)));
+    const vdid = didOf(vfile.genesis), vsecret = unhex(vfile.secret);
+    ok('licence, derived vendor: sigelo-offline vendor --n 0 (words on stdin) writes the identity file; its genesis is the printed DID',
+      minted.status === 0 && (JSON.parse(minted.stdout) as { did: string }).did === vdid && vfile.rotations.length === 0, minted.stderr);
+    const was = process.env['SIGELO_VENDOR_DID'];
+    process.env['SIGELO_VENDOR_DID'] = vdid;
+    try {
+      const at = (raw: unknown, dir: string): string => whyOf(raw, gA, dir);
+      const byV0 = lic(dA, { iss: vdid, secret: vsecret, issuer: vfile.genesis });
+      const dv = mkdtempSync(join(scratch, 'kv-'));
+      ok('licence, derived vendor: a licence signed with vendor.local.json is pro under the pin = its genesis DID', at(byV0, dv) === 'PRO', at(byV0, dv));
+      process.env['SIGELO_VENDOR_DID'] = vendorId.did;
+      ok('licence, derived vendor: …and refused under any other pin', at(byV0, mkdtempSync(join(scratch, 'kv-'))).includes(`not the vendor ${vendorId.did}`));
+      process.env['SIGELO_VENDOR_DID'] = vdid;
+      const r1 = run(['recover', '--vendor', '--n', '1', '--genesis', join(vdir, 'v', 'vendor.local.json'), '-']);
+      const out = JSON.parse(r1.stdout || '{}') as { did: string; rotation: Rotation; identity_seed_hex: string; vendor: string };
+      const v1secret = unhex(out.identity_seed_hex ?? '');
+      const byV1 = lic(dA, { iss: out.did, secret: v1secret, issuer: vfile.genesis, rotations: [out.rotation] });
+      ok('licence, derived vendor: recover --vendor --n 1 gives a recovery rotation; a licence by the new key carrying it is pro, chain 2, pin unchanged',
+        r1.status === 0 && out.rotation.body.reason === 'recovery' && out.vendor === vdid && (() => { const s = checkLicence(byV1, gA, dv, T, []); return s.tier === 'pro' && s.chain === 2; })(), r1.stderr + at(byV1, dv));
+      rememberVendorChain(dv, byV1, gA, T, []);
+      ok('licence, derived vendor: once the keeper has seen it, the rotation-0 key\'s licences are refused', at(byV0, dv).includes('shorter than the 2'), at(byV0, dv));
+      const thief = keygen({ recovery: vfile.genesis.recovery, seed: seed(0x6a) });
+      const rotT = rotate({ genesis: vfile.genesis, next_genesis: thief.genesis, iat: T, reason: 'voluntary', secret: vsecret, next_secret: thief.secret });
+      const byThief = lic(dA, { iss: thief.did, secret: thief.secret, issuer: vfile.genesis, rotations: [rotT] });
+      const dt = mkdtempSync(join(scratch, 'kv-'));
+      rememberVendorChain(dt, byThief, gA, T, []);
+      ok('licence, derived vendor: a thief\'s voluntary rotation with the stolen rotation-0 key (newer iat) loses to the words\' recovery rotation (SPEC §7.1)',
+        at(byThief, dt) === 'PRO' && at(byV1, dt) === 'PRO' && (rememberVendorChain(dt, byV1, gA, T, []), at(byThief, dt).includes('forks from')), at(byThief, dt));
+    } finally { process.env['SIGELO_VENDOR_DID'] = was; }
+  }
   const reg2: KeeperEntry[] = [{ dir: kA, did: dA, genesis: gA }, { dir: kB, did: dB, genesis: gB }];
   ok('licence: seats 2 issued to keeper A also covers keeper B registered on the same host', checkLicence(lic(dA, { seats: 2 }), gB, kB, T, reg2).tier === 'pro');
   ok('licence: seats 1 does not cover a host running 2 keepers', whyOf(lic(dA, { seats: 1 }), gB, kB, T, reg2) === 'the licence covers 1 keeper; this host runs 2');

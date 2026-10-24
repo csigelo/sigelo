@@ -10,7 +10,14 @@ declare class TextDecoder {
   decode(b: Uint8Array): string;
 }
 
+/** `sigelo-offline vendor` reads the words unseen on a terminal (raw mode, no echo). */
+interface OfflineStdin {
+  isTTY?: boolean; setRawMode(on: boolean): void; resume(): void; pause(): void; setEncoding(e: string): void;
+  on(ev: 'data', cb: (d: string) => void): void; off(ev: 'data', cb: (d: string) => void): void;
+}
+
 declare module 'node:fs' {
+  export function existsSync(path: string): boolean;
   export function readFileSync(path: string): Uint8Array;
   export function writeFileSync(path: string, data: string | Uint8Array, opts: { mode?: number; flag?: string }): void;
   export function mkdirSync(path: string, opts: { recursive?: boolean; mode?: number }): void;

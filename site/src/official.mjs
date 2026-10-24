@@ -23,22 +23,23 @@ export const SIMPLEX = 'https://smp10.simplex.im/a#18LjfJawmkVxvFtCHFo-yyzPo8Kr3
 // one only with --preflight, which deploy.sh does not run yet, so run it by hand before a deploy.
 export const RELAY_LIVE = true;
 
-// Roles: 'content' serves a site; 'redirect' 301s to `to` (site/deploy/nginx.conf); 'parked' is
-// ours and serves nothing of ours. A redirect is called one only while `live`, i.e. its DNS reaches
+// Roles: 'content' serves a site; 'redirect' 301s to `to` (site/deploy/nginx.conf); 'reserved' is
+// ours, held for a service of ours not built yet (`what`), serves nothing and has no DNS record or
+// nginx block until then; 'parked' is ours and serves nothing of ours. A redirect is called one only while `live`, i.e. its DNS reaches
 // that 301: check.mjs fails a live redirect that does not answer it. Until then the text says it
 // will redirect once its DNS points to us. The issuer DID is not listed here: it is computed from
 // world/genesis.json, and site/test/run.mjs checks that SECURITY.md names it.
 //
 // DOMAINS, HOSTS, REPOSITORIES: the table of design/relay-plan.md §1, what sigelo.ai says
 // (relay/site/build.mjs keeps a copy; relay/site/test.mjs compares the two) and what sigelo.io says
-// once RELAY_LIVE. One row differs: the plan has sigelo.dev
-// parked, the site brief a redirect to sigelo.io.
+// once RELAY_LIVE. sigelo.dev is reserved for a self-hosted code forge (decided 2026-10-24; it was
+// a pending redirect to sigelo.io before).
 export const DOMAINS = [
   { name: 'sigelo.io', role: 'content', what: 'protocol' },
   { name: 'sigelo.ai', role: 'content', what: 'relay and front page' },
   { name: 'sigelo.net', role: 'redirect', to: 'sigelo.ai', live: true },
-  { name: 'sigelo.online', role: 'redirect', to: 'sigelo.ai', live: false },
-  { name: 'sigelo.dev', role: 'redirect', to: 'sigelo.io', live: false },
+  { name: 'sigelo.online', role: 'redirect', to: 'sigelo.ai', live: true },
+  { name: 'sigelo.dev', role: 'reserved', what: 'code forge, planned' },
   { name: 'sigelo.org', role: 'parked' },
 ];
 // Hosts under those domains that serve something of their own.
@@ -55,8 +56,8 @@ export const BEFORE_LAUNCH = {
     { name: 'sigelo.io', role: 'content', what: 'protocol' },
     { name: 'sigelo.ai', role: 'parked' },
     { name: 'sigelo.net', role: 'redirect', to: 'sigelo.io', live: true },
-    { name: 'sigelo.online', role: 'redirect', to: 'sigelo.io', live: false },
-    { name: 'sigelo.dev', role: 'redirect', to: 'sigelo.io', live: false },
+    { name: 'sigelo.online', role: 'redirect', to: 'sigelo.io', live: true },
+    { name: 'sigelo.dev', role: 'reserved', what: 'code forge, planned' },
     { name: 'sigelo.org', role: 'parked' },
   ],
   hosts: [], repositories: [REPO], payment_places: [],

@@ -60,7 +60,7 @@ Never automate view-key disclosure (§6.2).
 
 `src/keys.ts` derives everything from one offline 32-byte root `S` (a Monero 25-word seed):
 `k(path) = HKDF-SHA256(S, "", path)`; `identitySeed`, `recoverySeed`, `walletFromRoot`,
-`keeperRoot(S, j)`, `agentIdentitySeed(K, i, n)`, `delegateIdentitySeed(K, i, n)`, `deriveRoot(S, net, n, keepers)`,
+`keeperRoot(S, j)`, `agentIdentitySeed(K, i, n)`, `delegateIdentitySeed(K, i, n)`, `vendorSeed(S, n)`, `deriveRoot(S, net, n, keepers)`,
 `deriveIdentity`, `mnemonicFromRoot`/`rootFromMnemonic`, `newRoot`, `vaultFromRoot` (the
 Owner's cold wallet; never loaded by a keeper). Derived wallets import into stock software by
 private spend key.
@@ -74,6 +74,8 @@ sigelo-offline new      [--net <net>]
 sigelo-offline derive   <25 words|hex> [--net <net>] [--keepers N] [--reveal-all]
 sigelo-offline recover  --genesis <file> <root> [--agent i [--keeper j] --n m | --identity-n n | --new-keeper <j|random>]
                         [--next-recovery <z…|sha256:…|none>] [--iat <unix>]
+sigelo-offline vendor   --n <n> [--words <file|->] [--out <dir>] [--net <net>]
+sigelo-offline recover  --vendor --n <n> [--genesis <file>] (- | --words <file|->)
 ```
 
 `<net>` is `mainnet`, `stagenet` or `testnet`. Run on a machine with no network.
@@ -93,3 +95,5 @@ sigelo-offline recover  --genesis <file> <root> [--agent i [--keeper j] --n m | 
 - **`recover`** signs a §7 recovery rotation from the agent's last honest genesis and prints
   `{ did, rotation, identity_seed_hex }` for `sigelo-agent adopt --rotation`; `--new-keeper`
   recovers a keeper's DID for `sigelo-spend init --adopt` (INCIDENT.md §5).
+- **`vendor`** writes the licence-signing identity from the words (file or stdin): `vendor.local.json`
+  (0600), `vendor.init.json`, the genesis; refuses to overwrite. `recover --vendor --n n` is its next key.

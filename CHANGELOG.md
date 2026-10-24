@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Site:** sigelo.online now redirects to sigelo.ai, like sigelo.net, on the sigelo.io certificate; sigelo.dev is reserved for a code forge (planned), no longer a pending redirect.
+- **Vendor from the words:** `sigelo-offline vendor --n <n>` derives the licence-signing identity, `k(S, "sigelo/v1/vendor/ed25519/<n>")`, genesis pinned; `recover --vendor` rotates it. Words never on argv.
 - **App releases:** the Android APK is signed offline by its own key; `release.json` signs its SHA-256 and certificate; `release/apk-check.sh` checks an APK before install. APPS.md: the three forms, install.
 - **Android app** (apps/android): this phone's identity or a computer's page, picked at first start; the relay over native HTTPS and TLS (no Origin), the key in AndroidKeyStore. CI builds the APKs (release unsigned).
 - **Self-contained app** (apps/web): the page runs its own carrier in a browser (IndexedDB, Web Locks, MQTT over WebSocket, PoW in a Worker); same routes and JSON as `ui`. Nothing is sent before it is saved.
@@ -47,6 +49,8 @@ history, which is not public. This public history starts at the import of 2026-1
 - **Export gate:** `publish.sh` refuses a workflow that uses a directory or script the export leaves out (workflow_paths), naming the file and line.
 - **Sim keeper-swarm:** `503 busy` is sent again after Retry-After (up to 10 sends or 30 s, then a finding); busy retries
   and peak in-flight lane posts are reported; `half_body` sends a loopback Host.
+- **sigelo.ai, Enterprise:** coming soon, like Pro; new "Run your own relay": the open-source relay closed to your operators, its 12-character codes, and listing it in the signed registry (checked by hand).
+- **sigelo.ai, translations:** a per-language glossary as the build reads i18n/ (IA in Romance languages, the language's quotation marks); percentages as the locale writes them (tr %20); a stale page keeps its language.
 
 ## v0.1.9 — 2026-10-20
 

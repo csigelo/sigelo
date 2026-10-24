@@ -13,6 +13,8 @@ declare const process: {
   stdout: { write(s: string): boolean }; stderr: { write(s: string): boolean };
   /** For test.ts: `win32` has no POSIX file modes, no /usr/bin/env and runs no `#!/bin/sh` stand-in. */
   platform: string; env: Record<string, string | undefined>;
+  /** src/offline.ts: the words typed unseen on a terminal (OfflineStdin, env-ceremony.d.ts). */
+  stdin: OfflineStdin;
 };
 declare function setTimeout(fn: () => void, ms: number): unknown;
 

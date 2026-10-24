@@ -15,12 +15,12 @@ import { fileURLToPath } from 'node:url';
 import * as ed from '@noble/ed25519';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, concatBytes, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { Age, ceremony, IMPORT_REFUSED, importRoot, keeperLastHonest, openTty, recover, recoverKeeper, restore, restoreWords, roles } from './ceremony.js';
+import { Age, ceremony, IMPORT_REFUSED, importRoot, keeperLastHonest, openTty, recover, recoverKeeper, recoverVendor, restore, restoreWords, roles, vendor, vendorChain, VENDOR_FILES } from './ceremony.js';
 import { JcsError, RawNumber } from './jcs.js';
 import {
   agentIdentitySeed, decodeMoneroWords, delegateIdentitySeed, deriveIdentity, deriveRoot, encodeMoneroWords, identitySeed, k, keeperRoot,
   mnemonicFromRoot, newRoot, parseRoot, recoveryCommitment, recoveryPublicKey, recoverySeed, rootFromMnemonic,
-  vaultFromRoot, walletFromRoot,
+  vaultFromRoot, vendorSeed, walletFromRoot,
 } from './keys.js';
 import { MONERO_WORDS } from './monero-words.js';
 import {
@@ -951,6 +951,25 @@ const sep = [K0, keeperRoot(S1, 1), identitySeed(S1, 0), identitySeed(K0, 0), ag
   agentIdentitySeed(K0, 1, 0), agentIdentitySeed(K0, 0, 1), agentIdentitySeed(keeperRoot(S1, 1), 0, 0),
   delegateIdentitySeed(K0, 0, 0), delegateIdentitySeed(K0, 1, 0), delegateIdentitySeed(K0, 0, 1), delegateIdentitySeed(keeperRoot(S1, 1), 0, 0)].map(bytesToHex);
 t('keys keeper, root-identity and agent paths are domain-separated', new Set(sep).size === sep.length);
+// The vendor key (licences) on S: its own label, beside identity/recovery/release (MONERO.md §2).
+// Fixed vectors over S1, cross-checked against an independent HKDF (Python hmac).
+t('keys vendorSeed fixed vectors: n = 0 and n = 1 of S1',
+  bytesToHex(vendorSeed(S1, 0)) === '544dae28a70cecdb84b1c652f71ee2df8b14bcbbe8fdcd180f3f1b53c51efcb9' &&
+  bytesToHex(vendorSeed(S1, 1)) === 'a1e0a7e55f9a0e1d8e4bb8ca337b441c463abab116489206df7c819bca69554a' &&
+  bytesToHex(vendorSeed(S1, 0)) === bytesToHex(k(S1, 'sigelo/v1/vendor/ed25519/0')));
+const vsep = [0, 1, 2].flatMap((n) => [vendorSeed(S1, n), identitySeed(S1, n), k(S1, `sigelo/v1/release/ed25519/${n}`), identitySeed(keeperRoot(S1, 1), n)])
+  .concat([recoverySeed(S1), K0, keeperRoot(S1, 1)]).map(bytesToHex);
+t('keys vendorSeed: another n is another key, and no vendor key is a root-identity, release, keeper or recovery key', new Set(vsep).size === vsep.length);
+rejects('keys a negative vendor rotation is rejected', () => vendorSeed(S1, -1), 'non-negative integer');
+const KV = P.key_derivation_vendor, VR = hexToBytes(KV.root_hex), VC1 = vendorChain(VR, 1);
+t('keys key_derivation_vendor vector: seed, key, pinned genesis and DID, rotation 1, distinct from identity and release',
+  bytesToHex(vendorSeed(VR, 0)) === KV.vendor_seed_hex && bytesToHex(k(VR, KV.vendor_path)) === KV.vendor_seed_hex &&
+  encodeKey(ed.getPublicKey(vendorSeed(VR, 0))) === KV.vendor_key && KV.genesis.key === KV.vendor_key && KV.genesis.recovery === recoveryCommitment(VR) &&
+  did(KV.genesis) === KV.did && VC1.original === KV.did && same(VC1.genesis, KV.genesis) && same(VC1.rotations[0], KV.rotation_1) && VC1.did === KV.did_1 &&
+  bytesToHex(vendorSeed(VR, 1)) === KV.vendor_seed_1_hex && KV.rotation_1.body.reason === 'recovery' &&
+  verify({ v: VERSION, typ: 'bundle', genesis: KV.genesis, rotations: [KV.rotation_1], bindings: [], attestations: [], issuers: [] } as Bundle, NOW).did === KV.did_1 &&
+  KV.identity_seed_hex === bytesToHex(identitySeed(VR, 0)) && KV.release_seed_hex === bytesToHex(k(VR, 'sigelo/v1/release/ed25519/0')) &&
+  new Set([KV.vendor_seed_hex, KV.identity_seed_hex, KV.release_seed_hex]).size === 3);
 // deriveRoot emits K_0..K_{keepers-1} and nothing else moves: rootSummary above omits them.
 const dk = deriveRoot(S1, 'stagenet', 0, 2);
 t('keys deriveRoot emits keeper roots without changing the rest',
@@ -1528,6 +1547,77 @@ try {
     t('keeper CLI: --new-keeper with --agent, or not an index, is refused (exit 2)', bad.code === 2 && bad.err.includes('takes none of') && bad2.code === 2 && bad2.err.includes('keeper index'));
   } finally {
     rmSync(kTmp, { recursive: true, force: true });
+  }
+}
+
+// --- the vendor identity from the words (sigelo-offline vendor, recover --vendor; src/ceremony.ts).
+{
+  const vTmp = mkdtempSync(join(tmpdir(), 'sigelo-vendor-'));
+  try {
+    const run = (args: string[], input?: string) => { const x = spawnSync(process.argv[0]!, [OFFLINE, ...args], { input }); return { code: x.status, out: x.stdout.toString(), err: x.stderr.toString() }; };
+    const vout = join(vTmp, 'v');
+    const m = run(['vendor', '--n', '0', '--out', vout, '--net', 'stagenet'], scWords + '\n');
+    const o: Any = m.code === 0 ? JSON.parse(m.out) : {};
+    const files = m.code === 0 ? filesOf(vout) : [];
+    const store: Any = m.code === 0 ? JSON.parse(readFileSync(join(vout, 'vendor.local.json'), 'utf-8')) : {};
+    const pubG: Any = m.code === 0 ? JSON.parse(readFileSync(join(vout, 'sigelo-vendor-identity.json'), 'utf-8')) : {};
+    const init: Any = m.code === 0 ? JSON.parse(readFileSync(join(vout, 'vendor.init.json'), 'utf-8')) : {};
+    t('vendor CLI: --n 0 with the words on stdin writes the three files and prints the DID and the genesis SHA-256, nothing secret',
+      m.code === 0 && same(files, [...VENDOR_FILES].sort()) && o.did === did(pubG) && o.current === o.did && o.n === 0 &&
+      o.genesis_sha256 === bytesToHex(sha256(utf8ToBytes(canonicalize(pubG)))) && o.recovery_commitment === recoveryCommitment(SC) &&
+      o.vault === deriveRoot(SC, 'stagenet').vault.address && !leaks(m.out + m.err, SChex, scWords, recHex) && !m.out.includes(store.secret));
+    t('vendor CLI: the identity file is sigelo-agent\'s (plain key of vendorSeed(S, 0), the published genesis, no rotations); init.json is {did, genesis, current, n}',
+      store.v === VERSION && store.provider === 'file' && store.secret === bytesToHex(vendorSeed(SC, 0)) && same(store.genesis, pubG) && store.rotations.length === 0 &&
+      same(Object.keys(store).sort(), ['attestations', 'genesis', 'issuers', 'provider', 'rotations', 'secret', 'v']) && init.did === o.did && same(init.genesis, pubG) &&
+      pubG.key === encodeKey(ed.getPublicKey(vendorSeed(SC, 0))) && pubG.recovery === recoveryCommitment(SC) && pubG.created === '1970-01-01T00:00:00Z' &&
+      readFileSync(join(vout, 'sigelo-vendor-identity.json'), 'utf-8') === JSON.stringify(pubG, null, 2) + '\n');
+    if (process.platform === 'win32') console.log('SKIP vendor file modes (Windows has no POSIX modes)');
+    else t('vendor CLI: vendor.local.json 0600, the public files 0644, the directory 0700',
+      (statSync(join(vout, 'vendor.local.json')).mode & 0o777) === 0o600 && (statSync(join(vout, 'sigelo-vendor-identity.json')).mode & 0o777) === 0o644 &&
+      (statSync(join(vout, 'vendor.init.json')).mode & 0o777) === 0o644 && (statSync(vout).mode & 0o777) === 0o700);
+    const again = run(['vendor', '--n', '0', '--out', vout], scWords + '\n');
+    t('vendor CLI: refuses to overwrite (exit 2), the files unchanged', again.code === 2 && again.err.includes('refusing to overwrite') &&
+      readFileSync(join(vout, 'vendor.local.json'), 'utf-8') === JSON.stringify(store, null, 2) + '\n');
+    const argv = run(['vendor', '--n', '0', '--out', join(vTmp, 'x'), ...scWords.split(' ')]);
+    t('vendor CLI: words on the command line are refused, nothing written', argv.code === 2 && argv.err.includes('never go on the command line') && !argv.err.includes(scWords.split(' ')[0]! + ' ' + scWords.split(' ')[1]!));
+    const wf = join(vTmp, 'words.txt');
+    writeFileSync(wf, scWords + '\n');
+    const same0 = run(['vendor', '--n', '0', '--out', join(vTmp, 'v0b'), '--words', wf]);
+    t('vendor CLI: the same words give the same DID, byte for byte (pinned genesis), from --words <file> too',
+      same0.code === 0 && JSON.parse(same0.out).did === o.did && readFileSync(join(vTmp, 'v0b', 'vendor.local.json'), 'utf-8') === JSON.stringify(store, null, 2) + '\n');
+    const other = run(['vendor', '--n', '0', '--out', join(vTmp, 'o')], mnemonicFromRoot(hexToBytes(VAULT_VECTORS[1]!.seed)) + '\n');
+    t('vendor CLI: other words, another vendor', other.code === 0 && JSON.parse(other.out).did !== o.did);
+
+    // Rotation 0 → 1: recover --vendor, the rotation adopt takes; the chain from vendor --n 1 is the same.
+    const r1 = run(['recover', '--vendor', '--n', '1', '--genesis', join(vout, 'vendor.local.json'), '-'], scWords + '\n');
+    const ro: Any = r1.code === 0 ? JSON.parse(r1.out) : {};
+    const lib = recoverVendor({ S: SC, n: 1, known: store });
+    const thiefId = keygen({ seed: new Uint8Array(32).fill(9), recovery: recoveryCommitment(SC) });
+    const thiefRot = rotate({ genesis: pubG, next_genesis: thiefId.genesis, iat: NOW, reason: 'voluntary', secret: vendorSeed(SC, 0), next_secret: thiefId.secret });
+    const chainOf = (rotations: unknown[]) => verify({ v: VERSION, typ: 'bundle', genesis: pubG, rotations, bindings: [], attestations: [], issuers: [] } as Bundle, NOW);
+    t('recover --vendor --n 1: { did, rotation, identity_seed_hex, vendor } = the library\'s; a recovery rotation at iat 0 to vendorSeed(S, 1); the chain verifies, beating a thief\'s newer voluntary rotation',
+      r1.code === 0 && same(Object.keys(ro).sort(), ['did', 'identity_seed_hex', 'rotation', 'vendor']) && same(ro, lib) && ro.vendor === o.did &&
+      ro.identity_seed_hex === bytesToHex(vendorSeed(SC, 1)) && ro.rotation.body.reason === 'recovery' && ro.rotation.body.iat === 0 &&
+      ro.rotation.next_genesis.recovery === recoveryCommitment(SC) && chainOf([ro.rotation]).did === ro.did && chainOf([thiefRot, ro.rotation]).did === ro.did &&
+      !leaks(r1.out + r1.err, SChex, scWords, recHex));
+    const v1 = run(['vendor', '--n', '1', '--out', join(vTmp, 'v1')], scWords + '\n');
+    const s1: Any = v1.code === 0 ? JSON.parse(readFileSync(join(vTmp, 'v1', 'vendor.local.json'), 'utf-8')) : {};
+    t('vendor CLI: --n 1 rebuilds the rotated file from the words alone: the same genesis, the same rotation, the new key',
+      v1.code === 0 && JSON.parse(v1.out).did === o.did && JSON.parse(v1.out).current === ro.did && same(s1.genesis, pubG) && same(s1.rotations, [ro.rotation]) && s1.secret === ro.identity_seed_hex);
+    const gap = run(['recover', '--vendor', '--n', '2', '--genesis', join(vout, 'vendor.local.json'), '-'], scWords + '\n');
+    const rep = run(['recover', '--vendor', '--n', '1', '--genesis', join(vTmp, 'v1', 'vendor.local.json'), '-'], scWords + '\n');
+    const wrong = run(['recover', '--vendor', '--n', '1', '--genesis', join(vTmp, 'o', 'sigelo-vendor-identity.json'), '-'], scWords + '\n');
+    const zero = run(['recover', '--vendor', '--n', '0', '-'], scWords + '\n');
+    const mix = run(['recover', '--vendor', '--n', '1', '--iat', '5', '-'], scWords + '\n');
+    const av = run(['recover', '--vendor', '--n', '1', ...scWords.split(' ')]);
+    t('recover --vendor: a gap, a repeat, another vendor\'s chain, --n 0, --iat, or words in argv are refused by name (exit 2)',
+      gap.code === 2 && gap.err.includes('at rotation 0 of the words; the next rotation is --n 1') && rep.code === 2 && rep.err.includes('the next rotation is --n 2') &&
+      wrong.code === 2 && wrong.err.includes('other words') && zero.code === 2 && zero.err.includes('1 or more') && mix.code === 2 && mix.err.includes('--iat') &&
+      av.code === 2 && av.err.includes('never go on the command line') && [gap, rep, wrong, zero, mix, av].every((x) => x.out === ''));
+    rejects('vendor: --n past the cap is refused', () => vendorChain(SC, 65), '0 to 64');
+    rejects('vendor: a refused write leaves nothing behind', () => vendor({ S: SC, n: 0, out: vout }), 'refusing to overwrite');
+  } finally {
+    rmSync(vTmp, { recursive: true, force: true });
   }
 }
 

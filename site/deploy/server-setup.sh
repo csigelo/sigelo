@@ -17,7 +17,7 @@
 #   --skip-cert           do not run certbot (a certificate is already at /etc/letsencrypt/live/sigelo.io)
 #   --certs               ONLY the certificate step (6), on a server this script prepared and deploy.sh
 #                         has installed nginx.conf on (nothing beside it needed; node for the DNS
-#                         test): adds each of sigelo.online, .dev (apex, www) whose DNS points here to the
+#                         test): adds sigelo.online and www.sigelo.online, each once its DNS points here, to the
 #                         sigelo.io lineage, prints the names skipped. Idempotent: rerun it after DNS
 #                         changes; it re-issues only when a pointed name is missing from the certificate
 #   --stats               ONLY the visit-statistics step, on a server this script already prepared
@@ -98,8 +98,9 @@
 #
 # Requires: DNS A (and AAAA, if the server has IPv6) for sigelo.io, www.sigelo.io, sigelo.net and
 # www.sigelo.net already pointing here, and ports 80/443 open — certbot proves control over HTTP-01
-# on port 80. sigelo.online and .dev join the certificate once their DNS points here (step 6).
-# sigelo.ai is the relay's (--relay), on its own host; sigelo.org is parked.
+# on port 80. sigelo.online (apex, www) joins the certificate once its DNS points here (step 6).
+# sigelo.ai is the relay's (--relay), on its own host; sigelo.dev is reserved (no DNS, no block);
+# sigelo.org is parked.
 # Idempotent: re-running skips what is already in place.
 set -eu
 
@@ -107,7 +108,7 @@ DOMAIN=sigelo.io
 ALT=sigelo.net          # also owned; redirect-only (nginx.conf), on the one certificate lineage
 # Also owned, redirect-only like $ALT (nginx.conf: one server group each); apex and www of each join
 # the same lineage as soon as their DNS points at this host.
-EXTRA="sigelo.online sigelo.dev"
+EXTRA="sigelo.online"
 WEBROOT=/var/www/sigelo.io
 ACME=/var/www/acme
 HERE=$(cd "$(dirname "$0")" && pwd)

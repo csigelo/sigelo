@@ -399,7 +399,10 @@ else {
         const base = to.replace(/\/$/, '');
         await redir(`http://${d}/`, `${base}/`);
         await redir(`https://${d}/spec.md?x=1`, `${base}/spec.md?x=1`);
-        await redir(`https://www.${d}/`, `${base}/`);
+        // www is checked once it has a record (sigelo.online went live with its apex alone); a www
+        // that resolves elsewhere still FAILs.
+        if ((await a4(`www.${d}`)).length) await redir(`https://www.${d}/`, `${base}/`);
+        else skip(`https://www.${d}/ → 301 ${base}/`, `www.${d} has no A record yet`);
       };
       for (const [d, to] of Object.entries(of.redirects)) await held(d, to);
       for (const [d, to] of Object.entries(of.redirects_pending_dns)) {

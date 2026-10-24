@@ -8,6 +8,7 @@
  * k(path)  = HKDF-SHA256(ikm = S, salt = "", info = path)          -> 32 bytes
  * identity = Ed25519 seed  k("sigelo/v1/identity/ed25519/<n>")     n = rotation counter
  * recovery = Ed25519 seed  k("sigelo/v1/recovery/ed25519")
+ * vendor   = Ed25519 seed  k("sigelo/v1/vendor/ed25519/<n>")       n = rotation counter; signs licences only
  * wallet   = b = sc_reduce32(k("sigelo/v1/monero/<w>"))            a = H_s(b), B = bG, A = aG
  * keeper   = K_j = k("sigelo/v1/keeper/<j>")                        j = keeper index
  * agent    = Ed25519 seed  k(K, "sigelo/v1/identity/<i>/ed25519/<n>")  i = account, on K not S
@@ -58,6 +59,14 @@ export function identitySeed(S: Uint8Array, n: number): Uint8Array {
   if (!Number.isSafeInteger(n) || n < 0) throw new SigeloError(`identity: rotation counter must be a non-negative integer, got ${n}`);
   return k(S, `sigelo/v1/identity/ed25519/${n}`);
 }
+
+/**
+ * Ed25519 seed for the vendor identity (the key that signs licences), rotation `n`. Its own label,
+ * never `identity`: the vendor key and the operator's root identity are different keys of one root.
+ * Its genesis commits to the root's recovery key, as the root identity's does, so the 25 words
+ * restore the key, the DID and the recovery (src/ceremony.ts `vendorChain`).
+ */
+export const vendorSeed = (S: Uint8Array, n: number): Uint8Array => k(S, `sigelo/v1/vendor/ed25519/${index('vendor rotation', n)}`);
 
 /**
  * Keeper root `K_j`: the subtree of `S` one keeper holds so it can mint agent identities

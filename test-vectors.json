@@ -1362,6 +1362,48 @@
       "worker_path": "sigelo/v1/identity/2/ed25519/0",
       "worker_seed_hex": "b0799910d2f8d25044c8cf0920a8f35550510d6c40004f9d0f6a8aa6091f308a",
       "note": "keeper_root_hex = HKDF-SHA256(root, \"\", \"sigelo/v1/keeper/1\"); each seed = HKDF-SHA256(keeper root, \"\", path), Ed25519 raw. The delegate a keeper mints at account 2 and the worker enrolled at index 2 under the same keeper root must hold different keys: delegate_seed_hex != worker_seed_hex."
+    },
+    "key_derivation_vendor": {
+      "root_hex": "736967656c6f20726f6f7420736565642c207465737420766563746f72202331",
+      "vendor_path": "sigelo/v1/vendor/ed25519/0",
+      "vendor_seed_hex": "544dae28a70cecdb84b1c652f71ee2df8b14bcbbe8fdcd180f3f1b53c51efcb9",
+      "vendor_key": "z6Mkop1rHjJxKApHjwUWKZ6MYKvKicu4wywBTrxNSPrk6oRF",
+      "recovery": "sha256:cdd6b57b4d3d703430a97987e19f82ccf63d4742eabe247644fc86dcb64bb07d",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkop1rHjJxKApHjwUWKZ6MYKvKicu4wywBTrxNSPrk6oRF",
+        "recovery": "sha256:cdd6b57b4d3d703430a97987e19f82ccf63d4742eabe247644fc86dcb64bb07d",
+        "created": "1970-01-01T00:00:00Z",
+        "nonce": "z6quuL5a9eDfeXUiz4qivGk"
+      },
+      "did": "did:sigelo:zDAtsmrLxXMvboDCCc8kr3s6YTt6t3BvdiGv6acvV75c9",
+      "vendor_seed_1_hex": "a1e0a7e55f9a0e1d8e4bb8ca337b441c463abab116489206df7c819bca69554a",
+      "rotation_1": {
+        "body": {
+          "v": "sigelo/0",
+          "typ": "rotation",
+          "id": "did:sigelo:zDAtsmrLxXMvboDCCc8kr3s6YTt6t3BvdiGv6acvV75c9",
+          "next": "did:sigelo:z4kVaJnCHy7KNvCAVGdE1vmyhtiWu5cpHGU2TZD9XhVHY",
+          "iat": 0,
+          "reason": "recovery",
+          "recovery_key": "z6MkrqZ2EqXr8HxquJpujTZYB1abAMNeEmHNE8tYiMwyeSWg"
+        },
+        "sig": "z3r4HeNwahaqixTj9QCgzjHgjgz4CRPZ5d5bgUcxmT1PAgQFoM4x57UppPnH57Q4Saxp4QLpnumxVx9mQwkbrxBJa",
+        "sig_next": "z4VqiD2LXc3t3kXBYFjTQrRYZYbiW2ts5G5qpjMHpuNY43YToJrm2ECWhuq9P33FtJZuKQq6mCJBmJuQRu4R1KkG9",
+        "next_genesis": {
+          "v": "sigelo/0",
+          "typ": "genesis",
+          "key": "z6MkiAsoffHxSkHMFbqsXYEyaQ6fv1yAE9DWNvLaguJingSb",
+          "recovery": "sha256:cdd6b57b4d3d703430a97987e19f82ccf63d4742eabe247644fc86dcb64bb07d",
+          "created": "1970-01-01T00:00:00Z",
+          "nonce": "zW88KYyMJiMcvErft43sQiT"
+        }
+      },
+      "did_1": "did:sigelo:z4kVaJnCHy7KNvCAVGdE1vmyhtiWu5cpHGU2TZD9XhVHY",
+      "identity_seed_hex": "d701590b1694a79577d39fa47868069d1d594444eabfa6e09adcc19d2f1a7509",
+      "release_seed_hex": "18c282ece17c70103bb3fcc9b70389a0af9ac5133d61cbc5efcd1c4eb32ee6d8",
+      "note": "vendor_seed_hex = HKDF-SHA256(root, \"\", vendor_path), Ed25519 raw. genesis: key = vendor_key, recovery = the root's recovery commitment (HKDF path \"sigelo/v1/recovery/ed25519\"), created \"1970-01-01T00:00:00Z\", nonce = the first 16 bytes of SHA-256 of the raw key; did = its DID. rotation_1: the recovery rotation to rotation 1 (seed vendor_seed_1_hex), iat 0, signed by the root's recovery key. The vendor seed differs from the root identity's (identity_seed_hex) and the release key's (release_seed_hex)."
     }
   },
   "negative": {

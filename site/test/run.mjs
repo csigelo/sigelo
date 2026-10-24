@@ -383,12 +383,12 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   // (RELAY_LIVE), BEFORE_LAUNCH until then. Both tables are pinned here to the decided roles
   // (site/src/official.mjs):
   // changing a role is a decision, not a refactor.
-  const role = (d) => (d.role === 'redirect' ? `redirect ${d.to}${d.live ? '' : ' (DNS pending)'}` : d.role === 'content' ? `content: ${d.what}` : d.role);
+  const role = (d) => (d.role === 'redirect' ? `redirect ${d.to}${d.live ? '' : ' (DNS pending)'}` : d.role === 'content' || d.role === 'reserved' ? `${d.role}: ${d.what}` : d.role);
   const tableOf = (domains) => domains.map((d) => `${d.name} ${role(d)}`).join('; ');
-  ok(tableOf(DOMAINS) === 'sigelo.io content: protocol; sigelo.ai content: relay and front page; sigelo.net redirect sigelo.ai; sigelo.online redirect sigelo.ai (DNS pending); sigelo.dev redirect sigelo.io (DNS pending); sigelo.org parked'
+  ok(tableOf(DOMAINS) === 'sigelo.io content: protocol; sigelo.ai content: relay and front page; sigelo.net redirect sigelo.ai; sigelo.online redirect sigelo.ai; sigelo.dev reserved: code forge, planned; sigelo.org parked'
     && HOSTS.map((h) => h.name).join() === 'relay.sigelo.ai' && REPOSITORIES.join() === 'https://github.com/csigelo/sigelo,https://github.com/csigelo/sigelo-relay',
     `site/src/official.mjs DOMAINS is the decided table, stated from the relay launch (${tableOf(DOMAINS)})`);
-  ok(tableOf(BEFORE_LAUNCH.domains) === 'sigelo.io content: protocol; sigelo.ai parked; sigelo.net redirect sigelo.io; sigelo.online redirect sigelo.io (DNS pending); sigelo.dev redirect sigelo.io (DNS pending); sigelo.org parked'
+  ok(tableOf(BEFORE_LAUNCH.domains) === 'sigelo.io content: protocol; sigelo.ai parked; sigelo.net redirect sigelo.io; sigelo.online redirect sigelo.io; sigelo.dev reserved: code forge, planned; sigelo.org parked'
     && BEFORE_LAUNCH.domains.map((d) => d.name).join() === DOMAINS.map((d) => d.name).join()
     && BEFORE_LAUNCH.hosts.length === 0 && BEFORE_LAUNCH.repositories.join() === REPO && BEFORE_LAUNCH.payment_places.length === 0,
     `site/src/official.mjs BEFORE_LAUNCH: the same domains, sigelo.ai parked, every redirect to sigelo.io, one repository, no payment place (${tableOf(BEFORE_LAUNCH.domains)})`);
@@ -405,9 +405,10 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(of.issuer_did && of.issuer_did === ix.world?.issuer && of.domains?.join() === domains.map((d) => d.name).join() && of.content?.join() === CONTENT_HOSTS.join()
     && JSON.stringify(of.redirects) === JSON.stringify(redirects(true)) && JSON.stringify(of.redirects_pending_dns) === JSON.stringify(redirects(false))
     && of.parked?.join() === domains.filter((d) => d.role === 'parked').map((d) => d.name).join()
+    && JSON.stringify(of.reserved) === JSON.stringify(Object.fromEntries(domains.filter((d) => d.role === 'reserved').map((d) => [d.name, d.what])))
     && of.repositories?.join() === OFFICIAL.repositories.join() && of.repository === REPO && JSON.stringify(of.payment_details_only_on) === JSON.stringify(OFFICIAL.payment_places)
     && of.npm_user === 'csigelo' && of.maintainer === 'csigelo' && of.packages?.join() === packagesAt(RELEASED).join() && of.releases?.includes(`${ORIGIN}/releases/`),
-    `index.json: official follows OFFICIAL (domains, content, redirects, pending, parked, repositories, payment places), issuer_did = world.issuer, npm_user, the ${of.packages?.length} packages of v${RELEASED} (sigelo-contact from 0.1.2, which SECURITY.md must then name: below), maintainer`);
+    `index.json: official follows OFFICIAL (domains, content, redirects, pending, reserved, parked, repositories, payment places), issuer_did = world.issuer, npm_user, the ${of.packages?.length} packages of v${RELEASED} (sigelo-contact from 0.1.2, which SECURITY.md must then name: below), maintainer`);
   // SECURITY.md's "Nobody from the project…" line, as data: a payment address comes only with an
   // invoice the buyer asked for, over the SimpleX address on /contact (sigelo.ai's index.json has the
   // same two fields; relay/site/build.mjs --launch refuses the older ones).
@@ -430,7 +431,8 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   // `missing` and `pendingSaid` take the table as an argument: the launch table is checked too.
   const rolesOf = (off) => [...off.domains.filter((d) => d.role === 'content').map((d) => `${d.name} (${d.what}`), ...off.hosts.map((h) => h.name),
     ...off.domains.filter((d) => d.role === 'redirect' && d.live).map((d) => `${d.name} redirects to ${d.to}`),
-    ...off.domains.filter((d) => d.role === 'redirect' && !d.live).map((d) => `${d.name} (to ${d.to})`)];
+    ...off.domains.filter((d) => d.role === 'redirect' && !d.live).map((d) => `${d.name} (to ${d.to})`),
+    ...off.domains.filter((d) => d.role === 'reserved').map((d) => `${d.name} is reserved (${d.what})`)];
   const pendingSaid = (t, off = OFFICIAL) => off.domains.every((d) => d.role !== 'redirect' || d.live) || /redirects? once (its|their) DNS points to us/.test(t);
   const missing = (t, off = OFFICIAL) => [...rolesOf(off).filter((r) => !t.includes(r)),
     ...off.domains.filter((d) => d.role === 'parked').map((d) => d.name)
@@ -570,7 +572,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
         if (!placed) bad.push(`${d.name}: the ${tls(b) ? 'TLS' : 'port-80'} block's return is not where it must be (${tls(b) ? 'server level, no location' : 'alone in location /'})`);
       }
     }
-    for (const x of OFFICIAL.domains.filter((y) => y.role === 'parked' || (y.role === 'content' && y.name !== 'sigelo.io')).map((y) => y.name)) {
+    for (const x of OFFICIAL.domains.filter((y) => y.role === 'parked' || y.role === 'reserved' || (y.role === 'content' && y.name !== 'sigelo.io')).map((y) => y.name)) {
       if (servers.some((b) => names(b).includes(x) || names(b).includes(`www.${x}`))) bad.push(`${x} has a server block`);
     }
     servers.forEach((b, i) => {
@@ -598,18 +600,18 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   };
   const conf = readFileSync(join(SITE, 'deploy', 'nginx.conf'), 'utf8');
   const bad = nginxRefusals(conf);
-  ok(bad.length === 0, `nginx.conf: plain server names; each redirect domain has one port-80 and one TLS block, each with exactly one return, to its OFFICIAL target, and nothing else that could run first; no block for sigelo.ai or a parked domain; exactly one HSTS line of a year in every TLS block, none elsewhere; every content type; Link rel=describedby always; header maps keyed on $uri; 404s cached a minute; the not-found page noindex${bad.length ? ` (${bad.join('; ')})` : ''}`);
+  ok(bad.length === 0, `nginx.conf: plain server names; each redirect domain has one port-80 and one TLS block, each with exactly one return, to its OFFICIAL target, and nothing else that could run first; no block for sigelo.ai or a reserved or parked domain; exactly one HSTS line of a year in every TLS block, none elsewhere; every content type; Link rel=describedby always; header maps keyed on $uri; 404s cached a minute; the not-found page noindex${bad.length ? ` (${bad.join('; ')})` : ''}`);
   // The checker against broken copies (each must be refused, by name).
   const parts = conf.split(/^(?=server \{$)/m);
   const block = (name, isTls) => parts.findIndex((x) => x.startsWith('server {') && x.includes(`server_name ${name}`) && /listen 443 ssl/.test(x) === isTls);
   const mutate = (edits) => { const c = [...parts]; for (const [i, f] of edits) c[i] = f(c[i]); return c.join(''); };
-  const dev = block('sigelo.dev', true), io = block('sigelo.io;', true), net = block('sigelo.net', true);
+  const dev = block('sigelo.online', true), io = block('sigelo.io;', true), net = block('sigelo.net', true);
   const shifted = mutate([[dev, (x) => x.replace(`    ${HSTS}\n`, '')], [io, (x) => x.replace(HSTS, `${HSTS}\n    ${HSTS}`)]]);
   const firstReturn = mutate([[net, (x) => x.replace(/(server_name [^\n]*\n)/, '$1    return 301 https://other.example$request_uri;\n')]]);
   const rewrite = mutate([[net, (x) => x.replace(/(server_name [^\n]*\n)/, '$1    rewrite ^ https://evil.example/ permanent;\n')]]);
   const regexName = mutate([[io, (x) => x.replace('server_name sigelo.io;', 'server_name sigelo.io ~^(www\\.)?sigelo\\.ai$;')]]);
   const rawKey = conf.replace('map "$sigelo_stats$uri" $sigelo_robots {', 'map $request_uri $sigelo_robots {');
-  ok(dev > 0 && io > 0 && net > 0 && nginxRefusals(shifted).some((w) => /server_name|sigelo\.dev/.test(w) && /HSTS "missing"/.test(w)) && nginxRefusals(shifted).some((w) => /\(sigelo\.io\): HSTS ".* \| /.test(w))
+  ok(dev > 0 && io > 0 && net > 0 && nginxRefusals(shifted).some((w) => /server_name|sigelo\.online/.test(w) && /HSTS "missing"/.test(w)) && nginxRefusals(shifted).some((w) => /\(sigelo\.io\): HSTS ".* \| /.test(w))
     && nginxRefusals(firstReturn).some((w) => w.startsWith('sigelo.net: returns "return 301 https://other.example$request_uri; | '))
     && nginxRefusals(conf.replace(LINK, LINK.replace(' always;', ';'))).some((w) => w.includes('describedby'))
     && rewrite !== conf && nginxRefusals(rewrite).some((w) => w.startsWith('sigelo.net: a redirect block holds "rewrite ^ https://evil.example/ permanent;"'))

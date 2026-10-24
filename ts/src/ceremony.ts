@@ -27,14 +27,15 @@
  * keys are S, and S is every identity (MONERO.md §2).
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, openSync, readdirSync, writeFileSync, writeSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readdirSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ed from '@noble/ed25519';
-import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize } from './jcs.js';
-import { agentIdentitySeed, delegateIdentitySeed, deriveRoot, identitySeed, keeperRoot, mnemonicFromRoot, newRoot, recoverySeed, rootFromMnemonic } from './keys.js';
+import { agentIdentitySeed, delegateIdentitySeed, deriveRoot, identitySeed, keeperRoot, mnemonicFromRoot, newRoot, recoveryCommitment, recoverySeed, rootFromMnemonic, vendorSeed } from './keys.js';
 import { decodeAddress, Net } from './monero.js';
-import { Bundle, did, encodeKey, Genesis, keygen, rotate, Rotation, SigeloError, structure, verify } from './sigelo.js';
+import { Bundle, did, encodeKey, Genesis, Identity, keygen, rotate, Rotation, SigeloError, structure, verify, VERSION } from './sigelo.js';
 
 /** The age step. `encrypt` takes the recipient, `decrypt` a path to an identity file. */
 export interface Age { encrypt(recipient: string, plaintext: Uint8Array): Uint8Array; decrypt(identity: string, ciphertext: Uint8Array): Uint8Array }
@@ -291,4 +292,91 @@ export function recoverKeeper(o: { bundle: Bundle; S?: Uint8Array; recoverySecre
   const v = verify(bundle, o.iat);
   if (v.did !== r.did) throw new SigeloError(`recover: the keeper bundle with the recovery appended resolves to ${v.did}, not ${r.did}`);
   return { did: v.chain[0]!, current: r.did, rotation: r.rotation, keeper_root_hex: r.keeper_root_hex!, bundle };
+}
+
+// ---------------------------------------------------------------- the vendor identity
+
+/**
+ * The vendor identity (keys.ts `vendorSeed`): the DID that signs licences, made from the 25 words
+ * alone, so no secret exists that the words do not restore. Its genesis is pinned (SPEC §4 `nonce`:
+ * `created` fixed, the nonce the first 16 bytes of SHA-256 of the raw key, as contact/enrol.mjs
+ * pins the operator's) and commits to the root's recovery key (`recoveryCommitment(S)`, as the root
+ * identity's does). Rotation m → m+1 is a RECOVERY rotation, signed with `recoverySeed(S)` at a
+ * pinned `iat`: whoever holds the words holds the recovery key, a recovery supersedes any voluntary
+ * rotation a thief signs with a stolen vendor key (SPEC §7.1), and pinned bytes make the chain
+ * 0 → n the same at every derivation. One recovery per node, always from the derived head, so two
+ * recoveries never tie (§7.3 step 2).
+ */
+export const VENDOR_CREATED = '1970-01-01T00:00:00Z', VENDOR_IAT = 0, VENDOR_MAX_N = 64;
+
+/** Rotation `m`'s pinned genesis: the same bytes, hence the same DID, from the same words. */
+export function vendorGenesis(S: Uint8Array, m: number): Identity {
+  const seed = vendorSeed(S, m);
+  return keygen({ seed, recovery: recoveryCommitment(S), created: VENDOR_CREATED, nonce: sha256(ed.getPublicKey(seed)).slice(0, 16) });
+}
+
+export interface VendorChain { original: string; did: string; genesis: Genesis; rotations: Rotation[]; secret: Uint8Array; n: number }
+
+/** The vendor chain at rotation `n`: genesis 0, the recovery rotations 0 → n, the secret of `n`. */
+export function vendorChain(S: Uint8Array, n: number): VendorChain {
+  if (!Number.isSafeInteger(n) || n < 0 || n > VENDOR_MAX_N) throw new SigeloError(`vendor: --n is the rotation counter, 0 to ${VENDOR_MAX_N}, got ${n}`);
+  const rec = recoverySeed(S);
+  try {
+    const g = Array.from({ length: n + 1 }, (_, m) => vendorGenesis(S, m));
+    const rotations = g.slice(1).map((x, m) => rotate({ genesis: g[m]!.genesis, next_genesis: x.genesis, iat: VENDOR_IAT, reason: 'recovery', secret: rec, next_secret: x.secret }));
+    g.slice(0, n).forEach((x) => x.secret.fill(0));
+    return { original: g[0]!.did, did: g[n]!.did, genesis: g[0]!.genesis, rotations, secret: g[n]!.secret, n };
+  } finally { rec.fill(0); }
+}
+
+/** What `sigelo-offline vendor` writes, in this order; any of them present is a refusal. */
+export const VENDOR_FILES = ['vendor.local.json', 'vendor.init.json', 'sigelo-vendor-identity.json'] as const;
+
+/**
+ * Write the vendor identity at rotation `n` into `out` (created 0700): `vendor.local.json` (0600,
+ * sigelo-agent's identity file, plain key, so `SIGELO_IDENTITY=… sigelo-agent bundle|sign` and
+ * issue-licence read it unchanged), `vendor.init.json` (what `sigelo-agent init` prints: did and
+ * genesis, plus the current DID and n) and `sigelo-vendor-identity.json` (the genesis, to publish).
+ * Refuses before writing anything if one exists. Returns public values only.
+ */
+export function vendor(o: { S: Uint8Array; n: number; out: string }) {
+  const c = vendorChain(o.S, o.n);
+  try {
+    mkdirSync(o.out, { recursive: true, mode: 0o700 });
+    const taken = VENDOR_FILES.filter((f) => existsSync(join(o.out, f)));
+    if (taken.length > 0) throw new SigeloError(`vendor: ${taken.join(', ')} already in ${o.out} — refusing to overwrite; nothing was written`);
+    const store = { v: VERSION, provider: 'file', secret: hex(c.secret), genesis: c.genesis, rotations: c.rotations, attestations: [], issuers: [] };
+    const write = (name: string, body: string, mode: number): string => (writeFileSync(join(o.out, name), body, { mode, flag: 'wx' }), name);
+    const files = [
+      write(VENDOR_FILES[0], JSON.stringify(store, null, 2) + '\n', 0o600),
+      write(VENDOR_FILES[1], JSON.stringify({ did: c.original, genesis: c.genesis, current: c.did, n: o.n }, null, 2) + '\n', 0o644),
+      write(VENDOR_FILES[2], JSON.stringify(c.genesis, null, 2) + '\n', 0o644),
+    ];
+    return { did: c.original, genesis_sha256: hex(sha256(utf8ToBytes(canonicalize(c.genesis)))), current: c.did, n: o.n, recovery_commitment: c.genesis.recovery, files };
+  } finally { c.secret.fill(0); }
+}
+
+/**
+ * The vendor's rotation `n - 1 → n` (`recover --vendor --n n`): the recovery rotation from the
+ * derived head, and the new key, `{ did, rotation, identity_seed_hex }` for `sigelo-agent adopt
+ * --rotation`, plus `vendor` (the genesis DID, the pin). `known`, when given (a vendor bundle, the
+ * identity file or the published genesis), must start at this vendor's genesis and end at
+ * rotation n - 1 of the words: a gap or a repeat is refused, naming the `--n` to use.
+ */
+export function recoverVendor(o: { S: Uint8Array; n: number; known?: Genesis | (Bundle & { genesis: Genesis }) }) {
+  if (!Number.isSafeInteger(o.n) || o.n < 1) throw new SigeloError('recover --vendor: --n is the NEW rotation, 1 or more (rotation 0 is the genesis: sigelo-offline vendor --n 0)');
+  const c = vendorChain(o.S, o.n);
+  try {
+    if (o.known !== undefined) {
+      const g = (o.known as Genesis).typ === 'genesis' ? o.known as Genesis : (o.known as Bundle).genesis;
+      structure(g, 'genesis');
+      if (did(g) !== c.original) throw new SigeloError(`recover --vendor: the chain given starts at ${did(g)}, but these words' vendor is ${c.original} — other words, or not the vendor's file`);
+      const seen = new Set([did(g), ...(((o.known as Bundle).rotations ?? []) as Rotation[]).map((r) => r.body.next)]);
+      const derived = [c.original, ...c.rotations.map((r) => r.body.next)];
+      let m = 0;
+      while (m + 1 < derived.length && seen.has(derived[m + 1]!)) m++;
+      if (m !== o.n - 1) throw new SigeloError(`recover --vendor: the chain given is at rotation ${m} of the words; the next rotation is --n ${m + 1}`);
+    }
+    return { did: c.did, rotation: c.rotations[o.n - 1]!, identity_seed_hex: hex(c.secret), vendor: c.original };
+  } finally { c.secret.fill(0); }
 }

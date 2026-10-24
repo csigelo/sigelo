@@ -11,6 +11,8 @@
  *   sigelo-offline derive   <25 words | 64 hex> [--net <net>] [--keepers N] [--reveal-all]
  *   sigelo-offline recover  --genesis <file> <root> [(--agent i | --delegate i) [--keeper j] --n m | --identity-n n | --new-keeper <j|random>]
  *                           [--next-recovery <z…|sha256:…|none>] [--iat <unix>]
+ *   sigelo-offline vendor   --n <n> [--words <file|->] [--out <dir>] [--net <net>]
+ *   sigelo-offline recover  --vendor --n <n> [--genesis <vendor bundle|genesis>] (- | --words <file|-> | --backup … | --restored <f>)
  *
  * `ceremony` is §4.5: `S` never reaches stdout or a file other than the Owner's encrypted
  * backup (src/ceremony.ts) — and, with `--human`, the human's own terminal: the 25 words go to
@@ -33,11 +35,16 @@
  * own DID (INCIDENT.md §5): `--genesis` is the keeper's bundle (`identity.json`, or a bare genesis),
  * the new key is `identitySeed(K', 0)` for `K' = keeperRoot(S, j)` (or random), and the output is
  * `{ did, current, rotation, keeper_root_hex, bundle }` for `sigelo-spend init --adopt`.
+ * `vendor` writes the vendor identity (keys.ts `vendorSeed`, src/ceremony.ts `vendor`) from the
+ * 25 words: the identity file, what `sigelo-agent init` prints, and the genesis to publish; it
+ * prints the DID and the genesis's SHA-256. `recover --vendor --n n` is its rotation n - 1 → n,
+ * a recovery rotation from the words (src/ceremony.ts `recoverVendor`), for `sigelo-agent adopt
+ * --rotation`. Both take the words from a file or stdin only (on a terminal, typed unseen).
  * Warnings go to stderr so `... > handout.json` stays valid JSON.
  */
 import { readFileSync } from 'node:fs';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
-import { Age, ageBinary, ceremony, checkRecipient, IMPORT_LIABILITY, importRoot, NextKey, openTty, recover, recoverKeeper, restore, restoreWords, roles } from './ceremony.js';
+import { Age, ageBinary, ceremony, checkRecipient, IMPORT_LIABILITY, importRoot, NextKey, openTty, recover, recoverKeeper, recoverVendor, restore, restoreWords, roles, vendor } from './ceremony.js';
 import { deriveRoot, newRoot, parseRoot, recoverySeed, rootFromMnemonic } from './keys.js';
 import { Net } from './monero.js';
 import { Bundle, Genesis, parseBytes, SigeloError, VERSION } from './sigelo.js';
@@ -65,6 +72,15 @@ const USAGE = `sigelo-offline — root seed for sigelo × Monero (MONERO.md §2,
       --new-keeper: a keeper's own DID; --genesis is its identity.json (bundle) or genesis; the new
       key is identitySeed(K', 0), K' = keeperRoot(S, j) or random; prints { did, current, rotation,
       keeper_root_hex, bundle } for \`sigelo-spend init --adopt\` (INCIDENT.md §5).
+  sigelo-offline vendor   --n <n> [--words <file|->] [--out <dir>] [--net <net>]
+      the vendor identity, rotation n, from the 25 words (file or stdin, default -; never argv):
+      writes vendor.local.json (0600), vendor.init.json and sigelo-vendor-identity.json (the genesis)
+      to --out (default .), refusing to overwrite; prints the DID and the genesis SHA-256 (--net: also
+      the vault address, to check the words).
+  sigelo-offline recover  --vendor --n <n> [--genesis <vendor bundle|genesis>] (- | --words <file|-> | --backup … | --restored <f>)
+      the vendor's rotation n-1 → n (recovery-signed, from the words); prints { did, rotation,
+      identity_seed_hex, vendor } for \`sigelo-agent adopt --rotation\`. --genesis: refuse unless the
+      chain given is at rotation n-1 of these words.
 
 <net> is mainnet, stagenet or testnet (default stagenet). Run with networking down.`;
 
@@ -102,6 +118,39 @@ function cmdDerive(args: string[]): void {
 
 /** The 25 words from a file or stdin (`-`); never argv, where `ps` and shell history show them. */
 const readWords = (src: string): string => readFileSync(src === '-' ? 0 : src, 'utf-8');
+
+/** `readWords`, but on a terminal stdin is read unseen (raw mode, no echo), as `sigelo-agent keeper --from-words`. */
+function readWordsUnseen(src: string): Promise<string> {
+  const stdin = process.stdin;
+  if (src !== '-' || !stdin.isTTY) return Promise.resolve(readWords(src));
+  process.stderr.write('sigelo-offline: type the 25 words (or 64 hex of the root), then Enter. Nothing is shown.\n> ');
+  return new Promise((done) => {
+    let s = '';
+    stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8');
+    const on = (d: string): void => {
+      for (const ch of d) {
+        if (ch === '\u0003') { stdin.setRawMode(false); process.stderr.write('\n'); process.exit(130); }
+        if (ch === '\r' || ch === '\n') { stdin.off('data', on); stdin.setRawMode(false); stdin.pause(); process.stderr.write('\n'); done(s); return; }
+        s = ch === '\u007f' || ch === '\b' ? s.slice(0, -1) : s + ch;
+      }
+    };
+    stdin.on('data', on);
+  });
+}
+
+async function cmdVendor(args: string[]): Promise<void> {
+  const { f, words, net, int } = parse('vendor', args, ['n', 'words', 'out', 'net'], []);
+  if (words.length > 0) die('vendor: unexpected argument — the 25 words never go on the command line (ps and shell history show them); pass --words <file> or type them on stdin');
+  const n = int('n');
+  if (n === undefined) die(`vendor: --n <rotation> is required (0 to mint; the vendor's current rotation to rebuild its file)\n\n${USAGE}`);
+  const S = parseRoot(await readWordsUnseen(f['words'] ?? '-'));
+  const vault = f['net'] === undefined ? undefined : deriveRoot(S, net).vault.address;
+  let r: ReturnType<typeof vendor>;
+  try { r = vendor({ S, n: n!, out: f['out'] ?? '.' }); } finally { S.fill(0); }
+  console.error(`vendor: wrote ${r.files.join(', ')} to ${f['out'] ?? '.'}. vendor.local.json (0600) is the vendor key: offline media only, never a synced folder or a host an agent runs on.\n` +
+    'Check recovery_commitment against fingerprint.txt (the words are the right ones); the words restore all three files: sigelo-offline vendor --n <current rotation>.');
+  console.log(JSON.stringify({ ...r, ...(vault !== undefined && { vault }) }, null, 2));
+}
 const NO_ARGV = (cmd: string): string => `${cmd}: unexpected argument — the 25 words never go on the command line (ps and shell history show them); ` +
   (cmd === 'restore' ? 'pass --words <file> or --words - and type them on stdin' : 'pass --import <file|->');
 
@@ -158,9 +207,42 @@ function cmdNew(net: Net): void {
   console.log(`vault     ${deriveRoot(S, net).vault.address}`);
 }
 
-function cmdRecover(args: string[]): void {
+/** S from `recover`'s sources: the backup, a `restore --reveal-all` file's vault spend key, or the words (`-`, `--words`). */
+async function vendorRoot(f: Record<string, string>, words: string[], net: Net): Promise<Uint8Array> {
+  if (words.length > 0 && !(words.length === 1 && words[0] === '-')) die('recover --vendor: the 25 words never go on the command line (ps and shell history show them); pass - or --words <file> and type them on stdin');
+  const sources = [f['backup'] !== undefined, f['restored'] !== undefined, words.length > 0, f['words'] !== undefined].filter(Boolean).length;
+  if (sources !== 1) die('recover --vendor: give the root exactly one way: - or --words <file|-> (the 25 words), --backup/--identity/--net, or --restored <file>');
+  if (f['backup'] !== undefined) {
+    if (!f['identity'] || !f['net']) die('recover: --backup needs --identity and --net (restore checks the fingerprint per net)');
+    const r = restore({ backup: readFileSync(f['backup']!), identity: f['identity']!, net, age: age(), revealAll: true }) as { owner_backup?: { vault: { spend_key: string } } };
+    return hexToBytes(r.owner_backup!.vault.spend_key);
+  }
+  if (f['restored'] !== undefined) {
+    const sk = (parseBytes(readFileSync(f['restored']!)) as { owner_backup?: { vault?: { spend_key?: string } } }).owner_backup?.vault?.spend_key;
+    if (typeof sk !== 'string') die(`recover --vendor: ${f['restored']} has no owner_backup.vault.spend_key (the root): the vendor's next key is derived from it — make the file with \`restore --reveal-all\``);
+    return parseRoot(sk!);
+  }
+  return parseRoot(await readWordsUnseen(f['words'] ?? '-'));
+}
+
+async function cmdRecoverVendor(f: Record<string, string>, words: string[], net: Net, n: number | undefined): Promise<void> {
+  const other = ['agent', 'delegate', 'keeper', 'identity-n', 'new-keeper', 'next-recovery', 'iat'].filter((x) => f[x] !== undefined);
+  if (other.length > 0) die(`recover --vendor: the next key is the vendor's rotation n of the words, its recovery commitment and iat pinned; it takes none of ${other.map((x) => `--${x}`).join(', ')}`);
+  if (n === undefined) die('recover --vendor: --n <rotation> is required: the NEW rotation, one past the vendor\'s current one');
+  const known = f['genesis'] === undefined ? undefined : parseBytes(readFileSync(f['genesis']!)) as Genesis | (Bundle & { genesis: Genesis });
+  const S = await vendorRoot(f, words, net);
+  let out: ReturnType<typeof recoverVendor>;
+  try { out = recoverVendor({ S, n: n!, known }); } finally { S.fill(0); }
+  console.error(`recover --vendor: ${out.rotation.body.id} → ${out.did} (rotation ${n}, reason "recovery"; the pin, ${out.vendor}, is unchanged). The output holds the NEW vendor key:\n` +
+    'run `sigelo-agent adopt --rotation <file>` with SIGELO_IDENTITY=<vendor.local.json>, publish the rotation beside the genesis, reissue every live licence, then shred the file.');
+  console.log(JSON.stringify(out, null, 2));
+}
+
+async function cmdRecover(args: string[]): Promise<void> {
   const { f, words, net, int } = parse('recover', args,
-    ['genesis', 'backup', 'identity', 'net', 'restored', 'agent', 'delegate', 'keeper', 'n', 'identity-n', 'next-recovery', 'iat', 'new-keeper'], []);
+    ['genesis', 'backup', 'identity', 'net', 'restored', 'agent', 'delegate', 'keeper', 'n', 'identity-n', 'next-recovery', 'iat', 'new-keeper', 'words'], ['vendor']);
+  if (f['vendor']) return cmdRecoverVendor(f, words, net, int('n'));
+  if (f['words'] !== undefined) die('recover: --words goes with --vendor; otherwise pass - and type the root on stdin');
   if (!f['genesis']) die(`recover: --genesis <file> is required — the agent's last honest genesis (SPEC §7.1)\n\n${USAGE}`);
   const g = parseBytes(readFileSync(f['genesis']!)) as (Genesis | Bundle) & { genesis?: Genesis };
   const from = g.typ === 'genesis' ? g : g.genesis ?? die(`recover: ${f['genesis']} holds neither a genesis nor a "genesis" field`);
@@ -215,7 +297,8 @@ try {
   else if (cmd === 'restore') cmdRestore(args);
   else if (cmd === 'new') cmdNew(parse('new', args, ['net'], []).net);
   else if (cmd === 'derive') cmdDerive(args);
-  else if (cmd === 'recover') cmdRecover(args);
+  else if (cmd === 'recover') await cmdRecover(args);
+  else if (cmd === 'vendor') await cmdVendor(args);
   else if (cmd === undefined || cmd === '-h' || cmd === '--help' || cmd === 'help') console.log(USAGE);
   else die(`unknown command ${JSON.stringify(cmd)}\n\n${USAGE}`);
 } catch (e) {
