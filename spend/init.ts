@@ -29,6 +29,7 @@ import { parsePolicy, tokenHash } from './policy.js';
 import { commitmentOf, keygen } from 'sigelo';
 import { CLOCK_FLOOR, CLOCK_SKEW, IDENTITY_FILE, keeperBundle, keeperGenesis, keeperOf, daemonNet, isLoopback, isOnion, loadKeeper, loadPolicy, parseDaemons, readLog, walletRpc, type KeeperId } from './service.js';
 import { rpcVersionOk, RPC_RANGE } from './rpcrange.js';
+import { confPins, normalFingerprint, pinnable, pinOf, PINS_FILE, probeTls, probeTlsSync, readPins, type Pins, type TlsProbe } from './daemontls.js';
 import { toAtomic, toXmr } from './wallet.js';
 
 const toHex = (b: Uint8Array): string => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -324,11 +325,15 @@ export function init(argv: string[], sys: { uid?: number; chown?: Chown } = {}):
 
   // Where the keeper's wallet-rpc is: an existing one (--wallet-rpc), or one these units run.
   let rpc: string, login: string | undefined, walletUnit: string | undefined, walletConf: string | undefined;
+  // The https:// daemons' pins (daemontls.ts): hard, the operator's --daemon-ssl-fingerprint list;
+  // else auto, each certificate verified (CA store and hostname) here and pinned.
+  let pins: Pins | undefined;
+  const tlsLines: string[] = [];
   const daemonFlags = ['--daemon-proxy', '--daemon-ssl-fingerprint', '--daemon-login-file'];
   const proxy = one(f, '--daemon-proxy'), loginFile = one(f, '--daemon-login-file');
   const fingerprints = (f.v.get('--daemon-ssl-fingerprint') ?? []).flatMap((x) => x.split(',')).filter((x) => x.trim() !== '').map((x) => {
-    const h = x.trim().replace(/:/g, '').toLowerCase();
-    if (!/^[0-9a-f]{64}$/.test(h)) throw new Error(`--daemon-ssl-fingerprint ${JSON.stringify(x)} is not a SHA-256 fingerprint (64 hex characters, colons allowed)`);
+    const h = normalFingerprint(x);
+    if (h === undefined) throw new Error(`--daemon-ssl-fingerprint ${JSON.stringify(x)} is not a SHA-256 fingerprint (64 hex characters, colons allowed)`);
     return h;
   });
   const slug = slugOf(dir);
@@ -347,6 +352,25 @@ export function init(argv: string[], sys: { uid?: number; chown?: Chown } = {}):
     if (fingerprints.length > 0 && !tls) throw new Error(`--daemon-ssl-fingerprint pins an https:// daemon, and the first --daemons entry ${first} is not one`);
     if (proxy !== undefined && !/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}$/.test(proxy)) throw new Error(`--daemon-proxy ${JSON.stringify(proxy)} is not ip:port of a SOCKS proxy (Tor: 127.0.0.1:9050)`);
     if (proxy === undefined && daemons.some(isOnion)) throw new Error(`--daemons ${daemons.find(isOnion)!} is a .onion address and there is no --daemon-proxy: give the Tor SOCKS port (--daemon-proxy 127.0.0.1:9050)`);
+    if (fingerprints.length > 0) pins = { v: 1, mode: 'hard', hard: fingerprints, daemons: {} };
+    else if (daemons.some(pinnable)) {
+      // Read outside a proxy, the certificate would tell the node this host's address.
+      if (proxy !== undefined) throw new Error(`--daemons ${daemons.find(pinnable)!} is https:// and --daemon-proxy is set: init would read its certificate outside the proxy; pin it with --daemon-ssl-fingerprint`);
+      pins = { v: 1, mode: 'auto', hard: [], daemons: {} };
+      for (const d of daemons.filter(pinnable)) {
+        let p: TlsProbe;
+        try { p = probeTlsSync(d); } catch (e) {
+          if (d === first) throw new Error(`--daemons ${d}: no TLS certificate could be read (${why(e)}), and wallet-rpc needs one pinned for an https:// daemon: try when the node answers, or give --daemon-ssl-fingerprint`);
+          tlsLines.push(`note: fallback ${d} did not answer TLS (${why(e)}); the keeper verifies and pins it when it switches to it`);
+          continue;
+        }
+        if (!p.valid) throw new Error(`--daemons ${d}: certificate sha256 ${p.fingerprint} refused, ${p.why}. A node with its own (self-signed) certificate: check that fingerprint with its operator and pin it with --daemon-ssl-fingerprint`);
+        pins.daemons[d] = pinOf(p);
+        tlsLines.push(`  daemon TLS    ${d}: sha256 ${p.fingerprint}, valid until ${p.notAfter}, verified for ${p.host} (${p.issuer}); auto-pinned, re-pinned when it renews`);
+      }
+    }
+    if (pins?.mode === 'hard' && daemons.some((d) => d.startsWith('https://'))) tlsLines.push(`  daemon TLS    hard-pinned to ${fingerprints.join(', ')} (--daemon-ssl-fingerprint): never re-pinned`);
+    const autoPin = pins?.mode === 'auto' ? pins.daemons[first]?.fingerprint : undefined;
     let daemonLogin: string | undefined;
     if (loginFile !== undefined) {
       const lf = resolve(loginFile);
@@ -360,7 +384,7 @@ export function init(argv: string[], sys: { uid?: number; chown?: Chown } = {}):
     rpc = `http://127.0.0.1:${wport}/json_rpc`;
     login = `sigelo:${randomBytes(18).toString('base64url')}`;
     // Logins in a 0600 --config-file, never on argv: /proc/<pid>/cmdline is readable by every local uid.
-    walletConf = `# monero-wallet-rpc --config-file for sigelo keeper ${slug}: the logins, off the command line\nrpc-login=${login}\n${daemonLogin !== undefined ? `daemon-login=${daemonLogin}\n` : ''}`;
+    walletConf = `# monero-wallet-rpc --config-file for sigelo keeper ${slug}: the logins, off the command line${autoPin !== undefined ? '; the daemon\'s certificate pin, which the keeper rewrites when it renews' : ''}\nrpc-login=${login}\n${daemonLogin !== undefined ? `daemon-login=${daemonLogin}\n` : ''}${autoPin !== undefined ? `daemon-ssl-allowed-fingerprints=${autoPin}\n` : ''}`;
     walletUnit = `[Unit]
 Description=monero-wallet-rpc for sigelo keeper ${slug} (${net}, 127.0.0.1:${wport})
 
@@ -385,6 +409,8 @@ WantedBy=${wantedBy}
 `;
   } else {
     for (const x of ['--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin', ...daemonFlags]) if (f.v.has(x)) throw new Error(`${x} goes with --create-wallet-rpc`);
+    // Your own wallet-rpc: its fallbacks are verified and pinned when the keeper switches to them.
+    if (daemons.some(pinnable)) pins = { v: 1, mode: 'auto', hard: [], daemons: {} };
     rpc = one(f, '--wallet-rpc')!;
     try { if (new URL(rpc).pathname === '/') rpc = rpc.replace(/\/?$/, '/json_rpc'); } catch { throw new Error(`--wallet-rpc ${JSON.stringify(rpc)} is not a URL`); }
     login = one(f, '--wallet-rpc-login');
@@ -440,6 +466,7 @@ WantedBy=${wantedBy}
   secret('policy.json', JSON.stringify(policy, null, 2) + '\n');
   if (licence !== undefined) secret(LICENCE_FILE, licence);
   if (walletConf !== undefined) secret(WALLET_CONF, walletConf);
+  if (pins !== undefined) secret(PINS_FILE, JSON.stringify(pins, null, 2) + '\n');
   const cli = copyApp(join(dir, 'app'));
   const sd = join(dir, 'systemd');
   mkdirSync(sd, { mode: 0o700 });
@@ -499,6 +526,7 @@ WantedBy=timers.target
   writeFileSync(join(dir, INSTALL), JSON.stringify({
     v: 1, net, port: keeperPort, agent, account, wallet_rpc: rpc, created_wallet_rpc: walletUnit !== undefined, daemons,
     ...(walletUnit !== undefined && { daemon_proxy: proxy ?? null, daemon_ssl_fingerprints: fingerprints, daemon_login_file: loginFile !== undefined ? resolve(loginFile) : null }),
+    daemon_ssl_pin: pins?.mode ?? null,
     systemd, unit_dir: systemd ? units0 : null, units, keeper_did: id.did, app: cli, node: process.execPath, created: iso(now()),
     agent_token_file: tokenPath, layout: owner === undefined ? 'single-user' : owner.uid === agentOwner!.uid ? 'single-user (root install)' : 'two-user',
     ...(owner !== undefined && { keeper_user: owner.name }),
@@ -522,6 +550,7 @@ WantedBy=timers.target
     `  layout        ${owner === undefined ? 'single user: the agent runs as this user, which can also read policy.json (the wallet login) and edit it — the weaker layout; for an agent you do not fully trust, init as root (README "Two users")'
       : owner.uid === agentOwner!.uid ? `one user (${owner.name}) for keeper and agent — the weaker layout: give the token file's directory to the agent's own user` : `two users: keeper and wallet-rpc as ${owner.name}, the token for uid ${agentOwner!.uid} only`}`,
     `  wallet-rpc    ${rpc}${walletUnit !== undefined ? ` (unit ${names.wallet}, over your wallet file, login in policy.json and ${WALLET_CONF})` : ' (yours, already running)'}`,
+    ...tlsLines,
     `  units         ${systemd ? `installed in ${units0} (and kept in ${sd})` : `written to ${sd} only (--no-systemd): copy them to ${units0} to use them`}`,
     `  start         systemctl ${root ? '' : '--user '}enable --now ${start.join(' ')}`,
     `  check         sigelo-spend doctor --dir ${dir}`,
@@ -606,6 +635,8 @@ export async function doctor(dir: string, at = now(), timeoutMs = 5000): Promise
   const units = Array.isArray(inst['units']) ? (inst['units'] as unknown[]).map(String) : [];
   const strs = (x: unknown): string[] => (Array.isArray(x) ? x.map(String) : []);
   let listed = strs(inst['daemons']);
+  let dpins: Pins | undefined;
+  try { dpins = readPins(dir); } catch (e) { fail(`daemon pins: ${why(e)}`); }
   const loose = (x: string): boolean => process.platform !== 'win32' && (statSync(x).mode & 0o077) !== 0;
   for (const u of units) {
     let text: string;
@@ -653,6 +684,12 @@ export async function doctor(dir: string, at = now(), timeoutMs = 5000): Promise
       if (first?.startsWith('https://') === true && val('--daemon-ssl') !== 'enabled') p.push(`the daemon is ${first} and the unit lacks --daemon-ssl enabled: wallet-rpc's autodetect falls back to plaintext`);
       const pins = strs(inst['daemon_ssl_fingerprints']).sort().join(), pinned = a.flatMap((x, i) => (x === '--daemon-ssl-allowed-fingerprints' ? [a[i + 1] ?? ''] : [])).sort().join();
       if (pins !== pinned) p.push(`--daemon-ssl-allowed-fingerprints [${pinned}] are not the ones init pinned [${pins}]`);
+      // An auto pin lives in the --config-file, where the keeper rewrites it when the certificate renews.
+      if (dpins?.mode === 'auto' && first !== undefined && pinnable(first) && conf !== undefined && existsSync(conf)) {
+        const inConf = confPins(confText), want = dpins.daemons[first]?.fingerprint;
+        if (inConf.length === 0 && pinned === '') p.push(`the daemon ${first} is https:// and neither the unit nor ${conf} pins its certificate (daemon-ssl-allowed-fingerprints): wallet-rpc refuses TLS without a pin`);
+        else if (want !== undefined && !inConf.includes(want)) warn(`daemon pins: ${conf} pins ${inConf.join(', ') || 'nothing'}, ${PINS_FILE} ${want} for ${first} (a re-pin cut short? the keeper writes both)`);
+      }
       if (listed.some(isOnion) && val('--proxy') === undefined) p.push(`${listed.find(isOnion)!} is a .onion daemon and the unit has no --proxy (Tor's SOCKS port)`);
       const lf = inst['daemon_login_file'];
       if (typeof lf === 'string') {
@@ -667,6 +704,22 @@ export async function doctor(dir: string, at = now(), timeoutMs = 5000): Promise
   if (policy !== undefined) for (const d of listed) {
     const n = daemonNet(d);
     if (n !== undefined && n !== policy.net) warn(`daemon ${d}: its port is ${n}'s default and the policy is on ${policy.net} (a port heuristic: wallet-rpc reports no daemon network)`);
+  }
+  // The https:// daemons' certificates: what each presents now, against its pin (daemontls.ts).
+  if (dpins !== undefined) for (const d of listed.filter(pinnable)) {
+    const name = `daemon certificate ${d.replace(/^https:\/\//, '')}`, hard = dpins.mode === 'hard';
+    const pinned = hard ? dpins.hard : dpins.daemons[d] !== undefined ? [dpins.daemons[d]!.fingerprint] : [];
+    const how = hard ? 'hard-pinned (--daemon-ssl-fingerprint: never re-pinned)' : pinned.length === 0 ? 'auto, pinned when the keeper switches to it' : 'auto-pinned (verified against the CA store; the keeper re-pins a renewed certificate that verifies)';
+    let pr: TlsProbe;
+    try { pr = await probeTls(d, { timeoutMs }); } catch (e) { warn(`${name}: none read (${why(e)}); ${how}${pinned.length > 0 ? `, pinned ${pinned.join(', ')}` : ''}`); continue; }
+    const days = Math.floor((Date.parse(pr.notAfter) / 1000 - at) / 86400);
+    const cert = `sha256 ${pr.fingerprint}, valid until ${pr.notAfter} (${days} days)`;
+    const match = pinned.includes(pr.fingerprint);
+    if (hard && match) (days < 14 ? warn : ok)(`${name}: ${cert}, ${how}${days < 14 ? ': when the node renews it, the wallet goes offline until you pin the new one' : ''}`);
+    else if (hard) warn(`${name}: the node presents ${cert}, not the pinned ${pinned.join(', ')}: ${how}, so wallet-rpc refuses this node — check the new fingerprint with its operator and re-pin by hand`);
+    else if (!pr.valid) warn(`${name}: ${cert}, refused: ${pr.why}${match ? ' (it is the pinned one)' : pinned.length > 0 ? `; pinned ${pinned.join(', ')}` : ''} — the keeper pins no certificate that does not verify`);
+    else if (match || pinned.length === 0) ok(`${name}: ${cert}, verified for ${pr.host} (${pr.issuer}); ${how}`);
+    else warn(`${name}: renewed — the node presents ${cert}, verified for ${pr.host}, not the pinned ${pinned.join(', ')}; the keeper re-pins it when the wallet loses its daemon`);
   }
   if (inst['systemd'] === true) {
     const keeper = units.find((u) => u.startsWith('sigelo-keeper-') && !u.includes('-check'));

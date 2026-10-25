@@ -20,6 +20,8 @@ npx sigelo-kit-drill install --dir ~/sigelo-drills --kit kit.json  # writes the 
 npx sigelo-kit-grade ~/sigelo-drills/<date>/TIMELINE.md            # after each drill
 ```
 
+With `clean_host.daemon_ssl` `enabled`, bind verifies the daemon's certificate (system CAs, hostname) and pins its SHA-256 on the clean wallet-rpc; a self-signed node needs `clean_host.daemon_ssl_fingerprint`.
+
 From a clone, the same scripts run in place (`sh kit/ceremony/run.sh …`, `node kit/bind.mjs …`); they find `ts/dist/offline.js`. `kit/test/run.sh` runs the kit's own checks (it needs `age`, `age-keygen` and util-linux `script` for the ceremony part, and SKIPs that part without them).
 
 Requirements: node ≥ 22, `age` (or `rage`), a POSIX `sh` (busybox works), systemd or cron for the reminder. Linux is the tested platform; the ceremony's offline check reads `/proc/net/route` and falls back to `netstat -rn` elsewhere.

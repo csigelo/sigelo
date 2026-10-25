@@ -38,8 +38,8 @@ systemd `--user` units: the keeper (`Restart=always`, `SIGELO_DAEMONS` from `--d
 --password-file P` a unit for `monero-wallet-rpc` over your wallet file — `--rpc-bind-ip
 127.0.0.1`, a generated RPC login (kept in `policy.json`; wallet-rpc reads it from a 0600
 `<dir>/wallet-rpc.conf` named by `--config-file`, never from its command line), `--untrusted-daemon`, the first
-`--daemons` entry as its `--daemon-address` (`https://` → `--daemon-ssl enabled`, pinned with
-`--daemon-ssl-fingerprint <sha256 hex>`, repeatable or comma-separated; `--daemon-proxy ip:port`
+`--daemons` entry as its `--daemon-address` (`https://` → `--daemon-ssl enabled` and its
+certificate pinned, "Choosing a daemon"; `--daemon-proxy ip:port`
 → `--proxy`, required for `.onion`; `--daemon-login-file F` (0600) → `daemon-login` in the same
 config file). The unit runs the binary by the absolute path `init`
 resolves: `--wallet-rpc-bin <path>`, else the first `monero-wallet-rpc` on PATH; with neither,
@@ -55,7 +55,8 @@ Every choice is a flag; a refusal names the flag and writes nothing.
 `monero-wallet-rpc --wallet-dir D`: `sigelo-spend wallet-restore --keeper-package keeper-0.json
 --wallet-rpc URL --wallet-file allowance --password-file P --daemon node:38089`. It scans from
 `--restore-height N`, else `--restore-date YYYY-MM-DD`, else the package's `created` day (a day is
-its first block minus a day, asked of `--daemon`), else from genesis with a warning: hours to days.
+its first block minus a day, asked of `--daemon`; an `https://` one's certificate is checked as the
+keeper checks it, or pinned with `--daemon-ssl-fingerprint`), else from genesis with a warning: hours to days.
 `sigelo-spend restore-height` prints that height alone, for a restore by hand (`refresh {start_height}`).
 
 ### Two users
@@ -130,7 +131,9 @@ onion node with clearnet ones; the wallet-rpc unit on 127.0.0.1, its login in a 
 `--config-file` and no `--rpc-login`, `--daemon-login` or `--password` on its command line, never
 `--disable-rpc-login`, `--confirm-external-bind` or `--restricted-rpc`, `--trusted-daemon` only for
 a loopback daemon, `--daemon-ssl enabled` and the pins for an `https://` daemon, `--proxy` for a
-`.onion` one; a WARN when a daemon's port is another network's default, a heuristic), the
+`.onion` one; a WARN when a daemon's port is another network's default, a heuristic), each
+`https://` daemon's certificate (its SHA-256, notAfter, auto- or hard-pinned, a WARN when it is not
+the pinned one or does not verify), the
 clock (not before `CLOCK_FLOOR`, not behind the newest signed line), the wallet-rpc
 (`get_version` within `RPC_RANGE`, the range `canary.ts` pins: RPC 1.30–1.33; its wallet on the
 policy's network), the keeper's `/health`, and the tier. Lines `ok`, `WARN` (the host's state:
@@ -149,12 +152,22 @@ revoke them and delegate anew.
 A remote daemon learns your IP and which outputs your wallet asks about; your own node keeps both on your host.
 
 - Own or local node first: `--daemons 127.0.0.1:18081` (stagenet `127.0.0.1:38081`). Only a node on this host may be `--trusted-daemon`.
-- A trusted remote node: `--daemons https://node.example:18089 --daemon-ssl-fingerprint <sha256>`. TLS is then required, never autodetected.
+- A remote node over TLS: `--daemons https://node.example:18089`. TLS is then required, never autodetected, and the certificate pinned (below).
 - Tor: `--daemons <x>.onion:18081 --daemon-proxy 127.0.0.1:9050`. A `.onion` daemon without a proxy is refused.
 - A daemon behind RPC auth: `--daemon-login-file F` (0600).
 - Fallback: every further `--daemons` entry is one the keeper may move the wallet to. Mixing your
   node with public ones lets a fallback move it to a public one (`doctor` warns); onion and
   clearnet in one list are refused.
+
+**TLS pins.** monero-wallet-rpc 0.18 checks a daemon's certificate against no CA; it wants a pin,
+the certificate's SHA-256. So `init` verifies first, with Node's TLS: the chain against Node's CA
+store (Mozilla's roots; `NODE_EXTRA_CA_CERTS` adds one) and the hostname; then it pins that
+certificate in `wallet-rpc.conf` and `daemon-pins.json`. When the node renews it, the wallet loses
+its daemon; the keeper verifies the new certificate the same way, re-pins it (`set_daemon`, both
+files) and logs old → new fingerprint and dates. One that does not verify is refused. A fallback is
+verified and pinned when the keeper switches to it. `--daemon-ssl-fingerprint <sha256>`
+(repeatable) is a hard pin instead, for a self-signed node: never re-pinned, a mismatch an error
+naming both. `.onion` needs no pin; with `--daemon-proxy`, pin by hand. `doctor` shows each pin.
 
 Several uids on one host: mount `/proc` with `hidepid=2`, also for a wallet-rpc you run yourself;
 its logins belong in a 0600 `--config-file`, never on its command line.
@@ -511,8 +524,8 @@ daemon, its `--daemon-address`; when that node is down every pay is `wallet_offl
 `SIGELO_DAEMONS` in the keeper's environment to an ordered list — commas or whitespace,
 each `host:port`, `[ipv6]:port`, or either with `http://`/`https://`, the wallet-rpc's own
 address first — and `serve` moves the wallet-rpc along it with `set_daemon {address, trusted:
-false}` (plus `ssl_support: "enabled"` for an `https://` entry: TLS required, checked against the
-system CAs; a `--daemon-ssl-fingerprint` pin holds only until the first switch) when either:
+false}` (plus `ssl_support: "enabled"` and `ssl_allowed_fingerprints` for an `https://` entry: TLS
+required, its certificate verified and pinned first, "TLS pins") when either:
 
 - `DAEMON_FAILS` (3) builds in a row (`transfer`, or a revoke's `sweep_all`) were refused "no
   connection to daemon" — a build that worked resets the count; or
@@ -528,7 +541,9 @@ line; a failed `set_daemon` is a warning too, and the address after it is tried 
 Fail closed is unchanged: until the wallet has synced from the new daemon every pay is still
 `wallet_offline` (TRY LATER). A malformed or repeated entry stops `serve` at start (`parseDaemons`
 in `service.ts`), and so does a list mixing `.onion` with other addresses; fewer than two entries
-means no fallback and no extra wallet call. `set_daemon` carries no `proxy`: wallet-rpc refuses
+means no fallback and no extra wallet call (one `https://` entry still gets the re-pin check).
+Before it moves on from an `https://` daemon the keeper reads its certificate: renewed and
+verified, it is re-pinned in place; a hard pin or one that does not verify is an error. `set_daemon` carries no `proxy`: wallet-rpc refuses
 a per-daemon proxy when started with `--proxy`, and that the process-level `--proxy` still holds
 after `set_daemon` is not verified against wallet-rpc 0.18.x — a Tor-only list is all `.onion`,
 so a lost proxy fails closed rather than reaching a node in the clear. Never
@@ -853,7 +868,11 @@ balance/receive/history pinned to the caller's account, `/bind` at the caller's 
 spend mode for account 1, view mode at (0,0) for a root on account 0, a delegate's too —
 refusing a foreign DID, a foreign or another account's address, the base address above account
 0, an unregistered agent, an over-long window and a wrong-mode signature, and its accepted
-`sig_addr` verifying `proven`), and `monero-wallet-rpc` interop against a wallet started `--offline`. Against a live
+`sig_addr` verifying `proven`), and `monero-wallet-rpc` interop against a wallet started `--offline`,
+and one against a mock TLS daemon: the pin carried by the config file and by `set_daemon`
+`ssl_allowed_fingerprints` (hex), a renewed certificate refused under the old pin, and `ssl_support:
+"enabled"` without a pin refused. The keeper's re-pin (a renewed certificate that verifies → re-pinned,
+one that does not → refused naming both, a hard pin never re-pinned) runs on the mock wallet. Against a live
 stagenet wallet it checks that `/health` returns a height and makes a `--dry-run` `/pay` from
 the account holding the most unlocked funds: a fee and no receipt when spendable (2026-09-23:
 fee 30480000 for 1e9), otherwise a SKIP naming the balance; and G3 read-only against it:
@@ -916,7 +935,9 @@ registered keepers, the D1 placeholder refusing a test-issued licence, and the t
 and key in no shipped file; `init` and `doctor` run as the CLI on the mock wallet — the policy,
 modes, token, keeper DID, the snippet byte for byte against this README and MONERO.md, the units
 (the frozen copy, `SIGELO_DAEMONS`, the wallet-rpc unit's loopback, its login in the 0600
-config file and not on argv, untrusted daemon, `--daemon-ssl`/pins, `--proxy`, `daemon-login`,
+config file and not on argv, untrusted daemon, `--daemon-ssl`/pins (auto: a test CA's certificate
+verified and pinned in the config file; self-signed, unknown CA, another host's or no answer refused;
+hard pins on argv), `--proxy`, `daemon-login`,
 `--notify`), `doctor` failing a login on argv, a 0644 config or login file, a remote
 `--trusted-daemon`, an `https://` daemon without TLS, a `.onion` one without `--proxy`, and
 warning on a mixed list or a port of another network, every refusal (non-empty directory, a second keeper, missing or conflicting

@@ -232,6 +232,19 @@ An incident on it: `SIGELO_SOAK_DIR=… SIGELO_FREEZE_KEEPER_UNIT=sigelo-keeper-
 SIGELO_FREEZE_WALLET_UNIT=sigelo-wallet-rpc-soak-019.service sh freeze.sh`. Updating its code:
 the same `SIGELO_SOAK_NAME=… sh setup.sh`, then restart its keeper.
 
+#### Mainnet (`setup.sh --mainnet`)
+
+REAL coins; a named soak only. No `--stagenet`, net `mainnet` in `policy.json` and `install.json`,
+the wallet scanned from today (`restore-height --restore-date`, never genesis). Daemons default to
+public mainnet nodes over `https://`. Their pin is automatic, as `sigelo-spend init` sets it
+(`pin.mjs`): the first daemon's certificate verified by Node's CA store and hostname, its SHA-256
+in `keeper/wallet-rpc.conf` and `keeper/daemon-pins.json`. When the node renews its certificate the
+keeper verifies the new one and re-pins it (`set_daemon` and both files, one warning: old → new);
+a fallback is verified and pinned when switched to. `SIGELO_SOAK_DAEMON_PINS=<sha256,…>` sets hard
+pins instead (wallet-rpc argv; a self-signed node): never re-pinned, so a renewal there means a
+re-run with the new pin. A re-run of `setup.sh` re-verifies the auto pin. `doctor` shows each
+daemon's fingerprint, expiry and pin.
+
 ## Healthy
 
 **Day 0** is `started` in `soak-stats.json`, written by the agent's first tick in that soak

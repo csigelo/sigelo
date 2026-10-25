@@ -113,7 +113,7 @@ for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recov
 done
 # The installer ships inside sigelo-spend (it is the same package: `sigelo-spend init`), the tests do not.
 listing=$(tar -tzf "$out/sigelo-spend-$v.tgz")
-for f in cli init licence rpcrange service; do
+for f in cli daemontls init licence rpcrange service; do
 	printf '%s\n' "$listing" | grep -qx "package/dist/$f.js" || { echo "build.sh: sigelo-spend-$v.tgz has no dist/$f.js" >&2; exit 1; }
 done
 if printf '%s\n' "$listing" | grep -q 'package/dist/test\.'; then echo "build.sh: sigelo-spend-$v.tgz carries the tests (and the test vendor key)" >&2; exit 1; fi

@@ -22,6 +22,8 @@ declare const process: {
   execPath: string;
   /** init.ts: run as root (the two-user layout) or not. Absent on Windows. */
   getuid?: () => number;
+  /** daemontls.ts: its probe child answers one JSON line. */
+  stdout: { write(s: string): boolean };
 };
 declare function setTimeout(fn: () => void, ms: number): { unref(): unknown };
 declare function clearTimeout(t: unknown): void;
@@ -40,6 +42,8 @@ declare class TextDecoder {
   constructor(label?: string, opts?: { fatal?: boolean; ignoreBOM?: boolean });
   decode(b: Uint8Array): string;
 }
+/** test.ts: a PEM body. */
+declare function btoa(s: string): string;
 declare const AbortSignal: { timeout(ms: number): unknown };
 declare function fetch(url: string, init?: {
   method?: string; headers?: Record<string, string>; body?: string | Uint8Array; signal?: unknown;
@@ -52,11 +56,15 @@ declare function fetch(url: string, init?: {
 
 declare module 'node:crypto' {
   export function createHash(algorithm: string): {
-    update(data: string, encoding?: string): { digest(encoding: 'hex'): string };
+    update(data: string | Uint8Array, encoding?: string): { digest(encoding: 'hex'): string };
     digest(encoding: 'hex'): string;
   };
   /** A Buffer, which is a Uint8Array; `toString('hex')` is the only extra used here. */
   export function randomBytes(n: number): Uint8Array & { toString(encoding: 'hex' | 'base64url'): string };
+  /** test.ts: the mock daemons' certificates (a CA and leaves, ECDSA P-256, no openssl). */
+  export interface KeyObject { export(opts: { type: 'spki'; format: 'der' }): Uint8Array; export(opts: { type: 'pkcs8'; format: 'pem' }): string }
+  export function generateKeyPairSync(type: 'ec', opts: { namedCurve: 'prime256v1' }): { privateKey: KeyObject; publicKey: KeyObject };
+  export function sign(algorithm: 'sha256', data: Uint8Array, key: KeyObject): Uint8Array;
 }
 declare module 'node:fs' {
   export function readFileSync(path: string, encoding: 'utf-8'): string;
@@ -162,6 +170,33 @@ declare module 'node:net' {
     on(event: 'error', cb: (err: Error) => void): void;
     on(event: 'close', cb: () => void): void;
   };
+}
+declare module 'node:tls' {
+  /** daemontls.ts: what a daemon's TLS presented. `fingerprint256` is SHA-256 of `raw`, as AA:BB:…. */
+  export interface PeerCertificate { raw: Uint8Array; fingerprint256: string; valid_from: string; valid_to: string; subject: unknown; issuer: unknown }
+  export interface TLSSocket {
+    authorized: boolean; authorizationError: unknown;
+    getPeerCertificate(): PeerCertificate | null;
+    destroy(err?: Error): void;
+    once(event: 'secureConnect', cb: () => void): void;
+    once(event: 'error', cb: (err: Error) => void): void;
+  }
+  export function connect(opts: { host: string; port: number; servername?: string; rejectUnauthorized: boolean; ca?: string[] }): TLSSocket;
+  /** Node's CA store (Mozilla's roots as Node ships them). */
+  export const rootCertificates: readonly string[];
+  /** undefined when the certificate names the host, else why not. */
+  export function checkServerIdentity(host: string, cert: PeerCertificate): Error | undefined;
+}
+declare module 'node:https' {
+  import type { ClientRequest, IncomingMessage, Server, ServerResponse } from 'node:http';
+  import type { TLSSocket } from 'node:tls';
+  /** test.ts: a mock daemon over TLS; `setSecureContext` is a certificate renewal. */
+  export function createServer(opts: { cert: string; key: string }, handler: (req: IncomingMessage, res: ServerResponse) => void): Server & {
+    setSecureContext(opts: { cert: string; key: string }): void;
+  };
+  /** restore.ts: a daemon's JSON-RPC over TLS, its certificate checked by daemontls.ts. */
+  export function request(url: string, opts: { method: string; headers: Record<string, string>; rejectUnauthorized: boolean; ca?: string[]; servername?: string; agent: false },
+    cb: (res: IncomingMessage & { statusCode?: number; socket: TLSSocket }) => void): ClientRequest & { on(event: 'socket', cb: (s: TLSSocket) => void): void };
 }
 declare module 'node:url' {
   export function fileURLToPath(url: string): string;

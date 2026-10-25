@@ -37,6 +37,7 @@ const URL_ = `http://127.0.0.1:${process.env.SIGELO_SOAK_PORT ?? '38200'}`;
 // keeper's own client (spend/dist/service.js walletRpc).
 const { walletRpc: keeperWalletRpc } = await import(pathToFileURL(join(SPEND, 'dist', 'service.js')).href);
 const WALLET = (() => { try { return JSON.parse(readFileSync(POLICY, 'utf-8')).wallet ?? {}; } catch { return {}; } })();
+const NET = (() => { try { return JSON.parse(readFileSync(POLICY, 'utf-8')).net; } catch { return 'stagenet'; } })();
 const WALLET_RPC = process.env.SIGELO_SOAK_WALLET_RPC ?? WALLET.rpc ?? 'http://127.0.0.1:38083/json_rpc';
 const LOG = join(DATA, 'soak.log'), STATS = join(DATA, 'soak-stats.json'), STATE = join(DATA, 'state.json');
 const RATE_GAP_MS = Number(process.env.SOAK_RATE_GAP_MS ?? 62_000); // rate_per_minute 2: space root spends
@@ -129,7 +130,7 @@ async function approve(ref) {
   const body = JSON.parse(line);
   const id = JSON.parse(readFileSync(join(DATA, 'keys', 'approver.json'), 'utf-8'));
   const kd = await keeperDid();
-  const sane = body.typ === 'spend-approval' && body.net === 'stagenet' && body.keeper === kd && body.amount === CAROL_ATOMIC && body.ref === ref;
+  const sane = body.typ === 'spend-approval' && body.net === NET && body.keeper === kd && body.amount === CAROL_ATOMIC && body.ref === ref;
   if (!sane) { judge('approver: check body', 'approver', 'insane', null, oneLine(line), { ok: ['sane'] }, 0); return false; }
   const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: id.genesis, rotations: [], bindings: [], attestations: [], issuers: [] };
   if (verify(bundle, now()).did !== id.did) throw new Error('approver bundle does not verify');

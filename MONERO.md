@@ -460,7 +460,9 @@ within a minute, and only from the lane after an answer, so a switch never delay
 one. A switch is a warning on stderr, never a log line: it signs nothing and spends nothing.
 Fail closed is unchanged — while the wallet has no daemon every pay is `wallet_offline`, a TRY
 LATER. It does not help a host with no network at all (soak incident #4); that is the host's
-to notice (spend/soak `check.mjs --notify`). Which daemons to list, TLS, Tor and what a node
+to notice (spend/soak `check.mjs --notify`). An `https://` daemon is pinned (wallet-rpc checks no
+CA): its certificate verified first, a renewed one that verifies re-pinned in place instead of a
+switch. Which daemons to list, TLS, Tor and what a node
 learns: spend/README.md "Choosing a daemon".
 
 **The spend-approval** (G6, `spend/approval.ts`). One closed object, signed by an approver

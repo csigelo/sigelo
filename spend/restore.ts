@@ -3,9 +3,9 @@
  * The height a wallet scans from (MONERO.md §6 "Restore height").
  *
  *   sigelo-spend wallet-restore --keeper-package keeper-<j>.json --wallet-rpc URL [--wallet-rpc-login u:p]
- *                               --wallet-file NAME --password-file F [--daemon URL]
+ *                               --wallet-file NAME --password-file F [--daemon URL [--daemon-ssl-fingerprint HEX]]
  *                               [--restore-height N | --restore-date YYYY-MM-DD]
- *   sigelo-spend restore-height [--daemon URL] [--restore-height N | --restore-date YYYY-MM-DD | --keeper-package F]
+ *   sigelo-spend restore-height [--daemon URL [--daemon-ssl-fingerprint HEX]] [--restore-height N | --restore-date YYYY-MM-DD | --keeper-package F]
  *
  * A wallet restored from height 0 scans the whole chain: hours to days on a small machine. The
  * height is, in this order: `--restore-height`; else the first block of `--restore-date`'s day
@@ -25,6 +25,7 @@ import { resolve } from 'node:path';
 import { decodeAddress } from 'sigelo/dist/monero.js';
 import { flags, one } from './init.js';
 import { walletRpc } from './service.js';
+import { httpsPost, normalFingerprint, type TlsTrust } from './daemontls.js';
 import type { Policy } from './policy.js';
 
 const DAY_S = 86400;
@@ -50,14 +51,24 @@ export function parseHeight(s: string): number {
   return n;
 }
 
-/** A daemon's JSON-RPC: host:port, http://… or https://…; `/json_rpc` when no path is given. */
-export function daemonCall(daemon: string, timeoutMs = 20_000): DaemonCall {
+/**
+ * A daemon's JSON-RPC: host:port, http://… or https://…; `/json_rpc` when no path is given. An
+ * https:// daemon's certificate is checked as the keeper checks it (daemontls.ts): it verifies
+ * against the CA store for that hostname, or, with `pins` (`--daemon-ssl-fingerprint`), it is
+ * one of them.
+ */
+export function daemonCall(daemon: string, timeoutMs = 20_000, trust: TlsTrust & { pins?: string[] } = {}): DaemonCall {
   let url: URL;
   try { url = new URL(/^https?:\/\//.test(daemon) ? daemon : `http://${daemon}`); } catch { throw new Error(`--daemon ${JSON.stringify(daemon)} is not host:port or a URL`); }
   if (url.pathname === '/') url.pathname = '/json_rpc';
+  const tls = url.protocol === 'https:';
+  if ((trust.pins ?? []).length > 0 && !tls) throw new Error(`--daemon-ssl-fingerprint pins an https:// daemon, and --daemon ${daemon} is not one`);
   return async (method, params) => {
-    const r = await fetch(url.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: '0', method, params }), signal: AbortSignal.timeout(timeoutMs) });
-    const j = await r.json() as { result?: Record<string, unknown>; error?: { message?: string } };
+    const body = JSON.stringify({ jsonrpc: '2.0', id: '0', method, params });
+    const r = tls ? await httpsPost(url.toString(), body, { ...trust, timeoutMs })
+      : await fetch(url.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(timeoutMs) }).then(async (x) => ({ status: x.status, text: await x.text() }));
+    let j: { result?: Record<string, unknown>; error?: { message?: string } };
+    try { j = JSON.parse(r.text) as typeof j; } catch { throw new Error(`${method}: the reply is not JSON (HTTP ${r.status})`); }
     if (j?.error !== undefined) throw new Error(`${method}: ${String(j.error.message)}`);
     if (typeof j?.result !== 'object' || j.result === null) throw new Error(`${method}: no result (HTTP ${r.status})`);
     return j.result;
@@ -118,19 +129,26 @@ function packageOf(file: string): { created?: string; wallet?: { spend_key: stri
 }
 
 /** `sigelo-spend wallet-restore | restore-height` → exit code. `call` replaces the daemon (tests). */
-export async function restoreCli(argv: string[], io: { out?: (s: string) => void; err?: (s: string) => void; call?: DaemonCall } = {}): Promise<number> {
+export async function restoreCli(argv: string[], io: { out?: (s: string) => void; err?: (s: string) => void; call?: DaemonCall; ca?: string[] } = {}): Promise<number> {
   const out = io.out ?? ((s) => { console.log(s); }), err = io.err ?? ((s) => { console.error(s); });
   const [cmd, ...rest] = argv;
-  const common = ['--daemon', '--restore-height', '--restore-date', '--keeper-package'];
+  const common = ['--daemon', '--daemon-ssl-fingerprint', '--restore-height', '--restore-date', '--keeper-package'];
   const f = cmd === 'wallet-restore' ? flags(rest, [...common, '--wallet-rpc', '--wallet-rpc-login', '--wallet-file', '--password-file'], []) : flags(rest, common, []);
   if (f.pos.length > 0) throw new Error(`${cmd} takes flags only, not ${JSON.stringify(f.pos[0])}`);
   const pkgFile = one(f, '--keeper-package'), daemon = one(f, '--daemon');
+  const pins = (f.v.get('--daemon-ssl-fingerprint') ?? []).flatMap((x) => x.split(',')).filter((x) => x.trim() !== '').map((x) => {
+    const h = normalFingerprint(x);
+    if (h === undefined) throw new Error(`--daemon-ssl-fingerprint ${JSON.stringify(x)} is not a SHA-256 fingerprint (64 hex characters, colons allowed)`);
+    return h;
+  });
+  if (pins.length > 0 && daemon === undefined) throw new Error('--daemon-ssl-fingerprint pins the --daemon, and there is none');
+  const call = (): DaemonCall | undefined => io.call ?? (daemon !== undefined ? daemonCall(daemon, 20_000, { pins, ...(io.ca !== undefined && { ca: io.ca }) }) : undefined);
   const pkg = pkgFile !== undefined ? packageOf(pkgFile) : undefined;
   const ask: RestoreAsk = { ...(one(f, '--restore-height') !== undefined && { height: one(f, '--restore-height') }), ...(one(f, '--restore-date') !== undefined && { date: one(f, '--restore-date') }), ...(pkg?.created !== undefined && { created: pkg.created }) };
   if (ask.date !== undefined) parseDay(ask.date, '--restore-date');   // a typo stops here, before the daemon or the wallet
   if (ask.height !== undefined) parseHeight(ask.height);
   if (cmd === 'restore-height') {
-    const r = await restoreHeight(ask, io.call ?? (daemon !== undefined ? daemonCall(daemon) : undefined));
+    const r = await restoreHeight(ask, call());
     if (r.warning !== undefined) err(r.warning);
     out(String(r.height));
     return 0;
@@ -145,7 +163,7 @@ export async function restoreCli(argv: string[], io: { out?: (s: string) => void
   let rpc = rpc0;
   try { if (new URL(rpc).pathname === '/') rpc = rpc.replace(/\/?$/, '/json_rpc'); } catch { throw new Error(`--wallet-rpc ${JSON.stringify(rpc0)} is not a URL`); }
   const password = readFileSync(resolve(pwFile), 'utf-8').replace(/\r?\n$/, '');
-  const r = await restoreHeight(ask, io.call ?? (daemon !== undefined ? daemonCall(daemon) : undefined));
+  const r = await restoreHeight(ask, call());
   if (r.warning !== undefined) err(r.warning);
   const login = one(f, '--wallet-rpc-login');
   const policy = { wallet: { rpc, ...(login !== undefined && { login }) } } as Policy;

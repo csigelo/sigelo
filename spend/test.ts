@@ -16,7 +16,8 @@
  *      routes and its view-mode `sign` included; never a relay, never create_address.
  *   4. monero-wallet-rpc --offline agrees that our binding signature is valid (SKIP if absent).
  */
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, sign as cryptoSign, type KeyObject } from 'node:crypto';
+import { createServer as httpsServer } from 'node:https';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
@@ -33,6 +34,7 @@ import { agentOf, evaluate, fingerprint, invoiceKey, parsePolicy, sameHash, toke
 import { BUILD_TIMEOUT_MS, CLOCK_FLOOR, CLOCK_SKEW, DAEMON_FAILS, DAEMON_STALE_MS, DAEMON_SWITCH_MS, codeOf, keeperGenesis, keeperIdentity, loadKeeper, loadPolicy, loadRoot, parseDaemons, priorOf, readLog, serve as serveBare, spentOf, startOf, WALLET_TIMEOUT_MS, walletRpc, type Receipt, type ServeOptions } from './service.js';
 import { checkLicence, DEV_VENDOR_DID, describe as describeLicence, LICENCE_SKEW, licenceRefusal, readLicence, rememberVendorChain, TERM_MAX_DAYS, vendorDid, type KeeperEntry } from './licence.js';
 import { init as initKeeper, passwdOf, SNIPPET, type UserLookup } from './init.js';
+import { pinnable, probeTls, readPins, type Pins } from './daemontls.js';
 import { daemonCall, dayOf, GENESIS_WARNING, heightAt, parseDay, parseHeight, restoreCli, restoreHeight, type DaemonCall } from './restore.js';
 import { explain, LINES, run, toAtomic, toXmr, type Outcome } from './wallet.js';
 import { asTreeEntry, covered, DELEGATE_KDF, delegateSeed, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry } from './tree.js';
@@ -436,6 +438,66 @@ function mockWallet(mode: WalletMode = {}): Promise<MockWallet> {
 }
 const called = (w: MockWallet, method: string): Record<string, unknown>[] => w.calls.filter((c) => c['method'] === method);
 
+// ---------------------------------------------------------------- mock https daemons (daemontls.ts)
+//
+// X.509 by hand (ECDSA P-256, no openssl, no key kept in the repository): a test CA, leaves it
+// signs for a host name, and self-signed ones. `fp` is the certificate's SHA-256: wallet-rpc's pin.
+const derOf = (tag: number, ...parts: Uint8Array[]): Uint8Array => {
+  const n = parts.reduce((a, p) => a + p.length, 0), len = n < 128 ? [n] : n < 256 ? [0x81, n] : [0x82, n >> 8, n & 255];
+  const out = new Uint8Array(1 + len.length + n);
+  out[0] = tag; out.set(len, 1);
+  let o = 1 + len.length;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+};
+const by = (...x: number[]): Uint8Array => Uint8Array.from(x);
+const utf = (x: string): Uint8Array => new TextEncoder().encode(x);
+const ECDSA_SHA256 = derOf(0x30, derOf(0x06, by(0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02)));
+const x509Name = (cn: string): Uint8Array => derOf(0x30, derOf(0x31, derOf(0x30, derOf(0x06, by(0x55, 0x04, 0x03)), derOf(0x0c, utf(cn)))));
+const x509Time = (ms: number): Uint8Array => derOf(0x17, utf(new Date(ms).toISOString().replace(/[-:T]/g, '').slice(2, 14) + 'Z'));
+const pemOf = (label: string, der: Uint8Array): string => {
+  let bin = '';
+  for (const x of der) bin += String.fromCharCode(x);
+  return `-----BEGIN ${label}-----\n${btoa(bin).replace(/.{64}/g, '$&\n').replace(/\n?$/, '\n')}-----END ${label}-----\n`;
+};
+interface TestCert { cert: string; key: string; fp: string; notAfter: string; signer: { cn: string; key: KeyObject } }
+/** A CA (`ca`), a leaf it signs for `dns` (default [cn]) (`by`), or else a self-signed leaf; valid from a day ago for `days`. */
+function testCert(cn: string, o: { ca?: boolean; dns?: string[]; by?: TestCert; days?: number } = {}): TestCert {
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const t = Math.floor(Date.now() / 1000) * 1000, day = 86_400_000, until = t + (o.days ?? 90) * day;
+  const ext = o.ca === true ? derOf(0x30, derOf(0x06, by(0x55, 0x1d, 0x13)), derOf(0x01, by(0xff)), derOf(0x04, derOf(0x30, derOf(0x01, by(0xff)))))
+    : derOf(0x30, derOf(0x06, by(0x55, 0x1d, 0x11)), derOf(0x04, derOf(0x30, ...(o.dns ?? [cn]).map((d) => derOf(0x82, utf(d))))));
+  const issuer = o.by?.signer ?? { cn, key: privateKey };
+  const tbs = derOf(0x30, derOf(0xa0, derOf(0x02, by(2))), derOf(0x02, by(0x01, ...randomBytes(8))), ECDSA_SHA256, x509Name(issuer.cn),
+    derOf(0x30, x509Time(t - day), x509Time(until)), x509Name(cn), publicKey.export({ type: 'spki', format: 'der' }), derOf(0xa3, derOf(0x30, ext)));
+  const der = derOf(0x30, tbs, ECDSA_SHA256, derOf(0x03, by(0), cryptoSign('sha256', tbs, issuer.key)));
+  return { cert: pemOf('CERTIFICATE', der), key: privateKey.export({ type: 'pkcs8', format: 'pem' }), fp: createHash('sha256').update(der).digest('hex'),
+    notAfter: new Date(until).toISOString().replace('.000Z', 'Z'), signer: { cn, key: privateKey } };
+}
+/** A daemon's JSON-RPC over TLS on localhost; `present` swaps its certificate and drops open connections (a renewal); `hits` counts requests read. */
+interface TlsDaemon { url: string; port: number; hits(): number; present(c: TestCert): void; close(): Promise<void> }
+async function tlsDaemon(c: TestCert, answer: (method: string, params: Record<string, unknown>) => Promise<unknown> = async () => ({ status: 'OK', height: 100 })): Promise<TlsDaemon> {
+  let hits = 0;
+  const srv = httpsServer({ cert: c.cert, key: c.key }, (rq, rs) => {
+    let b = '';
+    rq.setEncoding('utf8');
+    rq.on('data', (x) => { b += String(x); });
+    rq.on('end', () => {
+      hits++;
+      // wallet-rpc also asks for binary (.bin) routes: no JSON, an empty answer.
+      let rpc: { method: string; params: Record<string, unknown> };
+      try { rpc = JSON.parse(b === '' ? '{}' : b) as typeof rpc; } catch { rs.writeHead(404); rs.end(); return; }
+      const { method, params } = rpc;
+      answer(method, params ?? {}).then((result) => { rs.writeHead(200, { 'Content-Type': 'application/json' }); rs.end(JSON.stringify({ jsonrpc: '2.0', id: '0', result })); },
+        () => { rs.writeHead(200, { 'Content-Type': 'application/json' }); rs.end(JSON.stringify({ jsonrpc: '2.0', id: '0', error: { code: -1, message: 'no' } })); });
+    });
+  });
+  await new Promise<void>((r) => { srv.listen(0, '127.0.0.1', () => { r(); }); });
+  const port = (srv.address() as { port: number }).port;
+  return { url: `https://localhost:${port}`, port, hits: () => hits, present: (x) => { srv.setSecureContext({ cert: x.cert, key: x.key }); srv.closeAllConnections(); },
+    close: () => new Promise<void>((r) => { srv.closeAllConnections(); srv.close(() => { r(); }); }) };
+}
+
 const wallet = await mockWallet();
 writePolicy({ wallet: { rpc: `http://127.0.0.1:${wallet.port}/json_rpc` } });
 const svc = await serve({ policyPath, port: 0 });
@@ -535,11 +597,12 @@ await wallet.close();
 // the mock wallet would actually have broadcast.
 
 type Api = { status: number; body: Record<string, unknown> };
-async function fresh(over: Raw, mode: WalletMode = {}, opts: { dryRun?: boolean; walletTimeoutMs?: number; buildTimeoutMs?: number; bodyTimeoutMs?: number; clock?: () => number; daemons?: string[]; daemonClock?: () => number; laneMax?: number } = {}) {
+async function fresh(over: Raw, mode: WalletMode = {}, { pre, ...opts }: { dryRun?: boolean; walletTimeoutMs?: number; buildTimeoutMs?: number; bodyTimeoutMs?: number; clock?: () => number; daemons?: string[]; daemonClock?: () => number; laneMax?: number; daemonCa?: string[]; pre?: (dir: string) => void } = {}) {
   const d = mkdtempSync(join(tmpdir(), 'sigelo-spend-2p-'));
   const w = await mockWallet(mode);
   const pp = join(d, 'policy.json');
   writeFileSync(pp, JSON.stringify(legacyPolicy({ wallet: { rpc: `http://127.0.0.1:${w.port}/json_rpc` }, ...over }), null, 2), { mode: 0o600 });
+  pre?.(d);
   let s = await serve({ policyPath: pp, port: 0, ...opts });
   const pay = (body: unknown): Promise<Api> => api(s.port, '/pay', { method: 'POST', token: TOKEN, body });
   const payRaw = async (raw: string): Promise<Api> => {
@@ -2394,16 +2457,96 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     ok('daemons: a plain host:port fallback entry sets no ssl_support (wallet-rpc autodetects)', called(f.w, 'set_daemon').every((c) => !('ssl_support' in (c['params'] as Record<string, unknown>))));
     await f.done();
 
-    // An https:// entry keeps its meaning: set_daemon requires TLS.
-    t += DAEMON_SWITCH_MS;
-    warned.length = 0;
-    const HS = 'https://node3.example:38089';
-    const tl = await fresh(small(), { transferError: 'no connection to daemon' }, { daemons: [A, HS], daemonClock: () => t });
-    for (let i = 0; i < DAEMON_FAILS; i++) await drained(tl, body);
-    const tp = called(tl.w, 'set_daemon').map((c) => c['params'] as Record<string, unknown>);
-    ok('daemons: an https:// fallback entry → set_daemon {address, trusted: false, ssl_support: "enabled"}, no proxy', tp.length === 1 && tp[0]!['address'] === HS && tp[0]!['trusted'] === false &&
-      tp[0]!['ssl_support'] === 'enabled' && !('proxy' in tp[0]!), JSON.stringify(tp));
-    await tl.done();
+    // An https:// entry keeps its meaning: set_daemon requires TLS, and pins the certificate it
+    // verified (daemontls.ts) — wallet-rpc 0.18 refuses ssl_support "enabled" without a pin.
+    const ca = testCert('sigelo test CA', { ca: true });
+    const leafA = testCert('localhost', { by: ca }), leafB = testCert('localhost', { by: ca }), self = testCert('localhost');
+    const td = await tlsDaemon(leafA), HS = td.url;
+    const errs: string[] = [], err0 = console.error;
+    // The keeper's own errors are collected; a FAIL line from `ok` still goes out.
+    console.error = (...a: unknown[]): void => { const x = a.map(String).join(' '); if (x.startsWith('sigelo-spend:')) errs.push(x); else err0(...a); };
+    try {
+      t += DAEMON_SWITCH_MS;
+      warned.length = 0;
+      const tl = await fresh(small(), { transferError: 'no connection to daemon' }, { daemons: [A, HS], daemonClock: () => t, daemonCa: [ca.cert] });
+      for (let i = 0; i < DAEMON_FAILS; i++) await drained(tl, body);
+      const tp = called(tl.w, 'set_daemon').map((c) => c['params'] as Record<string, unknown>);
+      const tpins = JSON.parse(readFileSync(join(tl.dir, 'daemon-pins.json'), 'utf-8')) as Pins;
+      ok('daemons: an https:// fallback entry → set_daemon {address, trusted: false, ssl_support: "enabled", ssl_allowed_fingerprints: [its verified certificate]}, no proxy',
+        tp.length === 1 && tp[0]!['address'] === HS && tp[0]!['trusted'] === false && tp[0]!['ssl_support'] === 'enabled' &&
+        JSON.stringify(tp[0]!['ssl_allowed_fingerprints']) === JSON.stringify([leafA.fp]) && !('proxy' in tp[0]!), JSON.stringify(tp));
+      ok('daemons: …and the pin is kept in daemon-pins.json (auto, its notAfter), 0600', tpins.mode === 'auto' && tpins.daemons[HS]?.fingerprint === leafA.fp && tpins.daemons[HS]?.not_after === leafA.notAfter &&
+        (WIN || (statSync(join(tl.dir, 'daemon-pins.json')).mode & 0o777) === 0o600), JSON.stringify(tpins));
+      await tl.done();
+
+      // A fallback whose certificate does not verify (self-signed; or a CA the store lacks) is not switched to.
+      t += DAEMON_SWITCH_MS;
+      [warned.length, errs.length] = [0, 0];
+      td.present(self);
+      const ts = await fresh(small(), { transferError: 'no connection to daemon' }, { daemons: [A, HS], daemonClock: () => t, daemonCa: [ca.cert] });
+      for (let i = 0; i < DAEMON_FAILS; i++) await drained(ts, body);
+      ok('daemons: an https:// fallback presenting a self-signed certificate → no set_daemon, an error naming its fingerprint, the next try a minute later',
+        called(ts.w, 'set_daemon').length === 0 && errs.length === 1 && errs[0]!.includes(`${HS} (2/2) not switched to: its certificate sha256 ${self.fp}`) && errs[0]!.includes('not verified by the CA store'), errs.join(' | '));
+      await ts.done();
+
+      // One https:// daemon, auto-pinned in daemon-pins.json and the wallet-rpc's --config-file.
+      const pinned = (d: string, fp: string, m: 'auto' | 'hard' = 'auto'): void => {
+        writeFileSync(join(d, 'daemon-pins.json'), JSON.stringify(m === 'hard' ? { v: 1, mode: 'hard', hard: [fp], daemons: {} }
+          : { v: 1, mode: 'auto', hard: [], daemons: { [HS]: { fingerprint: fp, not_after: '2027-01-21T23:59:59Z', pinned_at: '2026-10-25T00:00:00Z' } } }), { mode: 0o600 });
+        writeFileSync(join(d, 'wallet-rpc.conf'), `# test\nrpc-login=sigelo:x\ndaemon-ssl-allowed-fingerprints=${fp}\n`, { mode: 0o600 });
+      };
+      t += DAEMON_SWITCH_MS;
+      [warned.length, errs.length] = [0, 0];
+      td.present(leafA);
+      const notes: string[] = [];
+      console.warn = (...a: unknown[]): void => { const x = a.map(String).join(' '); if (x.includes('daemon')) notes.push(x); };
+      const one = await fresh(small(), { transferError: 'no connection to daemon' }, { daemons: [HS], daemonClock: () => t, daemonCa: [ca.cert], pre: (d) => { pinned(d, leafA.fp); } });
+      for (let i = 0; i < DAEMON_FAILS; i++) await drained(one, body);
+      ok('daemons: one https:// daemon still presenting the pinned certificate → nothing re-pinned, nothing switched, nothing said',
+        called(one.w, 'set_daemon').length === 0 && errs.length === 0 && notes.length === 0, [...errs, ...notes].join(' | '));
+      // The node renews its certificate: wallet-rpc answers "no connection to daemon" like a node that is down.
+      td.present(leafB);
+      t += DAEMON_SWITCH_MS;
+      const offline: string[] = [];
+      for (let i = 0; i < DAEMON_FAILS; i++) offline.push(String((await drained(one, body)).body['code']));
+      const rp = called(one.w, 'set_daemon').map((c) => c['params'] as Record<string, unknown>);
+      const after = JSON.parse(readFileSync(join(one.dir, 'daemon-pins.json'), 'utf-8')) as Pins, conf = readFileSync(join(one.dir, 'wallet-rpc.conf'), 'utf-8');
+      ok('daemons: a renewed certificate that verifies → re-pinned in place: set_daemon {the same address, its new fingerprint}, no switch',
+        rp.length === 1 && rp[0]!['address'] === HS && rp[0]!['ssl_support'] === 'enabled' && rp[0]!['trusted'] === false && JSON.stringify(rp[0]!['ssl_allowed_fingerprints']) === JSON.stringify([leafB.fp]), JSON.stringify(rp));
+      ok('daemons: …one warning naming old → new fingerprint and dates, not a spend; pays meanwhile wallet_offline, no log line',
+        notes.length === 1 && notes[0]!.includes(`re-pinned ${leafA.fp} (until 2027-01-21T23:59:59Z) → ${leafB.fp} (valid `) && notes[0]!.includes(`to ${leafB.notAfter}, verified for localhost`) && notes[0]!.includes('not a spend') &&
+        offline.every((c) => c === 'wallet_offline') && one.lines().length === 0 && errs.length === 0, notes.join(' | '));
+      ok('daemons: …kept: daemon-pins.json and the wallet-rpc --config-file (rpc-login kept) carry the new pin, so a wallet-rpc restart keeps it',
+        after.daemons[HS]?.fingerprint === leafB.fp && after.daemons[HS]?.not_after === leafB.notAfter && conf.includes('\nrpc-login=sigelo:x\n') &&
+        conf.includes(`\ndaemon-ssl-allowed-fingerprints=${leafB.fp}\n`) && !conf.includes(leafA.fp) && (WIN || (statSync(join(one.dir, 'wallet-rpc.conf')).mode & 0o777) === 0o600), conf);
+      // A certificate that does not verify is never pinned: an error naming both.
+      td.present(self);
+      t += DAEMON_SWITCH_MS;
+      notes.length = 0;
+      for (let i = 0; i < DAEMON_FAILS; i++) await drained(one, body);
+      ok('daemons: a renewed certificate that does NOT verify (self-signed) → not re-pinned: an error naming both fingerprints, the pins unchanged',
+        called(one.w, 'set_daemon').length === 1 && errs.length === 1 && errs[0]!.includes(`presents certificate sha256 ${self.fp}, not the pinned ${leafB.fp}`) && errs[0]!.includes('refused, not re-pinned') &&
+        readFileSync(join(one.dir, 'wallet-rpc.conf'), 'utf-8').includes(leafB.fp) && (JSON.parse(readFileSync(join(one.dir, 'daemon-pins.json'), 'utf-8')) as Pins).daemons[HS]?.fingerprint === leafB.fp, errs.join(' | '));
+      await one.done();
+
+      // A hard pin (--daemon-ssl-fingerprint) is never re-pinned, even to a certificate that verifies.
+      td.present(leafB);
+      t += DAEMON_SWITCH_MS;
+      [notes.length, errs.length] = [0, 0];
+      const hp = await fresh(small(), { transferError: 'no connection to daemon' }, { daemons: [HS, A], daemonClock: () => t, daemonCa: [ca.cert], pre: (d) => { pinned(d, leafA.fp, 'hard'); } });
+      for (let i = 0; i < DAEMON_FAILS; i++) await drained(hp, body);
+      const hs = called(hp.w, 'set_daemon').map((c) => String((c['params'] as Record<string, unknown>)['address']));
+      ok('daemons: a hard pin and a node presenting another certificate (CA-valid) → an error naming both, no re-pin; the fallback moves on',
+        errs.length === 1 && errs[0]!.includes(`presents certificate sha256 ${leafB.fp}`) && errs[0]!.includes(`not the pinned ${leafA.fp}`) && errs[0]!.includes('hard pin') &&
+        JSON.stringify(hs) === JSON.stringify([A]) && readFileSync(join(hp.dir, 'wallet-rpc.conf'), 'utf-8').includes(leafA.fp), `${hs.join()} · ${errs.join(' | ')}`);
+      // Back to the https:// one: set_daemon carries the hard pins, not the certificate it presents.
+      t += DAEMON_SWITCH_MS;
+      errs.length = 0;
+      for (let i = 0; i < DAEMON_FAILS; i++) await drained(hp, body);
+      const back = called(hp.w, 'set_daemon').map((c) => c['params'] as Record<string, unknown>).at(-1)!;
+      ok('daemons: a switch to a hard-pinned https:// daemon → set_daemon with the hard pins', back['address'] === HS && JSON.stringify(back['ssl_allowed_fingerprints']) === JSON.stringify([leafA.fp]), JSON.stringify(back));
+      await hp.done();
+    } finally { console.error = err0; console.warn = (...a: unknown[]): void => { const x = a.map(String).join(' '); if (x.includes('daemon fallback')) warned.push(x); }; await td.close(); }
     {
       let mixed = '';
       try { parseDaemons(`${'a'.repeat(56)}.onion:18081 node.example:18089`); } catch (x) { mixed = (x as Error).message; }
@@ -2475,6 +2618,43 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   try { await walletRpc(pol(`${user}:wrong`), 'get_version', {}, 5000); bad = 'accepted'; } catch (e) { bad = (e as Error).message; }
   ok('walletRpc: the digest login answers on the socket that got the nonce (per-connection nonce, as wallet-rpc 0.18.5.0); a wrong login is 401', good === '{"version":65566}' && bad === 'wallet: 401 — wallet.login is missing or wrong', `${good} · ${bad}`);
   srv.closeAllConnections(); srv.close();
+}
+
+// ---------------------------------------------------------------- 2k'. an https:// daemon: verify, then pin (daemontls.ts)
+//
+// wallet-rpc 0.18 checks no CA for its daemon and refuses TLS without a pin, so sigelo-spend
+// verifies the certificate itself (Node's CA store, the hostname) and pins what verified.
+{
+  const ca = testCert('sigelo test CA', { ca: true });
+  const leafA = testCert('localhost', { by: ca }), other = testCert('other.example', { by: ca }), self = testCert('localhost');
+  const td = await tlsDaemon(leafA);
+  try {
+    const trusted = await probeTls(td.url, { ca: [ca.cert] });
+    ok('probeTls: a certificate the (test) CA signed for localhost verifies; its SHA-256 is the pin, notAfter read',
+      trusted.valid && trusted.fingerprint === leafA.fp && trusted.host === 'localhost' && trusted.notAfter === leafA.notAfter && trusted.issuer.includes('sigelo test CA') && trusted.why === undefined, JSON.stringify(trusted));
+    const unknown = await probeTls(td.url);
+    ok('probeTls: the same certificate without that CA in the store does not verify (the store is Node\'s, not "anything")', !unknown.valid && unknown.fingerprint === leafA.fp && (unknown.why ?? '').startsWith('not verified by the CA store'), JSON.stringify(unknown));
+    td.present(self);
+    const selfP = await probeTls(td.url, { ca: [ca.cert] });
+    ok('probeTls: a self-signed certificate does not verify, its fingerprint still read', !selfP.valid && selfP.fingerprint === self.fp && (selfP.why ?? '').includes('CA store'), JSON.stringify(selfP));
+    td.present(other);
+    const otherP = await probeTls(td.url, { ca: [ca.cert] });
+    ok('probeTls: a CA-signed certificate for another host name does not verify (the hostname is checked)', !otherP.valid && otherP.fingerprint === other.fp && (otherP.why ?? '').startsWith('not issued to localhost'), JSON.stringify(otherP));
+    let down = '';
+    try { await probeTls(`https://localhost:${await new Promise<number>((r) => { const x = createServer(() => undefined); x.listen(0, '127.0.0.1', () => { const p = (x.address() as { port: number }).port; x.close(() => { r(p); }); }); })}`, { timeoutMs: 3000 }); } catch (e) { down = (e as Error).message; }
+    ok('probeTls: nothing listening is an error, not a certificate', down.includes('ECONNREFUSED'), down);
+    ok('pinnable: https:// clearnet only (http, host:port and .onion are not pinned by sigelo-spend)', pinnable('https://node.example:18089') && !pinnable('node.example:18089') && !pinnable('http://node.example:18089') && !pinnable(`https://${'a'.repeat(56)}.onion:18089`));
+    const pd = mkdtempSync(join(tmpdir(), 'sigelo-pins-'));
+    const none = readPins(pd);
+    writeFileSync(join(pd, 'install.json'), JSON.stringify({ daemon_ssl_fingerprints: [leafA.fp] }), { mode: 0o600 });
+    const old = readPins(pd);
+    writeFileSync(join(pd, 'daemon-pins.json'), '{"v":2}', { mode: 0o600 });
+    let bad = '';
+    try { readPins(pd); } catch (e) { bad = (e as Error).message; }
+    ok('readPins: no file → auto with nothing pinned; a keeper from before it with install.json pins → hard; a malformed file is an error',
+      none.mode === 'auto' && Object.keys(none.daemons).length === 0 && old.mode === 'hard' && old.hard[0] === leafA.fp && bad.includes('not a sigelo-spend daemon-pins file'), JSON.stringify([none, old, bad]));
+    rmSync(pd, { recursive: true, force: true });
+  } finally { await td.close(); }
 }
 
 // ---------------------------------------------------------------- 2l. the installer, the tiers and the licence (monetization line 2)
@@ -2856,6 +3036,85 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     const fpPlain = await cli([...await dargs(join(scratch, 'k-fp'), 'node.example:38089'), '--daemon-ssl-fingerprint', FP], join(scratch, 'reg-fp.json'));
     const fpBad = await cli([...await dargs(join(scratch, 'k-fp'), 'https://node.example:38089'), '--daemon-ssl-fingerprint', 'abc'], join(scratch, 'reg-fp.json'));
     ok('init: a fingerprint without an https:// first daemon, or not 64 hex, is refused and writes nothing', fpPlain.err.includes('pins an https:// daemon') && fpBad.err.includes('is not a SHA-256 fingerprint') && !existsSync(join(scratch, 'k-fp')), fpPlain.err + fpBad.err);
+
+    // https:// without --daemon-ssl-fingerprint: verify, then pin (daemontls.ts). init reads the
+    // certificate in a child node, which trusts the test CA through NODE_EXTRA_CA_CERTS.
+    {
+      const ca = testCert('sigelo test CA', { ca: true });
+      const leafA = testCert('localhost', { by: ca }), leafB = testCert('localhost', { by: ca }), self = testCert('localhost'), self2 = testCert('localhost'), other = testCert('other.example', { by: ca });
+      const caFile = join(scratch, 'test-ca.pem');
+      writeFileSync(caFile, ca.cert, { mode: 0o600 });
+      const trust = { NODE_EXTRA_CA_CERTS: caFile };
+      const td = await tlsDaemon(leafA), host = `localhost:${td.port}`;
+      try {
+        const ka = join(scratch, 'ka'), regA = join(scratch, 'reg-a.json');
+        const ia = await cli(await dargs(ka, `${td.url},node2.example:38089`), regA, trust);
+        const au = ia.code === 0 ? unitOf(ka) : '', aconf = ia.code === 0 ? readFileSync(join(ka, 'wallet-rpc.conf'), 'utf-8') : '';
+        const apins = ia.code === 0 ? JSON.parse(readFileSync(join(ka, 'daemon-pins.json'), 'utf-8')) as Pins : undefined;
+        const ainst = ia.code === 0 ? JSON.parse(readFileSync(join(ka, 'install.json'), 'utf-8')) as Record<string, unknown> : {};
+        onKeeperHost('init: an https:// daemon and no --daemon-ssl-fingerprint → its certificate verified (CA store, hostname) and pinned in the 0600 --config-file; --daemon-ssl enabled, no pin on argv',
+          () => ia.code === 0 && au.includes(`"--daemon-address" "${host}" "--untrusted-daemon" "--daemon-ssl" "enabled" "--rpc-bind-ip"`) && !au.includes('--daemon-ssl-allowed-fingerprints') &&
+            aconf.includes(`\ndaemon-ssl-allowed-fingerprints=${leafA.fp}\n`) && /\nrpc-login=sigelo:/.test(aconf) && mode(join(ka, 'wallet-rpc.conf')) === 0o600, () => ia.err + au + aconf);
+        onKeeperHost('init: …daemon-pins.json (0600) says auto with the fingerprint and notAfter; install.json daemon_ssl_pin auto; the output names the pin',
+          () => apins?.mode === 'auto' && apins.daemons[td.url]?.fingerprint === leafA.fp && apins.daemons[td.url]?.not_after === leafA.notAfter && mode(join(ka, 'daemon-pins.json')) === 0o600 &&
+            ainst['daemon_ssl_pin'] === 'auto' && JSON.stringify(ainst['daemon_ssl_fingerprints']) === '[]' &&
+            ia.out.includes(`daemon TLS    ${td.url}: sha256 ${leafA.fp}, valid until ${leafA.notAfter}, verified for localhost (sigelo test CA); auto-pinned`), () => ia.out + JSON.stringify(apins));
+        const da = await cli(['doctor', '--dir', ka], regA, trust);
+        onKeeperHost('doctor: the daemon\'s certificate — fingerprint, notAfter, auto-pinned — and the unit passes', () => !da.out.includes('FAIL') &&
+          da.out.includes(`ok   daemon certificate ${host}: sha256 ${leafA.fp}, valid until ${leafA.notAfter} (`) && da.out.includes('verified for localhost (sigelo test CA); auto-pinned (verified against the CA store'), () => da.out);
+        td.present(leafB);
+        const dRen = await cli(['doctor', '--dir', ka], regA, trust);
+        onKeeperHost('doctor: a renewed certificate that verifies → WARN naming both, the keeper re-pins it', () => dRen.code === 2 &&
+          dRen.out.includes(`WARN daemon certificate ${host}: renewed — the node presents sha256 ${leafB.fp}`) && dRen.out.includes(`not the pinned ${leafA.fp}; the keeper re-pins it`), () => dRen.out);
+        td.present(self);
+        const dSelf = await cli(['doctor', '--dir', ka], regA, trust);
+        onKeeperHost('doctor: a certificate that does not verify → WARN, refused, the pin named', () => dSelf.code === 2 &&
+          dSelf.out.includes(`WARN daemon certificate ${host}: sha256 ${self.fp}`) && dSelf.out.includes(`refused: not verified by the CA store`) && dSelf.out.includes(`pinned ${leafA.fp}`), () => dSelf.out);
+        td.present(leafA);
+        const noPin = await withUnit(ka, (u) => u, regA);
+        writeFileSync(join(ka, 'wallet-rpc.conf'), aconf.replace(/daemon-ssl-allowed-fingerprints=.*\n/, ''), { mode: 0o600 });
+        const dNoPin = await cli(['doctor', '--dir', ka], regA, trust);
+        writeFileSync(join(ka, 'wallet-rpc.conf'), aconf.replace(leafA.fp, leafB.fp), { mode: 0o600 });
+        const dOther = await cli(['doctor', '--dir', ka], regA, trust);
+        writeFileSync(join(ka, 'wallet-rpc.conf'), aconf, { mode: 0o600 });
+        onKeeperHost('doctor: an auto-pinned https:// daemon with no pin in the --config-file fails (wallet-rpc refuses TLS without one); a pin there other than daemon-pins.json\'s warns',
+          () => !noPin.out.includes('FAIL') && dNoPin.code === 1 && dNoPin.out.includes(`the daemon ${td.url} is https:// and neither the unit nor`) &&
+            dOther.out.includes(`WARN daemon pins: ${join(ka, 'wallet-rpc.conf')} pins ${leafB.fp}, daemon-pins.json ${leafA.fp}`), () => dNoPin.out + dOther.out);
+
+        // Refused, writing nothing: a self-signed certificate, a CA the store lacks, another host's, nothing listening, a proxy.
+        const refused = async (name: string, env: Record<string, string>, ...more: string[]): Promise<Cli> => cli([...await dargs(join(scratch, 'k-tls'), td.url), ...more], join(scratch, `reg-${name}.json`), env);
+        td.present(self);
+        const rSelf = await refused('s', trust);
+        td.present(leafA);
+        const rStore = await refused('n', {});
+        td.present(other);
+        const rName = await refused('o', trust);
+        td.present(leafA);
+        const rProxy = await refused('p', trust, '--daemon-proxy', '127.0.0.1:9050');
+        const gone = await tlsDaemon(leafA), goneUrl = gone.url;
+        await gone.close();
+        const rDown = await cli([...await dargs(join(scratch, 'k-tls'), goneUrl)], join(scratch, 'reg-d.json'), trust);
+        ok('init: an https:// daemon whose certificate does not verify (self-signed; a CA the store lacks; another host\'s), that does not answer, or behind --daemon-proxy, without a pin → refused, writing nothing',
+          rSelf.code === 1 && rSelf.err.includes(`certificate sha256 ${self.fp} refused, not verified by the CA store`) && rSelf.err.includes('pin it with --daemon-ssl-fingerprint') &&
+          rStore.err.includes(`certificate sha256 ${leafA.fp} refused, not verified by the CA store`) && rName.err.includes(`certificate sha256 ${other.fp} refused, not issued to localhost`) &&
+          rProxy.err.includes('--daemon-proxy is set: init would read its certificate outside the proxy') && rDown.err.includes('no TLS certificate could be read') && !existsSync(join(scratch, 'k-tls')),
+          [rSelf.err, rStore.err, rName.err, rProxy.err, rDown.err].join(' | '));
+
+        // A hard pin: the operator's fingerprint (here a self-signed node's), never re-pinned.
+        td.present(self);
+        const kh = join(scratch, 'kh'), regH = join(scratch, 'reg-h.json');
+        const ih = await cli([...await dargs(kh, td.url), '--daemon-ssl-fingerprint', self.fp], regH);
+        const hpins = ih.code === 0 ? JSON.parse(readFileSync(join(kh, 'daemon-pins.json'), 'utf-8')) as Pins : undefined;
+        onKeeperHost('init --daemon-ssl-fingerprint: a hard pin on argv, nothing probed or in the --config-file; daemon-pins.json hard', () => ih.code === 0 && hpins?.mode === 'hard' && hpins.hard[0] === self.fp &&
+          unitOf(kh).includes(`"--daemon-ssl-allowed-fingerprints" "${self.fp}"`) && !readFileSync(join(kh, 'wallet-rpc.conf'), 'utf-8').includes('daemon-ssl-allowed-fingerprints') && ih.out.includes('hard-pinned'), () => ih.err + ih.out);
+        const dh = await cli(['doctor', '--dir', kh], regH);
+        td.present(self2);
+        const dh2 = await cli(['doctor', '--dir', kh], regH);
+        onKeeperHost('doctor: a hard-pinned self-signed node → ok, "hard-pinned"; another certificate there → WARN naming both, re-pin by hand',
+          () => dh.out.includes(`ok   daemon certificate ${host}: sha256 ${self.fp}`) && dh.out.includes('hard-pinned (--daemon-ssl-fingerprint: never re-pinned)') &&
+            dh2.code === 2 && dh2.out.includes(`WARN daemon certificate ${host}: the node presents sha256 ${self2.fp}`) && dh2.out.includes(`not the pinned ${self.fp}`) && dh2.out.includes('re-pin by hand'), () => dh.out + dh2.out);
+      } finally { await td.close(); }
+    }
 
     // .onion → --proxy; never without one; never mixed with clearnet.
     const ko = join(scratch, 'ko'), regO = join(scratch, 'reg-o.json');
@@ -3319,6 +3578,46 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   try {
     const viaHttp = await heightAt(daemonCall(base), dayT - 86400);
     ok('restore: daemonCall over HTTP (host:port → /json_rpc) gives the same height', viaHttp === want && seen.every((x) => x.method === 'get_info' || x.method === 'get_block_header_by_height'));
+    // Over TLS: the certificate checked as the keeper checks it (daemontls.ts) before an answer is read.
+    {
+      const ca = testCert('sigelo test CA', { ca: true });
+      const leafA = testCert('localhost', { by: ca }), leafB = testCert('localhost', { by: ca }), self = testCert('localhost'), other = testCert('other.example', { by: ca });
+      const td = await tlsDaemon(leafA, chain);
+      const refusal = async (c: DaemonCall): Promise<string> => { try { await c('get_info', {}); return 'answered'; } catch (e) { return (e as Error).message; } };
+      try {
+        const viaTls = await heightAt(daemonCall(td.url, 5000, { ca: [ca.cert] }), dayT - 86400);
+        ok('restore: daemonCall over https:// with a certificate that verifies (CA, hostname) gives the same height', viaTls === want);
+        const hits = td.hits();
+        const noStore = await refusal(daemonCall(td.url, 5000));
+        td.present(self);
+        const selfR = await refusal(daemonCall(td.url, 5000, { ca: [ca.cert] }));
+        td.present(other);
+        const otherR = await refusal(daemonCall(td.url, 5000, { ca: [ca.cert] }));
+        ok('restore: an https:// daemon whose certificate does not verify — a CA the store lacks, self-signed, another host\'s — is refused, naming its fingerprint',
+          noStore.includes(`certificate sha256 ${leafA.fp} refused, not verified by the CA store`) && selfR.includes(`certificate sha256 ${self.fp} refused`) &&
+          otherR.includes(`certificate sha256 ${other.fp} refused, not issued to localhost`) && selfR.includes('--daemon-ssl-fingerprint'), [noStore, selfR, otherR].join(' | '));
+        ok('restore: …and no request reaches it: the certificate is checked before the body is sent', td.hits() === hits, `${td.hits() - hits} requests reached it`);
+        td.present(self);
+        const pinnedSelf = await heightAt(daemonCall(td.url, 5000, { pins: [self.fp] }), dayT - 86400);
+        td.present(leafB);
+        const mism = await refusal(daemonCall(td.url, 5000, { ca: [ca.cert], pins: [leafA.fp] }));
+        ok('restore: --daemon-ssl-fingerprint is a hard pin: a self-signed node it names answers; another certificate (even CA-valid) is refused naming both',
+          pinnedSelf === want && mism.includes(`presents certificate sha256 ${leafB.fp}, not the pinned ${leafA.fp}`), mism);
+        const outs: string[] = [], errs: string[] = [];
+        td.present(leafA);
+        const viaCli = await restoreCli(['restore-height', '--daemon', td.url, '--restore-date', day], { out: (x) => { outs.push(x); }, err: (x) => { errs.push(x); }, ca: [ca.cert] });
+        td.present(self);
+        const pinCli = await restoreCli(['restore-height', '--daemon', td.url, '--restore-date', day, '--daemon-ssl-fingerprint', self.fp.match(/../g)!.join(':').toUpperCase()], { out: (x) => { outs.push(x); }, err: (x) => { errs.push(x); } });
+        const refCli = await restoreCli(['restore-height', '--daemon', td.url, '--restore-date', day], { out: (x) => { outs.push(x); }, err: (x) => { errs.push(x); }, ca: [ca.cert] });
+        const bad: string[] = [];
+        for (const argv of [['--daemon', td.url, '--daemon-ssl-fingerprint', 'abc'], ['--daemon-ssl-fingerprint', self.fp], ['--daemon', base, '--daemon-ssl-fingerprint', self.fp]]) {
+          try { await restoreCli(['restore-height', '--restore-date', day, ...argv], { out: () => undefined, err: () => undefined }); bad.push('accepted'); } catch (e) { bad.push((e as Error).message); }
+        }
+        ok('restore-height --daemon https://…: verified → the height; --daemon-ssl-fingerprint (colons, any case) pins a self-signed node; a refusal → 0 and the warning saying why',
+          viaCli === 0 && pinCli === 0 && refCli === 0 && outs.join() === `${want},${want},0` && errs.length === 1 && errs[0]!.startsWith(GENESIS_WARNING) && errs[0]!.includes(`certificate sha256 ${self.fp} refused`), JSON.stringify([outs, errs]));
+        ok('restore-height --daemon-ssl-fingerprint: not 64 hex, without --daemon, or for a plain-HTTP daemon → an error', bad[0]!.includes('is not a SHA-256 fingerprint') && bad[1]!.includes('there is none') && bad[2]!.includes('is not one'), bad.join(' | '));
+      } finally { await td.close(); }
+    }
     const cli = async (argv: string[]): Promise<{ code: number; out: string[]; err: string[]; thrown?: string }> => {
       const out: string[] = [], err: string[] = [];
       try { return { code: await restoreCli(argv, { out: (x) => { out.push(x); }, err: (x) => { err.push(x); } }), out, err }; } catch (e) { return { code: 1, out, err, thrown: String(e) }; }
@@ -3522,6 +3821,55 @@ if (liveAddress !== null) {
   // is what the NEXT run binds against — it would then be talking to the previous run's wallet,
   // with `interop` already open, and the port is fixed because the RPC has no ephemeral mode.
   if (up !== null) await new Promise<void>((r) => { proc.on('exit', () => { r(); }); setTimeout(r, 10_000); });
+  rmSync(walletDir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------- 4b. wallet-rpc and the daemon pin (interop)
+//
+// What carries the pin, against the monero-wallet-rpc on PATH and a mock TLS daemon: the
+// --config-file line `daemon-ssl-allowed-fingerprints=` (init's auto pin) and `set_daemon`'s
+// `ssl_allowed_fingerprints` (the keeper's re-pin and its https:// fallback), both as 64 hex.
+// The daemon counts requests: one that arrives got past wallet-rpc's certificate check.
+{
+  const port = 38086;
+  const ca = testCert('sigelo test CA', { ca: true });
+  const leafA = testCert('localhost', { by: ca }), leafB = testCert('localhost', { by: ca });
+  const td = await tlsDaemon(leafA);
+  const walletDir = mkdtempSync(join(tmpdir(), 'sigelo-spend-pin-'));
+  writeFileSync(join(walletDir, 'rpc.conf'), `daemon-ssl-allowed-fingerprints=${leafA.fp}\n`, { mode: 0o600 });
+  const proc = spawn('monero-wallet-rpc', ['--stagenet', '--daemon-address', `localhost:${td.port}`, '--daemon-ssl', 'enabled', '--untrusted-daemon', '--rpc-bind-port', String(port),
+    '--rpc-bind-ip', '127.0.0.1', '--disable-rpc-login', '--wallet-dir', walletDir, '--config-file', join(walletDir, 'rpc.conf'), '--non-interactive', '--log-level', '0', '--log-file', join(walletDir, 'rpc.log')], { stdio: 'ignore' });
+  let launchError = '';
+  proc.on('error', (e) => { launchError = e.message; });
+  const call = async (method: string, params: unknown = {}): Promise<{ result?: Record<string, unknown>; error?: { message: string } } | null> => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json_rpc`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: '0', method, params }), signal: AbortSignal.timeout(60_000) });
+      return await res.json() as { result?: Record<string, unknown>; error?: { message: string } };
+    } catch { return null; }
+  };
+  let up = null;
+  for (let i = 0; i < 30 && up === null && launchError === ''; i++) {
+    await new Promise<void>((r) => { setTimeout(r, 500); });
+    up = await call('get_version');
+  }
+  if (up === null) skip('monero-wallet-rpc daemon pin interop', launchError === '' ? `did not come up on ${port}` : launchError);
+  else {
+    const reached = async (): Promise<boolean> => { const h = td.hits(); await call('refresh'); return td.hits() > h; };
+    const made = await call('create_wallet', { filename: 'pin', password: '', language: 'English' });
+    ok('wallet-rpc pin interop: create_wallet with --daemon-ssl enabled and the pin in the --config-file', made !== null && made.error === undefined, JSON.stringify(made));
+    ok('wallet-rpc pin interop: the --config-file pin (daemon-ssl-allowed-fingerprints=<64 hex>) lets its certificate through', await reached());
+    td.present(leafB);
+    ok('wallet-rpc pin interop: a renewed certificate (CA-valid) is refused under the old pin — wallet-rpc checks no CA', !(await reached()));
+    const sdB = await call('set_daemon', { address: `localhost:${td.port}`, trusted: false, ssl_support: 'enabled', ssl_allowed_fingerprints: [leafB.fp] });
+    ok('wallet-rpc pin interop: set_daemon with ssl_allowed_fingerprints [the new one] (the keeper\'s re-pin) reconnects', sdB?.error === undefined && await reached(), JSON.stringify(sdB));
+    const sdA = await call('set_daemon', { address: `https://localhost:${td.port}`, trusted: false, ssl_support: 'enabled', ssl_allowed_fingerprints: [leafA.fp] });
+    ok('wallet-rpc pin interop: set_daemon with another fingerprint (and an https:// address) is refused at the handshake', sdA?.error === undefined && !(await reached()), JSON.stringify(sdA));
+    const sdNone = await call('set_daemon', { address: `localhost:${td.port}`, trusted: false, ssl_support: 'enabled' });
+    ok('wallet-rpc pin interop: set_daemon with ssl_support "enabled" and no pin is refused (the fallback before verify-then-pin)', /no user certificate or fingerprints/.test(sdNone?.error?.message ?? ''), JSON.stringify(sdNone));
+  }
+  proc.kill('SIGTERM');
+  if (up !== null) await new Promise<void>((r) => { proc.on('exit', () => { r(); }); setTimeout(r, 10_000); });
+  await td.close();
   rmSync(walletDir, { recursive: true, force: true });
 }
 

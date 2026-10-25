@@ -31,8 +31,8 @@ sigelo-spend doctor [--dir D] [--notify]
 sigelo-spend licence show [--dir D] | sigelo-spend licence install <file> [--dir D]
 sigelo-spend receipts export [--dir D] --since <YYYY-MM-DD|unix> [--format json|csv]
 sigelo-spend wallet-restore --keeper-package keeper-<j>.json --wallet-rpc URL [--wallet-rpc-login u:p] --wallet-file NAME --password-file F
-                  [--daemon URL] [--restore-height N | --restore-date YYYY-MM-DD]
-sigelo-spend restore-height [--daemon URL] [--restore-height N | --restore-date YYYY-MM-DD | --keeper-package F]
+                  [--daemon URL [--daemon-ssl-fingerprint HEX]] [--restore-height N | --restore-date YYYY-MM-DD]
+sigelo-spend restore-height [--daemon URL [--daemon-ssl-fingerprint HEX]] [--restore-height N | --restore-date YYYY-MM-DD | --keeper-package F]
 
 \`init\` sets up one keeper on this host over your own wallet-rpc and wallet: nothing is hosted
 and no key leaves the host. Free: one keeper, one agent, its whole policy. A licence (a sigelo
@@ -40,7 +40,9 @@ attestation, checked offline) adds delegation, approvals, receipts export and mo
 The bearer token is read from SIGELO_SPEND_TOKEN. It is a secret: anything holding it can
 spend its agent's account within that agent's bounds. \`serve\` reads SIGELO_DAEMONS, an
 ordered list of daemon addresses (the wallet-rpc's own first) it moves the wallet-rpc along when
-its daemon stops answering. \`token new\` needs <agent> for an
+its daemon stops answering. An https:// daemon's certificate is verified (CA store, hostname)
+and pinned, and re-pinned when it renews; --daemon-ssl-fingerprint pins by hand (hard, never
+re-pinned). \`token new\` needs <agent> for an
 agents-style policy; a buckets-style one has a single token and takes none.
 The restore height: --restore-height, else --restore-date's first block minus a day, else the
 package's created day (both need --daemon), else 0 with a warning: a scan from genesis takes hours.`;

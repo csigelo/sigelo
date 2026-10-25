@@ -16,6 +16,7 @@ import { decodeAddress, verifySigeloMoneroSigAddr, type Net } from 'sigelo/dist/
 import { affordable, agentOf, evaluate, invoiceKey, parseAllow, parsePolicy, plain, tokenHash, type Decision, type PayRequest, type Plan, type Policy, type Prior, type Spent, type Status } from './policy.js';
 import { approvalRequest, checkApproval, type ApprovalBody, type Approved } from './approval.js';
 import { describe as describeLicence, LICENCE_FILE, licenceRefusal, readLicence, type LicenceStatus } from './licence.js';
+import { confPins, pinnable, pinOf, probeTls, readPins, writeConfPins, writePins, type Pins, type TlsProbe } from './daemontls.js';
 import { asTreeEntry, chain, DELEGATE_KDF, delegateSeed, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry, type TreeEntry } from './tree.js';
 
 /**
@@ -63,6 +64,8 @@ export interface ServeOptions {
   daemons?: string[];
   /** The fallback's clock, milliseconds (default `Date.now`). For tests. */
   daemonClock?: () => number;
+  /** Extra trust anchors (PEM) for an https:// daemon's certificate, beside Node's CA store. For tests. */
+  daemonCa?: string[];
   /** How many requests may wait in the one-at-a-time lane (default `LANE_MAX`); past it, 503 busy. */
   laneMax?: number;
 }
@@ -120,11 +123,21 @@ export const WALLET_TIMEOUT_MS = 60_000;
  * The daemon fallback (MONERO.md §4 "Daemons"). A keeper whose wallet-rpc talks to one remote
  * daemon is down whenever that node is: every pay is `wallet_offline`, a TRY LATER. With
  * `SIGELO_DAEMONS` set to two or more addresses, the keeper moves wallet-rpc to the next one
- * (`set_daemon`, `trusted: false`, `ssl_support: "enabled"` for an `https://` one) when `DAEMON_FAILS` builds in a row answered "no connection
+ * (`set_daemon`, `trusted: false`, `ssl_support: "enabled"` and the certificate's pin for an
+ * `https://` one) when `DAEMON_FAILS` builds in a row answered "no connection
  * to daemon", or when the wallet height has not moved for `DAEMON_STALE_MS` while it is asked to
  * pay — never on one failure, and never twice within `DAEMON_SWITCH_MS`. A switch is a warning on
  * stderr, never a spend.log line: nothing is signed and no pay is answered differently; while the
  * wallet has no daemon, every pay is still `wallet_offline`.
+ *
+ * An https:// daemon is pinned (daemontls.ts), and wallet-rpc answers a certificate that is not
+ * the pinned one with the same "no connection to daemon". So before it moves on, the keeper reads
+ * the current daemon's certificate: renewed under an auto pin and verified (CA store, hostname),
+ * it is re-pinned in place (`set_daemon` with the new fingerprint, `daemon-pins.json`, the
+ * wallet-rpc's --config-file) and the wallet stays on its node; under a hard pin, or not
+ * verified, it is an error naming both fingerprints and the fallback goes on. A switch to an
+ * https:// daemon verifies its certificate first and pins it; one that does not verify is not
+ * switched to. With one https:// daemon and no fallback the same check runs, without a switch.
  */
 export const DAEMON_FAILS = 3;
 export const DAEMON_SWITCH_MS = 60_000;
@@ -892,8 +905,53 @@ export async function serve(opts: ServeOptions): Promise<Service> {
   let current = 0, misses = 0, switched = -Infinity, asked = -Infinity;
   let seen: { height: number; at: number } | undefined;
   const daemonSaw = (offline: boolean): void => { misses = offline ? misses + 1 : 0; };
+  // The pins (daemontls.ts): read at start, rewritten on a re-pin. A malformed file stops the start.
+  const walletConf = join(keeperDir, 'wallet-rpc.conf');
+  const dpins: Pins | undefined = daemons.some((d) => d.startsWith('https://')) ? owned(() => readPins(keeperDir)) : undefined;
+  const trust = { ...(opts.daemonCa !== undefined && { ca: opts.daemonCa }), timeoutMs: 15_000 };
+  const short = (fp: string): string => `${fp.slice(0, 16)}…`;
+  const pinnedOf = (d: string): string[] => dpins === undefined ? [] : dpins.mode === 'hard' ? dpins.hard : dpins.daemons[d] !== undefined ? [dpins.daemons[d]!.fingerprint] : [];
+  /** Record an auto pin: daemon-pins.json, and the wallet-rpc's own --config-file for its start daemon. */
+  const keepPin = (d: string, p: TlsProbe): void => {
+    if (dpins === undefined || dpins.mode !== 'auto') return;
+    dpins.daemons[d] = pinOf(p);
+    try {
+      writePins(keeperDir, dpins);
+      if (d === daemons[0] && existsSync(walletConf) && confPins(readFileSync(walletConf, 'utf-8')).length > 0) writeConfPins(walletConf, [p.fingerprint]);
+    } catch (e) { console.warn(`sigelo-spend: daemon ${d}: the new pin is live in wallet-rpc but not saved (${why(e)}); after a wallet-rpc restart the keeper re-pins it again`); }
+  };
+  /**
+   * The current daemon's certificate, when wallet-rpc has lost it: true when it was renewed,
+   * verified and re-pinned in place (no switch). Anything else — no answer, the pinned
+   * certificate, a hard pin, one that does not verify — is false: the fallback goes on.
+   */
+  const repin = async (d: string, cause: string): Promise<boolean> => {
+    let p: TlsProbe;
+    try { p = await probeTls(d, trust); } catch { return false; }
+    const old = pinnedOf(d);
+    if (old.includes(p.fingerprint)) return false;
+    const was = old.length === 0 ? 'nothing' : old.map((x) => `${x}${dpins?.daemons[d]?.fingerprint === x ? ` (until ${dpins.daemons[d]!.not_after})` : ''}`).join(', ');
+    if (dpins?.mode === 'hard') {
+      console.error(`sigelo-spend: daemon ${d} presents certificate sha256 ${p.fingerprint} (valid ${p.notBefore} to ${p.notAfter}), not the pinned ${was}: a hard pin (--daemon-ssl-fingerprint) is never re-pinned — wallet-rpc refuses this node until its operator's new fingerprint is pinned by hand`);
+      return false;
+    }
+    if (!p.valid) {
+      console.error(`sigelo-spend: daemon ${d} presents certificate sha256 ${p.fingerprint}, not the pinned ${was}, and it is ${p.why}: refused, not re-pinned`);
+      return false;
+    }
+    try {
+      await walletRpc(policy, 'set_daemon', { address: d, trusted: false, ssl_support: 'enabled', ssl_allowed_fingerprints: [p.fingerprint] }, 15_000);
+    } catch (e) {
+      console.warn(`sigelo-spend: daemon ${d}: its certificate was renewed (${short(p.fingerprint)}, verified) but set_daemon failed (${why(e)})`);
+      return false;
+    }
+    keepPin(d, p);
+    console.warn(`sigelo-spend: daemon ${d}: ${cause}; its certificate was renewed: re-pinned ${was} → ${p.fingerprint} (valid ${p.notBefore} to ${p.notAfter}, verified for ${p.host}, ${p.issuer}). wallet-rpc reconnected with set_daemon; not a spend`);
+    return true;
+  };
+  const checking = daemons.length >= 2 || (daemons.length === 1 && pinnable(daemons[0]!));
   const daemonCheck = async (): Promise<void> => {
-    if (daemons.length < 2) return;
+    if (!checking) return;
     const t = nowMs();
     // The height at most once a minute: a lane of pays must not each wait on a slow wallet.
     if (t - asked >= DAEMON_SWITCH_MS) {
@@ -908,13 +966,31 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     const cause = misses >= DAEMON_FAILS ? `${misses} wallet builds in a row answered "no connection to daemon"`
       : `the wallet height has stayed at ${seen!.height} for ${Math.round((t - seen!.at) / 60_000)} min while asked to pay`;
     const from = daemons[current]!;
-    current = (current + 1) % daemons.length;
     [switched, misses, seen] = [t, 0, undefined];
+    // First: is it the pin? A renewed certificate that verifies keeps the wallet on its node.
+    if (pinnable(from) && await repin(from, cause)) return;
+    if (daemons.length < 2) return;
+    current = (current + 1) % daemons.length;
     const to = daemons[current]!, which = `${current + 1}/${daemons.length}`;
+    // https:// keeps its meaning: TLS required, never wallet-rpc's autodetect (which falls back to
+    // plaintext), and pinned — the hard pins, or the certificate it presents now, verified.
+    let fps: string[] | undefined, probed: TlsProbe | undefined;
+    if (dpins?.mode === 'hard' && to.startsWith('https://')) fps = dpins.hard;
+    else if (pinnable(to)) {
+      try { probed = await probeTls(to, trust); } catch (e) {
+        console.warn(`sigelo-spend: daemon fallback: ${cause}; ${to} (${which}) not switched to: its certificate could not be read (${why(e)}) — the next address is tried in a minute at the earliest`);
+        return;
+      }
+      if (!probed.valid) {
+        console.error(`sigelo-spend: daemon fallback: ${cause}; ${to} (${which}) not switched to: its certificate sha256 ${probed.fingerprint} is ${probed.why} — the next address is tried in a minute at the earliest`);
+        return;
+      }
+      fps = [probed.fingerprint];
+    }
     try {
-      // https:// keeps its meaning: TLS required, never wallet-rpc's autodetect (which falls back to
-      // plaintext). No `proxy`: wallet-rpc refuses one when started with --proxy (parseDaemons).
-      await walletRpc(policy, 'set_daemon', { address: to, trusted: false, ...(to.startsWith('https://') && { ssl_support: 'enabled' }) }, 15_000);
+      // No `proxy`: wallet-rpc refuses one when started with --proxy (parseDaemons).
+      await walletRpc(policy, 'set_daemon', { address: to, trusted: false, ...(to.startsWith('https://') && { ssl_support: 'enabled' }), ...(fps !== undefined && { ssl_allowed_fingerprints: fps }) }, 15_000);
+      if (probed !== undefined) keepPin(to, probed);
       console.warn(`sigelo-spend: daemon fallback: ${cause}; wallet-rpc moved from ${from} to ${to} (${which}, trusted=false). Not a spend: nothing signed or logged; pays stay TRY LATER (wallet_offline) until the wallet syncs`);
     } catch (e) {
       console.warn(`sigelo-spend: daemon fallback: ${cause}; set_daemon ${to} (${which}) failed (${why(e)}) — the next address is tried in a minute at the earliest`);

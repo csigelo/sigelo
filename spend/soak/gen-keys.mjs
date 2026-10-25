@@ -235,6 +235,7 @@ if (mode === undefined) {
     const t = JSON.parse(readFileSync(TEMPLATE, 'utf-8')), a = t.agents['soak-root'];
     t.approvers[0].did = id.approver.did; t.recovery_commitment = id.RC; a.did = id.root.did; a.genesis = id.root.genesis;
     if (process.env.SIGELO_SOAK_WALLET_RPC) t.wallet.rpc = process.env.SIGELO_SOAK_WALLET_RPC;
+    if (process.env.SIGELO_SOAK_NET) t.net = process.env.SIGELO_SOAK_NET; // setup.sh --mainnet
     const login = confLogin(dir);
     if (login !== undefined) t.wallet.login = login;
     for (const agent of Object.values(t.agents)) for (const e of agent.allow ?? []) {

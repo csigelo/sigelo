@@ -3,7 +3,9 @@
 // kit/test/kit.test.mjs — bind, print, the drill scheduler and the grader, in a scratch directory.
 // Nothing is installed: units are written to a scratch --units-dir or printed with --dry-run,
 // no systemctl or crontab runs, and the reminder's logger/notify-send are switched off.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash, generateKeyPairSync, randomBytes, sign as cryptoSign } from 'node:crypto';
+import { createServer as httpsServer } from 'node:https';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -68,6 +70,63 @@ const badCh = node([join(KIT, 'bind.mjs'), '--kit', kitOf('kit-badch.json', { da
 t('bind refuses a .onion clean_host.daemon without clean_host.proxy, a daemon_ssl that is not enabled/disabled/autodetect, a proxy that is not ip:port',
   noProxy.code === 2 && noProxy.err.includes('a .onion daemon needs clean_host.proxy') && badCh.code === 2 && badCh.err.includes('clean_host.daemon_ssl: must be') &&
   badCh.err.includes('clean_host.proxy: must be ip:port') && !existsSync(join(tmp, 'b-onion')) && !existsSync(join(tmp, 'b-badch')));
+
+// --- daemon_ssl enabled: verify, then pin (bind.mjs cleanDaemonPins; the keeper's spend/daemontls.ts) ---
+// X.509 by hand as in spend/test.ts (ECDSA P-256, no openssl): a test CA, a leaf it signs for localhost, a self-signed leaf.
+const derOf = (tag, ...parts) => {
+  const n = parts.reduce((a, p) => a + p.length, 0), len = n < 128 ? [n] : n < 256 ? [0x81, n] : [0x82, n >> 8, n & 255];
+  const out = new Uint8Array(1 + len.length + n); out[0] = tag; out.set(len, 1);
+  let o = 1 + len.length; for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+};
+const by = (...x) => Uint8Array.from(x), utf = (x) => new TextEncoder().encode(x);
+const ECDSA_SHA256 = derOf(0x30, derOf(0x06, by(0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02)));
+const x509Name = (cn) => derOf(0x30, derOf(0x31, derOf(0x30, derOf(0x06, by(0x55, 0x04, 0x03)), derOf(0x0c, utf(cn)))));
+const x509Time = (ms) => derOf(0x17, utf(new Date(ms).toISOString().replace(/[-:T]/g, '').slice(2, 14) + 'Z'));
+const pemOf = (der) => `-----BEGIN CERTIFICATE-----\n${Buffer.from(der).toString('base64').replace(/.{64}/g, '$&\n').replace(/\n?$/, '\n')}-----END CERTIFICATE-----\n`;
+function testCert(cn, o = {}) {
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const now = Math.floor(Date.now() / 1000) * 1000, day = 86_400_000;
+  const ext = o.ca ? derOf(0x30, derOf(0x06, by(0x55, 0x1d, 0x13)), derOf(0x01, by(0xff)), derOf(0x04, derOf(0x30, derOf(0x01, by(0xff)))))
+    : derOf(0x30, derOf(0x06, by(0x55, 0x1d, 0x11)), derOf(0x04, derOf(0x30, derOf(0x82, utf(cn)))));
+  const issuer = o.by?.signer ?? { cn, key: privateKey };
+  const tbs = derOf(0x30, derOf(0xa0, derOf(0x02, by(2))), derOf(0x02, by(0x01, ...randomBytes(8))), ECDSA_SHA256, x509Name(issuer.cn),
+    derOf(0x30, x509Time(now - day), x509Time(now + 90 * day)), x509Name(cn), publicKey.export({ type: 'spki', format: 'der' }), derOf(0xa3, derOf(0x30, ext)));
+  const der = derOf(0x30, tbs, ECDSA_SHA256, derOf(0x03, by(0), cryptoSign('sha256', tbs, issuer.key)));
+  return { cert: pemOf(der), key: privateKey.export({ type: 'pkcs8', format: 'pem' }), fp: createHash('sha256').update(der).digest('hex'), signer: { cn, key: privateKey } };
+}
+// bind in a child while this process serves the mock daemon (spawnSync would block its event loop).
+const nodeAsync = (args, env = {}) => new Promise((done) => {
+  const c = spawn(process.execPath, args, { env: { ...process.env, ...env } });
+  let out = '', err = '';
+  c.stdout.on('data', (x) => { out += x; }); c.stderr.on('data', (x) => { err += x; });
+  c.on('close', (code) => done({ code, out, err }));
+});
+{
+  const ca = testCert('sigelo kit test CA', { ca: true }), leaf = testCert('localhost', { by: ca }), self = testCert('localhost');
+  const caPem = join(tmp, 'test-ca.pem');
+  writeFileSync(caPem, ca.cert);
+  const srv = httpsServer({ cert: leaf.cert, key: leaf.key }, (rq, rs) => { rs.end('{}'); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const daemon = `localhost:${srv.address().port}`;
+  const bindTls = (name, ch) => nodeAsync([join(KIT, 'bind.mjs'), '--kit', kitOf(`${name}.json`, { daemon, daemon_ssl: 'enabled', ...ch }), '--record', recPath, '--out', join(tmp, name)], { NODE_EXTRA_CA_CERTS: caPem });
+  const okB = await bindTls('b-tls-ca', {});
+  const pinned = `--daemon-address ${daemon} --daemon-ssl enabled --daemon-ssl-allowed-fingerprints ${leaf.fp} \\`;
+  t('bind, daemon_ssl enabled, a CA-trusted daemon for its host: verified, its SHA-256 pinned on the clean wallet-rpc (--daemon-ssl-allowed-fingerprints) in DRILL and RUNBOOK',
+    okB.code === 0 && ['DRILL.md', 'RUNBOOK.md'].every((d) => read(join(tmp, 'b-tls-ca', d)).includes(pinned)));
+  srv.setSecureContext({ cert: self.cert, key: self.key }); srv.closeAllConnections();
+  const selfB = await bindTls('b-tls-self', {});
+  t('bind, daemon_ssl enabled, a self-signed daemon: refused (exit 2, its fingerprint and "CA store" named), nothing written',
+    selfB.code === 2 && selfB.err.includes(`certificate sha256 ${self.fp} refused`) && selfB.err.includes('CA store') && selfB.err.includes('clean_host.daemon_ssl_fingerprint') && !existsSync(join(tmp, 'b-tls-self')));
+  const hardB = await bindTls('b-tls-hard', { daemon_ssl_fingerprint: self.fp.toUpperCase().replace(/(..)(?!$)/g, '$1:') });
+  t('bind, clean_host.daemon_ssl_fingerprint: a hard pin, used as given (normalised), the 64 hex not taken for key material',
+    hardB.code === 0 && read(join(tmp, 'b-tls-hard', 'RUNBOOK.md')).includes(`--daemon-ssl-allowed-fingerprints ${self.fp} \\`));
+  const badFp = await bindTls('b-tls-badfp', { daemon_ssl_fingerprint: 'abc' });
+  const viaTor = await bindTls('b-tls-proxy', { proxy: '127.0.0.1:9050' });
+  t('bind refuses a daemon_ssl_fingerprint that is not 64 hex, and daemon_ssl enabled with a proxy but no hard pin (the probe would leave Tor)',
+    badFp.code === 2 && badFp.err.includes('is not a SHA-256 fingerprint') && viaTor.code === 2 && viaTor.err.includes('outside Tor'));
+  srv.closeAllConnections(); await new Promise((r) => srv.close(r));
+}
 const words25 = 'abbey abducts ability ablaze abnormal abort abrasive absorb abyss academy aces aching acidic acoustic acquire across actress acumen adapt addicted adept adhesive adjust adopt adrenalin';
 const bad = { ...kit, net: 'stagenet', keeper: { ...kit.keeper, spend_key: 'x' }, backup: { ...kit.backup, paper_location: words25 }, note: 'a'.repeat(0) + 'f'.repeat(64), extra: 'AGE-SECRET-KEY-1QQQ' };
 writeFileSync(join(tmp, 'kit-bad.json'), JSON.stringify(bad));

@@ -13,10 +13,17 @@
 // define, a net that disagrees with the record, and anything in kit.json that looks like key
 // material — a 64-hex value, an age identity, a run of seed words, a field named like a secret.
 // kit.json describes where things are; it never holds them.
+//
+// clean_host.daemon_ssl "enabled": monero-wallet-rpc 0.18 checks no CA for its daemon and refuses
+// TLS without a pin, so bind reads the daemon's certificate, verifies it (Node's CA store plus
+// NODE_EXTRA_CA_CERTS, and the hostname) and writes its SHA-256 into the command as
+// --daemon-ssl-allowed-fingerprints. clean_host.daemon_ssl_fingerprint is a hard pin instead (a
+// node with its own certificate); a certificate that does not verify is refused.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { checkServerIdentity, connect } from 'node:tls';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const KIT = dirname(fileURLToPath(import.meta.url));
@@ -53,8 +60,50 @@ export function secretProblems(kit, words) {
   return out;
 }
 
+// ---- verify, then pin: the minimal copy of spend/daemontls.ts probeTls (the kit is its own
+// package and cannot import the keeper's). Keep the two in step.
+/** 64 hex, colons allowed, any case -> wallet-rpc's form; undefined when it is not one. */
+export const normalFingerprint = (x) => { const h = String(x).trim().replace(/:/g, '').toLowerCase(); return /^[0-9a-f]{64}$/.test(h) ? h : undefined; };
+const fpList = (x) => (Array.isArray(x) ? x : String(x ?? '').split(',')).map(String).filter((y) => y.trim() !== '');
+/** A daemon that wallet-rpc reaches over TLS and needs a pin for: daemon_ssl enabled, not a .onion. */
+export const needsPin = (ch) => ch.daemon_ssl === 'enabled' && !/\.onion(?::[0-9]+)?$/i.test(String(ch.daemon ?? ''));
+/** Connect to host:port (https:// optional), read the leaf certificate, close: { fingerprint, valid, why }. */
+export function probeTls(daemon, timeoutMs = 15_000) {
+  const m = /^(?:https:\/\/)?(\[[0-9A-Fa-f:.]+\]|[^:/]+):([0-9]{1,5})\/?$/.exec(daemon);
+  if (m === null) return Promise.reject(new Error(`${JSON.stringify(daemon)} is not host:port`));
+  const host = m[1].replace(/^\[(.*)\]$/, '$1'), port = Number(m[2]), ip = /^[0-9.]+$/.test(host) || host.includes(':');
+  return new Promise((done, fail) => {
+    const s = connect({ host, port, ...(!ip && { servername: host }), rejectUnauthorized: false });
+    const timer = setTimeout(() => { s.destroy(); fail(new Error(`${host}:${port}: no TLS answer in ${timeoutMs} ms`)); }, timeoutMs);
+    s.once('error', (e) => { clearTimeout(timer); fail(new Error(`${host}:${port}: ${e.message || e.code || 'failed'}`)); });
+    s.once('secureConnect', () => {
+      clearTimeout(timer);
+      const c = s.getPeerCertificate();
+      s.destroy();
+      if (!c || !(c.raw instanceof Uint8Array)) return fail(new Error(`${host}:${port}: presented no certificate`));
+      let why;
+      if (!s.authorized && s.authorizationError === 'ERR_TLS_CERT_ALTNAME_INVALID') why = `not issued to ${host}`;
+      else if (!s.authorized) why = `not verified by the CA store: ${String(s.authorizationError)}`;
+      else { const named = checkServerIdentity(host, c); if (named !== undefined) why = `not issued to ${host}: ${named.message}`; }
+      done({ host, fingerprint: String(c.fingerprint256).replace(/:/g, '').toLowerCase(), notAfter: c.valid_to, valid: why === undefined, why });
+    });
+  });
+}
+
+/** The --daemon-ssl-allowed-fingerprints the clean wallet-rpc needs: [] when none; throws on a refusal. */
+export async function cleanDaemonPins(ch) {
+  if (!needsPin(ch)) return [];
+  const hard = fpList(ch.daemon_ssl_fingerprint);
+  if (hard.length) return hard.map(normalFingerprint);
+  if (ch.proxy) throw new Error('clean_host.daemon_ssl enabled with a proxy: bind would read the certificate outside Tor; set clean_host.daemon_ssl_fingerprint');
+  let p;
+  try { p = await probeTls(String(ch.daemon ?? '')); } catch (e) { throw new Error(`clean_host.daemon: no certificate read (${e.message}); set clean_host.daemon_ssl_fingerprint to pin it by hand`); }
+  if (!p.valid) throw new Error(`clean_host.daemon: certificate sha256 ${p.fingerprint} refused, ${p.why}; a node with its own certificate: clean_host.daemon_ssl_fingerprint`);
+  return [p.fingerprint];
+}
+
 /** The values the templates use: kit.json flattened, the record's, and the derived command blocks. */
-export function values(kit, record) {
+export function values(kit, record, pins = []) {
   const v = {};
   (function flat(o, p) {
     for (const [k, x] of Object.entries(o)) {
@@ -67,7 +116,7 @@ export function values(kit, record) {
   // The clean host's daemon options: TLS (wallet-rpc's --daemon-ssl, default autodetect) and,
   // optionally, a SOCKS proxy (Tor) — the restore wallet holds spend keys.
   const ch = kit.clean_host ?? {};
-  v.clean_daemon_opts = `--daemon-ssl ${ch.daemon_ssl || 'autodetect'}${ch.proxy ? ` --proxy ${ch.proxy}` : ''}`;
+  v.clean_daemon_opts = `--daemon-ssl ${ch.daemon_ssl || 'autodetect'}${pins.length ? ` --daemon-ssl-allowed-fingerprints ${pins.join(',')}` : ''}${ch.proxy ? ` --proxy ${ch.proxy}` : ''}`;
   const k = kit.keeper ?? {};
   const sup = kit.supervisor;
   if (sup === 'systemd-user' || sup === 'systemd-system') {
@@ -101,15 +150,20 @@ export async function bind({ kitPath, recordPath, out }) {
   if (kit.v !== 'sigelo-kit/1') problems.push(`v: expected "sigelo-kit/1", got ${JSON.stringify(kit.v)}`);
   if (!['mainnet', 'stagenet', 'testnet'].includes(kit.net)) problems.push('net: must be mainnet, stagenet or testnet');
   if (!['systemd-user', 'systemd-system', 'none'].includes(kit.supervisor)) problems.push('supervisor: must be systemd-user, systemd-system or none');
-  problems.push(...secretProblems(kit, await wordlist()));
   const ch = kit.clean_host ?? {};
+  // A certificate fingerprint is public and 64 hex: checked as one, not as key material.
+  problems.push(...secretProblems({ ...kit, clean_host: { ...ch, daemon_ssl_fingerprint: undefined } }, await wordlist()));
+  const badFp = fpList(ch.daemon_ssl_fingerprint).filter((x) => normalFingerprint(x) === undefined);
+  if (badFp.length) problems.push(`clean_host.daemon_ssl_fingerprint: ${badFp.map((x) => JSON.stringify(x)).join(', ')} is not a SHA-256 fingerprint (64 hex)`);
   if (ch.daemon_ssl !== undefined && !['enabled', 'disabled', 'autodetect'].includes(ch.daemon_ssl)) problems.push('clean_host.daemon_ssl: must be enabled, disabled or autodetect');
   if (ch.proxy !== undefined && ch.proxy !== '' && !/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}$/.test(ch.proxy)) problems.push('clean_host.proxy: must be ip:port of a SOCKS proxy (Tor: 127.0.0.1:9050), or empty');
   if (/\.onion(:[0-9]+)?$/i.test(String(ch.daemon ?? '')) && !ch.proxy) problems.push('clean_host.daemon: a .onion daemon needs clean_host.proxy (Tor\'s SOCKS port)');
   const record = recordPath ? JSON.parse(readFileSync(recordPath, 'utf8')) : undefined;
   if (record && record.net !== kit.net) problems.push(`net: kit.json says ${kit.net}, the ceremony record says ${record.net}`);
+  let pins = [];
+  if (!problems.length) { try { pins = await cleanDaemonPins(ch); } catch (e) { problems.push(e.message); } }
   if (problems.length) throw new Error(`bind: kit.json refused:\n  ${problems.join('\n  ')}`);
-  const v = values(kit, record);
+  const v = values(kit, record, pins);
   const filled = DOCS.map((d) => [d, fill(readFileSync(join(KIT, 'procedure', d), 'utf8'), v)]);
   const missing = filled.flatMap(([d, f]) => f.missing.map((m) => `${d}: {{${m}}}`));
   if (missing.length) throw new Error(`bind: no value in kit.json${recordPath ? ' or the record' : ''} for:\n  ${missing.join('\n  ')}`);
