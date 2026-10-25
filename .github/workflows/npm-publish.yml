@@ -22,6 +22,10 @@ on:
       tag:
         description: 'tag to publish, e.g. v0.1.2'
         required: true
+      mode:
+        description: "publish, or check: ask npm's OIDC exchange for each package and print its verdict, publish nothing"
+        required: false
+        default: 'publish'
 permissions:
   id-token: write
   contents: read
@@ -29,11 +33,29 @@ concurrency:
   group: npm-publish
   cancel-in-progress: false
 jobs:
+  # mode=check: the exchange npm would do before `npm publish`, with this workflow's own claims
+  # (filename npm-publish.yml), so a refusal here is the trusted-publisher entry's verdict and
+  # not a filename mismatch. Prints status and body per package; never fails; publishes nothing.
+  check:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'check'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const tok = await core.getIDToken('npm:registry.npmjs.org');
+            const c = JSON.parse(Buffer.from(tok.split('.')[1], 'base64url').toString());
+            for (const k of ['sub','repository','workflow_ref','job_workflow_ref','environment','ref','event_name','runner_environment']) core.info(`${k}: ${JSON.stringify(c[k])}`);
+            for (const p of ['sigelo','sigelo-contact','sigelo-agent','sigelo-spend','sigelo-mcp','sigelo-recovery-kit']) {
+              const r = await fetch(`https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(p)}`, { method: 'POST', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json', 'npm-command': 'publish', 'user-agent': 'npm/11.21.1 node/v22 linux x64 workspaces/false ci/github-actions' }, body: '{}' });
+              const body = (await r.text()).replace(/"token":"[^"]+"/, '"token":"<redacted>"').slice(0, 400);
+              core.info(`${p}: ${r.status} ${body}`);
+            }
   publish:
     # Runs on a tag push only once the repository variable NPM_TRUSTED_PUBLISHING is 'true' (the
     # trusted publisher configured on npmjs for all six packages); before that a tag push would fail
     # on E404 every release. workflow_dispatch always runs.
-    if: github.event_name == 'workflow_dispatch' || vars.NPM_TRUSTED_PUBLISHING == 'true'
+    if: (github.event_name == 'workflow_dispatch' && inputs.mode != 'check') || (github.event_name == 'push' && vars.NPM_TRUSTED_PUBLISHING == 'true')
     runs-on: ubuntu-latest
     defaults:
       run:
