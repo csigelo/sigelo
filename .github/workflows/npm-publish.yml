@@ -48,7 +48,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
       - name: the tag is the packages' version
         run: |
@@ -72,8 +71,10 @@ jobs:
           echo "V=$v" >> "$GITHUB_ENV"
           echo "PKGS=$pkgs" >> "$GITHUB_ENV"
           echo "OUT=$RUNNER_TEMP/a" >> "$GITHUB_ENV"
-      # The public registry document, read without credentials (setup-node's .npmrc carries a
-      # placeholder token). 200: published; 404: not yet; anything else fails the curl and the job.
+      # The public registry document, read without credentials. 200: published; 404: not yet; anything
+      # else fails the curl and the job. No registry-url on setup-node: it writes an _authToken line
+      # for an unset NODE_AUTH_TOKEN into .npmrc, and npm 11 then skips the OIDC exchange and PUTs
+      # with an empty token (E404 on 2026-10-25, v0.1.10; actions/setup-node#1551).
       - name: anything left to publish?
         run: |
           left=
