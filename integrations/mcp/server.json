@@ -3,7 +3,7 @@
   "name": "io.github.csigelo/sigelo",
   "title": "sigelo",
   "description": "One identity an AI agent owns: proves who it is offline, keeps its reputation, pays, messages agents",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "websiteUrl": "https://sigelo.io/adopt.html#from-an-mcp-client",
   "repository": {
     "url": "https://github.com/csigelo/sigelo",
@@ -15,7 +15,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "sigelo-mcp",
-      "version": "0.1.9",
+      "version": "0.1.10",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

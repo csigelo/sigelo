@@ -1,6 +1,6 @@
 {
   "name": "sigelo-key-agent",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "description": "Local key agent for sigelo identities: holds the identity key and signs known sigelo bodies over a 0700 Unix socket (named pipe on Windows), as ssh-agent does",
   "homepage": "https://sigelo.io/",
