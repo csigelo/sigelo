@@ -20,7 +20,7 @@
 //   node apps/web/test-shell.mjs   → ALL PASS (n); without the relay checkout, part 2's relay half SKIPs
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { createServer as httpsServer, request as httpsRequest } from 'node:https';
 import { registerHooks } from 'node:module';
@@ -250,10 +250,10 @@ const same = (a, b) => Buffer.from(a).equals(Buffer.from(b));
 // "full" can be locked: cancelled), the form and the wipe. hosts: name → { port: local port }.
 const PRIVATE = (h) => { const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h); if (!m) return false; const [a, b] = [Number(m[1]), Number(m[2])]; return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254); };
 function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
-  const target = new EventTarget(), keys = new Map(), log = { ops: [], streams: [] };
-  const state = { mode, wipe, locked: false };
+  const target = new EventTarget(), keys = new Map(), log = { ops: [], streams: [], seals: [] };
+  const state = { mode, wipe, locked: false, secure: false, clipCleared: 0 };
   const ALIASES = { 'identity:false': 0, 'identity:true': 1, control: 2 };
-  const AAD = { identity: 'sigelo-app identity/0', control: 'sigelo-app control/0' };
+  const AAD = { identity: 'sigelo-app identity/0', keeper: 'sigelo-app keeper/0', control: 'sigelo-app control/0' };
   const route = (host, port) => { const p = hosts[host]?.[port]; if (!p) throw Object.assign(new Error(`${host}:${port}: unreachable`), { check: 'connect' }); return p; };
   const shell = {
     info: () => JSON.stringify({ v: 'sigelo-shell/0', mode: state.mode, wipe: state.wipe, version: 'test' }),
@@ -291,11 +291,13 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             post({ id: m.id });
           } else if (m.op === 'close') { const sock = streams.get(m.s); streams.delete(m.s); sock?.destroy(); }
           else if (m.op === 'seal' || m.op === 'open') {
-            const kind = m.kind === 'identity' ? 'identity' : m.kind === 'control' ? 'control' : null;
+            const kind = ['identity', 'keeper', 'control'].includes(m.kind) ? m.kind : null;
             if (!kind) throw Object.assign(new Error('kind'), { check: 'kind' });
             const data = Buffer.from(m.data, 'base64');
             if (m.op === 'seal') {
-              const a = kind === 'identity' ? ALIASES[`identity:${Boolean(m.full)}`] : 2;
+              // The keeper root of a restore: under the FULL key (alias 1), its own AAD, as SigeloBridge.java.
+              const a = kind === 'identity' ? ALIASES[`identity:${Boolean(m.full)}`] : kind === 'keeper' ? 1 : 2;
+              log.seals.push({ kind, full: Boolean(m.full), alias: a });
               if (a === 1 && state.locked) throw Object.assign(new Error('not unlocked'), { check: 'cancelled' });
               if (!keys.has(a)) keys.set(a, randomBytes(32));
               const iv = randomBytes(12), c = createCipheriv('aes-256-gcm', keys.get(a), iv);
@@ -303,7 +305,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
               post({ id: m.id, data: Buffer.concat([Buffer.from([1, a]), iv, c.update(data), c.final(), c.getAuthTag()]).toString('base64') });
             } else {
               const a = data[1];
-              if (data[0] !== 1 || data.length < 30 || (kind === 'identity' ? a > 1 : a !== 2) || !keys.has(a)) throw Object.assign(new Error('not sealed here'), { check: 'sealed' });
+              if (data[0] !== 1 || data.length < 30 || (kind === 'identity' ? a > 1 : kind === 'keeper' ? a !== 1 : a !== 2) || !keys.has(a)) throw Object.assign(new Error('not sealed here'), { check: 'sealed' });
               if (a === 1 && state.locked) throw Object.assign(new Error('not unlocked'), { check: 'cancelled' });
               const d = createDecipheriv('aes-256-gcm', keys.get(a), data.subarray(2, 14));
               d.setAAD(Buffer.from(AAD[kind])); d.setAuthTag(data.subarray(data.length - 16));
@@ -316,6 +318,8 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             if (state.mode !== null && state.mode !== m.mode) throw Object.assign(new Error('switch from the menu'), { check: 'mode' });
             state.mode = m.mode; post({ id: m.id, mode: state.mode });
           } else if (m.op === 'wiped') { state.wipe = false; post({ id: m.id }); }
+          else if (m.op === 'secure') { state.secure = m.on === true; post({ id: m.id }); }
+          else if (m.op === 'clip-clear') { state.clipCleared++; post({ id: m.id }); }
           else throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
         } catch (e) { if (m.id !== undefined) post({ id: m.id, error: { check: e.check ?? 'connect', message: e.message } }); }
       };
@@ -323,6 +327,71 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
     },
   };
   return { shell, target, state, log, keys, connect: () => A.connectBridge({ shell, target }) };
+}
+
+
+// ================================================================ 1b. restore from seed in the Android app (seed.mjs), no relay needed
+{
+  const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href);
+  const { mnemonicFromRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
+  const S0 = new Uint8Array(32).fill(5); S0[31] = 0x0f;
+  const words = mnemonicFromRoot(S0), list = words.split(' '), sHex = Buffer.from(S0).toString('hex');
+  // Any 3 words of the seed in a row, anywhere: the seed or a part of it.
+  const leaks = (text) => { const t = String(text).toLowerCase(); for (let i = 0; i + 3 <= list.length; i++) if (t.includes(list.slice(i, i + 3).join(' '))) return true; return t.includes(sHex); };
+  const F = fakeShell({ mode: 'self' }), bridge = await F.connect(), idb = new FakeIDB();
+  const p = await A.androidPlatform({ bridge, mqtt: mqttEsm, indexedDB: idb, pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
+  const tries = [], ops0 = F.log.ops.length, said = [];
+  // The flush, watched: while the restore runs, the shell's network refuses before anything reaches the shell.
+  const watched = { ...p, flush: async () => { tries.push(await checkOf(() => bridge.https('https://relay.test/x')), await checkOf(() => bridge.tls('relay.test', 8883)), await checkOf(() => p.fetch('https://relay.test/y'))); return p.flush(); } };
+  const keep = { log: console.log, error: console.error, warn: console.warn, info: console.info, debug: console.debug };
+  for (const k of Object.keys(keep)) console[k] = (...a) => { said.push(a.map(String).join(' ')); };
+  let r;
+  try { r = await SD.restoreInto(watched, { words, name: 'phone', relay: 'relay.sigelo.ai', net: 'stagenet', restore: {}, seat: 'here', now: 1761400000 }); } finally { Object.assign(console, keep); }
+  const during = F.log.ops.slice(ops0);
+  ok(tries.length >= 3 && tries.every((x) => x === 'restoring'), `restore: the network held while it runs: the shell's https and tls and the page's fetch refused restoring (${tries})`);
+  ok(!during.includes('https') && !during.includes('tls') && during.filter((o) => o === 'seal').length === 2, `restore: nothing reached the network; two seals (${during})`);
+  ok(F.log.seals.length === 2 && F.log.seals.every((x) => x.full === true && x.alias === 1) && F.log.seals.map((x) => x.kind).join() === 'identity,keeper',
+    'restore: the identity and the keeper sealed by the shell under the FULL key (screen lock or biometric), the keeper as its own kind');
+  ok(await checkOf(() => bridge.https('https://relay.test/z')) !== 'restoring' && W.network.held === 0, 'restore: the network free again after the last commit');
+  const files = idb.dbs.get('sigelo').stores.get('files'), stored = [...files.values()].map((v) => Buffer.from(v).toString('latin1')).join('\n');
+  ok(files.has('identity.keystore') && files.has('keeper.keystore') && !files.has('identity.sealed') && !leaks(stored) && !stored.includes('root_hex') && !stored.includes('"secret"'),
+    'restore: the words, S, the key and K_1 are nowhere in the app\'s storage in the clear (only identity.keystore, keeper.keystore)');
+  ok(!said.some(leaks) && said.length === 0, `restore: nothing logged at all (${said.length} lines)`);
+  const id = JSON.parse(new TextDecoder().decode(await W.loadIdentity(p))), kp = JSON.parse(new TextDecoder().decode(await W.loadSealed(p, 'keeper')));
+  ok(id.derived?.n === 0 && kp.v === 'sigelo-keeper-hot/0' && kp.keeper === 1 && kp.net === 'stagenet' && kp.restore_height === 0 && kp.me.did === r.did && r.seat === 'here',
+    'restore: the sealed files open again: the operator (derived n 0) and K_1 (stagenet, no height or date given → restore_height 0)');
+  F.state.locked = true;
+  ok(await checkOf(() => W.loadSealed(p, 'keeper')) === 'cancelled' && await checkOf(() => bridge.open(p.files.read('keeper.keystore'), { kind: 'identity' })) === 'cancelled', 'restore: K_1 opens only after the screen lock (cancelled: asked again)');
+  F.state.locked = false;
+  ok(await checkOf(() => bridge.open(p.files.read('keeper.keystore'), { kind: 'control' })) === 'sealed', 'restore: the keeper never opens as another kind');
+  const seat = SD.seatOf(p, () => id), info = seat.info();
+  ok(info?.here === true && info.holder === 'phone' && info.epoch === 1 && seat.restored()?.on === '2025-10-25' && seat.restored().keeper === 1 && seat.restored().seat === 'here',
+    'restore: this phone is the first FULL device and holds the seat (epoch 1); Me: restored on the day, keeper 1, seat here');
+  const set = JSON.parse(new TextDecoder().decode(p.files.read(SD.SETTINGS)));
+  ok(set.mode.kind === 'full' && set.mode.standby === false && !leaks(JSON.stringify(set)), 'restore: settings: FULL, not standby');
+  // The screen: FLAG_SECURE and the clipboard through the shell.
+  await bridge.secure(true);
+  const on = F.state.secure;
+  await bridge.secure(false); await bridge.clipClear();
+  ok(on === true && F.state.secure === false && F.state.clipCleared === 1, 'shell: FLAG_SECURE on and off (secure), the clipboard cleared (clip-clear)');
+  const src = readFileSync(join(HERE, 'seed.mjs'), 'utf8');
+  ok(SD.WORDS_ATTRS.autocomplete === 'off' && SD.WORDS_ATTRS.autocorrect === 'off' && SD.WORDS_ATTRS.autocapitalize === 'none' && SD.WORDS_ATTRS.spellcheck === 'false'
+    && /secure\(true\)/.test(src) && /bridge\.clipClear\(\)/.test(src) && /addEventListener\('paste'/.test(src) && /I have my 25 words on paper/.test(src),
+    'seed.mjs: the words\' box without autocomplete, autocorrect, capitals or spellcheck; FLAG_SECURE while the form is up; the clipboard cleared after a paste; "I have my 25 words on paper" first');
+  // The code, not its comments (which say there is none): no way from a root to its 25 words, no "show seed".
+  const pages = ['app.mjs', 'shell.mjs', 'seed.mjs', 'router.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8')).join('\n') + readFileSync(join(REPO, 'adapters', 'moadim', 'ui.js'), 'utf8');
+  const code = pages.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  ok(!/show (the |your )?(seed|25 words)|show seed|reveal|mnemonicFromRoot|encodeMoneroWords|newRoot/i.test(code) && /Restore from my 25 words/.test(readFileSync(join(HERE, 'shell.mjs'), 'utf8')),
+    'no "show seed" anywhere in the app (nothing turns a root into words); the first-start screen offers "Restore from my 25 words"');
+  // Seat elsewhere: a standby; the seat taken later signs the list naming this phone.
+  const F2 = fakeShell({ mode: 'self' }), b2 = await F2.connect(), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
+  await SD.restoreInto(p2, { words, name: 'tab', relay: '', restore: { restore_date: '2024-02-29' }, seat: 'elsewhere', now: 1761400000 });
+  const id2 = JSON.parse(new TextDecoder().decode(await W.loadIdentity(p2))), s2 = SD.seatOf(p2, () => id2);
+  ok(s2.info().here === false && p2.files.read(SD.LIST) === null && JSON.parse(new TextDecoder().decode(await W.loadSealed(p2, 'keeper'))).restore_date === '2024-02-29' && JSON.parse(new TextDecoder().decode(p2.files.read(SD.SETTINGS))).mode.standby === true,
+    'restore, seat elsewhere: a standby, no list here, restore_date kept');
+  const t = await s2.take(1761400100);
+  ok(t.holder === 'tab' && t.seat.epoch === 1 && s2.info().here === true && s2.restored().seat === 'here' && JSON.parse(new TextDecoder().decode(p2.files.read(SD.SETTINGS))).mode.standby === false, 'seat take: the list signed naming this phone, the seat here');
+  ok(await checkOf(() => SD.restoreInto(p2, { words: list.slice(0, 24).join(' '), name: 'tab', relay: '', seat: 'here', now: 1761400000 })) === 'restore_words' && W.network.held === 0, 'restore: 24 words refused restore_words, the network released');
 }
 
 // ================================================================ 2. platform-android.mjs

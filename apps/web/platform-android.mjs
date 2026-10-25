@@ -14,21 +14,27 @@
 //   → {op:"https", id, method, url, type?, body?}  ← {id, status, headers:{date, content-length, retry-after, content-type}, body}
 //   → {op:"tls", id, host, port}                   ← {id, stream}; then ← {s, data} … ← {s, end:true, error?}
 //   → {op:"write", id, s, data}                    ← {id} once written;   → {op:"close", s}
-//   → {op:"seal", id, kind, full?, data}           ← {id, data}   kind "identity" | "control" (AES-256-GCM, AndroidKeyStore)
+//   → {op:"seal", id, kind, full?, data}           ← {id, data}   kind "identity" | "keeper" | "control" (AES-256-GCM, AndroidKeyStore;
+//                                                                 keeper: K_j of a restore from seed, under the FULL key)
 //   → {op:"open", id, kind, data}                  ← {id, data}
 //   → {op:"mode", id, mode}                        ← {id, mode}   the form at first start ("self" | "remote")
 //   → {op:"wiped", id}                             ← {id}         the page has cleared its storage after a switch
+//   → {op:"secure", id, on}                        ← {id}         FLAG_SECURE on the window (no screenshot, no recents
+//                                                                 thumbnail) while the restore-from-seed screen is up
+//   → {op:"clip-clear", id}                        ← {id}         the clipboard cleared (after the words were pasted)
 //   any ← {id, error:{check, message}}
 // https: https:// to any host; http:// only to a private IPv4 address (a computer's `ui --remote`
 // on the LAN, sealed in the page). tls: certificate and host name checked by the system's trust
 // store. Nothing is sent but what the request names: no Origin, no cookie, no redirect followed.
+// While a restore from seed holds the network (platform-web.mjs holdNetwork), https and tls refuse here
+// before anything reaches the shell.
 import { sha256 } from '@noble/hashes/sha2.js';
 import { MsgError, fail } from './vendor/contact/kdf.mjs';
-import { webPlatform, workerPow } from './platform-web.mjs';
+import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped']);
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear']);
 export const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); };
 export const unb64 = (s) => { const t = atob(s), o = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) o[i] = t.charCodeAt(i); return o; };
 
@@ -92,13 +98,18 @@ function makeBridge(info, port) {
   return Object.freeze({
     info, request, port,
     async https(url, { method = 'GET', body, type } = {}) {
+      checkNetwork();
       const b = body === undefined ? undefined : typeof body === 'string' ? new TextEncoder().encode(body) : body;
       const r = await request('https', { method, url, ...(b !== undefined && { body: b64(b), type: type ?? 'text/plain;charset=UTF-8' }) });
       return { status: r.status, headers: r.headers ?? {}, body: unb64(r.body ?? '') };
     },
-    async tls(host, port) { const r = await request('tls', { host, port }); return stream(r.stream); },
+    async tls(host, port) { checkNetwork(); const r = await request('tls', { host, port }); return stream(r.stream); },
     async seal(bytes, { kind, full = false }) { return unb64((await request('seal', { kind, full, data: b64(bytes) })).data); },
     async open(bytes, { kind }) { return unb64((await request('open', { kind, data: b64(bytes) })).data); },
+    /** FLAG_SECURE on (the restore screen is up) or off. */
+    async secure(on) { await request('secure', { on: on === true }); },
+    /** The system clipboard emptied. */
+    async clipClear() { await request('clip-clear'); },
   });
 }
 
@@ -166,10 +177,10 @@ export function androidPow(inWorker = workerPow()) {
   };
 }
 
-/** The identity sealed by the shell: AES-256-GCM under a key in AndroidKeyStore (FULL: unlocked by the user). */
+/** The identity (and a restored keeper) sealed by the shell: AES-256-GCM under a key in AndroidKeyStore (FULL and keeper: unlocked by the user). */
 export const keystoreSealer = (bridge) => Object.freeze({
-  seal: (bytes, { full = false } = {}) => bridge.seal(bytes, { kind: 'identity', full }),
-  open: (bytes) => bridge.open(bytes, { kind: 'identity' }),
+  seal: (bytes, { full = false, kind = 'identity' } = {}) => bridge.seal(bytes, { kind, full }),
+  open: (bytes, { kind = 'identity' } = {}) => bridge.open(bytes, { kind }),
 });
 
 /** The platform: webPlatform's files, flush, owner and proof of work; the shell's network and key. */

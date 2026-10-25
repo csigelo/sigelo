@@ -74,7 +74,7 @@ const USAGE = `sigelo-offline — root seed for sigelo × Monero (MONERO.md §2,
       keeper_root_hex, bundle } for \`sigelo-spend init --adopt\` (INCIDENT.md §5).
   sigelo-offline vendor   --n <n> [--words <file|->] [--out <dir>] [--net <net>]
       the vendor identity, rotation n, from the 25 words (file or stdin, default -; never argv):
-      writes vendor.local.json (0600), vendor.init.json and sigelo-vendor-identity.json (the genesis)
+      writes vendor.local.json (0600), vendor.init.json (with created, today's UTC day) and sigelo-vendor-identity.json (the genesis)
       to --out (default .), refusing to overwrite; prints the DID and the genesis SHA-256 (--net: also
       the vault address, to check the words).
   sigelo-offline recover  --vendor --n <n> [--genesis <vendor bundle|genesis>] (- | --words <file|-> | --backup … | --restored <f>)

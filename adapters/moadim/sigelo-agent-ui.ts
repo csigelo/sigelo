@@ -42,7 +42,7 @@ import { did, verify, VERSION, type Attestation, type Genesis } from 'sigelo';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
-import { enrolInto, keeperPath, workersOf } from './sigelo-agent-enrol.ts';
+import { enrolInto, keeperPath, readKeeper, workersOf } from './sigelo-agent-enrol.ts';
 import { deviceRound, hasTty, seatGate, seatInfo, terminalQr, ttyLine, ttyWrite, type DevMsg } from './sigelo-agent-device.ts';
 import { CONTROL_NAME, controlLine, defaultAddress, isRelay, isScope, lanControls, loadAead, newControl, openRequest, R_BODY_MAX, remoteCall, sealAnswer, type AnyControl, type Control, type Scope } from './sigelo-agent-remote.ts';
 import { relayControls, type RelayCarrier, type Relays } from './sigelo-agent-control.ts';
@@ -54,6 +54,7 @@ const DAY = 86400, OPERATOR_DAYS = 90, RENEW_DAYS = 14, BODY_MAX = 256 * 1024;
 const STATIC: Record<string, [string, string]> = {
   '/': ['ui.html', 'text/html'], '/ui.html': ['ui.html', 'text/html'], '/ui.js': ['ui.js', 'text/javascript'], '/ui.css': ['ui.css', 'text/css'],
   '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/sw.js': ['sw.js', 'text/javascript'], '/icon.svg': ['icon.svg', 'image/svg+xml'],
+  '/icon-maskable.svg': ['icon-maskable.svg', 'image/svg+xml'],
   '/shim-zlib.mjs': ['shim-zlib.mjs', 'text/javascript'], '/shim-kdf.mjs': ['shim-kdf.mjs', 'text/javascript'],
   // QR reading and drawing in the page (design/devices.md §6.4): sigelo-contact's own files, as they are.
   '/qr.mjs': ['contact:qr.mjs', 'text/javascript'], '/qr-decode.mjs': ['contact:qr-decode.mjs', 'text/javascript'],
@@ -141,7 +142,7 @@ interface PageLib {
   makePage(o: {
     makeCarrier: (onEvent: (e: Ev) => void, kept: { relay?: string }) => unknown; link: LinkLib; relayFixed: string | null; linksFile: string; codeKind: (t: string) => string; unlogged: RegExp;
     store: { readHistory(): string | null; append(line: string): void; clearHistory(): void; readData(): string | null; writeData(text: string): void };
-    hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string };
+    hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string; restored?: unknown };
       agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean };
   }): {
     carrier: unknown; routes: Record<string, Route>; dispatch(method: string, url: URL, b: Record<string, unknown>): Promise<[number, unknown]>;
@@ -193,6 +194,18 @@ export async function revokeControl(identity: string, name: string, carrierOptio
   delete d.controls![name];
   writePrivate(f, JSON.stringify(d));
   return true;
+}
+
+/**
+ * Me's "restored from seed" line (UI-API.md GET /api/me `restored`): an identity from the 25 words
+ * (`derived`) with its keeper file and the day that file was made: { on, keeper, seat: here | elsewhere | null }.
+ */
+function restoredOf(path: string): { restored?: { on: string; keeper: number; seat: string | null } } {
+  try {
+    if (!(id.load(path) as { derived?: unknown }).derived || !existsSync(keeperPath(path))) return {};
+    const k = readKeeper(path) as { keeper: number; created?: unknown }, st = seatInfo(path);
+    return typeof k.created === 'string' ? { restored: { on: k.created, keeper: k.keeper, seat: st ? (st.here ? 'here' : 'elsewhere') : null } } : {};
+  } catch { return {}; }
 }
 
 export async function startUi(o: UiOptions): Promise<Ui> {
@@ -250,7 +263,8 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     hooks: {
       me: () => me(),
       meInfo: () => ({ identity_file: path, recovery: id.head(loadMe()).recovery === null ? 'none' : 'set', key: 'file',
-        erase: `SIGELO_IDENTITY=${path} sigelo-agent erase-request --recovery-key <your recovery.key>   (on the machine holding the recovery key)` }),
+        erase: `SIGELO_IDENTITY=${path} sigelo-agent erase-request --recovery-key <your recovery.key>   (on the machine holding the recovery key)`,
+        ...restoredOf(path) }),
       agents: () => agents(),
       // The seat (DEVICES.md); device messages after each drain: wiped answers, a standby asking for the seat.
       seat: () => seatInfo(path),

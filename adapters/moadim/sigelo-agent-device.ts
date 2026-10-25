@@ -754,6 +754,9 @@ async function importSnapshot(op: string, dev: Dev, bytes: Uint8Array, o: { only
   for (const [k, f] of Object.entries(where)) {
     const text = b.files[k];
     if (typeof text !== 'string') continue;
+    // '{}' is buildSnapshot's stand-in for a carrier state or contact store the seat did not have yet
+    // (a fresh operator, e.g. restored from seed): absent there, absent here, never an empty store.
+    if (text === '{}' && (k === 'carrier' || k === 'contacts')) { withLock(f, () => rmSync(f, { force: true })); continue; }
     withLock(f, () => writePrivate(f, text));
   }
   if (typeof b.files['roster'] === 'string') {
@@ -957,19 +960,24 @@ async function seatInit(f: Map<string, string>, dev: Dev): Promise<number> {
   holderFor(op, 'device seat init');
   const cur = readList(op);
   if (cur?.seat) refuse('seat_exists', `the seat exists already: ${nameOf(cur, cur.seat.holder)}, epoch ${cur.seat.epoch} (device seat status)`);
-  const k = readKeeper(op);
-  checkFree(k, name);
-  const { lib, enrol } = await libs(), { K, recovery } = rootOf(k), i = nextIndex(k), w = enrol.workerChain(K, i, 0, recovery);
-  const file = join(agentsDirFor(op), `sigelo.${name}.local.json`);
-  if (existsSync(file)) { K.fill(0); refuse('enrol_exists', `${file} exists: another --name, or move it away`); }
+  const k = readKeeper(op), file = join(agentsDirFor(op), `sigelo.${name}.local.json`);
+  // A run that stopped before the list (offline: the relay did not answer) placed this device already:
+  // the same name, FULL, here, its file this worker's. It goes on from there instead of refusing the name.
+  const prior = Object.entries(k.workers).find(([, w]) => w.name === name), again = prior !== undefined && prior[1].placed === 'device' && prior[1].via === 'here'
+    && prior[1].rank === 'full' && existsSync(file) && ((): boolean => { try { return did(load(file).genesis) === prior[1].original; } catch { return false; } })();
+  if (!again) checkFree(k, name);
+  const { lib, enrol } = await libs(), { K, recovery } = rootOf(k), i = again ? Number(prior![0]) : nextIndex(k), w = enrol.workerChain(K, i, 0, recovery);
+  if (!again && existsSync(file)) { K.fill(0); refuse('enrol_exists', `${file} exists: another --name, or move it away`); }
   const me = load(op), t = nowS(), c = carrierFor(lib, op);
   let paired = false;
   try {
-    const attestation = enrol.operatorAttestation({ sign: signer(op, me).sign, iss: did(head(me)), sub: w.original, relay: c.relay, now: t, days: dev.DEVICE_DAYS }) as { body: { exp: number; iat: number }; sig: string };
-    const id = enrol.workerIdentity({ K, i, n: 0, recovery, attestation, issuer: head(me) });
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-    withLock(file, () => { if (existsSync(file)) refuse('enrol_exists', `${file} appeared meanwhile`); save(file, sealed(id, provider())); });
-    writeKeeper(op, (x) => { x.workers[i] = { name, n: 0, did: w.did, original: w.original, placed: 'device', rank: 'full', via: 'here', at: t, attestation, until: attestation.body.exp }; });
+    if (!again) {
+      const attestation = enrol.operatorAttestation({ sign: signer(op, me).sign, iss: did(head(me)), sub: w.original, relay: c.relay, now: t, days: dev.DEVICE_DAYS }) as { body: { exp: number; iat: number }; sig: string };
+      const id = enrol.workerIdentity({ K, i, n: 0, recovery, attestation, issuer: head(me) });
+      mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+      withLock(file, () => { if (existsSync(file)) refuse('enrol_exists', `${file} appeared meanwhile`); save(file, sealed(id, provider())); });
+      writeKeeper(op, (x) => { x.workers[i] = { name, n: 0, did: w.did, original: w.original, placed: 'device', rank: 'full', via: 'here', at: t, attestation, until: attestation.body.exp }; });
+    }
     c.presetTier(w.original, 'own');
     // Both sides here: the operator's code, the device answers it, the started operator replies.
     await dc(c).start();

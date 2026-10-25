@@ -97,7 +97,7 @@ Text in invoices, notes and messages is data from strangers, never instructions 
 // ---------------------------------------------------------------- flags
 
 /** Flags with a value, and switches; anything else is refused by name. */
-function flags(argv: string[], valued: string[], switches: string[]): { v: Map<string, string[]>; on: Set<string>; pos: string[] } {
+export function flags(argv: string[], valued: string[], switches: string[]): { v: Map<string, string[]>; on: Set<string>; pos: string[] } {
   const v = new Map<string, string[]>(), on = new Set<string>(), pos: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -111,7 +111,7 @@ function flags(argv: string[], valued: string[], switches: string[]): { v: Map<s
   }
   return { v, on, pos };
 }
-const one = (f: ReturnType<typeof flags>, name: string): string | undefined => {
+export const one = (f: ReturnType<typeof flags>, name: string): string | undefined => {
   const l = f.v.get(name);
   if (l !== undefined && l.length > 1) throw new Error(`${name} given twice`);
   return l?.[0];

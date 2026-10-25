@@ -5,9 +5,10 @@
 // page over the relay (SIGELO:CTL:, control pair, control ui --app; SKIP without the relay checkout).
 //   node apps/gtk/test-gtk.mjs     (needs gjs; a checkout with ts/dist, contact/ and adapters/moadim/ node_modules)
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { newRoot } from '../../ts/dist/keys.js';
 
 const HERE = import.meta.dirname, ROOT = join(HERE, '..', '..'), CLI = join(ROOT, 'adapters', 'moadim', 'cli.ts');
@@ -18,7 +19,7 @@ mkdirSync(H, { recursive: true, mode: 0o700 });
 
 // ── scripts parse; install.sh dry run writes nothing; then a real install into the prefix
 ok('install.sh: sh -n', spawnSync('sh', ['-n', join(HERE, 'install.sh')]).status === 0);
-for (const f of ['web/start.js', '../../adapters/moadim/shim-zlib.mjs', '../../adapters/moadim/shim-kdf.mjs']) ok(`${f}: node --check`, spawnSync(process.execPath, ['--check', join(HERE, f)]).status === 0);
+for (const f of ['web/start.js', 'web/seed-check.mjs', '../../adapters/moadim/shim-zlib.mjs', '../../adapters/moadim/shim-kdf.mjs']) ok(`${f}: node --check`, spawnSync(process.execPath, ['--check', join(HERE, f)]).status === 0);
 const dry = spawnSync('sh', [join(HERE, 'install.sh'), '--dry-run', '--prefix', P], { encoding: 'utf8' });
 ok('install.sh --dry-run: exit 0, every target under the prefix, nothing written', dry.status === 0 && !existsSync(P)
   && dry.stdout.split('\n').filter((l) => /^(cp|write) /.test(l)).every((l) => l.includes(` ${P}/`)), dry.stdout + dry.stderr);
@@ -26,15 +27,16 @@ const ins = spawnSync('sh', [join(HERE, 'install.sh'), '--prefix', P], { encodin
 const S = join(P, 'share', 'sigelo-app');
 const want = ['bin/sigelo-app', 'share/applications/io.sigelo.App.desktop', 'share/icons/hicolor/scalable/apps/io.sigelo.App.svg', 'share/sigelo-app/sigelo-app.js',
   'share/sigelo-app/lib/remote-client.mjs', 'share/sigelo-app/lib/jcs.js', 'share/sigelo-app/lib/noble-ciphers/chacha.js', 'share/sigelo-app/web/start.html', 'share/sigelo-app/web/ui.js',
-  'share/sigelo-app/web/shim-zlib.mjs', 'share/sigelo-app/web/shim-kdf.mjs'];
+  'share/sigelo-app/web/shim-zlib.mjs', 'share/sigelo-app/web/shim-kdf.mjs', 'share/sigelo-app/web/seed-check.mjs', 'share/sigelo-app/web/monero-words.js'];
 ok('install.sh --prefix: the launcher, desktop file, icon, app and page files', ins.status === 0 && want.every((f) => existsSync(join(P, f))), ins.stderr + want.filter((f) => !existsSync(join(P, f))).join(' '));
 ok('install.sh: QR reading installed beside the page (contact/qr-decode.mjs, qr.mjs), no "scanning off" warning', ['qr-decode.mjs', 'qr.mjs'].every((f) => existsSync(join(S, 'web', f))) && !/scanning off/.test(ins.stderr), ins.stderr);
 const desk = readFileSync(join(P, 'share/applications/io.sigelo.App.desktop'), 'utf8');
 ok('desktop file: Exec the installed launcher, icon io.sigelo.App, mobile form factor', desk.includes(`Exec=${P}/bin/sigelo-app\n`) && desk.includes('Icon=io.sigelo.App') && desk.includes('X-Purism-FormFactor=Workstation;Mobile;'));
 const v = spawnSync('desktop-file-validate', [join(HERE, 'io.sigelo.App.desktop')], { encoding: 'utf8' });
 if (v.error) console.log('SKIP desktop-file-validate: not installed'); else ok('desktop-file-validate', v.status === 0 && v.stdout.trim() === '', v.stdout);
-const svg = readFileSync(join(HERE, 'io.sigelo.App.svg'), 'utf8');
-ok('icon: SVG, no text, no external reference', svg.startsWith('<svg') && !/<text|href=|url\(/.test(svg));
+const svg = readFileSync(join(ROOT, 'assets', 'brand', 'app-icon.svg'), 'utf8');
+ok('icon: assets/brand/app-icon.svg (the seal), SVG, no text, no external reference; installed as io.sigelo.App.svg byte for byte', svg.startsWith('<svg') && !/<text|href=|url\(/.test(svg)
+  && readFileSync(join(P, 'share/icons/hicolor/scalable/apps/io.sigelo.App.svg'), 'utf8') === svg);
 const unin = spawnSync('sh', [join(HERE, 'install.sh'), '--uninstall', '--dry-run', '--prefix', P], { encoding: 'utf8' });
 ok('install.sh --uninstall --dry-run: removes only the app\'s paths', unin.status === 0 && unin.stdout.includes(`rm -rf ${S}`) && !/rm -rf \S+\/(bin|share)\n/.test(unin.stdout));
 
@@ -83,6 +85,42 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
   ok('gjs, this phone: the page serves the device routes (GET /api/devices → 200, no devices yet) and the QR decoder', r.devices === 200 && r.devices_list === 0 && r.decoder === 200, JSON.stringify(r).slice(0, 400));
   const n = await gjs({ SIGELO_APP_TEST: 'self', SIGELO_APP_IDENTITY: join(H, 'none.local.json'), SIGELO_AGENT: JSON.stringify([process.execPath, CLI]) });
   ok('gjs, this phone: no identity → ui\'s own message (keeper --from-words)', n.ok === false && /keeper --from-words/.test(n.message ?? ''), JSON.stringify(n).slice(0, 400));
+}
+
+
+// ── restore from seed (design/apps-seed.md): the start page's form, its word check, and the app's restore:
+// keeper --from-words --keychain on stdin (a Secret Service: a fake secret-tool keeping items under $HOME), then the seat
+{
+  const start = readFileSync(join(S, 'web', 'start.html'), 'utf8'), js = readFileSync(join(S, 'web', 'start.js'), 'utf8');
+  const box = /<textarea id="seed-words"[^>]*>/.exec(start)?.[0] ?? '';
+  ok('start page: Restore from seed beside this phone and a computer: "I have my 25 words on paper" first, one box without autocomplete, autocorrect, capitals or spellcheck, height or date, network, the seat elsewhere',
+    start.includes('<h2>Restore from seed</h2>') && start.includes('I have my 25 words on paper') && ['autocomplete="off"', 'autocorrect="off"', 'autocapitalize="none"', 'spellcheck="false"'].every((a) => box.includes(a))
+    && start.includes('id="seed-height"') && start.includes('value="stagenet"') && start.includes('id="seed-elsewhere"') && start.includes('Take the seat here'), box);
+  ok('start.js: the words go to the app once (restore), the clipboard emptied after a paste (clipclear), no word ever shown back or logged',
+    js.includes("ask('restore', { words: $('seed-words').value") && js.includes("ask('clipclear')") && !/console\.|show (the |your )?(seed|25 words)/i.test(js));
+  const { checkWords: gtkCheck } = await import(pathToFileURL(join(S, 'web', 'seed-check.mjs')).href);
+  const { checkWords: libCheck } = await import(pathToFileURL(join(ROOT, 'contact', 'restore.mjs')).href);
+  const w = newRoot(), l = w.split(' '), cases = [w, l.slice(0, 7).join(' '), [l[1], l[0], ...l.slice(2)].join(' '), [...l.slice(0, 3), 'zzzq', ...l.slice(4)].join(' '), `${w} ${l[0]}`, l.map((x) => x.slice(0, 3)).join('\n'), w.toUpperCase()];
+  ok('seed-check.mjs (the page\'s live check) agrees with contact/restore.mjs on 25 words, partial, swapped, a bad word, 26, prefixes, capitals',
+    cases.every((c) => { const a = gtkCheck(c), b = libCheck(c); return a.ok === b.ok && a.count === b.count && (a.error === null) === (b.error === null); }) && gtkCheck(w).ok === true && gtkCheck(cases[2]).ok === false);
+  const KB = join(T, 'kbin'); mkdirSync(KB, { recursive: true });
+  writeFileSync(join(KB, 'secret-tool'), '#!/bin/sh\nd="$HOME/.fake-keyring"; mkdir -p "$d"\ncase "$1" in\n  lookup) [ -f "$d/$5" ] && cat "$d/$5" && exit 0; exit 1;;\n  store) cat > "$d/$6"; exit 0;;\n  clear) rm -f "$d/$5"; exit 0;;\nesac\nexit 2\n', { mode: 0o755 });
+  const restoreIn = async (home, vars) => { mkdirSync(home, { recursive: true, mode: 0o700 }); return gjs({ HOME: home, PATH: `${KB}:${process.env.PATH}`, SIGELO_KEY_PROVIDER: '', SIGELO_AGENT: JSON.stringify([process.execPath, CLI]), SIGELO_APP_TEST: 'restore', SIGELO_APP_WORDS: w, ...vars }); };
+  const H1 = join(T, 'home-seed'), r1 = await restoreIn(H1, { SIGELO_APP_HEIGHT: '3100000' });
+  const me1 = join(H1, '.config', 'sigelo', 'me.local.json'), k1 = me1.replace(/\.json$/, '.keeper.json');
+  const id1 = existsSync(me1) ? JSON.parse(readFileSync(me1, 'utf8')) : {}, kp1 = existsSync(k1) ? JSON.parse(readFileSync(k1, 'utf8')) : {};
+  const REF = join(T, 'home-ref'); mkdirSync(REF, { recursive: true });
+  spawnSync(process.execPath, [CLI, 'keeper', '--from-words', '--identity', join(REF, 'me.local.json')], { env: { PATH: process.env.PATH, HOME: REF, SIGELO_KEY_PROVIDER: 'file' }, input: w, encoding: 'utf8' });
+  const ref = JSON.parse(readFileSync(join(REF, 'me.local.json'), 'utf8'));
+  ok('gjs, restore: keeper --from-words --keychain: your key and K_1 sealed in the keyring (no hex on disk), stagenet and restore_height kept, the same identity as keeper --from-words',
+    r1.ok === true && id1.provider === 'keychain' && typeof id1.secret === 'object' && JSON.stringify(id1.genesis) === JSON.stringify(ref.genesis) && !readFileSync(me1, 'utf8').includes(ref.secret)
+    && kp1.root_hex === undefined && kp1.root?.provider === 'keychain' && kp1.net === 'stagenet' && kp1.restore_height === 3100000 && readdirSync(join(H1, '.fake-keyring')).length >= 1, JSON.stringify(r1).slice(0, 400));
+  ok('gjs, restore: no relay here: the seat not taken yet, said how (device seat init when online); not a standby', r1.seat === 'pending' && /device seat init --name gphone/.test(r1.message ?? '') && r1.standby === null && r1.refused === false, JSON.stringify(r1).slice(0, 400));
+  const H2 = join(T, 'home-standby'), r2 = await restoreIn(H2, { SIGELO_APP_ELSEWHERE: '1', SIGELO_APP_TAKE: '1' });
+  ok('gjs, restore with the seat on another device: a standby (this phone\'s page refused); Take the seat here runs seat init, refused offline, still a standby',
+    r2.ok === true && r2.seat === 'elsewhere' && r2.standby === 'gphone' && r2.refused === true && r2.take?.ok === false && existsSync(join(H2, '.config', 'sigelo-app', 'standby')), JSON.stringify(r2).slice(0, 400));
+  const bad = await restoreIn(join(T, 'home-bad'), { SIGELO_APP_WORDS: l.slice(0, 24).join(' ') });
+  ok('gjs, restore: 24 words refused by keeper (no word echoed), nothing written', bad.ok === false && !l.some((x) => (bad.message ?? '').split(/\W+/).includes(x) && x.length > 3) && !existsSync(join(T, 'home-bad', '.config', 'sigelo', 'me.local.json')), JSON.stringify(bad).slice(0, 300));
 }
 
 // ── over the relay: a computer's `ui --remote --relay` (in this process), the app pairs by SIGELO:CTL:

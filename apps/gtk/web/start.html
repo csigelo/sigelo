@@ -22,6 +22,28 @@
     <p class="muted">Keep relay.sigelo.ai unless you run your own; change it later under Me. A 12-character code always names its own relay.</p>
     <div class="bar"><button id="self" class="primary">Open this phone's page</button></div>
   </section>
+  <section class="card" id="seed">
+    <h2>Restore from seed</h2>
+    <p class="muted">Your 25 words make your identity and your keeper again on this phone (FULL), sealed in the keyring. They are never shown back.</p>
+    <div id="seed-ack"><label><input id="seed-seen" type="checkbox"> I have my 25 words on paper</label>
+      <div class="bar"><button id="seed-go" disabled>Continue</button></div></div>
+    <div id="seed-form" hidden>
+      <label for="seed-name">Name for this device</label>
+      <input id="seed-name" value="phone" maxlength="20" autocomplete="off" autocapitalize="none" spellcheck="false">
+      <label for="seed-words">Your 25 words</label>
+      <textarea id="seed-words" rows="5" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" aria-describedby="seed-count"></textarea>
+      <p id="seed-count" class="muted">0 of 25 words</p>
+      <label for="seed-height">Restore height or date (optional)</label>
+      <input id="seed-height" placeholder="3100000 or 2024-02-29" autocomplete="off" spellcheck="false">
+      <p class="muted">The block height or the day your words were made. Empty: from Monero's first block.</p>
+      <div class="bar"><label><input type="radio" name="seed-net" value="mainnet" checked> mainnet</label><label><input type="radio" name="seed-net" value="stagenet"> stagenet</label></div>
+      <label><input id="seed-elsewhere" type="checkbox"> sigelo already runs as me on another device (it keeps the seat)</label>
+      <div class="bar"><button id="seed-restore" class="primary" disabled>Restore</button><button id="seed-cancel">Cancel</button></div>
+    </div>
+    <div id="seed-standby" hidden><p class="warn">Another device holds your seat: this phone does not log in as you.</p>
+      <div class="bar"><button id="seed-take">Take the seat here</button></div></div>
+    <p id="seed-status" class="muted"></p>
+  </section>
   <section class="card">
     <h2>A computer</h2>
     <p class="muted">Drive the page of a computer running <code>sigelo-agent ui --remote</code> on this network (SIGELO:UI:), or from anywhere with <code>ui --remote --relay</code> (SIGELO:CTL:). This phone holds no account key.</p>

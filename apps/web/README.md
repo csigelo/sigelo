@@ -27,6 +27,7 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `platform-android.mjs` | In the Android app: the bridge (`sigelo-bridge/0`), the shell's fetch, MQTT and key |
 | `ws-over-stream.mjs` | RFC 6455 client framing over the shell's TLS stream (wss), and the stream as a socket (mqtts) |
 | `shell.mjs` | In the Android app: the form picked at first start; the remote form (a computer's page, on the LAN or over the relay) |
+| `seed.mjs` | Restore from seed: the two screens, `restoreInto` (derive with `contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
 | `copy.mjs` | The vendoring: walks the import graph, copies each file byte for byte, writes `vendor.json` |
 | `vendor.json` | Every vendored file, its source and SHA-256 (committed; `vendor/` is not) |
 | `test-web.mjs`, `test-shell.mjs` | The tests, in Node, through the same import map (`test-fakes.mjs`: IndexedDB, Worker) |
@@ -75,13 +76,30 @@ key from a script running in this origin (THREAT-MODEL §3.12). In the Android a
 sealer: the file is sealed under an AndroidKeyStore key instead (`identity.keystore`). Contacts, carrier state, history and the page's data are
 files of the platform under `app/me.local.*`, as `ui` keeps them beside `me.local.json`.
 
+## Restore from seed (seed.mjs)
+
+The first-start screen's other way in: "I have my 25 words on paper", then one box checked as it is
+typed (count, the first word not in the Monero list by position, the checksum), a restore height or
+date, the network, the device's name, and whether sigelo already runs as you on another device.
+`contact/restore.mjs` derives what `sigelo-agent keeper --from-words` writes: the operator identity
+(`operatorIdentity(S, 0)`) and the keeper file (K_1, the recovery commitment, `created`, `net`,
+`restore_height` or `restore_date`; neither given → `restore_height: 0`), this device as worker 0 of
+K_1, FULL, attested 14 days. Both files are sealed at once (`identity`, `keeper`: the WebCrypto key,
+or the FULL keystore key in the Android app). The list and the seat notes (`app/me.local.devices.json`,
+`app/me.local.seat.json`) are plain: they hold no secret. From the first word to the last commit
+the network is held: the page's fetch and MQTT and the shell's `https` and `tls` refuse `restoring`.
+The words are never stored, logged or shown again. Seat here: a signed list, this device holding the
+seat at epoch 1 (`seat init`). Elsewhere: a standby. `router.mjs` then never logs in, refuses writes
+with `seat_elsewhere`, and the banner offers "Take the seat here" (`POST /api/seat/take`). Me shows
+"Restored from seed on <day> · keeper j=1 · seat here".
+
 ## Code trust
 
 The app runs only its own files: CSP `default-src 'self'`, scripts from this origin and the import
 map by its hash; `connect-src https: wss:` for the relays. No bundler, no transform: `copy.mjs`
 copies sigelo-contact's modules (`contact/`), sigelo's (`ts/dist/`), @noble's, `mqtt.esm.js`
 (MQTT.js 5.16.0), `ui.js`, `ui.css`, the icon, `remote-client.mjs` and the page's `node:zlib` shim for
-the QR codec, as they are. 53 files, about 1.5 MiB, most of it MQTT.js and @noble/post-quantum.
+the QR codec, as they are. 61 files, about 1.7 MiB, most of it MQTT.js and @noble/post-quantum.
 
 ## Not here yet
 
@@ -107,3 +125,9 @@ the QR codec, as they are. 53 files, about 1.5 MiB, most of it MQTT.js and @nobl
 test-shell.mjs runs the Android app's page side over a fake shell that keeps SigeloBridge's protocol
 in Node: the RFC 6455 framing (against `ws` and a raw server for every failure), the bridge, the
 keystore seal, and two apps over mqtts and wss behind a stand-in nginx that refuses browser requests.
+Restore from seed is tested in both files:
+- test-web: the page's files equal `keeper --from-words` for a fixed mnemonic (same DID, same K_1);
+  the router as seat and as standby, and the take.
+- test-shell: the keystore seals of the identity and keeper under the FULL key; no word, key or
+  K_1 in the clear in storage; nothing logged; the network refused during the restore;
+  `FLAG_SECURE` and the clipboard; no "show seed".

@@ -123,8 +123,9 @@ try {
   ok('keeper --from-words: K_1 beside the operator identity, 0600, the trust said', kp.status === 0 && (statSync(kfile).mode & 0o777) === 0o600 && kjson.includes(Buffer.from(K).toString('hex'))
     && JSON.parse(kp.stdout).keeper === 1 && kp.stderr.includes('whoever reads it can derive every worker under it'), kp.stderr);
   ok('the keeper file holds K, not the seed', !kjson.includes(Buffer.from(S).toString('hex')) && !kjson.includes(words.split(' ')[0]!) && JSON.parse(kjson).recovery === RC);
+  ok('the keeper file records created, its UTC day (YYYY-MM-DD)', [0, 1].map((d) => new Date(Date.now() - d * 86400_000).toISOString().slice(0, 10)).includes(JSON.parse(kjson).created));
   const twice = await cli(OP, ['keeper', '--from-words'], { input: words });
-  ok('keeper --from-words again: the same DID, kept, said', twice.status === 0 && meDid() === opDid && twice.stderr.includes('is the root identity of your words') && twice.stderr.includes(': kept'), twice.stderr);
+  ok('keeper --from-words again: the same DID, kept, said; created unchanged', JSON.parse(readFileSync(kfile, 'utf8')).created === JSON.parse(kjson).created && twice.status === 0 && meDid() === opDid && twice.stderr.includes('is the root identity of your words') && twice.stderr.includes(': kept'), twice.stderr);
   rmSync(human);
   const back = await cli(OP, ['keeper', '--from-words'], { input: words });
   ok('the operator identity lost: keeper --from-words gives the same DID back', back.status === 0 && meDid() === opDid, back.stderr);

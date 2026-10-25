@@ -73,6 +73,10 @@
    "from": "ts/node_modules/@noble/ed25519/index.js",
    "sha256": "a4f631d1876b5d9e43a86cd71194ca27b5e1451edf4ba4db9a418f40a475569a"
   },
+  "vendor/@noble/hashes/_blake.js": {
+   "from": "contact/node_modules/@noble/hashes/_blake.js",
+   "sha256": "cabbff61d1f373bac45594ad758df7c42e176464ddbb94b44f5533fa977a4f56"
+  },
   "vendor/@noble/hashes/_md.js": {
    "from": "contact/node_modules/@noble/hashes/_md.js",
    "sha256": "60cf3010fda89e3e4d3f0e7ff1ce249e9c467f34b4fd41b6fd6101d9f69be763"
@@ -80,6 +84,14 @@
   "vendor/@noble/hashes/_u64.js": {
    "from": "contact/node_modules/@noble/hashes/_u64.js",
    "sha256": "b09da8c07fe8187c07649494cdb7cd0bcf13df90b506a9473d19e4d5f8c2e102"
+  },
+  "vendor/@noble/hashes/argon2.js": {
+   "from": "contact/node_modules/@noble/hashes/argon2.js",
+   "sha256": "f39753324bdf2f484150731d24b1d71236f26bf10bedd594f7d190fcdfdefdc9"
+  },
+  "vendor/@noble/hashes/blake2.js": {
+   "from": "contact/node_modules/@noble/hashes/blake2.js",
+   "sha256": "03f00237bcc0b4d822a80f7c0ac22e42632c48e246c3b6da584e6452186e32f0"
   },
   "vendor/@noble/hashes/hkdf.js": {
    "from": "contact/node_modules/@noble/hashes/hkdf.js",
@@ -129,6 +141,14 @@
    "from": "contact/control.mjs",
    "sha256": "66f453a554be7d010fb0b12b78e135e43afbb4020c7d7e5168ca5492c88ddff2"
   },
+  "vendor/contact/device.mjs": {
+   "from": "contact/device.mjs",
+   "sha256": "87dea7fa578e7693983631143f66054f83e706593e22a078bdc6c3fa6ea4e1c9"
+  },
+  "vendor/contact/enrol.mjs": {
+   "from": "contact/enrol.mjs",
+   "sha256": "727207a680f093f9b1845b30657275c0fb8a6fc2db0322cd65acdfdd52050186"
+  },
   "vendor/contact/envelope.mjs": {
    "from": "contact/envelope.mjs",
    "sha256": "355ea1260a7fd4e3465abc25d5f274ac84d901f33d207ce58489818f4a8bc796"
@@ -151,7 +171,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "contact/page.mjs",
-   "sha256": "38f31440fe100cc96dbaa94492eeb04b42b30b9afec7fe94590b181b131f632a"
+   "sha256": "029f59d4116eb3b66f0a65bfebbb0d382bde4200a1c94df8b2043799b20eac1f"
   },
   "vendor/contact/prekeys.mjs": {
    "from": "contact/prekeys.mjs",
@@ -169,6 +189,10 @@
    "from": "contact/relays.mjs",
    "sha256": "424ea83d7cfae63d9b457eb9af5f207edb4a02fe5ff80677d432133e3f5fc9de"
   },
+  "vendor/contact/restore.mjs": {
+   "from": "contact/restore.mjs",
+   "sha256": "2805a7257325509621a25cc02692548669641ba21f5964fd88d27b3b2268b3b4"
+  },
   "vendor/contact/short.mjs": {
    "from": "contact/short.mjs",
    "sha256": "972c77bd1fd5869008cea5fda6a4facac234c408287c88a50684c7099dd4f1ea"
@@ -179,7 +203,7 @@
   },
   "vendor/icon.svg": {
    "from": "adapters/moadim/icon.svg",
-   "sha256": "592c2e4e82d9bbd0808c6a00ce28c94d37f40f50a0ae39b28f114d0e70ff7bbc"
+   "sha256": "9bac27f47169f4d2f870e443d5f27425e928b290097f2522488fe1d2525223d3"
   },
   "vendor/mqtt.esm.js": {
    "from": "contact/node_modules/mqtt/dist/mqtt.esm.js",
@@ -197,6 +221,14 @@
    "from": "ts/dist/jcs.js",
    "sha256": "3baef3a8f3c032581b2d892ad4fa58e0eaa456dfb5302cbcbaab668bdbdeb9f9"
   },
+  "vendor/sigelo/keys.js": {
+   "from": "ts/dist/keys.js",
+   "sha256": "5876c870d8840fb8fce9df1b7a0e2d2ba3c7687ea75a60c6c414283158753eb1"
+  },
+  "vendor/sigelo/monero-words.js": {
+   "from": "ts/dist/monero-words.js",
+   "sha256": "ea1031bcd47fa6bafc4f3449da21255b1560d7979684e9a496c24cd186b8cf23"
+  },
   "vendor/sigelo/monero.js": {
    "from": "ts/dist/monero.js",
    "sha256": "361ff98ed70172b6b01c99a60276c8cc482550017ccbeb265c847937d0c12098"
@@ -211,7 +243,7 @@
   },
   "vendor/ui.js": {
    "from": "adapters/moadim/ui.js",
-   "sha256": "5467c6d1586b26dc32e600608e89ac068ef65011bcb199df0623c25cbaa08bbf"
+   "sha256": "1d05df339f9693107cc2ba8c17b50609173b9c788fbf687ceeb32ad0e26f96cf"
   }
  }
 }

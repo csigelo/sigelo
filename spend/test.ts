@@ -33,6 +33,7 @@ import { agentOf, evaluate, fingerprint, invoiceKey, parsePolicy, sameHash, toke
 import { BUILD_TIMEOUT_MS, CLOCK_FLOOR, CLOCK_SKEW, DAEMON_FAILS, DAEMON_STALE_MS, DAEMON_SWITCH_MS, codeOf, keeperGenesis, keeperIdentity, loadKeeper, loadPolicy, loadRoot, parseDaemons, priorOf, readLog, serve as serveBare, spentOf, startOf, WALLET_TIMEOUT_MS, walletRpc, type Receipt, type ServeOptions } from './service.js';
 import { checkLicence, DEV_VENDOR_DID, describe as describeLicence, LICENCE_SKEW, licenceRefusal, readLicence, rememberVendorChain, TERM_MAX_DAYS, vendorDid, type KeeperEntry } from './licence.js';
 import { init as initKeeper, passwdOf, SNIPPET, type UserLookup } from './init.js';
+import { daemonCall, dayOf, GENESIS_WARNING, heightAt, parseDay, parseHeight, restoreCli, restoreHeight, type DaemonCall } from './restore.js';
 import { explain, LINES, run, toAtomic, toXmr, type Outcome } from './wallet.js';
 import { asTreeEntry, covered, DELEGATE_KDF, delegateSeed, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry } from './tree.js';
 
@@ -3239,6 +3240,137 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
       loadKeeper(join(scratch, 'kl2'), fromHexT(outL.keeper_root_hex)).bundle.rotations.length === 1, recL.err + i5.err);
   } finally {
     await w.close();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------- 2m. the restore height (restore.ts)
+{
+  // A synthetic chain: block h at T0 + 120 h, with a little jitter (timestamps are only roughly
+  // ordered on a real chain). The daemon is a mock; nothing reaches a network.
+  const T0 = 1_700_000_000, TIP = 50_000;
+  const tsOf = (h: number): number => T0 + 120 * h + (h % 7 === 3 ? 50 : 0);
+  let calls = 0;
+  const chain: DaemonCall = async (method, params) => {
+    calls++;
+    if (method === 'get_info') return { height: TIP + 1, status: 'OK' };
+    if (method === 'get_block_header_by_height') {
+      const h = params['height'] as number;
+      if (!Number.isSafeInteger(h) || h < 0 || h > TIP) throw new Error(`no block ${h}`);
+      return { block_header: { height: h, timestamp: tsOf(h) }, status: 'OK' };
+    }
+    throw new Error(`unexpected ${method}`);
+  };
+  const linear = (t: number): number => { for (let h = 0; h <= TIP; h++) if (tsOf(h) >= t) return h; return TIP; };
+
+  ok('restore: dayOf is the UTC day', dayOf(1790000000) === '2026-09-21' && dayOf(0) === '1970-01-01');
+  ok('restore: parseDay takes a real YYYY-MM-DD, 00:00 UTC', parseDay('2026-09-21', 'x') === Date.UTC(2026, 8, 21) / 1000 && parseDay('2024-02-29', 'x') === Date.UTC(2024, 1, 29) / 1000);
+  const badDays = ['2026-02-30', '2026-9-21', '21-09-2026', '2026-09-21T00:00:00Z', '', '2023-02-29'];
+  ok('restore: parseDay refuses anything else, by name', badDays.every((d) => { try { parseDay(d, '--restore-date'); return false; } catch (e) { return String(e).includes('--restore-date') && String(e).includes('YYYY-MM-DD'); } }));
+  ok('restore: parseHeight takes whole numbers ≥ 0 only', parseHeight('0') === 0 && parseHeight('3141592') === 3141592 &&
+    ['-1', '1.5', '01', '1e6', '', ' 5', '0x10', '99999999999999999'].every((x) => { try { parseHeight(x); return false; } catch (e) { return String(e).includes('--restore-height'); } }));
+
+  // The binary search against the mock: the first block at or after t, as a linear scan says.
+  const targets = [T0 - 1, T0, T0 + 1, T0 + 120 * 12345, T0 + 120 * 12345 + 1, T0 + 120 * 3 + 10, T0 + 120 * 3 + 60, T0 + 120 * TIP, T0 + 120 * TIP + 1000];
+  let agree = true, maxCalls = 0;
+  for (const t of targets) { calls = 0; const h = await heightAt(chain, t); maxCalls = Math.max(maxCalls, calls); if (h !== linear(t)) { agree = false; console.error(`heightAt ${t}: ${h}, linear ${linear(t)}`); } }
+  ok('restore: heightAt = a linear scan (first block at or after t) at the edges, mid-chain and past the tip', agree);
+  ok('restore: heightAt asks O(log n) headers (≤ 3 + ⌈log2 n⌉), nothing cached', maxCalls <= 3 + Math.ceil(Math.log2(TIP)), `${maxCalls} calls`);
+  ok('restore: heightAt with jitter: block 3 (+50 s) is found for a t between block 3\'s nominal and real time', await heightAt(chain, T0 + 120 * 3 + 10) === 3);
+
+  // Precedence: height > date > created > 0 with the warning; a day minus one day of margin.
+  const day = dayOf(T0 + 120 * 20_000), dayT = parseDay(day, 'x');
+  const want = linear(dayT - 86400);
+  const r1 = await restoreHeight({ height: '777', date: day, created: '2020-01-01' }, chain);
+  const r2 = await restoreHeight({ date: day, created: '2020-01-01' }, chain);
+  const r3 = await restoreHeight({ created: day }, chain);
+  const r4 = await restoreHeight({}, chain);
+  ok('restore precedence: an explicit height wins over a date and created, no warning', r1.height === 777 && r1.source === 'height' && r1.warning === undefined);
+  ok('restore precedence: a date wins over created; its height is the first block of the day before (one day of margin)',
+    r2.source === 'date' && r2.height === want && tsOf(want) >= dayT - 86400 && tsOf(want - 1) < dayT - 86400 && want < linear(dayT) && r2.warning === undefined, JSON.stringify(r2));
+  ok('restore precedence: the recorded created day, with no option', r3.source === 'created' && r3.height === want && r3.warning === undefined);
+  ok('restore precedence: nothing at all → 0 and the loud warning (genesis, hours, --restore-height)',
+    r4.height === 0 && r4.source === 'genesis' && r4.warning === GENESIS_WARNING && /genesis/.test(GENESIS_WARNING) && /hours/.test(GENESIS_WARNING) && GENESIS_WARNING.includes('--restore-height'));
+  const noD = await restoreHeight({ created: day }, undefined);
+  const down = await restoreHeight({ date: day }, async () => { throw new Error('connect ECONNREFUSED'); });
+  const junk = await restoreHeight({ date: day }, async () => ({ height: 'tall' }));
+  ok('restore: a day and no daemon → 0 and the warning, saying a daemon is needed', noD.height === 0 && noD.source === 'genesis' && (noD.warning ?? '').startsWith(GENESIS_WARNING) && (noD.warning ?? '').includes('--daemon'));
+  ok('restore: a daemon that does not answer, or answers junk → 0 and the warning with why, never a guess',
+    down.height === 0 && (down.warning ?? '').startsWith(GENESIS_WARNING) && (down.warning ?? '').includes('ECONNREFUSED') && junk.height === 0 && (junk.warning ?? '').includes('not a whole number'));
+  let threw = '';
+  try { await restoreHeight({ date: '2026-13-01' }, chain); } catch (e) { threw = String(e); }
+  ok('restore: a malformed date is an error, not a fallback', threw.includes('--restore-date') && threw.includes('YYYY-MM-DD'));
+
+  // Over HTTP: one mock daemon + wallet-rpc, recording calls; the CLI verbs as the operator runs them.
+  const seen: { method: string; params: Record<string, unknown> }[] = [];
+  const srv = createServer((rq: IncomingMessage, rs: ServerResponse) => {
+    let b = '';
+    rq.on('data', (c: unknown) => { b += String(c); });
+    rq.on('end', () => {
+      const { method, params } = JSON.parse(b) as { method: string; params: Record<string, unknown> };
+      seen.push({ method, params });
+      chain(method, params).then((result) => { rs.writeHead(200, { 'Content-Type': 'application/json' }); rs.end(JSON.stringify({ jsonrpc: '2.0', id: '0', result })); },
+        () => { rs.writeHead(200, { 'Content-Type': 'application/json' }); rs.end(JSON.stringify({ jsonrpc: '2.0', id: '0', ...(method === 'generate_from_keys' ? { result: { address: params['address'] } } : { error: { code: -1, message: 'no' } }) })); });
+    });
+  });
+  await new Promise<void>((r) => { srv.listen(0, '127.0.0.1', () => { r(); }); });
+  const port = (srv.address() as { port: number }).port, base = `127.0.0.1:${port}`;
+  const scratch = mkdtempSync(join(tmpdir(), 'sigelo-restore-'));
+  try {
+    const viaHttp = await heightAt(daemonCall(base), dayT - 86400);
+    ok('restore: daemonCall over HTTP (host:port → /json_rpc) gives the same height', viaHttp === want && seen.every((x) => x.method === 'get_info' || x.method === 'get_block_header_by_height'));
+    const cli = async (argv: string[]): Promise<{ code: number; out: string[]; err: string[]; thrown?: string }> => {
+      const out: string[] = [], err: string[] = [];
+      try { return { code: await restoreCli(argv, { out: (x) => { out.push(x); }, err: (x) => { err.push(x); } }), out, err }; } catch (e) { return { code: 1, out, err, thrown: String(e) }; }
+    };
+    const rh = await cli(['restore-height', '--daemon', `http://${base}`, '--restore-date', day]);
+    ok('restore-height --restore-date --daemon: stdout is the height alone, nothing on stderr', rh.code === 0 && rh.out.join() === String(want) && rh.err.length === 0, JSON.stringify(rh));
+    const rh0 = await cli(['restore-height']);
+    ok('restore-height with nothing: 0 on stdout, the warning on stderr', rh0.code === 0 && rh0.out.join() === '0' && rh0.err.join() === GENESIS_WARNING);
+    const rhN = await cli(['restore-height', '--restore-height', '123', '--restore-date', day]);
+    ok('restore-height --restore-height wins and needs no daemon', rhN.code === 0 && rhN.out.join() === '123');
+
+    // The ceremony's keeper-0.json carries created; wallet-restore reads it, asks the daemon, makes the wallet.
+    const S = rootFromMnemonic(newRoot()), cer = join(scratch, 'cer');
+    ceremony({ net: 'stagenet', recipient: 'age1' + 'q'.repeat(58), out: cer, keepers: 2, age: { encrypt: (_r: string, p: Uint8Array) => p, decrypt: (_i: string, c: Uint8Array) => c }, S: new Uint8Array(S), created: T0 + 120 * 20_000 });
+    const pkg0 = join(cer, 'keeper-0.json'), pk = JSON.parse(readFileSync(pkg0, 'utf-8')) as { created: string; allowance: { address: string; spend_key: string; view_key: string } };
+    const pw = join(scratch, 'pw');
+    writeFileSync(pw, 'hunter2\n', { mode: 0o600 });
+    const wr = (more: string[]) => cli(['wallet-restore', '--keeper-package', pkg0, '--wallet-rpc', `http://${base}`, '--wallet-file', 'allowance', '--password-file', pw, ...more]);
+    seen.length = 0;
+    const a = await wr(['--daemon', base]);
+    const gen = seen.filter((x) => x.method === 'generate_from_keys');
+    ok('wallet-restore: the package\'s created day → generate_from_keys at that day\'s height minus a day, the allowance keys, the password from the file',
+      a.code === 0 && pk.created === day && gen.length === 1 && gen[0]!.params['restore_height'] === want && gen[0]!.params['address'] === pk.allowance.address &&
+      gen[0]!.params['spendkey'] === pk.allowance.spend_key && gen[0]!.params['viewkey'] === pk.allowance.view_key && gen[0]!.params['password'] === 'hunter2' &&
+      gen[0]!.params['filename'] === 'allowance' && a.err.length === 0 && a.out.join().includes(`restore height ${want}`), JSON.stringify(a) + JSON.stringify(gen));
+    seen.length = 0;
+    const b2 = await wr(['--daemon', base, '--restore-height', '4242']);
+    ok('wallet-restore --restore-height: exactly that height, the daemon not asked', b2.code === 0 && seen.length === 1 && seen[0]!.params['restore_height'] === 4242);
+    seen.length = 0;
+    const c2 = await wr(['--restore-date', day]);
+    ok('wallet-restore with a day and no --daemon: still made, at 0, with the warning', c2.code === 0 && seen.length === 1 && seen[0]!.params['restore_height'] === 0 && c2.err.join().startsWith(GENESIS_WARNING));
+    // A package without created (one made before this change): 0 and the warning, the old behaviour.
+    const old = join(scratch, 'old-keeper-0.json'), { created: _c, ...rest } = JSON.parse(readFileSync(pkg0, 'utf-8')) as Record<string, unknown>;
+    writeFileSync(old, JSON.stringify(rest), { mode: 0o600 });
+    seen.length = 0;
+    const d2 = await cli(['wallet-restore', '--keeper-package', old, '--wallet-rpc', `http://${base}/`, '--wallet-file', 'allowance', '--password-file', pw, '--daemon', base]);
+    ok('wallet-restore: a package without created and no option → height 0 and the warning; the daemon not asked', _c === day && d2.code === 0 && seen.length === 1 && seen[0]!.method === 'generate_from_keys' && seen[0]!.params['restore_height'] === 0 && d2.err.join() === GENESIS_WARNING);
+    seen.length = 0;
+    const refusals = await Promise.all([
+      wr(['--restore-date', '2026-02-30']),
+      wr(['--restore-height', '-5']),
+      cli(['wallet-restore', '--keeper-package', join(cer, 'keeper-1.json'), '--wallet-rpc', `http://${base}`, '--wallet-file', 'w', '--password-file', pw]),
+      cli(['wallet-restore', '--keeper-package', pkg0, '--wallet-rpc', `http://${base}`, '--wallet-file', '../escape', '--password-file', pw]),
+      cli(['wallet-restore', '--keeper-package', pkg0, '--wallet-rpc', `http://${base}`, '--wallet-file', 'w']),
+      cli(['wallet-restore', '--keeper-package', pkg0, '--frobnicate']),
+    ]);
+    ok('wallet-restore refuses a bad date, a bad height, a package with no wallet, a path for a name, a missing flag, an unknown flag — before any call',
+      refusals.every((x) => x.code === 1 && x.thrown !== undefined) && seen.length === 0 && refusals[0]!.thrown!.includes('--restore-date') && refusals[1]!.thrown!.includes('--restore-height') &&
+      refusals[2]!.thrown!.includes('carries no wallet') && refusals[3]!.thrown!.includes('not a path') && refusals[4]!.thrown!.includes('--password-file') && refusals[5]!.thrown!.includes('unknown flag'),
+      JSON.stringify(refusals.map((x) => x.thrown)));
+  } finally {
+    srv.close();
     rmSync(scratch, { recursive: true, force: true });
   }
 }

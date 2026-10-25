@@ -110,6 +110,9 @@ ok('wallet-set refuses a blob carrying a spend key',
 ok('wallet-set refuses the operator/air-gapped spelling too',
   fails('wallet-set', JSON.stringify({ ...view, b: hex(d.treasury.b) })).includes('SPEND key'));
 ok('wallet-set refuses an unknown field', fails('wallet-set', JSON.stringify({ ...view, restore_height: '1' })).includes('unknown field'));
+ok('wallet-set refuses restore_height, as a number too, and says where a restore height lives (the keeper\'s wallet-restore)',
+  ((e) => e.includes('unknown field') && e.includes('sigelo-spend wallet-restore') && e.includes('--restore-date'))(fails('wallet-set', JSON.stringify({ ...view, restore_height: 3000000 }))));
+ok('wallet-set: any other unknown field gets no restore-height hint', !fails('wallet-set', JSON.stringify({ ...view, colour: 'red' })).includes('wallet-restore'));
 ok('wallet-set refuses an address the keys do not produce',
   fails('wallet-set', JSON.stringify({ ...view, address: d.allowance.address })).includes('does not match the keys'));
 ok('wallet-set refuses a net the address contradicts',

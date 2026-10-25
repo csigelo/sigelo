@@ -12,6 +12,11 @@
 //                identity (a random key, ~/.config/sigelo/control.local.json, 0600) and pairs it; the
 //                four words are compared with the computer's; then `sigelo-agent control ui --app`
 //                serves the computer's page here, every call a request over the relay (design/apps.md §6.3).
+//   restore from seed (design/apps-seed.md): the 25 words from the start page go once, on stdin, to
+//                `sigelo-agent keeper --from-words --keychain` (the key and K_1 sealed in the keyring before
+//                anything is written; never argv, never a file); then `device seat init` (this phone takes the
+//                seat) or, when another device keeps it, a standby: this phone's page does not start until
+//                "Take the seat here" (seat init here; the other device must be stopped or lost).
 // Start page (web/start.html): pick a form, or scan/paste a computer's SIGELO:UI: or SIGELO:CTL: text.
 // This phone's form shows the relay new codes name (the page's setting, relay.sigelo.ai pre-filled): changed
 // there, it is set through the page's own POST /api/settings once the page runs; SIGELO_RELAY still wins.
@@ -116,12 +121,45 @@ async function startSelf(identity, verb = ['ui', '--app', ...(identity ? ['--ide
   child = null;
   return { ok: false, message: errs.filter(Boolean).join('\n').slice(-1500) || `sigelo-agent ui ended (exit ${p.get_exit_status()})` };
 }
-/** sigelo-agent once, to its end → {status, out, err}. */
-async function runAgent(args) {
+/** sigelo-agent once, to its end → {status, out, err}. input: its stdin (the 25 words, never argv). */
+async function runAgent(args, input = null) {
   let p;
-  try { p = Gio.Subprocess.new([...agentArgv(), ...args], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE); } catch (e) { return { status: -1, out: '', err: e.message }; }
-  const [out, err] = await new Promise((ok) => p.communicate_utf8_async(null, null, (s, r) => { try { const [, o, e] = s.communicate_utf8_finish(r); ok([o ?? '', e ?? '']); } catch (e) { ok(['', String(e.message)]); } }));
+  try { p = Gio.Subprocess.new([...agentArgv(), ...args], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE | (input === null ? 0 : Gio.SubprocessFlags.STDIN_PIPE)); } catch (e) { return { status: -1, out: '', err: e.message }; }
+  const [out, err] = await new Promise((ok) => p.communicate_utf8_async(input, null, (s, r) => { try { const [, o, e] = s.communicate_utf8_finish(r); ok([o ?? '', e ?? '']); } catch (e) { ok(['', String(e.message)]); } }));
   return { status: p.get_exit_status(), out, err };
+}
+const lastLine = (r, what) => ((r.err.trim().split('\n').at(-1) ?? '').replace(/^sigelo-agent: /, '') || `${what} ended (exit ${r.status})`).replace(/"[^"\n]*"/g, '"…"');
+
+// ---- restore from seed: the standby mark (another device keeps the seat), this app's own
+const standbyPath = () => GLib.build_filenamev([GLib.get_user_config_dir(), 'sigelo-app', 'standby']);
+const standbyName = () => { try { return dec.decode(GLib.file_get_contents(standbyPath())[1]).trim() || null; } catch { return null; } };
+function setStandby(name) {
+  if (name === null) { try { Gio.File.new_for_path(standbyPath()).delete(null); } catch {} return; }
+  GLib.mkdir_with_parents(GLib.path_get_dirname(standbyPath()), 0o700);
+  GLib.file_set_contents(standbyPath(), name);
+}
+/** The words to keeper --from-words --keychain on stdin; then the seat here (seat init) or a standby → {ok, seat, message}. */
+async function restore({ words, name, height, net, elsewhere }) {
+  if (typeof words !== 'string' || typeof name !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,19}$/.test(name)) return { ok: false, message: 'Name for this device: lowercase letters, digits, _ and -, at most 20.' };
+  if (net !== 'mainnet' && net !== 'stagenet') return { ok: false, message: 'Network: mainnet or stagenet.' };
+  const h = String(height ?? '').trim(), birth = h === '' ? ['--restore-height', '0'] : /^\d+$/.test(h) ? ['--restore-height', h] : ['--restore-date', h];
+  const r = await runAgent(['keeper', '--from-words', '--keychain', '--net', net, ...birth], words);
+  if (r.status !== 0) return { ok: false, message: lastLine(r, 'sigelo-agent keeper') };
+  if (elsewhere === true) { setStandby(name); return { ok: true, seat: 'elsewhere' }; }
+  const s = await runAgent(['device', 'seat', 'init', '--name', name]);
+  return s.status === 0 ? { ok: true, seat: 'here' } : { ok: true, seat: 'pending', message: `not taken yet (${lastLine(s, 'device seat init')}): run sigelo-agent device seat init --name ${name} when online` };
+}
+/** This phone's page refused while a standby (it would log in as you beside the seat), else null. */
+const standbyRefusal = () => (standbyName() === null ? null
+  : { ok: false, standby: true, message: 'Another device holds your seat: this phone does not log in as you. Take the seat here (Restore from seed), only if that device is stopped or lost.' });
+/** Standby → the seat here: device seat init (no list on this phone: it becomes the seat's). */
+async function take() {
+  const name = standbyName();
+  if (name === null) return { ok: false, message: 'This phone is not a standby.' };
+  const s = await runAgent(['device', 'seat', 'init', '--name', name]);
+  if (s.status !== 0) return { ok: false, message: lastLine(s, 'device seat init') };
+  setStandby(null);
+  return { ok: true, seat: 'here' };
 }
 // Over the relay: this phone's control (sigelo-agent-control.ts), its file where sigelo-agent keeps it.
 const controlPath = () => GLib.getenv('SIGELO_CONTROL') ?? GLib.build_filenamev([GLib.get_home_dir(), '.config', 'sigelo', 'control.local.json']);
@@ -171,6 +209,12 @@ if (TEST) {
         out = { ok: true, words: p.words, kept: hasRelayControl(), me: me.status, did: me.body.did, state: st.status, again: st2.status, exited: c.get_if_exited() };
       } else out = { ...r, words: p.words };
     } else out = p;
+  } else if (TEST === 'restore') {
+    // The words from the test's environment here only; the start page hands them over the bridge.
+    out = await restore({ words: GLib.getenv('SIGELO_APP_WORDS') ?? '', name: 'gphone', height: GLib.getenv('SIGELO_APP_HEIGHT') ?? '', net: 'stagenet', elsewhere: GLib.getenv('SIGELO_APP_ELSEWHERE') === '1' });
+    out.standby = standbyName();
+    out.refused = standbyRefusal()?.standby === true;
+    if (GLib.getenv('SIGELO_APP_TAKE') === '1') out.take = await take();
   } else if (TEST === 'self') {
     const r = await startSelf(GLib.getenv('SIGELO_APP_IDENTITY'));
     if (r.ok) {
@@ -242,6 +286,8 @@ app.connect('activate', () => {
   // The bridge: only pages of sigelo-app://app/ may use it; ui.html only for `call`.
   const ops = {
     async self({ relay }) {
+      const no = standbyRefusal();
+      if (no) return no;
       const r = await startSelf(identity);
       if (!r.ok) return r;
       if (typeof relay === 'string') {
@@ -267,7 +313,11 @@ app.connect('activate', () => {
       GLib.idle_add(GLib.PRIORITY_DEFAULT, () => { view.load_uri(r.url); return GLib.SOURCE_REMOVE; });
       return { ok: true };
     },
-    async saved() { return { text: keyring.get() !== null || hasRelayControl(), keyring: Secret !== null }; },
+    async saved() { return { text: keyring.get() !== null || hasRelayControl(), keyring: Secret !== null, standby: standbyName() !== null }; },
+    async restore(o) { return restore(o); },
+    async take() { return take(); },
+    // After the words were pasted: the clipboard (and the primary selection) emptied.
+    async clipclear() { try { view.get_clipboard().set_content(null); view.get_primary_clipboard().set_content(null); } catch {} return { ok: true }; },
     async resume() {
       if (hasRelayControl()) return ops.relay();
       const t = keyring.get(); return t === null ? { ok: false, message: 'No computer kept.' } : ops.connect({ text: t });

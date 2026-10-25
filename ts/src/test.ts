@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import * as ed from '@noble/ed25519';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, concatBytes, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { Age, ceremony, IMPORT_REFUSED, importRoot, keeperLastHonest, openTty, recover, recoverKeeper, recoverVendor, restore, restoreWords, roles, vendor, vendorChain, VENDOR_FILES } from './ceremony.js';
+import { Age, ceremony, dayOf, IMPORT_REFUSED, importRoot, keeperLastHonest, openTty, recover, recoverKeeper, recoverVendor, restore, restoreWords, roles, vendor, vendorChain, VENDOR_FILES } from './ceremony.js';
 import { JcsError, RawNumber } from './jcs.js';
 import {
   agentIdentitySeed, decodeMoneroWords, delegateIdentitySeed, deriveIdentity, deriveRoot, encodeMoneroWords, identitySeed, k, keeperRoot,
@@ -1122,6 +1122,8 @@ try {
     pkgs[0].role === 'agents' && pkgs[0].allowance.spend_key === bytesToHex(d1.allowance.b) && pkgs[0].root_identity_seed_hex === bytesToHex(d1.identity) && !('treasury' in pkgs[0]) &&
     pkgs[2].role === 'treasury' && pkgs[2].treasury.spend_key === bytesToHex(d1.treasury.b) && !('allowance' in pkgs[2]) &&
     pkgs[1].role === 'keeper' && !('treasury' in pkgs[1]) && !('allowance' in pkgs[1]));
+  t('ceremony every keeper package records created, the UTC day of the ceremony clock (YYYY-MM-DD): the wallet\'s restore-height floor',
+    pkgs.every((p) => p.created === '2026-09-21') && dayOf(1790000000) === '2026-09-21' && dayOf(1790035199) === '2026-09-21' && dayOf(1790035200) === '2026-09-22');
   const mode = (f: string): number => statSync(join(out, f)).mode & 0o777;
   if (process.platform === 'win32') console.log('SKIP ceremony file modes (Windows has no POSIX modes: the files inherit the directory\'s ACL)');
   else t('ceremony keeper packages and the backup are 0600', [0, 1, 2].every((j) => mode(`keeper-${j}.json`) === 0o600) && mode('backup.age') === 0o600);
@@ -1573,11 +1575,24 @@ try {
       m.code === 0 && same(files, [...VENDOR_FILES].sort()) && o.did === did(pubG) && o.current === o.did && o.n === 0 &&
       o.genesis_sha256 === bytesToHex(sha256(utf8ToBytes(canonicalize(pubG)))) && o.recovery_commitment === vendorRecoveryCommitment(SC) &&
       o.vault === deriveRoot(SC, 'stagenet').vault.address && !leaks(m.out + m.err, SChex, scWords, recHex) && !m.out.includes(store.secret));
-    t('vendor CLI: the identity file is sigelo-agent\'s (plain key of vendorSeed(S, 0), the published genesis, no rotations); init.json is {did, genesis, current, n}',
+    t('vendor CLI: the identity file is sigelo-agent\'s (plain key of vendorSeed(S, 0), the published genesis, no rotations); init.json is {did, genesis, current, n, created}',
       store.v === VERSION && store.provider === 'file' && store.secret === bytesToHex(vendorSeed(SC, 0)) && same(store.genesis, pubG) && store.rotations.length === 0 &&
       same(Object.keys(store).sort(), ['attestations', 'genesis', 'issuers', 'provider', 'rotations', 'secret', 'v']) && init.did === o.did && same(init.genesis, pubG) &&
       pubG.key === encodeKey(ed.getPublicKey(vendorSeed(SC, 0))) && pubG.recovery === vendorRecoveryCommitment(SC) && pubG.created === '1970-01-01T00:00:00Z' &&
       readFileSync(join(vout, 'sigelo-vendor-identity.json'), 'utf-8') === JSON.stringify(pubG, null, 2) + '\n');
+    const today = new Date().toISOString().slice(0, 10), yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+    t('vendor CLI: vendor.init.json records created (this run\'s UTC day); the genesis carries none of it, still pinned at 1970-01-01',
+      [today, yesterday].includes(init.created) && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(init.created) && pubG.created === '1970-01-01T00:00:00Z' &&
+      !readFileSync(join(vout, 'sigelo-vendor-identity.json'), 'utf-8').includes(init.created) && !readFileSync(join(vout, 'vendor.local.json'), 'utf-8').includes(init.created));
+    {
+      const lv = join(vTmp, 'lib-created');
+      vendor({ S: SC, n: 0, out: lv, created: 1790000000 });
+      const li: Any = JSON.parse(readFileSync(join(lv, 'vendor.init.json'), 'utf-8'));
+      t('vendor library: created from the given clock; the identity file and genesis byte for byte the CLI\'s',
+        li.created === '2026-09-21' && same(Object.keys(li).sort(), ['created', 'current', 'did', 'genesis', 'n']) &&
+        readFileSync(join(lv, 'vendor.local.json'), 'utf-8') === readFileSync(join(vout, 'vendor.local.json'), 'utf-8') &&
+        readFileSync(join(lv, 'sigelo-vendor-identity.json'), 'utf-8') === readFileSync(join(vout, 'sigelo-vendor-identity.json'), 'utf-8'));
+    }
     if (process.platform === 'win32') console.log('SKIP vendor file modes (Windows has no POSIX modes)');
     else t('vendor CLI: vendor.local.json 0600, the public files 0644, the directory 0700',
       (statSync(join(vout, 'vendor.local.json')).mode & 0o777) === 0o600 && (statSync(join(vout, 'sigelo-vendor-identity.json')).mode & 0o777) === 0o644 &&

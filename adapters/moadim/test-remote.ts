@@ -99,10 +99,11 @@ ok('remote: the local listener still checks Host, token and Origin', (await http
   && (await http(page.port, 'POST', '/api/sync', { ...T, 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${R}` }, '{}')).status === 403
   && (await http(page.port, 'POST', '/api/history/clear', { ...T, 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${page.port}` }, '{}')).status === 200);
 // The installable page.
-const man = await http(page.port, 'GET', '/manifest.webmanifest'), sw = await http(page.port, 'GET', '/sw.js'), icon = await http(page.port, 'GET', '/icon.svg'), html = await http(page.port, 'GET', '/');
+const man = await http(page.port, 'GET', '/manifest.webmanifest'), sw = await http(page.port, 'GET', '/sw.js'), icon = await http(page.port, 'GET', '/icon.svg'), mask = await http(page.port, 'GET', '/icon-maskable.svg'), html = await http(page.port, 'GET', '/');
 const kept = /KEPT = (\[[^\]]*\])/.exec(sw.body)?.[1] ?? '';
-ok('install: manifest (start_url /, an SVG icon), sw.js keeping ui.html, ui.js, ui.css only, the icon; ui.html links the manifest',
+ok('install: manifest (start_url /, an SVG icon and a maskable one, both served), sw.js keeping ui.html, ui.js, ui.css only, the icon; ui.html links the manifest',
   man.status === 200 && String(man.headers['content-type']).startsWith('application/manifest+json') && JSON.parse(man.body).start_url === '/' && JSON.parse(man.body).icons[0].src === '/icon.svg'
+    && JSON.parse(man.body).icons[1]?.src === '/icon-maskable.svg' && JSON.parse(man.body).icons[1]?.purpose === 'maskable' && mask.status === 200 && String(mask.headers['content-type']).startsWith('image/svg+xml')
     && sw.status === 200 && String(sw.headers['content-type']).startsWith('text/javascript') && kept === "['/ui.html', '/ui.js', '/ui.css']" && !/caches?\.[a-z]+\([^)]*api/.test(sw.body)
     && icon.status === 200 && String(icon.headers['content-type']).startsWith('image/svg+xml') && html.body.includes('rel="manifest" href="/manifest.webmanifest"'), kept);
 // CLI beside the page: --controls lists, never the key; --revoke-control refused while it runs.

@@ -324,8 +324,8 @@ const VALUES = {
   ...officialLines(worldDidEarly && `${worldDidEarly.slice(0, 'did:sigelo:zBASk7'.length)}…`),
   // The links to the relay (/, /adopt, /contact), only once it serves (RELAY_LIVE). A line that
   // holds only an empty value is dropped (fill).
-  relay_layer: RELAY_LIVE ? ` The relay at [sigelo.ai](${RELAY_ORIGIN}/) is a service built on it: pairing and messages between agents, run by us, or [run your own](https://github.com/csigelo/sigelo-relay).` : '',
-  relay_try: RELAY_LIVE ? `[Try it with two agents →](${RELAY_ORIGIN}/connect.html)` : '',
+  relay_layer: RELAY_LIVE ? ` With it, agents message each other and shops, no account needed. [sigelo.ai](${RELAY_ORIGIN}/) is the post office for those messages; only the two agents can read them. Anyone can [run one](https://github.com/csigelo/sigelo-relay).` : '',
+  relay_try: RELAY_LIVE ? `[Try it with two agents →](${RELAY_ORIGIN}/connect.html) It needs an agent that runs commands, like Claude Code; the ChatGPT app cannot. Without one: use [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/adapters/moadim/APPS.md), wait for Android, or hand this page to your developer.` : '',
   relay_link: RELAY_LIVE ? ` · [Message other agents: sigelo relay](${RELAY_ORIGIN}/)` : '',
   relay_contact: RELAY_LIVE ? `- Relay: [sigelo.ai](${RELAY_ORIGIN}/)` : '',
 };
@@ -435,10 +435,20 @@ function jsonld(page, title, description) {
   else graph.push({ ...node, '@type': 'WebPage' });
   return JSON.stringify({ '@context': 'https://schema.org', '@graph': graph }, null, 1).replace(/</g, '\\u003c');
 }
-// Open Graph and Twitter: title, description and URL only, no image (ogp.me requires og:image, so
-// link previews stay text until a logo exists). Not on the not-found page.
-const social = (title, description, url) => [['og:type', 'website'], ['og:site_name', 'sigelo'], ['og:title', title], ['og:description', description], ['og:url', url]]
-  .map(([k, v]) => `<meta property="${k}" content="${esc(v)}">\n`).join('') + '<meta name="twitter:card" content="summary">\n';
+// Open Graph and Twitter: title, description, URL and the link-preview card (assets/brand/og.png,
+// 1200 x 630: the seal and "sigelo.io" on paper). Not on the not-found page.
+const OG_IMAGE = [['og:image', `${ORIGIN}/brand/og.png`], ['og:image:type', 'image/png'], ['og:image:width', '1200'], ['og:image:height', '630'], ['og:image:alt', 'sigelo seal and sigelo.io']];
+const social = (title, description, url) => [['og:type', 'website'], ['og:site_name', 'sigelo'], ['og:title', title], ['og:description', description], ['og:url', url], ...OG_IMAGE]
+  .map(([k, v]) => `<meta property="${k}" content="${esc(v)}">\n`).join('') + '<meta name="twitter:card" content="summary_large_image">\n';
+// The brand files (assets/brand/, made by design/logo/make.py): served under /brand/, the favicon
+// and the PNG icons also at the root. The header's seal is assets/brand/seal.svg inline, its fill
+// left to the stylesheet (wax red; seal-dark's #c8423f on a dark scheme), hidden from assistive
+// technology (the link says "sigelo").
+export const BRAND = join(ROOT, 'assets', 'brand');
+export const BRAND_FILES = ['seal.svg', 'seal-dark.svg', 'seal-mono.svg', 'favicon.svg', 'app-icon.svg', 'icon-maskable.svg',
+  'icon-192.png', 'icon-512.png', 'wordmark.svg', 'lockup-io.svg', 'lockup-ai.svg', 'og.png'];
+export const SEAL_INLINE = readFileSync(join(BRAND, 'seal.svg'), 'utf8').trim()
+  .replace(' xmlns="http://www.w3.org/2000/svg"', '').replace(/ role="img" aria-label="[^"]*"/, ' class="seal" aria-hidden="true" focusable="false"').replace(/<title>[^<]*<\/title>/, '').replace(/ fill="#[0-9a-f]{6}"/, '');
 function htmlPage(page, title, description, body) {
   const canonical = pageUrl(page);
   const nav = NAV.map(([s, label]) => `<li><a href="/${s}.html"${s === page.slug ? ' aria-current="page"' : ''}>${label}</a></li>`).join('');
@@ -455,12 +465,15 @@ function htmlPage(page, title, description, body) {
 <title>${esc(title)}${page.slug === 'index' ? '' : ' — sigelo'}</title>
 <meta name="description" content="${esc(description)}">
 ${indexed}<link rel="alternate" type="text/markdown" href="/${page.slug}.md" title="This page as Markdown">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="stylesheet" href="/style.css">
 ${ld}</head>
 <body>
 <header>
-<p class="site"><a href="/">sigelo</a></p>
+<p class="site"><a href="/">${SEAL_INLINE}sigelo</a></p>
 <nav aria-label="Pages"><ul>${nav}</ul></nav>${status}
 </header>
 <main>
@@ -495,9 +508,9 @@ export function build() {
   // Absent until server-setup.sh --world made the issuer key (a fresh server): no world block then.
   for (const f of ['genesis.json', 'rotations.json']) if (existsSync(join(ROOT, 'world', f))) put(`world/${f}`, readBytes(`world/${f}`));
   put('style.css', readFileSync(join(SITE, 'src', 'style.css')));
-  // The icon (<link rel="icon"> on every page): a PLACEHOLDER until the Owner picks a logo;
-  // replace site/assets/icon-512.png and keep the name. A square PNG, no metadata chunks.
-  put('icon-512.png', readFileSync(join(SITE, 'assets', 'icon-512.png')));
+  // The brand (assets/brand/): every file under /brand/; favicon.svg and the PNG icons at the root too.
+  for (const f of BRAND_FILES) put(`brand/${f}`, readFileSync(join(BRAND, f)));
+  for (const f of ['favicon.svg', 'icon-192.png', 'icon-512.png']) put(f, readFileSync(join(BRAND, f)));
   put('.nojekyll', '');
   put('CNAME', 'sigelo.io\n');
   // Release signing (release/RELEASE.md "Signing"): the SSH key that signs tags and the release

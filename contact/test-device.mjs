@@ -14,13 +14,14 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonicalize, did, sign } from 'sigelo';
-import { keeperRoot, recoveryCommitment } from 'sigelo/dist/keys.js';
+import { canonicalize, did, sign, verifySig } from 'sigelo';
+import { keeperRoot, mnemonicFromRoot, recoveryCommitment, rootFromMnemonic } from 'sigelo/dist/keys.js';
 import { UNLOGGED } from './carrier.mjs';
 import * as C from './control.mjs';
 import * as D from './device.mjs';
 import { operatorAttestation, operatorIdentity, workerIdentity } from './enrol.mjs';
 import { makeInvite } from './invite.mjs';
+import * as RS from './restore.mjs';
 import { alnumCapacity, encode, toPng, toTerminal } from './qr.mjs';
 import { jsQR, readPng, scanPng } from './qr-decode.mjs';
 
@@ -356,6 +357,58 @@ ok(UNLOGGED.test('sigelo-device/1') && UNLOGGED.test('sigelo-identity/0') && UNL
   const b = C.bucket({ now: () => clock }), first = Array.from({ length: 12 }, () => b.take());
   clock += 3000;
   ok(first.filter(Boolean).length === C.BURST && first.slice(0, 10).every(Boolean) && [b.take(), b.take(), b.take(), b.take()].filter(Boolean).length === 3 * C.RATE, 'the cap: a burst of 10, then one a second');
+}
+
+// ---- restore from seed in the apps (restore.mjs, design/apps-seed.md): the files keeper --from-words writes, the seat
+{
+  const S0 = new Uint8Array(32).fill(7); S0[31] = 0x0f;   // a canonical root (< l), fixed
+  const words = mnemonicFromRoot(S0), list = words.split(' '), now = 1761400000;
+  const leaks = (m) => list.some((w) => String(m).toLowerCase().split(/[^a-z]+/).includes(w));
+  const cw = (t) => RS.checkWords(t);
+  ok(cw('').count === 0 && cw(list.slice(0, 7).join(' ')).count === 7 && cw(list.slice(0, 7).join(' ')).ok === false && cw(list.slice(0, 7).join(' ')).error === null,
+    'checkWords: a partial seed counts, no error yet');
+  ok(cw(`  ${list.slice(0, 12).join('\n')}\t\t${list.slice(12).join('  ')}\n`).ok === true && cw(words.toUpperCase()).ok === true && cw(list.map((w) => w.slice(0, 3)).join(' ')).ok === true,
+    'checkWords: whitespace runs, newlines, upper case and 3-letter prefixes accepted; 25 with the checksum → ok');
+  const bad = cw([...list.slice(0, 6), 'zzzq', ...list.slice(7)].join(' '));
+  ok(bad.ok === false && bad.bad === 7 && /word 7 /.test(bad.error) && !bad.error.includes('zzzq'), 'checkWords: the first word not in the list named by position, never echoed');
+  const swapped = [list[1], list[0], ...list.slice(2)].join(' '), sw = cw(swapped);
+  ok(list[0] !== list[1] && sw.ok === false && /checksum/.test(sw.error) && !leaks(sw.error), 'checkWords: two words swapped → the checksum, no word in the message');
+  ok(/26 words/.test(cw(`${words} ${list[0]}`).error), 'checkWords: 26 words refused');
+  const pr = (t, n) => { try { return RS.parseRestore(t, n); } catch (e) { return e.check; } };
+  ok(JSON.stringify(pr('')) === '{}' && pr(' 3100000 ').restore_height === 3100000 && pr('2024-02-29', now).restore_date === '2024-02-29',
+    'parseRestore: empty → nothing; digits → restore_height; YYYY-MM-DD → restore_date');
+  ok(pr('2023-02-30') === 'restore_date' && pr('2014-04-17') === 'restore_date' && pr('2099-01-01', now) === 'restore_date' && pr('20240229x') === 'restore_date' && pr('99999999999') === 'restore_date' && pr('4294967296') === 'restore_height',
+    'parseRestore: refused: no such day, before Monero\'s first block, the future, junk, a height past 2^31');
+  const o = { name: 'phone', relay: 'relay.sigelo.ai', net: 'stagenet', restore: { restore_height: 3100000 }, now };
+  const r = RS.restoreFromWords(words, o), S = rootFromMnemonic(words), K = keeperRoot(S, 1), rec = recoveryCommitment(S);
+  ok(JSON.stringify(r.identity) === JSON.stringify(operatorIdentity(S, 0)) && r.identity.derived.n === 0 && r.did === did(r.identity.genesis),
+    'restoreFromWords: the identity is operatorIdentity(S, 0), as keeper --from-words writes it (derived n 0)');
+  ok(r.keeper.v === D.KEEPER_V && r.keeper.keeper === 1 && r.keeper.root_hex === hex(K) && r.keeper.recovery === rec && r.keeper.created === '2025-10-25' && r.keeper.net === 'stagenet' && r.keeper.restore_height === 3100000 && !('restore_date' in r.keeper)
+    && JSON.stringify(r.keeper.me) === JSON.stringify({ n: 0, did: r.did, original: r.did }) && JSON.stringify(Object.keys(r.keeper)) === JSON.stringify(['v', 'keeper', 'root_hex', 'recovery', 'created', 'net', 'restore_height', 'workers', 'me']),
+    'restoreFromWords: the keeper file: K_1, the recovery commitment, created (UTC day), net and restore_height, me');
+  const w0 = r.keeper.workers[0], dev = workerIdentity({ K, i: 0, n: 0, recovery: rec, attestation: w0.attestation, issuer: r.identity.genesis });
+  ok(JSON.stringify(r.device) === JSON.stringify(dev) && w0.rank === 'full' && w0.placed === 'device' && w0.original === did(dev.genesis) && r.worker === w0.original && w0.until === now + D.DEVICE_DAYS * 86400,
+    'restoreFromWords: this device is worker 0 of K_1, FULL, attested 14 days, in the roster');
+  const a = w0.attestation, opKey = r.identity.genesis.key;
+  ok(a.body.iss === r.did && a.body.sub === w0.original && a.body.claims.relay === 'relay.sigelo.ai' && verifySig(opKey, a.body, a.sig), 'restoreFromWords: the device attestation is the operator\'s, over the device\'s original DID');
+  ok(D.checkList(r.list, { keys: [opKey], operator: r.did }) === r.list && r.list.seq === 1 && r.list.seat.holder === w0.original && r.list.seat.epoch === 1 && r.list.devices.length === 1 && r.list.devices[0].rank === 'full' && D.holdsSeat(r.list, w0.original),
+    'restoreFromWords, seat here: the list signed by the operator, this device FULL, holding the seat at epoch 1 (seat init)');
+  ok(r.notes.v === RS.SEAT_LOCAL_V && r.notes.imported === 1 && r.notes.here.did === w0.original && !r.notes.elsewhere, 'restoreFromWords, seat here: the seat notes name this device');
+  const e = RS.restoreFromWords(words, { ...o, seat: 'elsewhere', restore: { restore_date: '2024-02-29' } });
+  ok(e.list === null && e.notes.elsewhere === true && e.notes.entry.did === w0.original && e.keeper.restore_date === '2024-02-29' && !('restore_height' in e.keeper) && e.keeper.root_hex === r.keeper.root_hex,
+    'restoreFromWords, seat elsewhere: no list (the seat\'s is on the other device), the entry kept for a take; restore_date');
+  const t = RS.takeSeat(e.notes, e.identity, now + 60);
+  ok(D.checkList(t.list, { keys: [opKey], operator: r.did }) === t.list && t.list.seat.holder === w0.original && t.notes.imported === 1 && !t.notes.elsewhere, 'takeSeat: the standby signs the list naming itself, notes say here');
+  const ck = (f) => checkOf(f);
+  ok(ck(() => RS.takeSeat(r.notes, r.identity, now)) === 'seat_here' && ck(() => RS.takeSeat(e.notes, operatorIdentity(keeperRoot(S, 9), 0), now)) === 'seat_here', 'takeSeat refused: the seat is here already; another operator\'s notes');
+  ok(ck(() => RS.restoreFromWords(words, { ...o, name: 'My Phone' })) === 'device_name' && ck(() => RS.restoreFromWords(words, { ...o, net: 'testnet' })) === 'restore_net'
+    && ck(() => RS.restoreFromWords(words, { ...o, seat: 'maybe' })) === 'restore_seat' && ck(() => RS.restoreFromWords(words, { ...o, j: 0 })) === 'restore'
+    && ck(() => RS.restoreFromWords(words, { ...o, restore: { restore_height: -1 } })) === 'restore_height' && ck(() => RS.restoreFromWords(words, { ...o, relay: 'a/b' })) !== 'accepted',
+    'restoreFromWords refused: a device name, a network, a seat, keeper 0, a height, a relay');
+  let msg = '';
+  try { RS.restoreFromWords(swapped, o); } catch (x) { msg = `${x.check} ${x.message}`; }
+  ok(/^restore_words /.test(msg) && !leaks(msg), 'restoreFromWords: wrong words refused restore_words, the message carries no word');
+  S.fill(0); K.fill(0);
 }
 
 report();

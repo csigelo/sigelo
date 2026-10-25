@@ -74,7 +74,7 @@ export function walletSet(s: Store, input: unknown): Store {
   const o = input as Record<string, unknown>;
   for (const k of Object.keys(o)) {
     if (SPEND_KEYS.includes(k)) throw new SigeloError(`wallet-set: refusing input carrying ${JSON.stringify(k)} — that is a SPEND key. This process reads untrusted text all day; MONERO.md §2 gives it the treasury's VIEW only. Pass the \`agent.treasury\` object from \`sigelo-offline derive\`, never \`operator\` or \`air_gapped\`.`);
-    if (!FIELDS.includes(k)) throw new SigeloError(`wallet-set: unknown field ${JSON.stringify(k)} — expected exactly { ${FIELDS.join(', ')} }`);
+    if (!FIELDS.includes(k)) throw new SigeloError(`wallet-set: unknown field ${JSON.stringify(k)} — expected exactly { ${FIELDS.join(', ')} }${k === 'restore_height' ? '. This process scans no chain (view keys only, no wallet-rpc): a restore height belongs to the wallet that scans, set where it is made: sigelo-spend wallet-restore --restore-height <n> | --restore-date YYYY-MM-DD (MONERO.md §6)' : ''}`);
   }
   for (const f of FIELDS) if (typeof o[f] !== 'string') throw new SigeloError(`wallet-set: missing or non-string ${f}`);
   const net = o['net'] as Net;

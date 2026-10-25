@@ -435,6 +435,67 @@ try {
     ok('beta\'s device identity is its own, standby or not: it sends', bsend.status === 0, bsend.stderr);
   } else console.log('  SKIP the seat: no python3 (pty)');
 
+
+  // ---- a FULL device restored from seed in an app (apps/web/seed.mjs, sigelo-contact/restore.mjs; design/apps-seed.md)
+  {
+    const CDIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'contact');
+    const RS = await import(pathToFileURL(join(CDIR, 'restore.mjs')).href) as { restoreFromWords(w: string, o: object): { identity: { secret: string; genesis: { key: string } }; keeper: Record<string, unknown>; device: object; notes: object; list: { seat: { holder: string; epoch: number }; devices: { name: string; worker: number; did: string; rank: string; added: number; by: string }[] }; did: string; worker: string } };
+    const DV = await import(pathToFileURL(join(CDIR, 'device.mjs')).href) as { signList(l: object, sign: (b: object) => string): object; nextSeat(c: unknown, h: string, t: number): object };
+    const { sign: signWith } = await import('sigelo');
+    const W2 = newRoot(), t0 = now(), REST = mkdtempSync(join(tmpdir(), 'sigelo-dev-rest-')), REF = mkdtempSync(join(tmpdir(), 'sigelo-dev-ref-'));
+    try {
+      const r = RS.restoreFromWords(W2, { name: 'rphone', relay: 'relay.test', net: 'stagenet', restore: { restore_height: 3100000 }, seat: 'here', now: t0 });
+      // The app's files, placed where sigelo-agent keeps them (the device's own file in the agents' directory).
+      const me = meOf(REST), dev = pool(REST, 'rphone'), put = (f: string, o: unknown): void => { mkdirSync(dirname(f), { recursive: true, mode: 0o700 }); writeFileSync(f, JSON.stringify(o, null, 2), { mode: 0o600 }); };
+      put(me, r.identity); put(me.replace(/\.json$/, '.keeper.json'), r.keeper); put(me.replace(/\.json$/, '.seat.json'), r.notes); put(me.replace(/\.json$/, '.devices.json'), r.list); put(dev, r.device); put(dev.replace(/\.json$/, '.devices.json'), r.list);
+      const ref = await cli(REF, ['keeper', '--from-words'], { input: W2 });
+      ok('seed-restored: the app\'s operator file and K_1 are what keeper --from-words writes for the same words', ref.status === 0 && JSON.stringify(readJ(meOf(REF))) === JSON.stringify(r.identity)
+        && (readJ(meOf(REF).replace(/\.json$/, '.keeper.json')) as { root_hex: string }).root_hex === r.keeper['root_hex'], ref.stderr);
+      const st = await cli(REST, ['device', 'seat']);
+      ok('seed-restored FULL device: device seat says it holds the seat, epoch 1 (seat init semantics)', st.status === 0 && json(st.stdout)['holds'] === true && (json(st.stdout)['seat'] as { holder: string; epoch: number }).holder === 'rphone'
+        && (json(st.stdout)['seat'] as { epoch: number }).epoch === 1 && json(st.stdout)['here'] === 'rphone', st.stdout + st.stderr);
+      const ls = await cli(REST, ['device', 'list', '--json']);
+      ok('seed-restored: device list shows it, FULL, worker 0', ls.status === 0 && /"rphone"/.test(ls.stdout) && /"full"/.test(ls.stdout), ls.stdout + ls.stderr);
+      const kp = await cli(REST, ['keeper']);
+      ok('seed-restored: the keeper file reads as the CLI\'s (keeper 1; net and restore_height kept)', kp.status === 0 && json(kp.stdout)['keeper'] === 1 && (readJ(me.replace(/\.json$/, '.keeper.json')) as { net?: string; restore_height?: number }).restore_height === 3100000, kp.stdout + kp.stderr);
+      const in1 = await cli(REST, ['inbox', '--operator']);
+      ok('seed-restored: the seat is here, so it logs in as you (inbox --operator, exit 0)', in1.status === 0, in1.stderr);
+      // The seat moved away (a newer list, signed by you, naming another FULL device): the restored device refuses.
+      const secret = Uint8Array.from(Buffer.from(r.identity.secret, 'hex')), tab = { name: 'rtab', worker: 1, did: 'did:sigelo:zTabTabTabTabTabTabTabTabTabTabTabTab', rank: 'full', added: t0, by: r.did };
+      const moved = DV.signList({ operator: r.did, seq: 2, iat: t0 + 1, devices: [...r.list.devices, tab], seat: DV.nextSeat(r.list.seat, tab.did, t0 + 1) }, (b) => signWith(secret, b));
+      put(me.replace(/\.json$/, '.devices.json'), moved); put(dev.replace(/\.json$/, '.devices.json'), moved);
+      const in2 = await cli(REST, ['inbox', '--operator']), ui2 = await cli(REST, ['ui', '--no-open']);
+      ok('seed-restored, the seat elsewhere: inbox --operator and ui refuse seat_elsewhere (rtab), exit 1', in2.status === 1 && in2.stderr.includes('seat_elsewhere') && in2.stderr.includes('rtab') && ui2.status === 1 && ui2.stderr.includes('seat_elsewhere'), in2.stderr + ui2.stderr);
+      const tk = await cli(REST, ['device', 'seat', 'take', '--force']);
+      const in3 = await cli(REST, ['inbox', '--operator']);
+      ok('seed-restored: device seat take --force takes it back (epoch 3), then it logs in as you again', tk.status === 0 && json(tk.stdout)['seat'] === 3 && json(tk.stdout)['holder'] === 'rphone' && in3.status === 0, tk.stdout + tk.stderr + in3.stderr);
+      secret.fill(0);
+      // The GTK app restores, then takes the seat with seat init: offline first (stopped before the list), then again online.
+      const off = await cli(REF, ['device', 'seat', 'init', '--name', 'gphone'], { env: { SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }) } });
+      const on = await cli(REF, ['device', 'seat', 'init', '--name', 'gphone']), sr = await cli(REF, ['device', 'seat']);
+      ok('device seat init offline stops (exit 1); run again online it goes on with the same device (not device_name_taken) and holds the seat', off.status === 1 && on.status === 0 && json(on.stdout)['worker'] === 0 && json(sr.stdout)['holds'] === true, off.stderr + on.stderr + on.stdout);
+      // The GTK app's restore: keeper --from-words --keychain (a Secret Service: the fake secret-tool), the wallet's birth and net kept.
+      const KC = mkdtempSync(join(tmpdir(), 'sigelo-dev-kc-')), NOKC = mkdtempSync(join(tmpdir(), 'sigelo-dev-nokc-'));
+      extra[KC] = { PATH: `${FAKE}:${process.env['PATH'] ?? ''}`, SIGELO_KEY_PROVIDER: '' };
+      try {
+        const kc = await cli(KC, ['keeper', '--from-words', '--keychain', '--net', 'stagenet', '--restore-date', '2024-02-29'], { input: W2 });
+        const kme = readJ(meOf(KC)) as { provider?: string; secret: unknown }, kk = readJ(meOf(KC).replace(/\.json$/, '.keeper.json')) as Record<string, unknown>;
+        ok('keeper --from-words --keychain: the key and K_1 sealed in the keychain (no hex on disk), net and restore_date kept, the same DID', kc.status === 0 && kme.provider === 'keychain' && typeof kme.secret === 'object'
+          && kk['root_hex'] === undefined && (kk['root'] as { provider?: string })?.provider === 'keychain' && kk['net'] === 'stagenet' && kk['restore_date'] === '2024-02-29' && typeof kk['created'] === 'string'
+          && (json(kc.stdout)['me'] as { did?: string })?.did === r.did && !readFileSync(meOf(KC), 'utf8').includes(r.identity.secret), kc.stderr);
+        const ks = await cli(KC, ['keys', 'status', '--operator']);
+        ok('…and the sealed key signs for you (keys status)', ks.status === 0 && json(ks.stdout)['signs'] === true, ks.stdout + ks.stderr);
+        // A Secret Service that does not answer (secret-tool says why, as without a D-Bus session).
+        const NOBIN = join(NOKC, 'bin'); mkdirSync(NOBIN);
+        writeFileSync(join(NOBIN, 'secret-tool'), '#!/bin/sh\necho "Cannot autolaunch D-Bus without X11 $DISPLAY" >&2\nexit 1\n', { mode: 0o755 });
+        const nk = await cli(NOKC, ['keeper', '--from-words', '--keychain'], { input: W2, env: { PATH: `${NOBIN}:${process.env['PATH'] ?? ''}` } });
+        ok('keeper --from-words --keychain without a keychain: keychain_unavailable, nothing written', nk.status === 1 && nk.stderr.includes('keychain_unavailable') && !existsSync(meOf(NOKC)), nk.stderr);
+        const both = await cli(NOKC, ['keeper', '--from-words', '--restore-height', '1', '--restore-date', '2024-02-29'], { input: W2 }), net = await cli(NOKC, ['keeper', '--from-words', '--net', 'testnet'], { input: W2 });
+        ok('keeper: --restore-height with --restore-date, or --net testnet: usage, exit 2, nothing written', both.status === 2 && net.status === 2 && !existsSync(meOf(NOKC)), both.stderr + net.stderr);
+      } finally { for (const d of [KC, NOKC]) rmSync(d, { recursive: true, force: true }); }
+    } finally { for (const d of [REST, REF]) rmSync(d, { recursive: true, force: true }); }
+  }
+
   // A plain message from the phone: the operator's inbox log has it, and nothing key-carrying.
   const sent = await cli(PHONE, ['send', 'operator', 'hello from the phone', '--identity', pool(PHONE, 'phone')]);
   const got = await cli(OP, ['inbox', '--operator']);

@@ -13,7 +13,7 @@
 //   node apps/web/copy.mjs && node apps/web/test-web.mjs   → ALL PASS (n)
 // The relay is its own AGPL package: SIGELO_RELAY_DIR, else ../../relay; without it, SKIP part 3.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -55,7 +55,7 @@ const html = readFileSync(join(HERE, 'index.html'), 'utf8'), map = C.importMap(h
   // remote-client.mjs imports node:module and node:url only in Node (its own dependencies), never in the page: C.NODE_ONLY.
   const nodeImports = vendored.filter(([rel]) => /\.m?js$/.test(rel)).flatMap(([rel, src]) => C.importsOf(readFileSync(src, 'utf8')).filter((s) => s.startsWith('node:') && !C.NODE_ONLY[rel]?.includes(s)).map((s) => `${rel}: ${s}`));
   ok(nodeImports.every((x) => x.endsWith('node:zlib') && /qr(-decode)?\.mjs/.test(x)), `no node: import in the page but the QR codec's node:zlib, mapped to the shim (${nodeImports})`);
-  const own = ['app.mjs', 'router.mjs', 'platform-web.mjs', 'platform-stub.mjs', 'pow-worker.mjs', 'platform-android.mjs', 'ws-over-stream.mjs', 'shell.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8'));
+  const own = ['app.mjs', 'router.mjs', 'platform-web.mjs', 'platform-stub.mjs', 'pow-worker.mjs', 'platform-android.mjs', 'ws-over-stream.mjs', 'shell.mjs', 'seed.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8'));
   ok(own.every((t) => !/from 'node:|innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(t)), 'the app\'s modules: no node: import, no HTML strings, no eval');
   const manifest = JSON.parse(readFileSync(join(HERE, 'vendor.json'), 'utf8'));
   ok(Object.keys(manifest.files).length === vendored.length && Object.entries(manifest.files).every(([rel, f]) => f.sha256 === createHash('sha256').update(readFileSync(join(HERE, ...rel.split('/')))).digest('hex')),
@@ -180,6 +180,55 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
     'presetRelay: the default keeps none; not a host refused');
   const appSrc = readFileSync(join(HERE, 'app.mjs'), 'utf8');
   ok(/presetRelay\(platform\.files, relay\.value\)/.test(appSrc) && /value: DEFAULT_RELAY/.test(appSrc) && appSrc.includes('A 12-character code always names its own relay'), 'app.mjs: the import form shows the relay, relay.sigelo.ai pre-filled');
+}
+
+
+// ================================================================ 2c. restore from seed (seed.mjs, contact/restore.mjs), no relay needed
+{
+  const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href);
+  const { makeRouter: mk } = await import(pathToFileURL(join(HERE, 'router.mjs')).href);
+  const { did: didOf } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
+  const { mnemonicFromRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
+  // A fixed test mnemonic (a canonical root, < l), and what `sigelo-agent keeper --from-words` makes of it.
+  const S0 = new Uint8Array(32).fill(9); S0[31] = 0x0e;
+  const words = mnemonicFromRoot(S0), H = mkdtempSync(join(tmpdir(), 'sigelo-seed-')), op = join(H, 'me.local.json');
+  const cli = spawnSync(process.execPath, [join(REPO, 'adapters', 'moadim', 'cli.ts'), 'keeper', '--from-words', '--identity', op], { env: { PATH: process.env.PATH, HOME: H, SIGELO_KEY_PROVIDER: 'file' }, input: words, encoding: 'utf8' });
+  const cMe = JSON.parse(readFileSync(op, 'utf8')), cK = JSON.parse(readFileSync(join(H, 'me.local.keeper.json'), 'utf8'));
+  rmSync(H, { recursive: true, force: true });
+  const idb = new FakeIDB(), p = await W.webPlatform({ name: 'seed', indexedDB: idb, mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
+  const r = await SD.restoreInto(p, { words: `  ${words.toUpperCase().replace(/ /g, '\n')}  `, name: 'phone', relay: 'relay.sigelo.ai', now: 1761400000 });
+  const me = JSON.parse(new TextDecoder().decode(await W.loadIdentity(p))), kp = JSON.parse(new TextDecoder().decode(await W.loadSealed(p, 'keeper')));
+  ok(cli.status === 0 && r.did === didOf(cMe.genesis) && didOf(me.genesis) === didOf(cMe.genesis) && JSON.stringify(me) === JSON.stringify(cMe),
+    `restore: the page derives the operator identity keeper --from-words writes for the same 25 words: the same DID, the same file (${r.did})`);
+  ok(kp.root_hex === cK.root_hex && kp.recovery === cK.recovery && kp.keeper === cK.keeper && JSON.stringify(kp.me) === JSON.stringify(cK.me) && kp.v === cK.v,
+    'restore: the same keeper root K_1 (hex), recovery commitment and me as keeper --from-words');
+  ok(kp.created === '2025-10-25' && kp.net === 'mainnet' && kp.restore_height === 0 && kp.workers[0].rank === 'full' && kp.workers[0].placed === 'device',
+    'restore: the keeper\'s metadata: created (UTC day), net, restore_height (0: no height or date given), this device worker 0 FULL');
+  const stored = [...idb.dbs.get('seed').stores.get('files').values()].map((v) => Buffer.from(v).toString('latin1')).join('\n');
+  ok(p.files.read('identity.sealed') !== null && p.files.read('keeper.sealed') !== null && !stored.includes(cK.root_hex) && !stored.includes(cMe.secret) && !stored.includes(words.split(' ').slice(0, 3).join(' ')) && idb.dbs.get('seed').stores.get('keys').has('identity'),
+    'restore: in a browser both sealed under the WebCrypto key (non-extractable, IndexedDB); no word, key or K in the clear');
+  const seat = SD.seatOf(p, () => me), router = mk({ platform: p, identity: () => me, mode: { kind: 'full', standby: false }, seat, options: { registry: false } });
+  const m = (await router.call('GET', '/api/me')).body, st = (await router.call('GET', '/api/state')).body;
+  ok(m.restored?.on === '2025-10-25' && m.restored.keeper === 1 && m.restored.seat === 'here' && st.me.seat?.here === true && st.me.seat.holder === 'phone' && router.mode().standby === false,
+    `router: GET /api/me says restored (day, keeper 1, seat here); GET /api/state me.seat: this phone holds it (${JSON.stringify(m.restored)})`);
+  ok((await router.call('POST', '/api/seat/take', { confirm: true })).body.error?.check === 'seat_here', 'router: POST /api/seat/take with the seat here → 409 seat_here');
+  // Standby: the seat on another device. Started, it never logs in; writes refused seat_elsewhere; reads answer.
+  const p2 = await W.webPlatform({ name: 'seed2', indexedDB: new FakeIDB(), mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
+  await SD.restoreInto(p2, { words, name: 'tab', relay: 'relay.sigelo.ai', restore: { restore_height: 3100000 }, seat: 'elsewhere', now: 1761400000 });
+  const me2 = JSON.parse(new TextDecoder().decode(await W.loadIdentity(p2))), r2 = mk({ platform: p2, identity: () => me2, mode: { kind: 'full', standby: true }, seat: SD.seatOf(p2, () => me2), options: { registry: false } });
+  let started = 0;
+  r2.carrier.start = async () => { started++; };
+  r2.carrier.checkClock = async () => {};
+  await r2.start();
+  const st2 = await r2.call('GET', '/api/state'), w2 = await r2.call('POST', '/api/send', { to: 'did:sigelo:zX', text: 'x' }), inv = await r2.call('POST', '/api/invite', {});
+  ok(started === 0 && st2.status === 200 && st2.body.me.seat?.here === false && w2.status === 409 && w2.body.error.check === 'seat_elsewhere' && inv.body.error?.check === 'seat_elsewhere',
+    `standby: started without logging in; GET /api/state shows the seat elsewhere (the banner); send and invite refused seat_elsewhere (${w2.status})`);
+  const noConfirm = await r2.call('POST', '/api/seat/take', {});
+  ok(noConfirm.status === 400 && started === 0, 'standby: POST /api/seat/take without confirm → 400, nothing started');
+  const tk = await r2.call('POST', '/api/seat/take', { confirm: true });
+  ok(tk.status === 200 && tk.body.seat === 'here' && tk.body.holder === 'tab' && started === 1 && (await r2.call('GET', '/api/state')).body.me.seat.here === true && r2.mode().standby === false,
+    `seat take: the list signed naming this device, the page starts as the operator (${JSON.stringify(tk.body)})`);
+  await r2.stop();
 }
 
 // ================================================================ 3. router.mjs against the relay

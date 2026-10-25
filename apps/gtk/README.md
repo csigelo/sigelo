@@ -7,6 +7,11 @@ packaged by the phone's Linux distribution. Two forms, picked on the start page:
 - **This phone:** the app starts `sigelo-agent ui --app` (its identity: `--identity <file>`, else
   `$SIGELO_HUMAN`, else `~/.config/sigelo/me.local.json`, as `ui`), reads the page's address and
   token from its stdout and shows that page. The page stops when the app does.
+- **Restore from seed:** "I have my 25 words on paper", then one box checked as you type
+  (`web/seed-check.mjs`), a restore height or date, the network, the device's name. The words go once,
+  on stdin, to `sigelo-agent keeper --from-words --keychain`, which seals your key and K_1 in the keyring
+  before anything is written. Then `device seat init` makes this phone the seat. If sigelo already runs
+  as you elsewhere, the phone is a standby: its page stays closed until "Take the seat here".
 - **A computer:** the computer runs `sigelo-agent ui --remote`; the app scans its QR, reads it from an
   image, or takes the pasted `SIGELO:UI:` text, and drives that computer's page. Every call is sealed
   in the app (sigelo-remote/0, UI-API.md "Remote"); the page's files are the app's own. The phone

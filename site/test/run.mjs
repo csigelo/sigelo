@@ -33,7 +33,7 @@ const DIST = join(SITE, 'dist');
 const ORIGIN = 'https://sigelo.io';
 if (!existsSync(join(DIST, 'index.html'))) { console.error('FAIL no site/dist/index.html: run node site/build.mjs first'); process.exit(1); }
 // The tables the build renders from (importing it builds nothing): the official names and the page list.
-const { DOMAINS, HOSTS, CONTENT_HOSTS, REPOSITORIES, PAGES: PAGE_LIST, REPO, RELAY_LIVE, OFFICIAL, BEFORE_LAUNCH, PAYMENT_PLACES, VALUE_SOURCES, securityDomainsLine, packagesAt, RELEASED } = await import('../build.mjs');
+const { DOMAINS, HOSTS, CONTENT_HOSTS, REPOSITORIES, PAGES: PAGE_LIST, REPO, RELAY_LIVE, OFFICIAL, BEFORE_LAUNCH, PAYMENT_PLACES, VALUE_SOURCES, securityDomainsLine, packagesAt, RELEASED, BRAND, BRAND_FILES } = await import('../build.mjs');
 const git = (...a) => execFileSync('git', ['-C', ROOT, ...a], { encoding: 'utf8' }).trim();
 
 let n = 0; const fails = [];
@@ -43,7 +43,7 @@ const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 // The content types below are the contract; site/deploy/nginx.conf (and apache.conf) must send the same.
 const TYPES = { '.html': 'text/html; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json', '.xml': 'application/xml', '.css': 'text/css; charset=utf-8', '.yaml': 'application/yaml',
-  '.mjs': 'text/javascript; charset=utf-8', '.png': 'image/png' };
+  '.mjs': 'text/javascript; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
 const handler = (req, res) => {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (p.includes('..')) { res.writeHead(400).end(); return; }
@@ -137,12 +137,17 @@ for (const f of htmlFiles) {
   const robots = tags.find((t) => t.tag === 'meta' && t.attrs.name === 'robots');
   if (notFound) ok(!canon && robots?.attrs.content === 'noindex', `${f}: noindex and no canonical`);
   else ok(canon && canon.attrs.href === (f === '/index.html' ? `${ORIGIN}/` : `${ORIGIN}${f}`) && !robots, `${f}: canonical ${canon?.attrs.href}, no robots meta`);
-  ok(tags.some((t) => t.tag === 'link' && t.attrs.rel === 'icon' && t.attrs.href === '/icon-512.png'), `${f}: <link rel=icon href=/icon-512.png>`);
+  const icons = tags.filter((t) => t.tag === 'link' && t.attrs.rel === 'icon').map((t) => `${t.attrs.type} ${t.attrs.href}`).join(' | ');
+  ok(icons === 'image/svg+xml /favicon.svg | image/png /icon-192.png | image/png /icon-512.png' && tags.some((t) => t.tag === 'link' && t.attrs.rel === 'apple-touch-icon' && t.attrs.href === '/icon-192.png'),
+    `${f}: <link rel=icon> favicon.svg, then the PNGs 192 and 512; apple-touch-icon (${icons})`);
+  const seal = html.match(/<p class="site"><a href="\/">(<svg[\s\S]*?<\/svg>)sigelo<\/a><\/p>/)?.[1] ?? '';
+  ok(seal.length > 0 && seal.length <= 3072 && /aria-hidden="true"/.test(seal) && !/fill="#/.test(seal), `${f}: header = the inline seal (${seal.length} bytes ≤ 3 KB, aria-hidden, fill from the stylesheet) + "sigelo"`);
   const og = Object.fromEntries(tags.filter((t) => t.tag === 'meta' && t.attrs.property?.startsWith('og:')).map((t) => [t.attrs.property, unesc(t.attrs.content)]));
   const card = tags.find((t) => t.tag === 'meta' && t.attrs.name === 'twitter:card')?.attrs.content;
   if (notFound) ok(Object.keys(og).length === 0 && !card, `${f}: no Open Graph or Twitter tags`);
-  else ok(og['og:url'] === canon?.attrs.href && og['og:title'] && title.startsWith(og['og:title']) && og['og:description'] === d && og['og:type'] === 'website' && og['og:site_name'] === 'sigelo' && card === 'summary',
-    `${f}: Open Graph (title, description, url = canonical, type, site_name) and twitter:card summary`);
+  else ok(og['og:url'] === canon?.attrs.href && og['og:title'] && title.startsWith(og['og:title']) && og['og:description'] === d && og['og:type'] === 'website' && og['og:site_name'] === 'sigelo' && card === 'summary_large_image'
+    && og['og:image'] === `${ORIGIN}/brand/og.png` && og['og:image:width'] === '1200' && og['og:image:height'] === '630' && og['og:image:alt'],
+    `${f}: Open Graph (title, description, url = canonical, type, site_name, image og.png 1200 x 630) and twitter:card summary_large_image`);
   ok(tags.filter((t) => t.tag === 'h1').length === 1, `${f}: exactly one <h1>`);
   const ld = scripts.filter((s) => /type="application\/ld\+json"/.test(s.attrs));
   ok(scripts.length === ld.length, `${f}: no executable <script> (only JSON-LD)`);
@@ -167,6 +172,36 @@ ok(new Set(titles).size === titles.length && new Set(descs).size === descs.lengt
 {
   const r = await get('/icon-512.png');
   ok(r.status === 200 && r.type === 'image/png' && r.body.subarray(1, 4).toString() === 'PNG', '/icon-512.png: 200, image/png, a PNG');
+}
+// ---- the brand: assets/brand/ (design/logo/make.py) served as is; SVGs parse, PNGs are PNGs ------
+{
+  const pngSize = (b) => b.subarray(1, 4).toString() === 'PNG' ? [b.readUInt32BE(16), b.readUInt32BE(20)] : null;
+  const want = { 'icon-192.png': [192, 192], 'icon-512.png': [512, 512], 'og.png': [1200, 630] };
+  for (const f of BRAND_FILES) {
+    const src = existsSync(join(BRAND, f)) ? readFileSync(join(BRAND, f)) : null, r = await get(`/brand/${f}`);
+    ok(src && r.status === 200 && Buffer.compare(r.body, src) === 0, `/brand/${f}: served, byte-identical to assets/brand/${f}`);
+    if (f.endsWith('.svg')) {
+      const { errors, tags } = readHtml(src?.toString('utf8') ?? '');
+      const root = tags[0];
+      ok(src && errors.length === 0 && root?.tag === 'svg' && root.attrs.xmlns === 'http://www.w3.org/2000/svg' && /^0 0 \d+ \d+$/.test(root.attrs.viewbox ?? '')
+        && !/<text|<image|<script|href=|url\(/.test(src.toString()) && src.length <= (/^(lockup|wordmark)/.test(f) ? 10240 : 3072),
+        `assets/brand/${f}: an SVG that parses (svg root, viewBox), no text, script or external reference, ${src?.length} bytes ≤ ${/^(lockup|wordmark)/.test(f) ? '10 KB (a file, never inlined)' : '3 KB'}`);
+    } else ok(JSON.stringify(pngSize(src ?? Buffer.alloc(0))) === JSON.stringify(want[f]), `assets/brand/${f}: a PNG, ${want[f]?.join(' x ')}`);
+  }
+  for (const f of ['favicon.svg', 'icon-192.png', 'icon-512.png']) {
+    const r = await get(`/${f}`);
+    ok(r.status === 200 && r.type === TYPES[extname(f)] && Buffer.compare(r.body, readFileSync(join(BRAND, f))) === 0, `/${f}: 200, ${TYPES[extname(f)]}, assets/brand/${f}`);
+  }
+  const seals = ['seal.svg', 'seal-dark.svg', 'seal-mono.svg'].map((f) => readFileSync(join(BRAND, f), 'utf8'));
+  const d = seals.map((x) => x.match(/ d="([^"]+)"/)?.[1]);
+  ok(d[0] && d.every((x) => x === d[0]) && /fill="#9b2226"/.test(seals[0]) && /fill="#c8423f"/.test(seals[1]) && /fill="currentColor"/.test(seals[2]),
+    'seal, seal-dark, seal-mono: one path (the pixel edge and the flying squares on all three), wax / dark wax / currentColor');
+  const css = readFileSync(join(DIST, 'style.css'), 'utf8');
+  ok(/:root \{[^}]*--seal: #9b2226;/.test(css) && /prefers-color-scheme: dark\)[^@]*--seal: #c8423f;/.test(css) && /\.seal \{[^}]*fill: var\(--seal\)/.test(css),
+    'style.css: the seal in wax, seal-dark\'s #c8423f under a dark scheme');
+  const pwa = ['icon.svg', 'icon-maskable.svg'].map((f) => readFileSync(join(ROOT, 'adapters', 'moadim', f)));
+  ok(pwa[0].equals(readFileSync(join(BRAND, 'app-icon.svg'))) && pwa[1].equals(readFileSync(join(BRAND, 'icon-maskable.svg'))),
+    'adapters/moadim/icon.svg and icon-maskable.svg (the PWA\'s) = assets/brand/app-icon.svg and icon-maskable.svg');
 }
 
 // ---- links: every internal href (and #fragment) resolves over HTTP ----------------------------
@@ -263,7 +298,8 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     }
     return w;
   };
-  const BUDGET = { '/index.md': 155, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40 };
+  // 2026-10-25 (Owner): / may explain in place, +40 words (155 → 195).
+  const BUDGET = { '/index.md': 195, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40 };
   for (const [f, max] of Object.entries(BUDGET)) {
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);
@@ -491,11 +527,15 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     ok(home?.relatedLink?.includes('https://sigelo.ai/'), '/: JSON-LD WebPage relatedLink https://sigelo.ai/');
     // The why first (2026-10-24: "why does an agent need an identity when going online?"): one paragraph, ≤ 60 words, no jargon, before the two layers.
     const why = md('/index.md').split('\n').find((l) => /^[A-Za-z]/.test(l)) ?? '', whyWords = why.split(/\s+/).filter(Boolean).length;
-    ok(whyWords <= 60 && /stranger/.test(why) && !/\bDID\b|attestation|keeper|`/.test(why) && md('/index.md').indexOf(why) < md('/index.md').indexOf('sigelo is the protocol'),
+    ok(whyWords <= 60 && /stranger/.test(why) && !/\bDID\b|attestation|keeper|`/.test(why) && md('/index.md').indexOf(why) < md('/index.md').indexOf('sigelo is free, open source'),
       `/: the why comes first, ${whyWords} words ≤ 60, no DID, attestation, keeper or code`);
-    // Two layers under one name (2026-10-24): the protocol here, the relay at sigelo.ai a service built on it; every footer links it.
-    ok(md('/index.md').includes('sigelo is the protocol and its tools: free, MIT, yours. The relay at [sigelo.ai](https://sigelo.ai/) is a service built on it: pairing and messages between agents, run by us, or [run your own](https://github.com/csigelo/sigelo-relay).'),
-      '/: names the two layers, the protocol (free, MIT, yours) and the relay at sigelo.ai, a service built on it that anyone can run');
+    // Two layers under one name (2026-10-24), in plain words (2026-10-25, naive readers lost "protocol"
+    // and "relay"): sigelo free and open, the relay at sigelo.ai said by what it does, anyone can run one;
+    // the next step names what it needs (an agent that runs commands; the ChatGPT app cannot). Every footer links the relay.
+    // Round 4 (2026-10-25): the relay as what the ID lets agents do, a post office; without a command-running agent, what one can still do.
+    ok(md('/index.md').includes('sigelo is free, open source (MIT). With it, agents message each other and shops, no account needed. [sigelo.ai](https://sigelo.ai/) is the post office for those messages; only the two agents can read them. Anyone can [run one](https://github.com/csigelo/sigelo-relay).')
+      && md('/index.md').includes('(https://sigelo.ai/connect.html) It needs an agent that runs commands, like Claude Code; the ChatGPT app cannot. Without one: use [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/adapters/moadim/APPS.md), wait for Android, or hand this page to your developer.'),
+      '/: names the two layers in plain words (sigelo free and open; with the ID agents message each other and shops; the relay at sigelo.ai, the post office, only the two agents read; anyone can run one), what "Try it" needs and what to do without it');
     const noFoot = PAGE_LIST.filter((p) => !/<footer>[\s\S]*Relay: <a href="https:\/\/sigelo\.ai\/">sigelo\.ai<\/a>[\s\S]*<\/footer>/.test(md(`/${p.slug}.html`))).map((p) => p.slug);
     ok(noFoot.length === 0, `every page's footer links the relay at sigelo.ai${noFoot.length ? ` (not: ${noFoot.join(' ')})` : ''}`);
   } else {
@@ -505,10 +545,11 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     ok(linking.length === 0 && !home?.relatedLink && !/\{\{relay_/.test(md('/index.md') + md('/adopt.md') + md('/contact.md')),
       `no file links or names a URL on sigelo.ai before the relay launch, no JSON-LD relatedLink${linking.length ? ` (in: ${linking.join(' ')})` : ''}`);
   }
-  // The motto belongs to sigelo.ai; sigelo.io keeps only the disclosure line.
-  const motto = texts.filter((f) => /By AI, for AI/i.test(readFileSync(join(DIST, f), 'utf8')));
-  ok(motto.length === 0 && /^Built and operated by an AI agent .* under a human owner, `csigelo`\./m.test(md('/index.md')),
-    `no sigelo.io file carries the motto; / keeps the disclosure line${motto.length ? ` (motto in: ${motto.join(' ')})` : ''}`);
+  // The motto is the project's (2026-10-25, Owner): on / right under the H1, with the disclosure
+  // sub-line saying who answers; the why stays the first paragraph of prose.
+  const lines = md('/index.md').split('\n').filter(Boolean);
+  ok(lines[0].startsWith('# sigelo: ') && lines[1] === '**By AI, for AI.** Built and operated by an AI agent under a human owner, `csigelo`, who answers for it.' && /^[A-Z]/.test(lines[2]) && /stranger/.test(lines[2]),
+    '/: the motto and the disclosure sub-line right under the H1, then the why');
   // Words never written: untrue of sigelo, or someone else's product. Over every page as HTML
   // (title, meta description, Open Graph, JSON-LD: what search snippets show) and as Markdown, the
   // repository documents (/spec, /security, /changelog) included, llms.txt, llms-full.txt and the

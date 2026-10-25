@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 package io.sigelo.app;
 
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -13,6 +14,7 @@ import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.security.keystore.KeyProperties;
 import android.security.keystore.UserNotAuthenticatedException;
 import android.util.Base64;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebMessage;
 import android.webkit.WebMessagePort;
@@ -69,8 +71,12 @@ import javax.net.ssl.SSLSocketFactory;
  *   tls    a TLS stream to host:port (the relay's MQTT on 8883, its WebSocket on 443): the system's
  *          certificate authorities, the host name checked; then data both ways until either closes.
  *   seal / open   AES-256-GCM under a key made in AndroidKeyStore that never leaves it: the identity
- *          (SAFE; FULL under a key that needs the screen lock, valid 5 minutes) or a computer's text.
+ *          (SAFE; FULL under a key that needs the screen lock, valid 5 minutes), the keeper root of a
+ *          restore from seed (under the FULL key, its own AAD) or a computer's text.
  *   mode / wiped  the form picked at first start; a switch (the menu) erases the other's storage.
+ *   secure        FLAG_SECURE on the window while the restore-from-seed screen is up (no screenshot,
+ *          no recents thumbnail, no screen recording of the 25 words); off again after.
+ *   clip-clear    the system clipboard emptied (the page asks after the words were pasted).
  */
 public final class SigeloBridge {
     static final String SHELL = "sigelo-shell/0", PORT_MESSAGE = "sigelo-bridge/0";
@@ -268,6 +274,17 @@ public final class SigeloBridge {
                 prefs.edit().putBoolean("wipe", false).apply();
                 post(to, ok(id));
                 break;
+            case "secure":
+                if (m.optBoolean("on", false)) activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                else activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                post(to, ok(id));
+                break;
+            case "clip-clear": {
+                ClipboardManager cm = activity.getSystemService(ClipboardManager.class);
+                if (cm != null) cm.clearPrimaryClip();
+                post(to, ok(id));
+                break;
+            }
             default:
                 fail(to, id, "op", "no operation " + op);
         }
@@ -512,8 +529,8 @@ public final class SigeloBridge {
 
     /** [1][alias][IV 12][ciphertext ‖ tag 16]; the AAD names the kind, so one kind's blob never opens as another's. */
     static byte[] seal(String kind, boolean full, byte[] plain) throws GeneralSecurityException, IOException, Refused {
-        int a = "identity".equals(kind) ? (full ? 1 : 0) : "control".equals(kind) ? 2 : -1;
-        if (a < 0) throw new Refused("kind", "identity or control");
+        int a = "identity".equals(kind) ? (full ? 1 : 0) : "keeper".equals(kind) ? 1 : "control".equals(kind) ? 2 : -1;
+        if (a < 0) throw new Refused("kind", "identity, keeper or control");
         Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
         c.init(Cipher.ENCRYPT_MODE, key(a, true));
         c.updateAAD(aad(kind));
@@ -530,7 +547,7 @@ public final class SigeloBridge {
     static byte[] open(String kind, byte[] blob) throws GeneralSecurityException, IOException, Refused {
         if (blob.length < 2 + 12 + 16 || blob[0] != 1) throw new Refused("sealed", "not sealed by this app");
         int a = blob[1];
-        boolean fits = "identity".equals(kind) ? (a == 0 || a == 1) : "control".equals(kind) && a == 2;
+        boolean fits = "identity".equals(kind) ? (a == 0 || a == 1) : "keeper".equals(kind) ? a == 1 : "control".equals(kind) && a == 2;
         if (!fits) throw new Refused("sealed", "sealed as something else");
         SecretKey k = key(a, false);
         if (k == null) throw new Refused("sealed", "its key is gone from this phone's keystore");
@@ -556,7 +573,7 @@ public final class SigeloBridge {
                 main.post(() -> activity.confirmCredential(() -> keystore(to, id, m, sealing, true),
                         () -> fail(to, id, "cancelled", "the screen lock was not confirmed")));
             } catch (KeyPermanentlyInvalidatedException e) {
-                fail(to, id, "sealed", "the key was invalidated (the screen lock was removed or changed): import the identity again");
+                fail(to, id, "sealed", "the key was invalidated (the screen lock was removed or changed): import the identity again, or restore it from your 25 words");
             } catch (Refused e) {
                 fail(to, id, e.check, e.getMessage());
             } catch (IllegalStateException e) {

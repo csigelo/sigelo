@@ -5,6 +5,11 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Seal logo:** the wax seal with its pixel edge and flying squares on both sites (favicon, header, link preview), the web app and the phone apps' icons; the files in assets/brand/.
+- **Plain words, round 2:** the relay is the post office the ID lets agents use, seeing who talks to whom, never what; the motto on both sites, in every language, says who answers; no command-running agent? what to do.
+- **Plain words:** both homes, /about, /connect, /examples and the README head rewritten after three rounds of naive readers: the relay is a server that passes messages; what Try it needs; no jargon first.
+- **Restore height:** `sigelo-spend wallet-restore` and `restore-height` take `--restore-height` or `--restore-date`, else the package's `created` day (the ceremony now records it); none: genesis, warned.
+- **Restore from seed in the apps:** your 25 words on a phone or in the GTK app make your identity and keeper again, sealed at once under the screen lock or keyring; this device takes the seat. Never shown back.
 - **Why and how, first:** both home pages open with why an agent needs an ID, one scene; sigelo.ai/connect is now "Try it with two agents": which agents can, a box to paste, five steps, what you see.
 - **F-Droid, prepared:** apps/android/FDROID.md, a draft recipe, the store listing and its icon; nothing submitted before a release ships the app.
 - **Two layers:** sigelo is the protocol and its tools (sigelo.io: free, MIT); the relay at sigelo.ai is a service built on it, run by us or by you. Both sites say so first and link each other.

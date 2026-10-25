@@ -2,4 +2,5 @@
 <resources>
     <color name="sigelo_blue">#FF0B57D0</color>
     <color name="sigelo_blue_dark">#FF0842A0</color>
+    <color name="sigelo_paper">#FFFCF9F2</color>
 </resources>

@@ -17,7 +17,7 @@
 // line and "\n"), clearHistory(), readData() → text | null, writeData(text). The history is every
 // message and pairing event the carrier's inbox() hands over; data is the page's own (tags, words
 // checked, read marks, the host's controls). hooks: me() → { did, original, chain }, meInfo() →
-// { identity_file, recovery, key, erase }, agents() → the agents' directory as the state shows it
+// { identity_file, recovery, key, erase, restored? } (restored: the app's restore from seed, { on, keeper, seat }), agents() → the agents' directory as the state shows it
 // ([] where there is none), seat() → the seat or null, deviceRound() → { gave? } after each drain
 // (or none), note(line), defer(fn) (setImmediate on Node), every(fn, ms) → a timer, hidden({ did, name })
 // → true for what the page never shows nor names (the computer's relay controls: their contacts, their
@@ -269,7 +269,8 @@ export function makePage({ makeCarrier, link: L, linksFile, codeKind, unlogged, 
     'GET /api/state': async (_, q) => { if (draining) await draining; return state(Number(q.get('since') ?? 0) || 0); },
     'GET /api/me': () => {
       const m = hooks.me(), i = hooks.meInfo();
-      return { did: m.did, original: m.original, chain: m.chain, identity_file: i.identity_file, recovery: i.recovery, key: i.key, relay: carrier.relay, retention_days: carrier.retentionDays, erase: i.erase };
+      return { did: m.did, original: m.original, chain: m.chain, identity_file: i.identity_file, recovery: i.recovery, key: i.key, relay: carrier.relay, retention_days: carrier.retentionDays, erase: i.erase,
+        ...(i.restored && { restored: i.restored }) };
     },
     'POST /api/invite': (b) => serial(async () => {
       const name = b['name'] === undefined || b['name'] === '' ? `contact-${hexOf(2)}` : cleanName(b['name'], 'name');

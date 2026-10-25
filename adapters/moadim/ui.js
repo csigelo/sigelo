@@ -112,7 +112,7 @@
     else if (Math.abs(off) > 60) parts.push(h('span', { class: 'warn' }, `Your clock is ${Math.abs(off)} s ${off < 0 ? 'ahead of' : 'behind'} the relay's: set it right, or codes fail`));
     else parts.push(h('span', { class: 'good' }, 'clock ok'));
     const mode = backend.mode?.(), banner = !mode ? null : mode.kind === 'remote' ? `Remote control of a computer${mode.via === 'relay' ? ', over the relay' : ''}: this phone holds no account key`
-      : mode.kind === 'full' ? 'This phone holds: FULL, standby' : `This phone holds: SAFE worker${Number.isInteger(mode.worker) ? ` ${mode.worker}` : ''}`;
+      : mode.kind === 'full' ? `This phone holds: FULL, ${me.seat?.here ? 'the seat' : 'standby'}` : `This phone holds: SAFE worker${Number.isInteger(mode.worker) ? ` ${mode.worker}` : ''}`;
     const box = h('div', null, banner ? h('div', { class: 'status mode' }, banner) : null, h('div', { class: 'status' }, parts));
     if (me.pow) box.append(powBar(me.pow));
     const seat = seatBanner();
@@ -443,7 +443,10 @@
   // seat_elsewhere, shows here, in any view, once.
   function seatBanner() {
     const seat = S.snap?.me?.seat, e = [S.note, S.fatal].find((x) => x?.check === 'seat_elsewhere');
-    if (seat && !seat.here) return h('div', { class: 'card warn' }, `The seat is with ${seat.holder}: this page no longer logs in as you. Here: sigelo-agent device seat take.`);
+    // In the app restored from seed (apps/web, LOCAL): the seat is taken here, after a warning (POST /api/seat/take).
+    const take = () => { if (confirm('Take the seat here only if that other device is stopped or lost: two devices logging in as you lose each other\'s messages. Take it?')) act(() => backend.call('POST', '/api/seat/take', { confirm: true })); };
+    if (seat && !seat.here) return h('div', { class: 'card warn' }, `The seat is with ${seat.holder}: this page no longer logs in as you. `,
+      LOCAL ? h('button', { onclick: take }, 'Take the seat here') : 'Here: sigelo-agent device seat take.');
     return e ? h('div', { class: 'card warn' }, 'Another device holds your seat: ', e.message) : null;
   }
   const lazy = (path) => { let m; return async () => { if (m === undefined) { try { m = await import(path); } catch { m = null; } } return m; }; };
@@ -667,6 +670,7 @@
       put(body, errorCard(S.note) ?? '',
         h('div', { class: 'card' }, h('div', { class: 'did' }, m.did), h('div', { class: 'bar' }, cp)),
         h('p', null, m.recovery === 'set' ? 'Recovery key: set, offline' : h('span', { class: 'warn' }, 'Recovery key: none. Theft of this key is permanent.')),
+        m.restored ? h('p', null, `Restored from seed on ${m.restored.on} · keeper j=${m.restored.keeper} · seat ${m.restored.seat ?? 'not set up (device seat init)'}`) : null,
         h('p', null, m.key === 'browser' ? 'Key: in this app\'s storage, sealed under a key it cannot export' : 'Key: file (keychain: not yet)'),
         h('p', null, `Relay: ${m.relay} · keeps messages ${m.retention_days} days`),
         relayBlock(),

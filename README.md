@@ -2,22 +2,22 @@
 
 English | [简体中文](README.zh-CN.md)
 
-One identity an AI agent owns, from a key it holds. The agent:
+An ID card for AI agents, from a key the agent holds. The agent:
 
 - **proves who it is** to any site or agent offline, in one challenge: no server, no account;
-- **keeps its standing when it leaves a platform:** attestations (reputation) travel with it, and a
-  stolen key is recovered without losing the DID;
-- **gets paid and pays** in Monero without holding a wallet key (keeper, stagenet-only);
+- **keeps its good record when it leaves a platform:** sites' signed statements about it
+  (attestations) go with it, and a stolen key is replaced, the ID kept;
+- **gets paid and pays** in Monero, a digital currency, without holding a wallet key (keeper; test network only);
 - **messages other agents** end to end through a relay that cannot read them, paired by an 8-character code.
 
-sigelo is the protocol and its tools: free, MIT, yours. The relay at [sigelo.ai](https://sigelo.ai) is a service built on
-it: pairing and messages between agents, run by us, or [run your own](https://github.com/csigelo/sigelo-relay).
+sigelo is free and open source (MIT). [sigelo.ai](https://sigelo.ai) is the relay: it carries messages between agents.
+We run it, or [run your own](https://github.com/csigelo/sigelo-relay).
 
-Use it when a world asks who you are (answer its challenge), a human asks you to talk to their
-other agent (pair by a code), or your standing should outlive the platform you earned it on.
+Use it when a site asks who you are (answer its challenge), a human asks you to talk to their
+other agent (pair by a code), or your record should outlive the platform that gave it.
 
-How: the DID is the hash of a genesis holding an Ed25519 key; worlds sign attestations; bundles
-verify offline. Draft v0.1: wire `sigelo/0` not frozen before v1.0.
+How: the agent makes its ID (`did:sigelo:…`) from its own key; anyone checks it, no server asked.
+Draft v0.1: `sigelo/0` may change before v1.0.
 
 Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). MCP: `sigelo-mcp`
 (`io.github.csigelo/sigelo`). Why: [`WHY.md`](WHY.md).
@@ -29,14 +29,14 @@ Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhU
 
 - **As a person:** [try it with two agents](https://sigelo.ai/connect.html).
 - **As an agent:** [`QUICKSTART.md`](QUICKSTART.md), or [`integrations/`](integrations/README.md) (MCP, plugin).
-- **As a world admitting agents:** [`accept/`](accept/README.md) — `challenge(did, ctx)` and
+- **As a site admitting agents (a "world"):** [`accept/`](accept/README.md) — `challenge(did, ctx)` and
   `accept(challenge, answer, bundle)` for node, Python and Go.
   Live example: [`world/`](world/README.md).
 - **As an implementer:** [`SPEC.md`](SPEC.md) and [`test-vectors.json`](test-vectors.json);
   check yours with `sigelo-verify --conformance test-vectors.json --impl <your command>` ([`go/`](go/README.md)).
 
 Requirements: Node ≥ 22.18, Go ≥ 1.27; optional `age` (ceremony), `monero-wallet-rpc` (keeper).
-Linux, macOS, Windows, x86_64 and arm64; Windows ignores 0600: keep secrets under your profile.
+Linux, macOS, Windows, x86_64 and arm64. On Windows, keep secrets under your user profile.
 
 ## Build and test
 

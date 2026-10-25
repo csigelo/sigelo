@@ -12,7 +12,8 @@
  *   backup.age        age -r <Owner> over { v, mnemonic, created, keepers, public }   0600
  *                     (v "sigelo-root/2": `mnemonic` is S as Monero's 25 words)
  *   fingerprint.txt   JCS(public) + "\n" — §4.5's "plaintext copy of public"          0644
- *   keeper-<j>.json   one per keeper: K_j and what that keeper needs to start          0600
+ *   keeper-<j>.json   one per keeper: K_j and what that keeper needs to start, and     0600
+ *                     `created` (the UTC day, YYYY-MM-DD): the restore height's floor for its wallet
  *
  * The one other exit for the 25 words is `tty` (`ceremony --human`, ROADMAP §2 M4): the human
  * running the ceremony sees them on /dev/tty, which the CLI opens itself (`openTty`) so they
@@ -67,6 +68,8 @@ export function checkRecipient(r: string): void {
 
 type Derived = ReturnType<typeof deriveRoot>;
 const hex = bytesToHex;
+/** Unix seconds → the UTC day, YYYY-MM-DD: the `created` of the unsigned files (never a genesis). */
+export const dayOf = (t: number): string => new Date(t * 1000).toISOString().slice(0, 10);
 const wallet = (w: Derived['treasury']) => ({ spend_key: hex(w.b), view_key: hex(w.a), address: w.address });
 const pubkey = (seed: Uint8Array): string => encodeKey(ed.getPublicKey(seed));
 /** §4.5's `public`: the backup's fingerprint. JCS so the Owner can compare it byte for byte. */
@@ -132,7 +135,8 @@ export function ceremony(o: CeremonyOpts) {
   const d = deriveRoot(S, o.net, 0, n);
   const keepers = d.keepers.map((K, j) => ({ j, role: role(j, t), identity: pubkey(identitySeed(K, 0)) }));
   const pub = publicOf(d);
-  const backup = { v: 'sigelo-root/2', mnemonic, created: o.created ?? Math.floor(Date.now() / 1000), keepers, public: pub };
+  const created = o.created ?? Math.floor(Date.now() / 1000);
+  const backup = { v: 'sigelo-root/2', mnemonic, created, keepers, public: pub };
   // Encrypt before writing anything: a failed age leaves the directory empty.
   const sealed = o.age.encrypt(o.recipient, new TextEncoder().encode(JSON.stringify(backup)));
   S.fill(0);
@@ -140,7 +144,7 @@ export function ceremony(o: CeremonyOpts) {
   const files = [write('backup.age', sealed, 0o600), write('fingerprint.txt', canonicalize(pub) + '\n', 0o644)];
   d.keepers.forEach((K, j) => {
     const pkg = {
-      v: 'sigelo-keeper/1', j, role: role(j, t), net: o.net,
+      v: 'sigelo-keeper/1', j, role: role(j, t), net: o.net, created: dayOf(created),
       keeper_root_hex: hex(K), identity_public_key: keepers[j]!.identity, recovery_commitment: d.recovery.commitment,
       ...(j === 0 ? { allowance: wallet(d.allowance), root_identity_seed_hex: hex(d.identity) } : {}),
       ...(j === t ? { treasury: wallet(d.treasury) } : {}),
@@ -337,10 +341,10 @@ export const VENDOR_FILES = ['vendor.local.json', 'vendor.init.json', 'sigelo-ve
  * Write the vendor identity at rotation `n` into `out` (created 0700): `vendor.local.json` (0600,
  * sigelo-agent's identity file, plain key, so `SIGELO_IDENTITY=… sigelo-agent bundle|sign` and
  * issue-licence read it unchanged), `vendor.init.json` (what `sigelo-agent init` prints: did and
- * genesis, plus the current DID and n) and `sigelo-vendor-identity.json` (the genesis, to publish).
+ * genesis, plus the current DID, n and `created`, this run's UTC day; the genesis stays pinned at iat 0) and `sigelo-vendor-identity.json` (the genesis, to publish).
  * Refuses before writing anything if one exists. Returns public values only.
  */
-export function vendor(o: { S: Uint8Array; n: number; out: string }) {
+export function vendor(o: { S: Uint8Array; n: number; out: string; created?: number }) {
   const c = vendorChain(o.S, o.n);
   try {
     mkdirSync(o.out, { recursive: true, mode: 0o700 });
@@ -350,7 +354,7 @@ export function vendor(o: { S: Uint8Array; n: number; out: string }) {
     const write = (name: string, body: string, mode: number): string => (writeFileSync(join(o.out, name), body, { mode, flag: 'wx' }), name);
     const files = [
       write(VENDOR_FILES[0], JSON.stringify(store, null, 2) + '\n', 0o600),
-      write(VENDOR_FILES[1], JSON.stringify({ did: c.original, genesis: c.genesis, current: c.did, n: o.n }, null, 2) + '\n', 0o644),
+      write(VENDOR_FILES[1], JSON.stringify({ did: c.original, genesis: c.genesis, current: c.did, n: o.n, created: dayOf(o.created ?? Math.floor(Date.now() / 1000)) }, null, 2) + '\n', 0o644),
       write(VENDOR_FILES[2], JSON.stringify(c.genesis, null, 2) + '\n', 0o644),
     ];
     return { did: c.original, genesis_sha256: hex(sha256(utf8ToBytes(canonicalize(c.genesis)))), current: c.did, n: o.n, recovery_commitment: c.genesis.recovery, files };

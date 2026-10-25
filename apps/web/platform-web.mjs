@@ -25,6 +25,13 @@
 import { MsgError, fail } from './vendor/contact/kdf.mjs';
 
 const STORE = 'files', KEYS = 'keys';
+
+// No network while a restore from seed runs (seed.mjs): from the first word to the last sealed write,
+// the page's fetch and MQTT (and the Android shell's https and tls, platform-android.mjs) refuse.
+export const network = { held: 0 };
+/** Hold the network until the returned release() (counted: holds nest). */
+export function holdNetwork() { network.held++; let done = false; return () => { if (!done) { done = true; network.held--; } }; }
+export const checkNetwork = () => { if (network.held > 0) fail('restoring', 'no network until the restored keys are sealed'); };
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const eexist = (n) => Object.assign(new Error(`EEXIST: ${n} exists`), { code: 'EEXIST' });
 const req = (r) => new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
@@ -89,6 +96,7 @@ export async function memoryFiles(db) {
 // iteration of a ReadableStream), cancelled when the reader leaves early.
 export function pageFetch(fetchFn) {
   return async (url, { method = 'GET', body, signal } = {}) => {
+    checkNetwork();
     const res = await fetchFn(url, { method, body, signal, redirect: 'manual', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
       ...(body !== undefined && { headers: { 'content-type': 'text/plain;charset=UTF-8' } }) });
     const stream = res.body;
@@ -110,6 +118,7 @@ export function pageMqtt(mqttLib, { createWebsocket } = {}) {
   const connect = mqttLib?.connect ?? mqttLib?.default?.connect;
   if (typeof connect !== 'function') throw new TypeError('mqtt: MQTT.js\'s browser build (mqtt.esm.js)');
   return (url, opts) => {
+    checkNetwork();
     const u = new URL(url);
     if (u.protocol !== 'wss:' && !(u.protocol === 'ws:' && LOOPBACK.has(u.hostname))) fail('connect', `${u.protocol}// is not carried in a page: MQTT over WebSocket (wss://) only`);
     const { wsOptions: _w, ...rest } = opts;
@@ -183,13 +192,17 @@ export async function webPlatform({ name = 'sigelo', indexedDB = globalThis.inde
   });
 }
 
-// ---------------------------------------------------------------- the identity, sealed
+// ---------------------------------------------------------------- the identity and the keeper, sealed
 
-// The identity file (sigelo-agent's JSON: secret, genesis, rotations, attestations, issuers) is
-// kept sealed: AES-256-GCM under a WebCrypto key made here, non-extractable, kept in IndexedDB's
-// key store (design/apps.md §5, PWA row). That protects a copy of the files, not the seed from a
-// script running in this origin, which can ask the key to decrypt (THREAT-MODEL §3.12).
-const SEALED = 'identity.sealed', KEY_ID = 'identity';
+// The identity file (sigelo-agent's JSON: secret, genesis, rotations, attestations, issuers) and, after a
+// restore from seed, the keeper file (K_j: sigelo-agent-enrol.ts's me.local.keeper.json) are kept
+// sealed: AES-256-GCM under a WebCrypto key made here, non-extractable, kept in IndexedDB's key store
+// (design/apps.md §5, PWA row), the kind in the AAD so one never opens as the other. That protects a
+// copy of the files, not the seed from a script running in this origin, which can ask the key to
+// decrypt (THREAT-MODEL §3.12).
+const KEY_ID = 'identity', KINDS = Object.freeze({ identity: 'identity', keeper: 'keeper' });
+const aadOf = (kind) => new TextEncoder().encode(`sigelo-app ${kind}/0`);
+const kindOf = (kind) => KINDS[kind] ?? fail('kind', 'identity or keeper');
 async function keyOf(db, subtle, make) {
   const tx = db.transaction(KEYS, 'readonly'), had = await req(tx.objectStore(KEYS).get(KEY_ID));
   if (had || !make) return had ?? null;
@@ -198,38 +211,43 @@ async function keyOf(db, subtle, make) {
   return k;
 }
 // A platform with a sealer (the Android app's: AndroidKeyStore, platform-android.mjs) seals with it
-// instead, into identity.keystore; the WebCrypto key is then never made.
-const SEALED_KS = 'identity.keystore';
-/** The identity file's bytes sealed into the platform's files (committed before this resolves). full: FULL (the shell's key asks for the user). */
-export async function saveIdentity(p, bytes, subtle = globalThis.crypto.subtle, { full = false } = {}) {
+// instead, into <kind>.keystore; the WebCrypto key is then never made.
+/** A file's bytes sealed into the platform's files as <kind>.sealed | <kind>.keystore (committed before this resolves). full: the shell's key asks for the user. */
+export async function saveSealed(p, kind, bytes, subtle = globalThis.crypto.subtle, { full = false } = {}) {
+  kindOf(kind);
   if (p.sealer) {
-    p.files.write(SEALED_KS, await p.sealer.seal(bytes, { full }));
+    p.files.write(`${kind}.keystore`, await p.sealer.seal(bytes, { full, kind }));
     await p.flush();
     return;
   }
   const key = await keyOf(p.db, subtle, true), iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode('sigelo-app identity/0') }, key, bytes));
+  const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aadOf(kind) }, key, bytes));
   const out = new Uint8Array(12 + ct.length);
   out.set(iv); out.set(ct, 12);
-  p.files.write(SEALED, out);
+  p.files.write(`${kind}.sealed`, out);
   await p.flush();
 }
-/** The identity file's bytes, or null when this app holds none. */
-export async function loadIdentity(p, subtle = globalThis.crypto.subtle) {
+/** A sealed file's bytes, or null when this app holds none. */
+export async function loadSealed(p, kind, subtle = globalThis.crypto.subtle) {
+  kindOf(kind);
   if (p.sealer) {
-    const k = p.files.read(SEALED_KS);
+    const k = p.files.read(`${kind}.keystore`);
     if (k === null) return null;
-    try { return await p.sealer.open(k); } catch (e) {
+    try { return await p.sealer.open(k, { kind }); } catch (e) {
       // Not unlocked (the user cancelled, no screen lock): ask again at the next start; else it is gone.
       if (e.check === 'cancelled' || e.check === 'locked') throw e;
-      return fail('identity', `the identity does not open under this app's key (${e.message}): import it again`);
+      return fail(kind, `the ${kind} does not open under this app's key (${e.message}): import it again`);
     }
   }
-  const c = p.files.read(SEALED);
+  const c = p.files.read(`${kind}.sealed`);
   if (c === null) return null;
   const key = await keyOf(p.db, subtle, false);
-  if (key === null) fail('identity', 'the identity is here but its key is gone (the browser\'s storage was partly cleared): import it again');
+  if (key === null) fail(kind, `the ${kind} is here but its key is gone (the browser's storage was partly cleared): import it again`);
   try {
-    return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: c.subarray(0, 12), additionalData: new TextEncoder().encode('sigelo-app identity/0') }, key, c.subarray(12)));
-  } catch { return fail('identity', 'the identity does not open under this app\'s key'); }
+    return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: c.subarray(0, 12), additionalData: aadOf(kind) }, key, c.subarray(12)));
+  } catch { return fail(kind, `the ${kind} does not open under this app's key`); }
 }
+/** The identity file's bytes sealed (saveSealed, kind identity). */
+export const saveIdentity = (p, bytes, subtle = globalThis.crypto.subtle, o = {}) => saveSealed(p, 'identity', bytes, subtle, o);
+/** The identity file's bytes, or null when this app holds none. */
+export const loadIdentity = (p, subtle = globalThis.crypto.subtle) => loadSealed(p, 'identity', subtle);

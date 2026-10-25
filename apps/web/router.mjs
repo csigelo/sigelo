@@ -11,6 +11,10 @@
 //   r.mode()                           { kind: 'safe' | 'full', worker?, standby? }: the page's banner
 //   await r.stop()
 //
+// seat: after a restore from seed (seed.mjs seatOf): { info() → {holder, epoch, here} | null, take(now),
+// restored() → {on, keeper, seat} | null }. info().here false: the seat is on another device: start()
+// takes the owner lock but never logs in (writes refused 409 seat_elsewhere, the page's banner), until
+// POST /api/seat/take {confirm: true} signs the list naming this device (seat take --force semantics).
 // identity(): the identity file as sigelo-agent writes it ({ secret, genesis, rotations,
 // attestations, issuers }), read at every operation. Its files live under the name `app/me.local.json`
 // in the platform's files (contacts, carrier state, history, the page's data, links).
@@ -49,7 +53,8 @@ export function presetRelay(files, host) {
 
 const DEVICES_HERE = 'devices are added, scanned and revoked on the operator\'s computer (sigelo-agent ui), not in this app';
 
-export function makeRouter({ platform, identity, mode = { kind: 'safe' }, options = {} }) {
+export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' }, options = {}, seat = null }) {
+  const mode = { ...mode0 };
   const { files } = platform;
   const paths = pathsFor(IDENTITY), base = IDENTITY.replace(/\.json$/, '');
   const historyFile = `${base}.history.jsonl`, dataFile = DATA_FILE, linksFile = L.linksPath(IDENTITY);
@@ -76,9 +81,10 @@ export function makeRouter({ platform, identity, mode = { kind: 'safe' }, option
     hooks: {
       me,
       meInfo: () => ({ identity_file: IDENTITY, recovery: headOf(identity()).recovery === null ? 'none' : 'set', key: 'browser',
-        erase: 'On the machine holding the recovery key, with this identity\'s file: SIGELO_IDENTITY=<file> sigelo-agent erase-request --recovery-key <your recovery.key>' }),
+        erase: 'On the machine holding the recovery key, with this identity\'s file: SIGELO_IDENTITY=<file> sigelo-agent erase-request --recovery-key <your recovery.key>',
+        ...(seat?.restored() && { restored: seat.restored() }) }),
       agents: () => [],
-      seat: () => null,
+      seat: () => seat?.info() ?? null,
       defer: (f) => { setTimeout(f, 0); },
     },
   });
@@ -89,11 +95,27 @@ export function makeRouter({ platform, identity, mode = { kind: 'safe' }, option
   routes['GET /api/devices'] = () => ({ devices: [], list: null, adding: [], joining: null });
   for (const r of ['add', 'confirm', 'words', 'scan', 'revoke', 'sync']) routes[`POST /api/devices/${r}`] = () => serial(async () => refuse(409, 'not_here', DEVICES_HERE));
 
+  // The seat on another device (a restore from seed as a standby): taken here only when the human says
+  // that device is stopped or lost; then this page starts as the operator, every session afresh.
+  routes['POST /api/seat/take'] = async (b) => {
+    const st = seat?.info() ?? refuse(404, 'route', 'no seat in this app: it was not restored from seed');
+    if (st.here) refuse(409, 'seat_here', 'this device holds the seat already');
+    if (b['confirm'] !== true) refuse(400, 'body', 'confirm: true: the other device is stopped or lost (two devices logging in as you lose each other\'s messages)');
+    if (owned === null) refuse(409, 'start', 'the app has not started');
+    const r = await seat.take(Math.floor(Date.now() / 1000));
+    page.live.seatGone = null; mode.standby = false;
+    await page.start();
+    return { seat: 'here', holder: r.holder, epoch: r.seat.epoch };
+  };
+
   let owned = null;
   return {
     platform, carrier: page.carrier, page,
     async start() {
       owned = await platform.owner(me().original);
+      const st = seat?.info();
+      // Standby: the owner lock held, nothing sent; reads answer, writes are refused seat_elsewhere.
+      if (st && st.here === false) { page.live.seatGone = st.holder; return; }
       try { await page.start(); } catch (e) { owned.release(); owned = null; throw e; }
     },
     async stop() {

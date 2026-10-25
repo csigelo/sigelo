@@ -60,6 +60,8 @@
     "./qr.mjs": "./qr.mjs",
     "./qr-decode": "./qr-decode.mjs",
     "./qr-decode.mjs": "./qr-decode.mjs",
+    "./restore": "./restore.mjs",
+    "./restore.mjs": "./restore.mjs",
     "./package.json": "./package.json"
   },
   "files": [
@@ -80,6 +82,7 @@
     "qr-decode.mjs",
     "qr.mjs",
     "relays.mjs",
+    "restore.mjs",
     "short.mjs",
     "store.mjs",
     "fixtures/carrier-v0.json",

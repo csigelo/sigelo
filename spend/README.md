@@ -51,6 +51,13 @@ The agent's token goes to its own file, never into the keeper directory: `--agen
 PATH` (0600, the only copy; it must not exist), default `~/.config/sigelo-wallet/<dir>-<agent>.token`.
 Every choice is a flag; a refusal names the flag and writes nothing.
 
+`init` makes no wallet. To make the allowance wallet from the ceremony's package, in a
+`monero-wallet-rpc --wallet-dir D`: `sigelo-spend wallet-restore --keeper-package keeper-0.json
+--wallet-rpc URL --wallet-file allowance --password-file P --daemon node:38089`. It scans from
+`--restore-height N`, else `--restore-date YYYY-MM-DD`, else the package's `created` day (a day is
+its first block minus a day, asked of `--daemon`), else from genesis with a warning: hours to days.
+`sigelo-spend restore-height` prints that height alone, for a restore by hand (`refresh {start_height}`).
+
 ### Two users
 
 **Recommended: the keeper and wallet-rpc under their own user, the agent under another.** An

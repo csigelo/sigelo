@@ -26,7 +26,7 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 | Route | Body / query | Answer |
 |---|---|---|
 | `GET /api/state` | `since=<seq>` | `{seq, now, me, groups: {mine, contacts}, pending: {invites, paired, answers, failed}, events, introductions}` |
-| `GET /api/me` | | `{did, original, chain, identity_file, recovery: "set"\|"none", key: "file", relay, retention_days, erase}` |
+| `GET /api/me` | | `{did, original, chain, identity_file, recovery: "set"\|"none", key: "file", relay, retention_days, erase, restored?}`; `restored` `{on, keeper, seat: "here"\|"elsewhere"\|null}` when the identity comes from the 25 words and its keeper file has the day it was made (Me: "Restored from seed on …") |
 | `POST /api/invite` | `{name?, long?}` | `{id, name, code, exp, short?, short_exp?, relay}`: `short` parked 10 min; `short_exp` the relay's clock |
 | `POST /api/invite/cancel` | `{id}` | `{cancelled: true}` |
 | `POST /api/accept` | `{code, name?, tier?}` | `{status: "connected", contact: {did, name, fingerprint, pair, tier}}`, or `{status: "waiting"\|"pending", did, detail, exp}`; `tier`: `friend` or `quiet` (own is detected) |
@@ -67,6 +67,11 @@ by the agent), `friend` (the default; the page shows "new message" and a count),
 until opened); the human's choice (`/api/tier`) wins. `ours`: that attestation marks it, whatever the tier (an
 own agent may be `friend` by choice). **Mine** = `ours` or tier `own`; `mine` = the attestation's
 expiry for a local agent; `local` = the agent's name on this machine.
+
+Only in the self-contained app (apps/web, not `ui`): `POST /api/seat/take` `{confirm: true}` for a standby
+restored from seed: the list signed naming this device, then the page logs in as you (`seat take --force`
+semantics: the other device must be stopped or lost) → `{seat: "here", holder, epoch}`; `400` without
+`confirm`, `409 seat_here`.
 
 `me` in `state`: `{did, relay, online, clock_offset (s, relay minus local, the carrier's `clockOffset`), clock_checked,
 retention_days, error, pow: {bits, elapsed_s, expected_s}|null, pow_done_ms, seat: {holder, epoch, here}|null}`

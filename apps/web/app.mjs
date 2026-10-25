@@ -3,7 +3,8 @@
 // this app holds (sealed in its storage), the router (router.mjs) and, for ui.js, the `local`
 // backend: globalThis.sigeloLocal = { call, onChange, mode }. Set before anything is awaited, so
 // ui.js (a deferred script after this module) finds it. Without an identity: a form to import one
-// (the file `sigelo-agent device scan` wrote on a computer, or the operator's for FULL), then a reload.
+// (the file `sigelo-agent device scan` wrote on a computer, or the operator's for FULL), or to restore it
+// from the 25 words (seed.mjs: the operator and K_1, FULL, the seat here or on another device), then a reload.
 // In the Android app (SigeloShell, apps/android): the shell's platform (platform-android.mjs), and
 // the form picked at first start (shell.mjs): this phone's identity, or a computer's page (remote).
 import mqtt from './vendor/mqtt.esm.js';
@@ -13,13 +14,15 @@ import { androidPlatform, connectBridge } from './platform-android.mjs';
 import { DEFAULT_RELAY } from './vendor/contact/carrier.mjs';
 import { makeRouter, presetRelay } from './router.mjs';
 import { pickMode, remoteBackend, wipeIfAsked } from './shell.mjs';
+import { restoreView, seatOf } from './seed.mjs';
 
 const SETTINGS = 'app/settings.json';
-let router = null;
+let router = null, bridge = null;
 const ready = (async () => {
   let platform;
   if (globalThis.SigeloShell) {
-    const bridge = await connectBridge(), box = document.getElementById('setup');
+    bridge = await connectBridge();
+    const box = document.getElementById('setup');
     await wipeIfAsked(bridge);
     if (bridge.info.mode === null) { pickMode(box, bridge); throw Object.assign(new Error('Pick what this phone does, below.'), { status: 403, check: 'mode' }); }
     if (bridge.info.mode === 'remote') return (router = await remoteBackend(bridge, box, { mqtt }));
@@ -32,7 +35,7 @@ const ready = (async () => {
   }
   const s = platform.files.read(SETTINGS), settings = s === null ? {} : JSON.parse(new TextDecoder().decode(s));
   const identity = parseBytes(raw);
-  router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' } });
+  router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' }, seat: seatOf(platform, () => identity) });
   await router.start();
   addEventListener('pagehide', () => { void router.stop(); });
   return router;
@@ -53,6 +56,9 @@ globalThis.sigeloLocal = Object.freeze({
 function setup(platform) {
   const box = document.getElementById('setup');
   if (!box) return;
+  // Restore from seed: straight to it when the first-start screen asked (#restore), else a card below.
+  const restore = () => restoreView(box, platform, { bridge, back: () => { location.hash = ''; setup(platform); } });
+  if (location.hash === '#restore') { restore(); return; }
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   const file = el('input', { type: 'file', accept: '.json,application/json' });
   const full = el('input', { type: 'checkbox' });
@@ -79,6 +85,10 @@ function setup(platform) {
     file, el('label', {}, full, ' This is the operator (FULL, standby)'),
     el('label', { textContent: 'Relay for new codes' }), relay,
     el('p', { className: 'muted', textContent: 'Keep relay.sigelo.ai unless you run your own. A 12-character code always names its own relay.' }),
-    el('div', { className: 'bar' }, go), say));
+    el('div', { className: 'bar' }, go), say),
+  el('div', { className: 'card' },
+    el('h2', { textContent: 'Restore from seed' }),
+    el('p', { textContent: 'Your 25 words make your identity and your keeper again here (FULL). They are sealed at once and never shown back.' }),
+    el('div', { className: 'bar' }, el('button', { textContent: 'Restore from my 25 words', onclick: restore }))));
   box.hidden = false;
 }

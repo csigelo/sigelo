@@ -40,7 +40,9 @@ run mkdir -p "$SHARE/lib/noble-ciphers" "$SHARE/web" "$BIN" "$APPS" "$ICONS"
 run cp "$HERE/sigelo-app.js" "$SHARE/"
 run cp "$REPO/adapters/moadim/remote-client.mjs" "$JCS" "$SHARE/lib/"
 for f in chacha.js _arx.js _poly1305.js utils.js LICENSE; do run cp "$NOBLE/$f" "$SHARE/lib/noble-ciphers/"; done
-for f in start.html start.js start.css; do run cp "$HERE/web/$f" "$SHARE/web/"; done
+for f in start.html start.js start.css seed-check.mjs; do run cp "$HERE/web/$f" "$SHARE/web/"; done
+# The Monero word list for the start page's live check of the 25 words (data only, from ts/dist).
+run cp "$REPO/ts/dist/monero-words.js" "$SHARE/web/"
 for f in ui.html ui.js ui.css icon.svg shim-zlib.mjs shim-kdf.mjs; do run cp "$REPO/adapters/moadim/$f" "$SHARE/web/"; done
 # QR reading (contact/qr-decode.mjs, design/devices.md §6.4) where this checkout has it; else paste only.
 if [ -f "$REPO/contact/qr-decode.mjs" ] && [ -f "$REPO/contact/qr.mjs" ]; then
@@ -61,6 +63,6 @@ if [ "$DRY" = 1 ]; then echo "write $BIN/sigelo-app: exec gjs -m $SHARE/sigelo-a
 else printf '#!/bin/sh\nexec gjs -m "%s/sigelo-app.js" "$@"\n' "$SHARE" > "$BIN/sigelo-app"; chmod 755 "$BIN/sigelo-app"; fi
 if [ "$DRY" = 1 ]; then echo "write $APPS/io.sigelo.App.desktop: Exec=$BIN/sigelo-app"
 else sed "s|^Exec=sigelo-app\$|Exec=$BIN/sigelo-app|" "$HERE/io.sigelo.App.desktop" > "$APPS/io.sigelo.App.desktop"; fi
-run cp "$HERE/io.sigelo.App.svg" "$ICONS/"
+run cp "$REPO/assets/brand/app-icon.svg" "$ICONS/io.sigelo.App.svg"
 [ "$DRY" = 1 ] || { command -v update-desktop-database >/dev/null && update-desktop-database -q "$APPS" 2>/dev/null || true; }
 [ "$DRY" = 1 ] || echo "installed: $BIN/sigelo-app (the app list shows sigelo)"

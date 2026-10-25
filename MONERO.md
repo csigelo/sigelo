@@ -739,8 +739,8 @@ sigelo-offline restore  --words <file|-> [--keepers N] [--fingerprint <dir>/fing
    `public` (the fingerprint) is unchanged from `sigelo-root/1` and does not name the vault.
 5. Write one package per keeper, `keeper-<j>.json`, **plaintext, mode 0600, on the ceremony
    host** — not age-encrypted per keeper host; moving each to its host is the operator's step:
-   `{v: "sigelo-keeper/1", j, role, net, keeper_root_hex, identity_public_key,
-   recovery_commitment}`. Keeper 0 (the agents' keeper) adds the `allowance` wallet
+   `{v: "sigelo-keeper/1", j, role, net, created, keeper_root_hex, identity_public_key,
+   recovery_commitment}` (`created`: the ceremony's UTC day, the wallet's restore-height floor, §6). Keeper 0 (the agents' keeper) adds the `allowance` wallet
    `{spend_key, view_key, address}` and the **root identity seed**; the keeper named by
    `--treasury-keeper` adds the `treasury` wallet. Without that flag the treasury spend key
    is in the backup only. `keeper_root_hex` is what that keeper's `spend.key` holds (§2), and
@@ -894,7 +894,10 @@ Faucets: `stagenet-faucet.xmr-tw.org` works and needs no captcha — a plain
 `GET /send_tx/?addr=<stagenet address>` paid 0.1 XMR into the allowance wallet on
 2026-09-23. `xmrfaucet.xnothingx.com` also listed; the `melo.tools` faucet is dead (the
 domain is for sale). Wallet-only RSS ~100 MB, one per keeper (agents are accounts).
-Set the restore height to "now" on fresh wallets or the first scan takes hours on this CPU.
+**Restore height.** A wallet restored from height 0 scans the whole chain: hours to days here.
+`sigelo-spend wallet-restore` (and `restore-height`, which prints it) takes `--restore-height <n>`,
+else `--restore-date YYYY-MM-DD`, else the `created` day of the keeper package; a day becomes the
+first block one day earlier, found on `--daemon`. Neither, or no daemon: 0, with a warning.
 Never `--trusted-daemon` on a public node; nothing here needs it. `--tx-notify` is the
 receive hook.
 

@@ -3,7 +3,7 @@
 // machine with Node alone. The build itself runs on CI (.github/workflows/android.yml).
 //   node apps/android/check.mjs     → ALL PASS (n)
 // The manifest and resources (well-formed, two permissions, no backup, references resolve, the
-// icon as the GTK app's SVG), the Gradle files (AGP pinned, minSdk 28, targetSdk 35, no
+// icon from assets/brand/app-icon.svg), the Gradle files (AGP pinned, minSdk 28, targetSdk 35, no
 // dependency, braces balanced), the wrapper (its jar by SHA-256, the distribution pinned), the Java
 // (the bridge's operations as platform-android.mjs sends them, the WebView's settings, every asset
 // type served), the F-Droid listing, icon and draft recipe (FDROID.md), the workflow (actions
@@ -136,14 +136,18 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   ok(read(MAIN, 'res', 'values-v35', 'themes.xml').includes('windowOptOutEdgeToEdgeEnforcement') && read(MAIN, 'res', 'values', 'themes.xml').includes('@android:style/Theme.Material.Light.DarkActionBar'), 'theme: the platform\'s Material (no AndroidX); Android 15 not edge to edge');
 }
 {
-  // The icon: apps/gtk/io.sigelo.App.svg in the adaptive icon's 108 dp, the SVG's 512 as its 72 dp safe zone.
-  const svg = read(REPO, 'apps', 'gtk', 'io.sigelo.App.svg'), vec = read(MAIN, 'res', 'drawable', 'ic_launcher_foreground.xml');
-  const c = /<circle cx="(\d+)" cy="(\d+)" r="(\d+)"[^>]*stroke-width="(\d+)"/.exec(svg), p = /<path d="M(\d+) (\d+)l(\d+) (\d+) (\d+)-(\d+)"[^>]*stroke-width="(\d+)"/.exec(svg);
-  const fill = /<rect[^>]*fill="#([0-9a-f]{6})"/.exec(svg)?.[1];
-  const [cx, cy, r, sw] = c.slice(1).map(Number), [px, py, a, b, d, e, sw2] = p.slice(1).map(Number), off = (768 - 512) / 2;
-  ok(vec.includes('android:viewportWidth="768"') && vec.includes(`M${cx + off - r},${cy + off} a${r},${r} 0 1,0 ${2 * r},0 a${r},${r} 0 1,0 -${2 * r},0`)
-    && vec.includes(`M${px + off},${py + off} l${a},${b} l${d},-${e}`) && (vec.match(new RegExp(`strokeWidth="${sw}"`, 'g')) ?? []).length === 2 && sw === sw2
-    && read(MAIN, 'res', 'values', 'colors.xml').toLowerCase().includes(`#ff${fill}`), 'icon: the GTK app\'s SVG (ring, check, stroke, blue) in the adaptive icon');
+  // The icon: assets/brand/app-icon.svg (the seal) in the adaptive icon's 108 dp, the SVG's 512 square as
+  // the full 108 dp (the mark sits in the 66 dp safe circle), paper behind, the same foreground as the themed layer.
+  const { shapes, vector, polygons } = await import('./icon.mjs');
+  const s = shapes(), vec = read(MAIN, 'res', 'drawable', 'ic_launcher_foreground.xml'), launcher = read(MAIN, 'res', 'mipmap-anydpi', 'ic_launcher.xml');
+  ok(vec === vector(s) && vec.includes(`android:pathData="${s.d}"`) && vec.includes('android:fillType="evenOdd"') && vec.includes(`android:scaleX="${Math.round(s.scale * 1.5 * 1e4) / 1e4}"`),
+    'icon: the foreground is app-icon.svg\'s seal path (evenodd), its transform x 1.5 in the 768 viewport (icon.mjs vector())');
+  ok(read(MAIN, 'res', 'values', 'colors.xml').toUpperCase().includes(`<COLOR NAME="SIGELO_PAPER">#FF${s.paper.toUpperCase()}</COLOR>`) && launcher.includes('<background android:drawable="@color/sigelo_paper" />')
+    && launcher.includes('<foreground android:drawable="@drawable/ic_launcher_foreground" />') && launcher.includes('<monochrome android:drawable="@drawable/ic_launcher_foreground" />'),
+    'icon: adaptive, paper background (app-icon.svg\'s square), the seal as foreground and monochrome');
+  // Inside the safe zone: every point of the mark within 33 dp of the centre (of 108), i.e. 33/108 × 512 px of the SVG.
+  const far = Math.max(...polygons(s.d).flat().map(([x, y]) => Math.hypot(s.tx + x * s.scale - 256, s.ty + y * s.scale - 256)));
+  ok(far <= (33 / 108) * 512, `icon: the whole mark (pixels and flying squares) inside the 66 dp safe circle (${(far / 512 * 108).toFixed(1)} dp ≤ 33 from the centre)`);
 }
 
 // ================================================================ Gradle
@@ -174,9 +178,10 @@ ok(Object.keys(java).sort().join() === 'MainActivity.java,SigeloBridge.java', `j
 ok(Object.values(java).every((t) => balanced(code(t)) && /^package io\.sigelo\.app;$/m.test(t) && [...t.matchAll(/^import ([\w.]+);$/gm)].every((m) => /^(android|java|javax|org\.json)\./.test(m[1]))),
   'java: braces balanced, package io.sigelo.app, no import but the platform\'s (no AndroidX)');
 const A = await import(pathToFileURL(join(REPO, 'apps', 'web', 'platform-android.mjs')).href).catch(() => null);
-const ops = A?.OPS ?? ['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped'];
+// The module needs the page's import map to load in Node; without it, its OPS line read as text.
+const ops = A?.OPS ?? JSON.parse((/export const OPS = Object\.freeze\((\[[^\]]*\])\)/.exec(read(REPO, 'apps', 'web', 'platform-android.mjs'))?.[1] ?? '[]').replace(/'/g, '"'));
 const cases = [...code(java['SigeloBridge.java']).matchAll(/case "\s*"/g)].length;
-const caseNames = [...java['SigeloBridge.java'].matchAll(/case "([a-z]+)":/g)].map((m) => m[1]).sort();
+const caseNames = [...java['SigeloBridge.java'].matchAll(/case "([a-z-]+)":/g)].map((m) => m[1]).sort();
 ok(caseNames.join() === [...ops].sort().join() && cases === ops.length, `bridge: SigeloBridge answers exactly the operations platform-android.mjs sends (${caseNames} / ${ops})`);
 const pa = read(REPO, 'apps', 'web', 'platform-android.mjs');
 ok(['sigelo-shell/0', 'sigelo-bridge/0'].every((s) => java['SigeloBridge.java'].includes(`"${s}"`) && pa.includes(`'${s}'`)) && /"sigelo-app " \+ kind \+ "\/0"/.test(java['SigeloBridge.java']),
@@ -248,7 +253,7 @@ if (process.env.SIGELO_ANDROID_JAR) {
   ok(!/A2A|\bTODO\b/i.test(['title.txt', 'short_description.txt', 'full_description.txt', ...logs.map((f) => `changelogs/${f}`)].map(txt).join('\n')), 'fastlane: no placeholder, no protocol jargon in the listing');
   let icon = '';
   try { icon = execFileSync(process.execPath, [join(HERE, 'icon.mjs'), '--check'], { encoding: 'utf8' }); } catch (e) { icon = String(e.stdout); }
-  ok(/^ok /m.test(icon), `fastlane: images/icon.png is apps/gtk/io.sigelo.App.svg as icon.mjs draws it (${icon.trim()})`);
+  ok(/^ok /m.test(icon), `fastlane: images/icon.png is assets/brand/app-icon.svg as icon.mjs draws it (${icon.trim()})`);
 
   const yml = join(HERE, 'fdroid', 'io.sigelo.app.yml');
   let d = null, why = '';

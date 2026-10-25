@@ -10,6 +10,13 @@ small bridge in Java for what a page cannot do. No AndroidX, no dependency but t
 - **This phone:** the phone holds an identity, SAFE (the file `sigelo-agent device scan` wrote for it
   on your computer) or FULL (the operator's, standby). Import the file once; the app runs its own
   carrier and talks to the relay itself.
+- **Restore from seed:** your 25 words make the operator identity and your keeper root K_1 again on
+  the phone (FULL), as `sigelo-agent keeper --from-words` does on a computer. First "I have my 25
+  words on paper", then one box: the words are checked as you type (count, word list, checksum),
+  pasting is allowed and the clipboard is cleared after it, and screenshots are blocked while the
+  screen is up. Add a restore height or date, the network and the device's name. Both files are sealed under the FULL key
+  (your screen lock is asked); the words are kept nowhere and never shown back. The phone takes the
+  seat, or, if sigelo already runs as you elsewhere, waits as a standby until "Take the seat here".
 - **A computer:** the phone drives the page of a computer running `sigelo-agent ui --remote` on the
   same network. Scan its QR (camera), pick a screenshot of it, or paste its `SIGELO:UI:` text. The
   phone holds no account key, only that computer's text.
@@ -28,7 +35,7 @@ Three AES-256-GCM keys made in AndroidKeyStore, which never leave it:
 | Key | Seals |
 |---|---|
 | `sigelo-identity` | the SAFE identity file |
-| `sigelo-identity-full` | the FULL identity file; usable 5 minutes after you confirm the screen lock (no screen lock, no FULL) |
+| `sigelo-identity-full` | the FULL identity file and, after a restore from seed, the keeper root (its own AAD); usable 5 minutes after you confirm the screen lock (no screen lock, no FULL) |
 | `sigelo-control` | a computer's `SIGELO:UI:` text |
 
 The sealed files are in the app's private storage, with the contacts, ratchets and history. The seed
@@ -45,7 +52,9 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
 - `tls`: a TLS stream (the system's certificate authorities, the host name checked). MQTT on 8883
   is the stream itself; on 443 the page frames WebSocket over it (`apps/web/ws-over-stream.mjs`).
   The relay refuses requests from web pages; these are not.
-- `seal`, `open`: the keystore above. `mode`, `wiped`: the form.
+- `seal`, `open`: the keystore above (kinds `identity`, `keeper`, `control`). `mode`, `wiped`: the form.
+- `secure`: `FLAG_SECURE` on the window while the restore screen is up (no screenshot, no recents
+  thumbnail), off after. `clip-clear`: the clipboard emptied after the 25 words were pasted.
 
 The page comes from the APK at `https://appassets.androidplatform.net/` (served by the app, never
 fetched); nothing else loads, links open in the browser. JavaScript on, file access off, mixed content

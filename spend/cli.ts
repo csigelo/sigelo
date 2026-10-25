@@ -8,6 +8,7 @@
  *   sigelo-spend pay <policy.json> <request.json> [--port 38090]
  *   sigelo-spend approve-request <policy.json> <ref>
  *   sigelo-spend init | doctor | licence show|install | receipts export   (init.ts)
+ *   sigelo-spend wallet-restore | restore-height                         (restore.ts)
  */
 import { randomBytes } from 'node:crypto';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,6 +16,7 @@ import { resolve } from 'node:path';
 import { operator } from './init.js';
 import { describe } from './licence.js';
 import { parsePolicy, tokenHash } from './policy.js';
+import { restoreCli } from './restore.js';
 import { loadPolicy, parseDaemons, readLog, serve } from './service.js';
 
 const USAGE = `sigelo-spend serve <policy.json> [--dry-run] [--port 38090]
@@ -28,6 +30,9 @@ sigelo-spend init [--dir D] [--net stagenet|mainnet] (--wallet-rpc URL [--wallet
 sigelo-spend doctor [--dir D] [--notify]
 sigelo-spend licence show [--dir D] | sigelo-spend licence install <file> [--dir D]
 sigelo-spend receipts export [--dir D] --since <YYYY-MM-DD|unix> [--format json|csv]
+sigelo-spend wallet-restore --keeper-package keeper-<j>.json --wallet-rpc URL [--wallet-rpc-login u:p] --wallet-file NAME --password-file F
+                  [--daemon URL] [--restore-height N | --restore-date YYYY-MM-DD]
+sigelo-spend restore-height [--daemon URL] [--restore-height N | --restore-date YYYY-MM-DD | --keeper-package F]
 
 \`init\` sets up one keeper on this host over your own wallet-rpc and wallet: nothing is hosted
 and no key leaves the host. Free: one keeper, one agent, its whole policy. A licence (a sigelo
@@ -36,7 +41,9 @@ The bearer token is read from SIGELO_SPEND_TOKEN. It is a secret: anything holdi
 spend its agent's account within that agent's bounds. \`serve\` reads SIGELO_DAEMONS, an
 ordered list of daemon addresses (the wallet-rpc's own first) it moves the wallet-rpc along when
 its daemon stops answering. \`token new\` needs <agent> for an
-agents-style policy; a buckets-style one has a single token and takes none.`;
+agents-style policy; a buckets-style one has a single token and takes none.
+The restore height: --restore-height, else --restore-date's first block minus a day, else the
+package's created day (both need --daemon), else 0 with a warning: a scan from genesis takes hours.`;
 
 const die = (msg: string): never => { console.error(`sigelo-spend: ${msg}`); return process.exit(1); };
 const flag = (argv: string[], name: string): boolean => argv.includes(name);
@@ -59,6 +66,7 @@ const positional = (argv: string[]): string[] => {
 
 async function main(argv: string[]): Promise<void> {
   if (['init', 'doctor', 'licence', 'receipts'].includes(argv[0] ?? '')) { process.exitCode = await operator(argv); return; }
+  if (['wallet-restore', 'restore-height'].includes(argv[0] ?? '')) { process.exitCode = await restoreCli(argv); return; }
   const args = positional(argv);
   const cmd = args[0];
 

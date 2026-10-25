@@ -33,7 +33,7 @@ export async function wipeIfAsked(bridge, { indexedDB = globalThis.indexedDB, st
   return true;
 }
 
-/** First start: the two forms. Picking one tells the shell, then the page starts again in it. */
+/** First start: the two forms (and this phone's from the 25 words, seed.mjs). Picking one tells the shell, then the page starts again in it. */
 export function pickMode(box, bridge) {
   const pick = (mode) => async () => {
     try { await bridge.request('mode', { mode }); location.reload(); } catch (e) { say.textContent = e.message; }
@@ -43,6 +43,9 @@ export function pickMode(box, bridge) {
     el('div', { className: 'card' }, el('h2', { textContent: 'This phone' }),
       el('p', { textContent: 'This phone holds an identity: the one a computer made for it (sigelo-agent device scan), or the operator\'s (FULL). Its key is sealed under a key of this phone\'s keystore.' }),
       el('div', { className: 'bar' }, el('button', { className: 'primary', textContent: 'This phone', onclick: pick('self') }))),
+    el('div', { className: 'card' }, el('h2', { textContent: 'Restore from seed' }),
+      el('p', { textContent: 'Your 25 words make your identity and your keeper again on this phone (FULL), sealed under your screen lock.' }),
+      el('div', { className: 'bar' }, el('button', { textContent: 'Restore from my 25 words', onclick: async () => { location.hash = '#restore'; await pick('self')(); } }))),
     el('div', { className: 'card' }, el('h2', { textContent: 'A computer' }),
       el('p', { textContent: 'Drive the page of a computer running sigelo-agent ui --remote on this network. This phone holds no account key, only that computer\'s text.' }),
       el('div', { className: 'bar' }, el('button', { textContent: 'A computer', onclick: pick('remote') }))),

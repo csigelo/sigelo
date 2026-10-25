@@ -29,6 +29,9 @@ export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of
        [--replace-me] [--rotate-me]        K_j beside it (0600), the words read from the terminal or stdin (never argv);
                                            j default 1, never 0. --replace-me: an identity not from the words is set
                                            aside; --rotate-me: your identity's next key, rotation n+1 of the words
+       [--keychain] [--net <n>]            --keychain: the key and K_j sealed in the OS keychain before anything is
+       [--restore-height <h> | --restore-date <YYYY-MM-DD>]   written (the phone app's restore); --net mainnet|stagenet
+                                           and the wallet's birth, kept in the keeper file for its wallet restore
   enrol --name <n> [--index <i>]           worker i (next free): a one-time code (10 minutes) for the other machine;
        [--wait <s>] [--identity <file>]    it pairs like any contact, then takes on worker i's identity, run by you
        [--tier friend|quiet]               --tier: yours but low trust (it reads the web): its messages wait in the
@@ -116,7 +119,8 @@ interface Me { n: number; did: string; original: string }
 /** The operator identity file: seed-derived, marked so `rotate` refuses a random key (cli.ts). */
 type MeStore = Store & { derived?: { path: string; n: number } };
 // root_hex: K plain (0600); or root: K sealed in the OS keychain (a FULL device's, DEVICES.md), provider "keychain".
-export interface Keeper { v: string; keeper: number; root_hex?: string; root?: keychain.WrappedSecret; provider?: string; recovery: string; me?: Me;
+// created: the UTC day the file was first made (YYYY-MM-DD), kept after; not signed, read by nothing here.
+export interface Keeper { v: string; keeper: number; root_hex?: string; root?: keychain.WrappedSecret; provider?: string; recovery: string; me?: Me; created?: string;
   workers: Record<string, { name: string; n: number; did: string; original: string; placed: string; at: number; rank?: string; via?: string; revoked?: number; attestation?: { body: { exp: number; iat: number }; sig: string }; until?: number }> }
 export const keeperPath = (op: string): string => op.replace(/\.json$/, '') + '.keeper.json';
 export function readKeeper(op: string): Keeper {
@@ -184,7 +188,13 @@ const busyOn = (f: string): void => {
 };
 
 /** The operator identity from S: written when absent (rotation n), kept when it is S's, rotated with --rotate-me. */
-function placeMe(enrol: Enrol, S: Uint8Array, op: string, known: number | undefined, replace: boolean, rotateMe: boolean): Me {
+/** An identity file's key sealed in the OS keychain (sigelo-wrap/1, as `keys wrap` and a FULL device scan seal it). */
+function sealedMe(id: Store): Store {
+  const x = { ...id } as Store, seed = Uint8Array.from(Buffer.from(id.secret as string, 'hex'));
+  try { x.secret = keychain.wrap(seed, x, keychain.systemKeychain()) as never; x.provider = 'keychain'; } finally { seed.fill(0); }
+  return x;
+}
+function placeMe(enrol: Enrol, S: Uint8Array, op: string, known: number | undefined, replace: boolean, rotateMe: boolean, wrap = false): Me {
   const original = enrol.operatorChain(S, 0).original, mark = (n: number) => ({ path: `${enrol.IDENTITY_PATH}/${n}`, n });
   if (existsSync(op)) {
     let s: MeStore;
@@ -211,16 +221,36 @@ function placeMe(enrol: Enrol, S: Uint8Array, op: string, known: number | undefi
   }
   const n = (known ?? 0) + (rotateMe ? 1 : 0), id = enrol.operatorIdentity(S, n), d = did(id.rotations.at(-1)?.next_genesis ?? id.genesis);
   mkdirSync(dirname(op), { recursive: true, mode: 0o700 });
-  withLock(op, () => { if (existsSync(op)) throw new Error(`keeper: ${op} appeared meanwhile: run it again`); save(op, id); });
-  note(`your identity ${op} (0600): the root identity of your words, rotation ${n} (${d}). Lost, the words make it again: sigelo-agent keeper --from-words`);
+  withLock(op, () => { if (existsSync(op)) throw new Error(`keeper: ${op} appeared meanwhile: run it again`); save(op, wrap ? sealedMe(id) : id); });
+  note(`your identity ${op} (0600${wrap ? ', its key sealed in the OS keychain' : ''}): the root identity of your words, rotation ${n} (${d}). Lost, the words make it again: sigelo-agent keeper --from-words`);
   return { n, did: d, original };
 }
 
-/** sigelo-agent keeper [--from-words [--replace-me] [--rotate-me]] [--keeper j] [--identity f] → exit code. */
+/**
+ * The wallet metadata a keeper file keeps for its wallet restore (design/apps-seed.md): net, and the
+ * wallet's birth as restore_height or restore_date (UTC day). Field names only: sigelo-spend reads them.
+ */
+function walletMeta(f: Map<string, string>): { net?: string; restore_height?: number; restore_date?: string } {
+  const out: { net?: string; restore_height?: number; restore_date?: string } = {}, h = f.get('--restore-height'), d = f.get('--restore-date'), n = f.get('--net');
+  if (n !== undefined) { if (n !== 'mainnet' && n !== 'stagenet') throw usageError(`--net: mainnet or stagenet, not ${JSON.stringify(n)}`); out.net = n; }
+  if (h !== undefined && d !== undefined) throw usageError('--restore-height or --restore-date, not both');
+  if (h !== undefined) { if (!/^\d{1,10}$/.test(h) || Number(h) > 2 ** 31 - 1) throw usageError(`--restore-height: a block height, not ${JSON.stringify(h)}`); out.restore_height = Number(h); }
+  if (d !== undefined) {
+    const t = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d) ? Date.parse(`${d}T00:00:00Z`) : NaN;
+    if (!(t >= Date.UTC(2014, 3, 18)) || new Date(t).toISOString().slice(0, 10) !== d || t > Date.now()) throw usageError(`--restore-date: a day as YYYY-MM-DD, from 2014-04-18 (Monero's first block) to today, not ${JSON.stringify(d)}`);
+    out.restore_date = d;
+  }
+  return out;
+}
+
+/** sigelo-agent keeper [--from-words [--replace-me] [--rotate-me] [--keychain] [--net n] [--restore-height h | --restore-date d]] [--keeper j] [--identity f] → exit code. */
 export async function keeperMain(rest: string[]): Promise<number> {
   try {
-    const f = flags(rest, ['--keeper', '--identity'], ['--from-words', '--replace-me', '--rotate-me', '--operator']), op = operatorPath(f.get('--identity'));
+    const f = flags(rest, ['--keeper', '--identity', '--net', '--restore-height', '--restore-date'], ['--from-words', '--replace-me', '--rotate-me', '--operator', '--keychain']), op = operatorPath(f.get('--identity'));
     if ((f.has('--replace-me') || f.has('--rotate-me')) && !f.has('--from-words')) throw usageError('keeper: --replace-me and --rotate-me go with --from-words: they need the words');
+    const meta = walletMeta(f), wrap = f.has('--keychain');
+    if ((wrap || Object.keys(meta).length) && !f.has('--from-words')) throw usageError('keeper: --keychain, --net, --restore-height and --restore-date go with --from-words');
+    if (wrap && !keychain.answers(keychain.systemKeychain())) throw Object.assign(new Error('keeper: keychain_unavailable: --keychain, but no OS keychain answers here (Secret Service, macOS keychain, DPAPI): nothing written'), { check: 'keychain_unavailable' });
     checkOperator(op, f.has('--from-words'), 'keeper');
     const { lib, enrol } = await libs();
     let me: Me | undefined;
@@ -233,11 +263,13 @@ export async function keeperMain(rest: string[]): Promise<number> {
       try {
         const old = existsSync(file) ? readKeeper(op) : undefined;
         if (old && Buffer.from(rootOf(old).K).toString('hex') !== hex) throw Object.assign(new Error(`keeper: ${file} holds another keeper root (K_${old.keeper} of other words, or another index): delete it first if you mean to replace it; its workers stay placed but cannot be restored from it`), { check: 'keeper_exists' });
-        me = placeMe(enrol, S, op, old?.me?.n, f.has('--replace-me'), f.has('--rotate-me'));
-        withLock(file, () => { if (!existsSync(file)) save(file, { v: KEEPER_V, keeper: j, root_hex: hex, recovery, workers: {} } as never); });
+        me = placeMe(enrol, S, op, old?.me?.n, f.has('--replace-me'), f.has('--rotate-me'), wrap);
+        // --keychain: K_j sealed under the identity's keychain item before the file exists (the plain write below then finds it).
+        if (wrap) withLock(file, () => { if (!existsSync(file)) save(file, { v: KEEPER_V, keeper: j, provider: 'keychain', root: keychain.wrapRoot(K, me!.original, j, recovery), recovery, created: new Date().toISOString().slice(0, 10), workers: {} } as never); });
+        withLock(file, () => { if (!existsSync(file)) save(file, { v: KEEPER_V, keeper: j, root_hex: hex, recovery, created: new Date().toISOString().slice(0, 10), workers: {} } as never); });
       } finally { S.fill(0); K.fill(0); }
     }
-    const k = writeKeeper(op, (x) => { scan(enrol, lib, op, x); if (me) x.me = me; });
+    const k = writeKeeper(op, (x) => { scan(enrol, lib, op, x); if (me) x.me = me; Object.assign(x, meta); });
     note(`keeper root K_${k.keeper} in ${keeperPath(op)} (0600). It is not your seed: whoever reads it can derive every worker under it, `
       + 'never your vault, your other keepers or the recovery key. A worker\'s key on a server reveals that worker only. Delete the file to stop enrolling; the 25 words make it again.');
     out({ keeper: k.keeper, file: keeperPath(op), recovery: k.recovery, me: k.me ?? null, workers: Object.entries(k.workers).map(([i, w]) => ({ worker: Number(i), ...w })) });
