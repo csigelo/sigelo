@@ -19,7 +19,7 @@ import { Age, ceremony, dayOf, IMPORT_REFUSED, importRoot, keeperLastHonest, ope
 import { JcsError, RawNumber } from './jcs.js';
 import {
   agentIdentitySeed, decodeMoneroWords, delegateIdentitySeed, deriveIdentity, deriveRoot, encodeMoneroWords, identitySeed, k, keeperRoot,
-  mnemonicFromRoot, newRoot, parseRoot, recoveryCommitment, recoveryPublicKey, recoverySeed, rootFromMnemonic,
+  mnemonicFromRoot, newRoot, newRootBytes, parseRoot, recoveryCommitment, recoveryPublicKey, recoverySeed, rootFromMnemonic,
   vaultFromRoot, vendorRecoveryCommitment, vendorRecoverySeed, vendorSeed, walletFromRoot,
 } from './keys.js';
 import { MONERO_WORDS } from './monero-words.js';
@@ -1042,6 +1042,11 @@ t('words case, extra whitespace and 3-letter prefixes are accepted, as wallet2 d
   bytesToHex(rootFromMnemonic(w1.split(' ').map((w) => w.slice(0, 3)).join(' '))) === VAULT_VECTORS[0]!.seed);
 t('words newRoot is 25 words of a canonical root, fresh each call',
   [newRoot(), newRoot()].every((m) => m.split(' ').length === 25 && mnemonicFromRoot(rootFromMnemonic(m)) === m) && newRoot() !== newRoot());
+{
+  const a = newRootBytes(), b = newRootBytes(), m = mnemonicFromRoot(a);
+  t('words newRootBytes is a canonical 32-byte root (< l, nonzero, top 3 bits clear), fresh each call; its words decode to it',
+    a.length === 32 && (a[31]! & 0xe0) === 0 && a.some((x) => x !== 0) && bytesToHex(rootFromMnemonic(m)) === bytesToHex(a) && bytesToHex(a) !== bytesToHex(b));
+}
 t('keys parseRoot takes either 64 hex characters or the 25 words',
   bytesToHex(parseRoot(VAULT_VECTORS[0]!.seed)) === VAULT_VECTORS[0]!.seed && bytesToHex(parseRoot(w1)) === VAULT_VECTORS[0]!.seed);
 /** 24 data words plus the 25th that makes the checksum hold (it is one of the 24, by prefix). */

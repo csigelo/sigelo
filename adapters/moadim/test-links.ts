@@ -133,6 +133,10 @@ try {
   ok('links on the agent: {id, contact, tier, purpose, linked_by, expires}', la.status === 0 && lj.links?.length === 2 && lj.links.some((x) => x.id === r1.id && x.contact === dB && x.tier === 'friend' && x.linked_by === opDid), la.stdout);
   const oj = json<{ made: { id: string; status: string }[] }>(lo);
   ok('links on the operator: the links it made, linked', oj.made?.filter((x) => x.status === 'linked').length === 2 && noLink(lo.stdout), lo.stdout);
+  // The inbox labels a linked contact's messages: link {id, purpose}, on stdout with the message.
+  const sb = await cli(HB, ['send', 'vps-a', 'the PR is ready']), ib = await cli(HA, ['inbox', '--wait', '5']);
+  const lm = json<{ messages: { content: string; link?: { id: string; purpose: string } }[] }>(ib).messages?.find((m) => m.content === 'the PR is ready');
+  ok('inbox: vps-b\'s message carries link {id, purpose}', sb.status === 0 && lm?.link?.id === r1.id && lm.link.purpose === 'review the pull requests', ib.stdout + ib.stderr);
 
   // ---- lazily: vps-b and vps-c, nobody watching; each next inbox does its part.
   const l3 = await cli(OP, ['link', 'vps-b', 'vps-c', '--purpose', 'write the docs', '--days', '1', '--wait', '0', '--operator']);
@@ -159,6 +163,16 @@ try {
   ok('expired, linked onto an earlier pairing: both keep it, the purpose gone, the tier as before', !a1?.revoked && !c1?.revoked && a1?.link === undefined && c1?.link === undefined && a1?.tier === tierAC, ea.stderr + JSON.stringify(a1));
   const lo2 = json<{ made: { id: string; status: string }[] }>(await cli(OP, ['link', '--finish', '--wait', '3', '--operator']).then(() => cli(OP, ['links', '--operator'])));
   ok('the operator: every link ended', lo2.made?.length === 3 && lo2.made.every((x) => x.status === 'ended'), JSON.stringify(lo2));
+  // ---- relink after unlink (design/links.md §7.1a): the operator asks both again → linked again, a new id; then unlinked.
+  ok('unlinked: each side remembers the end (ended: the link id)', (contactsOf(fa)[dB] as Rec & { ended?: { id: string } })?.ended?.id === r1.id && (contactsOf(fb)[dA] as Rec & { ended?: { id: string } })?.ended?.id === r1.id);
+  const rl = await cli(OP, ['link', 'vps-a', 'vps-b', '--purpose', 'review again', '--wait', '0', '--operator']), rr = json<{ id: string; status: string }>(rl);
+  for (let k = 0; k < 5 && !(contactsOf(fa)[dB]?.link && contactsOf(fb)[dA]?.link); k++) {
+    await cli(HA, ['inbox', '--wait', '3']); await cli(OP, ['link', '--finish', '--wait', '3', '--operator']); await cli(HB, ['inbox', '--wait', '3']);
+  }
+  ok('relink: both asked afresh → linked again under a new id, neither revoked', rl.status === 0 && rr.id !== r1.id && contactsOf(fa)[dB]?.link?.id === rr.id && contactsOf(fb)[dA]?.link?.id === rr.id
+    && !contactsOf(fa)[dB]?.revoked && !contactsOf(fb)[dA]?.revoked, rl.stdout + rl.stderr + JSON.stringify([contactsOf(fa)[dB], contactsOf(fb)[dA]]));
+  await cli(OP, ['unlink', rr.id, '--operator']);
+  for (let k = 0; k < 2; k++) { await cli(HA, ['inbox', '--wait', '3']); await cli(HB, ['inbox', '--wait', '3']); }
 
   // ================================================================ external: a hotel
   const xi = await cli(HX, ['init', '--no-recovery']);

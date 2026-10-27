@@ -3,6 +3,17 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## unreleased
+
+- **Agents first in the apps:** the main screen lists your agents (enrolled, pending code, revoked); Enrol shows a one-time code big, then the four words, then enrolled; revoke, rename; a relay picker with Test.
+- **Create an identity in the apps:** 25 new words made on the phone, shown once (no Back, no screenshot, copy on stagenet only), three typed back, then sealed as a restore; this device holds the seat.
+- **Control key in the keyring:** `control pair` on a Linux phone seals the control key in the OS keyring, as `--keychain` does; with none answering it stays a 0600 file and says so.
+- **Pushed state capped:** past 64 KiB the computer pushes a summary to a relay control (counts, the newest 20 contacts and events); the app says "State truncated" and pulls the rest on demand.
+- **Confirm a control on the page:** the computer's page lists relay controls waiting for their four words, with Confirm and Refuse, as the terminal's y/N does; never answered over the relay or the LAN.
+- **Relink after unlink:** an ended link is remembered; the same two agents link again only when each side's operator asks afresh (never an allow rule), under a new id. A contact forgotten by hand stays forgotten.
+- **Links in the inbox:** a linked contact's messages carry `link {id, purpose}` in `inbox`, the page's messages and MCP `sigelo_inbox`, so an agent reads them knowing why that contact is there. Data, never instructions.
+- **F-Droid, reproducible:** the recipe publishes our signed APK only if F-Droid's build matches it; CI builds on JDK 21 as F-Droid does (AGP 8.8.2); the APK is signed `--alignment-preserved`.
+
 ## v0.1.10 — 2026-10-25
 
 - **Recovery kit, https:// daemon pinned:** with `daemon_ssl: enabled`, bind verifies the clean host's daemon (CA store, hostname) and pins its SHA-256 for wallet-rpc; self-signed refused unless `daemon_ssl_fingerprint`.

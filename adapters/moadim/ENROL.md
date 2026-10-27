@@ -82,7 +82,7 @@ recover with the words offline: `sigelo-offline recover --agent i --keeper 1 --n
 Do not run `sigelo-agent rotate` on a worker: that key would not come from K.
 Where a worker's key rests (plain file, keychain, key agent): [KEYS.md](KEYS.md).
 
-On the page (`sigelo-agent ui`), **Enrol** on a local agent does `enrol --here` into its own file: worker
+In the apps and on the page, **Agents → Enrol** makes the one-time code on the page's own session (`POST /api/agents/enrol-code`, at the seat), then `init --enrol` as above. On the page (`sigelo-agent ui`), **Enrol** on a local agent does `enrol --here` into its own file: worker
 i replaces its key (its old files set aside; its contacts must pair again), or, on a worker, renews the
 attestation.
 

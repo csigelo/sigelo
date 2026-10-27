@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 package io.sigelo.app;
 
+import android.content.ClipData;
+import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -9,6 +11,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PersistableBundle;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.security.keystore.KeyProperties;
@@ -74,13 +77,16 @@ import javax.net.ssl.SSLSocketFactory;
  *          (SAFE; FULL under a key that needs the screen lock, valid 5 minutes), the keeper root of a
  *          restore from seed (under the FULL key, its own AAD) or a computer's text.
  *   mode / wiped  the form picked at first start; a switch (the menu) erases the other's storage.
- *   secure        FLAG_SECURE on the window while the restore-from-seed screen is up (no screenshot,
- *          no recents thumbnail, no screen recording of the 25 words); off again after.
+ *   secure        FLAG_SECURE on the window while a seed screen is up (no screenshot, no recents
+ *          thumbnail, no screen recording of the 25 words); off again after. door: while on, the system
+ *          Back does nothing (a new identity's words: the review screen's one button is the only way on).
  *   clip-clear    the system clipboard emptied (the page asks after the words were pasted).
+ *   clip-copy     text on the clipboard marked sensitive (no preview; stagenet words only), emptied
+ *          after `clear` seconds (1 to 300) unless something else was copied since.
  */
 public final class SigeloBridge {
     static final String SHELL = "sigelo-shell/0", PORT_MESSAGE = "sigelo-bridge/0";
-    private static final String KEYSTORE = "AndroidKeyStore";
+    private static final String KEYSTORE = "AndroidKeyStore", CLIP_LABEL = "sigelo stagenet words";
     // Aliases by the byte that starts a sealed blob after its version: 0 SAFE identity, 1 FULL identity, 2 a computer's text.
     private static final String[] ALIASES = {"sigelo-identity", "sigelo-identity-full", "sigelo-control"};
     private static final int HTTP_MAX = 1 << 20, CHUNK = 16384, TIMEOUT_MS = 20000, MAX_STREAMS = 16, AUTH_SECONDS = 300;
@@ -274,14 +280,37 @@ public final class SigeloBridge {
                 prefs.edit().putBoolean("wipe", false).apply();
                 post(to, ok(id));
                 break;
-            case "secure":
-                if (m.optBoolean("on", false)) activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            case "secure": {
+                boolean on = m.optBoolean("on", false);
+                if (on) activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
                 else activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                activity.door = on && m.optBoolean("door", false);
                 post(to, ok(id));
                 break;
+            }
             case "clip-clear": {
                 ClipboardManager cm = activity.getSystemService(ClipboardManager.class);
                 if (cm != null) cm.clearPrimaryClip();
+                post(to, ok(id));
+                break;
+            }
+            case "clip-copy": {
+                ClipboardManager cm = activity.getSystemService(ClipboardManager.class);
+                if (cm == null) {
+                    fail(to, id, "clip", "no clipboard");
+                    break;
+                }
+                ClipData clip = ClipData.newPlainText(CLIP_LABEL, m.optString("text"));
+                PersistableBundle extras = new PersistableBundle();
+                extras.putBoolean("android.content.extra.IS_SENSITIVE", true);   // ClipDescription.EXTRA_IS_SENSITIVE (API 33): no preview
+                clip.getDescription().setExtras(extras);
+                cm.setPrimaryClip(clip);
+                int clear = Math.max(1, Math.min(300, m.optInt("clear", 60)));
+                main.postDelayed(() -> {
+                    // Ours still, or unreadable (the app in the background): emptied. Another app's copy since: kept.
+                    ClipDescription d = cm.getPrimaryClipDescription();
+                    if (d == null || CLIP_LABEL.contentEquals(d.getLabel() == null ? "" : d.getLabel())) cm.clearPrimaryClip();
+                }, clear * 1000L);
                 post(to, ok(id));
                 break;
             }

@@ -26,7 +26,9 @@
 // introduction this contact came with (prior: {tier, tier_by}, the pairing was there before: an end
 // restores them instead of forgetting). Kept by a re-pair, a merge and a rename; gone with revoke. A
 // link never writes operator_exp, so never ours; while it lasts a contact that is not ours cannot be
-// set own (link_tier).
+// set own (link_tier). ended: {id, by, at} on a contact a link's end revoked (revoke(did, ended)), and
+// relink: {id, until}, the one-use permit a NEW link leaves on it (design/links.md §7.1a): the pairing
+// through that link's code is admitted, the record written afresh. Forgotten by hand: no ended, never.
 // The file holds one-time secrets, Bob's one-time key and
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
 import { utf8ToBytes } from '@noble/hashes/utils.js';
@@ -306,13 +308,35 @@ export class Contacts {
     return found[0] ?? null;
   }
 
-  /** Local and final for this store: the pairing key goes, and pending codes to or from the contact die with it. */
-  revoke(did) {
+  /**
+   * Local and final for this store: the pairing key goes, and pending codes to or from the contact die
+   * with it. ended: {id, by, at} when a link's end revokes it (relink may then permit a new link); a
+   * revoke without it (forgotten by hand) is for good.
+   */
+  revoke(did, ended = null) {
     const c = this.lookup(did) ?? fail('not_contact', `${did} is not a contact`);
-    c.revoked = true; c.pair_key = null; delete c.link;
+    c.revoked = true; c.pair_key = null; delete c.link; delete c.relink;
+    if (ended) c.ended = ended; else delete c.ended;
     for (const [n, p] of Object.entries(this.s.accepts)) if (c.chain.includes(p.code_did)) delete this.s.accepts[n];
     for (const [n, p] of Object.entries(this.s.invites)) if (p.peer === c.did) delete this.s.invites[n];
     this.save(); return c;
+  }
+
+  /**
+   * A NEW link with a contact an ended link revoked (design/links.md §7.1a): a one-use permit, until
+   * `until`, for the pairing through that link's code (admit). → true; null when `did` is no revoked
+   * contact here (nothing to permit). Forgotten by hand: revoked; the ended link's own id: link_stale.
+   */
+  relink(did, id, until, now) {
+    checkTime(now);
+    const c = this.load().lookup(did);
+    if (!c || !c.revoked) return null;
+    if (!c.ended) fail('revoked', `${c.did} was revoked by this owner (forgotten, not by a link's end): never linked again`);
+    if (c.ended.id === id) fail('link_stale', `link ${id} ended with ${c.name}: a new link has a new id`);
+    if (!Number.isSafeInteger(until) || until <= now) fail('link_expired', 'a relink permit ends in the future');
+    c.relink = { id, until };
+    this.save();
+    return true;
   }
 
   /**
@@ -329,21 +353,24 @@ export class Contacts {
    */
   admit(bundle, r, name, fields, now) {
     const held = this.#holders(r.chain), gone = held.find((c) => c.revoked);
-    if (gone) fail('revoked', `${gone.did} was revoked by this owner`);
+    // A relink (design/links.md §7.1a): a pairing (named) of a contact an ended link revoked, with a
+    // live permit; written afresh, its rotations seen kept.
+    const relinking = gone && name !== null && held.length === 1 && gone.relink && gone.relink.until > now ? gone : null;
+    if (gone && !relinking) fail('revoked', `${gone.did} was revoked by this owner`);
     if (held.length > 1) fail('original_did', `the chain runs through ${held.length} contacts: ${held.map((c) => c.did).join(', ')}`);
-    const old = held[0];
+    const prior = held[0], old = relinking ? undefined : prior;
     if (!old && name === null) fail('not_contact', `${r.chain[0]} is not a contact; this code was for a known contact only`);
     let rotations = bundle.rotations;
-    if (old) {
+    if (prior) {
       const claimed = r.did, seen = new Set(rotations.map(canonicalize));
-      rotations = [...rotations, ...old.rotations.filter((x) => !seen.has(canonicalize(x)))];
+      rotations = [...rotations, ...prior.rotations.filter((x) => !seen.has(canonicalize(x)))];
       r = attempt('bundle', () => verify({ ...bundle, rotations }, now));
       if (r.did !== claimed) fail('stale_chain', `the rotations already seen resolve to ${r.did}, not ${claimed}`);
-      if (r.chain[0] !== old.did) fail('original_did', `the chain starts at ${r.chain[0]}; this store knows the peer from ${old.did}`);
+      if (r.chain[0] !== prior.did) fail('original_did', `the chain starts at ${r.chain[0]}; this store knows the peer from ${prior.did}`);
     }
     const heldNow = this.#holders(r.chain);
-    if (heldNow.some((c) => c.revoked)) fail('revoked', `${r.chain[0]} was revoked during this pairing`);
-    if (heldNow.some((c) => c.did !== old?.did)) fail('original_did', `another contact took ${r.chain[0]}'s chain during this pairing`);
+    if (heldNow.some((c) => c.revoked && c.did !== relinking?.did)) fail('revoked', `${r.chain[0]} was revoked during this pairing`);
+    if (heldNow.some((c) => c.did !== prior?.did)) fail('original_did', `another contact took ${r.chain[0]}'s chain during this pairing`);
     const kept = old ? Object.fromEntries(TIER_KEYS.filter((k) => Object.hasOwn(old, k)).map((k) => [k, old[k]])) : {};
     const pre = !old && TIERS.includes(this.s.preset?.[r.chain[0]]) ? { tier: this.s.preset[r.chain[0]], tier_by: 'owner' } : {};
     if (this.s.preset) delete this.s.preset[r.chain[0]];

@@ -9,10 +9,10 @@ sigelo-agent links accept|refuse <id> [--tell]    # the introduced agent's side
 sigelo-agent links allow|deny <contact> [--tier friend|quiet] [--days n]
 ```
 
-`link` asks A (yours by key, ENROL.md) for a one-use code, checks it is A's, and offers it to B
-with the purpose. Both keep `link {id, purpose, linked_by, expires}` (`contacts`, `links`, MCP
-`sigelo_links`). The code is never parked, printed or logged; link messages are handled by code in
-`inbox`, `watch` and MCP, never shown to a model.
+`link` asks A (yours by key) for a one-use code, checks it is A's, offers it to B with the
+purpose. Both keep `link {id, purpose, linked_by, expires}` (`contacts`, `links`, MCP
+`sigelo_links`). The code is never parked, printed or logged; link messages are handled by code, never
+shown to a model. **Inbox:** a linked contact's messages carry `link {id, purpose}`.
 
 **Own.** B is yours too and accepts. `--tier-a`, `--tier-b`: how A files B, B files A (friend or
 quiet; else own). Already paired: the purpose is attached.
@@ -24,11 +24,12 @@ note}`) unless the introducer is quiet there. `links accept` files A at quiet (`
 `links refuse` tells nobody without `--tell`; unanswered, it lapses with the code (7 days).
 `links allow` accepts that contact's introductions by themselves; `deny` ends that.
 
-**Never own.** A link never makes a contact yours; a linked contact not yours cannot be set own.
+**Never own.** A linked contact not yours cannot be set own.
 
-**End.** `unlink <id>` or the expiry: both sides forget the contact.
+**End.** `unlink <id>` or the expiry: both sides forget the contact. Linking them again needs a
+fresh `link` (external: its operator's accept, never `allow`).
 
-**Page.** `sigelo-agent ui` → Links: link, unlink, and introductions to you, with a banner (UI-API.md).
+**Page.** `sigelo-agent ui` → Links (UI-API.md).
 
 **Refusals.** `link_from`, `link_tier`, `link_peer`, `link_not_ours`, `link_stale`, `link_text`,
 `link_expired`, `link_refused`, `busy`. Exit 0 linked or pending, 1 refused, 2 usage.

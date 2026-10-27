@@ -17,6 +17,9 @@
 //                anything is written; never argv, never a file); then `device seat init` (this phone takes the
 //                seat) or, when another device keeps it, a standby: this phone's page does not start until
 //                "Take the seat here" (seat init here; the other device must be stopped or lost).
+//   create (pass A10a): `keeper --new-words` draws 25 words and their wallet's address; the start page shows
+//                them once (no Back, copy on stagenet only); three typed back are checked here, then the words
+//                go once on stdin to `keeper --from-words --keychain --made-here` (birth today), and the seat init.
 // Start page (web/start.html): pick a form, or scan/paste a computer's SIGELO:UI: or SIGELO:CTL: text.
 // This phone's form shows the relay new codes name (the page's setting, relay.sigelo.ai pre-filled): changed
 // there, it is set through the page's own POST /api/settings once the page runs; SIGELO_RELAY still wins.
@@ -139,16 +142,54 @@ function setStandby(name) {
   GLib.file_set_contents(standbyPath(), name);
 }
 /** The words to keeper --from-words --keychain on stdin; then the seat here (seat init) or a standby → {ok, seat, message}. */
-async function restore({ words, name, height, net, elsewhere }) {
+async function restore({ words, name, height, net, elsewhere, made = false }) {
   if (typeof words !== 'string' || typeof name !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,19}$/.test(name)) return { ok: false, message: 'Name for this device: lowercase letters, digits, _ and -, at most 20.' };
   if (net !== 'mainnet' && net !== 'stagenet') return { ok: false, message: 'Network: mainnet or stagenet.' };
   const h = String(height ?? '').trim(), birth = h === '' ? ['--restore-height', '0'] : /^\d+$/.test(h) ? ['--restore-height', h] : ['--restore-date', h];
-  const r = await runAgent(['keeper', '--from-words', '--keychain', '--net', net, ...birth], words);
+  const r = await runAgent(['keeper', '--from-words', '--keychain', '--net', net, ...birth, ...(made ? ['--made-here'] : [])], words);
   if (r.status !== 0) return { ok: false, message: lastLine(r, 'sigelo-agent keeper') };
   if (elsewhere === true) { setStandby(name); return { ok: true, seat: 'elsewhere' }; }
   const s = await runAgent(['device', 'seat', 'init', '--name', name]);
   return s.status === 0 ? { ok: true, seat: 'here' } : { ok: true, seat: 'pending', message: `not taken yet (${lastLine(s, 'device seat init')}): run sigelo-agent device seat init --name ${name} when online` };
 }
+// ---- create a new identity (pass A10a): `keeper --new-words` draws the words (newRoot's draw) and their
+// wallet's address; the start page shows them once; three typed back are checked HERE (the page never
+// decides); then the same words go once, on stdin, to keeper --from-words --keychain --made-here, the
+// wallet's birth today, and the seat here. The words live in this process until then, never in a file.
+let fresh = null;   // { words: [25], net, vault, asked: [3 positions] | null, passed }
+const sameWord = (typed, word) => { const t = String(typed ?? '').trim().toLowerCase(); return t === word || (t.length === 3 && t === word.slice(0, 3)); };
+/** New words for the review screen → {ok, words, vault, net}. */
+async function newWords(net) {
+  fresh = null;
+  if (net !== 'mainnet' && net !== 'stagenet') return { ok: false, message: 'Network: mainnet or stagenet.' };
+  const r = await runAgent(['keeper', '--new-words', '--net', net]);
+  let j = null;
+  try { j = JSON.parse(r.out); } catch {}
+  if (r.status !== 0 || typeof j?.words !== 'string' || j.words.split(' ').length !== 25) return { ok: false, message: lastLine(r, 'sigelo-agent keeper --new-words') };
+  fresh = { words: j.words.split(' '), net, vault: j.vault, asked: null, passed: false };
+  return { ok: true, words: [...fresh.words], vault: fresh.vault, net };
+}
+/** Three positions (1 to 25) drawn here from /dev/urandom → {ok, asked}. */
+function quiz() {
+  if (fresh === null) return { ok: false, message: 'No new words: start again.' };
+  const at = new Set();
+  while (at.size < 3) { const b = randomBytes(1)[0]; if (b < 250) at.add((b % 25) + 1); }
+  fresh.asked = [...at].sort((a, b) => a - b); fresh.passed = false;
+  return { ok: true, asked: [...fresh.asked] };
+}
+/** The three words typed back; right → the identity made (restore with made), the words dropped → {ok, wrong?, seat}. */
+async function create({ answers, name }) {
+  if (fresh === null || fresh.asked === null) return { ok: false, message: 'No words asked: start again.' };
+  const wrong = Array.isArray(answers) && answers.length === 3 ? fresh.asked.filter((p, i) => !sameWord(answers[i], fresh.words[p - 1])) : [...fresh.asked];
+  fresh.asked = null;
+  if (wrong.length) return { ok: false, wrong };
+  const words = fresh.words.join(' '), today = new Date().toISOString().slice(0, 10), net = fresh.net;
+  const r = await restore({ words, name, height: today, net, elsewhere: false, made: true });
+  if (r.ok) fresh = null;   // kept on a failure before keeper wrote anything (a bad name): the page may try again
+  return r;
+}
+const discard = () => { fresh = null; return { ok: true }; };
+
 /** This phone's page refused while a standby (it would log in as you beside the seat), else null. */
 const standbyRefusal = () => (standbyName() === null ? null
   : { ok: false, standby: true, message: 'Another device holds your seat: this phone does not log in as you. Take the seat here (Restore from seed), only if that device is stopped or lost.' });
@@ -215,6 +256,17 @@ if (TEST) {
     out.standby = standbyName();
     out.refused = standbyRefusal()?.standby === true;
     if (GLib.getenv('SIGELO_APP_TAKE') === '1') out.take = await take();
+  } else if (TEST === 'create') {
+    // The create flow as the start page drives it; the answers are read from the words in this process only.
+    const n = await newWords('stagenet');
+    out = { new: n.ok, count: n.words?.length ?? 0, vault: n.vault ?? null };
+    if (n.ok) {
+      const q1 = quiz(), bad = await create({ answers: q1.asked.map((p, i) => (i !== 1 ? fresh.words[p - 1] : fresh.words[p % 25] === fresh.words[p - 1] ? 'zzz' : fresh.words[p % 25])), name: 'gphone' });
+      out.wrong = bad.wrong ?? null;
+      out.unasked = (await create({ answers: ['a', 'b', 'c'], name: 'gphone' })).ok;
+      const q2 = quiz(), good = await create({ answers: q2.asked.map((p) => fresh.words[p - 1].toUpperCase()), name: 'gphone' });
+      out = { ...out, ...good, kept: fresh !== null, again: (await create({ answers: ['a', 'b', 'c'], name: 'gphone' })).ok };
+    }
   } else if (TEST === 'self') {
     const r = await startSelf(GLib.getenv('SIGELO_APP_IDENTITY'));
     if (r.ok) {
@@ -314,7 +366,11 @@ app.connect('activate', () => {
       return { ok: true };
     },
     async saved() { return { text: keyring.get() !== null || hasRelayControl(), keyring: Secret !== null, standby: standbyName() !== null }; },
-    async restore(o) { return restore(o); },
+    async restore(o) { return restore({ words: o.words, name: o.name, height: o.height, net: o.net, elsewhere: o.elsewhere }); },
+    async newwords({ net }) { return newWords(net); },
+    async quiz() { return quiz(); },
+    async create({ answers, name }) { return create({ answers, name }); },
+    async discard() { return discard(); },
     async take() { return take(); },
     // After the words were pasted: the clipboard (and the primary selection) emptied.
     async clipclear() { try { view.get_clipboard().set_content(null); view.get_primary_clipboard().set_content(null); } catch {} return { ok: true }; },

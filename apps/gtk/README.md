@@ -6,7 +6,13 @@ packaged by the phone's Linux distribution. Two forms, picked on the start page:
 
 - **This phone:** the app starts `sigelo-agent ui --app` (its identity: `--identity <file>`, else
   `$SIGELO_HUMAN`, else `~/.config/sigelo/me.local.json`, as `ui`), reads the page's address and
-  token from its stdout and shows that page. The page stops when the app does.
+  token from its stdout and shows that page. The page stops when the app does. It opens on Agents;
+  Enrol makes the one-time code in that page (the CLI's `enrol` refuses `busy` beside it).
+- **Create new identity:** `sigelo-agent keeper --new-words` draws 25 words and their wallet's address
+  (JSON to the app, piped, never a terminal). The start page shows them once in a numbered grid (copy on
+  stagenet only, the clipboard emptied after 60 s), then asks three of them by number; the app checks
+  them, never the page. Right: the words go once on stdin to `keeper --from-words --keychain
+  --made-here` (the wallet's birth today), then `device seat init`. Linux has no screenshot block.
 - **Restore from seed:** "I have my 25 words on paper", then one box checked as you type
   (`web/seed-check.mjs`), a restore height or date, the network, the device's name. The words go once,
   on stdin, to `sigelo-agent keeper --from-words --keychain`, which seals your key and K_1 in the keyring

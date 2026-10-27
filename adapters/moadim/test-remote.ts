@@ -66,6 +66,13 @@ ok('remote: scope read: clear, forget, agents → 403 scope', (await Promise.all
 const lks = await tab.call('GET', '/api/links'), lka = await tab.call('POST', '/api/links/answer', { id: 'K7F3Q9ZP', accept: true }), lkl = await tab.call('POST', '/api/link', { a: 'x', b: 'y', purpose: 'p' });
 ok('remote: scope read: GET /api/links → the local answer; links/answer and link → 403 scope', lks.status === 200 && JSON.stringify(lks.body) === JSON.stringify(await local('/api/links'))
   && lka.status === 403 && lka.body.error.check === 'scope' && lkl.status === 403 && lkl.body.error.check === 'scope', JSON.stringify([lks, lka, lkl]));
+{
+  // Agents (the app's main list): the list is read; enrolling, revoking, renaming a worker and the relay Test are all.
+  const wk = await tab.call('GET', '/api/agents/workers'), outs = await Promise.all([['POST', '/api/agents/enrol-code', { name: 'vps' }], ['POST', '/api/agents/revoke', { worker: 0 }],
+    ['POST', '/api/agents/rename', { worker: 0, name: 'x' }], ['POST', '/api/relays/test', { relay: 'relay.test' }]].map(([m, p, b]) => tab.call(m as string, p as string, b as object)));
+  ok('remote: scope read: GET /api/agents/workers → the local answer; enrol-code, revoke, rename, relays/test → 403 scope', wk.status === 200 && JSON.stringify(wk.body) === JSON.stringify(await local('/api/agents/workers'))
+    && outs.every((r) => r.status === 403 && r.body.error.check === 'scope'), JSON.stringify([wk, outs]));
+}
 const dev = await tab.call('GET', '/api/devices/list'), dev2 = await tab.call('POST', '/api/../api/devices/add', {});
 ok('remote: /api/devices/* → sealed 403 remote, also through ..', dev.status === 403 && dev.body.error.check === 'remote' && dev2.status === 403 && dev2.body.error.check === 'remote', JSON.stringify([dev, dev2]));
 const nope = await tab.call('GET', '/api/nothing'), stat = await tab.call('GET', '/ui.js');
@@ -126,6 +133,11 @@ ok('remote: scope all: forget, tier, agents, link, links/allow in scope (404 not
   && (await full.call('POST', '/api/links/allow', { contact: 'did:sigelo:zNope', allow: true })).body.error.check === 'not_contact'
   && (await full.call('GET', '/api/agents')).status === 200 && (await full.call('GET', '/api/devices')).body.error.check === 'remote');
 {
+  const [ec, rv, rt] = [await full.call('POST', '/api/agents/enrol-code', { name: 'vps' }), await full.call('POST', '/api/agents/revoke', { worker: 7 }), await full.call('POST', '/api/relays/test', { relay: 'relay.test' })];
+  ok('remote: scope all: enrol-code reaches the route (no relay here: 409 connect), revoke an unknown worker 404, relays/test answers (the relay unreachable: ok false)',
+    ec.status === 409 && ec.body.error.check === 'connect' && rv.status === 404 && rv.body.error.check === 'worker' && rt.status === 200 && rt.body.ok === false, JSON.stringify([ec, rv, rt]));
+}
+{
   const [rs, rp, fs, fp] = [await tab.call('GET', '/api/settings'), await tab.call('POST', '/api/settings', { relay: 'corp.example.com' }), await full.call('GET', '/api/settings'), await full.call('POST', '/api/settings', { relay: '' })];
   ok('remote: the relay setting is scope all: read → 403 scope (GET and POST); all → 200, the local answer', rs.status === 403 && rs.body.error.check === 'scope' && rp.status === 403 && rp.body.error.check === 'scope'
     && fs.status === 200 && fs.body.relay === 'relay.sigelo.ai' && fs.body.fixed === 'relay.test' && fp.status === 200 && fp.body.relay === 'relay.sigelo.ai', JSON.stringify([rs, rp, fs, fp]));
@@ -151,7 +163,7 @@ await page.close();
 
 // ── the scope table covers every route of UI-API.md; read ⊂ chat ⊂ all
 {
-  const all = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/]+)`/gm)].map((m) => m[1]!);
+  const all = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/-]+)`/gm)].map((m) => m[1]!);
   // The device routes (D4) are documented too, and in no scope: deviceRoute refuses them before any scope.
   const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x));
   const [r, c, a] = [rm.SCOPES.read, rm.SCOPES.chat, rm.SCOPES.all];
@@ -297,12 +309,45 @@ else {
     const se = await call('GET', '/api/settings'), sp = await call('POST', '/api/settings', { relay: 'corp.example.com' }), rl = await call('GET', '/api/relays');
     ok('remote e2e: settings and relays sealed (scope all): the setting kept, SIGELO_RELAY-like caller relay still fixed; no registry → []', se.status === 200 && sp.body.relay === 'corp.example.com' && sp.body.fixed === 'relay.test'
       && rl.status === 200 && rl.body.relays.length === 0, JSON.stringify([se, sp, rl]));
+    const wk = await call('GET', '/api/agents/workers'), ec = await call('POST', '/api/agents/enrol-code', { name: 'vps' });
+    const rn = await call('POST', '/api/agents/rename', { worker: ec.body.worker, name: 'vps2' }), rv = await call('POST', '/api/agents/revoke', { worker: ec.body.worker }), rt = await call('POST', '/api/relays/test', { relay: 'relay.test' });
+    ok('remote e2e agents: the list, a code (12 characters: relay.test names its tag), rename, revoke (the unused code cancelled), the relay Test, sealed (scope all) → 200', wk.status === 200 && wk.body.keeper === true && ec.status === 200
+      && /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(ec.body.code) && rn.body.name === 'vps2' && rv.body.cancelled === true && rt.body.ok === true, JSON.stringify([ec, rn, rv, rt]).slice(0, 900));
     const all = [...rm.SCOPES.all], missed = all.filter((x) => done_.get(x) !== 200);
     ok(`remote e2e: every route in scope all answered 200 sealed (${all.length})`, missed.length === 0, JSON.stringify(missed));
   } finally {
     await pa.close(); await pb.close(); await relay.close?.();
   }
 }
+// ── the pushed state's cap (contact/control.mjs capState, PUSH_MAX 64 KiB): a summary past it, and the
+// app pulls the whole on demand (GET /api/state?full=1 is a request, never the pushed summary)
+{
+  const C = await import('sigelo-contact/control.mjs' as string) as any;
+  const row = (i: number) => ({ did: `did:sigelo:z${i}`, name: `c${i}`, last: { dir: 'in', text: 'x'.repeat(190), at: 1000 + i } });
+  const small = { seq: 3, me: { did: 'd' }, groups: { mine: [row(1)], contacts: [row(2)] }, events: [{ n: 1 }] };
+  const big = { seq: 9, me: { did: 'd' }, groups: { mine: Array.from({ length: 30 }, (_, i) => row(i)), contacts: Array.from({ length: 400 }, (_, i) => row(100 + i)) }, events: Array.from({ length: 50 }, (_, i) => ({ n: i, detail: 'y'.repeat(100) })) };
+  const cut = C.capState(big);
+  ok('capState: a state within 64 KiB goes as it is; past it a summary within 64 KiB: the newest 20 of each group and events, the counts, truncated',
+    C.PUSH_MAX === 64 * 1024 && C.capState(small) === small && JSON.stringify(big).length > C.PUSH_MAX && JSON.stringify(cut).length <= C.PUSH_MAX && cut.truncated.kept === 20
+    && cut.truncated.contacts.mine === 30 && cut.truncated.contacts.contacts === 400 && cut.truncated.events === 50 && cut.groups.contacts.length === 20 && cut.groups.contacts[0].name === 'c499'
+    && cut.events.length === 20 && cut.events.at(-1).n === 49 && cut.seq === 9 && cut.me.did === 'd', JSON.stringify(cut.truncated));
+  const huge = { ...big, groups: { mine: [], contacts: Array.from({ length: 50 }, (_, i) => ({ ...row(i), last: { ...row(i).last, text: 'z'.repeat(4000) } })) } };
+  ok('capState: fewer kept until it fits (each contact 4 KiB: under 16 of them)', JSON.stringify(C.capState(huge)).length <= C.PUSH_MAX && C.capState(huge).truncated.kept < 16, JSON.stringify(C.capState(huge).truncated));
+  // The app: the pushed summary answers GET /api/state (no request); full=1 asks the computer, whose whole answer then stands.
+  const op = 'did:sigelo:zOperator', inbox: { from: string; content: unknown }[] = [], sent: any[] = [];
+  const fake = { takeDevices: () => inbox.splice(0), send: async (_to: string, c: any) => { sent.push(c); inbox.push({ from: op, content: C.responseMessage({ id: c.id, status: 200, body: { ...big, seq: 10 } }) }); setTimeout(() => ctl.onEvent({ type: 'device' }), 0); } };
+  const ctl = C.makeControl({ operator: op, timeout: 2000 });
+  ctl.attach(fake);
+  await ctl.call('GET', '/api/state');   // the lease starts with a request
+  inbox.push({ from: op, content: C.eventsMessage({ seq: 11, since: 10, state: cut }) }); ctl.onEvent({ type: 'device' });
+  await new Promise((r) => setTimeout(r, 20));
+  const n0 = sent.length, pushed = await ctl.call('GET', '/api/state?since=10'), full = await ctl.call('GET', '/api/state?since=0&full=1'), after = await ctl.call('GET', '/api/state');
+  ok('control: the pushed summary answers GET /api/state, truncated (no request); full=1 is a request; its whole answer stands until the next push',
+    pushed.status === 200 && pushed.body.truncated?.kept === 20 && sent.length === n0 + 1 && full.status === 200 && full.body.truncated === undefined && full.body.groups.contacts.length === 400
+    && after.body.truncated === undefined && sent.length === n0 + 1, JSON.stringify([n0, sent.length, pushed.body.truncated, full.status]));
+  ctl.stop();
+}
+
 // ── over the relay (design/apps.md §6.3): a control identity, SIGELO:CTL:, request/response/events
 if (!hasRelay()) console.log(`SKIP remote over the relay: ${NO_RELAY}`);
 else {
@@ -347,7 +392,16 @@ else {
     ok('relay: ui.json controls{phone}: relay, scope read, the control DID, no key, not confirmed', kept?.relay === true && kept.scope === 'read' && kept.did === a.did && kept.key === undefined && kept.confirmed === false, JSON.stringify(kept));
     const early = await a.ctl.call('GET', '/api/me');
     ok('relay: before the words are confirmed on the computer → 403 words', early.status === 403 && early.body.error.check === 'words', JSON.stringify(early));
-    await pr.relay.confirm('phone', true);
+    // The computer's page: the Controls card lists it with its four words; Confirm there = the terminal's y.
+    const W3 = { ...T3(pr), Origin: `http://127.0.0.1:${pr.port}`, 'Content-Type': 'application/json' };
+    const pc = JSON.parse((await http(pr.port, 'GET', '/api/controls', T3(pr))).body), sentC = a.sent, overRelay = await a.ctl.call('GET', '/api/controls');
+    ok('relay: the computer\'s page lists the control waiting for its words (GET /api/controls: name, scope, the four words); over the relay that route is refused at once (403, no relay message)',
+      JSON.stringify(pc.pending) === JSON.stringify([{ name: 'phone', scope: 'read', words: p?.words }]) && overRelay.status === 403 && a.sent === sentC, JSON.stringify([pc, overRelay]));
+    const cf = await http(pr.port, 'POST', '/api/controls/confirm', W3, JSON.stringify({ name: 'phone', match: true }));
+    const cf2 = await http(pr.port, 'POST', '/api/controls/confirm', W3, JSON.stringify({ name: 'phone', match: false }));
+    ok('relay: Confirm on the page → confirmed (ui.json), nothing pending; a second answer → 404 control_unknown (the first stands)', cf.status === 200 && JSON.parse(cf.body).confirmed === true
+      && uiJson2(Pd).controls['phone']?.confirmed === true && JSON.parse((await http(pr.port, 'GET', '/api/controls', T3(pr))).body).pending.length === 0 && cf2.status === 404, cf.body + cf2.body);
+    ok('relay: /api/controls* in no remote scope (never answered over the LAN or the relay)', ![...rm.SCOPES.all].some((x) => x.includes('/api/controls')));
     const me = await a.ctl.call('GET', '/api/me'), localMe = JSON.parse((await http(pr.port, 'GET', '/api/me', T3(pr))).body);
     ok('relay: confirmed: GET /api/me over the relay → the local answer (JCS: the same value)', me.status === 200 && canonicalize(me.body) === canonicalize(localMe), JSON.stringify(me).slice(0, 200));
     const st = await a.ctl.call('GET', '/api/state');
@@ -382,9 +436,12 @@ else {
     const cinv = await chat.ctl.call('POST', '/api/invite', { name: 'dave' });
     ok('relay: scope chat: POST /api/invite over the relay → 200, a short code', cinv.status === 200 && typeof cinv.body.short === 'string', JSON.stringify(cinv).slice(0, 200));
     // Wrong words: the computer says no → the control is forgotten, its requests unanswered.
-    const bad = await (async () => { const r = await pr.relay.issue('bad', 'all'), x = await app(r!.line, 'bad'); await pr.relay.paired(); await pr.relay.confirm('bad', false); return x; })();
+    const bad = await (async () => {
+      const r = await pr.relay.issue('bad', 'all'), x = await app(r!.line, 'bad'); await pr.relay.paired();
+      await http(pr.port, 'POST', '/api/controls/confirm', W3, JSON.stringify({ name: 'bad', match: false })); return x;
+    })();
     const bq = await bad.ctl.call('GET', '/api/me');
-    ok('relay: words refused on the computer → the control forgotten (not in ui.json), its request never answered 200', bq.status !== 200 && uiJson2(Pd).controls['bad'] === undefined, JSON.stringify(bq));
+    ok('relay: words refused on the computer\'s page (Refuse) → the control forgotten (not in ui.json), its request never answered 200', bq.status !== 200 && uiJson2(Pd).controls['bad'] === undefined, JSON.stringify(bq));
     // Seat elsewhere: the list names another device the seat.
     const lp = op.replace(/\.json$/, '.devices.json'), t0 = Math.floor(Date.now() / 1000);
     writeFileSync(lp, JSON.stringify({ v: 'sigelo-devices/1', operator: 'did:sigelo:zOp', seq: 1, iat: t0, devices: [{ name: 'other', worker: 0, did: 'did:sigelo:zOther', rank: 'full', added: t0, by: 'did:sigelo:zOp' }], seat: { holder: 'did:sigelo:zOther', epoch: 1, iat: t0 }, sig: 'x' }), { mode: 0o600 });

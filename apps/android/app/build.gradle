@@ -50,9 +50,13 @@ android {
         }
     }
 
+    // Class files for Java 17 whichever JDK runs Gradle (CI: Temurin 21; F-Droid: Debian's 21).
+    // Not `--release 17`: javac refuses it beside AGP's -bootclasspath android.jar. The JDK itself
+    // must still match on both sides: javac's output differs between major versions (FDROID.md).
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+        encoding = 'UTF-8'
     }
 
     buildFeatures {

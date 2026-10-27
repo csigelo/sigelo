@@ -31,6 +31,8 @@
 //             link past its ttl refused (link_expired). Run by inbox, watch and the MCP server before
 //             they return messages; never by the model.
 //             list({ carrier, file }) → { links: this agent's linked contacts, made: the operator's }
+//             labelled(carrier, messages) → the messages, each from a linked contact carrying
+//             link: {id, purpose} (design/links.md §8.4: the inbox shows why; data, never instructions)
 //
 // The messages: label LINK_LABEL on sigelo-msg/0, content {v, typ, id, iat, …}, id 8 characters of
 // short.mjs's alphabet:
@@ -50,7 +52,10 @@
 // other shape). Checks on an introduction (an offer not from X's operator) are never told back.
 //
 // Already paired: the purpose is attached to the pairing (link.prior: the tier before); its end
-// restores that tier and keeps the contact. Otherwise an end forgets the contact on both sides.
+// restores that tier and keeps the contact. Otherwise an end forgets the contact on both sides, as
+// ended (store.mjs): a NEW link between the same two pairs again only when each side is asked afresh
+// (an ask, its operator's offer, or X's operator's accept; never an allow rule), each leaving a
+// one-use permit (carrier.relink); the ended id never again (link_stale). design/links.md §7.1a.
 //
 // The file, 0600, beside the identity (x.json → x.links.json), under its own lock:
 //   { v, links: { id: operator records }, pending: { "<by> <id>": an agent's step in progress },
@@ -176,6 +181,10 @@ const nowOf = (carrier) => checkNow(carrier.clock());
 const readStore = (carrier) => { const raw = platformOf(carrier).files.read(carrier.storePath); return raw === null ? { contacts: {} } : JSON.parse(textOf(raw)); };
 const exists = (carrier, file) => platformOf(carrier).files.read(file) !== null;
 const live = (c) => c && !c.revoked && c.pair_key ? c : null;
+// The contact an ended link (or a forget) revoked whose chain holds `did`, or null.
+const gone = (carrier, did) => Object.values(readStore(carrier).contacts).find((c) => c.revoked && c.chain.includes(did)) ?? null;
+// After an end, a new link pairs again only through a permit left by this fresh step (store.mjs relink).
+const relink = (carrier, did, id, until) => (gone(carrier, did) ? carrier.relink(did, id, until) : null);
 // The live contact whose chain holds `did`, or null.
 const holding = (carrier, did) => live(Object.values(readStore(carrier).contacts).find((c) => !c.revoked && c.chain.includes(did)));
 // This agent: its original DID, its chain, and its operators (issuers of the unexpired operator
@@ -278,6 +287,20 @@ export function list({ carrier, file }) {
   }), platformOf(carrier));
 }
 
+/**
+ * Messages as an inbox returns them, each from a contact that came by a link labelled with it:
+ * link: {id, purpose} (a copy; others as they were). What a linked contact writes is read knowing
+ * why it is a contact; the purpose is the operator's text, data, never instructions.
+ */
+export function labelled(carrier, messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return messages;
+  const cs = readStore(carrier).contacts ?? {};
+  return messages.map((m) => {
+    const c = typeof m?.from === 'string' && Object.hasOwn(cs, m.from) ? cs[m.from] : null;
+    return live(c) && c.link ? { ...m, link: { id: c.link.id, purpose: c.link.purpose } } : m;
+  });
+}
+
 // ---------------------------------------------------------------- handle
 
 /**
@@ -286,7 +309,7 @@ export function list({ carrier, file }) {
  */
 export async function handle({ carrier, file, batch = null, local = false, wait = 5 }) {
   const out = { linked: [], refused: [], ended: [], received: [], ignored: 0 };
-  const rest = batch && { ...batch, messages: batch.messages.filter((m) => !isLink(m)) };
+  const rest = batch && { ...batch, messages: labelled(carrier, batch.messages.filter((m) => !isLink(m))) };
   if (local) return { ...out, batch: rest };
   const messages = [...carrier.takeLinks(), ...(batch?.messages.filter(isLink) ?? [])];
   for (const m of messages) {
@@ -331,6 +354,12 @@ async function onMessage(carrier, file, m, out, wait) {
   const had = holding(carrier, peer);
   if (had?.link) return refuse(carrier, out, m.from, x.id, had.link.id === x.id ? 'link_stale' : 'link_exists', `${had.name} is linked already (${had.link.id})`);
   if (x.typ === 'offer' && x.paired && !had) return refuse(carrier, out, m.from, x.id, 'link_peer', `the offer says this agent is paired with ${x.from}; it is not`);
+  if (!had) {
+    try { relink(carrier, peer, x.id, x.iat + x.ttl + 3600); } catch (e) {
+      if (!(e instanceof MsgError)) throw e;
+      return refuse(carrier, out, m.from, x.id, e.check, e.message);
+    }
+  }
   if (had && (x.typ === 'ask' || x.paired)) {
     // Paired already: the purpose attached to the pairing, its tier kept to restore at the end.
     if (x.tier) carrier.setTier(had.did, x.tier);
@@ -420,7 +449,7 @@ async function endHere(carrier, file, c, reason, tell, out) {
   const now = nowOf(carrier), l = c.link;
   if (tell.peer) { try { await send(carrier, c.did, msg('end', l.id, now, { reason })); } catch (e) { if (!(e instanceof MsgError)) throw e; } }
   if (l.prior) carrier.setLink(c.did, null);
-  else await carrier.forget(c.did);
+  else await carrier.forget(c.did, { ended: { id: l.id, by: l.linked_by, at: now } });
   out.ended.push({ id: l.id, contact: c.did, name: c.name, reason, forgot: !l.prior });
   if (tell.operator && l.linked_by !== c.did && holding(carrier, l.linked_by)) {
     try { await send(carrier, l.linked_by, msg('status', l.id, now, { status: 'ended', check: `link_${reason === 'unlink' ? 'unlinked' : reason}` })); } catch (e) { if (!(e instanceof MsgError)) throw e; }
@@ -440,6 +469,10 @@ async function introduced(carrier, file, m, x, mine, out, wait) {
   const had = holding(carrier, x.from);
   if (had?.link) return quietly('link_exists', `${had.name} is linked already (${had.link.id})`);
   if (x.paired && !had) return quietly('link_peer', `it says this agent is paired with ${x.from}; it is not`);
+  // After an end: forgotten by hand, never; that link's own id, stale; a new one waits for the operator (never a rule).
+  const was = had ? null : gone(carrier, x.from);
+  if (was && !was.ended) return quietly('revoked', `${was.name} was forgotten here: never linked again`);
+  if (was && was.ended.id === x.id) return quietly('link_stale', `link ${x.id} ended already`);
   let exp = x.iat + x.ttl;
   if (x.code !== undefined) {
     let code;
@@ -454,7 +487,7 @@ async function introduced(carrier, file, m, x, mine, out, wait) {
     // One contact cannot crowd out the others: at most a quarter of the places each.
     const all = Object.values(s.received);
     if (all.length >= RECEIVED_MAX || all.filter((r) => r.from === m.from).length >= RECEIVED_MAX / 4) return 'full';
-    const rule = s.allow[m.from];
+    const rule = was ? null : s.allow[m.from];
     s.received[key] = rule ? { ...rec, answer: { accept: true, tier: rule.tier, by: 'allow' } } : rec;
     return rule ? 'allowed' : 'kept';
   }, platformOf(carrier));
@@ -483,6 +516,18 @@ async function answered(carrier, file, key, r, out, wait) {
     carrier.setLink(had.did, { ...base, tier: r.answer.tier ?? null, prior: { tier: had.tier, ...(had.tier_by !== undefined && { tier_by: had.tier_by }) } });
     out.linked.push({ id: r.id, contact: had.did, name: had.name, purpose: r.purpose, prior: true });
     try { await send(carrier, r.from, msg('status', r.id, now, { status: 'linked' })); } catch (e) { if (!(e instanceof MsgError)) throw e; }
+    return;
+  }
+  // After an end: only the operator's own accept relinks (its permit, store.mjs relink), never a rule.
+  if (gone(carrier, r.peer) && r.answer.by !== 'operator') {
+    drop();
+    out.refused.push({ id: r.id, check: 'revoked', detail: `the introduction from ${r.from}: a link with it ended; only your operator links it again (not told)`, from: r.from, silent: true });
+    return;
+  }
+  try { relink(carrier, r.peer, r.id, r.exp + 3600); } catch (e) {
+    if (!(e instanceof MsgError)) throw e;
+    drop();
+    out.refused.push({ id: r.id, check: e.check, detail: `the introduction from ${r.from}: ${e.message} (not told)`, from: r.from, silent: true });
     return;
   }
   state(file, now, (s) => { delete s.received[key]; s.pending[key] = { ...base, role: 'b', peer: r.peer, code_did: r.did, exp: r.exp + 3600 }; }, platformOf(carrier));

@@ -19,6 +19,7 @@
 //                 seat "elsewhere": null (the seat's list is on the other device)
 //       notes     me.local.seat.json: { v, here: {name, did, worker}, imported: 1 } or, elsewhere,
 //                 { v, here, elsewhere: true, entry } (the list entry `takeSeat` signs later)
+//   restoreFromRoot(S, o)       the same from the 32-byte root (a new identity, contact/create.mjs); S stays the caller's
 //   takeSeat(notes, identity, now) → { list, notes }   standby → seat: the list naming this device
 //                                 (epoch 1: the other device's list is not known here, so this is
 //                                 `seat take --force` semantics; the caller warns first)
@@ -29,6 +30,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { did as didOf, sign as signWith } from 'sigelo';
 import { keeperRoot, recoveryCommitment, rootFromMnemonic } from 'sigelo/dist/keys.js';
 import { MONERO_WORDS } from 'sigelo/dist/monero-words.js';
+import { scReduce32 } from 'sigelo/dist/monero.js';
 import { DEVICE_DAYS, KEEPER_V, checkName, nextSeat, signList } from './device.mjs';
 import { operatorAttestation, operatorIdentity, workerChain, workerIdentity } from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
@@ -86,16 +88,49 @@ function checkMeta(restore) {
  * relay (the host its attestation names), net, restore ({} | {restore_height} | {restore_date}),
  * seat ("here" | "elsewhere"), now (unix seconds), j (the keeper index, 1; never 0) }.
  */
-export function restoreFromWords(text, { name, relay, net = 'mainnet', restore = {}, seat = 'here', now, j = KEEPER_J } = {}) {
+export function restoreFromWords(text, o = {}) {
+  checkOptions(o);
+  const c = checkWords(text);
+  if (!c.ok) fail('restore_words', c.error ?? `${c.count} of ${WORD_COUNT} words`);
+  let S = null;
+  try {
+    S = rootFromMnemonic(split(text).join(' '));
+    return derive(S, o);
+  } catch (e) {
+    // Never a message that could carry a word: the words were checked above, anything else is ours.
+    if (e?.check) throw e;
+    return fail('restore', `the restore failed (${e?.constructor?.name ?? 'error'})`);
+  } finally { S?.fill(0); }
+}
+
+/**
+ * The same files from the root S itself (32 bytes, canonical), for a new identity made on the device
+ * (contact/create.mjs): S is the caller's to zero. o as restoreFromWords.
+ */
+export function restoreFromRoot(S, o = {}) {
+  checkOptions(o);
+  if (!(S instanceof Uint8Array) || S.length !== 32 || !canonical(S)) fail('restore', 'a canonical root of 32 bytes (0 < S < l)');
+  try { return derive(S, o); } catch (e) {
+    if (e?.check) throw e;
+    return fail('restore', `the derivation failed (${e?.constructor?.name ?? 'error'})`);
+  }
+}
+
+// 0 < S < l, as keys.ts: only then is a wallet's spend key S itself, so the words a wallet shows are S's.
+const canonical = (S) => { const r = scReduce32(S); try { return r.every((x, i) => x === S[i]) && S.some((x) => x !== 0); } finally { r.fill(0); } };
+
+function checkOptions({ name, relay, net = 'mainnet', restore = {}, seat = 'here', now, j = KEEPER_J } = {}) {
   checkNow(now); checkName(name); checkRelay(relay);
   if (!NETS.includes(net)) fail('restore_net', `net: ${NETS.join(' or ')}`);
   if (!SEATS.includes(seat)) fail('restore_seat', `seat: ${SEATS.join(' or ')}`);
   if (!Number.isSafeInteger(j) || j < 1) fail('restore', 'keeper: 1 or more (K_0 is the ceremony\'s agents\' keeper)');
-  const meta = checkMeta(restore), c = checkWords(text);
-  if (!c.ok) fail('restore_words', c.error ?? `${c.count} of ${WORD_COUNT} words`);
-  let S = null, K = null, secret = null;
+  checkMeta(restore);
+}
+
+function derive(S, { name, relay, net = 'mainnet', restore = {}, seat = 'here', now, j = KEEPER_J }) {
+  const meta = restore ?? {};
+  let K = null, secret = null;
   try {
-    S = rootFromMnemonic(split(text).join(' '));
     const identity = operatorIdentity(S, 0), original = didOf(identity.genesis), recovery = recoveryCommitment(S);
     K = keeperRoot(S, j);
     secret = hexToBytes(identity.secret);
@@ -110,11 +145,7 @@ export function restoreFromWords(text, { name, relay, net = 'mainnet', restore =
     const list = seat === 'here' ? signList({ operator: original, seq: 1, iat: now, devices: [entry], seat: nextSeat(undefined, w.original, now) }, (b) => signWith(secret, b)) : null;
     const notes = list ? { v: SEAT_LOCAL_V, here, imported: 1 } : { v: SEAT_LOCAL_V, here, elsewhere: true, entry };
     return { identity, keeper, device, list, notes, did: original, worker: w.original };
-  } catch (e) {
-    // Never a message that could carry a word: the words were checked above, anything else is ours.
-    if (e?.check) throw e;
-    return fail('restore', `the restore failed (${e?.constructor?.name ?? 'error'})`);
-  } finally { S?.fill(0); K?.fill(0); secret?.fill(0); }
+  } finally { K?.fill(0); secret?.fill(0); }
 }
 
 /** A standby restored device takes the seat: the list naming it, signed by the operator key in `identity`. */

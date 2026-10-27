@@ -33,16 +33,19 @@ export async function wipeIfAsked(bridge, { indexedDB = globalThis.indexedDB, st
   return true;
 }
 
-/** First start: the two forms (and this phone's from the 25 words, seed.mjs). Picking one tells the shell, then the page starts again in it. */
+/** First start: every way in (a new identity, create.mjs; this phone's file; the 25 words, seed.mjs; a computer). Picking one tells the shell, then the page starts again in it. */
 export function pickMode(box, bridge) {
   const pick = (mode) => async () => {
     try { await bridge.request('mode', { mode }); location.reload(); } catch (e) { say.textContent = e.message; }
   };
   const say = el('p', { className: 'muted' });
   box.replaceChildren(
+    el('div', { className: 'card' }, el('h2', { textContent: 'Create new identity' }),
+      el('p', { textContent: 'This phone makes 25 new words, shows them once for you to write down, and makes your identity and your keeper from them (FULL), sealed under your screen lock.' }),
+      el('div', { className: 'bar' }, el('button', { className: 'primary', textContent: 'Create new identity', onclick: async () => { location.hash = '#create'; await pick('self')(); } }))),
     el('div', { className: 'card' }, el('h2', { textContent: 'This phone' }),
       el('p', { textContent: 'This phone holds an identity: the one a computer made for it (sigelo-agent device scan), or the operator\'s (FULL). Its key is sealed under a key of this phone\'s keystore.' }),
-      el('div', { className: 'bar' }, el('button', { className: 'primary', textContent: 'This phone', onclick: pick('self') }))),
+      el('div', { className: 'bar' }, el('button', { textContent: 'This phone', onclick: pick('self') }))),
     el('div', { className: 'card' }, el('h2', { textContent: 'Restore from seed' }),
       el('p', { textContent: 'Your 25 words make your identity and your keeper again on this phone (FULL), sealed under your screen lock.' }),
       el('div', { className: 'bar' }, el('button', { textContent: 'Restore from my 25 words', onclick: async () => { location.hash = '#restore'; await pick('self')(); } }))),

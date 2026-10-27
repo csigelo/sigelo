@@ -7,6 +7,13 @@ small bridge in Java for what a page cannot do. No AndroidX, no dependency but t
 
 ## Two forms, picked at first start
 
+- **Create new identity:** the phone makes 25 new words (as `newRoot`: the system's randomness, a
+  canonical Monero seed) and shows them once, numbered 1 to 25, with the address of their own Monero
+  wallet. That screen blocks screenshots, ignores Back and has one way on: "I have written down my 25
+  words". Copy is offered on stagenet only (the clipboard is marked sensitive and emptied after 60 s).
+  Then three words are asked by number; a wrong one goes back to the words. Right: the identity and
+  K_1 are made from them as a restore makes them, sealed under the FULL key, and the phone holds the
+  seat. The words are gone after; Me says "Created on <day>; the 25 words are on your paper".
 - **This phone:** the phone holds an identity, SAFE (the file `sigelo-agent device scan` wrote for it
   on your computer) or FULL (the operator's, standby). Import the file once; the app runs its own
   carrier and talks to the relay itself.
@@ -54,7 +61,9 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
   The relay refuses requests from web pages; these are not.
 - `seal`, `open`: the keystore above (kinds `identity`, `keeper`, `control`). `mode`, `wiped`: the form.
 - `secure`: `FLAG_SECURE` on the window while the restore screen is up (no screenshot, no recents
-  thumbnail), off after. `clip-clear`: the clipboard emptied after the 25 words were pasted.
+  thumbnail), off after; with `door` (a new identity's words) the system Back does nothing meanwhile.
+  `clip-clear`: the clipboard emptied after the 25 words were pasted. `clip-copy`: stagenet words on
+  the clipboard, marked sensitive (no preview), emptied by the shell after 60 s.
 
 The page comes from the APK at `https://appassets.androidplatform.net/` (served by the app, never
 fetched); nothing else loads, links open in the browser. JavaScript on, file access off, mixed content
@@ -63,7 +72,7 @@ system picker. Permissions: INTERNET and CAMERA.
 
 ## Build (on CI)
 
-`.github/workflows/android.yml` (ubuntu-24.04, JDK 17, the image's Android SDK) runs on pushes and
+`.github/workflows/android.yml` (ubuntu-24.04, JDK 21 as F-Droid's build server, the image's Android SDK) runs on pushes and
 pull requests touching `apps/` and its sources, and by hand (Actions, android, Run workflow). It runs
 the page's tests, copies the page in, checks the project, then builds:
 
@@ -73,12 +82,12 @@ the page's tests, copies the page in, checks the project, then builds:
 
 The artifact `sigelo-android` holds them for 30 days. No secret is used. Gradle 8.10.2 comes from the
 wrapper, pinned by the distribution's SHA-256; the wrapper jar is Gradle's (validated in the run);
-the Android Gradle Plugin is pinned to 8.7.3.
+the Android Gradle Plugin is pinned to 8.8.2.
 
 F-Droid: not submitted yet; [FDROID.md](FDROID.md) has the readiness, the draft recipe and the
 store listing (`app/fastlane/`, its icon drawn by `icon.mjs`).
 
-On a computer with JDK 17 and the Android SDK, the same:
+On a computer with JDK 21 and the Android SDK, the same (another JDK major gives other bytes):
 
 ```
 cd ts && npm ci && npx tsc && cd ../contact && npm ci && cd ..

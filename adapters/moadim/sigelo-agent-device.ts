@@ -1426,14 +1426,16 @@ export async function devicePage(o: { op: string; agentsDir: string; carrier: un
       if (a && a.state !== 'done') { a.check = x.check; a.detail = x.detail; if (x.check === 'device_words') a.state = 'refused'; }
       else note(`device: ${x.check}: ${x.detail}`);
     }
-    for (const p of res.placed) {
-      const a = adds.get(p.id);
-      if (!a) continue;
-      a.state = 'done'; a.at = nowS();
-      const l = bumpList(op, dev, (ds) => [...ds.filter((d) => d.worker !== a.worker), entryFor(op, a.name, a.worker, p.original, 'safe')]);
-      rmSync(qrPath(op), { force: true });
-      await pushList(c, l, op);
-    }
+    for (const p of res.placed) { const a = adds.get(p.id); if (a) await placed(a, p.original); }
+    // Filed by another round over the same pending file (the page's agents, contact/page.mjs): done there.
+    const t = nowS();
+    for (const a of [...adds.values()].filter((x) => x.state === 'sending')) if (enrol.pending(enrolFile, t, (s) => s.issued[a.id]?.done)) await placed(a, a.original);
+  }
+  async function placed(a: Adding, original: string): Promise<void> {
+    a.state = 'done'; a.at = nowS();
+    const l = bumpList(op, dev, (ds) => [...ds.filter((d) => d.worker !== a.worker), entryFor(op, a.name, a.worker, original, 'safe')]);
+    rmSync(qrPath(op), { force: true });
+    await pushList(c, l, op);
   }
 
   function wordsOnce(b: Record<string, unknown>): unknown {

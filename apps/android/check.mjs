@@ -19,7 +19,9 @@ const MAIN = join(HERE, 'app', 'src', 'main'), JAVA = join(MAIN, 'java', 'io', '
 // The Gradle wrapper's jar for the version gradle-wrapper.properties names (services.gradle.org
 // publishes it as gradle-<v>-wrapper.jar.sha256; CI's wrapper-validation checks it again).
 const WRAPPER = { version: '8.10.2', jar: '2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046', dist: '31c55713e40233a8303827ceb42ca48a47267a0ad4bab9177123121e71524c26' };
-const AGP = '8.7.3';
+const AGP = '8.8.2';
+// The APK signing certificate (release/apk-ceremony.md; public: each release.json with an APK names it).
+const APK_CERT = '0e2f720cc60ca706adf97fd724e478c3601fb6ee8c35d4ed63973236f5994b21';
 
 let count = 0;
 const fails = [];
@@ -273,9 +275,10 @@ print(json.dumps(yaml.load(open(sys.argv[1]), Loader=L)))`, yml], { encoding: 'u
     const steps = [...(b.sudo ?? []), ...(b.prebuild ?? []), ...(b.build ?? [])].join('\n');
     ok(d !== null && /applicationId 'io\.sigelo\.app'/.test(app) && d.License === 'MIT' && /^MIT License/.test(read(REPO, 'LICENSE')) && d.RepoType === 'git'
       && d.Repo === 'https://github.com/csigelo/sigelo.git' && d.SourceCode === 'https://github.com/csigelo/sigelo', `fdroid draft: io.sigelo.app, MIT, the public repository (${why.trim().slice(0, 200)})`);
-    ok(b.subdir === 'apps/android/app' && b.commit === `v${b.versionName}` && Number.isInteger(b.versionCode) && b.versionCode >= code
-      && d.CurrentVersion === b.versionName && d.CurrentVersionCode === b.versionCode && logs.includes(`${b.versionCode}.txt`),
-      `fdroid draft: subdir app, tag v<versionName>, versionCode ≥ build.gradle's (${b.versionCode} ≥ ${code}), current = last build, its changelog there`);
+    // fdroiddata wants the tag's full commit hash, not the tag (its merge request checklist).
+    ok(b.subdir === 'apps/android/app' && /^[0-9a-f]{40}$/.test(b.commit ?? '') && Number.isInteger(b.versionCode) && b.versionCode >= code
+      && d.CurrentVersion === b.versionName && d.CurrentVersionCode === b.versionCode && logs.includes(`${b.versionCode}.txt`) && d.AuthorName === 'sigelo',
+      `fdroid draft: subdir app, the tag's full commit hash, versionCode ≥ build.gradle's (${b.versionCode} ≥ ${code}), current = last build, its changelog there, AuthorName`);
     ok(d.AutoUpdateMode === 'Version' && /^Tags \^v/.test(d.UpdateCheckMode ?? '') && JSON.stringify(b.gradle) === '[true]' && !b.output && !b.scanignore && !b.scandelete && !b.srclibs,
       'fdroid draft: Tags update check, auto-update on Version; the default flavour and output; no scanignore, scandelete or srclib');
     const node = /N=node-v(\d+)\.(\d+)\.(\d+)-linux-x64\.tar\.xz/.exec(steps), wf = read(REPO, '.github', 'workflows', 'android.yml');
@@ -283,7 +286,40 @@ print(json.dumps(yaml.load(open(sys.argv[1]), Loader=L)))`, yml], { encoding: 'u
       && wf.includes(`node-version: '${node[1]}'`), `fdroid draft: Node pinned by SHA-256, the major CI uses (${node?.[1]})`);
     ok((b.prebuild ?? []).every((s) => /^(cd [./a-z]+|npm ci --ignore-scripts)$/.test(s)) && /npx tsc/.test(steps) && /node apps\/android\/assets\.mjs/.test(steps)
       && !/relay|adapters|test-|curl .*(npmjs|github)|git clone/.test(steps.replace(/nodejs\.org/, '')), 'fdroid draft: prebuild only fetches (npm ci, no script); build runs tsc and assets.mjs; no relay, adapter or test');
+    const mr = existsSync(join(HERE, 'fdroid', 'MR.md')) ? read(HERE, 'fdroid', 'MR.md') : '';
+    ok(/^## Title\n\nNew app: sigelo$/m.test(mr) && /\/label ~"New App"/.test(mr) && /fdroid build --on-server -v -l io\.sigelo\.app/.test(mr) && !/A2A|\bTODO\b/.test(mr),
+      'fdroid MR.md: "New app: sigelo", the template\'s label, the local fdroid build step; no jargon, no placeholder left but the run URL');
+    // Route B (FDROID.md): F-Droid builds, then publishes our signed APK only if it matches.
+    ok(d.Binaries === 'https://github.com/csigelo/sigelo/releases/download/v%v/sigelo-%v.apk' && d.AllowedAPKSigningKeys === APK_CERT,
+      `fdroid draft: Binaries is the release's sigelo-<v>.apk, AllowedAPKSigningKeys our certificate (${d.AllowedAPKSigningKeys})`);
+    const jdk = /java-version: '(\d+)'/.exec(wf)?.[1], J = `/usr/lib/jvm/java-${jdk}-openjdk-amd64/bin`;
+    ok(jdk && (b.sudo ?? []).includes(`J=${J}`) && (b.sudo ?? []).some((c) => c.includes(`openjdk-${jdk}-jdk-headless`))
+      && ['java', 'javac'].every((t) => (b.sudo ?? []).includes(`update-alternatives --set ${t} $J/${t}`)) && /sourceCompatibility JavaVersion\.VERSION_17/.test(app),
+      `fdroid draft: F-Droid's java and javac set to the JDK major CI builds with (${jdk}); class files for 17 on both`);
   }
+}
+
+// ================================================================ reproducible: the ceremony and the compare run
+// The signed APK must be CI's unsigned one plus the signature block, nothing else moved: apksigner
+// realigns stored entries unless told not to, and then F-Droid's signature copy fails (v0.1.10).
+{
+  const cer = read(REPO, 'release', 'apk-ceremony.md');
+  ok(/apksigner sign [^`]*--alignment-preserved/.test(cer.replace(/\\\n\s*/g, ' ')) && /s\[:cd\]==u\[:cd\]/.test(cer),
+    'apk-ceremony: apksigner sign --alignment-preserved, then the signed APK checked to begin with the unsigned one');
+  const rp = join(REPO, '.github', 'workflows', 'android-reproduce.yml'), r = existsSync(rp) ? read(rp) : '';
+  const ru = [...r.matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)];
+  let y = null;
+  try {
+    y = JSON.parse(execFileSync('python3', ['-c', `import sys,yaml,json
+d=yaml.safe_load(open(sys.argv[1]))
+print(json.dumps({'on': sorted(str(k) for k in d[True]), 'jobs': {k: {'coe': v.get('continue-on-error'), 'steps': [s.get('continue-on-error') for s in v['steps']]} for k, v in d['jobs'].items()}}))`, rp], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  } catch (e) { y = e.code === 'ENOENT' || /No module named/.test(String(e.stderr)) ? 'skip' : null; }
+  ok(r && ru.length >= 5 && ru.every((u) => /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/.test(u[1]) && /# v\d/.test(u[2])) && !/\bsecrets\./.test(r)
+    && /^permissions:\s*\n\s+contents: read\s*$/m.test(r) && !/\$\{\{\s*(github\.event|inputs)\.[^}]*\}\}/.test(r.split('\n').filter((l) => !/^\s*(ref|REF|EXPECT):/.test(l)).join('\n'))
+    && (y === 'skip' || (y?.on?.join() === 'workflow_dispatch' && Object.values(y.jobs).every((j) => j.coe === true && j.steps.every((c) => c === true)))),
+    'android-reproduce: dispatch only, every job and step continue-on-error (a report, never a red run); actions pinned; no secret; inputs only through env');
+  ok(/exit 0\s*$/.test(r.trimEnd() + '\n') && /temurin-17, temurin-21, debian-21, debian-17/.test(r) && /apksigcopier"? compare --unsigned/.test(r) && /--alignment-preserved/.test(r),
+    'android-reproduce: four JDKs, the F-Droid signature copy, a verdict that always ends the run');
 }
 
 // ================================================================ the workflow
@@ -292,7 +328,7 @@ print(json.dumps(yaml.load(open(sys.argv[1]), Loader=L)))`, yml], { encoding: 'u
   const uses = [...wf.matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)];
   ok(uses.length >= 4 && uses.every((u) => /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/.test(u[1]) && /# v\d/.test(u[2])), `workflow: every action pinned by a commit SHA, its version in a comment (${uses.map((u) => u[1].split('@')[0])})`);
   ok(!/\bsecrets\./.test(wf) && !/pull_request_target|workflow_run/.test(wf) && /^permissions:\s*\n\s+contents: read\s*$/m.test(wf), 'workflow: no secret, no privileged trigger, contents: read only');
-  ok(/runs-on: ubuntu-24\.04/.test(wf) && /gradle\/actions\/wrapper-validation@/.test(wf) && /java-version: '17'/.test(wf), 'workflow: ubuntu-24.04, JDK 17, the wrapper validated');
+  ok(/runs-on: ubuntu-24\.04/.test(wf) && /gradle\/actions\/wrapper-validation@/.test(wf) && /java-version: '21'/.test(wf), 'workflow: ubuntu-24.04, JDK 21 (F-Droid\'s), the wrapper validated');
   ok(/keytool -genkeypair/.test(wf) && /assembleRelease/.test(wf) && /assembleDebug/.test(wf) && /sha256sum/.test(wf) && /SHA256SUMS/.test(wf) && /actions\/upload-artifact@/.test(wf) && /apksigner"? verify/.test(wf),
     'workflow: an ephemeral debug key (keytool), the unsigned release and the debug build, their SHA-256, uploaded');
   ok(/node apps\/android\/assets\.mjs/.test(wf) && /node apps\/android\/check\.mjs/.test(wf) && /test-shell\.mjs/.test(wf), 'workflow: the page copied in, this check and the page\'s tests before the build');

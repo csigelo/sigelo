@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } 
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { did, keygen, parseBytes, VERSION } from 'sigelo';
-import { keeperRoot, parseRoot, recoveryCommitment } from 'sigelo/dist/keys.js';
+import { keeperRoot, mnemonicFromRoot, newRootBytes, parseRoot, recoveryCommitment, vaultFromRoot } from 'sigelo/dist/keys.js';
 import { bundleOf, head, identityPath, load, save, type Store } from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
@@ -32,6 +32,9 @@ export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of
        [--keychain] [--net <n>]            --keychain: the key and K_j sealed in the OS keychain before anything is
        [--restore-height <h> | --restore-date <YYYY-MM-DD>]   written (the phone app's restore); --net mainnet|stagenet
                                            and the wallet's birth, kept in the keeper file for its wallet restore
+       [--made-here]                       the words were just made by keeper --new-words (kept: Me says "Created on")
+  keeper --new-words [--net <n>]           the phone app's create: 25 new words and their wallet's address as JSON on
+                                           stdout, piped only (never a terminal); writes nothing
   enrol --name <n> [--index <i>]           worker i (next free): a one-time code (10 minutes) for the other machine;
        [--wait <s>] [--identity <file>]    it pairs like any contact, then takes on worker i's identity, run by you
        [--tier friend|quiet]               --tier: yours but low trust (it reads the web): its messages wait in the
@@ -243,13 +246,31 @@ function walletMeta(f: Map<string, string>): { net?: string; restore_height?: nu
   return out;
 }
 
+/**
+ * keeper --new-words [--net n]: a fresh root (newRoot's draw) as its 25 words and the address of its own
+ * wallet (the vault), one JSON line on stdout, for the GTK app's create (apps/gtk): it shows them once, asks
+ * three back, then hands them to keeper --from-words --made-here on stdin. Writes nothing. Refused on a
+ * terminal: the words would stay in its scrollback (on a computer: sigelo-offline new, offline).
+ */
+function newWordsMain(rest: string[]): number {
+  try {
+    const f = flags(rest, ['--net'], ['--new-words']), net = f.get('--net') ?? 'mainnet';
+    if (net !== 'mainnet' && net !== 'stagenet') throw usageError(`--net: mainnet or stagenet, not ${JSON.stringify(net)}`);
+    if (process.stdout.isTTY) throw usageError('keeper --new-words: for the phone app, its output piped; on a terminal the words would stay in its scrollback (on a computer: sigelo-offline new, offline)');
+    const S = newRootBytes(), v = vaultFromRoot(S, net);
+    try { process.stdout.write(`${JSON.stringify({ words: mnemonicFromRoot(S), vault: v.address, net })}\n`); } finally { S.fill(0); v.b.fill(0); v.a.fill(0); }
+    return 0;
+  } catch (e) { return failed(e); }
+}
+
 /** sigelo-agent keeper [--from-words [--replace-me] [--rotate-me] [--keychain] [--net n] [--restore-height h | --restore-date d]] [--keeper j] [--identity f] → exit code. */
 export async function keeperMain(rest: string[]): Promise<number> {
+  if (rest.includes('--new-words')) return newWordsMain(rest);
   try {
-    const f = flags(rest, ['--keeper', '--identity', '--net', '--restore-height', '--restore-date'], ['--from-words', '--replace-me', '--rotate-me', '--operator', '--keychain']), op = operatorPath(f.get('--identity'));
+    const f = flags(rest, ['--keeper', '--identity', '--net', '--restore-height', '--restore-date'], ['--from-words', '--replace-me', '--rotate-me', '--operator', '--keychain', '--made-here']), op = operatorPath(f.get('--identity'));
     if ((f.has('--replace-me') || f.has('--rotate-me')) && !f.has('--from-words')) throw usageError('keeper: --replace-me and --rotate-me go with --from-words: they need the words');
-    const meta = walletMeta(f), wrap = f.has('--keychain');
-    if ((wrap || Object.keys(meta).length) && !f.has('--from-words')) throw usageError('keeper: --keychain, --net, --restore-height and --restore-date go with --from-words');
+    const meta = { ...walletMeta(f), ...(f.has('--made-here') && { made: 'here' }) }, wrap = f.has('--keychain');
+    if ((wrap || Object.keys(meta).length) && !f.has('--from-words')) throw usageError('keeper: --keychain, --net, --restore-height, --restore-date and --made-here go with --from-words');
     if (wrap && !keychain.answers(keychain.systemKeychain())) throw Object.assign(new Error('keeper: keychain_unavailable: --keychain, but no OS keychain answers here (Secret Service, macOS keychain, DPAPI): nothing written'), { check: 'keychain_unavailable' });
     checkOperator(op, f.has('--from-words'), 'keeper');
     const { lib, enrol } = await libs();

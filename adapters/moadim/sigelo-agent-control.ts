@@ -15,8 +15,9 @@
  * runs a sealed one (sigelo-agent-remote.ts remoteCall: scope, never the device routes) and is answered
  * by a `response`. A request starts a lease (contact/control.mjs LEASE): while it runs the computer
  * pushes `events` (GET /api/state?since=<last pushed seq>) when the state changed, at most one a
- * second, never asked for. A control holds a bucket of BURST requests refilled at RATE a second; one
- * over it is answered 429 rate once in ten seconds, then dropped. The seat elsewhere (DEVICES.md):
+ * second, never asked for; past 64 KiB as a summary flagged `truncated` (the app pulls the rest).
+ * A control holds a bucket of BURST requests refilled at RATE a second; one over it is answered
+ * 429 rate once in ten seconds, then dropped. The seat elsewhere (DEVICES.md):
  * 409 seat_elsewhere. Every request, answer and event is a relay message: requests count in the
  * control's day and sit in the operator's queue; answers and events in the operator's day (pooled
  * if Pro) and the control's queue.
@@ -27,6 +28,8 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { contactLib, contactModule, safeJson, safeText } from './sigelo-agent-contact.ts';
 import { isRelay, remoteCall, type AnyControl, type RelayControl, type Scope } from './sigelo-agent-remote.ts';
+import * as keychain from './sigelo-agent-keychain.ts';
+import type { Store } from './sigelo-agent.ts';
 
 interface Ctl {
   ANSWER_MAX: number; LEASE: number; RATE: number; BURST: number;
@@ -38,6 +41,7 @@ interface Ctl {
   readControl(c: unknown): Record<string, unknown>;
   responseMessage(o: { id: string; status: number; body: unknown }): object;
   eventsMessage(o: { seq: number; since: number; state: unknown }): object;
+  capState(st: unknown): unknown;
 }
 export interface RelayCarrier {
   relay: string;
@@ -107,7 +111,8 @@ export async function relayControls(o: {
       if (status !== 200) continue;
       const s = st as Record<string, unknown> & { seq: number }, d = digestOf(s);
       if (d === l.digest) continue;
-      try { await send(x.did, C.eventsMessage({ seq: s.seq, since: l.pushed, state: JSON.parse(JSON.stringify(s)) })); l.pushed = s.seq; l.digest = d; } catch (e) { o.note(`remote: events to a control not sent (${(e as Error).message})`); }
+      // Past PUSH_MAX a summary goes (contact/control.mjs capState): the app pulls the rest by a request.
+      try { await send(x.did, C.eventsMessage({ seq: s.seq, since: l.pushed, state: JSON.parse(JSON.stringify(C.capState(s))) })); l.pushed = s.seq; l.digest = d; } catch (e) { o.note(`remote: events to a control not sent (${(e as Error).message})`); }
     }
   }
   const changed = (): void => {
@@ -215,18 +220,40 @@ export async function relayControls(o: {
 // ---------------------------------------------------------------- the app's side on a Linux phone (apps/gtk)
 // `sigelo-agent control pair <SIGELO:CTL:…>`: a control identity made here (random key, never attested),
 // kept in ~/.config/sigelo/control.local.json (0600, $SIGELO_CONTROL; it can do nothing but talk to that
-// computer), the code accepted; prints {words, operator}: the four words to compare with the computer's.
+// computer), its key sealed in the OS keyring as an identity's `--keychain` key is (keychain.wrap,
+// account = the control's DID); no keyring answering: plain in the file, with a warning
+// (SIGELO_KEY_PROVIDER=file: plain, =keychain: refused without one); the code accepted; prints
+// {words, operator}: the four words to compare with the computer's.
 // `sigelo-agent control ui [--app | --no-open] [--port <p>]`: the page on 127.0.0.1 (pageServer), every
 // call a request to the computer over the relay, the state pushed (contact/control.mjs).
 // `sigelo-agent control forget`: the control's files deleted here (revoke it on the computer too).
 export const CONTROL_USAGE = 'control pair <SIGELO:CTL:…> [--force] | control ui [--app | --no-open] [--port <p>] | control forget   (--file <f>: else $SIGELO_CONTROL, else ~/.config/sigelo/control.local.json)';
 const note = (s: string): void => console.error(`sigelo-agent: ${safeText(s)}`);
 const controlFile = (flag: string | undefined): string => resolve(flag ?? process.env['SIGELO_CONTROL'] ?? join(homedir(), '.config', 'sigelo', 'control.local.json'));
-interface ControlFile { secret: string; genesis: object; operator: string | null; relay: string | null }
+interface ControlFile { provider?: string; secret: string | keychain.WrappedSecret; genesis: object; operator: string | null; relay: string | null }
+/** The control key at rest: sealed in the keyring when one answers (or SIGELO_KEY_PROVIDER says keychain), else plain with a warning. */
+function sealControl(idf: ControlFile & { secret: string }): ControlFile {
+  const want = process.env['SIGELO_KEY_PROVIDER'] || undefined;
+  if (want === 'file') return idf;
+  const kc = keychain.systemKeychain();
+  if (!keychain.answers(kc)) {
+    if (want === 'keychain') throw Object.assign(new Error('keychain_unavailable: SIGELO_KEY_PROVIDER=keychain, but no OS keyring answers here: nothing written'), { check: 'keychain_unavailable' });
+    note('no OS keyring answers here, so the control key is a plain file (0600): it talks to that computer only, within the scope confirmed there');
+    return idf;
+  }
+  const seed = Buffer.from(idf.secret, 'hex');
+  try { return { ...idf, provider: 'keychain', secret: keychain.wrap(seed, idf as unknown as Store, kc) }; } finally { seed.fill(0); }
+}
+/** A sealed control key's keyring item, removed (forget, pair --force): nothing left that opens the old file. */
+function dropSealed(f: string): void {
+  try { const w = (JSON.parse(readFileSync(f, 'utf8')) as ControlFile).secret; if (typeof w === 'object' && w?.provider === 'keychain') keychain.systemKeychain().remove(w.account); } catch {}
+}
+/** The control's seed: plain hex, or unsealed from the keyring (once per carrier). */
+const seedOf = (idf: ControlFile): Uint8Array => (typeof idf.secret === 'string' ? Buffer.from(idf.secret, 'hex') : keychain.unwrap(idf as unknown as Store));
 async function controlCarrier(file: string, idf: ControlFile, onEvent?: (e: unknown) => void): Promise<{ accept(c: string, o: object): Promise<{ status: string; contact?: { did: string } }>; contacts(): { contacts: { did: string; fingerprint: string | null }[] }; start(): Promise<void>; stop(): Promise<void> }> {
   const { lib } = await contactLib();
-  const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: idf.genesis, rotations: [], bindings: [], attestations: [], issuers: [] };
-  return new lib.Carrier({ identity: () => ({ secret: Buffer.from(idf.secret, 'hex'), bundle }), ...lib.pathsFor(file), ...lib.optionsFromEnv(), ...(idf.relay && { relay: idf.relay }), ...(onEvent && { onEvent }) }) as never;
+  const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: idf.genesis, rotations: [], bindings: [], attestations: [], issuers: [] }, seed = seedOf(idf);
+  return new lib.Carrier({ identity: () => ({ secret: seed, bundle }), ...lib.pathsFor(file), ...lib.optionsFromEnv(), ...(idf.relay && { relay: idf.relay }), ...(onEvent && { onEvent }) }) as never;
 }
 
 export async function controlMain(rest: string[]): Promise<number> {
@@ -248,7 +275,9 @@ export async function controlMain(rest: string[]): Promise<number> {
     let t: { code: string; relay: string | null };
     try { t = C.readControlText(text); } catch (e) { note(`control pair: ${(e as Error).message}`); return 2; }
     if (existsSync(f) && !force) { note(`control pair: ${f} holds a control already: control forget first (and revoke it on the computer), or --force`); return 1; }
-    const idf = { ...C.newControlIdentity(), operator: null, relay: t.relay } as unknown as ControlFile;
+    if (force) dropSealed(f);
+    let idf: ControlFile;
+    try { idf = sealControl({ ...C.newControlIdentity(), operator: null, relay: t.relay } as unknown as ControlFile & { secret: string }); } catch (e) { note(`control pair: ${(e as Error).message}`); return 1; }
     mkdirSync(dirname(f), { recursive: true, mode: 0o700 });
     writeFileSync(f, JSON.stringify(idf), { mode: 0o600 });
     const car = await controlCarrier(f, idf);
@@ -265,6 +294,7 @@ export async function controlMain(rest: string[]): Promise<number> {
   }
   if (sub === 'forget') {
     const { lib } = await contactLib(), p = lib.pathsFor(f) as { store: string; state: string; log?: string; files?: string };
+    dropSealed(f);
     for (const x of [f, p.store, p.state, p.log, `${p.state}.lock`]) if (x) rmSync(x, { force: true });
     note(`forgotten here: ${f}. Revoke it on the computer too: sigelo-agent ui --revoke-control <name>`);
     return 0;
@@ -273,7 +303,9 @@ export async function controlMain(rest: string[]): Promise<number> {
   let idf: ControlFile;
   try { idf = JSON.parse(readFileSync(f, 'utf8')) as ControlFile; } catch { note(`control ui: no control at ${f}: control pair <SIGELO:CTL:…> first`); return 2; }
   if (typeof idf.operator !== 'string') { note(`control ui: ${f} is not paired: control pair <SIGELO:CTL:…> again`); return 2; }
-  const ctl = C.makeControl({ operator: idf.operator }), car = await controlCarrier(f, idf, (e) => ctl.onEvent(e));
+  const ctl = C.makeControl({ operator: idf.operator });
+  let car: Awaited<ReturnType<typeof controlCarrier>>;
+  try { car = await controlCarrier(f, idf, (e) => ctl.onEvent(e)); } catch (e) { note(`control ui: ${(e as Error).message}`); return 1; }
   await car.start();
   ctl.attach(car);
   const { pageServer } = await import('./sigelo-agent-ui.ts');

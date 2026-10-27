@@ -415,6 +415,12 @@ ${code.slice(60)}
         ok(JSON.stringify((await a.call('sigelo_contacts')).data?.contacts[0]?.link) === JSON.stringify(l), 'relay: sigelo_contacts shows the link');
         r = await a.call('sigelo_set_tier', { contact: 'bob', tier: 'own' });
         ok(r.isError && r.structured?.code === 'link_tier', 'relay: sigelo_set_tier own on a linked contact that is not ours: link_tier', r.text);
+        // A linked contact's messages carry the link in sigelo_inbox: id and purpose, as data.
+        ok((await b.call('sigelo_send', { to: 'alice', text: 'about the docs' })).data?.status === 'sent', 'relay: bob writes to alice, linked');
+        r = await a.call('sigelo_inbox', { wait: 3 });
+        const lm = r.data?.messages?.find((m) => m.content === 'about the docs');
+        ok(!r.isError && JSON.stringify(lm?.link) === JSON.stringify({ id: l.id, purpose: l.purpose }), 'relay: sigelo_inbox labels a linked contact\'s message with link {id, purpose}', r.text);
+        ok(/link \{id, purpose\}/.test((await a.rpc('tools/list')).result.tools.find((t) => t.name === 'sigelo_inbox')?.description ?? ''), 'relay: sigelo_inbox says linked messages carry the link, as data');
         const st2 = JSON.parse(readFileSync(sp, 'utf8')); delete st2.contacts[bDid].link; writeFileSync(sp, JSON.stringify(st2));
         await b.call('sigelo_inbox', { wait: 2 });   // alice's refusal (link_from) reaches bob: handled, nothing shown
       }

@@ -26,7 +26,7 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 | Route | Body / query | Answer |
 |---|---|---|
 | `GET /api/state` | `since=<seq>` | `{seq, now, me, groups: {mine, contacts}, pending: {invites, paired, answers, failed}, events, introductions}` |
-| `GET /api/me` | | `{did, original, chain, identity_file, recovery: "set"\|"none", key: "file", relay, retention_days, erase, restored?}`; `restored` `{on, keeper, seat: "here"\|"elsewhere"\|null}` when the identity comes from the 25 words and its keeper file has the day it was made (Me: "Restored from seed on …") |
+| `GET /api/me` | | `{did, original, chain, identity_file, recovery: "set"\|"none", key: "file", relay, retention_days, erase, restored?}`; `restored` `{on, keeper, seat: "here"\|"elsewhere"\|null, created?}` when the identity comes from the 25 words and its keeper file has the day it was made (Me: "Restored from seed on …"); `created: true` when the words were made on this device (keeper `made: "here"`; Me: "Created on …; the 25 words are on your paper") |
 | `POST /api/invite` | `{name?, long?}` | `{id, name, code, exp, short?, short_exp?, relay}`: `short` parked 10 min; `short_exp` the relay's clock |
 | `POST /api/invite/cancel` | `{id}` | `{cancelled: true}` |
 | `POST /api/accept` | `{code, name?, tier?}` | `{status: "connected", contact: {did, name, fingerprint, pair, tier}}`, or `{status: "waiting"\|"pending", did, detail, exp}`; `tier`: `friend` or `quiet` (own is detected) |
@@ -36,12 +36,16 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 | `POST /api/tag` | `{contact, tags: [≤ 8, ≤ 20 chars]}` | `{tags}` |
 | `POST /api/forget` | `{contact}` | `{forgotten, offline}`: revoked here for good |
 | `POST /api/send` | `{to, text}` | the history record: `{n, at, kind: "out", did, id, text, status: "sent"\|"queued"\|"refused", code?, detail?}` |
-| `GET /api/messages` | `contact=<did>&since=<n>` | `{seq, messages: [{n, dir: "in"\|"out", at, text, label, status, code, detail}]}`, last 200; marks them read |
+| `GET /api/messages` | `contact=<did>&since=<n>` | `{seq, messages: [{n, dir: "in"\|"out", at, text, label, status, code, detail, link}]}` (`link`: `{id, purpose}` on a linked contact's, else null), last 200; marks them read |
 | `POST /api/sync` | | `{synced: true}`: one round now ("Retry now") |
 | `POST /api/history/clear` | | `{cleared: true}` |
 | `GET /api/agents` | | `[{name, did, error, mine: {exp, days_left}\|null, worker: i\|null, renew, contacts, contact}]`: the agents' directory; `contacts`: the agent's own |
 | `POST /api/agents/enrol` | `{agent}` | `{agent, worker, renewed, did, exp, days_left, old?, contacts?, warning?}`: `enrol --here` into the agent's file (ENROL.md); a worker: the attestation renewed. `400 keeper`: run `sigelo-agent keeper --from-words` |
 | `POST /api/agents/pair` | `{agent}` | `{status, contact}`: both sides in this process, words checked |
+| `GET /api/agents/workers` | | `{keeper, seat: "here"\|"elsewhere"\|null, workers: [{worker, name, did, original, rank, placed: "remote"\|"here"\|"device", at, status: "enrolled"\|"pending"\|"revoked"\|"unplaced", revoked, seen, tier, contact, local, attested_until, enrolling}]}`: the keeper's roster (the Agents screen); `enrolling` `{id, state: code\|words\|sending\|enrolled\|expired\|failed, code, exp, relay, words, command}` for a code this page made |
+| `POST /api/agents/enrol-code` | `{name, tier?, relay?}` | `{worker, name, did, original, tier, id, state, code, exp, relay, command}`: `enrol --name` on this page's session (ENROL.md): worker i (next free), a code for 10 minutes, once; its request answered with the worker's identity, the worker filed when it pairs. `400 keeper` without a keeper root; `409 seat_elsewhere`, `name_taken` |
+| `POST /api/agents/revoke` | `{worker}` | `{worker, name, cancelled, revoked, forgot, attested_until?}`: an unused code cancelled (its index free again); else its contact forgotten and the roster marks it revoked; its attestation stays valid until `attested_until`. A device: `409 device` |
+| `POST /api/agents/rename` | `{worker, name}` | `{worker, name}`: the roster and its contact |
 | `GET /api/links` | | `{made, links, received, allow}` (LINKS.md): links I made `{id, a, b, a_name, b_name, kind, purpose, note, tier_a, tier_b, expires, status, step, check}`; contacts linked to me; introductions waiting `{id, from, name, peer, peer_name, purpose, note, exp, quiet, answer?}`; allow rules `{contact, name, tier, until}` |
 | `POST /api/link` | `{a, b, purpose, tier_a?, tier_b?, days?, note?, relay?}` | the record, `status: "pending"`; refused: `409` with the `link_*` check |
 | `POST /api/unlink` | `{id}` | `{id, status: "ended", role}` |
@@ -50,6 +54,7 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 | `GET /api/settings` | | `{relay, default, fixed, in_use}`: the relay new codes name (default `relay.sigelo.ai`); `fixed`: `SIGELO_RELAY`'s host, which wins, or null; `in_use`: this session's own |
 | `POST /api/settings` | `{relay}` | the same; `relay` a host[:port], `""` or null for the default; kept in `.ui.json` `settings` |
 | `GET /api/relays` | | `{relays: [{tag, host, did?, tier?, note?}]}`: the signed `sigelo.ai/relays.json`, verified, fetched at most once a day |
+| `POST /api/relays/test` | `{relay}` | `{relay, ok, ms, retention_days, detail?}`: the picker's Test: GET `/relay.json` at that host, else `/challenge` |
 | `GET /api/devices` | | `{devices, list, adding, joining}` (DEVICES.md): `devices` `[{name, rank, worker, did, original, via, added, seen, paired, ours, tier, attested_until, revoked}]`; `list` `{seq, iat}` or null; `adding` (online adds) `[{id, name, worker, did, qr, short, exp, state, words}]`, `state` `code`, `words`, `sending`, `done`, `refused`, `expired`; `joining`: this machine's scan of an online code `{state, file, words, …}` or null |
 | `POST /api/devices/add` | `{name, offline?, tier?, days?, words?}` | online: an `adding` entry (`qr` `SIGELO:DEV:…`, 10 min); offline: `{id, name, worker, did, frames, list, exp}`. SAFE only: `full` → `409 device_full` (a terminal) |
 | `POST /api/devices/confirm` | `{id, match}` | the words gate: `true` sends its key; `false` drops it (`refused`); before the device answered `409 device_state` |
@@ -82,6 +87,9 @@ pairing view. `answers`: codes this side answered, waiting for the inviter until
 introductions to this identity waiting for an answer, introducer not quiet: the page's banner. The page runs the link handler
 (link.mjs) as `watch` does; link messages and codes never reach the history.
 
+**Agents:** the page's own session enrols them (the CLI's `enrol` refuses `busy` beside it); worker indices are given at the seat only.
+The keeper's `workers` are the list; a code's temporary pairing never shows in the contacts or the history.
+
 **Devices:** the page's own session runs them (the CLI's `device` verbs refuse `busy` beside it). Enrolment and device
 messages never reach the history. QR codes are drawn and read in the page with `qr.mjs` and `qr-decode.mjs` (served
 beside it, with `shim-*.mjs`; the import map is its one inline script, allowed by hash in the CSP): camera where
@@ -101,17 +109,17 @@ next invite and to this page's own connection at its next start. Codes accepted 
 A request `{id, ctr, nonce, box}` (≤ 1 MiB; `id` hex; `nonce`, `box` base64url): `box` = XChaCha20-Poly1305(key, nonce,
 aad `"sigelo-remote/0 req"` ‖ id ‖ u64be(ctr), JCS `{method, path, body?}`). The answer `{nonce, box}` under aad `"… res"` ‖ id ‖ ctr
 holds `{status, body}`, what this listener would answer. `ctr` must exceed the last one kept (one call at a time):
-a replay, a wrong key or an unknown id get `403` and no body. **Scopes:** `read`: state, me, messages, links; `chat`: + send,
-accept, invite, invite/cancel, words, rename, tag, sync, links/answer (pairs as accept does); `all`: + forget, tier, history/clear, agents,
-link, unlink, links/allow (who the agents talk to, as tier), settings, relays. Outside it: `403 scope`;
+a replay, a wrong key or an unknown id get `403` and no body. **Scopes:** `read`: state, me, messages, links, agents/workers; `chat`: + send,
+accept, invite, invite/cancel, words, rename, tag, sync, links/answer (pairs as accept does); `all`: + forget, tier, history/clear, agents
+(enrol-code, revoke, rename too), link, unlink, links/allow (who the agents talk to, as tier), settings, relays, relays/test. Outside it: `403 scope`;
 `/api/devices*` never (`403 remote`). `ui --controls` lists them (never a key); `ui --revoke-control <name>` forgets one
 (stop the page first: it owns the file). No TLS: the LAN sees sizes and timing; the text is page control until revoked.
 Client: `remote-client.mjs`. **Over the relay** (`ui --remote --relay [--name] [--scope]`, no listener): it prints
 `SIGELO:CTL:<short code>[:<HOST>]`; the app pairs a control identity of its own (a random key, never attested; contact/control.mjs) and the
-four words are confirmed at the computer's terminal (before: `403 words`). Calls are `sigelo-device/1` `request` {id, method, path, body?}
+four words are confirmed at the computer (before: `403 words`): its terminal (y/N), or the page's Controls card, `GET /api/controls` → `{pending: [{name, scope, words}]}` and `POST /api/controls/confirm` `{name, match}` → `{name, confirmed}` (refused: forgotten; none waiting: `404 control_unknown`; never remote, the app refuses it unsent: `403 remote`). Calls are `sigelo-device/1` `request` {id, method, path, body?}
 → `response` {id, status, body}, the same scopes; a request opens a 10-minute lease of `events` {seq, since, state} (GET /api/state, pushed
-on change), so the app's poll reads it locally: one request per 5 minutes while open. Cap: 10 at once, then 1/s (`429 rate`).
+on change; past 64 KiB a summary, the newest 20 contacts of each group and events, `truncated: {contacts, events, kept}`, and the app's "Pull the rest" asks `GET /api/state?full=1`, a request), so the app's poll reads it locally: one request per 5 minutes while open. Cap: 10 at once, then 1/s (`429 rate`).
 Seat elsewhere: `409 seat_elsewhere`. Each message counts in the relay allowance: requests the control's day, answers and events
 yours. The control is marked `relay` in `controls{}`; revoking forgets its contact. Phone side without a WebView carrier:
-`sigelo-agent control pair <text> | ui --app | forget` (apps/gtk). **`local`:** the self-contained app (apps/web) answers these routes in the page, over its own carrier, with the same JSON (contact/page.mjs). The Android app (apps/android) shows that page, or a computer's through `/r`, sealed in the page, carried by the app's HTTP. **`ui --app`:** for a shell that shows the page (apps/gtk): no browser, and the page stops when stdin ends. **Install:** `ui --port <p>` keeps the origin (taken: `port_taken`); `manifest.webmanifest`
+`sigelo-agent control pair <text> | ui --app | forget` (apps/gtk); the control key sealed in the OS keyring (as `--keychain`), plain 0600 with a warning when none answers. **`local`:** the self-contained app (apps/web) answers these routes in the page, over its own carrier, with the same JSON (contact/page.mjs). The Android app (apps/android) shows that page, or a computer's through `/r`, sealed in the page, carried by the app's HTTP. **`ui --app`:** for a shell that shows the page (apps/gtk): no browser, and the page stops when stdin ends. **Install:** `ui --port <p>` keeps the origin (taken: `port_taken`); `manifest.webmanifest`
 and `sw.js` keep `ui.html`, `ui.js`, `ui.css` only, never `/api/`.

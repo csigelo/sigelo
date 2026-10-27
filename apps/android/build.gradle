@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 // The Android Gradle Plugin, pinned; Gradle itself is pinned by the wrapper (distributionSha256Sum).
+// 8.8: its D8 no longer varies with the CPU count (F-Droid's reproducible-builds advice); the
+// newest AGP that runs on Gradle 8.10.2, the version F-Droid's own Gradle takes from the wrapper.
 plugins {
-    id 'com.android.application' version '8.7.3' apply false
+    id 'com.android.application' version '8.8.2' apply false
 }

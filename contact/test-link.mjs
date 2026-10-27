@@ -118,6 +118,20 @@ const D0 = 'did:sigelo:z' + '1'.repeat(44);
     ok(a1.link === undefined && a1.tier === 'friend' && a1.tier_by === 'owner', 'setLink null with prior: the tier before restored');
     hs.revoke(F.did);
     ok(hs.load().s.contacts[F.did].link === undefined, 'revoke drops the link');
+    // Relink (design/links.md §7.1a): a link's end is remembered (ended); a new link pairs only with a permit.
+    ok(hs.load().s.contacts[F.did].ended === undefined && checkOf(() => hs.relink(F.did, 'DDDDDDDD', now + 60, now)) === 'revoked', 'forgotten by hand: no ended; relink refused (revoked)');
+    ok(hs.relink(A.did, 'DDDDDDDD', now + 60, now) === null && hs.relink(D0, 'DDDDDDDD', now + 60, now) === null, 'relink of a live contact, or of no contact: nothing to permit (null)');
+    const X2 = agent('store relink');
+    hs.admit(chainOnly(X2), verify(chainOnly(X2), now), 'x2', { relay: 'relay.test', pair_key: key(4) }, now);
+    hs.revoke(X2.did, { id: 'K7F3Q9ZQ', by: H.did, at: now });
+    const x2 = () => hs.load().s.contacts[X2.did];
+    ok(x2().revoked && x2().ended?.id === 'K7F3Q9ZQ' && x2().pair_key === null, 'revoked by a link\'s end: ended {id, by, at} kept');
+    const again = (pk, name = 'x2', t = now) => checkOf(() => hs.admit(chainOnly(X2), verify(chainOnly(X2), t), name, { relay: 'relay.test', pair_key: key(pk) }, t));
+    ok(again(5) === 'revoked', 'a pairing without a permit: revoked');
+    ok(checkOf(() => hs.relink(X2.did, 'K7F3Q9ZQ', now + 60, now)) === 'link_stale' && checkOf(() => hs.relink(X2.did, 'EEEEEEEE', now, now)) === 'link_expired', 'a permit for the ended id: link_stale; one already over: link_expired');
+    ok(hs.relink(X2.did, 'EEEEEEEE', now + 60, now) === true && x2().relink?.id === 'EEEEEEEE', 'a new link\'s permit: relink {id, until}');
+    ok(again(6, null) === 'revoked' && again(6, 'x2', now + 61) === 'revoked', 'a notice (no name) is no pairing, and a permit past its until: revoked still');
+    ok(again(7) === 'accepted' && !x2().revoked && x2().ended === undefined && x2().relink === undefined && x2().pair_key === key(7) && x2().link === undefined, 'with the permit: admitted, the record written afresh (no ended, no permit)', JSON.stringify(x2()));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -209,6 +223,11 @@ try {
     'list on the agent: {id, contact, tier, purpose, linked_by, expires}', JSON.stringify(la));
   ok(lh.made.some((x) => x.id === L.id && x.status === 'linked' && x.tier_a === 'friend' && x.tier_b === 'quiet') && !JSON.stringify(lh).includes('sgl1'), 'list on the operator: the link made, no code', JSON.stringify(lh.made));
   ok(A.c.contacts().contacts.find((c) => c.did === B.did)?.link?.purpose === L.purpose, 'contacts() shows the purpose');
+  // The inbox labels a linked contact's messages with the link (id, purpose); others carry none.
+  await B.c.send(A.did, 'the PR is ready'); await F.c.send(A.did, 'lunch?');
+  await turn(A);
+  const lm = A.seen.find((m) => m.content === 'the PR is ready'), fm = A.seen.find((m) => m.content === 'lunch?');
+  ok(JSON.stringify(lm?.link) === JSON.stringify({ id: L.id, purpose: L.purpose }) && fm && fm.link === undefined, 'inbox: review\'s message carries link {id, purpose}; a friend\'s, unlinked, none', JSON.stringify([lm, fm]));
 
   // An end from a contact that is no party to the link: ignored.
   await sendLink(F, A, { v: LINK_V, typ: 'end', id: L.id, iat: now, reason: 'unlink' });
@@ -274,6 +293,24 @@ try {
     'unlink: ended at the operator; project and review forgot each other', JSON.stringify([u, contactOf(A, B.did).revoked, contactOf(B, A.did).revoked]));
   ok(A.out.some((r) => r.ended.some((x) => x.id === L.id && x.forgot)) && B.out.some((r) => r.ended.some((x) => x.id === L.id)), 'handle reports the end on both');
   ok(await failure(() => unlink({ carrier: H.c, file: H.f, id: 'ZZZZZZZZ' })) === 'link_unknown', 'unlink of no link: link_unknown');
+
+  // ---- relink (design/links.md §7.1a): the end remembered on both sides; one side's ask alone is
+  // refused; the ended id never again; both asked afresh: linked again under a new id.
+  ok(contactOf(A, B.did).ended?.id === L.id && contactOf(B, A.did).ended?.id === L.id, 'the end remembered on both revoked records (ended: the link id)');
+  const R1 = await link({ carrier: H.c, file: H.f, a: 'project', b: 'review', purpose: 'review again' });
+  await turn(A);
+  await H.c.inbox({ wait: 1 });
+  const inv1 = H.c.takeLinks().find((m) => m.content.id === R1.id && m.content.typ === 'invite');
+  ok(typeof inv1?.content.code === 'string' && contactOf(A, B.did).relink?.id === R1.id, 'project, asked afresh: a permit for review and a code (taken here, never forwarded)', JSON.stringify(contactOf(A, B.did)));
+  ok(await failure(() => B.c.accept(inv1.content.code, { name: 'project', wait: 0 })) === 'revoked' && contactOf(B, A.did).revoked && contactOf(A, B.did).revoked,
+    'that code accepted by review, which was not asked (one side alone): refused revoked before anything went; nothing paired');
+  await sendLink(H, A, { v: LINK_V, typ: 'ask', id: L.id, iat: now, peer: B.did, kind: 'own', purpose: 'p', ttl: DAY }); await turn(A);
+  ok(A.out.at(-1).refused.some((x) => x.id === L.id && x.check === 'link_stale'), 'an ask carrying the ended link\'s id: link_stale', JSON.stringify(A.out.at(-1).refused));
+  const R2 = await link({ carrier: H.c, file: H.f, a: 'project', b: 'review', purpose: 'review again' });
+  for (let i = 0; i < 4 && recOf(H, R2.id)?.status === 'pending'; i++) await rounds(1, A, H, B, A, B, H);
+  const ab2 = contactOf(A, B.did), ba2 = contactOf(B, A.did);
+  ok(recOf(H, R2.id).status === 'linked' && R2.id !== L.id && ab2?.link?.id === R2.id && !ab2.revoked && ab2.ended === undefined && ba2?.link?.id === R2.id && !ba2.revoked && ba2.ended === undefined,
+    'both asked afresh (project\'s ask, review\'s offer from its operator): linked again under a new id, the records fresh', JSON.stringify([recOf(H, R2.id)?.status, ab2, ba2]));
 
   // ---- expiry: a day and more later, each side ends by itself.
   now += DAY + 60;

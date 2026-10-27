@@ -251,7 +251,7 @@ const same = (a, b) => Buffer.from(a).equals(Buffer.from(b));
 const PRIVATE = (h) => { const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h); if (!m) return false; const [a, b] = [Number(m[1]), Number(m[2])]; return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254); };
 function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const target = new EventTarget(), keys = new Map(), log = { ops: [], streams: [], seals: [] };
-  const state = { mode, wipe, locked: false, secure: false, clipCleared: 0 };
+  const state = { mode, wipe, locked: false, secure: false, door: false, secureLog: [], clipCleared: 0, clip: null };
   const ALIASES = { 'identity:false': 0, 'identity:true': 1, control: 2 };
   const AAD = { identity: 'sigelo-app identity/0', keeper: 'sigelo-app keeper/0', control: 'sigelo-app control/0' };
   const route = (host, port) => { const p = hosts[host]?.[port]; if (!p) throw Object.assign(new Error(`${host}:${port}: unreachable`), { check: 'connect' }); return p; };
@@ -318,8 +318,9 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             if (state.mode !== null && state.mode !== m.mode) throw Object.assign(new Error('switch from the menu'), { check: 'mode' });
             state.mode = m.mode; post({ id: m.id, mode: state.mode });
           } else if (m.op === 'wiped') { state.wipe = false; post({ id: m.id }); }
-          else if (m.op === 'secure') { state.secure = m.on === true; post({ id: m.id }); }
-          else if (m.op === 'clip-clear') { state.clipCleared++; post({ id: m.id }); }
+          else if (m.op === 'secure') { state.secure = m.on === true; state.door = state.secure && m.door === true; state.secureLog.push(`${state.secure}${state.door ? '+door' : ''}`); post({ id: m.id }); }
+          else if (m.op === 'clip-clear') { state.clipCleared++; state.clip = null; post({ id: m.id }); }
+          else if (m.op === 'clip-copy') { state.clip = { text: m.text, clear: m.clear }; post({ id: m.id }); }
           else throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
         } catch (e) { if (m.id !== undefined) post({ id: m.id, error: { check: e.check ?? 'connect', message: e.message } }); }
       };
@@ -379,10 +380,10 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
     && /secure\(true\)/.test(src) && /bridge\.clipClear\(\)/.test(src) && /addEventListener\('paste'/.test(src) && /I have my 25 words on paper/.test(src),
     'seed.mjs: the words\' box without autocomplete, autocorrect, capitals or spellcheck; FLAG_SECURE while the form is up; the clipboard cleared after a paste; "I have my 25 words on paper" first');
   // The code, not its comments (which say there is none): no way from a root to its 25 words, no "show seed".
-  const pages = ['app.mjs', 'shell.mjs', 'seed.mjs', 'router.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8')).join('\n') + readFileSync(join(REPO, 'adapters', 'moadim', 'ui.js'), 'utf8');
+  const pages = ['app.mjs', 'shell.mjs', 'seed.mjs', 'router.mjs', 'create.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8')).join('\n') + readFileSync(join(REPO, 'adapters', 'moadim', 'ui.js'), 'utf8');
   const code = pages.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  ok(!/show (the |your )?(seed|25 words)|show seed|reveal|mnemonicFromRoot|encodeMoneroWords|newRoot/i.test(code) && /Restore from my 25 words/.test(readFileSync(join(HERE, 'shell.mjs'), 'utf8')),
-    'no "show seed" anywhere in the app (nothing turns a root into words); the first-start screen offers "Restore from my 25 words"');
+  ok(!/show (the |your )?(seed|25 words)|show seed|reveal|mnemonicFromRoot|encodeMoneroWords|newRoot/i.test(code) && /Restore from my 25 words/.test(readFileSync(join(HERE, 'shell.mjs'), 'utf8')) && /textContent: 'Create new identity'/.test(readFileSync(join(HERE, 'shell.mjs'), 'utf8')),
+    'no "show seed" anywhere in the app (nothing turns a root into words); the first-start screen offers "Create new identity" and "Restore from my 25 words"');
   // Seat elsewhere: a standby; the seat taken later signs the list naming this phone.
   const F2 = fakeShell({ mode: 'self' }), b2 = await F2.connect(), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
   await SD.restoreInto(p2, { words, name: 'tab', relay: '', restore: { restore_date: '2024-02-29' }, seat: 'elsewhere', now: 1761400000 });
@@ -392,6 +393,102 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const t = await s2.take(1761400100);
   ok(t.holder === 'tab' && t.seat.epoch === 1 && s2.info().here === true && s2.restored().seat === 'here' && JSON.parse(new TextDecoder().decode(p2.files.read(SD.SETTINGS))).mode.standby === false, 'seat take: the list signed naming this phone, the seat here');
   ok(await checkOf(() => SD.restoreInto(p2, { words: list.slice(0, 24).join(' '), name: 'tab', relay: '', seat: 'here', now: 1761400000 })) === 'restore_words' && W.network.held === 0, 'restore: 24 words refused restore_words, the network released');
+}
+
+// ================================================================ 1c. create a new identity in the Android app (create.mjs), its screens driven
+// through a minimal DOM: Create, the 25 words once (FLAG_SECURE, Back swallowed), the check, the seal.
+class FakeEl {
+  constructor(tag) { Object.assign(this, { tagName: tag.toUpperCase(), kids: [], attrs: {}, style: {}, on: {}, text: '', value: '', checked: false, disabled: false, hidden: false, className: '', parent: null }); }
+  get textContent() { return this.text + this.kids.map((k) => (typeof k === 'string' ? k : k.textContent)).join(''); }
+  set textContent(t) { this.kids = []; this.text = String(t); }
+  append(...k) { for (const x of k) { if (x === '') continue; this.kids.push(x); if (typeof x === 'object') x.parent = this; } }
+  replaceChildren(...k) { this.kids = []; this.text = ''; this.append(...k); }
+  after(x) { const at = this.parent.kids.indexOf(this); this.parent.kids.splice(at + 1, 0, x); x.parent = this.parent; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  addEventListener(t, f) { (this.on[t] ??= []).push(f); }
+  focus() {}
+  all() { return [this, ...this.kids.filter((k) => typeof k === 'object').flatMap((k) => k.all())]; }
+}
+{
+  const CV = await import(pathToFileURL(join(HERE, 'create.mjs')).href);
+  const F = fakeShell({ mode: 'self' }), bridge = await F.connect(), idb = new FakeIDB();
+  const p = await A.androidPlatform({ bridge, mqtt: mqttEsm, indexedDB: idb, pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
+  const saved = Object.fromEntries(['document', 'location', 'history', 'addEventListener', 'removeEventListener'].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  const listeners = new Map(), pushed = [];
+  let reloaded = 0;
+  Object.assign(globalThis, {
+    document: { createElement: (t) => new FakeEl(t) },
+    location: { hash: '#create', href: 'https://appassets.androidplatform.net/index.html#create', reload: () => { reloaded++; } },
+    history: { pushState: (...a) => { pushed.push(a); } },
+    addEventListener: (t, f) => listeners.set(`${t}`, f), removeEventListener: (t) => listeners.delete(`${t}`),
+  });
+  const said = [], keep = { log: console.log, error: console.error, warn: console.warn, info: console.info, debug: console.debug };
+  for (const k of Object.keys(keep)) console[k] = (...a) => { said.push(a.map(String).join(' ')); };
+  const box = new FakeEl('div'), button = (t) => box.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t);
+  let backs = 0;
+  try {
+    CV.createView(box, p, { bridge, back: () => { backs++; } });
+    const radios = box.all().filter((e) => e.type === 'radio');
+    radios.find((r) => r.value === 'stagenet').checked = true; radios.find((r) => r.value === 'mainnet').checked = false;
+    ok(box.textContent.includes('New identity') && button('Create') && radios.map((r) => r.value).join() === 'mainnet,stagenet' && F.state.secure === false && W.network.held === 0,
+      'create view: the form first (name, mainnet or stagenet, relay); no FLAG_SECURE yet, nothing drawn');
+    button('Create').onclick();
+    await sleep(50);
+    const grid = box.all().find((e) => e.tagName === 'OL'), list = grid?.kids.map((li) => li.textContent.replace(/^\d+ /, '')) ?? [];
+    const leaks = (text) => { const t = String(text).toLowerCase(); for (let i = 0; i + 3 <= list.length; i++) if (t.includes(list.slice(i, i + 3).join(' '))) return true; return false; };
+    ok(list.length === 25 && grid.kids.every((li, i) => li.textContent.startsWith(`${i + 1} `)) && grid.style.gridTemplateColumns === 'repeat(5, minmax(0, 1fr))' && W.network.held === 1,
+      'review: the 25 words once, numbered 1 to 25 in a 5 × 5 grid; the network held');
+    ok(F.state.secure === true && F.state.door === true && pushed.length === 1 && listeners.has('popstate') && !button('Back') && !button('Cancel') && button('I have written down my 25 words'),
+      'review: FLAG_SECURE on and the system Back swallowed (secure, door); the page\'s Back held too; no Back or Cancel, one way on: "I have written down my 25 words"');
+    const vault = box.all().find((e) => e.tagName === 'P' && /^5\w{94}$/.test(e.textContent))?.textContent;
+    ok(typeof vault === 'string' && box.textContent.includes('A Monero wallet app restored from these 25 words shows this same address'), `review: the address of the words' own wallet (stagenet), shown once to check the paper later (${vault?.slice(0, 8)})`);
+    await button('Copy the words (stagenet only)').onclick();
+    ok(F.state.clip?.text === list.join(' ') && F.state.clip.clear === 60 && box.textContent.includes('The clipboard is emptied in 60 s'), 'review, stagenet: copied through the shell, marked sensitive and emptied by it after 60 s');
+    button('I have written down my 25 words').onclick();
+    await sleep(50);
+    ok(F.state.clipCleared === 1 && F.state.clip === null && !box.all().some((e) => e.tagName === 'OL'), 'check: the clipboard emptied at once; the grid gone from the screen');
+    const asked = () => box.all().filter((e) => e.tagName === 'LABEL').map((e) => Number(/^Word (\d+)$/.exec(e.textContent)?.[1])).filter(Boolean), inputs = () => box.all().filter((e) => e.tagName === 'INPUT');
+    const q1 = asked();
+    ok(q1.length === 3 && inputs().length === 3 && inputs().every((x) => x.attrs.autocomplete === 'off' && x.attrs.autocorrect === 'off' && x.attrs.spellcheck === 'false'), `check: three words asked by number (${q1}), boxes without autocomplete or spellcheck`);
+    inputs().forEach((x, i) => { x.value = i === 0 ? (list[q1[0] % 25] === list[q1[0] - 1] ? 'zzz' : list[q1[0] % 25]) : list[q1[i] - 1]; });
+    await button('Check').onclick();
+    ok(box.all().some((e) => e.tagName === 'OL') && box.textContent.includes(`Word ${q1[0]} did not match`) && p.files.read('identity.keystore') === null && F.state.secure === true,
+      'check: a wrong word refused: back to the grid, the word named by its number; nothing sealed');
+    button('I have written down my 25 words').onclick();
+    const q2 = asked();
+    inputs().forEach((x, i) => { x.value = list[q2[i] - 1]; });
+    await button('Check').onclick();
+    await until(() => reloaded === 1, 5000);
+    await sleep(100);
+    ok(reloaded === 1 && F.log.seals.length === 2 && F.log.seals.every((x) => x.full === true && x.alias === 1) && F.state.secure === false && F.state.door === false && !listeners.has('popstate') && W.network.held === 0,
+      `check passed: identity and keeper sealed under the FULL key (screen lock), then FLAG_SECURE off, Back free again, the network released, the page restarts (${F.state.secureLog})`);
+    const files = idb.dbs.get('sigelo').stores.get('files'), stored = [...files.values()].map((v) => Buffer.from(v).toString('latin1')).join('\n');
+    const kp = JSON.parse(new TextDecoder().decode(await W.loadSealed(p, 'keeper')));
+    ok(files.has('identity.keystore') && files.has('keeper.keystore') && !leaks(stored) && !stored.includes('root_hex') && said.length === 0 && kp.made === 'here' && kp.net === 'stagenet' && kp.restore_date === kp.created,
+      `create: no word in the app's storage, nothing logged (${said.length}); the keeper made here, stagenet, the wallet's birth its creation day`);
+    ok(!leaks(JSON.stringify(box.all().map((e) => [e.textContent, e.value]))) && inputs().every((x) => x.value === ''), 'after acceptance: no word left on the screen or in a box');
+  } finally {
+    Object.assign(console, keep);
+    for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; }
+  }
+  // Mainnet: no copy, the grid not selectable, a copy event refused.
+  const F2 = fakeShell({ mode: 'self' }), b2 = await F2.connect(), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
+  Object.assign(globalThis, { document: { createElement: (t) => new FakeEl(t) }, location: { hash: '#create', href: 'x', reload() {} }, history: { pushState() {} }, addEventListener() {}, removeEventListener() {} });
+  try {
+    const box2 = new FakeEl('div');
+    const v2 = CV.createView(box2, p2, { bridge: b2 });
+    box2.all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Create').onclick();
+    const g = box2.all().find((e) => e.tagName === 'OL');
+    let prevented = false;
+    g.on.copy?.forEach((f) => f({ preventDefault: () => { prevented = true; } }));
+    ok(!box2.all().some((e) => e.tagName === 'BUTTON' && /Copy/.test(e.textContent)) && box2.textContent.includes('No copy on mainnet') && g.style.userSelect === 'none' && prevented && /^4/.test(box2.all().find((e) => e.tagName === 'P' && /^4\w{94}$/.test(e.textContent))?.textContent ?? ''),
+      'review, mainnet: no copy button, the words not selectable, a copy refused; the mainnet address');
+    v2.discard();
+    await sleep(50);
+    ok(W.network.held === 0 && F2.state.secure === false && F2.state.door === false, 'discard: the words dropped, the network released, FLAG_SECURE off');
+  } finally { for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } }
+  const src = readFileSync(join(HERE, 'create.mjs'), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  ok(!/mnemonicFromRoot|encodeMoneroWords|newRoot\b|localStorage|sessionStorage|console\./.test(src) && /session\.words\(\)/.test(src), 'create.mjs: the words only from the session (contact/create.mjs), never stored or logged');
 }
 
 // ================================================================ 2. platform-android.mjs
@@ -566,6 +663,9 @@ try {
     ok(line !== '' && me.status === 200 && me.body.did?.startsWith('did:sigelo:') && st.status === 200 && be.mode().kind === 'remote',
       `remote: the computer's text kept sealed (control key); sealed GET /api/me and /api/state over the shell's http to the LAN (${me.status} ${st.status})`);
     ok(forget.status === 403 && dv.status === 403, `remote: outside the scope (read) and the device routes refused by the computer (${forget.status}, ${dv.status})`);
+    const wk = await be.call('GET', '/api/agents/workers'), ec = await be.call('POST', '/api/agents/enrol-code', { name: 'vps' });
+    ok(wk.status === 200 && wk.body.keeper === true && Array.isArray(wk.body.workers) && ec.status === 403 && ec.body.error.check === 'scope',
+      `remote: the computer's Agents list read through the shell (scope read); enrolling is scope all (403 scope) (${wk.status}, ${ec.status})`);
     ok(kept.get('sigelo-control') && !kept.get('sigelo-control').includes('SIGELO') && R.log.ops.filter((o) => o === 'https').length >= 4, 'remote: the text is kept only sealed; every call through the shell');
     await new Promise((r) => { c.on('close', r); c.kill('SIGTERM'); });
     const gone = await be.call('GET', '/api/state');

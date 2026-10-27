@@ -15,13 +15,14 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalize, did, sign, verifySig } from 'sigelo';
-import { keeperRoot, mnemonicFromRoot, recoveryCommitment, rootFromMnemonic } from 'sigelo/dist/keys.js';
+import { keeperRoot, mnemonicFromRoot, recoveryCommitment, rootFromMnemonic, vaultFromRoot } from 'sigelo/dist/keys.js';
 import { UNLOGGED } from './carrier.mjs';
 import * as C from './control.mjs';
 import * as D from './device.mjs';
 import { operatorAttestation, operatorIdentity, workerIdentity } from './enrol.mjs';
 import { makeInvite } from './invite.mjs';
 import * as RS from './restore.mjs';
+import * as CR from './create.mjs';
 import { alnumCapacity, encode, toPng, toTerminal } from './qr.mjs';
 import { jsQR, readPng, scanPng } from './qr-decode.mjs';
 
@@ -409,6 +410,34 @@ ok(UNLOGGED.test('sigelo-device/1') && UNLOGGED.test('sigelo-identity/0') && UNL
   try { RS.restoreFromWords(swapped, o); } catch (x) { msg = `${x.check} ${x.message}`; }
   ok(/^restore_words /.test(msg) && !leaks(msg), 'restoreFromWords: wrong words refused restore_words, the message carries no word');
   S.fill(0); K.fill(0);
+}
+
+// ---- a new identity made in the apps (create.mjs, pass A10a): S drawn here, three words typed back, then the restore's files
+{
+  const now = 1761400000, ck = (f) => checkOf(f);
+  const s = CR.newSeed('stagenet'), w = s.words(), words = w.join(' '), S = rootFromMnemonic(words);
+  ok(w.length === 25 && RS.checkWords(words).ok && s.vault === vaultFromRoot(S, 'stagenet').address && s.vault.startsWith('5') && CR.newSeed('mainnet').vault.startsWith('4'),
+    'newSeed: 25 words with a valid checksum, a canonical root; vault = the words\' own Monero wallet (stagenet 5…, mainnet 4…)');
+  ok(ck(() => s.commit({ name: 'phone', relay: 'relay.sigelo.ai', now })) === 'create_unchecked' && ck(() => s.check(['a', 'b', 'c'])) === 'create_quiz', 'newSeed: no commit before three words are checked; no check before a quiz');
+  const q = s.quiz();
+  ok(q.length === CR.QUIZ && new Set(q).size === 3 && q.every((x, i) => Number.isInteger(x) && x >= 1 && x <= 25 && (i === 0 || q[i - 1] < x)), `quiz: three distinct positions 1..25, ascending (${q})`);
+  const bad = s.check(q.map((x, i) => (i === 1 ? w[x % 25] === w[x - 1] ? 'zzz' : w[x % 25] : w[x - 1])));
+  ok(bad.ok === false && bad.wrong.join() === String(q[1]) && ck(() => s.commit({ name: 'phone', relay: 'relay.sigelo.ai', now })) === 'create_unchecked' && ck(() => s.check(q.map((x) => w[x - 1]))) === 'create_quiz',
+    'check: a wrong word named by its position; the quiz ends (back to the words), no commit');
+  const q2 = s.quiz(), good = s.check(q2.map((x, i) => (i === 0 ? ` ${w[x - 1].toUpperCase()} ` : i === 1 ? w[x - 1].slice(0, 3) : w[x - 1])));
+  ok(good.ok === true && good.wrong.length === 0, 'check: the right words pass, as the wallet reads them (capitals, blanks, the first three letters)');
+  const r = s.commit({ name: 'phone', relay: 'relay.sigelo.ai', now }), ref = RS.restoreFromWords(words, { name: 'phone', relay: 'relay.sigelo.ai', net: 'stagenet', restore: { restore_date: '2025-10-25' }, now });
+  ok(JSON.stringify({ ...r, vault: undefined }) === JSON.stringify({ ...ref, keeper: { ...ref.keeper, made: 'here' } }) && r.vault === s.vault,
+    'commit: exactly the files a restore from the same 25 words makes (identity, keeper, device, list, notes), the keeper marked made here');
+  ok(r.keeper.created === '2025-10-25' && r.keeper.restore_date === '2025-10-25' && r.keeper.net === 'stagenet' && r.list.seat.epoch === 1 && r.list.devices[0].rank === 'full' && r.list.seat.holder === r.list.devices[0].did,
+    'commit: created today, the wallet\'s birth today (restore_date), stagenet; the first FULL device holding the seat (epoch 1)');
+  ok(ck(() => s.words()) === 'create_spent' && ck(() => s.quiz()) === 'create_spent' && ck(() => s.commit({ name: 'phone', relay: 'relay.sigelo.ai', now })) === 'create_spent',
+    'commit: S zeroed; the words are never given again (create_spent)');
+  const d = CR.newSeed('mainnet'); d.discard();
+  ok(ck(() => d.words()) === 'create_spent' && ck(() => CR.newSeed('testnet')) === 'create_net' && CR.newSeed('mainnet').words().join(' ') !== words, 'discard: S zeroed, refused after; testnet refused; a fresh root each time');
+  ok(ck(() => RS.restoreFromRoot(new Uint8Array(32), { name: 'phone', relay: 'relay.sigelo.ai', now })) === 'restore' && ck(() => RS.restoreFromRoot(new Uint8Array(32).fill(0xff), { name: 'phone', relay: 'relay.sigelo.ai', now })) === 'restore',
+    'restoreFromRoot: zero and S >= l refused (not canonical: a wallet would show other words)');
+  S.fill(0);
 }
 
 report();

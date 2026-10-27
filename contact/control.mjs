@@ -15,7 +15,8 @@
 //                                   local listener answers it ({status, body} of the LAN path)
 //   events    operator → control  { v, typ: "events", seq, since, state }          GET /api/state?since=<since>,
 //                                   pushed on change while the control holds a lease (LEASE, renewed by
-//                                   any request), never polled
+//                                   any request), never polled; past PUSH_MAX a summary (capState:
+//                                   truncated), and the app pulls the rest (GET /api/state?full=1)
 //
 //   const ctl = makeControl({ operator, timeout })     the client: its carrier is attached after
 //   carrier = new Carrier({ ..., onEvent: (e) => ctl.onEvent(e) }); ctl.attach(carrier)
@@ -35,6 +36,9 @@ export const LEASE = 600, RENEW = 300;
 // An answer longer than this is refused too_large (a free reader's message cap is 256 KiB).
 export const ANSWER_MAX = 192 * 1024;
 export const CALL_TIMEOUT = 30_000;
+// A pushed state longer than this goes as a summary (capState): the newest PUSH_KEEP contacts of each
+// group and events, the counts, truncated; the app shows it and pulls the whole on demand (a request).
+export const PUSH_MAX = 64 * 1024, PUSH_KEEP = 20;
 // The computer's cap per control: a bucket of BURST requests, refilled at RATE a second.
 export const RATE = 1, BURST = 10;
 const ID = /^[0-9a-f]{16}$/;
@@ -67,6 +71,24 @@ export function newControlIdentity() {
 }
 
 const isObject = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+
+/**
+ * A state to push: itself while its JSON is at most max; else a summary that fits: each group's
+ * newest keep contacts (by their last message), the newest keep events, every other field as it
+ * was, and truncated: { contacts: {group: count}, events: count, kept } (the counts of the whole).
+ * keep halves until it fits (0: the groups and events empty).
+ */
+export function capState(st, max = PUSH_MAX, keep = PUSH_KEEP) {
+  if (!isObject(st) || JSON.stringify(st).length <= max) return st;
+  const groups = isObject(st.groups) ? st.groups : {}, events = Array.isArray(st.events) ? st.events : [];
+  const newest = (xs, n) => [...xs].sort((a, b) => (b?.last?.at ?? 0) - (a?.last?.at ?? 0)).slice(0, n);
+  const counts = Object.fromEntries(Object.entries(groups).map(([g, xs]) => [g, Array.isArray(xs) ? xs.length : 0]));
+  for (let n = keep; ; n = n > 1 ? Math.floor(n / 2) : 0) {
+    const out = { ...st, groups: Object.fromEntries(Object.entries(groups).map(([g, xs]) => [g, Array.isArray(xs) ? newest(xs, n) : xs])),
+      events: events.slice(-n), truncated: { contacts: counts, events: events.length, kept: n } };
+    if (n === 0 || JSON.stringify(out).length <= max) return out;
+  }
+}
 export const newId = () => bytesToHex(randomBytes(8));
 export const requestMessage = ({ id, method, path, body }) => ({ v: CONTROL_V, typ: 'request', id, method, path, ...(body !== undefined && { body }) });
 export const responseMessage = ({ id, status, body }) => ({ v: CONTROL_V, typ: 'response', id, status, body });
@@ -144,8 +166,11 @@ export function makeControl({ operator, timeout = CALL_TIMEOUT, now = () => Date
       if (carrier === null) return err(503, 'remote', 'not connected yet');
       let url;
       try { url = new URL(path, 'http://app'); } catch { return err(404, 'route', 'not a route'); }
-      // The pushed state stands for GET /api/state while the lease runs: no relay message.
-      if (method === 'GET' && url.pathname === '/api/state' && state !== null && now() - asked < RENEW * 1000) {
+      // A control's four words are confirmed on the computer only: never asked, no relay message.
+      if (url.pathname === '/api/controls' || url.pathname.startsWith('/api/controls/')) return err(403, 'remote', 'controls are confirmed on the computer\'s own page only');
+      // The pushed state stands for GET /api/state while the lease runs: no relay message. full=1
+      // (a pushed summary's "pull the rest") always asks the computer.
+      if (method === 'GET' && url.pathname === '/api/state' && state !== null && now() - asked < RENEW * 1000 && url.searchParams.get('full') !== '1') {
         return { status: 200, body: JSON.parse(JSON.stringify(local(Number(url.searchParams.get('since') ?? 0) || 0))) };
       }
       return request(method, path, body);

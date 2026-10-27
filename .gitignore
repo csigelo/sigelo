@@ -30,3 +30,5 @@ world.lock
 /apps/android/build/
 /apps/android/app/build/
 /apps/android/local.properties
+# relay/site/build.mjs: the dark pages (DISCLOSED false), built beside dist/, never deployed
+dist-dark/

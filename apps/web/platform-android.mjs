@@ -19,9 +19,12 @@
 //   → {op:"open", id, kind, data}                  ← {id, data}
 //   → {op:"mode", id, mode}                        ← {id, mode}   the form at first start ("self" | "remote")
 //   → {op:"wiped", id}                             ← {id}         the page has cleared its storage after a switch
-//   → {op:"secure", id, on}                        ← {id}         FLAG_SECURE on the window (no screenshot, no recents
-//                                                                 thumbnail) while the restore-from-seed screen is up
+//   → {op:"secure", id, on, door?}                 ← {id}         FLAG_SECURE on the window (no screenshot, no recents
+//                                                                 thumbnail) while a seed screen is up; door: the system
+//                                                                 Back swallowed too (a new identity's words, create.mjs)
 //   → {op:"clip-clear", id}                        ← {id}         the clipboard cleared (after the words were pasted)
+//   → {op:"clip-copy", id, text, clear}            ← {id}         text on the clipboard marked sensitive (no preview), cleared
+//                                                                 by the shell after `clear` seconds (stagenet words only)
 //   any ← {id, error:{check, message}}
 // https: https:// to any host; http:// only to a private IPv4 address (a computer's `ui --remote`
 // on the LAN, sealed in the page). tls: certificate and host name checked by the system's trust
@@ -34,7 +37,7 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear']);
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy']);
 export const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); };
 export const unb64 = (s) => { const t = atob(s), o = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) o[i] = t.charCodeAt(i); return o; };
 
@@ -106,10 +109,12 @@ function makeBridge(info, port) {
     async tls(host, port) { checkNetwork(); const r = await request('tls', { host, port }); return stream(r.stream); },
     async seal(bytes, { kind, full = false }) { return unb64((await request('seal', { kind, full, data: b64(bytes) })).data); },
     async open(bytes, { kind }) { return unb64((await request('open', { kind, data: b64(bytes) })).data); },
-    /** FLAG_SECURE on (the restore screen is up) or off. */
-    async secure(on) { await request('secure', { on: on === true }); },
+    /** FLAG_SECURE on (a seed screen is up) or off; door: the system Back does nothing while on. */
+    async secure(on, { door = false } = {}) { await request('secure', { on: on === true, door: on === true && door === true }); },
     /** The system clipboard emptied. */
     async clipClear() { await request('clip-clear'); },
+    /** Text on the clipboard, marked sensitive, emptied by the shell after `clear` seconds (1 to 300). */
+    async clipCopy(text, { clear = 60 } = {}) { await request('clip-copy', { text: String(text), clear }); },
   });
 }
 

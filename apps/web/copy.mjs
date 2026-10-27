@@ -39,7 +39,7 @@ const SOURCES = [
 // dependencies in Node (nodeDeps) and is given them in the page (shell.mjs). Not followed.
 export const NODE_ONLY = { 'vendor/remote-client.mjs': ['node:module', 'node:url'] };
 // The page's modules (not copied: they are the app), and the QR codec ui.js imports by name.
-const ENTRIES = ['./app.mjs', './router.mjs', './platform-web.mjs', './platform-stub.mjs', './pow-worker.mjs', './platform-android.mjs', './ws-over-stream.mjs', './shell.mjs', './seed.mjs', '/qr.mjs', '/qr-decode.mjs'];
+const ENTRIES = ['./app.mjs', './router.mjs', './platform-web.mjs', './platform-stub.mjs', './pow-worker.mjs', './platform-android.mjs', './ws-over-stream.mjs', './shell.mjs', './seed.mjs', './create.mjs', '/qr.mjs', '/qr-decode.mjs'];
 const ASSETS = ['vendor/ui.js', 'vendor/ui.css', 'vendor/icon.svg'];
 
 export const sourceOf = (rel) => {

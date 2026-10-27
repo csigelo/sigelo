@@ -28,6 +28,7 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `ws-over-stream.mjs` | RFC 6455 client framing over the shell's TLS stream (wss), and the stream as a socket (mqtts) |
 | `shell.mjs` | In the Android app: the form picked at first start; the remote form (a computer's page, on the LAN or over the relay) |
 | `seed.mjs` | Restore from seed: the two screens, `restoreInto` (derive with `contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
+| `create.mjs` | Create new identity: the form, the 25 words once, the three-word check; `createInto` (commit with `contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
 | `copy.mjs` | The vendoring: walks the import graph, copies each file byte for byte, writes `vendor.json` |
 | `vendor.json` | Every vendored file, its source and SHA-256 (committed; `vendor/` is not) |
 | `test-web.mjs`, `test-shell.mjs` | The tests, in Node, through the same import map (`test-fakes.mjs`: IndexedDB, Worker) |
@@ -37,8 +38,8 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 `ui.js` picks its backend at load: `shell` in the GTK phone app (remote control), `local` when
 `app.mjs` set `globalThis.sigeloLocal`, else `http` (the computer's `ui`). The router is
 `contact/page.mjs`, the module `sigelo-agent ui` serves its routes from, so a route answers the same
-JSON here; what the app does not have answers as nothing: `GET /api/agents` is `[]`, enrolling or
-pairing an agent `404 agent`, `GET /api/devices` an empty list, adding, scanning or revoking a device
+JSON here; what the app does not have answers as nothing: `GET /api/agents` (an agents' directory) is `[]`, enrolling or
+pairing a local agent `404 agent`, `GET /api/devices` an empty list, adding, scanning or revoking a device
 `409 not_here` (that is the operator's computer). Changes are pushed (`onChange`); the 2 s poll stays,
 with the same `since`. A banner says what the page holds: SAFE worker, FULL standby, or remote.
 Remote over the relay (`SIGELO:CTL:`, contact/control.mjs): the computer pushes the state (events), so
@@ -92,6 +93,32 @@ The words are never stored, logged or shown again. Seat here: a signed list, thi
 seat at epoch 1 (`seat init`). Elsewhere: a standby. `router.mjs` then never logs in, refuses writes
 with `seat_elsewhere`, and the banner offers "Take the seat here" (`POST /api/seat/take`). Me shows
 "Restored from seed on <day> · keeper j=1 · seat here".
+
+## Create new identity (create.mjs)
+
+The first choice at first start. The form: the device's name, mainnet or stagenet, the relay. Create
+draws S in the page (`contact/create.mjs` `newSeed`: `newRoot`'s draw, `crypto.getRandomValues`,
+redrawn until 0 < S < l) and holds the network until the end. The words screen is a one-way door: the
+25 words numbered in a 5 × 5 grid, the address of their own Monero wallet (a wallet app restored from
+the words shows the same), no Back (the Android shell swallows the system's, `secure` with `door`),
+`FLAG_SECURE`, no copy on mainnet (not selectable); on stagenet a copy, the clipboard emptied after
+60 s. One button, "I have written down my 25 words". Then three words asked by number: wrong, back to
+the grid; right, `commit` gives exactly a restore's files for those words (operator, K_1, this device
+FULL holding the seat, `created` and `restore_date` today, `made: "here"`), sealed as a restore,
+S zeroed, the page restarts. Nothing is stored before the check; there is no way to see the words
+again. Me: "Created on <day>; the 25 words are on your paper".
+
+## Agents (pass A10b)
+
+The first screen, as Monerujo's transaction list: one row per worker of the keeper (`GET /api/agents/workers`: name,
+DID, where, enrolled / pending code / revoked, last seen), this device among them; below, **Enrol** and **Invite**.
+Enrol, as Receive: a name and a tier (own; friend or quiet for an agent that reads the web), the relay (the picker:
+tap to use, hold to edit, a typed host tested before OK), then one code big with its ten minutes, copy and share,
+and `sigelo-agent init --enrol <code>` for the other machine; the four words once it pairs; then enrolled. The code
+is made on the app's own session (`contact/page.mjs`), worker i the next free, at the seat only (a standby refuses
+`seat_elsewhere`). The keeper is opened per use and resealed after a change (`seed.mjs` `keeperOf`). Tapping a row:
+details, Rename, Revoke (its contact forgotten; its attestation stays valid to its end, said before).
+Without a keeper (an imported file) the list is empty and Enrol is off.
 
 ## Code trust
 

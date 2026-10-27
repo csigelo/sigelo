@@ -2,7 +2,8 @@
 # sigelo on F-Droid: readiness
 
 Not submitted. This file says what F-Droid needs, what is ready, and what waits for a release
-that ships the app. The draft recipe is [`fdroid/io.sigelo.app.yml`](fdroid/io.sigelo.app.yml);
+that ships the app. The recipe is [`fdroid/io.sigelo.app.yml`](fdroid/io.sigelo.app.yml) (route B,
+below); the merge request, ready to open after v0.1.11, is [`fdroid/MR.md`](fdroid/MR.md);
 the store listing is [`app/fastlane/metadata/android/en-US/`](app/fastlane/metadata/android/en-US/).
 `node apps/android/check.mjs` checks both.
 
@@ -14,7 +15,7 @@ the store listing is [`app/fastlane/metadata/android/en-US/`](app/fastlane/metad
   (@noble, MQTT.js) are MIT. The relay (AGPL, its own repository) is not in the APK and not needed
   to build it: CI fetches it for the page's tests only. The recipe skips it, and the tests.
 - **No proprietary dependency:** no Gradle dependency at all, no AndroidX, no Google library. The
-  Android Gradle Plugin 8.7.3 comes from Google's Maven, which F-Droid's scanner allows.
+  Android Gradle Plugin 8.8.2 comes from Google's Maven, which F-Droid's scanner allows.
 - **No tracker, no ads.** No dependency metadata block in the APK (`dependenciesInfo` off).
 - **No binary in the repository:** `apps/web/vendor/` and `app/src/main/assets/` are not committed
   (`vendor.json` lists hashes only). F-Droid's scanner (fdroidserver at commit 2d1e622, run here on a
@@ -35,13 +36,21 @@ Read from the [Build Metadata Reference](https://f-droid.org/docs/Build_Metadata
 fdroidserver's source (`execute_sudo.py`, `common.py`, `build_local_run.py`, `buildserver/`):
 
 - `sudo:` runs as root in the build container, then `sudo` is removed. Its commands are joined
-  with `; `. Here it installs Node 24 from nodejs.org, pinned by SHA-256. The policy allows
+  with `; ` and run under `bash -e -u -o pipefail`: one failure stops the build. Here it sets `java` and `javac` to OpenJDK 21 (the image picks its highest JDK, which
+  would change the bytes the day it holds a 25), and installs Node 24 from nodejs.org, pinned by
+  SHA-256 (`xz-utils` too: the image purges it). The policy allows
   "prebuilt FLOSS binaries from ... Node.js (current versions)"; Debian 13's own Node (20) is
   older than our `engines` (≥ 22).
 - `prebuild:` runs next; the source scan runs after it. Here: `npm ci --ignore-scripts` in `ts/` and
-  `contact/`, so the scan sees every package the page ships.
+  `contact/`, so the scan sees every package the page ships. npm at build time is the policy's route
+  for JavaScript: the scanner wants a lockfile beside each `package.json` (ours pin every package by
+  integrity hash) and scans what it fetched; no srclib, no vendored tarball. The scan of that tree is
+  clean, so no `scanignore` and no `scandelete`.
 - `build:` runs after the scan, then `gradle assembleRelease` in `subdir`. Here: `npx tsc` and
   `node apps/android/assets.mjs` (copy.mjs, then the page into the APK's assets). Both offline.
+- Gradle: F-Droid's own (`gradlew-fdroid`), 8.10.2 by the wrapper's version and SHA-256, with
+  `LC_ALL=C.UTF-8`, `TZ=Etc/UTC`, `SOURCE_DATE_EPOCH` (unused here), no daemon. It first strips
+  `signingConfigs` from `app/build.gradle` (tried: still valid; only the debug build had one).
 - Network: neither the docs nor the code cut it off. The build image (Debian trixie,
   `default-jdk-headless`) sets Gradle's network timeouts, and Gradle fetches the plugin from
   Google's Maven during the build. Our network use is `sudo` (Node) and `prebuild` (npm, lockfiles).
@@ -50,7 +59,8 @@ fdroidserver's source (`execute_sudo.py`, `common.py`, `build_local_run.py`, `bu
 - F-Droid takes no icon from an APK whose launcher icon is XML only (ours, adaptive). So
   `images/icon.png` is in the listing: `node apps/android/icon.mjs` draws it from the GTK app's SVG.
 
-Checked here: `fdroid lint`, `readmeta` and `rewritemeta` (no change) pass on the draft. The
+Checked here (fdroidserver 2.4.2): `fdroid lint`, `readmeta` and `rewritemeta` (no change) pass;
+`checkupdates --allow-dirty` finds v0.1.10, versionCode 2, in `apps/android/app`. The
 recipe's prebuild and build, run from `apps/android/app` on a clean clone, give the same 62 assets,
 byte for byte, as a checkout at another path; `vendor.json` unchanged. Not checked here: Gradle
 itself (no Android SDK on this machine).
@@ -63,30 +73,46 @@ APK cannot replace each other, and switching costs an uninstall, which erases wh
 (the sealed identity, contacts, history). `release.json` does not cover F-Droid's APK;
 `apk-check.sh` refuses it.
 
-**B. Reproducible, our signature.** The recipe gets `Binaries:` (the GitHub release's
+**B. Reproducible, our signature.** The recipe has `Binaries:` (the GitHub release's
 `sigelo-%v.apk`) and `AllowedAPKSigningKeys:` (the `cert_sha256` of release/apk-ceremony.md).
-F-Droid builds, compares with our signed APK minus its signature, and publishes ours only on a
-match. One key everywhere; `apk-check.sh` works on F-Droid's copy. Needs the APK key made (the
-ceremony) and a bit-identical build:
-
-- Deterministic already: the assets (above); npm lockfiles; Gradle and AGP pinned; AGP ≥ 7.1
-  fixes the ZIP entry order; no dependency, so no `baseline.prof`; no PNG resource;
-  not minified; `version-control-info.textproto` holds the commit, the same when both build the tag.
-- To fix: the JDK. CI uses Temurin 17, F-Droid Debian's default JDK (21). Align them (CI on the
-  same JDK, or the recipe installs CI's), then build once both ways and compare (`fdroid build` in
-  F-Droid's image against CI's unsigned APK; `apksigcopier` for the signed one).
-- Sign with the `apksigner` of build-tools 34 (F-Droid's advice for apksigcopier) or check it copies.
+F-Droid builds the tag, copies our signature onto its build and publishes ours only if it then
+verifies (`apksigcopier`, then `apksigner`). One key everywhere; `apk-check.sh` works on F-Droid's
+copy. It needs our signed APK to be CI's unsigned one plus the signature, and F-Droid's build to
+be CI's, bit for bit.
 
 **Recommended: B**, from the first F-Droid release: moving from A to B later makes every F-Droid
 user reinstall and lose what the app holds. A only if B cannot be made to match.
+
+## Determinism (A8)
+
+What can differ between CI and F-Droid's build, and where it stands:
+
+| Input | Finding | Done |
+|---|---|---|
+| Signing | apksigner (build-tools 35) re-pads the stored entries (`classes.dex`, `resources.arsc`) unless `--alignment-preserved`: v0.1.10's signed APK fails F-Droid's signature copy against CI's own unsigned build (tried with fdroidserver's `verify_apks`) | the ceremony signs with `--alignment-preserved` and checks the signed APK begins with the unsigned one; v0.1.10 stays off F-Droid |
+| JDK | javac's output differs between majors; CI had Temurin 17, F-Droid's image Debian's default, 21 | CI on Temurin 21; the recipe sets `java`/`javac` to OpenJDK 21; class files stay Java 17 (`--release` is not possible beside AGP's `-bootclasspath`) |
+| D8 | before R8 8.7.20 the dex could depend on the CPU count | AGP 8.8.2 (the newest on Gradle 8.10.2) |
+| Deflate | Temurin bundles zlib, Debian's JDK uses the system's | the compare run names "compression only" if so |
+| Zip | AGP ≥ 7.1: fixed order, every entry dated 1981-01-01 (seen in v0.1.10's APK) | nothing |
+| VCS info | `version-control-info.textproto` says `NO_SUPPORTED_VCS_FOUND` (the Gradle root is not the git root): the same everywhere | nothing |
+| Other | no BuildConfig, no dependency (no `baseline.prof`), not minified, javac UTF-8, the page's 71 assets byte-identical across checkouts | encoding pinned |
+
+The compare run, `.github/workflows/android-reproduce.yml` (dispatch only, a report, never red):
+v0.1.10 and the dispatched commit, each with Temurin 17 and 21 and Debian 21 (trixie) and 17
+(bookworm) in containers run as F-Droid runs Gradle; it names differing entries, copies a throwaway
+signature (`--alignment-preserved` and not) onto the Debian builds with apksigcopier, checks the
+published v0.1.10 APK the same way, and prints one verdict. If 21 does not match but 17 does: CI
+back on 17 and the recipe installs bookworm's `openjdk-17-jdk-headless` (F-Droid offers it).
+
+Status: built; reproduce run pending.
 
 ## Steps and who acts
 
 1. Release operator: the release that ships the app (release/RELEASE.md: versionName, versionCode
    + 1, the tag; route B: the APK ceremony, as for GitHub). Nothing else.
-2. Maintainer: set the draft's versionName, versionCode, commit and CurrentVersion to that tag (a
-   `changelogs/<versionCode>.txt` with it; check.mjs insists), and for B add `Binaries:` and
-   `AllowedAPKSigningKeys:`; run `fdroid build io.sigelo.app` in F-Droid's container (B: compare).
+2. Maintainer: set the recipe's versionName, versionCode, commit and CurrentVersion to that tag (a
+   `changelogs/<versionCode>.txt` with it; check.mjs insists); run `fdroid build io.sigelo.app` in
+   F-Droid's container, which fetches `Binaries:` and compares (fdroid/MR.md has the steps).
 3. Maintainer: fork fdroiddata, add `metadata/io.sigelo.app.yml`, one merge request ("New App"),
    then wait for the F-Droid reviewers. One concise reply per question; no pings.
 4. F-Droid: after the merge, the app appears in 24 to 48 hours. Later tags update by themselves
@@ -94,5 +120,5 @@ user reinstall and lose what the app holds. A only if B cannot be made to match.
 
 ## Time
 
-Ready now: listing, icon, draft, checks. After the tag: step 2 about half a day, B's JDK alignment
-and comparison about one more. Review: the queue's pace, often weeks; not ours to speed up.
+Ready now: listing, icon, recipe, checks, the compare workflow, the merge request text. After the
+tag: step 2 about half a day. Review: the queue's pace, often weeks; not ours to speed up.

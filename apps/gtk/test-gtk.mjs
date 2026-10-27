@@ -87,6 +87,35 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
   ok('gjs, this phone: no identity → ui\'s own message (keeper --from-words)', n.ok === false && /keeper --from-words/.test(n.message ?? ''), JSON.stringify(n).slice(0, 400));
 }
 
+// ── this phone's Agents: the page the app shows (ui --app, as it spawns it) enrols on the seat; the CLI's enrol
+// beside it refuses busy, so the page's route does it (UI-API.md /api/agents/*). No relay here: the code is refused connect.
+{
+  const web = readFileSync(join(S, 'web', 'ui.js'), 'utf8');
+  ok('installed page: Agents first, the Enrol and Invite bar, the code big, the relay picker\'s Test', /show\('agents'\);\s*poll\(\);/.test(web) && web.includes("'/api/agents/enrol-code'")
+    && web.includes("class: 'inner two'") && web.includes("'code big'") && web.includes("'/api/relays/test'"));
+  const { request } = await import('node:http');
+  const c = spawn(process.execPath, [CLI, 'ui', '--app', '--identity', human], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  let so = '';
+  c.stdout.on('data', (d) => { so += d; }); c.stderr.on('data', () => {});
+  const end = Date.now() + 20000;
+  while (!/#t=[0-9a-f]{32}/.test(so) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+  const [, port, token] = /127\.0\.0\.1:(\d+)\/#t=([0-9a-f]{32})/.exec(so) ?? [];
+  const call = (method, path, body) => new Promise((done) => {
+    const r = request({ host: '127.0.0.1', port, method, path, headers: { Host: `127.0.0.1:${port}`, 'X-Sigelo-Token': token, ...(method === 'POST' && { Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/json' }) } },
+      (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => done({ status: res.statusCode, body: JSON.parse(b || 'null') })); });
+    r.on('error', (e) => done({ status: 0, body: { error: { message: e.message } } }));
+    r.end(body === undefined ? undefined : JSON.stringify(body));
+  });
+  const wk = await call('GET', '/api/agents/workers'), ec = await call('POST', '/api/agents/enrol-code', { name: 'vps' });
+  const cli = spawnSync(process.execPath, [CLI, 'enrol', '--name', 'vps', '--identity', human], { env, encoding: 'utf8' });
+  ok('this phone\'s page: the Agents list from its keeper (GET /api/agents/workers); Enrol runs in the page (the code refused connect: no relay here), not busy',
+    wk.status === 200 && wk.body.keeper === true && Array.isArray(wk.body.workers) && ec.status === 409 && ec.body.error.check === 'connect', JSON.stringify([wk, ec]).slice(0, 400));
+  ok('this phone: the CLI\'s enrol beside the page → exit 1, busy (the page enrols)', cli.status === 1 && /open in sigelo-agent ui|busy/.test(cli.stderr), cli.stderr.slice(-300));
+  c.stdin.end();
+  await new Promise((r) => c.on('close', r));
+  ok('this phone\'s page: stdin closed → stopped, the keeper\'s roster unchanged (the refused code took no index)', !Object.keys(JSON.parse(readFileSync(human.replace(/\.json$/, '.keeper.json'), 'utf8')).workers).length);
+}
+
 
 // ── restore from seed (design/apps-seed.md): the start page's form, its word check, and the app's restore:
 // keeper --from-words --keychain on stdin (a Secret Service: a fake secret-tool keeping items under $HOME), then the seat
@@ -121,6 +150,22 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
     r2.ok === true && r2.seat === 'elsewhere' && r2.standby === 'gphone' && r2.refused === true && r2.take?.ok === false && existsSync(join(H2, '.config', 'sigelo-app', 'standby')), JSON.stringify(r2).slice(0, 400));
   const bad = await restoreIn(join(T, 'home-bad'), { SIGELO_APP_WORDS: l.slice(0, 24).join(' ') });
   ok('gjs, restore: 24 words refused by keeper (no word echoed), nothing written', bad.ok === false && !l.some((x) => (bad.message ?? '').split(/\W+/).includes(x) && x.length > 3) && !existsSync(join(T, 'home-bad', '.config', 'sigelo', 'me.local.json')), JSON.stringify(bad).slice(0, 300));
+
+  // ── create a new identity (pass A10a): the start page's screens, then the app: keeper --new-words, three words checked in the app, keeper --from-words --keychain --made-here
+  ok('start page: Create new identity first, with the name and the network; the words in a numbered grid, the wallet\'s address, copy for stagenet only, one way on ("I have written down my 25 words"), then three words typed back',
+    start.indexOf('<h2>Create new identity</h2>') < start.indexOf('<h2>This phone</h2>') && start.includes('id="create-grid"') && start.includes('id="create-vault"') && /<button id="create-copy" hidden>/.test(start)
+    && start.includes('I have written down my 25 words') && [0, 1, 2].every((i) => new RegExp(`<input id="create-a${i}" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">`).test(start)) && !/create-back|id="create-cancel"/.test(start));
+  ok('start.js: the app draws the words (newwords) and checks the three typed back (create: answers only, never the words); copy only on stagenet, the clipboard emptied after 60 s; the grid emptied after',
+    js.includes("ask('newwords', { net: createNet })") && js.includes("ask('create', { answers, name:") && /if \(createNet !== 'stagenet' \|\| !shown\) return;/.test(js) && js.includes('CLIP_SECONDS = 60') && js.includes("ask('clipclear')") && /shown = null; drop\(\)/.test(js) && !/console\./.test(js));
+  const HC = join(T, 'home-create'), c = await restoreIn(HC, { SIGELO_APP_TEST: 'create', SIGELO_APP_WORDS: '' });
+  const mc = join(HC, '.config', 'sigelo', 'me.local.json'), kc = mc.replace(/\.json$/, '.keeper.json');
+  const idc = existsSync(mc) ? JSON.parse(readFileSync(mc, 'utf8')) : {}, kpc = existsSync(kc) ? JSON.parse(readFileSync(kc, 'utf8')) : {}, today = new Date().toISOString().slice(0, 10);
+  ok('gjs, create: keeper --new-words gave 25 words and the stagenet address of their wallet; a wrong word named by position (back to the grid); answers without a quiz refused',
+    c.new === true && c.count === 25 && /^5[1-9A-HJ-NP-Za-km-z]{94}$/.test(c.vault ?? '') && Array.isArray(c.wrong) && c.wrong.length === 1 && c.unasked === false, JSON.stringify(c).slice(0, 400));
+  ok('gjs, create: the right words (any case) → keeper --from-words --keychain --made-here: your key and K_1 in the keyring, made here, stagenet, created and the wallet\'s birth today; the words dropped after (no second create)',
+    c.ok === true && c.kept === false && c.again === false && idc.provider === 'keychain' && typeof idc.secret === 'object' && idc.derived?.n === 0 && kpc.root_hex === undefined && kpc.root?.provider === 'keychain'
+    && kpc.made === 'here' && kpc.net === 'stagenet' && kpc.created === today && kpc.restore_date === today && c.seat === 'pending', JSON.stringify(c).slice(0, 400) + JSON.stringify(kpc).slice(0, 300));
+  ok('gjs, create: nothing the app printed carries a word of the 25 (only counts, positions, the address)', Object.keys(c).every((k) => ['new', 'count', 'vault', 'wrong', 'unasked', 'ok', 'seat', 'message', 'kept', 'again', 'standby', 'refused', 'stderr'].includes(k)), Object.keys(c).join());
 }
 
 // ── over the relay: a computer's `ui --remote --relay` (in this process), the app pairs by SIGELO:CTL:
@@ -140,8 +185,14 @@ else {
   spawnSync(process.execPath, [CLI, 'keeper', '--from-words', '--identity', op], { env, input: newRoot(), encoding: 'utf8' });
   const pg = await U.startUi({ identity: op, agents: join(H, 'op-agents'), carrier: { relay: 'relay.test', endpoints }, remote: { relay: true, name: 'phone', scope: 'read' } });
   const go = join(T, 'confirmed');
+  // The control key sealed in the keyring (a fake Secret Service under $HOME), as the identity's --keychain key is;
+  // a keyring that does not answer: plain 0600 and a warning.
+  const KR = join(T, 'kr-up'), KD = join(T, 'kr-down');
+  mkdirSync(KR, { recursive: true }); mkdirSync(KD, { recursive: true });
+  writeFileSync(join(KR, 'secret-tool'), '#!/bin/sh\nd="$HOME/.fake-keyring"; mkdir -p "$d"\ncase "$1" in\n  lookup) [ -f "$d/$5" ] && cat "$d/$5" && exit 0; exit 1;;\n  store) cat > "$d/$6"; exit 0;;\n  clear) rm -f "$d/$5"; exit 0;;\nesac\nexit 2\n', { mode: 0o755 });
+  writeFileSync(join(KD, 'secret-tool'), '#!/bin/sh\necho "Cannot autolaunch D-Bus without X11" >&2\nexit 1\n', { mode: 0o755 });
   try {
-    const renv = { ...env, SIGELO_RELAY_ENDPOINTS: JSON.stringify(endpoints), SIGELO_RELAY_REGISTRY: 'off', SIGELO_CONTROL: join(H, 'control.local.json'), SIGELO_AGENT: JSON.stringify([process.execPath, CLI]) };
+    const renv = { ...env, PATH: `${KR}:${process.env.PATH}`, SIGELO_KEY_PROVIDER: '', SIGELO_RELAY_ENDPOINTS: JSON.stringify(endpoints), SIGELO_RELAY_REGISTRY: 'off', SIGELO_CONTROL: join(H, 'control.local.json'), SIGELO_AGENT: JSON.stringify([process.execPath, CLI]) };
     const c = spawn('gjs', ['-m', join(S, 'sigelo-app.js')], { env: { ...renv, SIGELO_APP_TEST: 'relay', SIGELO_APP_CONTROL: ` ${pg.relay.line}\n`, SIGELO_APP_WAIT: go }, stdio: ['ignore', 'pipe', 'pipe'] });
     let so = '', se = ''; c.stdout.on('data', (d) => { so += d; }); c.stderr.on('data', (d) => { se += d; });
     const closed = new Promise((r) => c.on('close', r)), killer = setTimeout(() => c.kill('SIGKILL'), 120000);
@@ -161,6 +212,23 @@ else {
     const st = (await import('node:fs')).statSync(join(H, 'control.local.json'));
     const cf = JSON.parse(readFileSync(join(H, 'control.local.json'), 'utf8'));
     ok('control.local.json: 0600, a random key, recovery null, the operator\'s DID; not an attested identity', (st.mode & 0o777) === 0o600 && cf.genesis.recovery === null && cf.operator === r.did && cf.attestations.length === 0);
+    const { did: didOf } = await import(join(ROOT, 'ts', 'dist', 'sigelo.js'));
+    ok('control.local.json: its key sealed in the keyring (provider keychain, sigelo-wrap/1, the item under the control\'s DID), no plain key in the file; control ui opened it',
+      cf.provider === 'keychain' && cf.secret?.provider === 'keychain' && cf.secret.v === 'sigelo-wrap/1' && cf.secret.account === didOf(cf.genesis) && !/"secret":"[0-9a-f]{64}"/.test(readFileSync(join(H, 'control.local.json'), 'utf8'))
+      && readdirSync(join(H, '.fake-keyring')).includes(cf.secret.account) && r.ok === true, JSON.stringify(cf.secret));
+    // No keyring answering: a second control, plain 0600, and the warning.
+    const second = await pg.relay.issue('tablet', 'read'), plainFile = join(H, 'control-plain.local.json');
+    const pp = await new Promise((res) => {
+      const c2 = spawn(process.execPath, [CLI, 'control', 'pair', second.line], { env: { ...renv, PATH: `${KD}:${process.env.PATH}`, SIGELO_CONTROL: plainFile }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let o2 = '', e2 = ''; c2.stdout.on('data', (d) => { o2 += d; }); c2.stderr.on('data', (d) => { e2 += d; });
+      c2.on('close', (status) => res({ status, o2, e2 }));
+    });
+    await Promise.race([pg.relay.paired(), new Promise((x) => setTimeout(x, 5000))]);
+    const pf = existsSync(plainFile) ? JSON.parse(readFileSync(plainFile, 'utf8')) : {};
+    ok('control pair, no keyring answering: paired all the same, the key plain in a 0600 file, one warning saying so', pp.status === 0 && /^[0-9a-f]{64}$/.test(pf.secret ?? '') && pf.provider === undefined
+      && ((await import('node:fs')).statSync(plainFile).mode & 0o777) === 0o600 && pp.e2.includes('no OS keyring answers here, so the control key is a plain file (0600)'), JSON.stringify(pp).slice(0, 500));
+    const fg = spawnSync(process.execPath, [CLI, 'control', 'forget'], { env: renv, encoding: 'utf8' });
+    ok('control forget: the file and its keyring item gone', fg.status === 0 && !existsSync(join(H, 'control.local.json')) && !readdirSync(join(H, '.fake-keyring')).includes(cf.secret?.account), fg.stderr);
   } finally {
     await pg.close(); await relay.close?.();
   }

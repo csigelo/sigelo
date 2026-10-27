@@ -25,12 +25,14 @@ export interface Control { id: string; key: string; scope: Scope; ctr: number; c
 // The scope table (design: read ⊂ chat ⊂ all). A route in none of them is never remote. Links: the list
 // is read; answering an introduction pairs as accept does (chat); making or ending a link and an allow
 // rule set who the agents talk to and at what trust, as tier and forget do (all). The relay setting
-// and the registry's list: all (where new codes point is the operator's choice).
-const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages', 'GET /api/links'];
+// and the registry's list: all (where new codes point is the operator's choice). The agents list (the
+// keeper's workers) is read; enrolling, revoking or renaming a worker is all.
+const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages', 'GET /api/links', 'GET /api/agents/workers'];
 const CHAT = [...READ, 'POST /api/send', 'POST /api/accept', 'POST /api/invite', 'POST /api/invite/cancel', 'POST /api/words', 'POST /api/rename', 'POST /api/tag', 'POST /api/sync',
   'POST /api/links/answer'];
 const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/history/clear', 'GET /api/agents', 'POST /api/agents/enrol', 'POST /api/agents/pair',
-  'POST /api/link', 'POST /api/unlink', 'POST /api/links/allow', 'GET /api/settings', 'POST /api/settings', 'GET /api/relays'];
+  'POST /api/link', 'POST /api/unlink', 'POST /api/links/allow', 'GET /api/settings', 'POST /api/settings', 'GET /api/relays', 'POST /api/relays/test',
+  'POST /api/agents/enrol-code', 'POST /api/agents/revoke', 'POST /api/agents/rename'];
 export const SCOPES: Record<Scope, ReadonlySet<string>> = { read: new Set(READ), chat: new Set(CHAT), all: new Set(ALL) };
 export const isScope = (s: unknown): s is Scope => s === 'read' || s === 'chat' || s === 'all';
 /** Moving keys needs a human at the computer: never remote, whatever the scope. */

@@ -26,8 +26,10 @@ jobs:
       # Node 24: the page's tests need navigator.locks (Web Locks), which Node 22 lacks.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
         with: { node-version: '24' }
+      # JDK 21: the major F-Droid's build server runs (Debian's default-jdk); javac's output differs
+      # between majors, and F-Droid publishes our signed APK only if its build matches (FDROID.md).
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with: { distribution: temurin, java-version: '17' }
+        with: { distribution: temurin, java-version: '21' }
       - name: the page's sources (ts/dist; contact, relay and adapter dependencies)
         run: |
           (cd ts && npm ci --ignore-scripts && npx tsc)

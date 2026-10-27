@@ -20,7 +20,7 @@
 // its package.json. Prints `ok …` lines, then `ALL PASS (<n> checks)` and exits 0, or `FAIL …`
 // lines and exits 1.
 import { createServer } from 'node:http';
-import { readFileSync, existsSync, statSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -829,6 +829,35 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(/^[a-z0-9.-]+\/[a-z0-9._-]+$/i.test(sj.name) && sj.version === pj.version && sj.description.length <= 100, `server.json: name ${sj.name}, version = package.json (${pj.version}), description ≤ 100 chars`);
   ok(pj.mcpName === sj.name && sj.name.startsWith('io.github.') && sj.repository?.url === `https://github.com/${sj.name.split('/')[0].slice('io.github.'.length)}/sigelo`, `server.json: package.json mcpName = ${sj.name} (the registry's package-ownership check), its GitHub namespace = repository.url's account`);
   ok(p?.registryType === 'npm' && p.identifier === pj.name && p.version === pj.version && p.transport?.type === 'stdio', 'server.json: one npm package, sigelo-mcp, stdio');
+}
+
+// ---- dark pages (ROADMAP §15 R1; site/build.mjs DISCLOSED): a fixture page, built into scratch directories,
+// never site/dist. False: beside the output (<out>-dark/), noindex, and nothing in the site names it. True: a
+// page of the site, in the sitemap, index.json and llms.txt.
+{
+  const { build, DISCLOSED, readDark, darkOut, DARK_DIR } = await import('../build.mjs');
+  const tmp = mkdtempSync(join(tmpdir(), 'site-dark-'));
+  try {
+    const fixture = join(tmp, 'src'); mkdirSync(fixture);
+    writeFileSync(join(fixture, 'dark-fixture.md'), '---\ntitle: Dark fixture\ndescription: A page written ahead of the go.\n---\n\n# Dark fixture\n\n[Contact us for a quote](/contact.html)\n');
+    const shut = join(tmp, 'shut'), open = join(tmp, 'open');
+    const walkAll = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkAll(join(d, e.name)) : [join(d, e.name)]));
+    const r0 = build({ out: shut, disclosed: false, darkDir: fixture });
+    const named = walkAll(shut).filter((f) => !/\.(png|ico)$/.test(f) && readFileSync(f, 'utf8').includes('dark-fixture'));
+    const aside = darkOut(shut), h = existsSync(join(aside, 'dark-fixture.html')) ? readFileSync(join(aside, 'dark-fixture.html'), 'utf8') : '';
+    ok(r0.dark.join() === 'dark-fixture' && named.length === 0 && !existsSync(join(shut, 'dark-fixture.html')) && existsSync(join(aside, 'dark-fixture.md'))
+      && h.includes('<meta name="robots" content="noindex">') && !h.includes('rel="canonical"') && !h.includes('application/ld+json'),
+      `dark: DISCLOSED false: the page is built aside (<out>-dark/, noindex, no canonical or JSON-LD); nothing in the site names it, sitemap and index.json included${named.length ? ` (${named.map((f) => relative(shut, f)).join(', ')})` : ''}`);
+    const r1 = build({ out: open, disclosed: true, darkDir: fixture });
+    const rd = (f) => readFileSync(join(open, f), 'utf8');
+    ok(r1.pages === PAGE_LIST.length + 1 && !existsSync(darkOut(open)) && rd('dark-fixture.html').includes(`<link rel="canonical" href="${ORIGIN}/dark-fixture.html">`)
+      && rd('sitemap.xml').includes(`<loc>${ORIGIN}/dark-fixture.html</loc>`) && JSON.parse(rd('index.json')).pages.some((p) => p.slug === 'dark-fixture')
+      && rd('llms.txt').includes(`(${ORIGIN}/dark-fixture.md)`), 'dark: DISCLOSED true: a page of the site, indexed, in the sitemap, index.json and llms.txt; nothing aside');
+    ok(DISCLOSED === false ? readDark(DARK_DIR).every((d) => !existsSync(join(DIST, `${d.slug}.html`))) : true, `dark: site/dist holds none of site/src/dark/'s pages while DISCLOSED is false (${readDark(DARK_DIR).length} there)`);
+    ok(/^export const DISCLOSED = (?:true|false);$/m.test(readFileSync(join(SITE, 'build.mjs'), 'utf8'))
+      && (!existsSync(join(ROOT, 'release', 'publish.sh')) || readFileSync(join(ROOT, 'release', 'publish.sh'), 'utf8').includes(`grep -q '^export const DISCLOSED = true;$' "$stage/site/build.mjs" || rm -rf "$stage/site/src/dark"`)),
+      'dark: the flag is one line, and release/publish.sh leaves site/src/dark/ out of the export unless it says true');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
 }
 
 server.close();

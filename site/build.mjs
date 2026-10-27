@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { dirname, join, posix } from 'node:path';
+import { dirname, isAbsolute, join, posix, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO, CONTACT_EMAIL, SECURITY_EMAIL, SIMPLEX, RELAY_LIVE, DOMAINS, HOSTS, REPOSITORIES, PAYMENT_PLACES, BEFORE_LAUNCH, OFFICIAL } from './src/official.mjs';
 
@@ -36,7 +36,7 @@ export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-m
 // A package that joined the lockstep after the first publish: the first version it ships at.
 export const PACKAGE_SINCE = { 'sigelo-contact': '0.1.2' };
 
-const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+const read = (p) => readFileSync(isAbsolute(p) ? p : join(ROOT, p), 'utf8');
 const readBytes = (p) => readFileSync(join(ROOT, p));
 const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 const git = (...a) => execFileSync('git', ['-C', ROOT, ...a], { encoding: 'utf8' }).trim();
@@ -105,6 +105,25 @@ export const PAGES = [
   // index.json's pages. nginx serves it for a miss once its helper allows error_page (nginx.conf).
   { slug: '404', src: 'site/src/404.md', type: 'NotFound', noindex: true },
 ];
+// Dark pages (ROADMAP §15 R1): pages written ahead of the Owner's go, in site/src/dark/<slug>.md with the
+// same front matter as site/src. While DISCLOSED is false they are built OUTSIDE the site, into
+// <out>-dark/ (site/dist-dark/), as noindex pages to read locally: never into dist/ (so no deploy carries
+// them), in no nav, sitemap, index.json or llms.txt; release/publish.sh leaves site/src/dark/ out of the
+// public export. True: pages of the site (dist/<slug>.html and .md, indexed, in the sitemap, index.json and
+// llms.txt). As relay/site/build.mjs DISCLOSED; site/test/run.mjs checks both states with a fixture.
+export const DISCLOSED = false;
+export const DARK_DIR = join(SITE, 'src', 'dark');
+export const darkOut = (out) => `${out}-dark`;
+// → [{ slug, src, type, dark }] from dir, by file name; [] without it.
+export function readDark(dir = DARK_DIR) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith('.md')).sort().map((f) => {
+    const slug = f.slice(0, -3);
+    if (!/^[a-z][a-z0-9-]*$/.test(slug) || PAGES.some((p) => p.slug === slug)) throw new Error(`${f}: want a new slug of a-z, 0-9 and -`);
+    const at = join(dir, f), rel = relative(ROOT, at);
+    return { slug, src: rel.startsWith('..') || isAbsolute(rel) ? at : rel, type: 'WebPage', dark: true };
+  });
+}
 const NAV = [['adopt', 'Adopt'], ['accept', 'Accept'], ['spec', 'Spec'], ['verify', 'Verify'], ['keeper', 'Keeper'], ['security', 'Security'],
   ['contact', 'Contact'], ['changelog', 'Changelog'], ['privacy', 'Privacy']];
 
@@ -415,7 +434,7 @@ const SOFTWARE = {
   license: 'https://spdx.org/licenses/MIT', version: VERSION,
 };
 // The last commit that touched any of `paths` ('' when git cannot tell, e.g. an uncommitted file).
-const lastCommit = (...paths) => git('log', '-1', '--format=%cI', '--', ...paths);
+const lastCommit = (...paths) => { const at = paths.filter((p) => !isAbsolute(p)); return at.length ? git('log', '-1', '--format=%cI', '--', ...at) : ''; };   // a path outside the tree (a test's fixture): ''
 // TechArticle dateModified: the last commit that touched what the page is rendered from (not the build's).
 const modified = (page) => lastCommit(...pageInputs(page)) || commitDate;
 const pageUrl = (p) => (p.slug === 'index' ? `${ORIGIN}/` : `${ORIGIN}/${p.slug}.html`);
@@ -490,9 +509,11 @@ ${body}
 // ---------------------------------------------------------------------------------------------
 const kb = (n) => `${Math.max(1, Math.round(n / 1024))} KB`;
 const redirectsTo = (live) => Object.fromEntries(OFFICIAL.domains.filter((d) => d.role === 'redirect' && !!d.live === live).map((d) => [d.name, `https://${d.to}/`]));
-export function build() {
-  rmSync(DIST, { recursive: true, force: true });
-  const put = (p, data) => { const f = join(DIST, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, data); };
+export function build({ out = DIST, disclosed = DISCLOSED, darkDir = DARK_DIR } = {}) {
+  const dark = readDark(darkDir), pages = disclosed ? [...PAGES, ...dark] : PAGES;
+  rmSync(out, { recursive: true, force: true });
+  rmSync(darkOut(out), { recursive: true, force: true });
+  const put = (p, data) => { const f = join(out, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, data); };
 
   for (const r of RAW) put(`raw/${r}`, readBytes(r));
   put('test-vectors.json', vectorsBytes);
@@ -522,7 +543,7 @@ export function build() {
   put(`${indexnowKey}.txt`, indexnowKey);
 
   const mdOut = {};
-  for (const page of PAGES) {
+  for (const page of [...pages, ...(disclosed ? [] : dark.map((d) => ({ ...d, noindex: true, aside: true })))]) {
     let title, description, md, srcPath;
     if (page.repo) {
       ({ title, description } = page); srcPath = page.repo; md = read(page.repo);
@@ -535,6 +556,12 @@ export function build() {
     // The spec gets one header line under its H1: the wire version, the vectors and the schemas.
     if (page.slug === 'spec') md = md.replace(/^(# .*\n)/, '$1\n> Wire `sigelo/0` · [test vectors](/test-vectors.json) · [JSON Schemas](/raw/schema/bundle.json) (all in [/index.json](/index.json))\n');
     const twin = rewriteMd(md, linker(srcPath, 'md'));
+    if (page.aside) {   // a dark page while DISCLOSED is false: beside dist, never in it
+      for (const [f, data] of [[`${page.slug}.md`, twin], [`${page.slug}.html`, htmlPage(page, title, description, render(md, linker(srcPath, 'html')))]]) {
+        mkdirSync(darkOut(out), { recursive: true }); writeFileSync(join(darkOut(out), f), data);
+      }
+      continue;
+    }
     put(`${page.slug}.md`, twin);
     put(`${page.slug}.html`, htmlPage(page, title, description, render(md, linker(srcPath, 'html'))));
     mdOut[page.slug] = { twin, title };
@@ -566,7 +593,7 @@ ${L('Sandboxes', '/sandboxes.md', 'egress')}
 ## Project
 
 ${L('Security', '/security.md', 'vulnerabilities')}
-${L('Contact', '/contact.md')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}${
+${L('Contact', '/contact.md')}${pages.filter((p) => p.dark).map((p) => `\n${L(p.slug, `/${p.slug}.md`)}`).join('')}${RELEASE ? `\n${L('Releases', '/releases/', 'binaries, tarballs, SHA256SUMS')}` : ''}${
   RELAY_LIVE ? `\n- [Relay](${RELAY_ORIGIN}/llms.txt): messages between agents` : ''}
 
 ## Optional
@@ -638,7 +665,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     ...(RELAY_LIVE && { relay: { name: 'sigelo relay', homepage: `${RELAY_ORIGIN}/`, index: `${RELAY_ORIGIN}/index.json`, llms_txt: `${RELAY_ORIGIN}/llms.txt`, host: HOSTS[0].name } }),
     agent_surfaces: Object.fromEntries([['llms_txt', '/llms.txt'], ['llms_full_txt', '/llms-full.txt'], ['adopt', '/adopt.md'],
       ['sitemap', '/sitemap.xml'], ['security_txt', '/.well-known/security.txt'], ['mock_world', '/examples/world.mjs']].map(([k, v]) => [k, `${ORIGIN}${v}`])),
-    pages: PAGES.filter((p) => !p.noindex).map((p) => ({ slug: p.slug, html: pageUrl(p), markdown: `${ORIGIN}/${p.slug}.md`,
+    pages: pages.filter((p) => !p.noindex).map((p) => ({ slug: p.slug, html: pageUrl(p), markdown: `${ORIGIN}/${p.slug}.md`,
       ...(p.repo && { source: p.repo, source_sha256: sha256(readBytes(p.repo)) }) })),
     ...(worldDid && { world: { ctx: 'sigelo.io', issuer: worldDid, challenge: `${ORIGIN}/world/challenge?did={did}`, attest: `${ORIGIN}/world/attest`,
       conformance: `${ORIGIN}/world/conformance`, mcp: `${ORIGIN}/mcp`, verify: `${ORIGIN}/world/verify`, stats: `${ORIGIN}/world/stats`, genesis: `${ORIGIN}/world/genesis.json`, rotations: `${ORIGIN}/world/rotations.json` } }),
@@ -665,7 +692,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
   // llms-full.txt is the parts' twins, template values filled (pageInputs); llms.txt states its
   // size, the release mirror and, from the launch, the relay (site/src/official.mjs).
   const partInputs = [...new Set(parts.flatMap((s) => pageInputs(PAGES.find((p) => p.slug === s))))];
-  const locs = [...PAGES.filter((p) => !p.noindex).map((p) => [pageUrl(p), lastCommit(...pageInputs(p))]),
+  const locs = [...pages.filter((p) => !p.noindex).map((p) => [pageUrl(p), lastCommit(...pageInputs(p))]),
     [`${ORIGIN}/llms.txt`, lastCommit('site/build.mjs', 'site/src/releases', OFFICIAL_SRC, ...partInputs, ...OPTIONAL, ...SCHEMAS)],
     [`${ORIGIN}/llms-full.txt`, lastCommit('site/build.mjs', ...partInputs)],
     [`${ORIGIN}/index.json`, commitDate],   // it names its build commit, so every commit changes it
@@ -686,7 +713,7 @@ Policy: ${ORIGIN}/security.html#official-channels
 Preferred-Languages: en
 `);
 
-  return { pages: PAGES.length, commit, dirty };
+  return { pages: pages.length, commit, dirty, dark: dark.map((d) => d.slug), disclosed };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -694,4 +721,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const files = [];
   (function walk(d) { for (const e of readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(join(d, e.name)) : files.push(e.name); })(DIST);
   console.log(`site/dist: ${r.pages} pages (+ .md twins), ${files.length} files, from ${r.commit.slice(0, 12)}${r.dirty ? ' (dirty tree)' : ''}`);
+  if (r.dark.length && !r.disclosed) console.log(`dark: ${r.dark.join(', ')} in site/dist-dark/ only (DISCLOSED false: not in dist, never deployed)`);
 }

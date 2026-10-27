@@ -10,9 +10,10 @@
 //             bytes at every call: `created` pinned, the nonce from the key (SPEC §4 `nonce`),
 //             rotations m → m+1 voluntary with iat 0. A second copy of a rotation is the same
 //             rotation, never a fork.
-//   operator: issue({ carrier, file, i, n, name, keeper })  → a short code (short.mjs, 10 minutes,
-//             once) for a normal invite, and a pending enrolment kept in `file` for 24 hours, with
-//             the operator attestation signed now (`days`, ≤ 90; a device's 14)
+//   operator: issue({ carrier, file, i, n, name, keeper, relay? })  → a short code (short.mjs, 10
+//             minutes, once) for a normal invite (at `relay`, else the carrier's), and a pending
+//             enrolment kept in `file` for 24 hours, with the operator attestation signed now (`days`,
+//             ≤ 90; a device's 14)
 //   machine:  accept({ carrier, file, code, temp })  → `carrier` is a TEMPORARY identity (`temp`, its
 //             file): it fetches the code, pairs, and once paired sends a request, label LABEL_ENROL,
 //             {v, typ: "enrol-request", proof}
@@ -243,11 +244,11 @@ const checkKeeper = (k) => {
  * stands for (24 hours). The operator attestation is signed here, at derivation time.
  * → { short, short_exp, code, id, did (the worker's current DID), original }.
  */
-export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR_DAYS }) {
+export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR_DAYS, relay }) {
   checkKeeper(keeper);
   const w = workerChain(keeper.K, i, n, keeper.recovery);
   // The temporary identity's contact, named apart from the worker's (forgotten once it has paired).
-  const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true });
+  const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true, ...(relay !== undefined && relay !== carrier.relay && { relay }) });
   const now = nowOf(carrier), code = readCode(r.code, now), me = self(carrier, now);
   const attestation = operatorAttestation({ sign: me.sign, iss: me.did, sub: w.original, relay: code.relay, now, days });
   const old = liveHolding(carrier, w.original);

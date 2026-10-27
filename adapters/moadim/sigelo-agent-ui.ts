@@ -42,7 +42,7 @@ import { did, verify, VERSION, type Attestation, type Genesis } from 'sigelo';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import { withLock } from './sigelo-agent-monero.ts';
-import { enrolInto, keeperPath, readKeeper, workersOf } from './sigelo-agent-enrol.ts';
+import { enrolInto, keeperPath, readKeeper, rootOf, workersOf, writeKeeper, type Keeper } from './sigelo-agent-enrol.ts';
 import { deviceRound, hasTty, seatGate, seatInfo, terminalQr, ttyLine, ttyWrite, type DevMsg } from './sigelo-agent-device.ts';
 import { CONTROL_NAME, controlLine, defaultAddress, isRelay, isScope, lanControls, loadAead, newControl, openRequest, R_BODY_MAX, remoteCall, sealAnswer, type AnyControl, type Control, type Scope } from './sigelo-agent-remote.ts';
 import { relayControls, type RelayCarrier, type Relays } from './sigelo-agent-control.ts';
@@ -140,10 +140,12 @@ type Route = (b: Record<string, unknown>, q: URLSearchParams) => unknown;
 /** contact/page.mjs: the routes over the carrier, shared with the self-contained app. */
 interface PageLib {
   makePage(o: {
-    makeCarrier: (onEvent: (e: Ev) => void, kept: { relay?: string }) => unknown; link: LinkLib; relayFixed: string | null; linksFile: string; codeKind: (t: string) => string; unlogged: RegExp;
+    makeCarrier: (onEvent: (e: Ev) => void, kept: { relay?: string }) => unknown; link: LinkLib; relayFixed: string | null; linksFile: string; enrolFile: string; codeKind: (t: string) => string; unlogged: RegExp;
     store: { readHistory(): string | null; append(line: string): void; clearHistory(): void; readData(): string | null; writeData(text: string): void };
     hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string; restored?: unknown };
-      agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean };
+      agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean;
+      controls: { pending(): { name: string; scope: string; words: string | null }[]; confirm(name: string, match: boolean): Promise<boolean> };
+      keeper: { read(): Promise<Keeper | null>; root(k: Keeper): Promise<{ K: Uint8Array; recovery: string }>; update(fn: (k: Keeper) => void): Promise<void> } };
   }): {
     carrier: unknown; routes: Record<string, Route>; dispatch(method: string, url: URL, b: Record<string, unknown>): Promise<[number, unknown]>;
     start(): Promise<void>; halt(): Promise<void>; serial<T>(f: () => Promise<T>): Promise<T>; data: unknown; saveData(): void;
@@ -198,13 +200,14 @@ export async function revokeControl(identity: string, name: string, carrierOptio
 
 /**
  * Me's "restored from seed" line (UI-API.md GET /api/me `restored`): an identity from the 25 words
- * (`derived`) with its keeper file and the day that file was made: { on, keeper, seat: here | elsewhere | null }.
+ * (`derived`) with its keeper file and the day that file was made: { on, keeper, seat: here | elsewhere | null, created? }
+ * (created: the words were made on this device, `keeper --from-words --made-here`: Me says "Created on").
  */
-function restoredOf(path: string): { restored?: { on: string; keeper: number; seat: string | null } } {
+function restoredOf(path: string): { restored?: { on: string; keeper: number; seat: string | null; created?: true } } {
   try {
     if (!(id.load(path) as { derived?: unknown }).derived || !existsSync(keeperPath(path))) return {};
-    const k = readKeeper(path) as { keeper: number; created?: unknown }, st = seatInfo(path);
-    return typeof k.created === 'string' ? { restored: { on: k.created, keeper: k.keeper, seat: st ? (st.here ? 'here' : 'elsewhere') : null } } : {};
+    const k = readKeeper(path) as { keeper: number; created?: unknown; made?: unknown }, st = seatInfo(path);
+    return typeof k.created === 'string' ? { restored: { on: k.created, keeper: k.keeper, seat: st ? (st.here ? 'here' : 'elsewhere') : null, ...(k.made === 'here' && { created: true as const }) } } : {};
   } catch { return {}; }
 }
 
@@ -252,7 +255,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       ...paths, ...kept, ...opts, keep: true, onEvent,
     }),
     relayFixed: typeof opts.relay === 'string' ? opts.relay : null,
-    link: L, linksFile, codeKind: (t) => short.codeKind(t), unlogged: UNLOGGED,
+    link: L, linksFile, enrolFile: `${base}.enrol.json`, codeKind: (t) => short.codeKind(t), unlogged: UNLOGGED,
     store: {
       readHistory: () => (existsSync(historyFile) ? readFileSync(historyFile, 'utf8') : null),
       append: (line) => appendFileSync(historyFile, line, { mode: 0o600 }),
@@ -283,6 +286,26 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       },
       defer: (f) => { setImmediate(f); },
       hidden: (x) => relay?.hidden(x) ?? false,
+      // The Controls card (GET /api/controls, POST /api/controls/confirm): relay controls paired, their
+      // four words not confirmed; the same effect as the terminal's y/N (relayTerminal).
+      controls: {
+        pending: () => Object.entries((page.data as UiData).controls).filter(([, c]) => isRelay(c) && c.did !== null && !c.confirmed)
+          .map(([name, c]) => ({ name, scope: c.scope, words: (c as { words: string | null }).words })),
+        confirm: async (name, match) => {
+          const c = (page.data as UiData).controls[name];
+          if (!relay || !isRelay(c) || c.did === null || c.confirmed) return false;
+          await relay.confirm(name, match);
+          relay.changed();
+          note(match ? `${name} confirmed on the page: it controls this page (its scope) while the page runs` : `${name} refused on the page and forgotten`);
+          return true;
+        },
+      },
+      // Agents (ENROL.md): the keeper file beside the identity, read and written under its lock (sigelo-agent-enrol.ts).
+      keeper: {
+        read: async () => (existsSync(keeperPath(path)) ? readKeeper(path) : null),
+        root: async (k) => rootOf(k),
+        update: async (fn) => { writeKeeper(path, fn); },
+      },
     },
   });
   const { routes, dispatch, serial } = page, data = page.data as UiData, saveData = page.saveData;
@@ -605,6 +628,9 @@ async function relayTerminal(ui: Ui, path: string): Promise<void> {
     note(`${p.name} paired over the relay; its four words: ${p.words ?? '(none)'}`);
     if (!tty) { note(`no terminal to confirm them: ${p.name} answers nothing until they are confirmed (run ui --remote --relay --name ${p.name} in a terminal)`); continue; }
     const yes = /^y(es)?$/i.test((await ttyLine(`Does the app show the same four words (${p.words})? [y/N] `)).trim());
+    // Answered on the page meanwhile (its Controls card): that answer stands.
+    const now = readJson<Partial<UiData>>(dataPath(path), {}).controls?.[p.name];
+    if (!isRelay(now) || now.confirmed) { note(`${p.name}: already answered on the page`); continue; }
     await r.confirm(p.name, yes);
     note(yes ? `${p.name} confirmed: it controls this page (its scope) while the page runs` : `${p.name} refused and forgotten: someone else may have used the code`);
   }

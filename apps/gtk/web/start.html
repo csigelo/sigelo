@@ -14,6 +14,37 @@
 <body>
 <main id="app">
   <p id="note" class="card err" hidden></p>
+  <section class="card" id="create">
+    <h2>Create new identity</h2>
+    <p class="muted">This phone makes 25 new words, shows them once for you to write down, and makes your identity and your keeper from them (FULL), sealed in the keyring. Have paper and a pen ready.</p>
+    <div id="create-form">
+      <label for="create-name">Name for this device</label>
+      <input id="create-name" value="phone" maxlength="20" autocomplete="off" autocapitalize="none" spellcheck="false">
+      <div class="bar"><label><input type="radio" name="create-net" value="mainnet" checked> mainnet</label><label><input type="radio" name="create-net" value="stagenet"> stagenet</label></div>
+      <p class="muted">Stagenet is Monero's test network: its coins are worth nothing. Pick it to try sigelo out.</p>
+      <div class="bar"><button id="create-go" class="primary">Create new identity</button></div>
+    </div>
+    <div id="create-words" hidden>
+      <p id="create-note" class="warn" hidden></p>
+      <p class="warn">Write them on paper, in order, now. Whoever reads them owns this identity and its wallet. This is the only time this app shows them.</p>
+      <ol id="create-grid" class="seed-grid" aria-label="Your 25 words, in order"></ol>
+      <label>The address of your words' own wallet</label>
+      <p id="create-vault" class="mono"></p>
+      <p class="muted">A Monero wallet app restored from these 25 words shows this same address: note its first and last characters beside the words, to check your paper later.</p>
+      <div class="bar"><button id="create-copy" hidden>Copy the words (stagenet only)</button></div>
+      <p id="create-nocopy" class="muted">No copy on mainnet: write them by hand.</p>
+      <p class="muted">Nothing is kept until you have typed three of the words back. Leaving now discards them.</p>
+      <div class="bar"><button id="create-written" class="primary">I have written down my 25 words</button></div>
+    </div>
+    <div id="create-check" hidden>
+      <p>Type these words from your paper.</p>
+      <label for="create-a0" id="create-l0"></label><input id="create-a0" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+      <label for="create-a1" id="create-l1"></label><input id="create-a1" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+      <label for="create-a2" id="create-l2"></label><input id="create-a2" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+      <div class="bar"><button id="create-verify" class="primary">Check</button></div>
+    </div>
+    <p id="create-status" class="muted"></p>
+  </section>
   <section class="card">
     <h2>This phone</h2>
     <p class="muted">The page of this phone's own identity (sigelo-agent ui runs here).</p>

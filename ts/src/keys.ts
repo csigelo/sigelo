@@ -42,10 +42,20 @@ import { commitmentOf, encodeKey, Identity, keygen, SigeloError } from './sigelo
  * is S itself.
  */
 export function newRoot(): string {
+  const S = newRootBytes();
+  try { return encodeMoneroWords(S); } finally { S.fill(0); }
+}
+
+/**
+ * The same fresh root as bytes, for a caller that holds `S` and zeroes it itself (the phone apps'
+ * create, contact/create.mjs): no words string is made until one is shown. Rejected draws are zeroed.
+ */
+export function newRootBytes(): Uint8Array {
   for (;;) {
     const r = randomBytes(32);
     r[31] = r[31]! & 0x1f;
-    if (canonical(r)) return encodeMoneroWords(r);
+    if (canonical(r)) return r;
+    r.fill(0);
   }
 }
 

@@ -1,0 +1,201 @@
+name: android-reproduce
+# Does F-Droid's build reproduce CI's unsigned APK (apps/android/FDROID.md, route B)? One run answers:
+# the release APK built from two trees (the `ref` input, default the last release tag, and the
+# dispatched commit) with four JDKs: Temurin 17 and 21 as setup-java gives them (CI), and Debian's
+# default JDK in debian:trixie (21, F-Droid's build server) and debian:bookworm (17), run in a
+# container with the runner's Android SDK, the way F-Droid runs Gradle (from apps/android/app,
+# LC_ALL=C.UTF-8, TZ=Etc/UTC, SOURCE_DATE_EPOCH = the commit's time). The verdict job compares the
+# SHA-256s, names the entries that differ, and copies a throwaway signature onto the Debian builds as
+# `fdroid build` does with `Binaries:` (apksigcopier, then apksigner verify).
+# Report only: every step may fail without failing the run (continue-on-error); the last step prints
+# the verdict and succeeds. Dispatch only; no secret; nothing published but the run's artifacts.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'the other tree to rebuild (tag or commit)'
+        default: 'v0.1.10'
+      expect:
+        description: "SHA-256 of CI's unsigned APK for that tree (the android workflow's SHA256SUMS)"
+        default: '8670f3137f3d96619bd27e3359a5e40b7fd63b4914ea7d182283c51cff186faa'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [ref, head]
+        jdk: [temurin-17, temurin-21, debian-21, debian-17]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        continue-on-error: true
+        with:
+          persist-credentials: false
+          ref: ${{ matrix.tree == 'ref' && inputs.ref || github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
+        continue-on-error: true
+        with: { node-version: '24' }
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        if: startsWith(matrix.jdk, 'temurin-')
+        continue-on-error: true
+        with: { distribution: temurin, java-version: "${{ matrix.jdk == 'temurin-17' && '17' || '21' }}" }
+      - name: the page into the APK's assets (as the recipe's prebuild and build)
+        continue-on-error: true
+        run: |
+          (cd ts && npm ci --ignore-scripts && npx tsc)
+          (cd contact && npm ci --ignore-scripts)
+          node apps/android/assets.mjs
+      - name: build the unsigned release APK
+        continue-on-error: true
+        env:
+          JDK: ${{ matrix.jdk }}
+        run: |
+          set -x
+          git rev-parse HEAD
+          sde=$(git log -1 --format=%ct)
+          if [ "${JDK%%-*}" = temurin ]; then
+            java -version 2>&1; javac -version 2>&1
+            (cd apps/android && ./gradlew --no-daemon --stacktrace assembleRelease)
+          else
+            suite=trixie; [ "$JDK" = debian-17 ] && suite=bookworm
+            docker run --rm -v "$GITHUB_WORKSPACE:/w" -v "$ANDROID_HOME:/sdk" -e ANDROID_HOME=/sdk \
+              -e LC_ALL=C.UTF-8 -e TZ=Etc/UTC -e SOURCE_DATE_EPOCH="$sde" -e OWNER="$(id -u):$(id -g)" \
+              -w /w/apps/android/app "debian:$suite" bash -euxc '
+                apt-get update -qq
+                apt-get install -y -qq --no-install-recommends default-jdk-headless ca-certificates >/dev/null
+                java -version 2>&1; javac -version 2>&1
+                ../gradlew --no-daemon --stacktrace -Dorg.gradle.java.installations.auto-download=false assembleRelease
+                chown -R "$OWNER" /w/apps/android'
+          fi
+      - name: the APK, its SHA-256 and the JDK
+        continue-on-error: true
+        env:
+          TREE: ${{ matrix.tree }}
+          JDK: ${{ matrix.jdk }}
+        run: |
+          mkdir -p out
+          cp apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "out/$TREE-$JDK.apk"
+          { git rev-parse HEAD; sha256sum "out/$TREE-$JDK.apk"; } | tee "out/$TREE-$JDK.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (tag v7)
+        continue-on-error: true
+        with:
+          name: apk-${{ matrix.tree }}-${{ matrix.jdk }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14
+
+  verdict:
+    needs: build
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+        continue-on-error: true
+        with: { pattern: 'apk-*', merge-multiple: true, path: apks }
+      - name: compare the builds; name the entries that differ
+        continue-on-error: true
+        env:
+          REF: ${{ inputs.ref }}
+          EXPECT: ${{ inputs.expect }}
+        run: |
+          python3 - <<'EOF' | tee -a verdict.txt
+          import hashlib, os, zipfile
+          D = 'apks'
+          trees, jdks = ('ref', 'head'), ('temurin-17', 'temurin-21', 'debian-21', 'debian-17')
+          path = lambda t, j: os.path.join(D, f'{t}-{j}.apk')
+          sha = {}
+          for t in trees:
+              for j in jdks:
+                  p = path(t, j)
+                  sha[t, j] = hashlib.sha256(open(p, 'rb').read()).hexdigest() if os.path.exists(p) else None
+          for t in trees:
+              commit = next((open(os.path.join(D, f'{t}-{j}.txt')).readline().strip() for j in jdks if os.path.exists(os.path.join(D, f'{t}-{j}.txt'))), '?')
+              print(f'== tree {t} ({os.environ["REF"] if t == "ref" else "dispatched"}, {commit[:12]})')
+              for j in jdks: print(f'   {j:11} {sha[t, j] or "NO BUILD"}')
+          e = os.environ.get('EXPECT', '').strip()
+          if e: print(f'ref temurin-17 = expected CI hash {e[:12]}…: {"YES" if sha["ref", "temurin-17"] == e else "NO"}')
+          def entries(p):
+              z = zipfile.ZipFile(p)
+              return [(i.filename, i.CRC, i.compress_type, i.compress_size, i.file_size, i.external_attr, i.date_time) for i in z.infolist()]
+          for t in trees:
+              for a, b in (('temurin-17', 'debian-17'), ('temurin-21', 'debian-21'), ('temurin-17', 'temurin-21')):
+                  if not (sha[t, a] and sha[t, b]): print(f'{t}: {a} vs {b}: a build is missing'); continue
+                  if sha[t, a] == sha[t, b]: print(f'{t}: {a} == {b}: IDENTICAL'); continue
+                  x, y = entries(path(t, a)), entries(path(t, b))
+                  print(f'{t}: {a} != {b}:')
+                  if [n[0] for n in x] != [n[0] for n in y]: print('   entry order or set differs:', sorted(set(n[0] for n in x) ^ set(n[0] for n in y)) or 'same set, other order')
+                  yd = {n[0]: n for n in y}
+                  for n in x:
+                      m = yd.get(n[0])
+                      if m and m != n:
+                          what = 'content (CRC)' if m[1] != n[1] else 'compression only (same CRC)' if m[3] != n[3] else 'zip metadata'
+                          print(f'   {n[0]}: {what}; crc {n[1]:08x}/{m[1]:08x} size {n[4]}/{m[4]} csize {n[3]}/{m[3]} attr {n[5]:o}/{m[5]:o}')
+          EOF
+      - name: sign with a throwaway key; copy the signature onto the Debian builds (fdroid build's check)
+        continue-on-error: true
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/34.* 2>/dev/null | sort -V | tail -1)
+          [ -n "$bt" ] || bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          export PATH="$bt:$PATH"; echo "apksigner from $bt" | tee -a verdict.txt
+          python3 -m venv "$RUNNER_TEMP/v" && "$RUNNER_TEMP/v/bin/pip" install -q apksigcopier==1.1.1
+          pw=$(openssl rand -hex 24); echo "::add-mask::$pw"
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/t.p12" -storetype PKCS12 -alias t -keyalg RSA -keysize 3072 \
+            -validity 1 -dname 'CN=throwaway reproduce check' -storepass "$pw" -keypass "$pw" >/dev/null
+          sign() { apksigner sign --ks "$RUNNER_TEMP/t.p12" --ks-key-alias t --ks-pass "pass:$pw" --v1-signing-enabled false "$@"; }
+          for p in head:temurin-21:debian-21 head:temurin-17:debian-17 ref:temurin-17:debian-21 ref:temurin-17:debian-17; do
+            IFS=: read -r t ci fd <<< "$p"
+            u=apks/$t-$ci.apk f=apks/$t-$fd.apk
+            [ -f "$u" ] && [ -f "$f" ] || { echo "$t: $ci signed vs $fd: a build is missing" | tee -a verdict.txt; continue; }
+            sign --alignment-preserved --out "s-$t-$ci.apk" "$u" && sign --out "r-$t-$ci.apk" "$u" || continue
+            for k in s r; do
+              how=$([ $k = s ] && echo 'signed --alignment-preserved' || echo 'signed, realigned (the v0.1.10 ceremony)')
+              if "$RUNNER_TEMP/v/bin/apksigcopier" compare --unsigned "$k-$t-$ci.apk" "$f" 2>err.txt; then r=MATCH; else r="NO MATCH ($(tail -1 err.txt))"; fi
+              echo "$t: $ci $how vs F-Droid-like $fd: $r" | tee -a verdict.txt
+            done
+          done
+          # The published signed APK of the ref tree, as F-Droid's Binaries: would fetch it.
+          v=${REF#v}
+          if curl -fsSLo rel.apk "https://github.com/csigelo/sigelo/releases/download/$REF/sigelo-$v.apk"; then
+            for fd in temurin-17 debian-21; do
+              [ -f "apks/ref-$fd.apk" ] || continue
+              if "$RUNNER_TEMP/v/bin/apksigcopier" compare --unsigned rel.apk "apks/ref-$fd.apk" 2>err.txt; then r=MATCH; else r="NO MATCH ($(tail -1 err.txt))"; fi
+              echo "ref: the published sigelo-$v.apk vs $fd: $r" | tee -a verdict.txt
+            done
+          else
+            echo "ref: no published sigelo-$v.apk" | tee -a verdict.txt
+          fi
+          if [ -f apks/head-debian-21.apk ]; then
+            sign --alignment-preserved --out jdk21-signed.apk apks/head-debian-21.apk
+            apksigner verify --print-certs jdk21-signed.apk | tee -a verdict.txt
+          fi
+          rm -f "$RUNNER_TEMP/t.p12"
+      - name: verdict
+        if: always()
+        continue-on-error: true
+        run: |
+          echo '================ verdict'
+          cat verdict.txt 2>/dev/null || echo 'no comparison ran: see the build jobs'
+          if grep -q '^head: temurin-21 signed --alignment-preserved vs F-Droid-like debian-21: MATCH' verdict.txt 2>/dev/null; then
+            v='REPRODUCIBLE: CI on Temurin 21, F-Droid on Debian 21 (the recipe as written)'
+          elif grep -q '^head: temurin-17 signed --alignment-preserved vs F-Droid-like debian-17: MATCH' verdict.txt 2>/dev/null; then
+            v='REPRODUCIBLE only on 17: keep CI on Temurin 17, recipe installs bookworm openjdk-17 (FDROID.md, fallback)'
+          else
+            v='NOT REPRODUCIBLE yet: see the differing entries above'
+          fi
+          echo "$v"
+          { echo '```'; cat verdict.txt 2>/dev/null; echo '```'; echo "**$v**"; } >> "$GITHUB_STEP_SUMMARY"
+          exit 0

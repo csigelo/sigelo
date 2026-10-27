@@ -496,6 +496,40 @@ try {
     } finally { for (const d of [REST, REF]) rmSync(d, { recursive: true, force: true }); }
   }
 
+  // ---- a new identity created in an app (apps/web/create.mjs, sigelo-contact/create.mjs; pass A10a): the first FULL device, holding the seat
+  {
+    const CDIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'contact');
+    type Files = { identity: object; keeper: Record<string, unknown>; device: object; notes: object; list: object; did: string; vault: string };
+    const CR = await import(pathToFileURL(join(CDIR, 'create.mjs')).href) as { newSeed(net: string): { vault: string; words(): string[]; quiz(): number[]; check(a: string[]): { ok: boolean }; commit(o: object): Files } };
+    const { vaultFromRoot } = await import('sigelo/dist/keys.js');
+    const NEW = mkdtempSync(join(tmpdir(), 'sigelo-dev-new-')), REF = mkdtempSync(join(tmpdir(), 'sigelo-dev-newref-')), t0 = now();
+    try {
+      const s = CR.newSeed('stagenet'), w = s.words(), q = s.quiz();
+      ok('created: three words checked', s.check(q.map((i) => w[i - 1]!)).ok === true);
+      const r = s.commit({ name: 'cphone', relay: 'relay.test', now: t0 });
+      const me = meOf(NEW), dev = pool(NEW, 'cphone'), put = (f: string, o: unknown): void => { mkdirSync(dirname(f), { recursive: true, mode: 0o700 }); writeFileSync(f, JSON.stringify(o, null, 2), { mode: 0o600 }); };
+      put(me, r.identity); put(me.replace(/\.json$/, '.keeper.json'), r.keeper); put(me.replace(/\.json$/, '.seat.json'), r.notes); put(me.replace(/\.json$/, '.devices.json'), r.list); put(dev, r.device); put(dev.replace(/\.json$/, '.devices.json'), r.list);
+      const ref = await cli(REF, ['keeper', '--from-words', '--made-here', '--net', 'stagenet', '--restore-date', new Date(t0 * 1000).toISOString().slice(0, 10)], { input: w.join(' ') });
+      const rk = readJ(meOf(REF).replace(/\.json$/, '.keeper.json'));
+      ok('created: the app\'s operator file and K_1 are what keeper --from-words --made-here writes for the words it showed', ref.status === 0 && JSON.stringify(readJ(meOf(REF))) === JSON.stringify(r.identity)
+        && rk['root_hex'] === r.keeper['root_hex'] && rk['made'] === 'here' && r.keeper['made'] === 'here' && rk['restore_date'] === r.keeper['restore_date'], ref.stderr);
+      const st = await cli(NEW, ['device', 'seat']), ls = await cli(NEW, ['device', 'list', '--json']), kp = await cli(NEW, ['keeper']);
+      ok('created: the first FULL device (worker 0), holding the seat at epoch 1; the keeper reads as the CLI\'s', st.status === 0 && json(st.stdout)['holds'] === true && (json(st.stdout)['seat'] as { holder: string; epoch: number }).holder === 'cphone'
+        && (json(st.stdout)['seat'] as { epoch: number }).epoch === 1 && ls.status === 0 && /"cphone"/.test(ls.stdout) && /"full"/.test(ls.stdout) && kp.status === 0 && json(kp.stdout)['keeper'] === 1, st.stdout + st.stderr + ls.stderr + kp.stderr);
+      const in1 = await cli(NEW, ['inbox', '--operator']);
+      ok('created: the seat is here, so it logs in as you (inbox --operator, exit 0)', in1.status === 0, in1.stderr);
+      // keeper --new-words: what the GTK app runs; piped JSON, a valid seed and its own wallet's address, nothing written.
+      const before = readdirSync(join(REF, '.config', 'sigelo')).sort().join();
+      const nw = await cli(REF, ['keeper', '--new-words', '--net', 'stagenet']), j = json(nw.stdout) as { words?: string; vault?: string; net?: string };
+      let same = false;
+      try { const S = rootFromMnemonic(j.words ?? ''); same = vaultFromRoot(S, 'stagenet').address === j.vault; S.fill(0); } catch {}
+      ok('keeper --new-words (piped): 25 words of a canonical root and the stagenet address of their own wallet; nothing written', nw.status === 0 && j.net === 'stagenet' && same && (j.words ?? '').split(' ').length === 25
+        && readdirSync(join(REF, '.config', 'sigelo')).sort().join() === before && !nw.stderr.includes(j.words ?? '~'), nw.stderr);
+      const bn = await cli(REF, ['keeper', '--new-words', '--net', 'testnet']), mh = await cli(REF, ['keeper', '--made-here']);
+      ok('keeper --new-words --net testnet, or --made-here without --from-words: usage, exit 2', bn.status === 2 && mh.status === 2, bn.stderr + mh.stderr);
+    } finally { for (const d of [NEW, REF]) rmSync(d, { recursive: true, force: true }); }
+  }
+
   // A plain message from the phone: the operator's inbox log has it, and nothing key-carrying.
   const sent = await cli(PHONE, ['send', 'operator', 'hello from the phone', '--identity', pool(PHONE, 'phone')]);
   const got = await cli(OP, ['inbox', '--operator']);

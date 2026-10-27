@@ -14,7 +14,8 @@ import { androidPlatform, connectBridge } from './platform-android.mjs';
 import { DEFAULT_RELAY } from './vendor/contact/carrier.mjs';
 import { makeRouter, presetRelay } from './router.mjs';
 import { pickMode, remoteBackend, wipeIfAsked } from './shell.mjs';
-import { restoreView, seatOf } from './seed.mjs';
+import { keeperOf, restoreView, seatOf } from './seed.mjs';
+import { createView } from './create.mjs';
 
 const SETTINGS = 'app/settings.json';
 let router = null, bridge = null;
@@ -35,7 +36,7 @@ const ready = (async () => {
   }
   const s = platform.files.read(SETTINGS), settings = s === null ? {} : JSON.parse(new TextDecoder().decode(s));
   const identity = parseBytes(raw);
-  router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' }, seat: seatOf(platform, () => identity) });
+  router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' }, seat: seatOf(platform, () => identity), keeper: keeperOf(platform) });
   await router.start();
   addEventListener('pagehide', () => { void router.stop(); });
   return router;
@@ -57,8 +58,10 @@ function setup(platform) {
   const box = document.getElementById('setup');
   if (!box) return;
   // Restore from seed: straight to it when the first-start screen asked (#restore), else a card below.
-  const restore = () => restoreView(box, platform, { bridge, back: () => { location.hash = ''; setup(platform); } });
+  const back = () => { location.hash = ''; setup(platform); };
+  const restore = () => restoreView(box, platform, { bridge, back }), create = () => createView(box, platform, { bridge, back });
   if (location.hash === '#restore') { restore(); return; }
+  if (location.hash === '#create') { create(); return; }
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   const file = el('input', { type: 'file', accept: '.json,application/json' });
   const full = el('input', { type: 'checkbox' });
@@ -80,6 +83,10 @@ function setup(platform) {
     } catch (e) { say.textContent = `Not imported: ${e.message}`; }
   });
   box.replaceChildren(el('div', { className: 'card' },
+    el('h2', { textContent: 'Create new identity' }),
+    el('p', { textContent: 'This app makes 25 new words, shows them once for you to write down, and makes your identity and your keeper from them (FULL).' }),
+    el('div', { className: 'bar' }, el('button', { className: 'primary', textContent: 'Create new identity', onclick: create }))),
+  el('div', { className: 'card' },
     el('h2', { textContent: 'Import an identity' }),
     el('p', { textContent: `The file a computer wrote for this device (sigelo-agent device scan). It is sealed into this app's storage under a key ${platform.sealer ? 'of this phone\'s keystore (FULL: unlocked with your screen lock)' : 'the app cannot export'}.` }),
     file, el('label', {}, full, ' This is the operator (FULL, standby)'),

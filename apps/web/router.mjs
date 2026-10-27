@@ -12,7 +12,7 @@
 //   await r.stop()
 //
 // seat: after a restore from seed (seed.mjs seatOf): { info() → {holder, epoch, here} | null, take(now),
-// restored() → {on, keeper, seat} | null }. info().here false: the seat is on another device: start()
+// here() → this device {name, did, worker} | null, restored() → {on, keeper, seat} | null }. info().here false: the seat is on another device: start()
 // takes the owner lock but never logs in (writes refused 409 seat_elsewhere, the page's banner), until
 // POST /api/seat/take {confirm: true} signs the list naming this device (seat take --force semantics).
 // identity(): the identity file as sigelo-agent writes it ({ secret, genesis, rotations,
@@ -21,9 +21,13 @@
 // The relay new codes name: options.relay or the platform's env.relay when given (fixed, as SIGELO_RELAY
 // is for `sigelo-agent ui`), else the page's setting (GET/POST /api/settings, in the page's data),
 // else relay.sigelo.ai. presetRelay(files, host): the first-start form's choice, before any router.
+// keeper: { load() → bytes | null, save(bytes) } (seed.mjs keeperOf: the sealed keeper of a restore or a create):
+// the Agents list and their enrolment (contact/page.mjs); without one (an imported SAFE or FULL file) the
+// list is empty and enrolling refuses `keeper`.
 import { did as didOf } from 'sigelo';
 import { Carrier, DEFAULT_RELAY, UNLOGGED, pathsFor } from './vendor/contact/carrier.mjs';
 import { checkRelay } from './vendor/contact/invite.mjs';
+import { enrolPath } from './vendor/contact/enrol.mjs';
 import * as L from './vendor/contact/link.mjs';
 import { makePage, refuse } from './vendor/contact/page.mjs';
 import { codeKind } from './vendor/contact/short.mjs';
@@ -53,7 +57,7 @@ export function presetRelay(files, host) {
 
 const DEVICES_HERE = 'devices are added, scanned and revoked on the operator\'s computer (sigelo-agent ui), not in this app';
 
-export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' }, options = {}, seat = null }) {
+export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' }, options = {}, seat = null, keeper = null }) {
   const mode = { ...mode0 };
   const { files } = platform;
   const paths = pathsFor(IDENTITY), base = IDENTITY.replace(/\.json$/, '');
@@ -62,6 +66,9 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
     const s = identity(), chain = [didOf(s.genesis), ...(s.rotations ?? []).map((r) => didOf(r.next_genesis))];
     return { did: didOf(headOf(s)), original: chain[0], chain };
   };
+  let roster = null;
+  const opened = async () => { const b = await keeper.load(); if (b === null) return null; try { return JSON.parse(text(b)); } finally { b.fill(0); } };
+  const strip = (k) => { if (k === null) return null; const { root_hex: _, ...rest } = k; return rest; };
   const env = Object.fromEntries(Object.entries(platform.env ?? {}).filter(([k, v]) => v !== undefined && v !== null && ['relay', 'endpoints', 'retentionDays', 'shortRelay', 'registry'].includes(k)));
   const page = makePage({
     makeCarrier: (onEvent, kept) => new Carrier({
@@ -69,7 +76,7 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
       ...paths, ...kept, ...env, ...options, keep: true, onEvent, platform,
     }),
     relayFixed: options.relay ?? env.relay ?? null,
-    link: L, linksFile, codeKind, unlogged: UNLOGGED,
+    link: L, linksFile, enrolFile: enrolPath(IDENTITY), codeKind, unlogged: UNLOGGED,
     // The history and the page's data: files of the platform (IndexedDB behind them), written whole.
     store: {
       readHistory: () => text(files.read(historyFile)),
@@ -83,9 +90,23 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
       meInfo: () => ({ identity_file: IDENTITY, recovery: headOf(identity()).recovery === null ? 'none' : 'set', key: 'browser',
         erase: 'On the machine holding the recovery key, with this identity\'s file: SIGELO_IDENTITY=<file> sigelo-agent erase-request --recovery-key <your recovery.key>',
         ...(seat?.restored() && { restored: seat.restored() }) }),
-      agents: () => [],
+      // No agents' directory; this device itself (worker i of a restore or a create) is the one agent here.
+      agents: () => { const h = seat?.here?.(); return h ? [{ name: h.name, did: h.did }] : []; },
       seat: () => seat?.info() ?? null,
       defer: (f) => { setTimeout(f, 0); },
+      // The keeper sealed in the app's storage. The list reads its roster, kept here without the root after the
+      // first opening; K is opened only to enrol (on Android, within the screen lock's window); a change is resealed.
+      ...(keeper && { keeper: {
+        read: async () => (roster ??= strip(await opened())),
+        root: async () => { const k = await opened(); return { K: unhex(k.root_hex), recovery: k.recovery }; },
+        update: async (fn) => {
+          const k = await opened();
+          fn(k);
+          const out = utf8(JSON.stringify(k));
+          try { await keeper.save(out); } finally { out.fill(0); }
+          roster = strip(k);
+        },
+      } }),
     },
   });
   const { routes, serial } = page;

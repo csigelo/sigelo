@@ -13,6 +13,7 @@
 //   await c.relayForShort(short, { relay }) → { relay, from }: where a short code is parked: 8 characters, shortRelay
 //                                            (relay.sigelo.ai); 12, the relay its tag resolves to (relays.mjs), or relay_tag
 //   await c.registryRelays()               → [{ tag, host, did?, tier?, note? }]: the signed registry's relays, verified (relays.mjs)
+//   await c.probeRelay(host)               → { relay, ok, ms, retention_days, detail? }: does it answer (GET /relay.json, else /challenge)
 //   await c.redeemGift(code)               → { exp, months }: a gift code (PRO-K7F3-Q9ZP) redeemed at this agent's relay;
 //                                            this identity is the operator whose pool is Pro until exp (relay/gifts.mjs)
 //   await c.accept(code, { name, wait, relay })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
@@ -2402,6 +2403,22 @@ export class Carrier {
   async registryRelays() {
     return [...(await this.#registry())].map(([tag, e]) => ({ tag, ...e }));
   }
+  /**
+   * Does a relay answer here? GET /relay.json at its HTTP endpoint (endpointOf), else GET /challenge (a
+   * relay without the site's relay.json still answers it, 400 without a DID): the page's relay picker,
+   * before a host is used. Nothing is sent but these two GETs. → { relay, ok, ms, retention_days, detail? }.
+   */
+  async probeRelay(host) {
+    relayArg(host);
+    const base = endpointOf(host, this.endpoints).http, t0 = Date.now(), ms = () => Date.now() - t0;
+    try {
+      const r = await http(this.platform, `${base}/relay.json`);
+      if (r.status === 200 && r.body?.limits !== undefined) return { relay: host, ok: true, ms: ms(), retention_days: retentionOf(r.body) };
+      const c = await http(this.platform, `${base}/challenge`);
+      if ((c.status === 400 || c.status === 200) && c.body !== null) return { relay: host, ok: true, ms: ms(), retention_days: null };
+      return { relay: host, ok: false, ms: ms(), retention_days: null, detail: `${host} answered ${c.status}: not a sigelo relay` };
+    } catch (e) { return { relay: host, ok: false, ms: ms(), retention_days: null, detail: e.message }; }
+  }
 
   // The long code parked under a short one: GET /park/<code hash>, which the relay answers once,
   // at the relay relayForShort names. Whatever it answers is a code to parse like any other
@@ -2467,6 +2484,10 @@ export class Carrier {
       if (code.relay !== this.relay && code.relay !== named && !Object.hasOwn(this.endpoints ?? {}, code.relay) && !publicRelay(code.relay)) {
         fail('code_relay', `the code names ${code.relay}, an address or a local name, not a public relay: allow it in SIGELO_RELAY_ENDPOINTS if it is yours`);
       }
+      // A contact revoked here: refused before anything goes (its reply would be refused, the inviter
+      // left paired alone), unless a new link permits it (store.mjs relink).
+      const known = store.lookup(code.did);
+      if (known?.revoked && !(known.relink?.until > now)) fail('revoked', `${known.did} was revoked by this owner${known.ended ? ` (link ${known.ended.id} ended): a new link needs both operators to ask again` : ''}`);
       const k = kemKey();
       try {
         const answer = buildAnswer({ code, identity: { sign: me.sign, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_pk: k.pk, prekeys: null });
@@ -2752,6 +2773,8 @@ export class Carrier {
     });
   }
   setLink(who, link) { return this.#locked(({ now, store }) => store.setLink(who, link, now)); }
+  // A new link with a contact an ended link revoked: a one-use permit for its pairing (store.mjs relink).
+  relink(did, id, until) { return this.#locked(({ now, store }) => store.relink(did, id, until, now)); }
   // The original DID that paired through this agent's code `nonce` (its inviteNonce, readCode().nonce),
   // or null: none yet, or the code's life plus a day is over (enrol.mjs answers only that DID).
   answeredBy(nonce) { return this.#read(({ now, st }) => { const a = Object.hasOwn(st.answered, nonce) ? st.answered[nonce] : null; return a && a.exp > now ? a.did : null; }); }
@@ -2769,9 +2792,10 @@ export class Carrier {
     });
   }
 
-  async forget(did) {
+  // ended: {id, by, at} when a link's end forgets it (link.mjs), so a new link may pair it again.
+  async forget(did, { ended = null } = {}) {
     const c = this.#locked(({ store, st }) => {
-      const c = store.revoke(did);
+      const c = store.revoke(did, ended);
       delete st.peers[c.did];
       st.pending = st.pending.filter((p) => p.peer !== c.did);
       this.#sweepSpool(st);

@@ -108,6 +108,16 @@ public final class MainActivity extends Activity {
         web.loadUrl(START);
     }
 
+    /** Set by the bridge (secure, door) while a new identity's words are on screen: Back does nothing then. */
+    volatile boolean door;
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        if (door) return;
+        super.onBackPressed();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();

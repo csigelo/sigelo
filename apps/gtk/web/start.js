@@ -7,6 +7,10 @@
 // Restore from seed (design/apps-seed.md): "I have my 25 words on paper", then one box checked as it is
 // typed (seed-check.mjs); the words go to the app once (op restore), which hands them to
 // `sigelo-agent keeper --from-words --keychain` on stdin: sealed in the keyring before anything is written.
+// Create new identity (pass A10a): the app draws 25 words (op newwords); they are shown here once in a
+// numbered grid with their wallet's address, copy on stagenet only (the clipboard emptied after 60 s), no
+// way back but on; then three asked by number (op quiz) and typed back, checked by the app (op create),
+// which makes the identity from them. Wrong: back to the grid. The words are dropped from the page after.
 const $ = (id) => document.getElementById(id);
 const shell = globalThis.webkit?.messageHandlers?.sigelo;
 const ask = (op, o = {}) => shell ? shell.postMessage({ op, ...o }) : Promise.resolve({ ok: false, message: 'Open this page in the sigelo app.' });
@@ -140,3 +144,62 @@ $('seed-take').onclick = async () => {
   const s = await ask('self', {}); if (!s.ok) seedSay(s.message);
 };
 if (saved.standby) { $('seed-ack').hidden = true; $('seed-standby').hidden = false; }
+
+// ---- create a new identity
+const createSay = (t) => { $('create-status').textContent = t ?? ''; };
+const CLIP_SECONDS = 60;
+let createNet = 'mainnet', clipTimer = 0;
+const show = (step) => { for (const x of ['form', 'words', 'check']) $(`create-${x}`).hidden = x !== step; };
+function drop() {
+  $('create-grid').replaceChildren(); $('create-vault').textContent = '';
+  for (const i of [0, 1, 2]) $(`create-a${i}`).value = '';
+}
+function grid(words, note) {
+  const g = $('create-grid');
+  g.classList.toggle('nocopy', createNet === 'mainnet');
+  g.replaceChildren(...words.map((w, i) => { const li = document.createElement('li'), n = document.createElement('small'); n.textContent = `${i + 1} `; li.append(n, w); return li; }));
+  $('create-note').hidden = !note; $('create-note').textContent = note ?? '';
+  $('create-copy').hidden = createNet !== 'stagenet'; $('create-nocopy').hidden = createNet === 'stagenet';
+  show('words');
+}
+$('create-grid').addEventListener('copy', (e) => { if (createNet === 'mainnet') e.preventDefault(); });
+let shown = null;   // the words while the grid is up (again after a wrong check); dropped once made
+$('create-go').onclick = async () => {
+  const name = $('create-name').value.trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,19}$/.test(name)) { createSay('Name for this device: lowercase letters, digits, _ and -, at most 20.'); return; }
+  createNet = document.querySelector('input[name=create-net]:checked')?.value ?? 'mainnet';
+  $('create-go').disabled = true; createSay('Making your words…');
+  const r = await ask('newwords', { net: createNet });
+  $('create-go').disabled = false;
+  if (!r.ok) { createSay(r.message); return; }
+  shown = r.words; $('create-vault').textContent = r.vault; createSay('');
+  grid(shown);
+};
+$('create-copy').onclick = async () => {
+  if (createNet !== 'stagenet' || !shown) return;
+  try {
+    await navigator.clipboard.writeText(shown.join(' '));
+    clearTimeout(clipTimer); clipTimer = setTimeout(() => { void ask('clipclear'); }, CLIP_SECONDS * 1000);
+    createSay(`Copied. The clipboard is emptied in ${CLIP_SECONDS} s.`);
+  } catch (e) { createSay(`Not copied: ${e.message}`); }
+};
+$('create-written').onclick = async () => {
+  if (clipTimer) { clearTimeout(clipTimer); clipTimer = 0; void ask('clipclear'); }
+  const q = await ask('quiz');
+  if (!q.ok) { createSay(q.message); return; }
+  q.asked.forEach((n, i) => { $(`create-l${i}`).textContent = `Word ${n}`; });
+  $('create-grid').replaceChildren(); createSay('');
+  show('check'); $('create-a0').focus();
+};
+$('create-verify').onclick = async () => {
+  const answers = [0, 1, 2].map((i) => $(`create-a${i}`).value);
+  for (const i of [0, 1, 2]) $(`create-a${i}`).value = '';
+  $('create-verify').disabled = true; createSay('Checking, then sealing in the keyring…');
+  const r = await ask('create', { answers, name: $('create-name').value.trim() });
+  $('create-verify').disabled = false;
+  if (r.wrong) { grid(shown, `Word${r.wrong.length > 1 ? 's' : ''} ${r.wrong.join(', ')} did not match. Look at your paper again, then check once more.`); createSay(''); return; }
+  if (!r.ok) { createSay(`Not made: ${r.message}`); grid(shown); return; }
+  shown = null; drop(); show('form'); $('create-form').hidden = true;
+  createSay(r.seat === 'here' ? 'Made: this phone holds the seat.' : `Made. The seat: ${r.message}`);
+  const s = await ask('self', relayEdited ? { relay: $('relay').value.trim() } : {}); if (!s.ok) createSay(s.message);
+};
