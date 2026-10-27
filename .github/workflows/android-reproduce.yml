@@ -148,7 +148,9 @@ jobs:
         env:
           REF: ${{ inputs.ref }}
         run: |
-          bt=$(ls -d "$ANDROID_HOME"/build-tools/34.* 2>/dev/null | sort -V | tail -1)
+          # apksigner 35+ for --alignment-preserved (the ceremony's flag; 34 lacks it): install build-tools 35.0.0 if absent
+          [ -d "$ANDROID_HOME/build-tools/35.0.0" ] || yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --sdk_root="$ANDROID_HOME" "build-tools;35.0.0" >/dev/null 2>&1 || true
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/35.* 2>/dev/null | sort -V | tail -1)
           [ -n "$bt" ] || bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           export PATH="$bt:$PATH"; echo "apksigner from $bt" | tee -a verdict.txt
           python3 -m venv "$RUNNER_TEMP/v" && "$RUNNER_TEMP/v/bin/pip" install -q apksigcopier==1.1.1

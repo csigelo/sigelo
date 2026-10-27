@@ -10,7 +10,10 @@
     "disaster-recovery",
     "ai-agents",
     "did",
-    "sigelo"
+    "sigelo",
+    "agent-identity",
+    "monero",
+    "seed-phrase"
   ],
   "homepage": "https://sigelo.io/",
   "repository": {

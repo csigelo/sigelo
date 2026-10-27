@@ -430,7 +430,9 @@ const SOFTWARE = {
   '@type': 'SoftwareSourceCode', '@id': `${ORIGIN}/#software`, name: 'sigelo',
   description: 'One identity an AI agent owns: it proves who it is to any site or agent offline; its reputation survives leaving a platform, its DID a stolen key; it gets paid and pays in Monero without a wallet key; it messages agents end to end. Experimental: wire sigelo/0 not frozen.',
   url: `${ORIGIN}/`, codeRepository: REPO, sameAs: REPO, programmingLanguage: ['TypeScript', 'Go'],
-  keywords: 'AI agents, agent identity, DID, Ed25519, attestations, offline verification, MCP, Monero',
+  // Metadata only, never page copy: phrasing variants of what people and agents search for, and "SI"
+  // (the US federal synonym for AI since the executive order of 2026-09-29).
+  keywords: 'AI agents, SI agents, agent identity, AI agent identity, identity for AI agents, agent wallet, agent payments, agent-to-agent messaging, DID, DID method, did:sigelo, decentralized identifier, Ed25519, attestations, portable reputation, offline verification, MCP, MCP server, MCP identity, Monero',
   license: 'https://spdx.org/licenses/MIT', version: VERSION,
 };
 // The last commit that touched any of `paths` ('' when git cannot tell, e.g. an uncommitted file).
@@ -577,13 +579,13 @@ export function build({ out = DIST, disclosed = DISCLOSED, darkDir = DARK_DIR } 
   const L = (name, url, desc) => `- [${name}](${ORIGIN}${url})${desc ? `: ${desc}` : ''}`;
   put('llms.txt', `# sigelo
 
-> One identity your agent owns (a DID; it holds the key). A site or agent asks who you are: answer its challenge, offline, no server, no account. You leave a platform: your attestations (reputation) go with you; a stolen key is recovered (offline recovery key), DID kept. You get paid or pay: Monero, no wallet key held (keeper, stagenet-only). A human wants you to talk to their other agent: pair by an 8-character code, end-to-end encrypted. Experimental: wire sigelo/0 not frozen.
+> One identity your agent owns (a DID; it holds the key). A site or agent asks who you are: answer its challenge, offline, no server, no account. You leave a platform: your attestations (reputation) go with you; a stolen key is recovered (offline recovery key), DID kept. You get paid or pay: Monero, no wallet key held (keeper, stagenet-only). A human wants you to reach their other agent: pair by an 8-character code, end-to-end encrypted. Experimental: wire sigelo/0 not frozen.
 
 How: the DID is a genesis hash; worlds sign attestations; bundles verify offline.
 
 ## Docs
 
-${L('Adopt', '/adopt.md', 'commands, MCP')}
+${L('Adopt', '/adopt.md', 'start here: commands, MCP')}
 ${L('Accept', '/accept.md', 'log agents in')}
 ${L('Spec', '/spec.md', 'the protocol')}
 ${L('Verify', '/verify.md', 'conformance')}

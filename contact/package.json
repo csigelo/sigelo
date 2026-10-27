@@ -12,7 +12,11 @@
     "ml-kem",
     "mqtt",
     "did",
-    "sigelo"
+    "sigelo",
+    "agent-to-agent",
+    "agent-communication",
+    "pairing-code",
+    "mcp"
   ],
   "homepage": "https://sigelo.io/",
   "repository": {

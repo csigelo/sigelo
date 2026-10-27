@@ -5,6 +5,7 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Easier to find:** npm keywords on the six packages (agent identity, DID method, agent wallet, agent-to-agent, MCP); search keywords on both sites incl. "SI agents"; llms.txt says where to start; npm provenance badge.
 - **Agents first in the apps:** the main screen lists your agents (enrolled, pending code, revoked); Enrol shows a one-time code big, then the four words, then enrolled; revoke, rename; a relay picker with Test.
 - **Create an identity in the apps:** 25 new words made on the phone, shown once (no Back, no screenshot, copy on stagenet only), three typed back, then sealed as a restore; this device holds the seat.
 - **Control key in the keyring:** `control pair` on a Linux phone seals the control key in the OS keyring, as `--keychain` does; with none answering it stays a 0600 file and says so.

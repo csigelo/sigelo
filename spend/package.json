@@ -11,7 +11,11 @@
     "spending-limits",
     "monero-wallet-rpc",
     "payments",
-    "sigelo"
+    "sigelo",
+    "agent-wallet",
+    "agent-identity",
+    "did",
+    "mcp"
   ],
   "homepage": "https://sigelo.io/",
   "repository": {

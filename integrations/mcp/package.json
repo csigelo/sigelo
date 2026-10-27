@@ -13,7 +13,12 @@
     "ed25519",
     "attestation",
     "monero",
-    "sigelo"
+    "sigelo",
+    "agent-wallet",
+    "agent-payments",
+    "agent-to-agent",
+    "did-method",
+    "mcp-identity"
   ],
   "homepage": "https://sigelo.io/",
   "repository": {

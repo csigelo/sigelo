@@ -13,7 +13,10 @@
     "offline-verification",
     "signature",
     "portable-reputation",
-    "sigelo"
+    "sigelo",
+    "did-method",
+    "self-sovereign-identity",
+    "agent-to-agent"
   ],
   "homepage": "https://sigelo.io/",
   "repository": {

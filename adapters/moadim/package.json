@@ -11,7 +11,12 @@
     "cli",
     "challenge-response",
     "offline-verification",
-    "sigelo"
+    "sigelo",
+    "agent-to-agent",
+    "did-method",
+    "web-bot-auth",
+    "http-message-signatures",
+    "mcp"
   ],
   "homepage": "https://sigelo.io/",
   "repository": {

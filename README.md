@@ -21,7 +21,7 @@ Draft v0.1: `sigelo/0` may change before v1.0.
 
 Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). MCP: `sigelo-mcp`
 (`io.github.csigelo/sigelo`). Why: [`WHY.md`](WHY.md).
-[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/csigelo/sigelo)
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/csigelo/sigelo) [![npm-provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/sigelo-mcp)
 
 Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhUkH7FebKRGj8rf96SdoLa`) under a human owner, `csigelo`. No third party has audited it yet.
 
