@@ -9,7 +9,8 @@
 export function countCases(T) {
   const N = T.negative;
   let n = 0;
-  n += 3;   // positive: bundle, bundle_minimal, bundle_recovered == expect
+  n += 6;   // positive: bundle, bundle_minimal, bundle_recovered, bundle_retired_recovery_at_genesis,
+            //   bundle_retired_recovery_later_iat, bundle_recovery_null_commitment == expect
   n += 3;   // positive: genesis, world_genesis, member_genesis did
   n += 2;   // positive: attestation, attestation_unicode accepted
   n += 2;   // positive: a challenge in the attestation slot, an invoice in the binding slot
@@ -21,6 +22,7 @@ export function countCases(T) {
   n += 2;   // negative: unknown_field_genesis, genesis_bad_key
   n += 4;   // negative: not-a-candidate rotations
   n += 3;   // negative: fork, cycle, self_rotation
+  n += 1;   // negative: recovery_tie
   n += 1;   // negative: bundle_rotations_not_array
   for (const x of Object.values(N)) if (x && typeof x === 'object' && 'sig_id' in x) n++;   // bindings discarded
   n += Object.keys(N.parity.cases).length;                                                   // parity

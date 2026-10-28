@@ -140,6 +140,9 @@ try {
   ok('device add: exit 0, rank safe, worker 0, ours, own', op1.status === 0 && op1.stdout.includes('"rank": "safe"') && json(op1.stdout.split('\n').slice(1).join('\n'))['did'] === w0.did
     && json(op1.stdout.split('\n').slice(1).join('\n'))['tier'] === 'own', op1.stdout + op1.stderr);
   ok('both sides show the same four words', ((a, b) => a !== undefined && a === b)(/its four words: (\w+ \w+ \w+ \w+)/.exec(op1.stderr)?.[1], /Check with them: (\w+ \w+ \w+ \w+)/.exec(scan.stderr)?.[1]), op1.stderr + scan.stderr);
+  // Review 2026-10-28 (LOW): the flag is no comparison; nothing claims one happened.
+  ok('device add --yes-words-checked: says the words were NOT compared and how to revoke on a mismatch; words_checked false in the JSON', op1.stderr.includes('NOT compared') && op1.stderr.includes('device revoke phone')
+    && json(op1.stdout.split('\n').slice(1).join('\n'))['words_checked'] === false, op1.stderr);
   const st0 = JSON.parse(readFileSync(file0, 'utf8')) as { secret: string; attestations: { body: { iat: number; exp: number } }[] };
   ok('the device file: 0600, worker 0\'s key, an operator attestation of 14 days', (statSync(file0).mode & 0o777) === 0o600 && st0.secret === Buffer.from(w0.seed).toString('hex')
     && st0.attestations[0]!.body.exp - st0.attestations[0]!.body.iat === 14 * 86400);
@@ -426,9 +429,17 @@ try {
     const back = await cli(ALPHA, ['send', 'carl', 'from the new seat', '--operator']);
     const cb = await cli(CARL, ['inbox', '--wait', '5']);
     ok('…and alpha\'s reach carl', back.status === 0 && cb.stdout.includes('from the new seat'), back.stderr + cb.stdout + cb.stderr);
+    // Review 2026-10-28, MEDIUM 6: the new seat syncs first, so beta's batch holds the epoch-4 list and snapshot together.
+    const fsy = await cli(ALPHA, ['device', 'sync']);
+    ok('alpha (the seat by force) runs device sync: the list and its snapshot go to the standbys', fsy.status === 0 && (json(fsy.stdout)['snapshots'] as number) >= 1, fsy.stdout + fsy.stderr);
     const bIn = await cli(BETA, ['inbox', '--operator']), bUi = await cli(BETA, ['ui', '--no-open']);
     ok('beta, back: it reads its device inbox first, sees epoch 4 and refuses (inbox, ui): seat_elsewhere; its state sealed away', bIn.status === 1 && bIn.stderr.includes('seat_elsewhere') && bUi.status === 1 && bUi.stderr.includes('seat_elsewhere')
       && !existsSync(meOf(BETA).replace(/\.json$/, '.contacts.json')) && !plainOn(BETA), bIn.stderr + bUi.stderr + plainIn(BETA).join());
+    const parkedB = readdirSync(dirname(meOf(BETA))).filter((f) => /^me\.local\.parked\.3(-\d+)?\.sgs$/.test(f));
+    const pb = parkedB[0] ? dv.openSnapshot(new Uint8Array(readFileSync(join(dirname(meOf(BETA)), parkedB[0]))), K3) : undefined;
+    const heldB = dv.openSnapshot(new Uint8Array(readFileSync(meOf(BETA).replace(/\.json$/, '.snapshot.sgs'))), K3);
+    ok('…what beta took as the seat after the last snapshot stays with it, sealed under its own epoch (me.local.parked.3.sgs: carl in it), not overwritten by the newer snapshot held (epoch 4)',
+      pb?.epoch === 3 && pb.files['contacts']!.includes(carlDid) && heldB.epoch === 4, parkedB.join() + bIn.stderr);
     const sb = await cli(BETA, ['device', 'seat']);
     ok('device seat on beta: alpha holds it, epoch 4; a snapshot held here', sb.status === 0 && (json(sb.stdout)['seat'] as { holder: string; epoch: number }).holder === 'alpha' && (json(sb.stdout)['seat'] as { epoch: number }).epoch === 4 && json(sb.stdout)['snapshot'] !== null, sb.stdout);
     const bsend = await cli(BETA, ['send', 'operator', 'beta as itself', '--identity', betaFile]);

@@ -449,10 +449,18 @@ for (const name of ['recovery_key_mismatch', 'stale_recovery_key', 'voluntary_ch
     same(chainOf([...v.chain_with.map(rot), { body: v.body, sig: v.sig, sig_next: v.sig_next, next_genesis: v.next_genesis }]), v.expected_chain));
 }
 // §7.3 step 2 / §7.4: two valid recoveries sharing the latest iat is operator error, and no
-// rule picks between them. Not in the vectors, so minted here from the same recovery key.
-const tie = rotate({ genesis: g1, next_genesis: P.rotation_hostile_carried.next_genesis, iat: P.rotation_recovery.body.iat, reason: 'recovery', secret: K.recovery!, next_secret: K.attacker! });
-rejects('two recovery rotations sharing the latest iat reject the chain',
-  () => chainOf([rot('rotation_voluntary'), rot('rotation_recovery'), tie]), 'tie');
+// rule picks between them (vector negative.recovery_tie).
+rejects('neg recovery_tie: two recovery rotations sharing the latest iat reject the chain',
+  () => chainOf([...N.recovery_tie.chain_with.map(rot), nrot('recovery_tie')]), 'tie');
+// §7.4 recovery while the commitment is null, and a retired recovery key (review 2026-10-28,
+// MEDIUM 2): the three bundle vectors run in the §9.1 loop above; pin what they say.
+t('bundle_recovery_null_commitment: the recovery is not a candidate, chain [dm]',
+  same(P.bundle_recovery_null_commitment.expect.chain, [P.member_genesis.expect_did]) && P.bundle_recovery_null_commitment.bundle.rotations.length === 1);
+for (const n of ['bundle_retired_recovery_at_genesis', 'bundle_retired_recovery_later_iat']) {
+  const v = P[n];
+  t(`${n}: ACCEPTED as written, the thief's DID current (a retired recovery key still governs before its retirement)`,
+    v.expect.did === did(P.rotation_hostile.next_genesis) && v.bundle.rotations.some((r: Any) => r.body.reason === 'recovery' && r.body.recovery_key === P.rotation_recovery.body.recovery_key && r.body.next === v.expect.did));
+}
 // Differential D2: the latest recovery iat was Math.max(...list), one argument per valid
 // recovery, and V8 threw RangeError (a crash naming no check) past ~125 000 of them where go/
 // answered. Now a loop. Many recoveries at one node, in any order, pick the latest; a tie at

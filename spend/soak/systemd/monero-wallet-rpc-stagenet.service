@@ -6,7 +6,9 @@ Description=monero-wallet-rpc, stagenet allowance wallet (sigelo soak)
 [Service]
 Type=simple
 WorkingDirectory=%h/.local/monero/wallets
-ExecStart=/usr/bin/monero-wallet-rpc --stagenet --wallet-file allowance-stagenet --password stagenet --daemon-address node.monerodevs.org:38089 --rpc-bind-ip 127.0.0.1 --rpc-bind-port 38083 --disable-rpc-login --log-file rpc.log
+# The RPC login and the password file's path are in the 0600 --config-file setup.sh writes (policy.json
+# carries the same login), never on argv: /proc/<pid>/cmdline is readable by every local uid.
+ExecStart=/usr/bin/monero-wallet-rpc --stagenet --wallet-file allowance-stagenet --daemon-address node.monerodevs.org:38089 --rpc-bind-ip 127.0.0.1 --rpc-bind-port 38083 --config-file %h/.local/share/sigelo-soak/keeper/wallet-rpc.conf --non-interactive --log-file rpc.log
 Restart=on-failure
 RestartSec=30
 # To keep it down (an incident): spend/soak/freeze.sh (stop + a drop-in Restart=no); not `mask --runtime`, see the keeper unit.

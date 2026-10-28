@@ -15,8 +15,8 @@ small bridge in Java for what a page cannot do. No AndroidX, no dependency but t
   K_1 are made from them as a restore makes them, sealed under the FULL key, and the phone holds the
   seat. The words are gone after; Me says "Created on <day>; the 25 words are on your paper".
 - **This phone:** the phone holds an identity, SAFE (the file `sigelo-agent device scan` wrote for it
-  on your computer) or FULL (the operator's, standby). Import the file once; the app runs its own
-  carrier and talks to the relay itself.
+  on your computer). Import the file once; the app runs its own carrier and talks to the relay
+  itself. The operator's file (FULL) is not imported: restore from seed (design/apps.md §18).
 - **Restore from seed:** your 25 words make the operator identity and your keeper root K_1 again on
   the phone (FULL), as `sigelo-agent keeper --from-words` does on a computer. First "I have my 25
   words on paper", then one box: the words are checked as you type (count, word list, checksum),

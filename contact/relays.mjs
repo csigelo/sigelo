@@ -9,6 +9,10 @@
 //   3. none: the person is asked once (accept --relay <host>), and the host goes into the table.
 // Two known hosts with one tag (20 bits collide, by chance or on purpose): neither is guessed, the
 // person is asked. The registry lists a tag once (first host keeps it), so it cannot collide.
+// A contact's relay comes from the code that contact paired with, so its tag can be ground to equal
+// any registered relay's in seconds: such a host wins only when the registry has no other host for
+// the tag; one it names otherwise is a collision, asked (review 2026-10-28, MEDIUM 4). The own,
+// operator and table hosts rank above both and never consult the registry.
 //
 // The local table: relays.local.json beside the identity, {"relays": ["corp.example.com", …]}, hosts
 // as a long code names them (host[:port]); the tag is computed, never stored. The registry cache:
@@ -108,18 +112,26 @@ export async function loadRegistry({ file, url = REGISTRY_URL, now, get, pin = R
 }
 
 /**
- * The host for `tag`. known: [{ host, from }] (step 1, any order; duplicates of a host are one);
- * registry: () => Promise<Map> (step 2, called only when step 1 has no host for the tag).
- * → { host, from }; throws relay_tag when two known hosts share the tag, or nothing has it.
+ * The host for `tag`. known: [{ host, from }] (step 1, any order; duplicates of a host are one, the
+ * trusted `from` kept over 'contact'); registry: () => Promise<Map> (step 2, called when step 1 has no
+ * host for the tag, or only a contact's). → { host, from }; throws relay_tag when two known hosts
+ * share the tag, when the registry names another host than the one contact's, or nothing has it.
  */
 export async function resolveTag(tag, { known, registry, shown }) {
   const hits = new Map();
-  for (const k of known) if (goodRelay(k.host) && relayTag(k.host) === tag && !hits.has(k.host)) hits.set(k.host, k.from);
+  for (const k of known) if (goodRelay(k.host) && relayTag(k.host) === tag && (!hits.has(k.host) || hits.get(k.host) === 'contact')) hits.set(k.host, k.from);
   if (hits.size > 1) {
     fail('relay_tag', `short code ${shown}: its relay tag ${tag} fits ${[...hits.keys()].join(' and ')}, relays this agent knows: it does not guess. Ask the inviter which relay it used, then accept it with --relay <host>`);
   }
-  if (hits.size === 1) { const [[host, from]] = hits; return { host, from }; }
+  const [[host, from] = []] = hits;
+  if (host !== undefined && from !== 'contact') return { host, from };
   const e = (await registry()).get(tag);
+  if (host !== undefined) {
+    if (e && e.host !== host) {
+      fail('relay_tag', `short code ${shown}: its relay tag ${tag} fits ${host}, a contact's relay, and ${e.host} in the registry: it does not guess. Ask the inviter which relay it used, then accept it with --relay <host>`);
+    }
+    return { host, from };
+  }
   if (e) return { host: e.host, from: 'registry' };
   return fail('relay_tag', `short code ${shown} was made on a relay this agent does not know (relay tag ${tag}): ask the inviter which relay, then accept it with --relay <host> (remembered for its next code); or ask for the long code (invite --long)`);
 }

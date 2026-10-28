@@ -367,9 +367,10 @@ plain words, §4.2):
    not an integrated address (§7).
 4. repeat: the request's `ref` (given, or derived as `sha256(account ‖ JCS({to, amount,
    purpose}))` with `to` taken without its `bundle` — the bundle is evidence, not the
-   destination) already has a line in the agent's log within `dedupe_seconds`: an identical
-   request gets the stored outcome back (§4.2); a different request under a used explicit
-   `ref` is `409`. Nothing below runs, so a retry never pays twice and never re-spends budget.
+   destination) already has a line in the agent's log within `dedupe_seconds` (an explicit
+   `ref`: within the agent's `period_seconds`; a `relay_failed` line or an intent with no
+   outcome: for the life of the log): an identical request gets the stored outcome back
+   (§4.2); a different request under a used explicit `ref` is `409`. Nothing below runs, so a retry never pays twice and never re-spends budget.
 5. allowlist — the agent's `allow`, intersected with every ancestor's (§4.3). Rules: a
    literal `addr` (optionally `label`led, so the agent can say `pay bob`); a DID rule
    `{did, issuer, ctx?}`, the bundle verified offline, the address that DID's `proven` monero
@@ -439,7 +440,9 @@ repeat of the command is answered from the log, never rebuilt.
 **Dry run** (`serve --dry-run`, built) stops after (b): the price and the plan with
 `dry_run: true`, and **no receipt** — a signed entry for a transaction nobody broadcast would
 read to anyone else as proof of a payment. Dry runs are rate-limited like spends (in memory)
-and debit no budget.
+and debit no budget. Above `approval_above` a dry run answers `202` with the body to sign and
+`dry_run: true`, and writes no `pending` line; `POST /approve` is refused `dry_run`, like
+delegation, so nothing a dry run saw is paid by the next real keeper.
 
 **Clock** (built). Every line carries the keeper's `ts` and every window is measured back from
 `now`, so a line signed on a clock set back (a host that booted without the time) falls out of
@@ -537,9 +540,12 @@ default `"(none)"`.
 **Idempotency.** Every `pay` carries a `ref`: `--ref` if given, else derived by the keeper
 from `(account, to, amount, purpose)`. Within `dedupe_seconds` (default 10 min) the same
 command returns the first outcome — `ALREADY PAID … Not paid again.` for a relayed spend, the
-same `UNCERTAIN` for a `relay_failed` one or an intent whose outcome a crash never wrote, the
 same `WAITING FOR APPROVAL` for a pending one until its `exp`, while an approval is still
-needed (§4.1 step 8) — and never builds a second transaction. A `pay` that the CLI gave up
+needed (§4.1 step 8) — and never builds a second transaction. An UNCERTAIN outcome (a
+`relay_failed` spend, or an intent whose outcome a crash never wrote) answers the same
+`UNCERTAIN` for the life of the log, since the daemon may have the transaction; a `--ref` is
+remembered for the agent's `period_seconds`. Only the operator settles an UNCERTAIN one; the
+agent pays again on purpose under a new purpose or `--ref`. A `pay` that the CLI gave up
 waiting for is `UNCERTAIN`, not `TRY LATER`: the keeper may have relayed it after the CLI
 stopped listening, so the agent checks `history` before paying again. A second, intended identical payment changes the purpose (`coffee 2`) or passes
 `--ref`. A request refused by policy or by the wallet's build step left no line, so repeating

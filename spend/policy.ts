@@ -109,6 +109,8 @@ export interface Prior {
    * `approval` the keeper-verified approval an `approved` line carries.
    */
   nonce?: string; until?: number; approval?: Approved;
+  /** The line's transaction: an intent is settled by a relayed or relay_failed line of the same txid. */
+  txid?: string;
 }
 export interface Plan {
   account_index: number;
@@ -275,12 +277,20 @@ export function evaluate(req: PayRequest, policy: Policy, state: Spent[], now: n
   // approval takes a human, and the agent's re-run must still find it. Once an intent line has
   // spent its nonce it answers nothing — the intent (then the outcome) is the answer, and after
   // that window the same command is a new payment needing a new approval.
+  // An UNCERTAIN outcome — a relay_failed line, or an intent no outcome line of its txid settled
+  // — answers for the life of the log: the daemon may have the transaction, and a harness that
+  // retries later must never pay it twice. An explicit ref is the caller's idempotency key and is
+  // remembered for the agent's period_seconds; a derived one for dedupe_seconds, so the same
+  // coffee tomorrow is a new payment (review 2026-10-28 #10).
   const mine = (seen.prior ?? []).filter((p) => p.agent === name && p.ref === ref);
   const spent = new Set(mine.flatMap((p) => (p.status === 'intent' && p.nonce !== undefined ? [p.nonce] : [])));
+  const settledTx = new Set(mine.flatMap((p) => (p.status === 'relayed' || p.status === 'relay_failed' ? [p.txid] : [])));
+  const uncertain = (p: Prior): boolean => p.status === 'relay_failed' || (p.status === 'intent' && !settledTx.has(p.txid));
+  const window = req.ref !== undefined ? Math.max(policy.dedupe_seconds, agent.period_seconds) : policy.dedupe_seconds;
   const used = mine.filter((p) => (waiting(p.status) && p.until !== undefined
-    ? now < p.until && !spent.has(p.nonce!) : p.ts > now - policy.dedupe_seconds));
+    ? now < p.until && !spent.has(p.nonce!) : uncertain(p) || p.ts > now - window));
   if (used.some((p) => p.fp !== fp)) {
-    return { ok: false, conflict: true, reason: `repeat: ref ${JSON.stringify(ref)} was already used for a different payment in the last ${policy.dedupe_seconds}s. Use a new ref.` };
+    return { ok: false, conflict: true, reason: `repeat: ref ${JSON.stringify(ref)} was already used for a different payment. Use a new ref.` };
   }
   const repeat = (first: Prior): Decision =>
     ({ ok: false, repeat: first, reason: `repeat: ref ${JSON.stringify(ref)} already has an outcome (${first.status}); it is returned instead of paying again` });

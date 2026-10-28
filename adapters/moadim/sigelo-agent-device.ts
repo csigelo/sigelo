@@ -31,8 +31,8 @@ import { open as openFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ReadStream, WriteStream } from 'node:tty';
-import { did, keygen, verifySig, VERSION, type Attestation, type Genesis } from 'sigelo';
-import { addAttestation, addIssuer, identityPath, head, load, save, secretOf, type Store } from './sigelo-agent.ts';
+import { did, keygen, verify, verifySig, VERSION, type Attestation, type Genesis } from 'sigelo';
+import { addAttestation, addIssuer, bundleOf, identityPath, head, load, save, secretOf, type Store } from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
 import { withLock } from './sigelo-agent-monero.ts';
@@ -42,8 +42,9 @@ import { carrierFor, checkOperator, dropTemp, flags, initEnrol, keeperPath, libs
 export const USAGE = `Devices (DEVICES.md): this account on a phone or a second computer, by QR (SAFE: an own agent; FULL: you)
   device add --name <n> [--full]           --full: your identity and keeper root go too (asks "type FULL"; a terminal)
        [--wait <s>]                        online: a one-time QR (10 minutes); asks the device's four words
-       [--tier friend|quiet] [--days <d>]  on this terminal before its key goes (--yes-words-checked: you did)
-       [--png <dir>] [--yes-words-checked] --days: its attestation, 1 to 90 (default 14)
+       [--tier friend|quiet] [--days <d>]  on this terminal before its key goes; --yes-words-checked: not
+       [--png <dir>] [--yes-words-checked] asked, only printed (compare them after; revoke it if they differ)
+                                           --days: its attestation, 1 to 90 (default 14)
   device add --name <n> --offline          no network: the identity sealed in QR frames, then (Enter) the
        [--words 5..8] [--png <dir>] [--paged]  six words to type on the device; never both on one screen
   device scan [<code>|--text <t|->|--image <file>…] [--name <n>] [--into <file>] [--wait <s>]
@@ -197,7 +198,7 @@ async function addOnline(op: string, k: Keeper, name: string, days: number, tier
   const rank = full ? 'full' : 'safe';
   let confirmedAt: number | undefined;
   const checked = f.has('--yes-words-checked'), wait = seconds(f.get('--wait'), WAIT_ADD);
-  if (!checked && !hasTty()) refuse('device_words', 'the device\'s four words are confirmed on this terminal before its key goes, and there is none (/dev/tty): run it in a terminal, or compare the words yourself and pass --yes-words-checked');
+  if (!checked && !hasTty()) refuse('device_words', 'the device\'s four words are confirmed on this terminal before its key goes, and there is none (/dev/tty): run it in a terminal, or pass --yes-words-checked to go on unasked (the words are printed: compare them after, revoke it if they differ)');
   holderFor(op, 'device add');
   const { lib, enrol } = await libs(), { K, recovery } = rootOf(k), i = nextIndex(k), w = enrol.workerChain(K, i, 0, recovery);
   const c = carrierFor(lib, op), file = enrol.enrolPath(op);
@@ -212,7 +213,8 @@ async function addOnline(op: string, k: Keeper, name: string, days: number, tier
     note(`device ${name}: scan this QR on it within 10 minutes (until ${until(r.short_exp)}), once: sigelo-agent device scan, or type ${r.short}. `
       + `It becomes worker ${i} (${w.did}), yours, attested ${days} days${full ? ', FULL' : ''}. Its four words are asked here before its key goes; waiting up to ${wait} s`);
     const confirm = async (x: { words: string; temp: string }): Promise<boolean> => {
-      if (checked) { note(`the device paired; its four words: ${x.words} (not asked: --yes-words-checked)`); confirmedAt = nowS(); return true; }
+      // Not a confirmation: nobody compared anything (the words exist only now). Said so, and in the JSON.
+      if (checked) { note(`the device paired; its four words: ${x.words}. NOT compared (--yes-words-checked): compare them with the device now; if they differ, sigelo-agent device revoke ${name}`); return true; }
       const a = await ttyLine(`\nThe device paired. Do its words read: ${x.words} ? [y/N] `);
       const yes = /^y(es)?$/i.test(a.trim());
       if (yes) confirmedAt = nowS();
@@ -243,7 +245,7 @@ async function addOnline(op: string, k: Keeper, name: string, days: number, tier
       }
     }
     const pushed = await pushList(c, list, op);
-    out({ device: name, rank: full && !sent ? 'safe' : rank, worker: i, did: done.did, original: done.original, via: 'online', ours: done.ours, tier: done.tier, exp: done.exp, list: list.seq, synced: pushed });
+    out({ device: name, rank: full && !sent ? 'safe' : rank, worker: i, words_checked: !checked, did: done.did, original: done.original, via: 'online', ours: done.ours, tier: done.tier, exp: done.exp, list: list.seq, synced: pushed });
     return full && !sent ? 1 : 0;
   } finally { await c.stop(); }
 }
@@ -525,10 +527,33 @@ function writeFull(full: { operator: Store; keeper: Keeper; devices: List }, dev
   return { file: op, wrapped: wrap };
 }
 
-// The operator this device's identity was attested by: its contact record (did, current_did, current_key).
+/**
+ * The operators of an identity file: the issuers of the unexpired sigelo-relay/operator attestations
+ * on its chain that verify (contact/link.mjs me(), carrier.mjs #mine), issuer DID → latest exp. Never
+ * issuers[0] or any bare issuer: a world the agent took an ordinary attestation from is no operator
+ * (review 2026-10-28, HIGH 1).
+ */
+export function operatorsOf(file: string, now = nowS()): Map<string, number> {
+  const ops = new Map<string, number>();
+  try {
+    const r = verify({ ...bundleOf(load(file)), bindings: [] }, now);
+    for (const [iss, bodies] of Object.entries(r.attestations)) {
+      if (r.chain.includes(iss)) continue;
+      for (const b of bodies) if (b.ctx === OPERATOR_CTX && r.chain.includes(b.sub)) ops.set(iss, Math.max(ops.get(iss) ?? 0, b.exp));
+    }
+  } catch {}
+  return ops;
+}
+// This device's operator as a live contact (did, current_did, current_key), or null: then no device message is taken.
+// A FULL device also knows its operator by the operator identity it holds (with its keeper), the one its
+// signed list names: past the device's own attestation it still reads a newer seat record, so a lapsed
+// seat never logs in beside a newer one.
 function operatorOf(c: unknown, file: string): { did: string; current_did: string; current_key: string; name: string; fingerprint?: string | null } | null {
-  const iss = did(load(file).issuers?.[0] ?? {} as never);
-  const ct = dc(c).contacts().contacts.find((x) => !x.revoked && x.chain.includes(iss));
+  const ops = operatorsOf(file), held = readList(file)?.operator;
+  if (typeof held === 'string' && fullHere(held)) ops.set(held, Number.MAX_SAFE_INTEGER);
+  if (ops.size === 0) return null;
+  const exp = (x: { chain: string[] }): number => Math.max(0, ...x.chain.map((d) => ops.get(d) ?? 0));
+  const ct = dc(c).contacts().contacts.filter((x) => !x.revoked && exp(x) > 0).sort((a, b) => exp(b) - exp(a))[0];
   if (!ct) return null;
   const rec = (JSON.parse(readFileSync(dc(c).storePath, 'utf8')) as { contacts: Record<string, { current_key: string }> }).contacts[ct.did];
   return { did: ct.did, current_did: ct.current_did, current_key: rec!.current_key, name: ct.name, fingerprint: ct.fingerprint };
@@ -777,21 +802,32 @@ async function takeUp(op: string, dev: Dev, list: List): Promise<number | null> 
   writeSeatLocal(op, (x) => { x.imported = e; });
   return r.epoch;
 }
+/** Where a standby's own state is parked, sealed, per seat epoch: never overwritten by a newer snapshot (a second park of one epoch: -2, -3, …). */
+export const parkedPath = (op: string, epoch: number): string => {
+  const base = op.replace(/\.json$/, '');
+  for (let n = 1; ; n++) { const f = `${base}.parked.${epoch}${n > 1 ? `-${n}` : ''}.sgs`; if (!existsSync(f)) return f; }
+};
 /**
- * The seat is elsewhere: the operator's plaintext state here (an earlier tenure's) sealed into the
- * snapshot held when it is newer (counted at the epoch before the current one), then deleted, so a
- * standby keeps it only sealed. Not beside a page or a watcher on the file.
+ * The seat is elsewhere: the operator's plaintext state here (an earlier tenure's) sealed under its own
+ * epoch's name (counted at the epoch before the current one) and, when newer, as the snapshot held;
+ * the plaintext is deleted only once its sealed copy was written and opens again, so a standby keeps
+ * it only sealed and never loses what it took after the last snapshot (review 2026-10-28, MEDIUM 6).
+ * Not beside a page or a watcher on the file. → the parked file, or null (nothing to park).
  */
-async function park(op: string, dev: Dev, list: List): Promise<boolean> {
-  if (lockHolder(op) !== null) return false;
+async function park(op: string, dev: Dev, list: List): Promise<string | null> {
+  if (lockHolder(op) !== null) return null;
   const where = await snapFiles(op), plain = ['carrier', 'contacts', 'ui', 'enrol', 'held'].map((k) => where[k]!).filter((f) => existsSync(f));
-  if (!existsSync(where['carrier']!)) return false;
+  if (!existsSync(where['carrier']!)) return null;
   const was = { ...list, seq: Math.max(1, list.seq), seat: list.seat ? { ...list.seat, epoch: Math.max(1, list.seat.epoch - 1) } : undefined } as List;
-  const { bytes } = await buildSnapshot(op, dev, was, false);
+  const { bytes } = await buildSnapshot(op, dev, was, false), file = parkedPath(op, was.seat?.epoch ?? 1);
+  writePrivate(file, '');
+  writeFileSync(file, bytes, { mode: 0o600 });
+  const { K } = rootOf(readKeeper(op));
+  try { dev.openSnapshot(new Uint8Array(readFileSync(file)), K, { operator: did(load(op).genesis) }); } finally { K.fill(0); }
   keepSnapshot(op, dev, bytes);
   for (const f of plain) rmSync(f, { force: true });
   writeSeatLocal(op, (x) => { delete x.imported; });
-  return true;
+  return file;
 }
 
 /**
@@ -810,7 +846,7 @@ export async function seatGate(op: string, what: string): Promise<void> {
   }
   const l = readList(op)!, dev = await contactModule<Dev>('device');
   if (!here || l.seat!.holder !== here.did) {
-    try { if (await park(op, dev, l)) note(`your state here is sealed away (${snapPath(op)}): the seat is elsewhere`); } catch (e) { note(`your state here stays as it is (${(e as Error).message})`); }
+    try { const p = await park(op, dev, l); if (p) note(`your state here is sealed away (${p}): the seat is elsewhere`); } catch (e) { note(`your state here stays as it is (${(e as Error).message})`); }
     refuse('seat_elsewhere', `${what}: the seat is with ${nameOf(l, l.seat!.holder)} (epoch ${l.seat!.epoch}): only it logs in as you. Here: sigelo-agent device seat take (it asks the seat), or --force if it is lost`);
   }
   const loc = readSeatLocal(op);
@@ -1017,7 +1053,7 @@ async function seatGive(name: string, f: Map<string, string>, dev: Dev): Promise
     if (gone.gave !== undefined) { out({ seat_to: gone.gave }); return 0; }
     r = await giveSeat(c, op, dev, d!, f.has('--with-history'));
   } finally { await c.stop(); }
-  if (await park(op, dev, readList(op)!)) note(`your state here is sealed away (${snapPath(op)})`);
+  { const p = await park(op, dev, readList(op)!); if (p) note(`your state here is sealed away (${p})`); }
   note(`the seat went to ${name} (epoch ${r.epoch}; the snapshot ${r.route}, sealed): this machine no longer logs in as you. It takes your state at its next device sync or operator login`);
   out({ seat_to: name, epoch: r.epoch, snapshot: r.route, history: f.has('--with-history') });
   return 0;

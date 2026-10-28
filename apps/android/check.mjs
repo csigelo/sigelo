@@ -201,6 +201,10 @@ ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooser
 ok(/r\.hasGesture\(\)/.test(ma) && /ACTION_VIEW/.test(ma) && /CATEGORY_BROWSABLE/.test(ma), 'links: elsewhere opens in the browser, on a tap');
 ok(/setEndpointIdentificationAlgorithm\("HTTPS"\)/.test(java['SigeloBridge.java']) && /getDefaultHostnameVerifier\(\)\.verify\(host/.test(java['SigeloBridge.java']) && /setInstanceFollowRedirects\(false\)/.test(java['SigeloBridge.java'])
   && !/TrustManager|setHostnameVerifier|ALLOW_ALL/.test(code(java['SigeloBridge.java'])), 'network: TLS names checked twice, no custom trust, no redirect followed');
+// Review 2026-10-28 (LOW): switching forms deletes every keystore key, whichever form is left (remote
+// seals its control identity under alias 0 as well as its text under alias 2).
+const switchBody = /void switchTo\(String to\) \{([\s\S]*?)\n    \}/.exec(java['SigeloBridge.java'])?.[1] ?? '';
+ok(/for \(int a = 0; a < ALIASES\.length; a\+\+\) deleteKey\(a\);/.test(switchBody) && !/equals\(from\)/.test(switchBody), 'switch: every keystore alias deleted whichever form is left (no alias 0 kept from remote into self)');
 ok(/setUserAuthenticationRequired\(true\)/.test(java['SigeloBridge.java']) && /BLOCK_MODE_GCM/.test(java['SigeloBridge.java']) && /setKeySize\(256\)/.test(java['SigeloBridge.java']) && /"AndroidKeyStore"/.test(java['SigeloBridge.java']),
   'keystore: AES-256-GCM in AndroidKeyStore; FULL under the screen lock');
 {

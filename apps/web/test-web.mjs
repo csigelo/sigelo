@@ -233,6 +233,19 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   const st2 = await r2.call('GET', '/api/state'), w2 = await r2.call('POST', '/api/send', { to: 'did:sigelo:zX', text: 'x' }), inv = await r2.call('POST', '/api/invite', {});
   ok(started === 0 && st2.status === 200 && st2.body.me.seat?.here === false && w2.status === 409 && w2.body.error.check === 'seat_elsewhere' && inv.body.error?.check === 'seat_elsewhere',
     `standby: started without logging in; GET /api/state shows the seat elsewhere (the banner); send and invite refused seat_elsewhere (${w2.status})`);
+  // Review 2026-10-28, MEDIUM 7: the operator file imported as FULL (no signed list naming a seat) never runs a session.
+  const p3 = await W.webPlatform({ name: 'imported-full', indexedDB: new FakeIDB(), mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
+  const { keygen: kg3 } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href), k3 = kg3({ recovery: 'sha256:' + '1'.repeat(64) });
+  const me3 = { v: 'sigelo/0', secret: Buffer.from(k3.secret).toString('hex'), genesis: k3.genesis, rotations: [], attestations: [], issuers: [] };
+  const r3 = mk({ platform: p3, identity: () => me3, mode: { kind: 'full', standby: true }, seat: SD.seatOf(p3, () => me3), options: { registry: false } });
+  let started3 = 0;
+  r3.carrier.start = async () => { started3++; }; r3.carrier.checkClock = async () => {};
+  const why3 = await checkOf(() => r3.start());
+  ok(why3 === 'full_import' && started3 === 0, `imported FULL with no seat in a signed list: start() refused full_import, no session as you (${why3}, ${started3})`);
+  const r3s = mk({ platform: p3, identity: () => me3, mode: { kind: 'safe' }, seat: null, options: { registry: false } });
+  r3s.carrier.start = async () => {}; r3s.carrier.checkClock = async () => {};
+  ok(await checkOf(() => r3s.start()) === 'accepted', 'an imported SAFE file still starts');
+  await r3s.stop();
   const r2k = mk({ platform: p2, identity: () => me2, mode: { kind: 'full', standby: true }, seat: SD.seatOf(p2, () => me2), keeper: SD.keeperOf(p2), options: { registry: false } });
   r2k.carrier.start = async () => {}; r2k.carrier.checkClock = async () => {};
   const ws2 = (await r2k.call('GET', '/api/agents/workers')).body, ec2 = await r2k.call('POST', '/api/agents/enrol-code', { name: 'vps' });

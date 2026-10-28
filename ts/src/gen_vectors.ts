@@ -390,6 +390,45 @@ P.bundle_recovered = {
     '`network` (§6.2). Attestations to d0 still count; the one to the thief\'s DID and the thief\'s own binding are not in the chain.',
 };
 
+// §7.2/§7.3 as written (review of 2026-10-28, MEDIUM 2): a recovery key the operator rotated away
+// from still governs every node up to and including the one whose recovery retired it. The honest
+// chain is d0 -> d1 (voluntary) -> d2 (recovery by recovery1, commitment now rec2). A thief holding
+// only recovery1 signs a recovery from d0, or from d1 with a later iat than the operator's: both
+// bundles VERIFY and the thief's DID is current. No offline verifier can tell them from the
+// operator's own; the defence is destroying a retired recovery key (THREAT-MODEL §2.5a).
+const STALE_NOW = T0 + 80 * DAY;
+const bTh = { v: V, typ: 'binding', id: da, method: 'ed25519-test', addr: key('attacker'), iat: T0 + 75 * DAY, exp: T0 + 165 * DAY, nonce: nonce('79') };
+const bThEnv = { body: bTh, sig_id: sig('attacker', bTh), sig_addr: sig('attacker', bTh) };
+const rT0 = { v: V, typ: 'rotation', id: d0, next: da, iat: T0 + 70 * DAY, reason: 'recovery', recovery_key: key('recovery') };
+const rT1 = { v: V, typ: 'rotation', id: d1, next: da, iat: T0 + 36 * DAY, reason: 'recovery', recovery_key: key('recovery') };
+const staleBundle = (thief: J): J => ({
+  v: V, typ: 'bundle', genesis: g0,
+  rotations: [P.rotation_voluntary, P.rotation_recovery, rotEnv(thief, 'recovery', ga)].map((e: J) => pick(e, ENVELOPE)),
+  bindings: [bThEnv], attestations: [pick(P.attestation, ENVELOPE)], issuers: [gw],
+});
+const staleExpect = (chain: string[]): J => ({
+  did: da, chain, recovery: commit('attacker'), attestations: { [dw]: [att] }, bindings: [{ body: bTh, proof: 'proven' }], rejected: { attestations: 0, bindings: 0 },
+});
+P.bundle_retired_recovery_at_genesis = {
+  now: STALE_NOW, bundle: staleBundle(rT0), expect: staleExpect([d0, da]),
+  note: 'ACCEPTED, the rule as written (SPEC §7.2, §7.3 step 2). The operator retired recovery1 at d1 -> d2; a thief holding recovery1 ' +
+    'signs a recovery at d0, where recovery1 still governs, and it beats the voluntary d0 -> d1 (§7.1). The thief is current, the ' +
+    'attestation to d0 is kept and the thief\'s binding is proven. A leaked recovery key is terminal even after it was rotated away from.',
+};
+P.bundle_retired_recovery_later_iat = {
+  now: STALE_NOW, bundle: staleBundle(rT1), expect: staleExpect([d0, d1, da]),
+  note: 'ACCEPTED, the rule as written (SPEC §7.3 step 2). At d1 both the operator\'s recovery (iat +35 days) and the thief\'s by the ' +
+    'same recovery1 (iat +36 days) are valid; the latest iat is taken. The thief picks the later iat; an equal one rejects the chain.',
+};
+// §7.4 "recovery while the current commitment is null": not a candidate, the chain ends at dm.
+const rN = { v: V, typ: 'rotation', id: dm, next: d2, iat: T0 + 3600, reason: 'recovery', recovery_key: key('recovery') };
+P.bundle_recovery_null_commitment = {
+  now: NOW, bundle: { v: V, typ: 'bundle', genesis: gm, rotations: [pick(rotEnv(rN, 'recovery', g2), ENVELOPE)], bindings: [], attestations: [], issuers: [] },
+  expect: { did: dm, chain: [dm], recovery: null, attestations: {}, bindings: [], rejected: { attestations: 0, bindings: 0 } },
+  note: 'SPEC §7.4: a recovery rotation from a genesis with recovery: null is not a candidate, whatever key signs it. ' +
+    'The walk continues as if it were absent: the chain is [dm] and the bundle verifies.',
+};
+
 // ================================================================ NEGATIVE
 
 const bad = clone(att); bad.claims.posts = 999999;
@@ -417,6 +456,13 @@ const stale = { ...rr2, recovery_key: key('recovery') };
 N.stale_recovery_key = {
   ...rotEnv(stale, 'recovery', g3), chain_with: ['rotation_voluntary', 'rotation_recovery'], expected_chain: [d0, d1, d2],
   expect: 'NOT A CANDIDATE: recovery1 no longer governs after rotation_recovery changed the commitment to rec2. Chain ends at d2.',
+};
+// §7.3 step 2 / §7.4: two valid recoveries sharing the latest iat at one node (the operator's
+// rotation_recovery and one more by the same recovery1, same iat) reject the chain.
+const rtie = { v: V, typ: 'rotation', id: d1, next: dac, iat: T0 + 35 * DAY, reason: 'recovery', recovery_key: key('recovery') };
+N.recovery_tie = {
+  ...rotEnv(rtie, 'recovery', gac), chain_with: ['rotation_voluntary', 'rotation_recovery'],
+  expect: 'REJECT (tie): with rotation_recovery, two valid recovery rotations at d1 share the latest iat. Operator error; reissue.',
 };
 N.voluntary_changes_recovery = {
   ...rotEnv(rh, 'agent2', ga), chain_with: ['rotation_voluntary'], expected_chain: [d0, d1],

@@ -2377,6 +2377,7 @@ export class Carrier {
   // (relay.sigelo.ai), else the host its relay tag resolves to (relays.mjs resolveTag): this agent's
   // own relay, its contacts' relays, the relay its operator attestation names,
   // the local table; then the registry; else the person is asked (relay_tag). Nothing else asks.
+  // A contact's relay is checked against the registry first (resolveTag).
   async relayForShort(text, { relay } = {}) {
     const norm = normaliseShort(text), tag = tagOf(norm), shown = formatShort(norm);
     if (relay !== undefined) {

@@ -51,7 +51,8 @@ export function base45(b: Uint8Array): string {
 }
 
 /** A relay control (design/apps.md §6.3, sigelo-agent-control.ts): no key here, a paired control identity. */
-export interface RelayControl { relay: true; scope: Scope; created: number; last_used: number | null; did: string | null; nonce: string | null; exp: number | null; words: string | null; confirmed: boolean }
+// code: the long code while nobody answered it (withdrawn when the code is made again), never shown.
+export interface RelayControl { relay: true; scope: Scope; created: number; last_used: number | null; did: string | null; nonce: string | null; code?: string; exp: number | null; words: string | null; confirmed: boolean }
 export type AnyControl = Control | RelayControl;
 export const isRelay = (c: AnyControl | undefined): c is RelayControl => (c as RelayControl | undefined)?.relay === true;
 /** The LAN controls among them (the same objects: openRequest's ctr goes into ui.json). */
@@ -74,7 +75,23 @@ export async function remoteCall(scope: Scope, msg: { method: string; path: stri
       : [404, { error: { check: 'route', message: `no ${msg.method} ${url.pathname}` } }];
   }
   if (typeof b !== 'object' || b === null || Array.isArray(b)) return [400, { error: { check: 'body', message: 'a JSON object' } }];
-  return dispatch(msg.method, url, b as Record<string, unknown>);
+  const [status, body] = await dispatch(msg.method, url, b as Record<string, unknown>);
+  return [status, scrub(scope, msg.method, url.pathname, body)];
+}
+
+/**
+ * An answer as a scope may read it (review 2026-10-28, MEDIUM 8): a code that pairs is the act it
+ * enables, so a waiting invite's codes (`pending.invites[].code`, `short`) go only to chat and all,
+ * an enrolment's (`workers[].enrolling.code`, `command`) only to all. A copy; the page's own is untouched.
+ */
+export function scrub(scope: Scope, method: string, pathname: string, body: unknown): unknown {
+  if (method !== 'GET' || typeof body !== 'object' || body === null) return body;
+  const invites = pathname === '/api/state' && scope === 'read', enrol = (pathname === '/api/agents/workers' || pathname === '/api/agents') && scope !== 'all';
+  if (!invites && !enrol) return body;
+  const x = JSON.parse(JSON.stringify(body)) as { pending?: { invites?: Record<string, unknown>[] }; workers?: { enrolling?: Record<string, unknown> | null }[] };
+  if (invites) for (const i of x.pending?.invites ?? []) { delete i['code']; delete i['short']; }
+  if (enrol && Array.isArray(x.workers)) for (const w of x.workers) if (w.enrolling) { delete w.enrolling['code']; delete w.enrolling['command']; }
+  return x;
 }
 
 /** The text a control travels as (a QR later). */
@@ -117,14 +134,28 @@ export function sealAnswer(c: Control, ctr: number, json: string): string {
   return JSON.stringify({ nonce: nonce.toString('base64url'), box: Buffer.from(box).toString('base64url') });
 }
 
-/** The address of the interface the default route leaves by (no packet is sent), else the first non-internal IPv4. */
+/** An RFC 1918 address, or 100.64/10 (shared, CGNAT and tailnets) or 169.254/16 (link-local): never routed on the internet. */
+export function privateV4(ip: string): boolean {
+  if (!isIPv4(ip)) return false;
+  const [a, b] = ip.split('.').map(Number) as [number, number];
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254);
+}
+/**
+ * The LAN address to listen on: the default route's when it is private, else the first private
+ * non-internal IPv4, else null (the caller asks for --listen). A host whose default route leaves by
+ * a public address (a server) never opens the listener to the internet by default (review 2026-10-28).
+ */
+export function lanAddress(viaRoute: string | null, ifaces: ReturnType<typeof networkInterfaces>): string | null {
+  if (viaRoute && privateV4(viaRoute)) return viaRoute;
+  for (const list of Object.values(ifaces)) for (const i of list ?? []) if (i.family === 'IPv4' && !i.internal && privateV4(i.address)) return i.address;
+  return null;
+}
+/** The address of the interface the default route leaves by (no packet is sent), when private; see lanAddress. */
 export async function defaultAddress(): Promise<string | null> {
   const viaRoute = await new Promise<string | null>((ok) => {
     const s = createSocket('udp4');
     s.on('error', () => { s.close(); ok(null); });
     s.connect(9, '192.0.2.1', () => { let a: string | null = null; try { a = s.address().address; } catch {} s.close(); ok(a); });
   });
-  if (viaRoute && isIPv4(viaRoute) && viaRoute !== '0.0.0.0') return viaRoute;
-  for (const list of Object.values(networkInterfaces())) for (const i of list ?? []) if (i.family === 'IPv4' && !i.internal) return i.address;
-  return null;
+  return lanAddress(viaRoute, networkInterfaces());
 }

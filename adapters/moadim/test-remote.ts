@@ -172,6 +172,28 @@ await page.close();
   ok('remote: the device routes of UI-API.md (list, add, confirm, words, scan, revoke, sync) are in no scope', devices.length === 7 && !devices.some((x) => a.has(x) || c.has(x) || r.has(x)), JSON.stringify(devices));
 }
 
+// ── review 2026-10-28: a code that pairs is read only by the scope that may pair (MEDIUM 8); the LAN
+// listener never takes a public address by itself (LOW)
+{
+  const state = { seq: 1, pending: { invites: [{ name: 'carol', exp: 1, relay: 'relay.test', id: 'i1', short: 'K7F3-Q9ZP', short_exp: 1, code: 'sgl1Long' }] } };
+  const workers = { keeper: true, workers: [{ worker: 0, name: 'vps', enrolling: { id: 'e1', state: 'code', code: 'K7F3-Q9ZP', command: 'sigelo-agent init --enrol K7F3-Q9ZP', exp: 1 } }] };
+  const routes = { 'GET /api/state': 1, 'GET /api/agents/workers': 1 };
+  const call = async (scope: 'read' | 'chat' | 'all', path: string, body: unknown) => (await rm.remoteCall(scope, { method: 'GET', path }, routes, async () => [200, body]))[1] as any;
+  const [rs, cs, as] = [await call('read', '/api/state', state), await call('chat', '/api/state', state), await call('all', '/api/state', state)];
+  ok('remote: scope read: GET /api/state carries a waiting invite without its codes (short, code); chat and all get them; the page\'s own answer is untouched',
+    rs.pending.invites[0].name === 'carol' && rs.pending.invites[0].code === undefined && rs.pending.invites[0].short === undefined && cs.pending.invites[0].code === 'sgl1Long' && as.pending.invites[0].short === 'K7F3-Q9ZP'
+      && state.pending.invites[0]!.code === 'sgl1Long', JSON.stringify(rs));
+  const [rw, cw, aw] = [await call('read', '/api/agents/workers', workers), await call('chat', '/api/agents/workers', workers), await call('all', '/api/agents/workers', workers)];
+  ok('remote: GET /api/agents/workers: an enrolment\'s code and command only to scope all (read and chat see its state)', rw.workers[0].enrolling.state === 'code' && rw.workers[0].enrolling.code === undefined && rw.workers[0].enrolling.command === undefined
+    && cw.workers[0].enrolling.code === undefined && aw.workers[0].enrolling.code === 'K7F3-Q9ZP', JSON.stringify([rw, cw]));
+  const ifs = (a: string, internal = false) => ({ eth0: [{ address: a, family: 'IPv4', internal, netmask: '255.255.255.0', mac: '00:00:00:00:00:00', cidr: null }] }) as never;
+  ok('remote: the LAN address: the default route\'s when private; a public one is passed over for a private interface, else none (--listen)',
+    rm.lanAddress('192.168.1.5', ifs('10.0.0.2')) === '192.168.1.5' && rm.lanAddress('203.0.113.7', ifs('10.0.0.2')) === '10.0.0.2' && rm.lanAddress('203.0.113.7', ifs('198.51.100.9')) === null
+      && rm.lanAddress(null, ifs('172.20.1.1')) === '172.20.1.1' && rm.lanAddress(null, ifs('127.0.0.1', true)) === null);
+  ok('remote: private ranges: 10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16; not 172.32, 100.128, 8.8.8.8',
+    ['10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.0.1', '100.64.0.1', '169.254.1.1'].every(rm.privateV4) && !['172.32.0.1', '100.128.0.1', '8.8.8.8', '192.169.0.1', '::1'].some(rm.privateV4));
+}
+
 // ── --port: kept, and a taken one fails port_taken (the lock released)
 {
   const blocker = createServer();
@@ -419,6 +441,9 @@ else {
     const st2 = await a.ctl.call('GET', `/api/state?since=${seq0}`);
     ok('relay: a change on the computer (an invite made there) → events pushed; GET /api/state answered from them, no relay message', pushed > 0 && st2.status === 200
       && st2.body.pending.invites.some((x: { name: string }) => x.name === 'carol') && a.sent === sent0, JSON.stringify([pushed, a.sent, sent0, inv.name]));
+    const carolR = st2.body.pending.invites.find((x: { name: string }) => x.name === 'carol'), carolL = JSON.parse((await http(pr.port, 'GET', '/api/state', T3(pr))).body).pending.invites.find((x: { name: string }) => x.name === 'carol');
+    ok('relay: scope read: the pushed state names the invite but not its codes (no short, no long code); the page itself has both (review 2026-10-28, MEDIUM 8)', carolR !== undefined && carolR.code === undefined && carolR.short === undefined
+      && typeof carolL?.code === 'string' && typeof carolL?.short === 'string', JSON.stringify([carolR, carolL]));
     await new Promise((r) => setTimeout(r, 2500));
     ok('relay: nothing changed → nothing pushed (no polling either way)', pushed === 1 && a.sent === sent0, String(pushed));
     // chat and all, each its own control
@@ -442,6 +467,13 @@ else {
     })();
     const bq = await bad.ctl.call('GET', '/api/me');
     ok('relay: words refused on the computer\'s page (Refuse) → the control forgotten (not in ui.json), its request never answered 200', bq.status !== 200 && uiJson2(Pd).controls['bad'] === undefined, JSON.stringify(bq));
+    // Review 2026-10-28 (LOW): a code made again withdraws the one before; answering the old one pairs nothing.
+    const old = await pr.relay.issue('re', 'chat'), fresh = await pr.relay.issue('re', 'chat');
+    const late = await app(old!.line, 're-old', 4000);
+    const held = (): string => { try { return readFileSync(op.replace(/\.json$/, '.contacts.json'), 'utf8'); } catch { return ''; } };
+    await new Promise((r) => setTimeout(r, 3000));
+    ok('relay: a control\'s code made again: the first code pairs nobody on the computer (no hidden, unconfirmed contact); the new one stands', fresh !== null && fresh.line !== old!.line && late.status !== 'connected'
+      && !held().includes(late.did) && uiJson2(Pd).controls['re']?.did === null, JSON.stringify([late.status, uiJson2(Pd).controls['re']]));
     // Seat elsewhere: the list names another device the seat.
     const lp = op.replace(/\.json$/, '.devices.json'), t0 = Math.floor(Date.now() / 1000);
     writeFileSync(lp, JSON.stringify({ v: 'sigelo-devices/1', operator: 'did:sigelo:zOp', seq: 1, iat: t0, devices: [{ name: 'other', worker: 0, did: 'did:sigelo:zOther', rank: 'full', added: t0, by: 'did:sigelo:zOp' }], seat: { holder: 'did:sigelo:zOther', epoch: 1, iat: t0 }, sig: 'x' }), { mode: 0o600 });

@@ -12,7 +12,7 @@ import { parseBytes } from 'sigelo';
 import { loadIdentity, saveIdentity, webPlatform } from './platform-web.mjs';
 import { androidPlatform, connectBridge } from './platform-android.mjs';
 import { DEFAULT_RELAY } from './vendor/contact/carrier.mjs';
-import { makeRouter, presetRelay } from './router.mjs';
+import { FULL_IMPORT, makeRouter, presetRelay } from './router.mjs';
 import { pickMode, remoteBackend, wipeIfAsked } from './shell.mjs';
 import { keeperOf, restoreView, seatOf } from './seed.mjs';
 import { createView } from './create.mjs';
@@ -73,6 +73,8 @@ function setup(platform) {
     const f = file.files?.[0];
     if (!f) { say.textContent = 'Choose the identity file first.'; return; }
     try {
+      // FULL by import is refused: no signed device list names this app the seat (router.mjs FULL_IMPORT).
+      if (full.checked) throw new Error(FULL_IMPORT);
       const bytes = new Uint8Array(await f.arrayBuffer()), s = parseBytes(bytes);
       if (typeof s?.secret !== 'string' || !/^[0-9a-f]{64}$/.test(s.secret) || typeof s.genesis !== 'object') throw new Error('not a sigelo identity file with its key in it');
       presetRelay(platform.files, relay.value);
@@ -89,7 +91,7 @@ function setup(platform) {
   el('div', { className: 'card' },
     el('h2', { textContent: 'Import an identity' }),
     el('p', { textContent: `The file a computer wrote for this device (sigelo-agent device scan). It is sealed into this app's storage under a key ${platform.sealer ? 'of this phone\'s keystore (FULL: unlocked with your screen lock)' : 'the app cannot export'}.` }),
-    file, el('label', {}, full, ' This is the operator (FULL, standby)'),
+    file, el('label', {}, full, ' This is the operator (FULL): not imported yet, restore from your 25 words'),
     el('label', { textContent: 'Relay for new codes' }), relay,
     el('p', { className: 'muted', textContent: 'Keep relay.sigelo.ai unless you run your own. A 12-character code always names its own relay.' }),
     el('div', { className: 'bar' }, go), say),

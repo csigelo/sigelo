@@ -55,6 +55,7 @@ export function presetRelay(files, host) {
   files.write(DATA_FILE, utf8(JSON.stringify(d)));
 }
 
+export const FULL_IMPORT = 'an operator identity (FULL) with no signed device list naming this app the seat would log in as you beside the device that holds it (the two lose each other\'s messages): refused. Restore from your 25 words here instead (the seat here or on another device), or import the SAFE file sigelo-agent device scan wrote for this app';
 const DEVICES_HERE = 'devices are added, scanned and revoked on the operator\'s computer (sigelo-agent ui), not in this app';
 
 export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' }, options = {}, seat = null, keeper = null }) {
@@ -133,8 +134,12 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
   return {
     platform, carrier: page.carrier, page,
     async start() {
-      owned = await platform.owner(me().original);
       const st = seat?.info();
+      // FULL with no signed device list naming the seat (an imported operator file): it would log in as
+      // you beside the seat, and the two lose each other's messages. Refused until the app can be enrolled
+      // with device add --full (design/apps.md, open; review 2026-10-28, MEDIUM 7).
+      if (mode.kind === 'full' && !st) refuse(409, 'full_import', FULL_IMPORT);
+      owned = await platform.owner(me().original);
       // Standby: the owner lock held, nothing sent; reads answer, writes are refused seat_elsewhere.
       if (st && st.here === false) { page.live.seatGone = st.holder; return; }
       try { await page.start(); } catch (e) { owned.release(); owned = null; throw e; }

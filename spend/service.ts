@@ -297,7 +297,7 @@ export function priorOf(log: Receipt[], key?: string): Prior[] {
     const nonce = e.status === 'pending' ? e.approval_request?.nonce : e.status === 'approved' ? e.approval!.body.nonce : e.request.approval;
     const until = e.status === 'pending' ? e.approval_request?.exp : e.status === 'approved' ? e.approval!.body.exp : undefined;
     return [{
-      ts: e.ts, agent: agentOfEntry(e), ref: e.request.ref, fp: e.request.fp ?? '', status: e.status ?? 'relayed', line,
+      ts: e.ts, agent: agentOfEntry(e), ref: e.request.ref, fp: e.request.fp ?? '', status: e.status ?? 'relayed', line, txid: e.txid,
       ...(typeof nonce === 'string' && { nonce }), ...(Number.isSafeInteger(until) && { until: until as number }),
       ...(e.status === 'approved' && { approval: e.approval! }),
     }];
@@ -1288,6 +1288,9 @@ export async function serve(opts: ServeOptions): Promise<Service> {
       keeper: identity.did, net: policy.net, agent: w.did, ref: w.ref, to: w.to.addr, amount: request.amount, purpose: request.purpose,
       nonce: randomBytes(16).toString('hex'), iat: now, ttl: policy.max_approval_ttl,
     });
+    // A dry run shows the body and writes no pending line: a line on the real log would be a
+    // request the next real keeper pays on the agent's identical command (review 2026-10-28 #9).
+    if (dryRun) return reply(202, { status: 'approval_needed', code: 'approval', dry_run: true, ref: w.ref, error: reason, approval_request });
     const entry: LogEntry = {
       ts: now, status: 'pending', request: { to: w.to, amount: request.amount, agent: w.agent, purpose: request.purpose, ref: w.ref, fp: w.fp },
       plan: w.plan, txid: '', amount: request.amount, fee: '0', approval_request,
@@ -1303,6 +1306,7 @@ export async function serve(opts: ServeOptions): Promise<Service> {
    * nothing: the agent's next run of the same pay does (§9 decision 10).
    */
   const approve = async (_req: IncomingMessage, res: ServerResponse, text: string): Promise<void> => {
+    if (dryRun) return noDryRun(res, 'an approval writes the log and lets a payment through');
     const no = unlicensed('approvals (POST /approve)');
     if (no !== undefined) return fail(res, 403, no);
     let raw: unknown;
@@ -1521,7 +1525,7 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     for (const k of Object.keys(raw)) if (!fields.includes(k)) return `request: ${what} takes { ${fields.join(', ')} } — unknown field ${JSON.stringify(k)}`;
     return raw;
   };
-  const noDryRun = (res: ServerResponse): void => fail(res, 403, 'dry_run: delegation creates accounts, writes the log and moves money; a --dry-run keeper does none of that');
+  const noDryRun = (res: ServerResponse, what = 'delegation creates accounts, writes the log and moves money'): void => fail(res, 403, `dry_run: ${what}; a --dry-run keeper does none of that`);
   const ATOMIC_FUND = /^(0|[1-9][0-9]*)$/;
 
   /**

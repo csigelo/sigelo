@@ -104,7 +104,7 @@ next invite and to this page's own connection at its next start. Codes accepted 
 ## Remote
 
 `ui --remote [--listen <ip>] [--name <control>] [--scope read|chat|all]` adds a listener on a LAN address
-(default: the default route's) that answers only `POST /r`; anything else is `404` with no body. It prints
+(default: the default route's when private, else the first private IPv4: never a public one) that answers only `POST /r`; anything else is `404` with no body. It prints
 `SIGELO:UI:<ip>:<port>:<base45 of id (8 bytes) ‖ key (32)>` for the named control (new: scope `chat`), kept in `.ui.json` `controls{}`.
 A request `{id, ctr, nonce, box}` (≤ 1 MiB; `id` hex; `nonce`, `box` base64url): `box` = XChaCha20-Poly1305(key, nonce,
 aad `"sigelo-remote/0 req"` ‖ id ‖ u64be(ctr), JCS `{method, path, body?}`). The answer `{nonce, box}` under aad `"… res"` ‖ id ‖ ctr

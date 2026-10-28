@@ -82,6 +82,8 @@ function chownR(p: string, uid: number, gid: number, chown: Chown): void {
   if (statSync(p).isDirectory()) for (const n of readdirSync(p)) chownR(join(p, n), uid, gid, chown);
 }
 const INSTALL = 'install.json', TOKEN = 'agent.token', WALLET_CONF = 'wallet-rpc.conf';
+/** The files that open a wallet: its password file, the wallet file and its `.keys` beside it, as far as they exist. */
+const walletSecrets = (file: string, pw: string): string[] => [pw, file, `${file}.keys`].filter((x) => existsSync(x));
 
 /** MONERO.md §4.2 — the whole prompt snippet a harness gives a weak agent; "10 minutes" is dedupe_seconds 600. */
 export const SNIPPET = `You have a Monero wallet. Use only the \`sigelo-wallet\` command. You never see or need keys.
@@ -343,6 +345,15 @@ export function init(argv: string[], sys: { uid?: number; chown?: Chown } = {}):
     const file = one(f, '--wallet-file'), pw = one(f, '--password-file');
     if (file === undefined || pw === undefined) throw new Error('--create-wallet-rpc needs --wallet-file <your allowance wallet> and --password-file <its password file>: the wallet is yours, the installer makes none');
     if (!existsSync(resolve(file)) || !existsSync(resolve(pw))) throw new Error(`--wallet-file ${file} or --password-file ${pw} does not exist`);
+    // As private as a daemon login: a password file and .keys the agent's uid can read open the
+    // wallet offline, every account's spend key, past the keeper (review 2026-10-28 #5).
+    for (const x of walletSecrets(resolve(file), resolve(pw))) {
+      const m = statSync(x).mode;
+      if (process.platform !== 'win32' && (m & 0o077) !== 0) throw new Error(`${x} is readable by others (mode ${(m & 0o777).toString(8)}; chmod 600)`);
+    }
+    // The password file's path goes in the config file (wallet-rpc reads any option there), which
+    // reads '#' as a comment and trims edges.
+    if (!/^[^\s#][^\r\n#]*$/.test(resolve(pw)) || resolve(pw) !== resolve(pw).trim()) throw new Error(`--password-file ${resolve(pw)}: a path without '#', line breaks or edge spaces (it goes in wallet-rpc's config file)`);
     // Two users: wallet-rpc runs as the keeper's user, which must be able to open them.
     if (owner !== undefined) for (const x of [file, pw]) if (statSync(resolve(x)).uid !== owner.uid) throw new Error(`${resolve(x)} does not belong to ${owner.name}, who runs wallet-rpc: chown ${owner.name} ${resolve(x)}`);
     if (daemons.length === 0) throw new Error('--create-wallet-rpc needs --daemons a[,b,…]: the first is the wallet-rpc\'s --daemon-address, the rest the keeper\'s fallback');
@@ -384,15 +395,15 @@ export function init(argv: string[], sys: { uid?: number; chown?: Chown } = {}):
     rpc = `http://127.0.0.1:${wport}/json_rpc`;
     login = `sigelo:${randomBytes(18).toString('base64url')}`;
     // Logins in a 0600 --config-file, never on argv: /proc/<pid>/cmdline is readable by every local uid.
-    walletConf = `# monero-wallet-rpc --config-file for sigelo keeper ${slug}: the logins, off the command line${autoPin !== undefined ? '; the daemon\'s certificate pin, which the keeper rewrites when it renews' : ''}\nrpc-login=${login}\n${daemonLogin !== undefined ? `daemon-login=${daemonLogin}\n` : ''}${autoPin !== undefined ? `daemon-ssl-allowed-fingerprints=${autoPin}\n` : ''}`;
+    walletConf = `# monero-wallet-rpc --config-file for sigelo keeper ${slug}: the logins, off the command line${autoPin !== undefined ? '; the daemon\'s certificate pin, which the keeper rewrites when it renews' : ''}\nrpc-login=${login}\npassword-file=${resolve(pw)}\n${daemonLogin !== undefined ? `daemon-login=${daemonLogin}\n` : ''}${autoPin !== undefined ? `daemon-ssl-allowed-fingerprints=${autoPin}\n` : ''}`;
     walletUnit = `[Unit]
 Description=monero-wallet-rpc for sigelo keeper ${slug} (${net}, 127.0.0.1:${wport})
 
 [Service]
 Type=simple
-# Loopback, with an RPC login (the keeper holds it in policy.json; wallet-rpc reads it from the
-# 0600 --config-file, never argv), never a trusted daemon.
-ExecStart=${[bin, ...(net === 'stagenet' ? ['--stagenet'] : []), '--wallet-file', resolve(file), '--password-file', resolve(pw),
+# Loopback, with an RPC login (the keeper holds it in policy.json; wallet-rpc reads it and the
+# password file's path from the 0600 --config-file, never argv), never a trusted daemon.
+ExecStart=${[bin, ...(net === 'stagenet' ? ['--stagenet'] : []), '--wallet-file', resolve(file),
     '--daemon-address', first.replace(/^https?:\/\//, ''), '--untrusted-daemon',
     ...(tls ? ['--daemon-ssl', 'enabled', ...fingerprints.flatMap((x) => ['--daemon-ssl-allowed-fingerprints', x])] : []),
     ...(proxy !== undefined ? ['--proxy', proxy] : []),
@@ -696,8 +707,20 @@ export async function doctor(dir: string, at = now(), timeoutMs = 5000): Promise
         if (!/^daemon-login=\S/m.test(confText)) p.push(`init was given --daemon-login-file ${lf} and the --config-file has no daemon-login`);
         if (existsSync(lf) && loose(lf)) p.push(`--daemon-login-file ${lf} is readable by others (chmod 600)`);
       }
+      // The wallet's own secrets, as the unit names them: 0600 like the logins (review 2026-10-28 #5).
+      const pwArgv = val('--password-file'), pwFile = pwArgv ?? /^password-file=(.+)$/m.exec(confText)?.[1], wfile = val('--wallet-file');
+      if (pwFile === undefined && !has('--password')) p.push('no password-file in the --config-file: wallet-rpc cannot open the wallet');
+      if (pwFile !== undefined && !existsSync(pwFile)) p.push(`the password file ${pwFile} does not exist`);
+      for (const x of [pwFile, wfile].filter((y): y is string => y !== undefined)) if (!isAbsolute(x)) p.push(`${x}: the unit names the wallet's files by absolute path`);
+      if (wfile !== undefined && isAbsolute(wfile) && pwFile !== undefined && isAbsolute(pwFile)) {
+        for (const x of walletSecrets(wfile, pwFile)) {
+          let m: number;
+          try { m = statSync(x).mode; } catch { continue; } // not this user's to read (the two-user layout): wallet-rpc's user checks it
+          if (process.platform !== 'win32' && (m & 0o077) !== 0) p.push(`${x} is readable by others (mode ${(m & 0o777).toString(8)}; chmod 600)`);
+        }
+      }
       for (const x of p) fail(`unit ${u}: ${x}`);
-      if (p.length === 0) ok(`unit ${u}: wallet-rpc on 127.0.0.1 with an RPC login in ${conf!} (0600), ${has('--trusted-daemon') ? 'a trusted daemon on this host' : 'untrusted daemon'}${val('--daemon-ssl') === 'enabled' ? ', TLS required' : ''}${val('--proxy') !== undefined ? `, through --proxy ${val('--proxy')!}` : ''}`);
+      if (p.length === 0) ok(`unit ${u}: wallet-rpc on 127.0.0.1 with an RPC login in ${conf!} (0600)${pwArgv !== undefined ? ' (--password-file on the command line: init now writes it into the --config-file)' : ''}, ${has('--trusted-daemon') ? 'a trusted daemon on this host' : 'untrusted daemon'}${val('--daemon-ssl') === 'enabled' ? ', TLS required' : ''}${val('--proxy') !== undefined ? `, through --proxy ${val('--proxy')!}` : ''}`);
     } else ok(`unit ${u}`);
   }
   // The daemons' network: wallet-rpc reports none, so the port is the only evidence (a heuristic).

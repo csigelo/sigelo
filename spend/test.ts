@@ -1070,6 +1070,54 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
   await t.done();
 }
 {
+  // Review 2026-10-28 LOW 10: an UNCERTAIN outcome answers for the life of the log, and an
+  // explicit ref is remembered for period_seconds, not dedupe_seconds (§4.2).
+  const fp = (() => { const d = evaluate(req(), basePolicy(), [], NOW); return d.ok ? d.fp : ''; })();
+  const at = (over: Partial<Prior>): Prior => ({ ts: NOW - 10, agent: 'ops', ref: fp, fp, status: 'intent', line: 0, ...over });
+  const old = NOW - 30 * 86400;
+  const rf = evaluate(req(), basePolicy(), [], NOW, { prior: [at({ ts: old, txid: 't1' }), at({ ts: old, status: 'relay_failed', txid: 't1', line: 1 })] });
+  ok('review-2 #10: a relay_failed outcome 30 days old still answers (UNCERTAIN, never paid again)', !rf.ok && rf.repeat?.status === 'relay_failed', JSON.stringify(rf));
+  const orphan = evaluate(req(), basePolicy(), [], NOW, { prior: [at({ ts: old, txid: 't1' })] });
+  ok('review-2 #10: an intent whose outcome was never written answers 30 days on', !orphan.ok && orphan.repeat?.status === 'intent', JSON.stringify(orphan));
+  accepts('review-2 #10: a settled intent (relayed, same txid) outside dedupe_seconds is a new payment',
+    evaluate(req(), basePolicy(), [], NOW, { prior: [at({ ts: NOW - 600, txid: 't1' }), at({ ts: NOW - 600, status: 'relayed', txid: 't1', line: 1 })] }));
+  const ex = (ts: number, status: Prior['status'] = 'relayed'): Prior => at({ ts, status, ref: 'inv-42', txid: 't2' });
+  const exRep = evaluate(req({ ref: 'inv-42' }), basePolicy(), [], NOW, { prior: [ex(NOW - 601)] });
+  ok('review-2 #10: an explicit ref 601 s old (inside period_seconds) is still answered from the log', !exRep.ok && exRep.repeat?.status === 'relayed', JSON.stringify(exRep));
+  const exClash = evaluate(req({ ref: 'inv-42', amount: '2' }), basePolicy(), [], NOW, { prior: [ex(NOW - 3600)] });
+  ok('review-2 #10: …and reused for a different request an hour later is 409', !exClash.ok && exClash.conflict === true, JSON.stringify(exClash));
+  accepts('review-2 #10: an explicit ref older than period_seconds is free again', evaluate(req({ ref: 'inv-42' }), basePolicy(), [], NOW, { prior: [ex(NOW - 86400)] }));
+}
+{
+  // The reviewer's steps over HTTP: ref inv-42, relay fails (502 relay_failed, "Do not pay again"),
+  // the same command 601 s and 30 days later: never a second transfer; another body under it: 409.
+  let T = CLOCK_FLOOR + 30 * 86400;
+  const t = await fresh({}, { relay: 'error' }, { clock: () => T });
+  const body = { to: { addr: LITERAL }, amount: '1000', purpose: 'invoice 42', ref: 'inv-42' };
+  const one = await t.pay(body);
+  t.w.mode.relay = 'ok';
+  T += 601;
+  const later = await t.pay(body);
+  const clash = await t.pay({ ...body, amount: '2000' });
+  T += 30 * 86400;
+  const month = await t.pay(body);
+  ok('review-2 #10: relay_failed under ref inv-42, then the same command 601 s and 30 days later: the same UNCERTAIN, one transfer',
+    one.status === 502 && one.body['code'] === 'relay_failed' && [later, month].every((r) => r.status === 502 && r.body['repeat'] === true && r.body['txid'] === one.body['txid']) &&
+    called(t.w, 'transfer').length === 1 && called(t.w, 'relay_tx').length === 1, JSON.stringify([one.body, later.body, month.body]));
+  ok('review-2 #10: …and the same ref with a different body is 409, nothing built', clash.status === 409 && called(t.w, 'transfer').length === 1, JSON.stringify(clash.body));
+  // A relayed explicit ref: remembered for the agent's period_seconds (86400), then free.
+  const paid = await t.pay({ ...body, purpose: 'invoice 43', ref: 'inv-43' });
+  T += 3600;
+  const hour = await t.pay({ ...body, purpose: 'invoice 43', ref: 'inv-43' });
+  const hourClash = await t.pay({ ...body, purpose: 'invoice 43', ref: 'inv-43', amount: '2000' });
+  ok('review-2 #10: a relayed explicit ref an hour later is ALREADY PAID; another body under it is 409', paid.status === 200 && hour.status === 200 && hour.body['already_paid'] === true &&
+    hour.body['txid'] === paid.body['txid'] && hourClash.status === 409 && called(t.w, 'transfer').length === 2, JSON.stringify([hour.body, hourClash.body]));
+  T += 86400;
+  const day = await t.pay({ ...body, purpose: 'invoice 43', ref: 'inv-43' });
+  ok('review-2 #10: …past period_seconds it is a new payment', day.status === 200 && day.body['repeat'] === undefined && day.body['txid'] !== paid.body['txid'], JSON.stringify(day.body));
+  await t.done();
+}
+{
   // a crash between intent and outcome: only the intent line is on disk. A repeat must not pay.
   const t = await fresh({});
   const body = { to: { addr: LITERAL }, amount: '1000', purpose: 'crash' };
@@ -1916,6 +1964,37 @@ loadRefuses('G6 load: max_approval_ttl 0 is refused', g6Raw(undefined, {}, { max
   const late = await api(s.port, '/approve', { method: 'POST', body: approvalOf(q1, ownerId) });
   ok('G6 http: …and an approval of the expired one is refused', late.status === 403 && String(late.body['error']).includes('not valid at'), JSON.stringify(late.body));
   ok('G6 http: …nothing was built', called(w, 'transfer').length === 0);
+  await s.close(); await w.close(); rmSync(d, { recursive: true, force: true });
+}
+
+// Review 2026-10-28 LOW 9: a --dry-run keeper on the real directory writes no pending line and
+// takes no approval, so nothing it saw is paid by the next real keeper.
+{
+  const d = mkdtempSync(join(tmpdir(), 'sigelo-spend-g6dry-'));
+  const w = await mockWallet();
+  const pp = join(d, 'policy.json');
+  writeFileSync(pp, JSON.stringify(g6Raw(`http://127.0.0.1:${w.port}/json_rpc`), null, 2), { mode: 0o600 });
+  const logText = (): string => { try { return readFileSync(join(d, 'spend.log'), 'utf-8'); } catch { return ''; } };
+  const rent = { to: { label: 'bob' }, amount: '2000000000', purpose: 'rent' };
+  let s = await serve({ policyPath: pp, port: 0, dryRun: true });
+  const dry = await api(s.port, '/pay', { method: 'POST', token: ALICE, body: rent });
+  const dq = dry.body['approval_request'] as ApprovalBody | undefined;
+  ok('review-2 #9: a dry run above approval_above answers 202 with the body, dry_run: true, and writes no pending line',
+    dry.status === 202 && dry.body['dry_run'] === true && dq?.amount === '2000000000' && logText() === '' && w.calls.length === 0, JSON.stringify(dry.body) + logText());
+  const dryApprove = dq === undefined ? undefined : await api(s.port, '/approve', { method: 'POST', body: approvalOf(dq, ownerId) });
+  ok('review-2 #9: …and its approval posted to the dry-run keeper is refused, writing nothing', dryApprove?.status === 403 && dryApprove.body['code'] === 'dry_run' && logText() === '', JSON.stringify(dryApprove?.body));
+  // A real pending line on file (a real keeper asked), then a dry-run keeper on the same directory.
+  await s.close(); s = await serve({ policyPath: pp, port: 0 });
+  const real = await api(s.port, '/pay', { method: 'POST', token: ALICE, body: rent });
+  const q = real.body['approval_request'] as ApprovalBody | undefined;
+  await s.close(); s = await serve({ policyPath: pp, port: 0, dryRun: true });
+  const before = logText();
+  const approved = q === undefined ? undefined : await api(s.port, '/approve', { method: 'POST', body: approvalOf(q, ownerId) });
+  ok('review-2 #9: a dry-run keeper refuses /approve (dry_run) even for a real pending line, and the log is unchanged',
+    real.status === 202 && approved?.status === 403 && approved.body['code'] === 'dry_run' && logText() === before, JSON.stringify([real.body, approved?.body]));
+  await s.close(); s = await serve({ policyPath: pp, port: 0 });
+  const again = await api(s.port, '/pay', { method: 'POST', token: ALICE, body: rent });
+  ok('review-2 #9: …so the next real keeper still waits for that approval, nothing built', again.status === 202 && called(w, 'transfer').length === 0, JSON.stringify(again.body));
   await s.close(); await w.close(); rmSync(d, { recursive: true, force: true });
 }
 
@@ -3006,6 +3085,50 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
     const dNoBin = await cli(['doctor', '--dir', kw], join(scratch, 'reg-w.json'));
     writeFileSync(wunitPath, wunit, { mode: 0o600 });
     ok('doctor: a wallet-rpc unit whose binary is gone fails the install', dNoBin.code === 1 && dNoBin.out.includes(`FAIL unit sigelo-wallet-rpc-kw.service: ExecStart runs "${join(emptyDir, 'monero-wallet-rpc')}", which does not exist`), dNoBin.out);
+  }
+
+  // Review 2026-10-28 MEDIUM 5: the wallet's password file, wallet file and .keys are as private
+  // as a daemon login file: init refuses them readable by others, doctor fails them, and the
+  // password file's path leaves argv for the 0600 --config-file.
+  onKeeperHost('review-2 #5: the --password-file path is in the 0600 --config-file, not on argv', () => iw.code === 0 && !wunit.includes('--password-file') &&
+    readFileSync(join(kw, 'wallet-rpc.conf'), 'utf-8').includes(`\npassword-file=${pwf}\n`), () => wunit + readFileSync(join(kw, 'wallet-rpc.conf'), 'utf-8'));
+  if (WIN) skip('review-2 #5: a password file, wallet file or .keys readable by others is refused by init and fails doctor', 'Windows has no POSIX modes');
+  else {
+    writeFileSync(`${wf}.keys`, 'k', { mode: 0o600 });
+    const refused: string[] = [];
+    for (const x of [pwf, wf, `${wf}.keys`]) {
+      chmodSync(x, 0o644);
+      const r = await cli([...wargs(join(scratch, 'k-loose')), '--wallet-rpc-bin', stub], join(scratch, 'reg-loose.json'));
+      chmodSync(x, 0o600);
+      if (r.code === 1 && r.err.includes(`${x} is readable by others (mode 644; chmod 600)`) && !existsSync(join(scratch, 'k-loose'))) refused.push(x);
+      else console.log(`  init with ${x} 0644: exit ${r.code} ${r.err}`);
+    }
+    ok('review-2 #5: init --create-wallet-rpc refuses a 0644 password file, wallet file or .keys, naming it, writing nothing', refused.length === 3, JSON.stringify(refused));
+    const failed: string[] = [];
+    for (const x of [pwf, wf, `${wf}.keys`]) {
+      chmodSync(x, 0o644);
+      const d = await cli(['doctor', '--dir', kw], join(scratch, 'reg-w.json'));
+      chmodSync(x, 0o600);
+      if (d.code === 1 && d.out.includes(`FAIL unit sigelo-wallet-rpc-kw.service: ${x} is readable by others (mode 644; chmod 600)`) && d.out.includes('INSTALL INVALID')) failed.push(x);
+      else console.log(`  doctor with ${x} 0644: exit ${d.code}\n${d.out}`);
+    }
+    ok('review-2 #5: doctor fails the install when the unit\'s password file, wallet file or .keys is readable by others', failed.length === 3, JSON.stringify(failed));
+    // The unit init wrote before this round: --password-file on argv, none in the config file.
+    const wunitPath = join(kw, 'systemd', 'sigelo-wallet-rpc-kw.service'), confPath = join(kw, 'wallet-rpc.conf'), conf = readFileSync(confPath, 'utf-8');
+    const asBefore = async (): Promise<Cli> => {
+      writeFileSync(wunitPath, wunit.replace('"--wallet-file"', `"--password-file" "${pwf}" "--wallet-file"`), { mode: 0o600 });
+      writeFileSync(confPath, conf.replace(/^password-file=.*\n/m, ''), { mode: 0o600 });
+      const r = await cli(['doctor', '--dir', kw], join(scratch, 'reg-w.json'));
+      writeFileSync(wunitPath, wunit, { mode: 0o600 }); writeFileSync(confPath, conf, { mode: 0o600 });
+      return r;
+    };
+    const dOld = await asBefore();
+    chmodSync(pwf, 0o644);
+    const dOldLoose = await asBefore();
+    chmodSync(pwf, 0o600);
+    ok('review-2 #5: a unit from before (--password-file on argv) is still valid, saying so; its file 0644 fails',
+      dOld.code === 2 && dOld.out.includes('--password-file on the command line') && !dOld.out.includes('FAIL') &&
+      dOldLoose.code === 1 && dOldLoose.out.includes(`${pwf} is readable by others (mode 644; chmod 600)`), dOld.out + dOldLoose.out);
   }
 
   // The daemon: TLS, Tor, a daemon login, trust, the network — in the unit, and checked by doctor.

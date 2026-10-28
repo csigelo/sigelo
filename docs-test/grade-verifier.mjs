@@ -84,8 +84,8 @@ const want = (cond, why) => (cond ? null : why);
 const cases = [], inexpressible = [];
 const add = (c) => cases.push({ now: NOW, ...c });
 
-// ---- positive: the two bundles with a full §9.1 expectation
-for (const n of ['bundle', 'bundle_minimal', 'bundle_recovered']) add({ group: 'positive', name: `${n} == expect`, bundle: P[n].bundle, now: P[n].now, kind: 'result', expect: P[n].expect });
+// ---- positive: the bundles with a full §9.1 expectation
+for (const n of ['bundle', 'bundle_minimal', 'bundle_recovered', 'bundle_retired_recovery_at_genesis', 'bundle_retired_recovery_later_iat', 'bundle_recovery_null_commitment']) add({ group: 'positive', name: `${n} == expect`, bundle: P[n].bundle, now: P[n].now, kind: 'result', expect: P[n].expect });
 
 // ---- positive: genesis → DID (§4)
 for (const n of ['genesis', 'world_genesis', 'member_genesis'])
@@ -140,6 +140,8 @@ for (const n of ['recovery_key_mismatch', 'stale_recovery_key', 'voluntary_chang
     kind: 'check', fn: (r) => want(eq(r.chain, N[n].expected_chain), `chain ${JSON.stringify(r.chain)}`) });
 for (const n of ['fork', 'cycle', 'self_rotation'])
   add({ group: 'negative', name: `neg ${n} rejects`, bundle: bundle({ rotations: [rot(P.rotation_voluntary), rot(N[n])] }), kind: 'reject' });
+// two valid recoveries sharing the latest iat reject the chain (§7.3 step 2, §7.4)
+add({ group: 'negative', name: 'neg recovery_tie rejects', bundle: bundle({ rotations: [...N.recovery_tie.chain_with.map((m) => rot(P[m])), rot(N.recovery_tie)] }), kind: 'reject' });
 add({ group: 'negative', name: 'neg bundle_rotations_not_array rejects', bundle: N.bundle_rotations_not_array.bundle, kind: 'reject' });
 // bindings discarded, never downgraded (§6.1, §6.2, §3.1 types)
 for (const [n, x] of Object.entries(N)) {

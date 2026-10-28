@@ -44,7 +44,7 @@ export function pickMode(box, bridge) {
       el('p', { textContent: 'This phone makes 25 new words, shows them once for you to write down, and makes your identity and your keeper from them (FULL), sealed under your screen lock.' }),
       el('div', { className: 'bar' }, el('button', { className: 'primary', textContent: 'Create new identity', onclick: async () => { location.hash = '#create'; await pick('self')(); } }))),
     el('div', { className: 'card' }, el('h2', { textContent: 'This phone' }),
-      el('p', { textContent: 'This phone holds an identity: the one a computer made for it (sigelo-agent device scan), or the operator\'s (FULL). Its key is sealed under a key of this phone\'s keystore.' }),
+      el('p', { textContent: 'This phone holds an identity: the one a computer made for it (sigelo-agent device scan; FULL comes from your 25 words). Its key is sealed under a key of this phone\'s keystore.' }),
       el('div', { className: 'bar' }, el('button', { textContent: 'This phone', onclick: pick('self') }))),
     el('div', { className: 'card' }, el('h2', { textContent: 'Restore from seed' }),
       el('p', { textContent: 'Your 25 words make your identity and your keeper again on this phone (FULL), sealed under your screen lock.' }),

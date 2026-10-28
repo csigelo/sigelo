@@ -227,7 +227,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     if (r.relay && r.listen !== undefined) refuse(400, 'remote', '--relay: no LAN listener, so no --listen');
     if (r.listen !== undefined && (!isIPv4(r.listen) || r.listen === '0.0.0.0')) refuse(400, 'remote', `--listen: one IPv4 address of this machine, not ${JSON.stringify(r.listen)}`);
     if (!r.relay) {
-      remoteIp = r.listen ?? await defaultAddress() ?? refuse(400, 'remote', 'no LAN address found: give one with --listen <ip>');
+      remoteIp = r.listen ?? await defaultAddress() ?? refuse(400, 'remote', 'no private LAN address found (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16): give one with --listen <ip>');
       await loadAead();
     }
   }

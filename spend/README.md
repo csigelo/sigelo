@@ -35,8 +35,9 @@ what `--allow label=address` names — empty pays nobody), a frozen copy of this
 cache that is cleaned or a checkout that is rebuilt never changes a running keeper), and the
 systemd `--user` units: the keeper (`Restart=always`, `SIGELO_DAEMONS` from `--daemons`), with
 `--notify` an hourly `doctor --notify`, and with `--create-wallet-rpc --wallet-file F
---password-file P` a unit for `monero-wallet-rpc` over your wallet file — `--rpc-bind-ip
-127.0.0.1`, a generated RPC login (kept in `policy.json`; wallet-rpc reads it from a 0600
+--password-file P` (both, and `F.keys`, 0600: `init` refuses them readable by others and
+`doctor` fails them) a unit for `monero-wallet-rpc` over your wallet file — `--rpc-bind-ip
+127.0.0.1`, a generated RPC login (kept in `policy.json`; wallet-rpc reads it and `P`'s path from a 0600
 `<dir>/wallet-rpc.conf` named by `--config-file`, never from its command line), `--untrusted-daemon`, the first
 `--daemons` entry as its `--daemon-address` (`https://` → `--daemon-ssl enabled` and its
 certificate pinned, "Choosing a daemon"; `--daemon-proxy ip:port`
@@ -352,8 +353,10 @@ matched. An unknown token, a revoked one and none at all get the same answer on 
 **Idempotency (`ref`).** Every spend has a `ref`: the one sent, or `sha256(account ‖
 JCS({to, amount, purpose}))` with `to` taken without its `bundle` (the bundle is evidence, not
 the destination). Refs are per agent and are written into the log with the request's
-fingerprint. Within `dedupe_seconds` (default 600) a request whose ref is already logged is
-answered from the log, and **no transaction is built**:
+fingerprint. Within `dedupe_seconds` (default 600; an explicit `ref`: the agent's
+`period_seconds`) a request whose ref is already logged is answered from the log, and **no
+transaction is built**. An UNCERTAIN line (`relay_failed`, or an `intent` with no outcome line
+of its txid) answers for the life of the log:
 
 | logged outcome | answer |
 |---|---|
@@ -444,6 +447,8 @@ signal without waiting, and the soak's stops were crashes). `close()` waits for 
 `--dry-run` stops after the caps: `{ dry_run: true, amount, fee, cost, plan }`, **no
 receipt**, nothing relayed or logged, no budget spent, and rate-limited like a spend. It still
 needs unlocked balance, so on an empty wallet it returns the wallet's own "not enough money".
+Above `approval_above` it answers `202` with the body and `dry_run: true`, no `pending` line;
+`/approve` is refused `dry_run`.
 
 State lives next to the policy file, both 0600 (on Windows the mode is not applied: the files
 take the directory's ACL, so keep the policy directory where only the keeper's account can read): `spend.log` (NDJSON, `{entry, sig}` per line,
@@ -681,7 +686,8 @@ shadows a contact. **`<amount>`** is XMR, converted by string arithmetic: digits
 units; `--atomic` takes a whole number of atomic units instead. **`purpose`** is the rest of
 the line (so an unquoted `pay bob 0.05 coffee beans` works), at most 200 characters, default
 `(none)`. `--ref` is sent as the `ref`; without it the keeper derives one from (to, amount,
-purpose), so the same command within `dedupe_seconds` (600) is answered with the first outcome.
+purpose), so the same command within `dedupe_seconds` (600) is answered with the first outcome
+(a `--ref`: within `period_seconds`; an UNCERTAIN one: always).
 The CLI waits up to 300 s for the keeper (`SIGELO_WALLET_TIMEOUT_MS` overrides it, for
 harnesses and tests); a `pay` or `fund` that times out is UNCERTAIN, not TRY LATER — the keeper
 may have relayed it after the CLI stopped waiting — so the agent runs `history` before paying

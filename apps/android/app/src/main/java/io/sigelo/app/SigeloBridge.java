@@ -647,12 +647,9 @@ public final class SigeloBridge {
      * page's storage cleared here and, at its next load, by the page itself: wipe), then `to` starts.
      */
     void switchTo(String to) {
-        String from = mode();
-        if ("self".equals(from)) {
-            deleteKey(0);
-            deleteKey(1);
-        }
-        if ("remote".equals(from)) deleteKey(2);
+        // Every alias, whichever form is left: remote seals its control identity under alias 0 as
+        // well as the computer's text under 2, so keeping 0 would carry a key into self.
+        for (int a = 0; a < ALIASES.length; a++) deleteKey(a);
         closePort();
         WebStorage.getInstance().deleteAllData();
         prefs.edit().putString("mode", to).putBoolean("wipe", true).commit();

@@ -9,7 +9,7 @@ approvals, delegation and sweeps.
 
 | unit (systemd `--user`) | does |
 |---|---|
-| `monero-wallet-rpc-stagenet.service` | the allowance wallet on `127.0.0.1:38083` (`~/.local/monero/wallets`), `Restart=on-failure`: see "The wallet-rpc" below |
+| `monero-wallet-rpc-stagenet.service` | the allowance wallet on `127.0.0.1:38083` (`~/.local/monero/wallets`), RPC login and password file in `keeper/wallet-rpc.conf`, `Restart=on-failure`: see "The wallet-rpc" below |
 | `sigelo-soak-keeper.service` | `sigelo-spend serve policy.json --port 38200`, `Restart=always`; `SIGELO_DAEMONS` = the four stagenet nodes below, the wallet-rpc's own first (daemon fallback, spend/README.md) |
 | `sigelo-soak-agent.timer` → `.service` | one agent tick at :00 and :30 (`Persistent=true`: a missed tick runs once at boot), skipped while the host clock is not NTP-synced (below) |
 | `keeper/licence.json` (a file, not a unit) | the soak's "pro" licence: a sigelo attestation issued by a soak-local **test vendor** (`keys/vendor.*`, from `gen-keys.mjs licence`) to the keeper's DID, `{tier: "pro", seats: 4}`, 400 days; `setup.sh` puts the test vendor's DID in the keeper unit as `SIGELO_VENDOR_DID` (drop-in `sigelo-soak-keeper.service.d/licence.conf`, beside `SIGELO_DAEMONS`). Without it a keeper from 17e7787 on refuses the policy's delegates and approvals 403 `licence_required` |
@@ -148,7 +148,8 @@ env.sh          `. env.sh` → sigelo-wallet / sigelo-spend on PATH, acting as s
 state.json      the agent's state, including the live delegate's token
 soak.log  soak-stats.json
 wallet/         a named soak only: allowance-<n> (its own stagenet wallet), password (0600), wallet-rpc.log
-keeper/         a named soak only: wallet-rpc.conf (0600, rpc-login), install.json, systemd/ (its units)
+keeper/         wallet-rpc.conf (0600: rpc-login; the default soak's also password-file=), wallet.password (the
+                default soak's, 0600); a named soak only: install.json, systemd/ (its units)
 soak-alerts.log check.mjs --notify: one line per UNHEALTHY run, one on recovery
 ```
 
@@ -332,6 +333,12 @@ put that link where the unit file already is, which systemctl refuses (`Failed t
 lives. Both measured on a scratch unit, incident #5. A clean stop
 saves the wallet file; a crash does not, and the keeper now calls `store` after every transfer
 (spend/README.md, "Two phases"), because before that the file was 12 days stale (incident #4).
+
+Its RPC login and password file are in `keeper/wallet-rpc.conf` (`--config-file`, 0600), never on
+argv, where every local uid reads them in `/proc/<pid>/cmdline`. A soak set up before 2026-10-28
+ran with `--password stagenet --disable-rpc-login`: re-run `setup.sh` (it writes the config file
+and the password file and adds the login to `policy.json`), then restart the wallet-rpc unit and
+then the keeper, which reads `policy.json` at start.
 
 ## Host reboot
 

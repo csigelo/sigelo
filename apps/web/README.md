@@ -70,8 +70,9 @@ fixed, then the setting, then `relay.sigelo.ai`. Codes accepted never read it.
 ## The identity
 
 The app holds one identity file (sigelo-agent's JSON, key included): the file a computer wrote for
-this device (`sigelo-agent device scan`, SAFE), or the operator's (FULL, standby). `app.mjs` offers to
-import it when there is none. It is kept sealed: AES-256-GCM under a WebCrypto key generated here,
+this device (`sigelo-agent device scan`, SAFE). `app.mjs` offers to import it when there is none; the
+operator's file (FULL) it refuses, and `router.start()` refuses FULL without a seat in a signed list
+(`full_import`): FULL comes from the 25 words (design/apps.md §18). It is kept sealed: AES-256-GCM under a WebCrypto key generated here,
 non-extractable, stored in IndexedDB's key store. That protects a copy of the app's storage, not the
 key from a script running in this origin (THREAT-MODEL §3.12). In the Android app the platform has a
 sealer: the file is sealed under an AndroidKeyStore key instead (`identity.keystore`). Contacts, carrier state, history and the page's data are

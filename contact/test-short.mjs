@@ -117,7 +117,7 @@ const collide = (() => { const seen = new Map(); for (let i = 0; ; i++) { const 
   let asked = 0;
   const registry = async () => { asked++; return new Map([[relayTag('reg.test'), { host: 'reg.test' }], [relayTag('corp.test'), { host: 'other-corp.test' }]]); };
   const known = [{ host: 'relay.test', from: 'own' }, { host: 'corp.test', from: 'contact' }];
-  ok((await resolveTag(relayTag('corp.test'), { known, registry, shown: 'x' })).host === 'corp.test' && asked === 0, 'resolveTag: a known relay, the registry not consulted');
+  ok((await resolveTag(relayTag('corp.test'), { known: [{ host: 'relay.test', from: 'own' }, { host: 'corp.test', from: 'table' }], registry, shown: 'x' })).host === 'corp.test' && asked === 0, 'resolveTag: a relay of its own table, the registry not consulted');
   ok((await resolveTag(relayTag('reg.test'), { known, registry, shown: 'x' })).from === 'registry' && asked === 1, 'resolveTag: none known, the registry');
   const unknown = await failure(() => resolveTag(relayTag('nobody.test'), { known, registry, shown: 'AAAA-AAAA-' + relayTag('nobody.test') }));
   ok(unknown.check === 'relay_tag' && unknown.message.includes('accept it with --relay <host>') && unknown.message.includes(relayTag('nobody.test')), `resolveTag: nothing has it: relay_tag, asked for --relay (${unknown.message})`);
@@ -125,6 +125,19 @@ const collide = (() => { const seen = new Map(); for (let i = 0; ; i++) { const 
   const both = await failure(() => resolveTag(tag, { known: [{ host: h1, from: 'contact' }, { host: h2, from: 'table' }], registry, shown: 'x' }));
   ok(both.check === 'relay_tag' && both.message.includes(`${h1} and ${h2}`) && both.message.includes('it does not guess') && asked === 2, `two known hosts, one tag (${h1}, ${h2}: ${tag}): refused, both named, asked (${both.message})`);
   ok((await resolveTag(tag, { known: [{ host: h1, from: 'contact' }, { host: h1, from: 'table' }], registry, shown: 'x' })).host === h1, 'one host known twice: no collision');
+  // Review 2026-10-28, MEDIUM 4: a contact's relay (from the inviter's code) whose tag was ground to
+  // equal a registered relay's won over the registry. A contact-sourced host is checked against the
+  // registry: an entry for the tag naming another host is a collision, asked; own, operator and
+  // table hosts rank above both and never consult it.
+  const reg2 = async () => new Map([[tag, { host: h2 }]]);
+  const evil = await failure(() => resolveTag(tag, { known: [{ host: 'relay.test', from: 'own' }, { host: h1, from: 'contact' }], registry: reg2, shown: 'x' }));
+  ok(evil.check === 'relay_tag' && evil.message.includes(h1) && evil.message.includes(h2), `a contact's relay whose tag the registry gives another host: relay_tag, both named, neither dialled (${evil.message})`);
+  const agree = await resolveTag(tag, { known: [{ host: h2, from: 'contact' }], registry: reg2, shown: 'x' });
+  const alone = await resolveTag(tag, { known: [{ host: h1, from: 'contact' }], registry: async () => new Map(), shown: 'x' });
+  ok(agree.host === h2 && agree.from === 'contact' && alone.host === h1 && alone.from === 'contact', 'a contact\'s relay the registry agrees with, or does not list: that relay');
+  const ranked = await Promise.all(['own', 'operator', 'table'].map((from) => resolveTag(tag, { known: [{ host: h1, from }], registry: async () => { throw new Error('consulted'); }, shown: 'x' })));
+  const both2 = await resolveTag(tag, { known: [{ host: h1, from: 'contact' }, { host: h1, from: 'table' }], registry: async () => { throw new Error('consulted'); }, shown: 'x' });
+  ok(ranked.every((r) => r.host === h1) && both2.from === 'table', 'own, operator and table hosts resolve without the registry; a host both a contact\'s and the table\'s counts as the table\'s');
   rmSync(d, { recursive: true, force: true });
 }
 
@@ -437,6 +450,14 @@ try {
       ok(d5.check === 'closed' && hits === 1 && d5.long === c5.code, `accept by the registry's host: fetched at ${CORP} (closed to dora), the registry not fetched again the same day (${hits}; ${d5.check})`);
       const listed = await cdora.registryRelays();
       ok(listed.length === 1 && listed[0].host === CORP && listed[0].tag === relayTag(CORP) && listed[0].tier === 'enterprise' && hits === 1, `registryRelays (the apps' picker): the verified list from the cache, not fetched again (${JSON.stringify(listed)}; ${hits})`);
+      // Review 2026-10-28, MEDIUM 4, the carrier's path: a contact paired in from a code naming a
+      // host whose tag was ground to equal CORP's (twin-812718.test) no longer wins over the registry.
+      const TWIN = 'twin-812718.test', contactsOf = cdora.contacts;
+      cdora.contacts = () => ({ ...contactsOf.call(cdora), contacts: [{ name: 'mallory', relay: TWIN }] });
+      try {
+        const tw = await failure(() => cdora.relayForShort(c5.short));
+        ok(relayTag(TWIN) === relayTag(CORP) && tw.check === 'relay_tag' && tw.message.includes(TWIN) && tw.message.includes(CORP), `relayForShort: a contact's relay sharing the registry's tag for ${CORP}: relay_tag, asked, not dialled (${tw.message})`);
+      } finally { cdora.contacts = contactsOf; }
     } finally { await cdora.stop(); reg.close(); rmSync(elsewhere, { recursive: true, force: true }); }
     for (const c of [cn, cbn, co]) await c.stop();
   } finally { await corp.close(); }

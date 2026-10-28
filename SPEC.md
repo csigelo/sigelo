@@ -521,16 +521,20 @@ first and fails the second (vector `chain_precedence_only`).
 The governing commitment is the one in the **most recent recovery-signed genesis** in the
 chain, or the original genesis if there has been no recovery. Voluntary rotations carry it
 forward unchanged (enforced above). Only a recovery rotation can change it — so the
-operator can retire a recovery key, and an attacker never can.
+operator can retire a recovery key, and an attacker never can. Retiring governs the nodes
+after the recovery only: the retired key still governs every node up to and including the one
+it was retired at, so it must be destroyed, not just replaced (vectors
+`bundle_retired_recovery_at_genesis`, `bundle_retired_recovery_later_iat`; THREAT-MODEL §2.5a).
 
 ### 7.3 Chain rules
 
 Each DID in the chain is rotated from at most once. At a node:
 1. Collect rotations whose `id` is this node.
 2. Among them, the **valid** recovery rotations (signature, `sig_next`, commitment, `next` hash all
-   check; §7.4 lists what disqualifies one): if any, take the one with the latest `iat` —
-   the operator controls all of them. If two share that latest `iat` → **REJECT the
-   chain**; that is operator error and the fix is to reissue.
+   check; §7.4 lists what disqualifies one): if any, take the one with the latest `iat`:
+   whoever holds a recovery key that governs here signed each of them, the operator unless
+   that key leaked, retired or not (§7.2). If two share that latest `iat` → **REJECT the
+   chain**; that is operator error and the fix is to reissue (vector `negative.recovery_tie`).
 3. Otherwise, the **valid** voluntary rotations (signature, `sig_next`, `next` hash, commitment
    unchanged); invalid ones are not counted: exactly one → follow it. **More than one →
    REJECT the chain.** A fork under a single key is a compromise signal; the remedy is a
@@ -562,7 +566,7 @@ verify). Nothing in between.
 | `hash(next_genesis) ≠ next` | not a candidate |
 | voluntary, `next_genesis.recovery` ≠ current commitment | not a candidate |
 | recovery, `SHA-256(recovery_key)` ≠ current commitment (wrong or stale key) | not a candidate |
-| recovery while the current commitment is `null` | not a candidate |
+| recovery while the current commitment is `null` *(vector `bundle_recovery_null_commitment`)* | not a candidate |
 | body or `next_genesis` malformed, `sig`, `sig_next` or `next_genesis` missing (§3.1) | REJECT (structure, §9 step 2) |
 | two valid voluntary rotations at one node | REJECT (fork) |
 | two valid recovery rotations sharing the latest `iat` | REJECT (tie) |

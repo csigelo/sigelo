@@ -135,7 +135,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "contact/carrier.mjs",
-   "sha256": "1d3521a0549e09426d3e0474a8c8b81a7a050bd8535a7eb8bfb804965eb2374d"
+   "sha256": "8192fb1bbc17a1063f60647d0ab44fc4f7f60cddb710e92b9022ad4ffbc84925"
   },
   "vendor/contact/control.mjs": {
    "from": "contact/control.mjs",
@@ -191,7 +191,7 @@
   },
   "vendor/contact/relays.mjs": {
    "from": "contact/relays.mjs",
-   "sha256": "424ea83d7cfae63d9b457eb9af5f207edb4a02fe5ff80677d432133e3f5fc9de"
+   "sha256": "0dedadbbf075828108120b4809cf4a325998617e71f3d7291a9207f5dfe700c9"
   },
   "vendor/contact/restore.mjs": {
    "from": "contact/restore.mjs",

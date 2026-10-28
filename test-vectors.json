@@ -1350,6 +1350,410 @@
       },
       "note": "SPEC §6.1 superseded: d0 -> d2 is a recovery, so the three bindings by d0 (the thief's address after the recovery, the same backdated, a Monero one) are superseded: positional in the chain, never by iat. The thief's valid voluntary rotation at d0 loses to the recovery (§7.1). d2 bound before the voluntary rotation to d3: proven. A proven monero entry carries `network` (§6.2). Attestations to d0 still count; the one to the thief's DID and the thief's own binding are not in the chain."
     },
+    "bundle_retired_recovery_at_genesis": {
+      "now": 1764115200,
+      "bundle": {
+        "v": "sigelo/0",
+        "typ": "bundle",
+        "genesis": {
+          "v": "sigelo/0",
+          "typ": "genesis",
+          "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+          "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+          "created": "2026-09-07T00:00:00Z",
+          "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+        },
+        "rotations": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "next": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+              "iat": 1759276800,
+              "reason": "voluntary"
+            },
+            "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+            "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-10-01T00:00:00Z",
+              "nonce": "zVPYtbNU6bZFwfzo7Y2U2Ri"
+            }
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+              "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "iat": 1760227200,
+              "reason": "recovery",
+              "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+            },
+            "sig": "z2ginhdmAqehRPBpMqKHHX7Jj46M9fs3PQEYYeswNmhVHB28tFd9Dv663KnNVgAduFJgVCFw5Gc6LurWXcxZ2uN8A",
+            "sig_next": "z3ka8gS3vzy3LC47PmVgY24X5gHpei35cRXXJAS71LLoZzKf4ytrx4kXwijEgXyYVohUXPUVkjW1EQQZA87r8Kd1L",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+              "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+              "created": "2026-10-10T00:00:00Z",
+              "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+            }
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "next": "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW",
+              "iat": 1763251200,
+              "reason": "recovery",
+              "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+            },
+            "sig": "z5eh5VmuJPRqVetJtWjYjcbyppaJR3M8Ap71sjffBf5KFqeDxcvAvGpyUZ24riduNtBYLA6nZHs1uMxBid7LJ6mfA",
+            "sig_next": "zNAmm8cS5ttKTHo5mPJNZbwEMTxLdtmAt6ZaPn4aJ1QBqwymt9rJSrn1kh5wZ6Bt7cgLFmYmT2HnwApvrPwtbKdY",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "recovery": "sha256:0daeb23dfe219d49d45af2367a56d3ef1086bbf2b2c128bc64625a4cef90c731",
+              "created": "2026-10-20T00:00:00Z",
+              "nonce": "zXVnQFtRoY3VD8SsJ9m8FT3"
+            }
+          }
+        ],
+        "bindings": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW",
+              "method": "ed25519-test",
+              "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "iat": 1763683200,
+              "exp": 1771459200,
+              "nonce": "zG11e92ifvTvV8SDiSmLbhA"
+            },
+            "sig_id": "z4yZV3qsCU9JRvwcxXoj6Dt7cdu5Bx6y2L4DpXvSCnE1nPT8aXLn52HfB6kHBf8u3DrT6ah4LgGnK31d5fgvnEreC",
+            "sig_addr": "z4yZV3qsCU9JRvwcxXoj6Dt7cdu5Bx6y2L4DpXvSCnE1nPT8aXLn52HfB6kHBf8u3DrT6ah4LgGnK31d5fgvnEreC"
+          }
+        ],
+        "attestations": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "invite",
+              "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+              "claims": {
+                "joined": "2026-04-02",
+                "posts": 412,
+                "standing": "citizen"
+              }
+            },
+            "sig": "z5STzdK3h1Z3tk1xwgkwhcv3vgy3dvYtuC7S1BuMTrkUcqpPANdgr5bkaYookdKmbBhe1i4fdFNEXzQXYj4zVwKz1"
+          }
+        ],
+        "issuers": [
+          {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+            "recovery": null,
+            "created": "2026-01-01T00:00:00Z",
+            "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+          }
+        ]
+      },
+      "expect": {
+        "did": "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW",
+        "chain": [
+          "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+          "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW"
+        ],
+        "recovery": "sha256:0daeb23dfe219d49d45af2367a56d3ef1086bbf2b2c128bc64625a4cef90c731",
+        "attestations": {
+          "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw": [
+            {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "invite",
+              "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+              "claims": {
+                "joined": "2026-04-02",
+                "posts": 412,
+                "standing": "citizen"
+              }
+            }
+          ]
+        },
+        "bindings": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW",
+              "method": "ed25519-test",
+              "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "iat": 1763683200,
+              "exp": 1771459200,
+              "nonce": "zG11e92ifvTvV8SDiSmLbhA"
+            },
+            "proof": "proven"
+          }
+        ],
+        "rejected": {
+          "attestations": 0,
+          "bindings": 0
+        }
+      },
+      "note": "ACCEPTED, the rule as written (SPEC §7.2, §7.3 step 2). The operator retired recovery1 at d1 -> d2; a thief holding recovery1 signs a recovery at d0, where recovery1 still governs, and it beats the voluntary d0 -> d1 (§7.1). The thief is current, the attestation to d0 is kept and the thief's binding is proven. A leaked recovery key is terminal even after it was rotated away from."
+    },
+    "bundle_retired_recovery_later_iat": {
+      "now": 1764115200,
+      "bundle": {
+        "v": "sigelo/0",
+        "typ": "bundle",
+        "genesis": {
+          "v": "sigelo/0",
+          "typ": "genesis",
+          "key": "z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
+          "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+          "created": "2026-09-07T00:00:00Z",
+          "nonce": "zLxcqwJdGqcLsrCWP55q8LQ"
+        },
+        "rotations": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "next": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+              "iat": 1759276800,
+              "reason": "voluntary"
+            },
+            "sig": "z3VAXwnWoy3VcrZhBiBu56iLkhyQ54i2yHBjU1G424gAN75NwjTcJ36FrfDabZksuyKsrjcy3APcRPntFrtSdsAg3",
+            "sig_next": "z48XrtphRGqaMsXgaYhNsQ6LG4rSsuBq62ZeAsx5tAFDzhMYbgUzUpTgBGkRKGH696YBPunw2q2bDhR9WyvoftRdi",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkwW6aqMnjgrhJXFUko3NnZPGzVpkNzhYK7yEhnsibmLwL",
+              "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+              "created": "2026-10-01T00:00:00Z",
+              "nonce": "zVPYtbNU6bZFwfzo7Y2U2Ri"
+            }
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+              "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "iat": 1760227200,
+              "reason": "recovery",
+              "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+            },
+            "sig": "z2ginhdmAqehRPBpMqKHHX7Jj46M9fs3PQEYYeswNmhVHB28tFd9Dv663KnNVgAduFJgVCFw5Gc6LurWXcxZ2uN8A",
+            "sig_next": "z3ka8gS3vzy3LC47PmVgY24X5gHpei35cRXXJAS71LLoZzKf4ytrx4kXwijEgXyYVohUXPUVkjW1EQQZA87r8Kd1L",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+              "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+              "created": "2026-10-10T00:00:00Z",
+              "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+            }
+          },
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+              "next": "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW",
+              "iat": 1760313600,
+              "reason": "recovery",
+              "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+            },
+            "sig": "z3Dw9wgBWJjNVaRwtkCndxprZdE3dporJwzbuk2cBu1vruVrYq4wjLz532HMyEiiZGjUSFepSVq8iuANV1xQUTq2h",
+            "sig_next": "z2JAisjakB4NG78nTgEy5eTPKkCxDEsM3iqQyUt5PiHhA9GkJEcCieBjqpbsU1mYX1PdCU1REb57S98Zk2oUTuNsc",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "recovery": "sha256:0daeb23dfe219d49d45af2367a56d3ef1086bbf2b2c128bc64625a4cef90c731",
+              "created": "2026-10-20T00:00:00Z",
+              "nonce": "zXVnQFtRoY3VD8SsJ9m8FT3"
+            }
+          }
+        ],
+        "bindings": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW",
+              "method": "ed25519-test",
+              "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "iat": 1763683200,
+              "exp": 1771459200,
+              "nonce": "zG11e92ifvTvV8SDiSmLbhA"
+            },
+            "sig_id": "z4yZV3qsCU9JRvwcxXoj6Dt7cdu5Bx6y2L4DpXvSCnE1nPT8aXLn52HfB6kHBf8u3DrT6ah4LgGnK31d5fgvnEreC",
+            "sig_addr": "z4yZV3qsCU9JRvwcxXoj6Dt7cdu5Bx6y2L4DpXvSCnE1nPT8aXLn52HfB6kHBf8u3DrT6ah4LgGnK31d5fgvnEreC"
+          }
+        ],
+        "attestations": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "invite",
+              "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+              "claims": {
+                "joined": "2026-04-02",
+                "posts": 412,
+                "standing": "citizen"
+              }
+            },
+            "sig": "z5STzdK3h1Z3tk1xwgkwhcv3vgy3dvYtuC7S1BuMTrkUcqpPANdgr5bkaYookdKmbBhe1i4fdFNEXzQXYj4zVwKz1"
+          }
+        ],
+        "issuers": [
+          {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkvqoYXQfDDJRv8L4wKzxYeuKyVZBfi9Qo6Ro8MiLH3kDQ",
+            "recovery": null,
+            "created": "2026-01-01T00:00:00Z",
+            "nonce": "zP4rMbpayn6a9JeaZgpVMMj"
+          }
+        ]
+      },
+      "expect": {
+        "did": "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW",
+        "chain": [
+          "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+          "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+          "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW"
+        ],
+        "recovery": "sha256:0daeb23dfe219d49d45af2367a56d3ef1086bbf2b2c128bc64625a4cef90c731",
+        "attestations": {
+          "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw": [
+            {
+              "v": "sigelo/0",
+              "typ": "attestation",
+              "iss": "did:sigelo:zGZHz7hBGAC4bzTCjh6wqyn9KSam48CKAR3p8aBNGCHJw",
+              "sub": "did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG",
+              "iat": 1757203200,
+              "exp": 1764979200,
+              "ctx": "1f916.ai",
+              "admission": "invite",
+              "admission_by": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+              "claims": {
+                "joined": "2026-04-02",
+                "posts": 412,
+                "standing": "citizen"
+              }
+            }
+          ]
+        },
+        "bindings": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "binding",
+              "id": "did:sigelo:zDtnfqnUc5Ec7kYJo1HvojRvbu7f7ajcZLK2vm42smeZW",
+              "method": "ed25519-test",
+              "addr": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+              "iat": 1763683200,
+              "exp": 1771459200,
+              "nonce": "zG11e92ifvTvV8SDiSmLbhA"
+            },
+            "proof": "proven"
+          }
+        ],
+        "rejected": {
+          "attestations": 0,
+          "bindings": 0
+        }
+      },
+      "note": "ACCEPTED, the rule as written (SPEC §7.3 step 2). At d1 both the operator's recovery (iat +35 days) and the thief's by the same recovery1 (iat +36 days) are valid; the latest iat is taken. The thief picks the later iat; an equal one rejects the chain."
+    },
+    "bundle_recovery_null_commitment": {
+      "now": 1757289600,
+      "bundle": {
+        "v": "sigelo/0",
+        "typ": "bundle",
+        "genesis": {
+          "v": "sigelo/0",
+          "typ": "genesis",
+          "key": "z6MkrcyLxn5rutJC5JtiVwTsCuUK5iKGLjyhidzGfHcNjxcC",
+          "recovery": null,
+          "created": "2026-03-01T00:00:00Z",
+          "nonce": "zRB5sGLYgiaoQm6ekJZ9aP4"
+        },
+        "rotations": [
+          {
+            "body": {
+              "v": "sigelo/0",
+              "typ": "rotation",
+              "id": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+              "next": "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG",
+              "iat": 1757206800,
+              "reason": "recovery",
+              "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+            },
+            "sig": "zVAFFS5GC1RGFrnWaCtNsv1uRKcY9TArpeFcjFWqsCPc5Qrt6wWH2P8z3jWHbZmEqCJhaETk15VQLX9RVQLRD7n5",
+            "sig_next": "z3AXxeaFtNgxn3ErCGuFUYa9LSP1zGYKmmdCF6XCpSs3kiWysUuAkWwPmCysevMrW6wpUUmjK2iQ1gF2sABKXvmsc",
+            "next_genesis": {
+              "v": "sigelo/0",
+              "typ": "genesis",
+              "key": "z6MksFqxoSPy4qGetNEgGCxXhN7ThKqAqQXEKU3Eq8NGWmxd",
+              "recovery": "sha256:d71b51f7998646f3497614c3a3027fe90d876d39133af5de57faa03da004d1a6",
+              "created": "2026-10-10T00:00:00Z",
+              "nonce": "zMhm2QYcTsnJjf4egTw1Cvz"
+            }
+          }
+        ],
+        "bindings": [],
+        "attestations": [],
+        "issuers": []
+      },
+      "expect": {
+        "did": "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox",
+        "chain": [
+          "did:sigelo:zRwK6SKYNvSmQiVkt7Z7L8bCWNGNohp1rcChjo63X1ox"
+        ],
+        "recovery": null,
+        "attestations": {},
+        "bindings": [],
+        "rejected": {
+          "attestations": 0,
+          "bindings": 0
+        }
+      },
+      "note": "SPEC §7.4: a recovery rotation from a genesis with recovery: null is not a candidate, whatever key signs it. The walk continues as if it were absent: the chain is [dm] and the bundle verifies."
+    },
     "key_derivation_delegate": {
       "root_hex": "736967656c6f20726f6f7420736565642c207465737420766563746f72202331",
       "keeper": 1,
@@ -1584,6 +1988,32 @@
         "did:sigelo:zMmqQwrkvYGSyyEqrzCtaKNMso9Bzz9h8oSRV88XGFXG"
       ],
       "expect": "NOT A CANDIDATE: recovery1 no longer governs after rotation_recovery changed the commitment to rec2. Chain ends at d2."
+    },
+    "recovery_tie": {
+      "body": {
+        "v": "sigelo/0",
+        "typ": "rotation",
+        "id": "did:sigelo:z8hhrKBPMQH3A9Ph8CX7jxRvfppT5nWQYtMmugXjCQoKq",
+        "next": "did:sigelo:z6FfJsPgZBMqhvUEyFW2SoHM3MaJV8QLdLJje2y8KvFEJ",
+        "iat": 1760227200,
+        "reason": "recovery",
+        "recovery_key": "z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf"
+      },
+      "sig": "z3hkDXjVhGMJ7WKRb91kuUvFWyEYrWKMKTcNt3WeibySGea8QZTKy7W4bBjbq2S3iz8m3LjVyrbGos6QEhtfLfX1m",
+      "sig_next": "zVivSDckrqNp5mB3qJXTnaq5M61U2tA59apLTZ6U3ysiaFb1UiQD5kiobCoH3niXavAt33xgRmRE5tEmqRfQzFzC",
+      "next_genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6MkwYMhwTvsq376YBAcJHy3vyRWzBgn5vKfVqqDCgm7XVKU",
+        "recovery": "sha256:2c5a92ed92c0b7999f215be93c8f0433f58072bdba21a8b277faa495b57bf7f3",
+        "created": "2026-10-21T00:00:00Z",
+        "nonce": "zTXhSRGW818MJ9qSN3uXpwF"
+      },
+      "chain_with": [
+        "rotation_voluntary",
+        "rotation_recovery"
+      ],
+      "expect": "REJECT (tie): with rotation_recovery, two valid recovery rotations at d1 share the latest iat. Operator error; reissue."
     },
     "voluntary_changes_recovery": {
       "body": {

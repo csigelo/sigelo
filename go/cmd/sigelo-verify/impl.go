@@ -288,8 +288,9 @@ func buildCases(text []byte) (cases []implCase, inexpressible []string, err erro
 		return out
 	}
 
-	// ---- positive: the two bundles with a full §9.1 expectation
-	for _, n := range []string{"bundle", "bundle_minimal", "bundle_recovered"} {
+	// ---- positive: the bundles with a full §9.1 expectation
+	for _, n := range []string{"bundle", "bundle_minimal", "bundle_recovered",
+		"bundle_retired_recovery_at_genesis", "bundle_retired_recovery_later_iat", "bundle_recovery_null_commitment"} {
 		add(implCase{group: "positive", name: n + " == expect", text: vs.at(pv(n), "bundle"), now: vs.int(pv(n), "now"),
 			kind: "result", expect: surface(val(vs.at(pv(n), "expect")))})
 	}
@@ -402,6 +403,9 @@ func buildCases(text []byte) (cases []implCase, inexpressible []string, err erro
 	for _, n := range []string{"fork", "cycle", "self_rotation"} {
 		add(implCase{group: "negative", name: "neg " + n + " rejects", text: bundle(kv{"rotations", array(rot(pv("rotation_voluntary")), rot(nv(n)))}), kind: "reject"})
 	}
+	// two valid recoveries sharing the latest iat reject the chain (§7.3 step 2, §7.4)
+	add(implCase{group: "negative", name: "neg recovery_tie rejects",
+		text: bundle(kv{"rotations", array(append(rots(vs.strs(nv("recovery_tie"), "chain_with")), rot(nv("recovery_tie")))...)}), kind: "reject"})
 	add(implCase{group: "negative", name: "neg bundle_rotations_not_array rejects", text: vs.at(nv("bundle_rotations_not_array"), "bundle"), kind: "reject"})
 	// bindings discarded, never downgraded (§6.1, §6.2, §3.1 types)
 	for _, n := range N.keys {

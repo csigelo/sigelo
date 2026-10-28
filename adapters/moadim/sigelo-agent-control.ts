@@ -27,7 +27,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { contactLib, contactModule, safeJson, safeText } from './sigelo-agent-contact.ts';
-import { isRelay, remoteCall, type AnyControl, type RelayControl, type Scope } from './sigelo-agent-remote.ts';
+import { isRelay, remoteCall, scrub, type AnyControl, type RelayControl, type Scope } from './sigelo-agent-remote.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
 import type { Store } from './sigelo-agent.ts';
 
@@ -109,7 +109,8 @@ export async function relayControls(o: {
       if (o.seatElsewhere() !== null) continue;
       const [status, st] = await o.dispatch('GET', new URL(`/api/state?since=${l.pushed}`, 'http://remote'), {});
       if (status !== 200) continue;
-      const s = st as Record<string, unknown> & { seq: number }, d = digestOf(s);
+      // As a request of its scope would read it (remoteCall's scrub): a read control sees no invite code.
+      const s = scrub(x.scope, 'GET', '/api/state', st) as Record<string, unknown> & { seq: number }, d = digestOf(s);
       if (d === l.digest) continue;
       // Past PUSH_MAX a summary goes (contact/control.mjs capState): the app pulls the rest by a request.
       try { await send(x.did, C.eventsMessage({ seq: s.seq, since: l.pushed, state: JSON.parse(JSON.stringify(C.capState(s))) })); l.pushed = s.seq; l.digest = d; } catch (e) { o.note(`remote: events to a control not sent (${(e as Error).message})`); }
@@ -142,9 +143,15 @@ export async function relayControls(o: {
       if (had && !isRelay(had)) throw Object.assign(new Error(`control ${name} is a LAN control (SIGELO:UI:): revoke it (ui --revoke-control ${name}) or pick another --name`), { check: 'remote', status: 409 });
       if (had && had.scope !== scope) throw Object.assign(new Error(`control ${name} has scope ${had.scope}: revoke it (ui --revoke-control ${name}) to make it again with ${scope}`), { check: 'remote', status: 409 });
       if (had?.did) return null;
+      // A code made again: the one before is withdrawn first, so its short code pairs nobody (it was a
+      // hidden, unconfirmed contact otherwise; review 2026-10-28). Its long code is kept for that alone.
+      if (had && typeof had.code === 'string') {
+        try { await c.cancelInvite(had.code); } catch (e) { if ((e as { check?: string }).check !== 'challenge_unknown' && (e as { check?: string }).check !== 'code_expired') throw e; }
+        delete had.code; save();
+      }
       const r = await c.invite({ name: `control:${name}`, short: true });
       if (r.short === undefined) throw Object.assign(new Error('no short code from the relay: try again'), { check: 'remote', status: 502 });
-      controls[name] = { relay: true, scope, created: had?.created ?? nowS(), last_used: null, did: null, nonce: o.nonceOf(r.code), exp: r.short_exp ?? r.exp, words: null, confirmed: false };
+      controls[name] = { relay: true, scope, created: had?.created ?? nowS(), last_used: null, did: null, nonce: o.nonceOf(r.code), code: r.code, exp: r.short_exp ?? r.exp, words: null, confirmed: false };
       save();
       return { line: C.controlText(r.short, c.relay === lib.DEFAULT_RELAY ? undefined : c.relay), exp: r.short_exp ?? r.exp };
     },
@@ -154,7 +161,7 @@ export async function relayControls(o: {
         if (x.did !== null || x.nonce === null) continue;
         const by = c.answeredBy(x.nonce);
         if (!by) continue;
-        x.did = by; x.nonce = null;
+        x.did = by; x.nonce = null; delete x.code;
         x.words = c.contacts().contacts.find((y) => y.did === by)?.fingerprint ?? null;
         done.push({ name, words: x.words });
       }

@@ -283,6 +283,13 @@ func (cr *conformance) vectors(d any) {
 	cr.rejects("neg fork", err, "fork")
 	_, err = chainOf(g0, []rotation{R("rotation_voluntary"), NR("cycle")})
 	cr.rejects("neg cycle", err, "cycle")
+	// §7.3 step 2 / §7.4: two valid recoveries sharing the latest iat reject the chain.
+	var tie []rotation
+	for _, x := range at(neg("recovery_tie"), "chain_with").([]any) {
+		tie = append(tie, R(x.(string)))
+	}
+	_, err = chainOf(g0, append(tie, NR("recovery_tie")))
+	cr.rejects("neg recovery_tie", err, "tie")
 	cr.rejects("neg self_rotation", Structure(at(N, "self_rotation", "body"), "rotation"), "next == id")
 	ex := neg("expired_attestation")
 	cr.check("neg expired", !(at(ex, "body", "iat").(int64) <= NOW && NOW < at(ex, "body", "exp").(int64)))

@@ -163,7 +163,7 @@ const sound = {
   missing_prefix: ['attestation', N.missing_prefix.body], genesis_tampered: ['genesis', N.genesis_tampered.doc],
   expired_attestation: ['attestation', N.expired_attestation.body],
 };
-for (const n of ['recovery_key_mismatch', 'stale_recovery_key', 'voluntary_changes_recovery', 'rotation_bad_sig', 'fork', 'cycle'])
+for (const n of ['recovery_key_mismatch', 'stale_recovery_key', 'voluntary_changes_recovery', 'rotation_bad_sig', 'fork', 'cycle', 'recovery_tie'])
   sound[n] = ['rotation-envelope', pick(N[n], envelopeOf.rotation)];
 for (const n of ['binding_monero_subaddress_base_sig', 'binding_monero_sigv1', 'binding_monero_view_key_y_ge_p', 'binding_monero_spend_key_x0_signbit'])
   sound[n] = ['binding-envelope', pick(N[n], envelopeOf.binding)];

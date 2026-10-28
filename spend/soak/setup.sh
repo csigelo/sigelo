@@ -1,7 +1,8 @@
 #!/bin/sh
 # Install (or refresh) the stagenet keeper soak under ~/.local/share/sigelo-soak.
 # Idempotent: code is re-copied every run; keys (the test vendor's too), policy.json, spend.key,
-# licence.json, spend.log, the root token and the agent's state are created once and never overwritten.
+# licence.json, spend.log, the root token and the agent's state are created once and never overwritten
+# (except policy.json's wallet.login, set from keeper/wallet-rpc.conf when it differs).
 # Needs: ts/ and spend/ built (npx tsc in each), monero-wallet-rpc on 127.0.0.1:38083.
 #
 # SIGELO_SOAK_NAME=<n> (a-z, 0-9): a SIDE-BY-SIDE soak in the 0.1.9 layout (README "A second soak"),
@@ -101,7 +102,22 @@ chmod -R go-w "$APP"
 # identities and addresses are filled into $KEEPER/policy.json, never into the repository).
 [ -f "$DATA/keys/S.hex" ] || { echo "setup: no $DATA/keys — run: node $HERE/gen-keys.mjs" >&2; exit 1; }
 if [ -z "$NAME" ]; then
+  # The default soak's wallet-rpc (systemd/monero-wallet-rpc-stagenet.service) reads its RPC login and
+  # its password file's path from a 0600 config file, never argv: /proc/<pid>/cmdline is readable by
+  # every local uid. Both files once; the password is the stagenet wallet's own, made before this.
+  CONF=$KEEPER/wallet-rpc.conf PW=$KEEPER/wallet.password
+  [ -s "$PW" ] || printf '%s' stagenet > "$PW"
+  if [ ! -s "$CONF" ]; then
+    printf '%s\n' "# monero-wallet-rpc --config-file for the default sigelo soak (setup.sh): off the command line" \
+      "rpc-login=sigelo:$(node -e 'process.stdout.write(require("crypto").randomBytes(18).toString("base64url"))')" "password-file=$PW" > "$CONF"
+  fi
+  chmod 600 "$CONF" "$PW"
   SIGELO_SOAK_DIR=$DATA node "$APP/spend/soak/gen-keys.mjs" policy "$KEEPER"
+  # A policy.json from before the login gets it; the keeper sends it only when wallet-rpc asks for one,
+  # and reads it at start: restart the wallet-rpc unit, then the keeper (README "The wallet-rpc").
+  node -e 'const fs=require("fs"),[p,c]=process.argv.slice(1),j=JSON.parse(fs.readFileSync(p,"utf8")),l=/^rpc-login=(\S+)$/m.exec(fs.readFileSync(c,"utf8"))?.[1];
+    if (!l) { console.error(`setup: ${c} has no rpc-login`); process.exit(1); }
+    if (j.wallet.login !== l) { j.wallet.login = l; fs.writeFileSync(p + ".new", JSON.stringify(j, null, 2) + "\n", { mode: 0o600 }); fs.renameSync(p + ".new", p); console.log(`setup: ${p}: wallet.login from ${c}`); }' "$KEEPER/policy.json" "$CONF"
 else
   # The named soak's wallet: its own file, a password file, an RPC login in a 0600 config file, all once.
   mkdir -p "$WDIR"; chmod 700 "$WDIR"

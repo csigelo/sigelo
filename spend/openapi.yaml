@@ -79,8 +79,9 @@ paths:
         is read whole before the request joins it. Checks, in order: token → agent, `bucket`,
         request shape and destination, **repeat** (`ref`), allowlist, amount, per-transaction cap,
         per-period budget, rate, approval. Both caps count amount + fee. A `ref` already logged
-        within `dedupe_seconds` (a pending wait: until its `exp`) is answered from the log with
-        `repeat: true`, and nothing is built. The body is parsed with sigelo's strict parser
+        within `dedupe_seconds` (an explicit `ref`: `period_seconds`; a pending wait: until its
+        `exp`; an UNCERTAIN outcome: always) is answered from the log with `repeat: true`, and
+        nothing is built. The body is parsed with sigelo's strict parser
         (duplicate keys refused) because it carries signed objects.
       requestBody:
         required: true

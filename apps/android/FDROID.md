@@ -104,14 +104,16 @@ signature (`--alignment-preserved` and not) onto the Debian builds with apksigco
 published v0.1.10 APK the same way, and prints one verdict. If 21 does not match but 17 does: CI
 back on 17 and the recipe installs bookworm's `openjdk-17-jdk-headless` (F-Droid offers it).
 
-Status: reproduce run 2026-10-27 (run 40511324947, ref v0.1.10, head df93d80): the unsigned APKs
-reproduce within each JDK major: Temurin 17 = Debian 17 and Temurin 21 = Debian 21 for both trees;
-17 and 21 differ in classes.dex alone. v0.1.10's Temurin 17 build = CI's sha 8670f3…faa (YES), so
-CI on Temurin 21 = F-Droid's Debian 21 (the recipe as written). The signature-copy check did not
-run: the step picks build-tools 34.0.0, whose apksigner lacks `--alignment-preserved` (35+ has it);
-the published v0.1.10 APK's signature does not copy onto either build (apksigcopier: failed to
-verify; v0.1.10 predates the alignment-preserved ceremony). The run's verdict line reads "NOT
-REPRODUCIBLE yet" for that reason alone. Open: the step on build-tools 35+, one more run.
+Status: reproduce runs 2026-10-27 (run 40511324947 on head df93d80, then run 40553318607 on head
+1e18586 with build-tools 35.0.1): the unsigned APKs reproduce within each JDK major, Temurin 17 =
+Debian 17 and Temurin 21 = Debian 21 for both trees; 17 and 21 differ in classes.dex alone.
+Signature copy: a signature made with `--alignment-preserved` copies onto the matching Debian build
+on both majors (MATCH); a signature made the v0.1.10 way (apksigner realigns) copies onto neither
+(NO MATCH), and the published v0.1.10 APK's signature copies onto neither build for the same reason.
+Verdict line: REPRODUCIBLE, CI on Temurin 21 = F-Droid on Debian 21, the recipe as written. So:
+v0.1.10 is not reproducible for F-Droid (it predates the ceremony); v0.1.11, signed with
+`--alignment-preserved` on JDK 21 (release/apk-ceremony.md), will be. Nothing open on this side; the
+merge request follows v0.1.11.
 
 ## Steps and who acts
 
