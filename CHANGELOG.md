@@ -14,39 +14,40 @@ history, which is not public. This public history starts at the import of 2026-1
 - **Relink after unlink:** an ended link is remembered; the same two agents link again only when each side's operator asks afresh (never an allow rule), under a new id. A contact forgotten by hand stays forgotten.
 - **Links in the inbox:** a linked contact's messages carry `link {id, purpose}` in `inbox`, the page's messages and MCP `sigelo_inbox`, so an agent reads them knowing why that contact is there. Data, never instructions.
 - **F-Droid, reproducible:** the recipe publishes our signed APK only if F-Droid's build matches it; CI builds on JDK 21 as F-Droid does (AGP 8.8.2); the APK is signed `--alignment-preserved`.
+- **CI:** the macOS legs (portability, keyagent) move to `macos.yml`, dispatched by hand before a release; GitHub's macOS
+  runners were cancelled unstarted on five attempts in three days and made every sync red (docs-test/PORTABILITY.md).
 <!-- review2-keeper -->
-- **Keeper, wallet files private:** `init --create-wallet-rpc` refuses a password file, wallet file or `.keys` readable by others;
-  `doctor` fails them; the password file's path moves into the 0600 `wallet-rpc.conf`, as does the soak unit's. Review 2026-10-28, MEDIUM 5.
+- **Keeper, wallet files private:** `init` refuses a password, wallet or `.keys` file readable by others, `doctor` fails
+  them; the password file's path moves into `wallet-rpc.conf` (0600). Review 2026-10-28, MEDIUM 5.
 - **Keeper, dry run writes nothing:** above `approval_above` a `--dry-run` keeper answers `202` with `dry_run: true` and no
   `pending` line; `/approve` is refused `dry_run`. Review 2026-10-28, LOW 9.
-- **Keeper, never paid twice later:** a `relay_failed` or unsettled `intent` answers UNCERTAIN for the life of the log; an
-  explicit `ref` is remembered for `period_seconds`, not `dedupe_seconds`. Review 2026-10-28, LOW 10.
+- **Keeper, never paid twice later:** a `relay_failed` or unsettled `intent` answers UNCERTAIN for the life of the log;
+  an explicit `ref` is kept for `period_seconds`, not `dedupe_seconds`. Review 2026-10-28, LOW 10.
 <!-- review2-wire-relay -->
-- **Relay, short codes:** a fetched code's hash stays taken until its expiry (a tombstone), so whoever fetched it
-  cannot park its own code for the intended contact; `park_unknown` still tells. Review 2026-10-28, MEDIUM 3.
+- **Relay, short codes:** a fetched code's hash stays taken until its expiry (a tombstone): whoever fetched it cannot
+  park its own code for the intended contact; `park_unknown` still tells. Review 2026-10-28, MEDIUM 3.
 - **Relay, short codes:** `POST /park` is charged as a lookup, so `park_taken` is no free liveness check past the
   relay-wide ceiling. Review 2026-10-28, also observed.
-- **Relay, licences:** `POST /licence` answers the same before and after the operator's first login (a `note` says
-  it counts from then), so a public licence no longer tells who logs in here. Review 2026-10-28, also observed.
-- **contact/relays:** a contact's relay resolves a 12-character code's tag only when the registry names no other host
-  for it, else `relay_tag` (asked); own, operator and table hosts rank above. Review 2026-10-28, MEDIUM 4.
-- A retired recovery key still governs every node up to its retirement: a leaked one is terminal; destroy old copies
-  (SPEC §7.2, THREAT-MODEL §2.5a, §3.6a, INCIDENT §7; vectors `bundle_retired_recovery_*`, accepted as written; no wire
-  change). Review 2026-10-28, MEDIUM 2.
+- **Relay, licences:** `POST /licence` answers alike before and after the operator's first login (a `note` says it
+  counts from then): a public licence no longer tells who logs in here. Review 2026-10-28, also observed.
+- **contact/relays:** a contact's relay resolves a 12-character code's tag only when the registry names no other host,
+  else `relay_tag` (asked); own, operator and table hosts rank above. Review 2026-10-28, MEDIUM 4.
+- A retired recovery key still governs up to its retirement: a leaked one is terminal, destroy old copies
+  (SPEC §7.2, THREAT-MODEL §2.5a, INCIDENT §7; vectors `bundle_retired_recovery_*`). Review 2026-10-28, MEDIUM 2.
 - Vectors for SPEC §7.4's last two rows: `bundle_recovery_null_commitment`, `negative.recovery_tie`; ts and go run both.
   Review 2026-10-28, also observed.
 - The `--impl` grader (`sigelo-verify --conformance --impl`, `docs-test/grade-verifier.mjs`, `world/conformance.mjs`)
   scores those four vectors too: 158 → 162 bundle cases.
+- **Relay and contacts remember a retired recovery key:** another recovery by a key the chain they keep retired is
+  refused `retired_recovery`, so the owner stays. Review 2026-10-28, MEDIUM 2; no wire change.
 
 <!-- review2-devices -->
-- **Devices, who the operator is:** a device takes device messages (renew, wipe, list, seat, material) only from the
-  issuer of an unexpired `sigelo-relay/operator` attestation on its chain, never from `issuers[0]`: a world it took an
-  ordinary attestation from could make itself the operator or wipe the agent. Review 2026-10-28, HIGH 1.
-- **Devices, the old seat's state kept:** a standby parks its own state sealed under its epoch's name
-  (`<identity>.parked.<epoch>.sgs`) and deletes the plaintext only once that copy opens; a newer snapshot no longer
-  overwrites what it took after the last one. Review 2026-10-28, MEDIUM 6.
-- **Apps, FULL by import refused:** an operator file is no longer imported as FULL, and the app refuses to start FULL
-  without a signed device list naming the seat (`full_import`); FULL comes from the 25 words. Review 2026-10-28, MEDIUM 7.
+- **Devices, who the operator is:** device messages (renew, wipe, seat, list) come only from the issuer of an
+  unexpired operator attestation, never `issuers[0]`: a world could wipe the agent. Review 2026-10-28, HIGH 1.
+- **Devices, the old seat's state kept:** a standby parks its state sealed per epoch (`<identity>.parked.<epoch>.sgs`),
+  deleting the plaintext only once that copy opens. Review 2026-10-28, MEDIUM 6.
+- **Apps, FULL by import refused:** an operator file is not imported as FULL; the app starts FULL only with a signed
+  device list naming it as seat (`full_import`); FULL comes from the words. Review 2026-10-28, MEDIUM 7.
 - **Remote, codes by scope:** a read control gets the page's waiting invites without their codes, chat without an
   enrolment's code (LAN, relay requests and pushed state). Review 2026-10-28, MEDIUM 8.
 - **Remote, LAN address:** `ui --remote` listens on a private address only unless `--listen` names one. Review 2026-10-28, LOW.

@@ -1,6 +1,6 @@
 # Cutting a release
 
-Artefacts are built from the PUBLIC tree (Go module path rewritten), never from the private one.
+Artefacts are built from the PUBLIC tree (Go module path rewritten), never the private one.
 `<v>` is the package version, the same in every package.json; `$S` a scratch directory.
 
 1. Private repo: every package.json, lockfile and `integrations/mcp/server.json` at `<v>`; go/go.mod
@@ -12,8 +12,8 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
 2. Sync and push (the commands under "Sync commands").
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a` must end
-   `ALL PASS (<n> checks)`. The artefacts hash the same across hosts and node/npm versions (same Go
-   version; `release/normalize-tgz.mjs` rewrites the gzip).
+   `ALL PASS (<n> checks)`. The artefacts hash the same on any host (same Go version; normalize-tgz.mjs
+   rewrites the gzip).
 4. Tag that commit twice, `v<v>` and `go/v<v>` (VERSIONING §4):
    `TZ=UTC GIT_COMMITTER_DATE="$(date -u +%s) +0000" git -c user.name=csigelo -c
    user.email=contact@sigelo.io -c gpg.format=ssh -c user.signingkey=~/.ssh/sigelo_release_signing tag -s v<v> -m '…'`.
@@ -22,31 +22,32 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never from 
    "Each release"). Then `sh release/sign-release.sh v<v> $S/a --apk $S/a/sigelo-<v>.apk
    <cert_sha256>` writes `$S/a/release.json` (without the APK: drop `--apk …`).
 5. `gh release create v<v> --repo csigelo/sigelo --prerelease --title 'sigelo v<v> (draft)'
-   --notes-file $S/notes.md $S/a/*` — every file build.sh wrote, release.json, the APK. Notes (≤ 40 lines): status,
+   --notes-file $S/notes.md $S/a/*` — all build.sh wrote, release.json, the APK. Notes (≤ 40 lines): status,
    install lines, SHA256SUMS, CHANGELOG link. Drop `--prerelease` when final.
-6. Prove it from nothing: in a scratch GOPATH/GOMODCACHE,
+6. Prove it from nothing: in a scratch GOPATH,
    `GOFLAGS=-mod=mod go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v<v>`
-   (`GOPROXY=direct` if the proxy lags), then `sigelo-verify --conformance test-vectors.json` on the
-   released file; `gh release download` one binary and check it against SHA256SUMS.
+   (`GOPROXY=direct` if the proxy lags), `sigelo-verify --conformance test-vectors.json` on the
+   released file; `gh release download` one binary, check it against SHA256SUMS.
 7. Read the tag's conformance.yml run
-   (`api.github.com/repos/csigelo/sigelo/actions/runs?event=push&branch=v<v>`) and record it.
+   (`api.github.com/repos/csigelo/sigelo/actions/runs?event=push&branch=v<v>`); run
+   `gh workflow run macos.yml -R csigelo/sigelo --ref v<v>` (re-run if cancelled); record both.
 
 
 8. npm: the tag push runs `.github/workflows/npm-publish.yml` (OIDC;
-   trusted publishing): it rebuilds the tag, waits ≤ 30 min for step 5, publishes
+   trusted publishing): rebuilds the tag, waits ≤ 30 min for step 5, publishes
    only if SHA256SUMS equals the release's; idempotent. Re-run:
    `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`. No trusted publisher (a new
    package): before step 4's push, `npm publish $S/a/<pkg>-<v>.tgz` (temporary-userconfig token;
    `sigelo` first, `sigelo-contact` second).
 9. `gh workflow run mcp-registry.yml -R csigelo/sigelo`; `site/deploy/mirror-release.sh v<v>
-   sigelo-vps`, commit its SHA256SUMS, deploy.
+   sigelo-vps`; commit its SHA256SUMS; deploy.
 
 ## Nightly on the maintainer's host
 
 At 02:30 a user timer runs `sigelo-nightly` (outside this repository) on a clean clone of the
 private HEAD, offline: the ts, Go (with `--conformance` and `--impl` on the ts candidate), moadim,
 spend (`SIGELO_TEST_NO_LIVE=1`), mcp, world, accept and kit suites, the schema, doc budget and
-site checks, and `npm run sim`; crosscheck (no offline mode) is run by hand.
+site checks, `npm run sim`; crosscheck (no offline mode) runs by hand.
 Each run leaves a log and a one-line summary; a failure leaves `FAILED` and at most one critical
 desktop notification a day, success none.
 

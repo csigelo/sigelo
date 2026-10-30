@@ -50,8 +50,11 @@ no longer governs the nodes after that recovery: a recovery it signs there is no
 one it was retired at, so whoever later holds it signs a recovery from any of those and wins:
 from an earlier node, recovery beats key; at the retiring node, the later `iat` wins (vectors
 `bundle_retired_recovery_at_genesis`, `bundle_retired_recovery_later_iat`, accepted as SPEC
-§7.3 is written). A leaked recovery key is terminal even after it was rotated away from;
-destroy every old copy (backup, paper, old root) after a recovery-key change (§3.6a).
+§7.3 is written). A leaked recovery key is terminal even after it was rotated away from, for
+every verifier without memory;
+destroy every old copy (backup, paper, old root) after a recovery-key change (§3.6a). A verifier
+with memory catches it: the relay and a contact store that hold the owner's chain refuse any other
+recovery by the retired key (`retired_recovery`). A first-time offline verifier cannot.
 
 ### 2.5b Fork under one key
 Two valid voluntary rotations from the same node, both signed by the legitimate key. Either
@@ -230,8 +233,16 @@ attacker did while holding the key.
 Retiring a recovery key does not revoke it. No offline verifier can tell a thief's recovery by
 a retired key, from a node before its retirement, from the operator's own (§2.5a). The only
 defence is that no copy of it survives: destroy old backups, superseded papers and an old root
-once a recovery rotation has moved the identity to a new key. A recovery rotation that names
-the commitment it retires, for verifiers with memory, is a v0.2 proposal (ROADMAP), not built.
+once a recovery rotation has moved the identity to a new key.
+
+What verifiers with memory now catch, with no wire change: the rotation that retired a key already
+says so (its `recovery_key` hashes to the old commitment, its `next_genesis` carries another or
+`null`). The relay (`relay/auth.mjs`) and the contact store (`contact/store.mjs`) keep the owner's
+chain, so any other recovery by that key, from any node and with any `iat`, is a fork by a retired
+key, refused `retired_recovery`; the owner keeps her relay account and her contacts keep her. What
+is still not caught: a verifier that sees only the thief's chain (every first-time offline reader),
+and one that met the thief's chain before the owner's (first seen wins, both ways). Destroying
+the old copies stays the defence.
 
 ### 3.7 Timestamps
 Every `iat`, `exp`, and `created` is signer-asserted. sigelo has no clock and no notary.

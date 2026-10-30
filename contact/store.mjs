@@ -33,7 +33,7 @@
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { files as nodeFiles } from './platform-node.mjs';
-import { canonicalize, verify } from 'sigelo';
+import { canonicalize, commitmentOf, verify, verifySig } from 'sigelo';
 import { SKEW, TTL_MAX, V, attempt, checkTime, fail, hex, keyOf } from './invite.mjs';
 
 export const TIERS = ['own', 'friend', 'quiet'];
@@ -44,6 +44,21 @@ export const OPERATOR_CTX = 'sigelo-relay/operator';
 export const NAME_MAX = 64;
 // What a record keeps of its tier through admit (a re-pair, a merged notice).
 const TIER_KEYS = ['tier', 'tier_by', 'operator_exp', 'link'];
+// A recovery key used and replaced still governs every node up to its retirement (SPEC §7.2), and
+// no offline verifier tells its thief from its owner (THREAT-MODEL §2.5a). A known contact's record
+// remembers: its chain holds the recovery rotation that retired the key. → commitment → JCS of that
+// rotation, for the rotations on the chain's edges (signed by the key hashing to the commitment,
+// into a genesis with another one or none).
+const commitOrNull = (k) => { try { return commitmentOf(k); } catch { return null; } };
+const jcsOrNull = (x) => { try { return canonicalize(x); } catch { return null; } };
+function retiredBy(record) {
+  const edges = new Set(record.chain.slice(1).map((d, i) => `${record.chain[i]} ${d}`)), out = new Map();
+  for (const r of record.rotations) {
+    const c = r.body.reason === 'recovery' && edges.has(`${r.body.id} ${r.body.next}`) ? commitOrNull(r.body.recovery_key) : null;
+    if (c !== null && r.next_genesis.recovery !== c) out.set(c, canonicalize(r));
+  }
+  return out;
+}
 
 export class Contacts {
   /**
@@ -340,7 +355,9 @@ export class Contacts {
   }
 
   /**
-   * sigelo-pair's last checks, in its order and under its names: revoked, not_contact, then every
+   * sigelo-pair's last checks, in its order and under its names: revoked, not_contact, then
+   * retired_recovery (own: a recovery rotation sent by a recovery key the known chain retired,
+   * retiredBy), then every
    * rotation this store has seen is merged in and §7.3 picks again (bundle, stale_chain): a peer
    * cannot hide a rotation, so a recovery seen once keeps beating the thief. Then original_did
    * (own), and revoked once more, just before writing. r: verify(bundle) already checked by the caller.
@@ -362,6 +379,17 @@ export class Contacts {
     if (!old && name === null) fail('not_contact', `${r.chain[0]} is not a contact; this code was for a known contact only`);
     let rotations = bundle.rotations;
     if (prior) {
+      // A thief with an old copy of a retired recovery key signs a recovery from a node before its
+      // retirement (G0 → T, or the retiring node with a later iat): offline it verifies and §7.3
+      // follows it. This store saw the retirement, so any other recovery by that key is a fork by a
+      // retired key, refused. A store that first met the thief's chain cannot tell (the limit).
+      const retired = retiredBy(prior);
+      for (const x of retired.size > 0 ? rotations : []) {
+        const c = x?.body?.reason === 'recovery' ? commitOrNull(x.body.recovery_key) : null;
+        if (c !== null && retired.has(c) && jcsOrNull(x) !== retired.get(c) && verifySig(x.body.recovery_key, x.body, x.sig)) {
+          fail('retired_recovery', `a recovery rotation from ${x.body.id} signed by a recovery key ${prior.did} has retired (a later recovery replaced it)`);
+        }
+      }
       const claimed = r.did, seen = new Set(rotations.map(canonicalize));
       rotations = [...rotations, ...prior.rotations.filter((x) => !seen.has(canonicalize(x)))];
       r = attempt('bundle', () => verify({ ...bundle, rotations }, now));

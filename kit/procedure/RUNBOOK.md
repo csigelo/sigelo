@@ -115,7 +115,7 @@ New `POST /bind` for each agent's new `(i, 0)` at {{keeper.url}} (the new keeper
 
 ## 7. Total loss (case c)
 
-`S` cannot be rotated, only abandoned. New ceremony on a clean offline box (CEREMONY.md); sweep the vault, treasury and allowance to the new vault first. Recovery-rotate every identity to the new root with the old recovery key, setting the new root's commitment. If the recovery secret itself leaked, the attacker can issue a later-`iat` recovery and win (SPEC §7.3): announce the loss out of band and start new identities. The old recovery key stays terminal after the move: it still signs a recovery that wins from any node before the move (THREAT-MODEL §2.5a). Once the moves are done, destroy every copy of the old `S`, its `backup.age` and papers.
+`S` cannot be rotated, only abandoned. New ceremony on a clean offline box (CEREMONY.md); sweep the vault, treasury and allowance to the new vault first. Recovery-rotate every identity to the new root with the old recovery key, setting the new root's commitment. If the recovery secret itself leaked, the attacker can issue a later-`iat` recovery and win (SPEC §7.3): announce the loss out of band and start new identities. The old recovery key stays terminal after the move: it still signs a recovery that wins from any node before the move (THREAT-MODEL §2.5a); only a relay or contact that saw the move refuses it (`retired_recovery`). Once the moves are done, destroy every copy of the old `S`, its `backup.age` and papers.
 
 ## 8. Post-mortem
 

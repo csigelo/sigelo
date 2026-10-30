@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hexToBytes } from '@noble/hashes/utils.js';
-import { canonicalize } from 'sigelo';
+import { createHash } from 'node:crypto';
+import { canonicalize, keygen, rotate, verify } from 'sigelo';
 import { MsgError } from './kdf.mjs';
 import { SKEW, TTL_MAX, answerId, buildAnswer, buildReply, checkAnswer, checkReply, hex, inviteKeys, makeInvite, parseInvite } from './invite.mjs';
 import { Contacts } from './store.mjs';
@@ -148,6 +149,35 @@ try {
   run('save() with a planted .tmp symlink', {}, () => new Contacts(join(sub, 'Z.json'), F.dids.A0).addInvite(made(c), 'bob', c.now));
   ok(readFileSync(target, 'utf8') === 'untouched' && (statSync(join(sub, 'Z.json')).mode & 0o777) === 0o600, 'save() ignores a planted .tmp symlink and writes 0600');
   ok(readdirSync(sub).sort().join(' ') === 'Z.json Z.json.tmp target', 'save() leaves no temporary file behind');
+
+  // A retired recovery key (SPEC §7.2, THREAT-MODEL §2.5a), against a known contact: wren's chain
+  // G0 → G1 → recovery with R1 into G2 under a new key R2. A thief holding only R1 signs a recovery
+  // G0 → T, or G1 → T with a later iat: offline both verify and §7.3 follows them, so the merge used
+  // to take the thief's chain. The record remembers the retirement: retired_recovery; wren stays.
+  {
+    const sd = (l) => new Uint8Array(createHash('sha256').update(`sigelo-retired-test/0 ${l}`).digest());
+    const pub = (l) => keygen({ seed: sd(l), recovery: 'sha256:' + '0'.repeat(64), created: '2026-10-01T00:00:00Z', nonce: new Uint8Array(16) }).key;
+    const gen = (l, rec) => keygen({ seed: sd(l), recovery: pub(`${rec} recovery`), created: '2026-10-01T00:00:00Z', nonce: sd(`${l} nonce`).slice(0, 16) });
+    const step = (from, to, reason, iat, rec) => rotate({ genesis: from.genesis, next_genesis: to.genesis, iat, reason, secret: reason === 'recovery' ? sd(`${rec} recovery`) : from.secret, next_secret: to.secret });
+    const T = 1761000000, bundleOf = (g, rotations) => ({ v: 'sigelo/0', typ: 'bundle', genesis: g.genesis, rotations, bindings: [], attestations: [], issuers: [] });
+    const scenario = (l) => {
+      const g0 = gen(l, l), g1 = gen(`${l} 1`, l), g2 = gen(`${l} 2`, `${l} 2`), ta = gen(`${l} thief A`, `${l} thief`), tb = gen(`${l} thief B`, `${l} thief`);
+      const v = step(g0, g1, 'voluntary', T), rec = step(g1, g2, 'recovery', T + 100, l);
+      return { g0, honest: bundleOf(g0, [v, rec]), thiefA: bundleOf(g0, [step(g0, ta, 'recovery', T + 200, l)]), thiefB: bundleOf(g0, [v, step(g1, tb, 'recovery', T + 300, l)]), g2, ta, tb };
+    };
+    const now = T + 1000, fields = (n) => ({ relay: 'relay.test', pair_key: n.toString(16).padStart(64, '0') });
+    const ws = new Contacts(join(dir, 'retired.json'), F.dids.A0), w = scenario('wren');
+    ok(verify(w.thiefA, now).did === w.ta.did && verify(w.thiefB, now).did === w.tb.did, 'retired recovery: offline, both thief chains verify (G0 → T, and G1 → T with a later iat)');
+    run('retired recovery: wren known with her chain', {}, () => ws.admit(w.honest, verify(w.honest, now), 'wren', fields(1), now));
+    run('retired recovery: the thief with G0 and his recovery by the retired key', { error: 'retired_recovery' }, () => ws.admit(w.thiefA, verify(w.thiefA, now), null, fields(1), now));
+    run('retired recovery: the thief from G1 with a later iat than hers', { error: 'retired_recovery' }, () => ws.admit(w.thiefB, verify(w.thiefB, now), null, fields(1), now));
+    const again = run('retired recovery: her next bundle is admitted', {}, () => ws.admit(w.honest, verify(w.honest, now), null, fields(1), now));
+    ok(again?.current_did === w.g2.did && ws.lookup(w.g0.did).current_did === w.g2.did, 'retired recovery: she stays: the record ends at her G2, none of the thief\'s');
+    // The limit: a store that met the thief's chain first cannot tell; first seen wins.
+    const x = scenario('xena');
+    run('retired recovery, the limit: the thief\'s chain known first', {}, () => ws.admit(x.thiefA, verify(x.thiefA, now), 'xena', fields(2), now));
+    run('retired recovery, the limit: then her chain is refused', { error: 'retired_recovery' }, () => ws.admit(x.honest, verify(x.honest, now), null, fields(2), now));
+  }
 
   let thrown;
   try { parseInvite('sgl2', c.now); } catch (e) { thrown = e; }

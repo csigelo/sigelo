@@ -313,12 +313,12 @@ const TICK = 3600 * 1000, BACKOFF = [1000, 60000];
 // relay that accepts and closes at once is dialled ever more slowly, as one that refuses is.
 const STABLE_MS = 60000;
 // Login refusals no retry can fix.
-const PERMANENT = new Set(['password', 'bundle', 'sig', 'client_id', 'closed', 'challenge', 'relay', 'identity']);
+const PERMANENT = new Set(['password', 'bundle', 'sig', 'retired_recovery', 'client_id', 'closed', 'challenge', 'relay', 'identity']);
 // A refusal by one of these is this process failing, not a message: the delivery is not acknowledged.
 const INTERNAL = new Set(['lock', 'state', 'store', 'identity', 'time']);
 // The login checks relay/auth.mjs names on POST /check. Any other word from the relay is `connect`:
 // a check name decides what this client does next, so a relay cannot pick one.
-const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challenge_expired', 'bundle', 'sig', 'client_id', 'closed', 'pow', 'relay_full']);
+const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challenge_expired', 'bundle', 'sig', 'retired_recovery', 'client_id', 'closed', 'pow', 'relay_full']);
 // Refusals of an invite reply that a later round may get past: the reply stays queued.
 const REPLY_RETRY = new Set(['rate', 'relay_full', 'quota_messages']);
 // $sigelo/notice codes that refuse the publish, or the SUBSCRIBE, in flight (relay-plan §3 "Errors").
@@ -768,6 +768,8 @@ const LOGIN_NEXT = {
   relay_full: 'the relay is full: try again later',
   challenge_expired: 'the login took longer than its challenge lives (a slow proof of work): try again',
   challenge_unknown: 'try again',
+  // relay/auth.mjs: a recovery by a recovery key the chain kept there retired (THREAT-MODEL §2.5a).
+  retired_recovery: 'the relay keeps a chain that retired the recovery key this one recovers with: send the chain with the newest recovery',
   // A closed relay (relay/closed.mjs) admits its operators and the identities they attest for it.
   closed: 'this relay admits only identities its operator vouches for: ask that operator for an attestation for this relay (sigelo-agent add-attestation), or pair through an open relay',
   connect: 'try again later',

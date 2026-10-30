@@ -256,7 +256,7 @@ function agreed(agree, value, secret, store, r, kem_sk) {
  * order and under its names (each marked "pair:"), plus the invite's own:
  *   card, challenge_unknown, challenge_expired, bundle, card_did, challenge_did (re-key codes),
  *   challenge_body, transcript (own), sig, self (own), kem (own),
- *   revoked, not_contact, bundle, stale_chain, original_did (own), revoked
+ *   revoked, not_contact, retired_recovery (own), bundle, stale_chain, original_did (own), revoked
  * Returns { did, current_did, current_key, attestations, rejected, rekeyed, pair_key, secret,
  * answer_id } or throws MsgError. secret (hex) is gone from the store; the caller needs it for
  * the reply's topic and key, and answer_id for buildReply. rekeyed: an existing contact's pairing
@@ -285,7 +285,7 @@ export function checkAnswer(answer, store, now, agree) {
  * Bob: check Alice's reply and store her under her ORIGINAL DID. The same order; code_did stands
  * where sigelo-pair has challenge_did: Bob accepts only if the code's DID is in Alice's chain.
  *   card, challenge_unknown, challenge_expired, bundle, card_did, code_did, challenge_body,
- *   transcript, sig, self, kem, revoked, not_contact, bundle, stale_chain, original_did, revoked
+ *   transcript, sig, self, kem, revoked, not_contact, retired_recovery, bundle, stale_chain, original_did, revoked
  * Returns { did, current_did, current_key, attestations, rejected, rekeyed, pair_key } or throws MsgError.
  */
 export function checkReply(reply, store, now, agree) {
