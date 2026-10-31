@@ -15,8 +15,8 @@ Repo: https://github.com/csigelo/sigelo.git
 Binaries: https://github.com/csigelo/sigelo/releases/download/v%v/sigelo-%v.apk
 
 Builds:
-  - versionName: 0.1.11
-    versionCode: 3
+  - versionName: 0.1.12
+    versionCode: 4
     commit: b8b3a30d5fa0c7be4920069108705d41a1f0ddd9
     subdir: apps/android/app
     sudo:
@@ -50,5 +50,5 @@ AllowedAPKSigningKeys:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.1.11
-CurrentVersionCode: 3
+CurrentVersion: 0.1.12
+CurrentVersionCode: 4

@@ -158,14 +158,15 @@
     const unread = unreadOf(c), mark = c.status === 'pair_again' ? '!' : unread ? '●' : '○';
     const badges = [tierChip(c.tier)];
     if (c.local) badges.push(badge('on this machine'));
-    if (c.mine) badges.push(badge(`run by me · ${c.mine.days_left} d`, c.mine.days_left < 14 ? 'alert' : ''));
+    if (c.mine) badges.push(badge(`run by me · ${c.mine.days_left} d left`, c.mine.days_left < 4 ? 'alert' : ''));
     if (c.ours && c.tier !== 'own') badges.push(badge('mine · low trust'));
     for (const t of c.tags) badges.push(badge('#' + t));
     if (c.status === 'pair_again') badges.push(badge('Pair again', 'alert'));
     else if (c.status === 'waiting') badges.push(badge('waiting for their side'));
     else if (c.status === 'not_collected') badges.push(badge('not collected yet', 'alert'));
+    // An agent on this machine was paired here, by this machine: no words to compare with anyone.
     if (c.words_checked) badges.push(badge('✓ words', 'ok'));
-    else if (c.words) badges.push(badge('check words', 'alert'));
+    else if (c.words && !c.local) badges.push(badge('check words', 'alert'));
     if (c.link) badges.push(badge(`linked: ${c.link.purpose}`));
     const sub = c.tier === 'quiet' ? '' : c.tier === 'friend' ? (unread ? `new message${unread === 1 ? '' : 's'}` : '')
       : c.last ? `${c.last.dir === 'out' ? 'me: ' : ''}${c.last.text}` : 'no messages yet';
@@ -200,7 +201,7 @@
     S.home = 'contacts';
     const top = h('div'), list = h('div');
     put(app,
-      h('header', null, h('h1', null, 'Contacts'), h('button', { onclick: () => show('agents') }, 'Agents'), h('button', { onclick: () => show('links') }, 'Links'), SHELL || LOCAL ? null : h('button', { onclick: () => show('devices') }, 'Devices'), h('button', { onclick: () => show('me') }, 'Me'), ),
+      h('header', null, h('h1', null, 'Contacts'), h('nav', { class: 'tabs' }, h('button', { onclick: () => show('agents') }, 'Agents'), h('button', { onclick: () => show('links') }, 'Links'), SHELL || LOCAL ? null : h('button', { onclick: () => show('devices') }, 'Devices'), h('button', { onclick: () => show('me') }, 'Me'))),
       top, list,
       h('div', { class: 'foot' }, h('div', { class: 'inner' }, h('button', { class: 'primary', onclick: () => show('add') }, 'Add a contact'))));
     return () => {
@@ -238,8 +239,8 @@
     const top = h('div'), list = h('div');
     const enrolBtn = h('button', { class: 'primary', onclick: () => show('enrol') }, 'Enrol my agent');
     put(app,
-      h('header', null, h('h1', null, 'Agents'), h('button', { onclick: () => show('contacts') }, 'Contacts'), h('button', { onclick: () => show('links') }, 'Links'),
-        SHELL || LOCAL ? null : h('button', { onclick: () => show('devices') }, 'Devices'), h('button', { onclick: () => show('me') }, 'Me')),
+      h('header', null, h('h1', null, 'Agents'), h('nav', { class: 'tabs' }, h('button', { onclick: () => show('contacts') }, 'Contacts'), h('button', { onclick: () => show('links') }, 'Links'),
+        SHELL || LOCAL ? null : h('button', { onclick: () => show('devices') }, 'Devices'), h('button', { onclick: () => show('me') }, 'Me'))),
       top, list,
       h('div', { class: 'foot' }, h('div', { class: 'inner two' }, enrolBtn, h('button', { onclick: () => show('add') }, 'Add a contact'))));
     return async () => {
@@ -495,9 +496,11 @@
         }
       }
       if (P.mode === 'enter' && !P.busy) {
-        const r = P.result, e = P.error;
+        const e = P.error, came = P.result?.did ? contactBy(P.result.did) : null;
+        // Waiting: their side answers later (it was offline); the contact comes in the state, so do the words.
+        const r = came && came.status !== 'waiting' && P.result.status !== 'connected' ? { status: 'connected', contact: came } : P.result;
         if (r?.status === 'connected') out.push(h('p', { class: 'good' }, `✓ Paired with ${safeText(r.contact.name)}`), wordsBlock(contactBy(r.contact.did) ?? { ...r.contact, words: r.contact.fingerprint }));
-        else if (r?.status === 'waiting') out.push(h('div', { class: 'card' }, 'Your answer is at the relay. Waiting for their side to come online once', r.exp ? [', until ', when(r.exp)] : '', '.'));
+        else if (r?.status === 'waiting') out.push(h('div', { class: 'card' }, 'Your answer is at the relay. Waiting for their side to come online once', r.exp ? [', until ', when(r.exp)] : '', '. You can leave this screen: they show in Contacts, with the four words, once they answer.'));
         else if (r?.status === 'pending') out.push(h('div', { class: 'card' }, 'Your answer has not reached the relay yet: it goes at the next connection.'));
         if (e) {
           const why = {
@@ -518,28 +521,38 @@
   }
 
   // ---- CONVERSATION
+  // A file received (sigelo-file/0): the carrier's line "file <name> (<n> bytes), saved at <path>", shown as
+  // the name and size, the place below it small; any other line as it is.
+  const kb = (n) => (n < 1024 ? `${n} bytes` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+  function fileText(t) {
+    const m = /^file (.+) \((\d+) bytes\), saved at (.+)$/s.exec(String(t ?? ''));
+    if (!m) return h('div', { class: 'text' }, '📎 ', t);
+    return h('div', { class: 'file' }, h('div', { class: 'text' }, '📎 ', h('b', null, m[1]), ` · ${kb(Number(m[2]))}`), h('div', { class: 'path' }, 'Saved on this machine: ', m[3]));
+  }
   function viewChat(did) {
     S.contact = did; S.msgsSeq = -1;
     const title = h('h1'), tags = h('div'), alerts = h('div'), list = h('div'), panel = h('div');
     panel.hidden = true;
-    const text = h('textarea', { rows: 1, placeholder: 'type a message', 'aria-label': 'Message' });
+    const text = h('textarea', { rows: 1, placeholder: 'Message', 'aria-label': 'Message' });
+    // The box grows with what is typed, up to a third of the screen (ui.css), and back after Send.
+    const fit = () => { if (!text.style) return; text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${text.scrollHeight + 2}px`; };
+    text.addEventListener('input', fit);
     const send = async () => {
       const t = text.value;
       if (!t.trim()) return;
       sendBtn.disabled = true;
-      await act(() => backend.call('POST', '/api/send', { to: did, text: t }), () => { text.value = ''; S.msgsSeq = -1; });
+      await act(() => backend.call('POST', '/api/send', { to: did, text: t }), () => { text.value = ''; fit(); S.msgsSeq = -1; });
       sendBtn.disabled = false;
     };
     text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
     const sendBtn = h('button', { class: 'primary', onclick: send }, 'Send');
-    // Files (sigelo-file/0) are another branch's: the seam only.
-    const attach = h('button', { disabled: true, title: 'coming', 'aria-label': 'Attach a file (coming)' }, '📎');
+    let first = true;
     const rename = h('input', { autocomplete: 'off', 'aria-label': 'Name' }), tagIn = h('input', { autocomplete: 'off', placeholder: '#work #family', 'aria-label': 'Tags' });
     let panelFor = null;
     put(app,
       h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), title, h('button', { 'aria-label': 'More', onclick: () => { panel.hidden = !panel.hidden; S.update(); } }, '⋯')),
       tags, panel, alerts, list,
-      h('div', { class: 'foot' }, h('div', { class: 'inner' }, attach, text, sendBtn)));
+      h('div', { class: 'foot' }, h('div', { class: 'inner' }, text, sendBtn)));
     return async () => {
       const c = contactBy(did);
       if (!c) { title.textContent = 'Gone'; put(alerts, h('p', { class: 'muted' }, 'Not a contact (forgotten).')); return; }
@@ -562,18 +575,20 @@
       if (c.status === 'pair_again') al.push(h('div', { class: 'card' }, h('p', { class: 'warn' }, c.re_pair === 'own_recovery' ? 'You recovered your identity: pair again.' : 'They recovered their identity: pair again.'), h('button', { class: 'primary', onclick: () => invite({ name: c.name }) }, 'Pair again')));
       else if (c.status === 'waiting') al.push(h('div', { class: 'card' }, 'Waiting for their side: messages go once their keys come.'));
       if (c.not_collected) al.push(h('div', { class: 'card' }, h('p', null, 'Not collected yet: their side has not been online since.'), h('button', { onclick: () => act(() => backend.call('POST', '/api/sync')) }, 'Retry now')));
-      if (!c.words_checked && c.words) al.push(wordsBlock(c));
+      if (!c.words_checked && c.words && !c.local) al.push(wordsBlock(c));
       put(alerts, ...al.filter(Boolean));
       if (S.snap.seq !== S.msgsSeq) {
         S.msgsSeq = S.snap.seq;
         const r = await backend.call('GET', `/api/messages?contact=${encodeURIComponent(did)}`).catch(() => null);
         if (!r) return;
-        const atEnd = window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
+        // Opened at the newest message; later, kept there only if the reader was already at the end.
+        const atEnd = first || window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
+        first = false;
         put(list, ...(r.messages.length ? r.messages.map((m) => {
           const st = m.dir !== 'out' ? '' : m.status === 'queued' ? (m.code === 'no_reader' ? ' (not collected yet)' : ' (queued)') : m.status === 'refused' ? ` (refused: ${m.code})` : m.status === 'sent' ? ' ✓' : '';
           return h('div', { class: `msg ${m.dir}` }, h('div', { class: 'who' }, m.dir === 'out' ? 'me' : 'them', ' · ', when(m.at), st),
-            m.label ? badge(m.label === 'sigelo-file/0' ? '📎 file (coming)' : m.label) : null,
-            m.link ? badge(`link ${m.link.id}: ${m.link.purpose}`, 'link') : null, h('div', { class: 'text' }, m.text));
+            m.label && m.label !== 'sigelo-file/0' ? badge(m.label) : null,
+            m.link ? badge(`link ${m.link.id}: ${m.link.purpose}`, 'link') : null, m.label === 'sigelo-file/0' ? fileText(m.text) : h('div', { class: 'text' }, m.text));
         }) : [h('p', { class: 'muted' }, 'No messages yet.')]));
         if (atEnd) window.scrollTo(0, document.body.scrollHeight);
       }
@@ -636,7 +651,7 @@
       h('h2', null, 'Link two contacts'),
       h('div', null, h('label', null, 'First'), aSel, h('label', null, 'Second'), bSel, h('label', null, 'What for (up to 120 characters)'), purpose, h('label', null, 'Ends'), days, extra,
         h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: go }, 'Link'))), result,
-      h('h2', null, 'Links you made'), made, h('h2', null, 'Linked with you'), mine, h('h2', null, 'Introductions accepted by themselves'), rules);
+      h('h2', null, 'Links you made'), made, h('h2', null, 'Linked with you'), mine, h('h2', null, 'Accepted without asking'), rules);
     return async () => {
       put(top, statusLine(), noteCard());
       const cs = allContacts(), now = cs.map((c) => c.did + c.name).join();
@@ -825,7 +840,7 @@
       put(words, h('div', { class: 'card' }, h('label', null, 'Type the words the giving screen shows (not shown here)'), w, h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: go }, 'Open'))));
       w.focus();
     }
-    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => { scan.stop(); clearInterval(D.timer); show(S.home); } }, '‹'), h('h1', null, 'Devices')), top,
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => { scan.stop(); clearInterval(D.timer); back(); } }, '‹'), h('h1', null, 'Devices')), top,
       h('h2', null, 'Add a device'),
       h('div', null, h('label', null, 'Its name (a-z, 0-9, _ and -)'), name,
         h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => addDevice(false) }, 'Add (online)'), h('button', { onclick: () => addDevice(true) }, 'Add offline')),
@@ -855,10 +870,10 @@
       put(adding, cards);
       put(list, L.devices.length ? L.devices.map((d) => h('div', { class: 'row' }, h('span', { class: 'main' },
         h('div', { class: 'name' }, d.name), h('div', { class: 'sub' }, `worker ${d.worker} · added ${when(d.added)}${d.seen ? ` · seen ${when(d.seen)}` : ''}`),
-        h('div', null, badge(d.rank.toUpperCase(), d.rank === 'full' ? 'alert' : ''), d.revoked ? badge(`revoked ${when(d.revoked)}`, 'alert') : badge(d.paired ? 'paired' : 'not paired yet', d.paired ? 'ok' : ''), d.tier ? tierChip(d.tier) : null),
+        h('div', null, d.via === 'here' ? badge('this machine') : null, badge(d.rank.toUpperCase(), d.rank === 'full' ? 'alert' : ''), d.revoked ? badge(`revoked ${when(d.revoked)}`, 'alert') : badge(d.paired ? 'paired' : 'not paired yet', d.paired ? 'ok' : ''), d.tier ? tierChip(d.tier) : null),
         h('div', { class: 'did' }, d.did)),
-        d.revoked ? null : h('button', { onclick: () => { if (confirm(`Revoke ${d.name}? It is told to delete its keys, and forgotten here when it answers.`)) act(() => backend.call('POST', '/api/devices/revoke', { name: d.name })); } }, 'Revoke'),
-        h('button', { class: 'danger', onclick: () => { if (confirm(`${d.name} lost or stolen? It is revoked and forgotten now${d.rank === 'full' ? '; it held your identity: the steps with your 25 words follow' : ''}.`)) act(() => backend.call('POST', '/api/devices/revoke', { name: d.name, lost: true }), (r) => { if (r.steps) S.note = { message: [...r.steps.now.map((x) => `Done: ${x}`), 'With your 25 words:', ...r.steps.words.map((x, i) => `${i + 1}. ${x}`)].join('\n') }; }); } }, 'Lost')))
+        d.revoked || d.via === 'here' ? null : h('button', { onclick: () => { if (confirm(`Revoke ${d.name}? It is told to delete its keys, and forgotten here when it answers.`)) act(() => backend.call('POST', '/api/devices/revoke', { name: d.name })); } }, 'Revoke'),
+        d.via === 'here' ? null : h('button', { class: 'danger', onclick: () => { if (confirm(`${d.name} lost or stolen? It is revoked and forgotten now${d.rank === 'full' ? '; it held your identity: the steps with your 25 words follow' : ''}.`)) act(() => backend.call('POST', '/api/devices/revoke', { name: d.name, lost: true }), (r) => { if (r.steps) S.note = { message: [...r.steps.now.map((x) => `Done: ${x}`), 'With your 25 words:', ...r.steps.words.map((x, i) => `${i + 1}. ${x}`)].join('\n') }; }); } }, 'Lost')))
         : h('p', { class: 'muted' }, L.list ? 'None left.' : 'None yet: Add a device.'));
       const j = L.joining, r = D.result, out = [];
       if (j) {
@@ -905,7 +920,7 @@
       put(body, errorCard(S.note) ?? '',
         h('div', { class: 'card' }, h('div', { class: 'did' }, m.did), h('div', { class: 'bar' }, cp)),
         h('p', null, m.recovery === 'set' ? 'Recovery key: set, offline' : h('span', { class: 'warn' }, 'Recovery key: none. Theft of this key is permanent.')),
-        m.restored ? h('p', null, `${m.restored.created ? `Created on ${m.restored.on}; the 25 words are on your paper` : `Restored from seed on ${m.restored.on}`} · keeper j=${m.restored.keeper} · seat ${m.restored.seat ?? 'not set up (device seat init)'}`) : null,
+        m.restored ? h('p', null, `${m.restored.created ? `Created on ${m.restored.on}; the 25 words are on your paper` : `Restored from your 25 words on ${m.restored.on}`} · keeper ${m.restored.keeper} · ${m.restored.seat === 'here' ? 'logs in as you here (the seat)' : m.restored.seat === 'elsewhere' ? 'the seat is on another device' : 'seat not set up (device seat init)'}`) : null,
         h('p', null, m.key === 'browser' ? 'Key: in this app\'s storage, sealed under a key it cannot export' : m.key === 'keychain' ? 'Key: sealed in this machine\'s keyring' : 'Key: in the identity file, not sealed (sigelo-agent keys wrap seals it)'),
         h('p', null, `Relay: ${m.relay} · keeps messages ${m.retention_days} days`),
         relayBlock(),
@@ -924,10 +939,12 @@
 
   // ---- ADD A CONTACT: someone else's identity (a person's, or an agent not yours), paired by a code
   function viewAdd() {
+    const nameIn = h('input', { autocomplete: 'off', maxlength: '64', placeholder: 'optional', 'aria-label': 'Their name' });
     put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), h('h1', null, 'Add a contact')),
       h('p', null, 'Pair with someone else\'s identity, a person\'s or their agent\'s. It stays theirs; you choose how much its messages reach you.'),
       h('p', { class: 'muted' }, 'Not this? Your own agent on another machine: ', h('button', { onclick: () => show('enrol') }, 'Enrol my agent')),
-      h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => invite() }, 'Make a code to send')),
+      h('label', null, 'Their name, as you will see it'), nameIn,
+      h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => invite(nameIn.value.trim() ? { name: nameIn.value.trim() } : {}) }, 'Make a code to send')),
       h('div', { class: 'bar' }, h('button', { onclick: () => show('pair', { mode: 'enter' }) }, 'I have their code')),
       h('p', { class: 'muted' }, 'A code works once, for 10 minutes. Then you both compare four words.'));
     return () => {};
@@ -938,7 +955,7 @@
   const HOMES = new Set(['agents', 'contacts']);
   function show(view, arg, popped = false) {
     // A screen off a home list gets its own history entry (Back returns to the list); a home list none.
-    if (!popped && !HOMES.has(view) && view !== S.view) globalThis.history?.pushState?.({ sigeloView: view }, '');
+    if (!popped && !HOMES.has(view) && view !== S.view) globalThis.history?.pushState?.({ sigeloView: view, ...(arg !== undefined && typeof arg !== 'object' && { arg }) }, '');
     S.view = view; S.note = null;
     S.update = VIEWS[view](arg);
     window.scrollTo(0, 0);
@@ -959,7 +976,14 @@
     if (was?.status === 403) { show(S.view, undefined, true); return; }
     try { await S.update(); } catch {}
   }
-  globalThis.addEventListener?.('popstate', () => { if (!HOMES.has(S.view)) show(S.home, undefined, true); });
+  // Back lands on the entry before: a screen with a plain argument (a contact, an agent) comes back as it was; a
+  // code screen is not made twice (a second code), so Back past it lands on the screen before, or the home list.
+  globalThis.addEventListener?.('popstate', (ev) => {
+    const st = ev?.state ?? globalThis.history?.state, v = st?.sigeloView;
+    if (v === 'pair' || v === 'enrol') { globalThis.history?.back?.(); return; }
+    if (v && VIEWS[v] && !HOMES.has(v)) show(v, st.arg, true);
+    else if (!HOMES.has(S.view)) show(S.home, undefined, true);
+  });
   setInterval(() => { for (const el of document.querySelectorAll('.countdown')) el.textContent = left(Number(el.dataset.exp)); }, 1000);
   // Installable on this machine (manifest.webmanifest, sw.js: the three files, never /api/).
   if (backend === http && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

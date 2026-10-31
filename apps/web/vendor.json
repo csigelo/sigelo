@@ -243,11 +243,11 @@
   },
   "vendor/ui.css": {
    "from": "adapters/moadim/ui.css",
-   "sha256": "325ecb792c66a905bbee38271083167c2319c0660228937d88e5a83b375701e5"
+   "sha256": "17ae1db61b55dc2c284f004558be0b7f2a98b656db705fe87b7857f52fb1c16b"
   },
   "vendor/ui.js": {
    "from": "adapters/moadim/ui.js",
-   "sha256": "21dcf6e0f5fc0989d7d61a694ed747844f977bbf42112926e891f7bfc472e264"
+   "sha256": "595edae99fa42c090eef74eefd25238150b3008787308812f1f04615838a4ec1"
   }
  }
 }

@@ -1,0 +1,2 @@
+Messages read like a chat: bubbles, newest first, a box that grows, received files named. Contacts: pairing moves on to the four words once they answer; Back goes one screen back.
+The first version signed so F-Droid can check it matches this release; includes all of 0.1.11.

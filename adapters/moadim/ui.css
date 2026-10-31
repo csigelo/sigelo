@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
-:root { color-scheme: light dark; --fg: #111; --bg: #fff; --mut: #666; --line: #ddd; --acc: #0b57d0; --bad: #b3261e; --ok: #146c2e; --card: #f4f4f4; }
-@media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #121212; --mut: #9a9a9a; --line: #333; --acc: #8ab4f8; --bad: #f2b8b5; --ok: #7dd99a; --card: #1e1e1e; } }
+:root { color-scheme: light dark; --fg: #111; --bg: #fff; --mut: #666; --line: #ddd; --acc: #0b57d0; --bad: #b3261e; --ok: #146c2e; --card: #f4f4f4; --mine: #dce7fb; }
+@media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #121212; --mut: #9a9a9a; --line: #333; --acc: #8ab4f8; --bad: #f2b8b5; --ok: #7dd99a; --card: #1e1e1e; --mine: #1f3354; } }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 main { max-width: 40rem; margin: 0 auto; padding: 0 12px 96px; min-width: 0; }
@@ -13,6 +13,10 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 input:not([type=radio]):not([type=checkbox]), textarea, select { font: inherit; width: 100%; min-height: 44px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
 textarea { resize: vertical; min-height: 44px; max-height: 40vh; }
+.foot .inner > textarea { resize: none; max-height: 33vh; }
+/* The home lists' other screens: one row of equal tabs under the title. */
+header nav.tabs { display: flex; gap: 6px; flex: 1 0 100%; }
+header nav.tabs > button { flex: 1 1 0; padding: 8px 4px; }
 .status { font-size: .9rem; color: var(--mut); padding: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .warn { color: var(--bad); }
 .good { color: var(--ok); }
@@ -40,7 +44,10 @@ h2 { font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: 
 .words { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 700 1.9rem/1.25 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .03em; margin: 10px 0; }
 .steps { list-style: none; padding: 0; margin: 8px 0; }
 .steps li { padding: 3px 0; }
-.msg { padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+/* A conversation as bubbles: theirs on the left, mine on the right in the accent's tint. */
+.msg { width: fit-content; max-width: 85%; margin: 8px 0; padding: 6px 12px 8px; border-radius: 14px 14px 14px 4px; background: var(--card); overflow-wrap: anywhere; }
+.msg.out { margin-left: auto; background: var(--mine); border-radius: 14px 14px 4px 14px; }
+.msg .path { font-size: .75rem; color: var(--mut); word-break: break-all; }
 .msg .who { font-size: .8rem; color: var(--mut); }
 .msg.out .who { color: var(--acc); }
 .msg .text { white-space: pre-wrap; unicode-bidi: plaintext; }

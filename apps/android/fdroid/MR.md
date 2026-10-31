@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # The fdroiddata merge request (not opened)
 
-Opened once, after v0.1.11 ships the app. One post; then wait for the reviewers (humans). One
+Opened once, after v0.1.12 ships the signed app. One post; then wait for the reviewers (humans). One
 concise reply per question, no pings, no follow-up commits unless asked.
 
 - Repository: a public fork of https://gitlab.com/fdroid/fdroiddata (a GitLab account; no company name)
@@ -30,7 +30,7 @@ library, no tracker), MIT.
 
 Reproducible build: `Binaries:` is our release APK, `AllowedAPKSigningKeys:` its certificate. A run
 that rebuilds the tag the way the build server does (Debian's OpenJDK 21) and copies our signature
-onto it: <REPRODUCE-RUN-URL>. Release: https://github.com/csigelo/sigelo/releases/tag/v0.1.11
+onto it: <REPRODUCE-RUN-URL>. Release: https://github.com/csigelo/sigelo/releases/tag/v0.1.12
 
 Notes for review:
 - `npm ci --ignore-scripts` in prebuild fetches the page's JavaScript packages (all MIT), pinned by
@@ -65,17 +65,17 @@ Notes for review:
 /label ~"New App"
 ```
 
-## After v0.1.11: the steps
+## After v0.1.12: the steps
 
-1. Release v0.1.11 (release/RELEASE.md). The APK ceremony signs with `--alignment-preserved` and
+1. Release v0.1.12 (release/RELEASE.md). The APK ceremony signs with `--alignment-preserved` and
    its last line (the signed APK begins with the unsigned one) is silent.
-2. Here: in `io.sigelo.app.yml` set `versionName: 0.1.11`, `versionCode: 3`, `CurrentVersion`,
-   `CurrentVersionCode`, and `commit:` to `git -C <public clone> rev-parse 'v0.1.11^{commit}'`;
-   add `app/fastlane/metadata/android/en-US/changelogs/3.txt`; `node apps/android/check.mjs`.
+2. Here: in `io.sigelo.app.yml` set `versionName: 0.1.12`, `versionCode: 4`, `CurrentVersion`,
+   `CurrentVersionCode`, and `commit:` to `git -C <public clone> rev-parse 'v0.1.12^{commit}'`;
+   add `app/fastlane/metadata/android/en-US/changelogs/4.txt`; `node apps/android/check.mjs`.
 3. The compare run on the tag; its verdict must say REPRODUCIBLE and
-   `ref: the published sigelo-0.1.11.apk vs debian-21: MATCH`:
+   `ref: the published sigelo-0.1.12.apk vs debian-21: MATCH`:
    ```sh
-   gh workflow run android-reproduce.yml -R csigelo/sigelo --ref main -f ref=v0.1.11 -f expect=<CI unsigned SHA-256 of v0.1.11>
+   gh workflow run android-reproduce.yml -R csigelo/sigelo --ref main -f ref=v0.1.12 -f expect=<CI unsigned SHA-256 of v0.1.12>
    ```
 4. F-Droid's own build, on the VPS or the laptop (Docker, about 30 minutes; the container is
    thrown away, so `--on-server` may run the recipe's `sudo` in it):

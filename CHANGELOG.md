@@ -3,6 +3,13 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## v0.1.12 — 2026-10-31
+
+- **This release:** chat and contacts fixed on device (bubbles, newest first, files named, pairing moves on); the first
+  signed `--alignment-preserved`, F-Droid-reproducible APK; 0.1.11's app changes included.
+- **Messages read like a chat:** bubbles, mine on the right; opens at the newest; the box grows as you type; a received file shows its name and size, no dead attach button; Add a contact asks their name.
+- **App fixes:** Back goes one screen back, not to the list; a pairing that waited shows the four words once they answer; no false "check words" or alarm on this phone's own row; tabs in one row.
+
 ## v0.1.11 — 2026-10-31
 
 - **This release:** the apps make an identity from 25 new words or restore one, and enrol agents; the second outside

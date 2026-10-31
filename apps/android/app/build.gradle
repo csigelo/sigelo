@@ -20,8 +20,8 @@ android {
         applicationId 'io.sigelo.app'
         minSdk 28
         targetSdk 35
-        versionCode 3
-        versionName '0.1.11'
+        versionCode 4
+        versionName '0.1.12'
     }
 
     signingConfigs {

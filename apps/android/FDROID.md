@@ -3,7 +3,7 @@
 
 Not submitted. This file says what F-Droid needs, what is ready, and what waits for a release
 that ships the app. The recipe is [`fdroid/io.sigelo.app.yml`](fdroid/io.sigelo.app.yml) (route B,
-below); the merge request, ready to open after v0.1.11, is [`fdroid/MR.md`](fdroid/MR.md);
+below); the merge request, ready to open after v0.1.12, is [`fdroid/MR.md`](fdroid/MR.md);
 the store listing is [`app/fastlane/metadata/android/en-US/`](app/fastlane/metadata/android/en-US/).
 `node apps/android/check.mjs` checks both.
 
@@ -111,9 +111,9 @@ Signature copy: a signature made with `--alignment-preserved` copies onto the ma
 on both majors (MATCH); a signature made the v0.1.10 way (apksigner realigns) copies onto neither
 (NO MATCH), and the published v0.1.10 APK's signature copies onto neither build for the same reason.
 Verdict line: REPRODUCIBLE, CI on Temurin 21 = F-Droid on Debian 21, the recipe as written. So:
-v0.1.10 is not reproducible for F-Droid (it predates the ceremony); v0.1.11 is the first that is, signed with
-`--alignment-preserved` on JDK 21 (release/apk-ceremony.md). Nothing open on this side; the
-merge request follows v0.1.11.
+v0.1.10 is not reproducible for F-Droid (it predates the ceremony); v0.1.11 shipped no signed APK;
+v0.1.12 is the first that is, signed with `--alignment-preserved` on JDK 21 (release/apk-ceremony.md).
+Nothing open on this side; the merge request follows v0.1.12.
 
 ## Steps and who acts
 
