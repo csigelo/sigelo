@@ -33,29 +33,6 @@ export async function wipeIfAsked(bridge, { indexedDB = globalThis.indexedDB, st
   return true;
 }
 
-/** First start: every way in (a new identity, create.mjs; this phone's file; the 25 words, seed.mjs; a computer). Picking one tells the shell, then the page starts again in it. */
-export function pickMode(box, bridge) {
-  const pick = (mode) => async () => {
-    try { await bridge.request('mode', { mode }); location.reload(); } catch (e) { say.textContent = e.message; }
-  };
-  const say = el('p', { className: 'muted' });
-  box.replaceChildren(
-    el('div', { className: 'card' }, el('h2', { textContent: 'Create new identity' }),
-      el('p', { textContent: 'This phone makes 25 new words, shows them once for you to write down, and makes your identity and your keeper from them (FULL), sealed under your screen lock.' }),
-      el('div', { className: 'bar' }, el('button', { className: 'primary', textContent: 'Create new identity', onclick: async () => { location.hash = '#create'; await pick('self')(); } }))),
-    el('div', { className: 'card' }, el('h2', { textContent: 'This phone' }),
-      el('p', { textContent: 'This phone holds an identity: the one a computer made for it (sigelo-agent device scan; FULL comes from your 25 words). Its key is sealed under a key of this phone\'s keystore.' }),
-      el('div', { className: 'bar' }, el('button', { textContent: 'This phone', onclick: pick('self') }))),
-    el('div', { className: 'card' }, el('h2', { textContent: 'Restore from seed' }),
-      el('p', { textContent: 'Your 25 words make your identity and your keeper again on this phone (FULL), sealed under your screen lock.' }),
-      el('div', { className: 'bar' }, el('button', { textContent: 'Restore from my 25 words', onclick: async () => { location.hash = '#restore'; await pick('self')(); } }))),
-    el('div', { className: 'card' }, el('h2', { textContent: 'A computer' }),
-      el('p', { textContent: 'Drive the page of a computer running sigelo-agent ui --remote on this network. This phone holds no account key, only that computer\'s text.' }),
-      el('div', { className: 'bar' }, el('button', { textContent: 'A computer', onclick: pick('remote') }))),
-    el('p', { className: 'muted', textContent: 'You can switch later from the menu; switching erases what this app holds for the other.' }), say);
-  box.hidden = false;
-}
-
 const bundleOf = (s) => ({ v: 'sigelo/0', typ: 'bundle', genesis: s.genesis, rotations: [], bindings: [], attestations: [], issuers: [] });
 const hexBytes = (h) => Uint8Array.from(h.match(/../g), (x) => parseInt(x, 16));
 /** The control's carrier on the shell's platform: its own identity, the operator's relay. */
@@ -127,6 +104,20 @@ export async function remoteBackend(bridge, box, { storage = globalThis.localSto
     onChange() {},   // the page polls /api/state, as over HTTP
     mode: () => ({ kind: 'remote', via: 'lan' }),
   };
+}
+
+/** A computer's SIGELO:UI: text on the LAN: checked with one sealed call, then kept sealed for the next start. */
+export async function connectLan(bridge, text, { storage = globalThis.localStorage } = {}) {
+  // base45 has spaces: never trimmed at the end, cut at the 60 characters of 40 bytes.
+  const t = /SIGELO:UI:\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}:[0-9A-Z $%*+\-./:]{60}/.exec(text)?.[0] ?? text;
+  try { parseControl(t); } catch { throw new Error(t.startsWith('SIGELO:') ? 'This is not a computer\'s page (SIGELO:UI: or SIGELO:CTL:).' : 'Not a SIGELO:UI: or SIGELO:CTL: text.'); }
+  const deps = { xchacha20poly1305, canonicalize, fetch: bridgeFetch(bridge), randomBytes: (n) => crypto.getRandomValues(new Uint8Array(n)) };
+  let r;
+  try { r = await (await remoteClient(t, { deps })).call('GET', '/api/me'); } catch (e) {
+    throw new Error(e.status === 403 ? 'The computer refused this text (revoked, or another computer\'s).' : `No answer: is sigelo-agent ui --remote running there, on this network? (${e.message})`);
+  }
+  if (r.status !== 200) throw new Error(r.body?.error?.message ?? `HTTP ${r.status}`);
+  storage.setItem(CONTROL, b64(await bridge.seal(new TextEncoder().encode(t), { kind: 'control' })));
 }
 
 /** The connect view: scan, an image, or the text (SIGELO:UI: on the LAN, SIGELO:CTL: over the relay); then the page starts again. */

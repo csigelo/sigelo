@@ -97,6 +97,22 @@
   async function copy(text, btn) {
     try { await navigator.clipboard.writeText(text); const was = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = was; }, 1500); } catch { window.prompt('Copy this:', text); }
   }
+  const toast = (t) => { const x = h('div', { class: 'toast', role: 'status' }, t); document.body.append?.(x); setTimeout(() => x.remove?.(), 2500); };
+  /** A ready-to-send message: the shell's share sheet (Android), the page's (navigator.share), else the clipboard. */
+  async function share(text, btn) {
+    for (const via of [LOCAL?.share, navigator.share && ((t) => navigator.share({ text: t }))]) {
+      if (!via) continue;
+      try { await via(text); return; } catch (e) { if (e?.name === 'AbortError') return; }
+    }
+    try { await navigator.clipboard.writeText(text); toast('Message copied: paste it into any chat or mail.'); } catch { window.prompt('Copy this message:', text); }
+    void btn;
+  }
+  const hhmm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const PAIR_HOW = 'https://sigelo.io/pair.html', ENROL_HOW = 'https://sigelo.io/enrol.html';
+  const pairMessage = (code, exp) => `Pair with me on sigelo: code ${code}, once, until ${hhmm(exp)}. How: ${PAIR_HOW}`;
+  const enrolMessage = (code, exp, command) => `Enrol as my agent on sigelo: code ${code}, once, until ${hhmm(exp)}. On the agent's machine: ${command}  How: ${ENROL_HOW}`;
+  // Back: one history entry per screen off the home list, so the system's or browser's Back goes one step.
+  const back = () => { if (globalThis.history?.state?.sigeloView) history.back(); else show(S.home); };
   async function act(fn, after) {
     try { S.note = null; const r = await fn(); if (after) after(r); } catch (e) { S.note = e; }
     await poll();
@@ -184,16 +200,16 @@
     S.home = 'contacts';
     const top = h('div'), list = h('div');
     put(app,
-      h('header', null, h('h1', null, 'Contacts'), h('button', { onclick: () => show('agents') }, 'Agents'), h('button', { onclick: () => show('links') }, 'Links'), SHELL || LOCAL ? null : h('button', { onclick: () => show('devices') }, 'Devices'), h('button', { onclick: () => show('me') }, 'Me'), h('button', { class: 'primary', 'aria-label': 'Invite', onclick: () => invite() }, '+')),
+      h('header', null, h('h1', null, 'Contacts'), h('button', { onclick: () => show('agents') }, 'Agents'), h('button', { onclick: () => show('links') }, 'Links'), SHELL || LOCAL ? null : h('button', { onclick: () => show('devices') }, 'Devices'), h('button', { onclick: () => show('me') }, 'Me'), ),
       top, list,
-      h('div', { class: 'foot' }, h('div', { class: 'inner' }, h('button', { class: 'primary', onclick: () => invite() }, 'Invite'), h('button', { onclick: () => show('pair', { mode: 'enter' }) }, 'Enter a code'))));
+      h('div', { class: 'foot' }, h('div', { class: 'inner' }, h('button', { class: 'primary', onclick: () => show('add') }, 'Add a contact'))));
     return () => {
       put(top, statusLine(), controlsCard() ?? '', introBanner() ?? '', noteCard());
       if (!S.snap) return;
       const { mine, contacts } = S.snap.groups, pending = pendingRows(S.snap.pending);
       put(list,
-        h('h2', null, `Mine (${mine.length})`), mine.length ? mine.map(contactRow) : h('p', { class: 'muted' }, 'Your own agents (yours by key, or tier own): Agents → Enrol.'),
-        h('h2', null, `Contacts (${contacts.length})`), contacts.length ? contacts.map(contactRow) : h('p', { class: 'muted' }, 'Nobody yet: Invite, or Enter a code.'),
+        h('h2', null, `Mine (${mine.length})`), mine.length ? mine.map(contactRow) : h('p', { class: 'muted' }, 'Your own agents (yours by key, or tier own): Agents → Enrol my agent.'),
+        h('h2', null, `Contacts (${contacts.length})`), contacts.length ? contacts.map(contactRow) : h('p', { class: 'muted' }, 'Nobody yet: Add a contact.'),
         pending.length ? [h('h2', null, 'Pending'), pending] : null);
     };
   }
@@ -220,12 +236,12 @@
   function viewAgents() {
     S.home = 'agents';
     const top = h('div'), list = h('div');
-    const enrolBtn = h('button', { class: 'primary', onclick: () => show('enrol') }, 'Enrol');
+    const enrolBtn = h('button', { class: 'primary', onclick: () => show('enrol') }, 'Enrol my agent');
     put(app,
       h('header', null, h('h1', null, 'Agents'), h('button', { onclick: () => show('contacts') }, 'Contacts'), h('button', { onclick: () => show('links') }, 'Links'),
         SHELL || LOCAL ? null : h('button', { onclick: () => show('devices') }, 'Devices'), h('button', { onclick: () => show('me') }, 'Me')),
       top, list,
-      h('div', { class: 'foot' }, h('div', { class: 'inner two' }, enrolBtn, h('button', { class: 'primary', onclick: () => invite() }, 'Invite'))));
+      h('div', { class: 'foot' }, h('div', { class: 'inner two' }, enrolBtn, h('button', { onclick: () => show('add') }, 'Add a contact'))));
     return async () => {
       put(top, statusLine(), introBanner() ?? '', noteCard());
       const W = await loadWorkers();
@@ -237,14 +253,14 @@
           h('p', { class: 'muted' }, LOCAL ? 'Create a new identity or restore from your 25 words to enrol agents from this app.' : 'Make it once on this computer: sigelo-agent keeper --from-words')) : null,
         W.seat === 'elsewhere' ? h('p', { class: 'muted' }, 'The seat is on another device: enrol agents there.') : null,
         h('h2', null, `Agents (${rows.filter((w) => w.status !== 'revoked').length})`),
-        rows.length ? rows.map(workerRow) : W.keeper ? h('p', { class: 'muted' }, 'No agents yet: Enrol one. It gets a key from your 25 words, so they bring it back.') : null);
+        rows.length ? rows.map(workerRow) : W.keeper ? h('p', { class: 'muted' }, 'No agents yet: Enrol my agent. It gets a key from your 25 words, so they bring it back.') : null);
     };
   }
   function viewAgent(i) {
     const top = h('div'), body = h('div'), title = h('h1', null, 'Agent');
     const nameIn = h('input', { autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: '64', 'aria-label': 'Name' });
     let filled = null;
-    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show('agents') }, '‹'), title), top, body);
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), title), top, body);
     return async () => {
       put(top, statusLine(), noteCard());
       const w = (await loadWorkers()).workers?.find((x) => x.worker === i);
@@ -338,7 +354,7 @@
   function viewEnrol(arg) {
     const E = { id: arg?.id ?? null, first: null, busy: false, error: null, relay: null, picking: false, settings: null, matched: false };
     const top = h('div'), form = h('div'), body = h('div');
-    const nameIn = h('input', { autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: '64', placeholder: 'vps', 'aria-label': 'Agent name' });
+    const nameIn = h('input', { autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: '64', placeholder: 'a name, like vps', 'aria-label': 'Agent name' });
     let tier = 'own';
     const picker = relayPicker((host) => { E.relay = host; E.picking = false; S.update(); });
     backend.call('GET', '/api/settings').then((x) => { E.settings = x; S.update(); }).catch(() => {});
@@ -351,13 +367,15 @@
       E.busy = false;
       await poll();
     };
-    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show('agents') }, '‹'), h('h1', null, 'Enrol an agent')), top, form, body);
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), h('h1', null, 'Enrol my agent')), top, form, body);
     return async () => {
       put(top, statusLine(), noteCard());
       if (!E.id) {
         const s = E.settings, inUse = s ? s.fixed ?? E.relay ?? s.relay : null;
-        const pick = (t, label) => h('button', { type: 'button', 'aria-pressed': String(t === tier), class: t === tier ? 'primary' : '', onclick: () => { tier = t; S.update(); } }, label);
+        const pick = (t, label) => h('button', { type: 'button', 'aria-pressed': String(t === tier), class: t === tier ? 'on' : '', onclick: () => { tier = t; S.update(); } }, label);
         put(form,
+          h('p', null, 'Your own agent, on another machine, under your identity: its key comes from your 25 words.'),
+          h('p', { class: 'muted' }, 'Not this? Someone else, a person or their agent: ', h('button', { onclick: () => show('add') }, 'Add a contact')),
           h('label', null, 'Name (a-z, 0-9, _ and -): its contact name, and its file name on that machine'), nameIn,
           h('label', null, 'Its messages'), h('div', { class: 'bar', role: 'group', 'aria-label': 'Tier' }, ENROL_TIERS.map(([t, l]) => pick(t, l))),
           h('p', { class: 'muted' }, tier === 'own' ? 'Own: yours by key, its messages shown in full.' : 'Yours by key but low trust (it reads the web, say): its messages wait as notices, never pushed.'),
@@ -380,7 +398,7 @@
         const cp = h('button', { class: 'primary', onclick: () => copy(en.code, cp) }, 'Copy'), cc = h('button', { onclick: () => copy(en.command, cc) }, 'Copy the command');
         out.push(h('div', { class: 'card' }, h('div', { class: 'muted' }, `One-time code for ${safeText(name)}`), h('div', { class: 'code big' }, en.code),
           h('div', null, countdown(en.exp), ' left · once'),
-          h('div', { class: 'bar' }, cp, navigator.share ? h('button', { onclick: () => navigator.share({ text: en.command }).catch(() => {}) }, 'Share') : null),
+          h('div', { class: 'bar' }, cp, h('button', { onclick: (ev) => share(enrolMessage(en.code, en.exp, en.command), ev.currentTarget) }, 'Share')),
           h('p', null, 'On the agent\'s machine:'), h('div', { class: 'long' }, en.command), h('div', { class: 'bar' }, cc)));
         steps.push('… waiting for the agent to enter it');
       }
@@ -398,7 +416,7 @@
       else if (en.state === 'expired') out.push(h('p', { class: 'warn' }, 'The code expired (10 minutes) before the agent used it.'), h('button', { class: 'primary', onclick: () => show('enrol') }, 'New code'));
       else if (en.state === 'failed') out.push(h('p', { class: 'warn' }, en.detail ?? en.check ?? 'Not enrolled.'));
       else if (en.check) out.push(h('p', { class: 'warn' }, en.detail ?? en.check));
-      if (en.state === 'code') out.push(h('div', { class: 'bar' }, h('button', { onclick: () => act(() => backend.call('POST', '/api/agents/revoke', { worker: w?.worker ?? E.first?.worker }), () => show('agents')) }, 'Cancel')));
+      if (en.state === 'code') out.push(h('div', { class: 'bar' }, h('button', { onclick: () => act(() => backend.call('POST', '/api/agents/revoke', { worker: w?.worker ?? E.first?.worker }), back) }, 'Cancel')));
       put(body, ...out);
     };
   }
@@ -435,11 +453,11 @@
       input = h('input', { autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', placeholder: 'K7F3-Q9ZP, or a long code sgl1…', 'aria-label': 'Their code' });
       nameIn = h('input', { autocomplete: 'off', placeholder: 'optional', 'aria-label': 'Their name' });
       // Friend or quiet; own (my agents) is detected, never asked: friend, the default, is sent as no choice.
-      const pick = (t, label) => h('button', { type: 'button', 'aria-pressed': String(t === tier), class: t === tier ? 'primary' : '', onclick: () => { tier = t; put(tierPick, picks()); } }, label);
+      const pick = (t, label) => h('button', { type: 'button', 'aria-pressed': String(t === tier), class: t === tier ? 'on' : '', onclick: () => { tier = t; put(tierPick, picks()); } }, label);
       const picks = () => [pick('friend', 'Friend: tell me'), pick('quiet', 'Quiet: when I look')];
       tierPick = h('div', { class: 'bar', role: 'group', 'aria-label': 'Their messages' }, picks());
     }
-    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show(S.home) }, '‹'), h('h1', null, S.pair.mode === 'enter' ? 'Enter a code' : 'Invite')),
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), h('h1', null, S.pair.mode === 'enter' ? 'Their code' : 'Your code to send')),
       input ? h('div', null, h('label', null, 'Their code'), input, h('label', null, 'Their name'), nameIn,
         h('label', null, 'Their messages'), tierPick,
         h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => input.value.trim() && enter(input.value) }, 'Connect'))) : null,
@@ -459,12 +477,15 @@
         } else if (inv && pend) {
           const live = inv.short && inv.short_exp > relayNow();
           if (inv.short) {
-            out.push(h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Your code'), h('div', { class: 'code' }, inv.short),
-              live ? h('div', null, countdown(inv.short_exp), ' left · Say it, text it. Once.') : h('div', { class: 'warn' }, 'Code expired. The long code still works until ', when(inv.exp), '.')));
+            const cs = h('button', { class: 'primary', onclick: () => copy(inv.short, cs) }, 'Copy');
+            out.push(h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Your code'), h('div', { class: 'code big' }, inv.short),
+              live ? [h('div', null, countdown(inv.short_exp), ' left · once'),
+                h('div', { class: 'bar' }, cs, h('button', { onclick: (ev) => share(pairMessage(inv.short, inv.short_exp), ev.currentTarget) }, 'Share'))]
+                : h('div', { class: 'warn' }, 'Code expired. The long code still works until ', when(inv.exp), '.')));
           } else out.push(h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Your long code, once, until ', when(inv.exp)), h('div', { class: 'long' }, inv.code)));
           const cp = h('button', { onclick: () => copy(inv.code, cp) }, 'Copy long code');
           out.push(h('div', { class: 'bar' }, cp, inv.short && !live ? h('button', { class: 'primary', onclick: () => invite() }, 'New code') : null,
-            h('button', { onclick: () => act(() => backend.call('POST', '/api/invite/cancel', { id: inv.id }), () => show('contacts')) }, 'Cancel')));
+            h('button', { onclick: () => act(() => backend.call('POST', '/api/invite/cancel', { id: inv.id }), back) }, 'Cancel')));
           out.push(h('ul', { class: 'steps' }, h('li', null, inv.short ? `✓ code parked at your relay (${safeText(inv.relay)})` : '✓ long code made'), h('li', null, '… waiting for them to enter it')),
             h('p', { class: 'muted' }, 'Their agent must use the same relay for the short code; else send them the long code.'));
         } else if (inv) out.push(h('p', { class: 'muted' }, 'This code is no longer pending.'), h('button', { class: 'primary', onclick: () => invite() }, 'New code'));
@@ -516,7 +537,7 @@
     const rename = h('input', { autocomplete: 'off', 'aria-label': 'Name' }), tagIn = h('input', { autocomplete: 'off', placeholder: '#work #family', 'aria-label': 'Tags' });
     let panelFor = null;
     put(app,
-      h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show(S.home) }, '‹'), title, h('button', { 'aria-label': 'More', onclick: () => { panel.hidden = !panel.hidden; S.update(); } }, '⋯')),
+      h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), title, h('button', { 'aria-label': 'More', onclick: () => { panel.hidden = !panel.hidden; S.update(); } }, '⋯')),
       tags, panel, alerts, list,
       h('div', { class: 'foot' }, h('div', { class: 'inner' }, attach, text, sendBtn)));
     return async () => {
@@ -611,7 +632,7 @@
         ...(tierA.value && { tier_a: tierA.value }), ...(!external && tierB.value && { tier_b: tierB.value }), ...(external && note.value.trim() && { note: note.value.trim() }) }),
       (r) => { purpose.value = ''; note.value = ''; put(result, h('div', { class: 'card' }, `Link ${r.id}: asked ${safeText(r.a_name)} for a one-use code for ${safeText(r.b_name)}. It shows below as it goes.`)); });
     };
-    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show(S.home) }, '‹'), h('h1', null, 'Links')), top, intro,
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), h('h1', null, 'Links')), top, intro,
       h('h2', null, 'Link two contacts'),
       h('div', null, h('label', null, 'First'), aSel, h('label', null, 'Second'), bSel, h('label', null, 'What for (up to 120 characters)'), purpose, h('label', null, 'Ends'), days, extra,
         h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: go }, 'Link'))), result,
@@ -855,7 +876,7 @@
   function viewMe() {
     const body = h('div'), how = h('p', { class: 'did' });
     how.hidden = true;
-    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: () => show(S.home) }, '‹'), h('h1', null, 'Me')), body);
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), h('h1', null, 'Me')), body);
     backend.call('GET', '/api/me').then((m) => { S.me = m; S.update(); }).catch((e) => { S.note = e; });
     // The relay setting (UI-API.md Settings): the picker, kept out of the redraw so typing survives the poll.
     const R = { s: null, say: '' };
@@ -885,7 +906,7 @@
         h('div', { class: 'card' }, h('div', { class: 'did' }, m.did), h('div', { class: 'bar' }, cp)),
         h('p', null, m.recovery === 'set' ? 'Recovery key: set, offline' : h('span', { class: 'warn' }, 'Recovery key: none. Theft of this key is permanent.')),
         m.restored ? h('p', null, `${m.restored.created ? `Created on ${m.restored.on}; the 25 words are on your paper` : `Restored from seed on ${m.restored.on}`} · keeper j=${m.restored.keeper} · seat ${m.restored.seat ?? 'not set up (device seat init)'}`) : null,
-        h('p', null, m.key === 'browser' ? 'Key: in this app\'s storage, sealed under a key it cannot export' : 'Key: file (keychain: not yet)'),
+        h('p', null, m.key === 'browser' ? 'Key: in this app\'s storage, sealed under a key it cannot export' : m.key === 'keychain' ? 'Key: sealed in this machine\'s keyring' : 'Key: in the identity file, not sealed (sigelo-agent keys wrap seals it)'),
         h('p', null, `Relay: ${m.relay} · keeps messages ${m.retention_days} days`),
         relayBlock(),
         h('h2', null, 'Agents on this machine'),
@@ -901,9 +922,23 @@
     };
   }
 
+  // ---- ADD A CONTACT: someone else's identity (a person's, or an agent not yours), paired by a code
+  function viewAdd() {
+    put(app, h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), h('h1', null, 'Add a contact')),
+      h('p', null, 'Pair with someone else\'s identity, a person\'s or their agent\'s. It stays theirs; you choose how much its messages reach you.'),
+      h('p', { class: 'muted' }, 'Not this? Your own agent on another machine: ', h('button', { onclick: () => show('enrol') }, 'Enrol my agent')),
+      h('div', { class: 'bar' }, h('button', { class: 'primary', onclick: () => invite() }, 'Make a code to send')),
+      h('div', { class: 'bar' }, h('button', { onclick: () => show('pair', { mode: 'enter' }) }, 'I have their code')),
+      h('p', { class: 'muted' }, 'A code works once, for 10 minutes. Then you both compare four words.'));
+    return () => {};
+  }
+
   // ---- routing and polling
-  const VIEWS = { agents: viewAgents, agent: viewAgent, enrol: viewEnrol, contacts: viewContacts, pair: viewPair, chat: viewChat, me: viewMe, links: viewLinks, devices: viewDevices };
-  function show(view, arg) {
+  const VIEWS = { add: viewAdd, agents: viewAgents, agent: viewAgent, enrol: viewEnrol, contacts: viewContacts, pair: viewPair, chat: viewChat, me: viewMe, links: viewLinks, devices: viewDevices };
+  const HOMES = new Set(['agents', 'contacts']);
+  function show(view, arg, popped = false) {
+    // A screen off a home list gets its own history entry (Back returns to the list); a home list none.
+    if (!popped && !HOMES.has(view) && view !== S.view) globalThis.history?.pushState?.({ sigeloView: view }, '');
     S.view = view; S.note = null;
     S.update = VIEWS[view](arg);
     window.scrollTo(0, 0);
@@ -913,13 +948,18 @@
   async function poll() {
     if (polling) return;
     polling = true;
+    const was = S.fatal;
     try { S.snap = await backend.call('GET', `/api/state?since=${S.snap?.seq ?? 0}`); S.fatal = null; } catch (e) { S.fatal = e; }
     // The computer's page only (http): pending relay controls; a page that has none of it (404, 403) stops asking.
     if (backend === http && !S.fatal && S.controls !== false) { try { S.controls = (await backend.call('GET', '/api/controls')).pending; } catch (e) { if (e.status === 404 || e.status === 403) S.controls = false; } }
     polling = false;
-    if (S.fatal?.status === 403) { put(app, h('p', { class: 'card err' }, SHELL || LOCAL ? S.fatal.message : 'This page has no key: open the link sigelo-agent ui printed.')); return; }
+    // A refusal with a reason (the four words not confirmed on the computer yet, say) is said as it is, and
+    // the screen comes back once it passes; a bare 403 is a page opened without its key.
+    if (S.fatal?.status === 403) { put(app, h('p', { class: 'card err' }, SHELL || LOCAL || S.fatal.check ? S.fatal.message : 'This page has no key: open the link sigelo-agent ui printed.')); return; }
+    if (was?.status === 403) { show(S.view, undefined, true); return; }
     try { await S.update(); } catch {}
   }
+  globalThis.addEventListener?.('popstate', () => { if (!HOMES.has(S.view)) show(S.home, undefined, true); });
   setInterval(() => { for (const el of document.querySelectorAll('.countdown')) el.textContent = left(Number(el.dataset.exp)); }, 1000);
   // Installable on this machine (manifest.webmanifest, sw.js: the three files, never /api/).
   if (backend === http && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

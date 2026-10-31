@@ -135,7 +135,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "contact/carrier.mjs",
-   "sha256": "8192fb1bbc17a1063f60647d0ab44fc4f7f60cddb710e92b9022ad4ffbc84925"
+   "sha256": "de40ac2d6e3b205fd56b97183ae0f4a5979d429da763ca6c256437b0f59f111d"
   },
   "vendor/contact/control.mjs": {
    "from": "contact/control.mjs",
@@ -163,7 +163,7 @@
   },
   "vendor/contact/invite.mjs": {
    "from": "contact/invite.mjs",
-   "sha256": "adc4a5909c55dafd4c845659e1d1d4f35b7770122166dbc655a537a592fd0c7b"
+   "sha256": "e100621734441f6b3567750b4490b92737a86fe7371a614e44e291e93d7dd4a0"
   },
   "vendor/contact/kdf.mjs": {
    "from": "contact/kdf.mjs",
@@ -203,7 +203,7 @@
   },
   "vendor/contact/store.mjs": {
    "from": "contact/store.mjs",
-   "sha256": "4aca323f69465d38eb8a64a828a170960e484e9d34c0adcc2223ed911369541f"
+   "sha256": "650b911a61836df425e6f4ed330fecd6f7af4348bcbdf50f405d610fce575b18"
   },
   "vendor/icon.svg": {
    "from": "adapters/moadim/icon.svg",
@@ -243,11 +243,11 @@
   },
   "vendor/ui.css": {
    "from": "adapters/moadim/ui.css",
-   "sha256": "7da30fc8ff888a03bc3b3e3b6d5aff8f393ac7e1afa4d1b889c51ab4d46807ad"
+   "sha256": "325ecb792c66a905bbee38271083167c2319c0660228937d88e5a83b375701e5"
   },
   "vendor/ui.js": {
    "from": "adapters/moadim/ui.js",
-   "sha256": "832062db5204f1f8c7d85ea57a136107ed01fe1ed215d4fc12e39121a7a9a0ca"
+   "sha256": "21dcf6e0f5fc0989d7d61a694ed747844f977bbf42112926e891f7bfc472e264"
   }
  }
 }

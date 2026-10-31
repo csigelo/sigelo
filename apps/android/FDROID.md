@@ -111,8 +111,8 @@ Signature copy: a signature made with `--alignment-preserved` copies onto the ma
 on both majors (MATCH); a signature made the v0.1.10 way (apksigner realigns) copies onto neither
 (NO MATCH), and the published v0.1.10 APK's signature copies onto neither build for the same reason.
 Verdict line: REPRODUCIBLE, CI on Temurin 21 = F-Droid on Debian 21, the recipe as written. So:
-v0.1.10 is not reproducible for F-Droid (it predates the ceremony); v0.1.11, signed with
-`--alignment-preserved` on JDK 21 (release/apk-ceremony.md), will be. Nothing open on this side; the
+v0.1.10 is not reproducible for F-Droid (it predates the ceremony); v0.1.11 is the first that is, signed with
+`--alignment-preserved` on JDK 21 (release/apk-ceremony.md). Nothing open on this side; the
 merge request follows v0.1.11.
 
 ## Steps and who acts

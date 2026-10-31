@@ -58,7 +58,7 @@ THREAT-MODEL.md             what we defend against and what we do not.
 MONERO.md                   payment side: key model, keepers (agents = accounts, delegation,
                             approvals), root ceremony; §8 = what is built and verified.
 QUICKSTART.md               the lifecycle in seven steps, against examples/world.mjs
-CHANGELOG.md                what changed and why.
+CHANGELOG.md                what changed and why; one bullet per change, ≤ 220 characters with its continuation lines joined (site/test/run.mjs checks).
 test-vectors.json           real signatures from documented seeds. Conformance target.
 examples/world.mjs          a mock world in one file: the issuer + verifier side of QUICKSTART
 integrations/               harness wrappers: mcp/ (stdio MCP server, zero deps), claude-code/ skill+plugin, per-harness configs

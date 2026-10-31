@@ -41,6 +41,7 @@ run cp "$HERE/sigelo-app.js" "$SHARE/"
 run cp "$REPO/adapters/moadim/remote-client.mjs" "$JCS" "$SHARE/lib/"
 for f in chacha.js _arx.js _poly1305.js utils.js LICENSE; do run cp "$NOBLE/$f" "$SHARE/lib/noble-ciphers/"; done
 for f in start.html start.js start.css seed-check.mjs; do run cp "$HERE/web/$f" "$SHARE/web/"; done
+run cp "$REPO/apps/web/welcome.mjs" "$SHARE/web/"
 # The Monero word list for the start page's live check of the 25 words (data only, from ts/dist).
 run cp "$REPO/ts/dist/monero-words.js" "$SHARE/web/"
 for f in ui.html ui.js ui.css icon.svg shim-zlib.mjs shim-kdf.mjs; do run cp "$REPO/adapters/moadim/$f" "$SHARE/web/"; done

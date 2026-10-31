@@ -216,6 +216,8 @@ export async function startUi(o: UiOptions): Promise<Ui> {
   const inside = insideAgents(path, process.env, [agentsDir]);
   if (inside !== null) refuse(400, 'identity', `${path} is in the agents' directory ${inside}: any agent could sign as you there. Use $SIGELO_HUMAN outside it, or the default ~/.config/sigelo/me.local.json`);
   if (!existsSync(path)) refuse(400, 'identity', `no identity at ${path}: make it once from your 25 words: sigelo-agent keeper --from-words`);
+  // Where the key is: sealed under the OS keyring (keys wrap, keeper --keychain) or plain in the file.
+  const keyOf = (p: string): string => { try { const j = JSON.parse(readFileSync(p, 'utf8')) as { secret?: unknown }; return typeof j.secret === 'object' && j.secret !== null && (j.secret as { provider?: string }).provider === 'keychain' ? 'keychain' : 'file'; } catch { return 'file'; } };
   const loadMe = (): id.Store => { try { return id.load(path); } catch (e) { throw unreadable(path, e); } };
   loadMe();
   // --remote: checked before anything is taken.
@@ -265,7 +267,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     },
     hooks: {
       me: () => me(),
-      meInfo: () => ({ identity_file: path, recovery: id.head(loadMe()).recovery === null ? 'none' : 'set', key: 'file',
+      meInfo: () => ({ identity_file: path, recovery: id.head(loadMe()).recovery === null ? 'none' : 'set', key: keyOf(path),
         erase: `SIGELO_IDENTITY=${path} sigelo-agent erase-request --recovery-key <your recovery.key>   (on the machine holding the recovery key)`,
         ...restoredOf(path) }),
       agents: () => agents(),

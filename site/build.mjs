@@ -97,6 +97,8 @@ export const PAGES = [
   { slug: 'keeper', src: 'site/src/keeper.md', type: 'WebPage' },
   { slug: 'security', repo: 'SECURITY.md', type: 'WebPage', title: 'Security policy',
     description: 'How to report a vulnerability in sigelo: channels, scope, response times, safe harbour, and the areas not yet reviewed.' },
+  { slug: 'pair', src: 'site/src/pair.md', type: 'WebPage' },
+  { slug: 'enrol', src: 'site/src/enrol.md', type: 'WebPage' },
   { slug: 'contact', src: 'site/src/contact.md', type: 'ContactPage' },
   { slug: 'privacy', src: 'site/src/privacy.md', type: 'WebPage' },
   { slug: 'changelog', repo: 'CHANGELOG.md', type: 'WebPage', title: 'Changelog',

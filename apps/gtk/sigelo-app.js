@@ -202,9 +202,12 @@ async function take() {
   setStandby(null);
   return { ok: true, seat: 'here' };
 }
+/** This phone's identity file, as ui picks it: --identity, else $SIGELO_HUMAN, else <config>/sigelo/me.local.json. */
+const identityPath = () => identity ?? GLib.getenv('SIGELO_HUMAN') ?? GLib.build_filenamev([GLib.get_user_config_dir(), 'sigelo', 'me.local.json']);
 // Over the relay: this phone's control (sigelo-agent-control.ts), its file where sigelo-agent keeps it.
 const controlPath = () => GLib.getenv('SIGELO_CONTROL') ?? GLib.build_filenamev([GLib.get_home_dir(), '.config', 'sigelo', 'control.local.json']);
-const hasRelayControl = () => GLib.file_test(controlPath(), GLib.FileTest.IS_REGULAR);
+/** A paired control only: a pairing that failed leaves a control key with no operator, which is no computer kept. */
+const hasRelayControl = () => { try { return typeof JSON.parse(dec.decode(GLib.file_get_contents(controlPath())[1])).operator === 'string'; } catch { return false; } };
 /** A SIGELO:CTL: text paired with a new control identity → {ok, words} or {ok: false, message}. */
 async function pairRelay(text) {
   const t = String(text ?? '').trim();
@@ -365,7 +368,7 @@ app.connect('activate', () => {
       GLib.idle_add(GLib.PRIORITY_DEFAULT, () => { view.load_uri(r.url); return GLib.SOURCE_REMOVE; });
       return { ok: true };
     },
-    async saved() { return { text: keyring.get() !== null || hasRelayControl(), keyring: Secret !== null, standby: standbyName() !== null }; },
+    async saved() { return { identity: GLib.file_test(identityPath(), GLib.FileTest.IS_REGULAR), text: keyring.get() !== null || hasRelayControl(), keyring: Secret !== null, standby: standbyName() !== null }; },
     async restore(o) { return restore({ words: o.words, name: o.name, height: o.height, net: o.net, elsewhere: o.elsewhere }); },
     async newwords({ net }) { return newWords(net); },
     async quiz() { return quiz(); },

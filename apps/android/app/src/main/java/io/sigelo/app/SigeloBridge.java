@@ -5,6 +5,7 @@ import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -81,6 +82,7 @@ import javax.net.ssl.SSLSocketFactory;
  *          thumbnail, no screen recording of the 25 words); off again after. door: while on, the system
  *          Back does nothing (a new identity's words: the review screen's one button is the only way on).
  *   clip-clear    the system clipboard emptied (the page asks after the words were pasted).
+ *   share         the system's share sheet (ACTION_SEND, text/plain) with a message the page wrote: a code and how to use it.
  *   clip-copy     text on the clipboard marked sensitive (no preview; stagenet words only), emptied
  *          after `clear` seconds (1 to 300) unless something else was copied since.
  */
@@ -311,6 +313,18 @@ public final class SigeloBridge {
                     ClipDescription d = cm.getPrimaryClipDescription();
                     if (d == null || CLIP_LABEL.contentEquals(d.getLabel() == null ? "" : d.getLabel())) cm.clearPrimaryClip();
                 }, clear * 1000L);
+                post(to, ok(id));
+                break;
+            }
+            case "share": {
+                // A ready-to-send message (a code and its instructions link) through the system's share sheet.
+                String text = m.optString("text");
+                if (text.isEmpty() || text.length() > 2000) {
+                    fail(to, id, "share", "a message of 1 to 2000 characters");
+                    break;
+                }
+                Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
+                activity.startActivity(Intent.createChooser(send, null));
                 post(to, ok(id));
                 break;
             }

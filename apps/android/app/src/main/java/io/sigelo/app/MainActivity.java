@@ -108,13 +108,19 @@ public final class MainActivity extends Activity {
         web.loadUrl(START);
     }
 
-    /** Set by the bridge (secure, door) while a new identity's words are on screen: Back does nothing then. */
+    /** Set by the bridge (secure, door) while a new identity's words are on screen: Back does nothing then. Else Back is the page's. */
     volatile boolean door;
 
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
         if (door) return;
+        // The page keeps one history entry per screen (welcome.mjs, ui.js): Back goes one screen back,
+        // and leaves the app only from the first one.
+        if (web != null && web.canGoBack()) {
+            web.goBack();
+            return;
+        }
         super.onBackPressed();
     }
 
@@ -376,5 +382,7 @@ public final class MainActivity extends Activity {
 
     void modeChanged() {
         invalidateOptionsMenu();
+        // The first run's screens are behind it now: Back must not walk into them after the reload.
+        if (web != null) web.clearHistory();
     }
 }

@@ -1,0 +1,1 @@
+Create a new identity on the phone: 25 new words, shown once, three typed back, then sealed. Your agents come first: enrol one with a one-time code and four words, rename or revoke it; pick a relay and test it. Only your operator identity can renew, wipe or move this device. Built so F-Droid can check it matches this release.

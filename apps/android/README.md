@@ -5,7 +5,12 @@ The page of `sigelo-agent ui` as an Android app: a WebView around [apps/web](../
 small bridge in Java for what a page cannot do. No AndroidX, no dependency but the platform; minSdk 28
 (Android 9), targetSdk 35. Design: design/apps.md §8.
 
-## Two forms, picked at first start
+## The first run
+
+A welcome with three choices, then one decision per screen (`apps/web/welcome.mjs`, shared with the
+GTK phone app); Back goes one screen back (the page keeps one history entry per screen; the system
+Back follows it, and leaves the app only from the first screen). The form, this phone or a computer, is
+set only when a path commits.
 
 - **Create new identity:** the phone makes 25 new words (as `newRoot`: the system's randomness, a
   canonical Monero seed) and shows them once, numbered 1 to 25, with the address of their own Monero
@@ -15,7 +20,7 @@ small bridge in Java for what a page cannot do. No AndroidX, no dependency but t
   K_1 are made from them as a restore makes them, sealed under the FULL key, and the phone holds the
   seat. The words are gone after; Me says "Created on <day>; the 25 words are on your paper".
 - **This phone:** the phone holds an identity, SAFE (the file `sigelo-agent device scan` wrote for it
-  on your computer). Import the file once; the app runs its own carrier and talks to the relay
+  on your computer). Import the file once (Advanced, on the welcome); the app runs its own carrier and talks to the relay
   itself. The operator's file (FULL) is not imported: restore from seed (design/apps.md §18).
 - **Restore from seed:** your 25 words make the operator identity and your keeper root K_1 again on
   the phone (FULL), as `sigelo-agent keeper --from-words` does on a computer. First "I have my 25
@@ -62,7 +67,8 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
 - `seal`, `open`: the keystore above (kinds `identity`, `keeper`, `control`). `mode`, `wiped`: the form.
 - `secure`: `FLAG_SECURE` on the window while the restore screen is up (no screenshot, no recents
   thumbnail), off after; with `door` (a new identity's words) the system Back does nothing meanwhile.
-  `clip-clear`: the clipboard emptied after the 25 words were pasted. `clip-copy`: stagenet words on
+  `clip-clear`: the clipboard emptied after the 25 words were pasted. `share`: the system's share
+  sheet with a ready-to-send message (a code, until when, the instructions link). `clip-copy`: stagenet words on
   the clipboard, marked sensitive (no preview), emptied by the shell after 60 s.
 
 The page comes from the APK at `https://appassets.androidplatform.net/` (served by the app, never

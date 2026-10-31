@@ -2,28 +2,32 @@
 # sigelo on a Linux phone (GTK)
 
 The page of `sigelo-agent ui` as a phone app: GTK 4, libadwaita and WebKitGTK 6.0 under gjs, all
-packaged by the phone's Linux distribution. Two forms, picked on the start page:
+packaged by the phone's Linux distribution. With an identity on this phone it opens straight on its page
+(Agents); a standby says so and offers "Take the seat here"; a computer kept from before is reconnected.
+Else the first run, the same screens as the Android app (`apps/web/welcome.mjs`, installed beside the start
+page): a welcome with three choices, Create a new identity, Restore from 25 words, Connect to my agent
+elsewhere, then one decision per screen, Back one step at a time. What each does here:
 
-- **This phone:** the app starts `sigelo-agent ui --app` (its identity: `--identity <file>`, else
+- **This phone's page:** the app starts `sigelo-agent ui --app` (its identity: `--identity <file>`, else
   `$SIGELO_HUMAN`, else `~/.config/sigelo/me.local.json`, as `ui`), reads the page's address and
   token from its stdout and shows that page. The page stops when the app does. It opens on Agents;
   Enrol makes the one-time code in that page (the CLI's `enrol` refuses `busy` beside it).
 - **Create new identity:** `sigelo-agent keeper --new-words` draws 25 words and their wallet's address
-  (JSON to the app, piped, never a terminal). The start page shows them once in a numbered grid (copy on
+  (JSON to the app, piped, never a terminal). The page shows them once, numbered in two columns (copy on
   stagenet only, the clipboard emptied after 60 s), then asks three of them by number; the app checks
   them, never the page. Right: the words go once on stdin to `keeper --from-words --keychain
   --made-here` (the wallet's birth today), then `device seat init`. Linux has no screenshot block.
-- **Restore from seed:** "I have my 25 words on paper", then one box checked as you type
-  (`web/seed-check.mjs`), a restore height or date, the network, the device's name. The words go once,
+- **Restore from 25 words:** one box checked as you type (`web/seed-check.mjs`), then a restore
+  height or date and the network (the device's name, the seat elsewhere and the relay under Advanced). The words go once,
   on stdin, to `sigelo-agent keeper --from-words --keychain`, which seals your key and K_1 in the keyring
   before anything is written. Then `device seat init` makes this phone the seat. If sigelo already runs
   as you elsewhere, the phone is a standby: its page stays closed until "Take the seat here".
-- **A computer:** the computer runs `sigelo-agent ui --remote`; the app scans its QR, reads it from an
+- **Connect, on the LAN** (Advanced): the computer runs `sigelo-agent ui --remote`; the app scans its QR, reads it from an
   image, or takes the pasted `SIGELO:UI:` text, and drives that computer's page. Every call is sealed
   in the app (sigelo-remote/0, UI-API.md "Remote"); the page's files are the app's own. The phone
   holds no account key: only the text, kept in the keyring (else for this run only).
   "Forget the computer" (menu) drops it here; `ui --revoke-control <name>` on the computer ends it.
-- **A computer, over the relay:** the computer runs `ui --remote --relay`; the app takes its `SIGELO:CTL:`
+- **Connect to my agent elsewhere:** the computer runs `ui --remote --relay`; the app takes its 8-character `SIGELO:CTL:`
   code, `sigelo-agent control pair` makes this phone's control key (`~/.config/sigelo/control.local.json`,
   0600, never attested) and shows four words to confirm on the computer; then `control ui --app` serves
   that computer's page here, each call a relay message, the state pushed.

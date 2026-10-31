@@ -26,9 +26,11 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `platform-stub.mjs` | Loaded instead of `contact/platform-node.mjs` (import map): no Node default in a page |
 | `platform-android.mjs` | In the Android app: the bridge (`sigelo-bridge/0`), the shell's fetch, MQTT and key |
 | `ws-over-stream.mjs` | RFC 6455 client framing over the shell's TLS stream (wss), and the stream as a socket (mqtts) |
-| `shell.mjs` | In the Android app: the form picked at first start; the remote form (a computer's page, on the LAN or over the relay) |
-| `seed.mjs` | Restore from seed: the two screens, `restoreInto` (derive with `contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
-| `create.mjs` | Create new identity: the form, the 25 words once, the three-word check; `createInto` (commit with `contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
+| `welcome.mjs` | The first run, shared with the GTK phone app: the welcome's three choices, then one decision per screen (create, restore, connect), Back one step |
+| `setup.mjs` | The first run's work in this page (welcome.mjs's api): create, restore, connect, and the import under Advanced; the shell's form set only when a path commits |
+| `shell.mjs` | In the Android app: the remote form (a computer's page, on the LAN or over the relay), its pairing and `connectLan` |
+| `seed.mjs` | Restore from seed: `restoreInto` (derive with `contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
+| `create.mjs` | Create new identity: `createInto` (commit with `contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
 | `copy.mjs` | The vendoring: walks the import graph, copies each file byte for byte, writes `vendor.json` |
 | `vendor.json` | Every vendored file, its source and SHA-256 (committed; `vendor/` is not) |
 | `test-web.mjs`, `test-shell.mjs` | The tests, in Node, through the same import map (`test-fakes.mjs`: IndexedDB, Worker) |
@@ -69,8 +71,9 @@ fixed, then the setting, then `relay.sigelo.ai`. Codes accepted never read it.
 
 ## The identity
 
-The app holds one identity file (sigelo-agent's JSON, key included): the file a computer wrote for
-this device (`sigelo-agent device scan`, SAFE). `app.mjs` offers to import it when there is none; the
+The app holds one identity file (sigelo-agent's JSON, key included): one made from the 25 words (FULL),
+or the file a computer wrote for this device (`sigelo-agent device scan`, SAFE), imported under the
+welcome's Advanced; the
 operator's file (FULL) it refuses, and `router.start()` refuses FULL without a seat in a signed list
 (`full_import`): FULL comes from the 25 words (design/apps.md §18). It is kept sealed: AES-256-GCM under a WebCrypto key generated here,
 non-extractable, stored in IndexedDB's key store. That protects a copy of the app's storage, not the
@@ -80,7 +83,7 @@ files of the platform under `app/me.local.*`, as `ui` keeps them beside `me.loca
 
 ## Restore from seed (seed.mjs)
 
-The first-start screen's other way in: "I have my 25 words on paper", then one box checked as it is
+The welcome's second choice: one box checked as it is
 typed (count, the first word not in the Monero list by position, the checksum), a restore height or
 date, the network, the device's name, and whether sigelo already runs as you on another device.
 `contact/restore.mjs` derives what `sigelo-agent keeper --from-words` writes: the operator identity
@@ -97,14 +100,14 @@ with `seat_elsewhere`, and the banner offers "Take the seat here" (`POST /api/se
 
 ## Create new identity (create.mjs)
 
-The first choice at first start. The form: the device's name, mainnet or stagenet, the relay. Create
+The welcome's first choice. Name this phone (the network and the relay under Advanced). Create
 draws S in the page (`contact/create.mjs` `newSeed`: `newRoot`'s draw, `crypto.getRandomValues`,
 redrawn until 0 < S < l) and holds the network until the end. The words screen is a one-way door: the
-25 words numbered in a 5 × 5 grid, the address of their own Monero wallet (a wallet app restored from
+25 words numbered in an ordered list, two columns, the address of their own Monero wallet (a wallet app restored from
 the words shows the same), no Back (the Android shell swallows the system's, `secure` with `door`),
 `FLAG_SECURE`, no copy on mainnet (not selectable); on stagenet a copy, the clipboard emptied after
-60 s. One button, "I have written down my 25 words". Then three words asked by number: wrong, back to
-the grid; right, `commit` gives exactly a restore's files for those words (operator, K_1, this device
+60 s. One button, "I have written them down". Then three words asked by number: wrong, the number named and
+asked again (the 25 again only on "Show the words again"); right, `commit` gives exactly a restore's files for those words (operator, K_1, this device
 FULL holding the seat, `created` and `restore_date` today, `made: "here"`), sealed as a restore,
 S zeroed, the page restarts. Nothing is stored before the check; there is no way to see the words
 again. Me: "Created on <day>; the 25 words are on your paper".
@@ -119,6 +122,10 @@ and `sigelo-agent init --enrol <code>` for the other machine; the four words onc
 is made on the app's own session (`contact/page.mjs`), worker i the next free, at the seat only (a standby refuses
 `seat_elsewhere`). The keeper is opened per use and resealed after a change (`seed.mjs` `keeperOf`). Tapping a row:
 details, Rename, Revoke (its contact forgotten; its attestation stays valid to its end, said before).
+Add a contact is a separate screen (someone else's identity, a person's or an agent's): make a code to
+send, or enter theirs; each of the two screens says what the other is for. Each code has Share: a
+ready-to-send message with the code, until when, and the instructions page (sigelo.io/pair.html,
+sigelo.io/enrol.html), through the Android share sheet, else copied.
 Without a keeper (an imported file) the list is empty and Enrol is off.
 
 ## Code trust

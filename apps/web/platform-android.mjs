@@ -25,6 +25,8 @@
 //   → {op:"clip-clear", id}                        ← {id}         the clipboard cleared (after the words were pasted)
 //   → {op:"clip-copy", id, text, clear}            ← {id}         text on the clipboard marked sensitive (no preview), cleared
 //                                                                 by the shell after `clear` seconds (stagenet words only)
+//   → {op:"share", id, text}                       ← {id}         the system's share sheet with a ready-to-send message
+//                                                                 (a pairing or enrol code and its instructions link)
 //   any ← {id, error:{check, message}}
 // https: https:// to any host; http:// only to a private IPv4 address (a computer's `ui --remote`
 // on the LAN, sealed in the page). tls: certificate and host name checked by the system's trust
@@ -37,7 +39,7 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy']);
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share']);
 export const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); };
 export const unb64 = (s) => { const t = atob(s), o = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) o[i] = t.charCodeAt(i); return o; };
 
@@ -115,6 +117,7 @@ function makeBridge(info, port) {
     async clipClear() { await request('clip-clear'); },
     /** Text on the clipboard, marked sensitive, emptied by the shell after `clear` seconds (1 to 300). */
     async clipCopy(text, { clear = 60 } = {}) { await request('clip-copy', { text: String(text), clear }); },
+    async share(text) { await request('share', { text: String(text) }); },
   });
 }
 

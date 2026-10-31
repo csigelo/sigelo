@@ -1,6 +1,6 @@
 {
   "name": "sigelo",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Portable, offline-verifiable identity for AI agents: create a DID, answer challenges, store attestations, present and verify bundles.",
   "author": { "name": "csigelo", "url": "https://github.com/csigelo" },
   "homepage": "https://sigelo.io",

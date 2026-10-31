@@ -3,8 +3,13 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
-## unreleased
+## v0.1.11 — 2026-10-31
 
+- **This release:** the apps make an identity from 25 new words or restore one, and enrol agents; the second outside
+  review's ten findings fixed (one HIGH); the APK F-Droid-reproducible (`--alignment-preserved`).
+- **First run, one decision per screen:** the apps open on a welcome with three choices: create, restore from 25 words, connect to my agent elsewhere. Relay and import under Advanced; Back goes one screen back.
+- **Enrol my agent, Add a contact:** two screens, each saying what the other is for. Every code has Share: a ready-to-send message with the code, its expiry and an instructions page (sigelo.io/pair, /enrol).
+- **App fixes:** the 25 words no longer break mid-word; a wrong check word no longer shows them again; the GTK phone app opens on Agents when it holds an identity; titles fit a phone; Me says the key is in the keyring.
 - **Easier to find:** npm keywords on the six packages (agent identity, DID method, agent wallet, agent-to-agent, MCP); search keywords on both sites incl. "SI agents"; llms.txt says where to start; npm provenance badge.
 - **Agents first in the apps:** the main screen lists your agents (enrolled, pending code, revoked); Enrol shows a one-time code big, then the four words, then enrolled; revoke, rename; a relay picker with Test.
 - **Create an identity in the apps:** 25 new words made on the phone, shown once (no Back, no screenshot, copy on stagenet only), three typed back, then sealed as a restore; this device holds the seat.
@@ -14,16 +19,14 @@ history, which is not public. This public history starts at the import of 2026-1
 - **Relink after unlink:** an ended link is remembered; the same two agents link again only when each side's operator asks afresh (never an allow rule), under a new id. A contact forgotten by hand stays forgotten.
 - **Links in the inbox:** a linked contact's messages carry `link {id, purpose}` in `inbox`, the page's messages and MCP `sigelo_inbox`, so an agent reads them knowing why that contact is there. Data, never instructions.
 - **F-Droid, reproducible:** the recipe publishes our signed APK only if F-Droid's build matches it; CI builds on JDK 21 as F-Droid does (AGP 8.8.2); the APK is signed `--alignment-preserved`.
-- **CI:** the macOS legs (portability, keyagent) move to `macos.yml`, dispatched by hand before a release; GitHub's macOS
-  runners were cancelled unstarted on five attempts in three days and made every sync red (docs-test/PORTABILITY.md).
-<!-- review2-keeper -->
+- **CI:** the macOS legs (portability, keyagent) move to `macos.yml`, dispatched by hand before a release: GitHub
+  cancelled them unstarted five times in three days, every sync red (docs-test/PORTABILITY.md).
 - **Keeper, wallet files private:** `init` refuses a password, wallet or `.keys` file readable by others, `doctor` fails
   them; the password file's path moves into `wallet-rpc.conf` (0600). Review 2026-10-28, MEDIUM 5.
 - **Keeper, dry run writes nothing:** above `approval_above` a `--dry-run` keeper answers `202` with `dry_run: true` and no
   `pending` line; `/approve` is refused `dry_run`. Review 2026-10-28, LOW 9.
 - **Keeper, never paid twice later:** a `relay_failed` or unsettled `intent` answers UNCERTAIN for the life of the log;
   an explicit `ref` is kept for `period_seconds`, not `dedupe_seconds`. Review 2026-10-28, LOW 10.
-<!-- review2-wire-relay -->
 - **Relay, short codes:** a fetched code's hash stays taken until its expiry (a tombstone): whoever fetched it cannot
   park its own code for the intended contact; `park_unknown` still tells. Review 2026-10-28, MEDIUM 3.
 - **Relay, short codes:** `POST /park` is charged as a lookup, so `park_taken` is no free liveness check past the
@@ -40,8 +43,6 @@ history, which is not public. This public history starts at the import of 2026-1
   scores those four vectors too: 158 → 162 bundle cases.
 - **Relay and contacts remember a retired recovery key:** another recovery by a key the chain they keep retired is
   refused `retired_recovery`, so the owner stays. Review 2026-10-28, MEDIUM 2; no wire change.
-
-<!-- review2-devices -->
 - **Devices, who the operator is:** device messages (renew, wipe, seat, list) come only from the issuer of an
   unexpired operator attestation, never `issuers[0]`: a world could wipe the agent. Review 2026-10-28, HIGH 1.
 - **Devices, the old seat's state kept:** a standby parks its state sealed per epoch (`<identity>.parked.<epoch>.sgs`),

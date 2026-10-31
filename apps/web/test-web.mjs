@@ -178,8 +178,8 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   presetRelay(p4.files, 'relay.sigelo.ai');
   ok(await checkOf(() => presetRelay(p4.files, 'not a host')) === 'code_relay' && (await mk({ platform: p4, identity: () => store, options: { registry: false } }).call('GET', '/api/settings')).body.relay === 'relay.sigelo.ai',
     'presetRelay: the default keeps none; not a host refused');
-  const appSrc = readFileSync(join(HERE, 'app.mjs'), 'utf8');
-  ok(/presetRelay\(platform\.files, relay\.value\)/.test(appSrc) && /value: DEFAULT_RELAY/.test(appSrc) && appSrc.includes('A 12-character code always names its own relay'), 'app.mjs: the import form shows the relay, relay.sigelo.ai pre-filled');
+  const setupSrc = readFileSync(join(HERE, 'setup.mjs'), 'utf8');
+  ok(/presetRelay\(platform\.files, relay\.value\)/.test(setupSrc) && /value: DEFAULT_RELAY/.test(setupSrc) && setupSrc.includes("label: 'Import a device file'"), 'setup.mjs: the import (Advanced on the welcome) shows the relay, relay.sigelo.ai pre-filled');
 }
 
 
@@ -364,8 +364,14 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   ok(root.all().some((e) => e.tagName === 'H1' && e.textContent === 'Agents') && rows.length === 1 && rows[0].textContent.includes('phone') && rows[0].textContent.includes('FULL') && rows[0].textContent.includes('a device')
     && calls.some(([m, p]) => m === 'GET' && p === '/api/agents/workers'), 'ui.js: the first screen is Agents, a row per worker from GET /api/agents/workers (name, rank, where)');
   const foot = root.all().find((e) => e.className === 'inner two');
-  ok(foot?.kids.map((k) => k.textContent).join() === 'Enrol,Invite' && foot.kids.every((k) => k.className === 'primary' && !k.disabled), 'ui.js: the two-button bar, Enrol and Invite, equal, both ready (a keeper, the seat here)');
-  await btn('Enrol').click(); await settle();
+  ok(foot?.kids.map((k) => k.textContent).join() === 'Enrol my agent,Add a contact' && foot.kids[0].className === 'primary' && foot.kids[1].className !== 'primary' && foot.kids.every((k) => !k.disabled),
+    'ui.js: the two-button bar: Enrol my agent (the one primary) and Add a contact, both ready (a keeper, the seat here)');
+  await btn('Add a contact').click(); await settle();
+  ok(root.all().some((e) => e.tagName === 'H1' && e.textContent === 'Add a contact') && has('someone else\'s identity') && has('Not this? Your own agent on another machine') && btn('Make a code to send') && btn('I have their code') && btn('Enrol my agent'),
+    'Add a contact: its own screen, what it is for, "Not this?" pointing at Enrol my agent; make a code or enter theirs');
+  await btn('Enrol my agent').click(); await settle();
+  ok(root.all().some((e) => e.tagName === 'H1' && e.textContent === 'Enrol my agent') && has('Your own agent, on another machine, under your identity') && has('Not this? Someone else') && btn('Add a contact'),
+    'Enrol my agent: its own screen, what it is for, "Not this?" pointing at Add a contact');
   const nameIn = root.all().find((e) => e.attrs['aria-label'] === 'Agent name');
   nameIn.value = 'vps';
   await btn('Friend: low trust, tell me').click(); await settle();
@@ -387,6 +393,9 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
     && has('… waiting for the agent to enter it'), `enrol: POST /api/agents/enrol-code {name, tier, relay}; the code shown big with its countdown and the command (${JSON.stringify(made?.[2])})`);
   await btn('Copy').click();
   ok(sandbox.copied === 'K7F3-Q9ZP', 'enrol: Copy puts the code on the clipboard');
+  await btn('Share').click(); await settle();
+  ok(/^Enrol as my agent on sigelo: code K7F3-Q9ZP, once, until \d{1,2}:\d{2}.*sigelo-agent init --enrol K7F3-Q9ZP .*How: https:\/\/sigelo\.io\/enrol\.html$/.test(sandbox.copied ?? ''),
+    `enrol: Share, without a share sheet, copies a ready-to-send message: the code, until when, the command, the instructions link (${sandbox.copied})`);
   Object.assign(W_.workers[1].enrolling, { state: 'words', code: null, command: null, words: 'mobile absent bone lion' });
   await poll();
   ok(!root.all().some((e) => e.className === 'code big') && root.all().find((e) => e.className === 'words')?.textContent === 'mobileabsentbonelion' && btn('They match') && btn("They don't") && has('✓ the agent entered it and paired'),
@@ -580,11 +589,18 @@ try {
       } finally { await tc.stop(); }
       const K1 = keeperRoot(S0, 1);
       ok(res.placed.length === 1 && worker?.secret === Buffer.from(agentIdentitySeed(K1, 1, 0)).toString('hex'), `app enrol: the machine received worker 1 of the app's keeper root, end to end (${JSON.stringify(res.refused)})`);
-      const enrolled = await until(async () => { const w = (await O.call('GET', '/api/agents/workers')).body.workers.find((x) => x.worker === 1); return w?.status === 'enrolled' && w.contact ? w : null; }, 30000);
-      const w1 = (await O.call('GET', '/api/agents/workers')).body.workers.find((x) => x.worker === 1), st = (await O.call('GET', '/api/state')).body;
-      ok(enrolled && w1.placed === 'remote' && w1.tier === 'quiet' && w1.enrolling?.state === 'enrolled' && st.groups.mine.some((c) => c.did === w1.contact && c.ours === true && c.name === 'vps')
-        && ![...st.groups.mine, ...st.groups.contacts].some((c) => c.name.includes('(enrolling)')) && !st.pending.invites.some((x) => x.name.includes('(enrolling)')),
-        `app enrol: the list shows it enrolled (remote, quiet as chosen), in Mine as ours; nothing of the temporary pairing shows (${JSON.stringify(w1).slice(0, 240)})`);
+      // The worker's row, the contact in Mine and the temporary pairing's removal settle in separate
+      // steps after the enrolment lands; CI saw the row enrolled before the rest had settled, so the
+      // whole condition is waited for, not a snapshot of it.
+      const settled = (w, st) => w?.status === 'enrolled' && w.contact && w.placed === 'remote' && w.tier === 'quiet' && w.enrolling?.state === 'enrolled'
+        && st.groups.mine.some((c) => c.did === w.contact && c.ours === true && c.name === 'vps')
+        && ![...st.groups.mine, ...st.groups.contacts].some((c) => c.name.includes('(enrolling)')) && !st.pending.invites.some((x) => x.name.includes('(enrolling)'));
+      let w1, st;
+      const enrolled = await until(async () => {
+        w1 = (await O.call('GET', '/api/agents/workers')).body.workers.find((x) => x.worker === 1); st = (await O.call('GET', '/api/state')).body;
+        return settled(w1, st) ? w1 : null;
+      }, 30000);
+      ok(enrolled, `app enrol: the list shows it enrolled (remote, quiet as chosen), in Mine as ours; nothing of the temporary pairing shows (${JSON.stringify(w1).slice(0, 240)} mine=${JSON.stringify(st?.groups.mine.map((c) => [c.name, c.ours]))})`);
       const kp = JSON.parse(new TextDecoder().decode(await W.loadSealed(ip, 'keeper')));
       ok(kp.workers['1']?.name === 'vps' && kp.workers['1'].placed === 'remote' && ip.files.read('keeper.sealed') !== null && !Buffer.from(ip.files.read('keeper.sealed')).toString('latin1').includes(kp.root_hex),
         'app enrol: the roster kept in the sealed keeper (resealed), worker 1 vps, remote');

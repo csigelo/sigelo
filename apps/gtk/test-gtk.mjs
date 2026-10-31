@@ -27,7 +27,7 @@ const ins = spawnSync('sh', [join(HERE, 'install.sh'), '--prefix', P], { encodin
 const S = join(P, 'share', 'sigelo-app');
 const want = ['bin/sigelo-app', 'share/applications/io.sigelo.App.desktop', 'share/icons/hicolor/scalable/apps/io.sigelo.App.svg', 'share/sigelo-app/sigelo-app.js',
   'share/sigelo-app/lib/remote-client.mjs', 'share/sigelo-app/lib/jcs.js', 'share/sigelo-app/lib/noble-ciphers/chacha.js', 'share/sigelo-app/web/start.html', 'share/sigelo-app/web/ui.js',
-  'share/sigelo-app/web/shim-zlib.mjs', 'share/sigelo-app/web/shim-kdf.mjs', 'share/sigelo-app/web/seed-check.mjs', 'share/sigelo-app/web/monero-words.js'];
+  'share/sigelo-app/web/shim-zlib.mjs', 'share/sigelo-app/web/shim-kdf.mjs', 'share/sigelo-app/web/seed-check.mjs', 'share/sigelo-app/web/monero-words.js', 'share/sigelo-app/web/welcome.mjs'];
 ok('install.sh --prefix: the launcher, desktop file, icon, app and page files', ins.status === 0 && want.every((f) => existsSync(join(P, f))), ins.stderr + want.filter((f) => !existsSync(join(P, f))).join(' '));
 ok('install.sh: QR reading installed beside the page (contact/qr-decode.mjs, qr.mjs), no "scanning off" warning', ['qr-decode.mjs', 'qr.mjs'].every((f) => existsSync(join(S, 'web', f))) && !/scanning off/.test(ins.stderr), ins.stderr);
 const desk = readFileSync(join(P, 'share/applications/io.sigelo.App.desktop'), 'utf8');
@@ -77,8 +77,12 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
 // ── this phone: `ui --app` spawned by the app, the page answers, the child ends with the app
 {
   const start = readFileSync(join(S, 'web', 'start.html'), 'utf8');
-  ok('start page: this phone\'s form shows the relay field, relay.sigelo.ai pre-filled, and that a 12-character code names its own relay',
-    /<input id="relay" value="relay\.sigelo\.ai"/.test(start) && start.includes('12-character code always names its own relay') && readFileSync(join(S, 'web', 'start.js'), 'utf8').includes("ask('self', relayEdited"));
+  const sj = readFileSync(join(S, 'web', 'start.js'), 'utf8'), wel = readFileSync(join(S, 'web', 'welcome.mjs'), 'utf8');
+  ok('start page: the shared first run (welcome.mjs, installed beside it); an identity here opens this phone\'s page at once, a standby says so, a kept computer reconnects; else the welcome',
+    start.includes('<script type="module" src="start.js"></script>') && !/<input|<textarea|<section/.test(start) && sj.includes("from './welcome.mjs'") && /else if \(saved\.identity\)/.test(sj)
+    && sj.includes("ask('resume')") && sj.includes('standby()') && wel === readFileSync(join(ROOT, 'apps', 'web', 'welcome.mjs'), 'utf8'));
+  ok('welcome.mjs: three choices, nothing else; the relay only under Advanced, relay.sigelo.ai preset', wel.includes("button('Create a new identity'") && wel.includes("button('Restore from 25 words'") && wel.includes("button('Connect to my agent elsewhere'")
+    && wel.includes("DEFAULT_RELAY = 'relay.sigelo.ai'") && /fold\('Advanced'[^\n]*Relay/.test(wel));
   const r = await gjs({ SIGELO_APP_TEST: 'self', SIGELO_APP_IDENTITY: human, SIGELO_AGENT: JSON.stringify([process.execPath, CLI]), SIGELO_APP_RELAY: 'corp.example.com' });
   ok('gjs, this phone: the relay set through the page (POST /api/settings) → 200, kept as corp.example.com', r.relay === 200 && r.setting === 'corp.example.com', JSON.stringify(r).slice(0, 400));
   ok('gjs, this phone: ui --app spawned, GET /api/me with its token → 200; stopped → exit 0', r.ok === true && r.me === 200 && r.exited === true && r.code === 0, JSON.stringify(r).slice(0, 400));
@@ -91,7 +95,7 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
 // beside it refuses busy, so the page's route does it (UI-API.md /api/agents/*). No relay here: the code is refused connect.
 {
   const web = readFileSync(join(S, 'web', 'ui.js'), 'utf8');
-  ok('installed page: Agents first, the Enrol and Invite bar, the code big, the relay picker\'s Test', /show\('agents'\);\s*poll\(\);/.test(web) && web.includes("'/api/agents/enrol-code'")
+  ok('installed page: Agents first, the Enrol my agent and Add a contact bar, the code big, the relay picker\'s Test', /show\('agents'\);\s*poll\(\);/.test(web) && web.includes("'/api/agents/enrol-code'")
     && web.includes("class: 'inner two'") && web.includes("'code big'") && web.includes("'/api/relays/test'"));
   const { request } = await import('node:http');
   const c = spawn(process.execPath, [CLI, 'ui', '--app', '--identity', human], { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -120,13 +124,9 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
 // ── restore from seed (design/apps-seed.md): the start page's form, its word check, and the app's restore:
 // keeper --from-words --keychain on stdin (a Secret Service: a fake secret-tool keeping items under $HOME), then the seat
 {
-  const start = readFileSync(join(S, 'web', 'start.html'), 'utf8'), js = readFileSync(join(S, 'web', 'start.js'), 'utf8');
-  const box = /<textarea id="seed-words"[^>]*>/.exec(start)?.[0] ?? '';
-  ok('start page: Restore from seed beside this phone and a computer: "I have my 25 words on paper" first, one box without autocomplete, autocorrect, capitals or spellcheck, height or date, network, the seat elsewhere',
-    start.includes('<h2>Restore from seed</h2>') && start.includes('I have my 25 words on paper') && ['autocomplete="off"', 'autocorrect="off"', 'autocapitalize="none"', 'spellcheck="false"'].every((a) => box.includes(a))
-    && start.includes('id="seed-height"') && start.includes('value="stagenet"') && start.includes('id="seed-elsewhere"') && start.includes('Take the seat here'), box);
+  const js = readFileSync(join(S, 'web', 'start.js'), 'utf8');
   ok('start.js: the words go to the app once (restore), the clipboard emptied after a paste (clipclear), no word ever shown back or logged',
-    js.includes("ask('restore', { words: $('seed-words').value") && js.includes("ask('clipclear')") && !/console\.|show (the |your )?(seed|25 words)/i.test(js));
+    js.includes("must('restore', { words: o.words") && js.includes("ask('clipclear')") && !/console\.|show (the |your )?(seed|25 words)/i.test(js));
   const { checkWords: gtkCheck } = await import(pathToFileURL(join(S, 'web', 'seed-check.mjs')).href);
   const { checkWords: libCheck } = await import(pathToFileURL(join(ROOT, 'contact', 'restore.mjs')).href);
   const w = newRoot(), l = w.split(' '), cases = [w, l.slice(0, 7).join(' '), [l[1], l[0], ...l.slice(2)].join(' '), [...l.slice(0, 3), 'zzzq', ...l.slice(4)].join(' '), `${w} ${l[0]}`, l.map((x) => x.slice(0, 3)).join('\n'), w.toUpperCase()];
@@ -152,11 +152,8 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
   ok('gjs, restore: 24 words refused by keeper (no word echoed), nothing written', bad.ok === false && !l.some((x) => (bad.message ?? '').split(/\W+/).includes(x) && x.length > 3) && !existsSync(join(T, 'home-bad', '.config', 'sigelo', 'me.local.json')), JSON.stringify(bad).slice(0, 300));
 
   // ── create a new identity (pass A10a): the start page's screens, then the app: keeper --new-words, three words checked in the app, keeper --from-words --keychain --made-here
-  ok('start page: Create new identity first, with the name and the network; the words in a numbered grid, the wallet\'s address, copy for stagenet only, one way on ("I have written down my 25 words"), then three words typed back',
-    start.indexOf('<h2>Create new identity</h2>') < start.indexOf('<h2>This phone</h2>') && start.includes('id="create-grid"') && start.includes('id="create-vault"') && /<button id="create-copy" hidden>/.test(start)
-    && start.includes('I have written down my 25 words') && [0, 1, 2].every((i) => new RegExp(`<input id="create-a${i}" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">`).test(start)) && !/create-back|id="create-cancel"/.test(start));
-  ok('start.js: the app draws the words (newwords) and checks the three typed back (create: answers only, never the words); copy only on stagenet, the clipboard emptied after 60 s; the grid emptied after',
-    js.includes("ask('newwords', { net: createNet })") && js.includes("ask('create', { answers, name:") && /if \(createNet !== 'stagenet' \|\| !shown\) return;/.test(js) && js.includes('CLIP_SECONDS = 60') && js.includes("ask('clipclear')") && /shown = null; drop\(\)/.test(js) && !/console\./.test(js));
+  ok('start.js: the app draws the words (newwords) and checks the three typed back (create: answers only, never the words); copy only on stagenet (welcome.mjs), the clipboard emptied after 60 s',
+    js.includes("must('newwords', { net })") && js.includes("ask('create', { answers, name: o.name })") && js.includes("ask('clipclear')") && !/console\./.test(js));
   const HC = join(T, 'home-create'), c = await restoreIn(HC, { SIGELO_APP_TEST: 'create', SIGELO_APP_WORDS: '' });
   const mc = join(HC, '.config', 'sigelo', 'me.local.json'), kc = mc.replace(/\.json$/, '.keeper.json');
   const idc = existsSync(mc) ? JSON.parse(readFileSync(mc, 'utf8')) : {}, kpc = existsSync(kc) ? JSON.parse(readFileSync(kc, 'utf8')) : {}, today = new Date().toISOString().slice(0, 10);
