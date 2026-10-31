@@ -6,6 +6,7 @@
 //      200 KB, fragments both ways, ping/pong, close both ways) and a raw server for what must fail
 //      (accept, status, extension, masked or reserved frames, control frames, UTF-8, sizes, close
 //      frames, abrupt end, a close never answered); streamSocket (mqtts) over an echo server.
+//   1c. MQTT.js as a page loads it (its keepalive on worker-timers, a blob: Worker the CSP refuses): the CONNACK acted on.
 //   2. platform-android.mjs over the fake shell: the bridge, https (no Origin, no redirect, the
 //      LAN rule), tls (a wrong certificate name refused), the keystore seal, the proof of work and
 //      its fallback, the identity sealed; then two apps against the in-process relay behind a
@@ -322,6 +323,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
           else if (m.op === 'clip-clear') { state.clipCleared++; state.clip = null; post({ id: m.id }); }
           else if (m.op === 'clip-copy') { state.clip = { text: m.text, clear: m.clear }; post({ id: m.id }); }
           else if (m.op === 'share') { state.shared = m.text; post({ id: m.id }); }
+          else if (m.op === 'unlock') { state.unlocks = (state.unlocks ?? 0) + 1; if (state.locked) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); post({ id: m.id }); }
           else throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
         } catch (e) { if (m.id !== undefined) post({ id: m.id, error: { check: e.check ?? 'connect', message: e.message } }); }
       };
@@ -331,6 +333,58 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   return { shell, target, state, log, keys, connect: () => A.connectBridge({ shell, target }) };
 }
 
+
+
+// ================================================================ 1c. MQTT.js as a page runs it: the relay's CONNACK acted on
+// In a page (window and document there when it loads) MQTT.js's browser build keeps its keepalive on
+// worker-timers: a Worker from a blob: URL, which the page's CSP (worker-src 'self') refuses, thrown
+// inside the CONNACK's handling. On the phone: the CONNECT out, the relay's answer in within 100 ms,
+// then nothing from the client, and "the relay closed the connection". Here: the bundle loaded as in a
+// page, a Worker refusing blob: as that CSP does, and a scripted shell answering the CONNECT with a
+// CONNACK in three posts a few ms apart (mqtts through the bridge), or one message (a page's wss).
+{
+  const saved = { window: Object.getOwnPropertyDescriptor(globalThis, 'window'), document: Object.getOwnPropertyDescriptor(globalThis, 'document'), Worker: Object.getOwnPropertyDescriptor(globalThis, 'Worker') };
+  const restore = (k) => { if (saved[k]) Object.defineProperty(globalThis, k, saved[k]); else delete globalThis[k]; };
+  globalThis.window = globalThis; globalThis.document = {};
+  globalThis.Worker = class { constructor(u) { if (/^blob:/.test(String(u))) throw new DOMException(`Failed to construct 'Worker': access to the script at '${u}' is denied by the document's Content Security Policy`, 'SecurityError'); throw new Error('no Worker here'); } };
+  const pageMqtt = (await import(pathToFileURL(join(HERE, 'vendor', 'mqtt.esm.js')).href + '?as-a-page')).default;
+  restore('window'); restore('document');
+  const thrown = [], catcher = (e) => thrown.push(e?.message ?? String(e));
+  process.on('uncaughtException', catcher); process.on('unhandledRejection', catcher);
+  const CONNACK = [[0x20], [0x02, 0x00], [0x00]];
+  const scripted = () => {
+    const target = new EventTarget(), log = { writes: 0, closed: 0 };
+    const shell = {
+      info: () => JSON.stringify({ v: 'sigelo-shell/0', mode: 'self', wipe: false, version: 'test' }),
+      connect() {
+        const { port1, port2 } = new MessageChannel(), post = (x) => port1.postMessage(JSON.stringify(x));
+        port1.onmessage = (ev) => {
+          const m = JSON.parse(ev.data);
+          if (m.op === 'tls') post({ id: m.id, stream: 7 });
+          else if (m.op === 'write') { post({ id: m.id }); if (log.writes++ === 0) CONNACK.forEach((c, i) => setTimeout(() => post({ s: 7, data: Buffer.from(c).toString('base64') }), 5 + 10 * i)); }
+          else if (m.op === 'close') log.closed++;
+        };
+        setTimeout(() => target.dispatchEvent(new MessageEvent('message', { data: 'sigelo-bridge/0', ports: [port2] })));
+      },
+    };
+    return { log, connect: () => A.connectBridge({ shell, target }) };
+  };
+  const opts = { protocolVersion: 4, clean: false, clientId: 'c'.repeat(40), username: 'did:sigelo:z' + 'u'.repeat(48), password: 'p'.repeat(1100), reconnectPeriod: 0, connectTimeout: 3000, keepalive: 60, resubscribe: false, wsOptions: { maxPayload: 1 << 20 } };
+  const outcome = (client) => new Promise((y) => { client.once('connect', () => y('connect')); client.once('error', (e) => y(`error: ${e.message}`)); client.once('close', () => y('close')); setTimeout(() => y('nothing in 3.5 s'), 3500); });
+  const S1 = scripted(), b1 = await S1.connect(), c1 = A.bridgeMqtt(b1, pageMqtt)('mqtts://relay.test:8883', opts), r1 = await outcome(c1);
+  ok(r1 === 'connect' && c1.connected && thrown.length === 0, `mqtts in a page: a CONNACK in three posts after the CONNECT is acted on, keepalive and all (${r1}; ${thrown.join('; ') || 'nothing thrown'})`);
+  c1.end(true);
+  thrown.length = 0;
+  const fakeWs = () => { const s = { readyState: 0, OPEN: 1, CONNECTING: 0, CLOSING: 2, CLOSED: 3, bufferedAmount: 0, binaryType: 'arraybuffer', onopen: null, onmessage: null, onclose: null, onerror: null, close() {},
+    send() { setTimeout(() => s.onmessage?.({ data: Uint8Array.of(0x20, 2, 0, 0).buffer })); } };
+    setTimeout(() => { s.readyState = 1; s.onopen?.({}); }); return s; };
+  const c2 = W.pageMqtt(pageMqtt, { createWebsocket: fakeWs })('wss://relay.test/mqtt', opts), r2 = await outcome(c2);
+  ok(r2 === 'connect' && c2.connected && thrown.length === 0, `wss in a page (platform-web.mjs): the CONNACK acted on (${r2}; ${thrown.join('; ') || 'nothing thrown'})`);
+  c2.end(true);
+  await sleep(50);
+  process.off('uncaughtException', catcher); process.off('unhandledRejection', catcher);
+  restore('Worker');
+}
 
 // ================================================================ 1b. restore from seed in the Android app (seed.mjs), no relay needed
 {
@@ -630,7 +684,9 @@ try {
   ok(p.files.read('identity.keystore')?.[1] === 1, 'platform: FULL under the key that asks for the screen lock');
   F.state.locked = true;
   ok(await checkOf(() => W.loadIdentity(p)) === 'cancelled', 'platform: FULL not unlocked: cancelled (asked again at the next start), not "import it again"');
+  ok(await checkOf(() => bridge.unlock()) === 'cancelled', 'app lock: unlock with the screen lock not confirmed: cancelled');
   F.state.locked = false;
+  ok(await checkOf(() => bridge.unlock()) === 'accepted' && F.state.unlocks === 2, 'app lock: unlock confirmed: resolves (MainActivity.unlock asks the screen lock)');
   const prefix = 'sigelo-relay-pow/0\nrelay.testdid:sigelo:zA5';
   ok(await p.pow(prefix, 9) === await nodePow(prefix, 9), 'pow: in the Worker, the counter Node finds');
   let tried = 0;

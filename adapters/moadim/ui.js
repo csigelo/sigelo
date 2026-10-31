@@ -39,9 +39,24 @@
     }
     return el;
   }
-  /** el's children replaced: lists flattened, strings as escaped text, empties dropped. */
-  const put = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false && k !== '')
-    .map((k) => (k instanceof Node ? k : document.createTextNode(safeText(k)))));
+  /**
+   * el's children replaced: lists flattened, strings as escaped text, empties dropped. A screen is drawn
+   * again at every poll, its fields reused; the child of el that holds the focus (a field being typed
+   * in, or a card around it) is never taken out, only the others around it: a field taken out of the
+   * page loses the focus, and a phone's keyboard closes with it. → el.
+   */
+  const put = (el, ...kids) => {
+    const nodes = kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false && k !== '')
+      .map((k) => (k instanceof Node ? k : document.createTextNode(safeText(k))));
+    const f = document.activeElement;
+    const keep = f && f !== el && el.contains?.(f) ? nodes.find((n) => n.parentNode === el && (n === f || n.contains?.(f))) : undefined;
+    if (!keep) { el.replaceChildren(...nodes); return el; }
+    for (const c of [...el.childNodes]) if (c !== keep) c.remove();
+    const i = nodes.indexOf(keep);
+    keep.before(...nodes.slice(0, i));
+    keep.after(...nodes.slice(i + 1));
+    return el;
+  };
   const badge = (text, kind) => h('span', { class: `badge${kind ? ' ' + kind : ''}` }, text);
 
   const http = {
@@ -304,9 +319,19 @@
     return el;
   }
   function relayPicker(onUse) {
-    const P = { list: null, tests: new Map(), say: '' };
+    const P = { list: null, tests: new Map(), say: '' }, card = h('div', { class: 'card' });
     const custom = h('input', { autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: '255', placeholder: 'relay.example.org', 'aria-label': 'Relay host' });
-    const norm = () => custom.value.trim().toLowerCase();
+    // A relay is named by its host[:port] (codes and logins carry the name), so a URL pasted is read as
+    // that name: mqtts://host[:port], or wss:// and https:// on 443. The carrier picks the transport
+    // (auto: 8883, and with no answer in 5 s the WebSocket on 443, wss://host/mqtt; a page: 443 only).
+    // A WebSocket off 443 has no relay name: kept as typed, and refused.
+    const norm = () => {
+      const v = custom.value.trim().toLowerCase(), m = /^(mqtts|wss|https):\/\/([a-z0-9.-]+)(?::(\d{1,5}))?(?:[/?#].*)?$/.exec(v);
+      if (!m) return v;
+      const [, scheme, host, port] = m;
+      if (scheme === 'mqtts') return port && port !== '8883' ? `${host}:${port}` : host;
+      return port && port !== '443' ? v : host;
+    };
     async function test(host) {
       if (!host) return { ok: false };
       P.tests.set(host, { busy: true }); S.update();
@@ -338,13 +363,16 @@
         const add = (host, sub) => { if (!host || seen.has(host)) return; seen.add(host); rows.push(row(host, sub, host === current)); };
         add(current, 'in use'); add(dflt, 'the default');
         for (const x of P.list ?? []) add(x.host, [x.tier, x.note].filter(Boolean).join(' · '));
-        return h('div', { class: 'card' }, rows,
+        // One card, kept: the field in it keeps the focus while the screen is drawn again (put).
+        put(card, rows,
           P.list === null ? h('div', { class: 'bar' }, h('button', { onclick: load }, 'Show the public registry')) : null,
           h('label', null, 'Another relay (hold a row to edit it here)'), custom, said(norm()),
           h('div', { class: 'bar' }, h('button', { onclick: () => test(norm()) }, 'Test'),
             h('button', { class: 'primary', onclick: async () => { const host = norm(), t = P.tests.get(host); if ((t?.ok ? t : await test(host)).ok) { custom.value = ''; onUse(host); } } }, 'OK')),
           P.say ? h('p', { class: 'muted' }, P.say) : null,
-          h('p', { class: 'muted' }, 'Tap a relay to use it. One you type is tested first: OK only once it answers.'));
+          h('p', { class: 'muted' }, 'Tap a relay to use it. One you type is tested first: OK only once it answers.'),
+          h('p', { class: 'muted' }, 'A host name, or its wss:// or mqtts:// address, read as its host: the app picks the port (8883, else the WebSocket on 443).'));
+        return card;
       },
     };
   }
@@ -547,7 +575,7 @@
     text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
     const sendBtn = h('button', { class: 'primary', onclick: send }, 'Send');
     let first = true;
-    const rename = h('input', { autocomplete: 'off', 'aria-label': 'Name' }), tagIn = h('input', { autocomplete: 'off', placeholder: '#work #family', 'aria-label': 'Tags' });
+    const rename = h('input', { autocomplete: 'off', 'aria-label': 'Name' }), tagIn = h('input', { autocomplete: 'off', placeholder: '#work #family', 'aria-label': 'Tags' }), panelCard = h('div', { class: 'card' });
     let panelFor = null;
     put(app,
       h('header', null, h('button', { 'aria-label': 'Back', onclick: back }, '‹'), title, h('button', { 'aria-label': 'More', onclick: () => { panel.hidden = !panel.hidden; S.update(); } }, '⋯')),
@@ -560,7 +588,7 @@
       put(tags, tierChip(c.tier), ...c.tags.map((t) => badge('#' + t)), c.local ? badge('on this machine') : '', c.mine ? badge(`run by me · ${c.mine.days_left} d`) : '', c.words_checked ? badge('✓ words', 'ok') : '', c.link ? badge(`linked: ${c.link.purpose}`) : '');
       if (panelFor !== did + c.name + c.tags.join()) { panelFor = did + c.name + c.tags.join(); rename.value = c.name; tagIn.value = c.tags.map((t) => '#' + t).join(' '); }
       if (!panel.hidden) {
-        put(panel, h('div', { class: 'card' },
+        put(panel, put(panelCard,
           h('label', null, 'Name'), rename, h('div', { class: 'bar' }, h('button', { onclick: () => act(() => backend.call('POST', '/api/rename', { contact: did, name: rename.value })) }, 'Rename')),
           h('label', null, 'Their messages'),
           h('div', { class: 'bar', role: 'group', 'aria-label': 'Tier' }, ['own', 'friend', 'quiet'].map((t) => h('button', { 'aria-pressed': String(c.tier === t), class: c.tier === t ? 'primary' : '',
@@ -953,7 +981,17 @@
   // ---- routing and polling
   const VIEWS = { add: viewAdd, agents: viewAgents, agent: viewAgent, enrol: viewEnrol, contacts: viewContacts, pair: viewPair, chat: viewChat, me: viewMe, links: viewLinks, devices: viewDevices };
   const HOMES = new Set(['agents', 'contacts']);
+  // Screens that show or spend the identity: the Android app asks the screen lock first (local.unlock;
+  // not again within a minute of the last). Not confirmed: the screen stays, the refusal said.
+  const GUARDED = new Set(['enrol', 'add', 'pair', 'me', 'devices']);
   function show(view, arg, popped = false) {
+    if (GUARDED.has(view) && view !== S.view && typeof LOCAL?.unlock === 'function') {
+      LOCAL.unlock().then(() => openView(view, arg, popped), (e) => { if (popped) openView(S.home, undefined, true); S.note = e; S.update(); });
+      return;
+    }
+    openView(view, arg, popped);
+  }
+  function openView(view, arg, popped) {
     // A screen off a home list gets its own history entry (Back returns to the list); a home list none.
     if (!popped && !HOMES.has(view) && view !== S.view) globalThis.history?.pushState?.({ sigeloView: view, ...(arg !== undefined && typeof arg !== 'object' && { arg }) }, '');
     S.view = view; S.note = null;

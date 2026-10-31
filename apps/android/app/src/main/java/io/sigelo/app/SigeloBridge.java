@@ -85,6 +85,8 @@ import javax.net.ssl.SSLSocketFactory;
  *   share         the system's share sheet (ACTION_SEND, text/plain) with a message the page wrote: a code and how to use it.
  *   clip-copy     text on the clipboard marked sensitive (no preview; stagenet words only), emptied
  *          after `clear` seconds (1 to 300) unless something else was copied since.
+ *   unlock        the screen lock, before a screen that shows or spends the identity (MainActivity.unlock:
+ *          not again within a minute of the last confirmation; none set on the phone: ok).
  */
 public final class SigeloBridge {
     static final String SHELL = "sigelo-shell/0", PORT_MESSAGE = "sigelo-bridge/0";
@@ -328,6 +330,9 @@ public final class SigeloBridge {
                 post(to, ok(id));
                 break;
             }
+            case "unlock":
+                activity.unlock(() -> post(to, ok(id)), () -> fail(to, id, "cancelled", "the screen lock was not confirmed"));
+                break;
             default:
                 fail(to, id, "op", "no operation " + op);
         }

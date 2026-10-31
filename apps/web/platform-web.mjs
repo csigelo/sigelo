@@ -113,6 +113,10 @@ export function pageFetch(fetchFn) {
   };
 }
 
+// MQTT.js's browser build keeps its keepalive on worker-timers (timerVariant 'auto' in a page): a
+// Worker from a blob: URL, which the page's CSP (worker-src 'self') refuses. The refusal is thrown
+// inside the CONNACK's handling, so the client never says connected and the relay's answer reads as
+// none. Every page's MQTT runs on the page's own timers: timerVariant 'native'.
 /** MQTT over the runtime's WebSocket (MQTT.js's browser build): wss://, or ws:// to a loopback address. */
 export function pageMqtt(mqttLib, { createWebsocket } = {}) {
   const connect = mqttLib?.connect ?? mqttLib?.default?.connect;
@@ -122,7 +126,7 @@ export function pageMqtt(mqttLib, { createWebsocket } = {}) {
     const u = new URL(url);
     if (u.protocol !== 'wss:' && !(u.protocol === 'ws:' && LOOPBACK.has(u.hostname))) fail('connect', `${u.protocol}// is not carried in a page: MQTT over WebSocket (wss://) only`);
     const { wsOptions: _w, ...rest } = opts;
-    const client = connect(url, { ...rest, forceNativeWebSocket: true, ...(createWebsocket && { createWebsocket }) });
+    const client = connect(url, { ...rest, forceNativeWebSocket: true, timerVariant: 'native', ...(createWebsocket && { createWebsocket }) });
     // Payloads go out as the bytes given; MQTT.js's browser build takes them as its own Buffer.
     return client;
   };

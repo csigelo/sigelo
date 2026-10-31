@@ -542,6 +542,32 @@ try {
     http.close();
   }
 
+  // ================================================================ a login the relay took, its answer lost: no second proof of work
+  {
+    // mute.test takes every CONNECT, and the connection ends with no CONNACK read (a client that never
+    // acted on it reads the same); POST /check says the login was good. The proof in it is the relay's:
+    // the next login carries none, and no search of the day's three is spent on an identity it holds.
+    const proofs = [];
+    const mute = await fakeBroker((type, body, sock) => { if (type === 1) { proofs.push(body.includes('"pow":')); setTimeout(() => sock.destroy(), 50); } });
+    const http = createServer((req, res) => {
+      const url = new URL(req.url, 'http://x'), [, , what] = url.pathname.split('/');
+      res.writeHead(what === 'challenge' || what === 'check' ? 200 : 404, { 'content-type': 'application/json' });
+      if (what === 'check') { req.resume(); req.on('end', () => res.end('{"ok":true}')); return; }
+      if (what !== 'challenge') { res.end(); return; }
+      res.end(JSON.stringify({ challenge: { v: 'sigelo-relay/0', typ: 'relay-login', did: url.searchParams.get('did'), relay: 'mute.test', nonce: randomBytes(32).toString('base64url') }, pow_bits: 4 }));
+    });
+    await new Promise((r) => http.listen(0, '127.0.0.1', r));
+    const M = agent('mia'), mia = make(M, { relay: 'mute.test', transport: 'mqtts', endpoints: { 'mute.test': { mqtt: `mqtt://127.0.0.1:${mute.port}`, http: `http://127.0.0.1:${http.address().port}/mute.test` } } });
+    const r1 = await mia.inbox();
+    ok(r1.offline && /took the login, but its answer did not reach this client/.test(r1.offline) && stateOf(M).relays['mute.test']?.proven === true,
+      `no CONNACK, POST /check ok: said so, and the proof counted as the relay's (${r1.offline})`);
+    await mia.inbox();
+    ok(proofs.length === 2 && proofs[0] === true && proofs[1] === false && (stateOf(M).relays['mute.test'].searches ?? []).length === 1,
+      `the next login carries no proof of work: one search in all (${JSON.stringify(proofs)})`);
+    mute.close();
+    http.close();
+  }
+
   // ================================================================ a 502 refuses nothing; a delivered answer outlives a refusal for good
   {
     // otto's own relay is home.test, so HOST is a stranger's relay to him. A proxy before HOST's

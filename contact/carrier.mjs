@@ -759,6 +759,13 @@ async function named(platform, ep, creds, err) {
       const check = LOGIN_CHECKS.has(r.body.check) ? r.body.check : 'connect';
       return new MsgError(check, `the relay refused the login (${relaySays(`${r.body.check}: ${r.body.detail}`)})${LOGIN_NEXT[check] ? `: ${LOGIN_NEXT[check]}` : ''}`, { cause: err, http: r.http });
     }
+    // The relay took this very login (its outcome, kept under these credentials): its answer did not
+    // reach this client. A proof of work in it is the relay's now (#dial: proven, no search again).
+    if (r.body?.ok === true) {
+      const e = new MsgError('connect', `the relay at ${ep.mqtt} took the login, but its answer did not reach this client (${err.message}): try again; if it repeats, the network between drops it`, { cause: err, http: r.http });
+      e.accepted = true;
+      return e;
+    }
   } catch {}
   return err instanceof MsgError ? err : new MsgError('connect', `the relay at ${ep.mqtt} did not take the connection (${err.message}): check the network and SIGELO_RELAY / SIGELO_RELAY_ENDPOINTS, then try again`, { cause: err });
 }
@@ -2130,7 +2137,7 @@ export class Carrier {
         const at = (st.relays[relay] ??= { proven: false, claims: {} }), recent = (at.searches ?? []).filter((t) => t > now - DAY);
         if (recent.length >= POW_SEARCHES) {
           // Permanent like the bits above: no backoff loop; the hourly round asks again (#retry).
-          const e = new MsgError('pow', `${recent.length} proof-of-work searches at ${relay} within 24 hours, the most this client spends: the next may begin after ${new Date((recent[0] + DAY) * 1000).toISOString()}`);
+          const e = new MsgError('pow', `${recent.length} proof-of-work searches at ${relay} within 24 hours, the most this client spends: the next may begin after ${new Date((recent[0] + DAY) * 1000).toISOString()}; nothing is lost meanwhile, this client tries again then by itself (a search is spent once per identity, and again only when a login with it got no answer)`);
           e.permanent = true;
           throw e;
         }
@@ -2193,11 +2200,18 @@ export class Carrier {
     const onPacket = (packet) => this.#onPacket(link, packet);
     const probe = this.transport === 'auto' && !FELL_BACK.has(ep.mqtt) && /^mqtts?:/.test(ep.mqtt);
     let url = this.transport === 'wss' ? await wsEndpoint(this.platform, ep) : this.transport === 'auto' ? FELL_BACK.get(ep.mqtt) ?? ep.mqtt : ep.mqtt;
-    // A cut connection is this client's own refusal: no POST /check may rename it.
+    // A cut connection is this client's own refusal: no POST /check may rename it. A login the relay
+    // took (POST /check: ok) whose answer was lost proved its work there: proven, so the next login
+    // spends no search (POW_SEARCHES) on an identity the relay holds.
+    const why = async (e) => {
+      const n = await named(this.platform, ep, creds, e);
+      if (n.accepted && creds.pow !== undefined) this.#locked(({ st }) => { (st.relays[relay] ??= { proven: false, claims: {} }).proven = true; });
+      return n;
+    };
     try { await mqttConnect(this.platform, url, creds, link, onPacket, probe ? PROBE_MS : CONNECT_MS); } catch (e) {
-      if (!probe || link.cut || typeof e.code === 'number') throw link.cut ?? await named(this.platform, ep, creds, e);
+      if (!probe || link.cut || typeof e.code === 'number') throw link.cut ?? await why(e);
       url = await wsEndpoint(this.platform, ep);
-      try { await mqttConnect(this.platform, url, creds, link, onPacket); } catch (e2) { throw link.cut ?? await named(this.platform, ep, creds, e2); }
+      try { await mqttConnect(this.platform, url, creds, link, onPacket); } catch (e2) { throw link.cut ?? await why(e2); }
       FELL_BACK.set(ep.mqtt, url);
       this.#emit({ type: 'transport', relay, transport: 'wss', detail: `${ep.mqtt} gave no CONNACK within ${PROBE_MS / 1000} s (${e.message}): MQTT over WebSocket at ${url} for the rest of this process` });
     }

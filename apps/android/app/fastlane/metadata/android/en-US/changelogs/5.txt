@@ -1,0 +1,2 @@
+Logging in to the relay works on Android: the connection no longer stalls after the relay answers, and no proof of work is spent that is not needed.
+Typing keeps the keyboard open; the relay picker takes wss:// addresses; the screen lock is asked on open and before sensitive screens.

@@ -3,6 +3,16 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## v0.1.13 — 2026-10-31
+
+- **This release:** the app logs in to the relay (the MQTT library's Worker was refused by the page's policy), spends no
+  unneeded proof of work, keeps the keyboard, takes wss:// relays, asks for the lock on open.
+- **Android: the relay's answer acted on:** MQTT.js kept its keepalive on a blob: Worker the page's CSP refuses, so each login hung after the relay's CONNACK; it runs on the page's timers now.
+- **No proof of work spent twice:** a login the relay took (POST /check ok) whose answer was lost counts its proof there; the 24-hour cap's refusal says what happens next.
+- **Typing keeps the keyboard:** a screen drawn again (each poll) no longer takes out the field being typed in, so a phone's keyboard stays open.
+- **Relay picker:** a pasted wss:// (on 443) or mqtts:// address is read as the relay's host name.
+- **App lock (Android):** the screen lock at each start, after a minute away, and before Enrol, Add a contact, codes, Devices and Me; the page hidden until it is confirmed.
+
 ## v0.1.12 — 2026-10-31
 
 - **This release:** chat and contacts fixed on device (bubbles, newest first, files named, pairing moves on); the first

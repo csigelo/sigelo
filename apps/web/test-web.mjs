@@ -307,23 +307,36 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
 // with its Test before OK, the code big, the four words, enrolled), an agent's details and Revoke.
 {
   const vm = await import('node:vm');
-  class Node_ { constructor() { this.parent = null; } }
+  // The focus as a DOM keeps it: a node taken out of its parent (removed, moved, or its parent's children
+  // replaced) takes the focus with it when it holds it, and the focus goes to the body.
+  const focus = { el: null };
+  const lost = (n) => { if (focus.el && (n === focus.el || n.contains?.(focus.el))) focus.el = body; };
+  class Node_ {
+    constructor() { this.parent = null; }
+    get parentNode() { return this.parent; }
+    remove() { const p = this.parent; if (!p) return; p.kids.splice(p.kids.indexOf(this), 1); this.parent = null; lost(this); }
+    before(...n) { this.parent.insert(this, n, 0); }
+    after(...n) { this.parent.insert(this, n, 1); }
+  }
   class Text_ extends Node_ { constructor(t) { super(); this.data = String(t); } get textContent() { return this.data; } }
   class El extends Node_ {
     constructor(tag) { super(); Object.assign(this, { tagName: tag.toUpperCase(), kids: [], attrs: {}, on: {}, style: {}, dataset: {}, className: '', value: '', disabled: false, hidden: false, checked: false }); }
     get textContent() { return this.kids.map((k) => k.textContent).join(''); }
     set textContent(t) { this.kids = [new Text_(t)]; }
-    append(...k) { for (const x of k) { const n = x instanceof Node_ ? x : new Text_(x); n.parent = this; this.kids.push(n); } }
-    replaceChildren(...k) { this.kids = []; this.append(...k); }
+    get childNodes() { return [...this.kids]; }
+    append(...k) { for (const x of k) { const n = x instanceof Node_ ? x : new Text_(x); n.remove(); n.parent = this; this.kids.push(n); } }
+    replaceChildren(...k) { for (const c of this.kids.splice(0)) { c.parent = null; lost(c); } this.append(...k); }
+    insert(ref, k, off) { for (const x of k) { const n = x instanceof Node_ ? x : new Text_(x); n.remove(); n.parent = this; this.kids.splice(this.kids.indexOf(ref) + off, 0, n); if (off) ref = n; } }
+    contains(x) { for (let n = x; n; n = n.parent) if (n === this) return true; return false; }
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return this.attrs[k] ?? null; }
     addEventListener(t, f) { (this.on[t] ??= []).push(f); }
-    focus() {}
+    focus() { focus.el = this; }
     getContext() { return null; }
     all() { return [this, ...this.kids.filter((k) => k instanceof El).flatMap((k) => k.all())]; }
     async click() { const ev = { preventDefault() {}, stopImmediatePropagation() {}, target: this }; for (const f of this.on.click ?? []) await f(ev); }
   }
-  const root = new El('main'), intervals = [];
+  const root = new El('main'), body = new El('body'), intervals = [];
   const W_ = { workers: [{ worker: 0, name: 'phone', did: 'did:sigelo:zPhone000000000000000000000000000000000000000000', original: 'did:sigelo:zPhone000000000000000000000000000000000000000000', rank: 'full', placed: 'device', at: 1761400000, status: 'enrolled', revoked: null, seen: null, tier: null, contact: null, local: 'phone', attested_until: null, enrolling: null }] };
   const calls = [], now = () => Math.floor(Date.now() / 1000);
   const snap = () => ({ seq: 1, now: now(), me: { did: 'did:sigelo:zMe', relay: 'relay.sigelo.ai', online: true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: null, pow: null, pow_done_ms: null, seat: { holder: 'phone', epoch: 1, here: true } },
@@ -343,7 +356,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
     'POST /api/agents/revoke': (b) => { const w = W_.workers.find((x) => x.worker === b.worker); w.status = 'revoked'; w.revoked = now(); return { worker: b.worker, name: w.name, cancelled: false, revoked: w.revoked, forgot: w.contact }; },
   };
   const sandbox = {
-    document: { getElementById: () => root, createElement: (t) => new El(t), createTextNode: (t) => new Text_(t), querySelectorAll: () => [], body: { scrollHeight: 0 } },
+    document: { getElementById: () => root, createElement: (t) => new El(t), createTextNode: (t) => new Text_(t), querySelectorAll: () => [], body, get activeElement() { return focus.el; } },
     Node: Node_, location: { hash: '', pathname: '/', protocol: 'https:' }, history: { replaceState() {} }, sessionStorage: { getItem: () => null, setItem() {} },
     window: { innerHeight: 800, innerWidth: 400, scrollY: 0, scrollTo() {} }, navigator: { clipboard: { writeText: async (t) => { sandbox.copied = t; } } }, confirm: () => true,
     setInterval: (f, ms) => { intervals.push([f, ms]); return intervals.length; }, clearInterval() {}, setTimeout: (f, ms) => setTimeout(f, Math.min(ms ?? 0, 10)), clearTimeout,
@@ -351,6 +364,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
     sigeloLocal: {
       async call(method, path, body) { calls.push([method, path, body]); const f = routes[`${method} ${path.split('?')[0]}`]; return f ? { status: 200, body: JSON.parse(JSON.stringify(f(body ?? {}))) } : { status: 404, body: { error: { check: 'route', message: `no ${method} ${path}` } } }; },
       onChange() {}, mode: () => ({ kind: 'full' }),
+      async unlock() { sandbox.unlocks = (sandbox.unlocks ?? 0) + 1; if (sandbox.refuseUnlock) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); },
     },
   };
   sandbox.globalThis = sandbox;
@@ -366,6 +380,11 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   const foot = root.all().find((e) => e.className === 'inner two');
   ok(foot?.kids.map((k) => k.textContent).join() === 'Enrol my agent,Add a contact' && foot.kids[0].className === 'primary' && foot.kids[1].className !== 'primary' && foot.kids.every((k) => !k.disabled),
     'ui.js: the two-button bar: Enrol my agent (the one primary) and Add a contact, both ready (a keeper, the seat here)');
+  sandbox.refuseUnlock = true;
+  await btn('Add a contact').click(); await settle();
+  ok(root.all().some((e) => e.tagName === 'H1' && e.textContent === 'Agents') && has('the screen lock was not confirmed') && sandbox.unlocks === 1,
+    'app lock: Add a contact asks the screen lock first (local.unlock); not confirmed, the screen stays and says so');
+  sandbox.refuseUnlock = false;
   await btn('Add a contact').click(); await settle();
   ok(root.all().some((e) => e.tagName === 'H1' && e.textContent === 'Add a contact') && has('someone else\'s identity') && has('Not this? Your own agent on another machine') && btn('Make a code to send') && btn('I have their code') && btn('Enrol my agent'),
     'Add a contact: its own screen, what it is for, "Not this?" pointing at Enrol my agent; make a code or enter theirs');
@@ -373,12 +392,23 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   ok(root.all().some((e) => e.tagName === 'H1' && e.textContent === 'Enrol my agent') && has('Your own agent, on another machine, under your identity') && has('Not this? Someone else') && btn('Add a contact'),
     'Enrol my agent: its own screen, what it is for, "Not this?" pointing at Add a contact');
   const nameIn = root.all().find((e) => e.attrs['aria-label'] === 'Agent name');
+  // Typing on a phone: the field keeps the focus (and the keyboard) while the poll draws the screen again.
+  nameIn.focus(); nameIn.value = 'vp';
+  await poll(); await poll();
+  ok(focus.el === nameIn && root.contains(nameIn) && nameIn.value === 'vp' && root.all().filter((e) => e.attrs['aria-label'] === 'Agent name').length === 1,
+    'enrol: the name field being typed in keeps the focus, its place and its text across the screen drawn again (the poll)');
   nameIn.value = 'vps';
   await btn('Friend: low trust, tell me').click(); await settle();
   await btn('Change').click(); await settle();
   ok(has('relay.sigelo.ai') && btn('Show the public registry') && root.all().some((e) => e.className === 'row current'), 'enrol: the relay picker: the one in use marked, the registry on demand');
   await btn('Show the public registry').click(); await settle();
   const custom = root.all().find((e) => e.attrs['aria-label'] === 'Relay host');
+  custom.focus(); custom.value = 'down.exa';
+  await poll();
+  ok(focus.el === custom && root.contains(custom) && custom.value === 'down.exa', 'enrol picker: the relay field keeps the focus inside the picker\'s card across the screen drawn again');
+  custom.value = 'wss://relay.example.org/mqtt';
+  await root.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === 'Test').at(-1).click(); await settle();
+  ok(calls.some(([m, p, b]) => p === '/api/relays/test' && b.relay === 'relay.example.org'), 'enrol picker: a wss:// address on 443 is read as its relay name (the host)');
   custom.value = 'down.example.org';
   await btn('OK').click(); await settle();
   ok(has('NO ANSWER: cannot reach the relay') && btn('Close') && btn('OK') && !root.all().some((e) => e.tagName === 'SPAN' && e.textContent === 'down.example.org') && calls.some(([m, p, b]) => p === '/api/relays/test' && b.relay === 'down.example.org'),

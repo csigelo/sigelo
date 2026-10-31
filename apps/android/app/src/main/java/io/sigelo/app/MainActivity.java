@@ -11,8 +11,10 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
@@ -45,6 +47,12 @@ import java.util.regex.Pattern;
  * video only, after Android's CAMERA permission is asked at the first scan; the image picker for a
  * file input. The menu switches between the two forms (this phone's identity, a computer's page):
  * after a confirmation the other form's storage and keys are erased.
+ *
+ * The app lock: once a form is set and the phone has a screen lock, the screen lock is asked at a
+ * start, at a return after LOCK_AFTER_MS away, and by the page before a screen that shows or spends
+ * the identity (SigeloBridge "unlock", within LOCK_AFTER_MS of the last confirmation: not again).
+ * The page is hidden until it is confirmed; not confirmed, the app goes to the background, locked.
+ * The FULL key's own window in AndroidKeyStore (SigeloBridge.AUTH_SECONDS) stays the inner guard.
  */
 public final class MainActivity extends Activity {
     static final String HOST = "appassets.androidplatform.net";
@@ -53,6 +61,8 @@ public final class MainActivity extends Activity {
 
     private static final int REQ_FILE = 1, REQ_CAMERA = 2, REQ_AUTH = 3;
     private static final int M_RELOAD = 1, M_SWITCH = 2, M_FORGET = 3;
+    /** Away from the screen this long (elapsed time, milliseconds): the screen lock again at the return. */
+    static final long LOCK_AFTER_MS = 60_000;
     /** The page's files by name: letters, digits and . _ @ - / only (vendor/@noble/...). */
     private static final Pattern SAFE_PATH = Pattern.compile("^/[A-Za-z0-9._@/-]{1,200}$");
     private static final Map<String, String> TYPES = new HashMap<>();
@@ -81,6 +91,10 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> pendingFiles;
     private PermissionRequest pendingCamera;
     private Runnable afterAuth, authCancelled;
+    /** elapsedRealtime: when the app left the screen (-1: it has not), when the screen lock was last confirmed (-1: never). */
+    private long awayAt = -1, unlockedAt = -1;
+    /** The page hidden until the screen lock is confirmed. */
+    private boolean locked = true;
 
     static boolean ours(Uri u) {
         return u != null && "https".equals(u.getScheme()) && HOST.equals(u.getHost()) && u.getPort() == -1;
@@ -122,6 +136,47 @@ public final class MainActivity extends Activity {
             return;
         }
         super.onBackPressed();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (awayAt >= 0 && SystemClock.elapsedRealtime() - awayAt >= LOCK_AFTER_MS) locked = true;
+        awayAt = -1;
+        // Our own prompt in front (afterAuth set) hid this activity: its answer comes in onActivityResult.
+        if (locked && afterAuth == null) lockNow();
+    }
+
+    @Override
+    protected void onStop() {
+        if (afterAuth == null) awayAt = SystemClock.elapsedRealtime();
+        super.onStop();
+    }
+
+    /** The page hidden and the screen lock asked. Nothing to ask (no form yet, no screen lock on this phone): open. */
+    private void lockNow() {
+        KeyguardManager km = getSystemService(KeyguardManager.class);
+        if (bridge == null || bridge.mode() == null || km == null || !km.isDeviceSecure()) {
+            showPage();
+            return;
+        }
+        locked = true;
+        if (web != null) web.setVisibility(View.INVISIBLE);
+        // Not confirmed: to the background, still locked; asked again when it comes back (onStart).
+        confirmCredential(this::showPage, () -> moveTaskToBack(true));
+    }
+
+    private void showPage() {
+        locked = false;
+        if (web != null) web.setVisibility(View.VISIBLE);
+    }
+
+    /** The page's ask (SigeloBridge "unlock"), on this thread: ok at once when confirmed within LOCK_AFTER_MS or no screen lock is set. */
+    void unlock(Runnable ok, Runnable no) {
+        KeyguardManager km = getSystemService(KeyguardManager.class);
+        boolean recent = unlockedAt >= 0 && SystemClock.elapsedRealtime() - unlockedAt < LOCK_AFTER_MS;
+        if (recent || km == null || !km.isDeviceSecure()) ok.run();
+        else confirmCredential(ok, no);
     }
 
     @Override
@@ -295,7 +350,19 @@ public final class MainActivity extends Activity {
             no.run();
             return;
         }
-        if (authCancelled != null) authCancelled.run();
+        // A prompt up already (the lock's, say, while the page asks for a key): its one answer serves both.
+        if (afterAuth != null) {
+            Runnable ok0 = afterAuth, no0 = authCancelled;
+            afterAuth = () -> {
+                ok0.run();
+                ok.run();
+            };
+            authCancelled = () -> {
+                no0.run();
+                no.run();
+            };
+            return;
+        }
         afterAuth = ok;
         authCancelled = no;
         try {
@@ -317,6 +384,7 @@ public final class MainActivity extends Activity {
         if (req == REQ_AUTH) {
             Runnable ok = afterAuth, no = authCancelled;
             afterAuth = authCancelled = null;
+            if (result == RESULT_OK) unlockedAt = SystemClock.elapsedRealtime();
             if (result == RESULT_OK && ok != null) ok.run();
             else if (no != null) no.run();
             return;

@@ -135,7 +135,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "contact/carrier.mjs",
-   "sha256": "de40ac2d6e3b205fd56b97183ae0f4a5979d429da763ca6c256437b0f59f111d"
+   "sha256": "1ab7ce7f93a535775970d6c4aed256b0a96defba83037eec7378e415a56477e0"
   },
   "vendor/contact/control.mjs": {
    "from": "contact/control.mjs",
@@ -247,7 +247,7 @@
   },
   "vendor/ui.js": {
    "from": "adapters/moadim/ui.js",
-   "sha256": "595edae99fa42c090eef74eefd25238150b3008787308812f1f04615838a4ec1"
+   "sha256": "503a77bde0190425719d3cf2321929c68eb92ff215a84b6e8db4bb088d9ae7e7"
   }
  }
 }

@@ -27,6 +27,9 @@
 //                                                                 by the shell after `clear` seconds (stagenet words only)
 //   → {op:"share", id, text}                       ← {id}         the system's share sheet with a ready-to-send message
 //                                                                 (a pairing or enrol code and its instructions link)
+//   → {op:"unlock", id}                            ← {id}         the screen lock confirmed, before a screen that shows or
+//                                                                 spends the identity (not asked again within a minute of
+//                                                                 the last; no screen lock set: at once), else cancelled
 //   any ← {id, error:{check, message}}
 // https: https:// to any host; http:// only to a private IPv4 address (a computer's `ui --remote`
 // on the LAN, sealed in the page). tls: certificate and host name checked by the system's trust
@@ -39,7 +42,7 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share']);
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share', 'unlock']);
 export const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); };
 export const unb64 = (s) => { const t = atob(s), o = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) o[i] = t.charCodeAt(i); return o; };
 
@@ -118,6 +121,8 @@ function makeBridge(info, port) {
     /** Text on the clipboard, marked sensitive, emptied by the shell after `clear` seconds (1 to 300). */
     async clipCopy(text, { clear = 60 } = {}) { await request('clip-copy', { text: String(text), clear }); },
     async share(text) { await request('share', { text: String(text) }); },
+    /** The screen lock (MainActivity.unlock): resolves once confirmed; refused `cancelled`. */
+    async unlock() { await request('unlock'); },
   });
 }
 
@@ -141,7 +146,7 @@ export function bridgeFetch(bridge) {
 /**
  * MQTT through the shell: mqtts://host[:8883] is the TLS stream itself, wss://host[:443]/path the
  * WebSocket framing over it (ws-over-stream.mjs). MQTT.js's browser build takes either as its
- * WebSocket (createWebsocket). Nothing else: no plain MQTT, no ws://.
+ * WebSocket (createWebsocket). Nothing else: no plain MQTT, no ws://. Timers native (platform-web.mjs pageMqtt says why).
  */
 export function bridgeMqtt(bridge, mqttLib) {
   const connect = mqttLib?.connect ?? mqttLib?.default?.connect;
@@ -158,7 +163,7 @@ export function bridgeMqtt(bridge, mqttLib) {
       at = url;
       createWebsocket = (_url, protocols) => wsOverStream(bridge.tls(host, Number(u.port || 443)), { url, protocols, maxPayload: wsOptions?.maxPayload });
     } else fail('connect', `${u.protocol}// is not carried by this app: mqtts:// or wss:// only`);
-    return connect(at, { ...rest, forceNativeWebSocket: true, createWebsocket });
+    return connect(at, { ...rest, forceNativeWebSocket: true, timerVariant: 'native', createWebsocket });
   };
 }
 

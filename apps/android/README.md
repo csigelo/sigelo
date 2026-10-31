@@ -50,6 +50,10 @@ Three AES-256-GCM keys made in AndroidKeyStore, which never leave it:
 | `sigelo-identity-full` | the FULL identity file and, after a restore from seed, the keeper root (its own AAD); usable 5 minutes after you confirm the screen lock (no screen lock, no FULL) |
 | `sigelo-control` | a computer's `SIGELO:UI:` text |
 
+The app lock: with a screen lock set, the app asks it at each start, at a return after a minute
+away, and before Enrol my agent, Add a contact, a code, Devices and Me (not again within a minute of
+the last); the page stays hidden until it is confirmed. The FULL key's 5 minutes stay the inner guard.
+
 The sealed files are in the app's private storage, with the contacts, ratchets and history. The seed
 is opened at start and lives in the app's memory while it runs. Nothing is in a backup or moved to a
 new phone. THREAT-MODEL §3.12 says what this does not defend.

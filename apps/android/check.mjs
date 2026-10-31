@@ -197,6 +197,10 @@ ok(['setJavaScriptEnabled(true)', 'setAllowFileAccess(false)', 'MIXED_CONTENT_NE
 ok(/static final String HOST = "appassets\.androidplatform\.net"/.test(ma) && /shouldInterceptRequest[\s\S]*?return serve\(r\)/.test(ma) && /if \(!ours\(u\)\) return refuse\(404/.test(ma),
   'WebView: the page from https://appassets.androidplatform.net/ (intercepted), anything else refused, never fetched');
 ok(/RESOURCE_VIDEO_CAPTURE\.equals\(res\[0\]\)/.test(ma) && /!video \|\| !ours\(req\.getOrigin\(\)\)/.test(ma) && /requestPermissions\(new String\[\] \{Manifest\.permission\.CAMERA\}/.test(ma), 'camera: video only, our origin only, CAMERA asked at the first request');
+ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\s\S]*?LOCK_AFTER_MS\) locked = true;[\s\S]*?if \(locked && afterAuth == null\) lockNow\(\);/.test(ma)
+  && /protected void onStop\(\) \{\s*if \(afterAuth == null\) awayAt = SystemClock\.elapsedRealtime\(\);/.test(ma) && /isDeviceSecure\(\)/.test(ma) && /setVisibility\(View\.INVISIBLE\)/.test(ma)
+  && /if \(afterAuth != null\) \{/.test(ma) && !/authCancelled\.run\(\);/.test(ma) && /activity\.unlock\(/.test(java['SigeloBridge.java']),
+  'app lock: the screen lock at a start and after LOCK_AFTER_MS away, the page hidden until confirmed; asked by the page (unlock); a second ask joins the prompt up, never cancels it');
 ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooserParams\.parseResult/.test(ma), 'files: a file input opens the system picker');
 ok(/r\.hasGesture\(\)/.test(ma) && /ACTION_VIEW/.test(ma) && /CATEGORY_BROWSABLE/.test(ma), 'links: elsewhere opens in the browser, on a tap');
 ok(/setEndpointIdentificationAlgorithm\("HTTPS"\)/.test(java['SigeloBridge.java']) && /getDefaultHostnameVerifier\(\)\.verify\(host/.test(java['SigeloBridge.java']) && /setInstanceFollowRedirects\(false\)/.test(java['SigeloBridge.java'])

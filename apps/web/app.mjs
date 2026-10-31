@@ -52,6 +52,8 @@ globalThis.sigeloLocal = Object.freeze({
   mode: () => router?.mode() ?? null,
   // A ready-to-send message through the Android share sheet; without the shell, ui.js copies it.
   async share(text) { if (!bridge) throw new Error('no share sheet'); await bridge.share(text); },
+  // The screen lock before a screen that shows or spends the identity (ui.js GUARDED); a page has none.
+  async unlock() { if (bridge) await bridge.unlock(); },
 });
 
 // ---- no identity yet: the first run, alone on the screen (ui.js's page hidden until there is one)
