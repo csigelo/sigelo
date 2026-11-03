@@ -10,20 +10,26 @@
 //             bytes at every call: `created` pinned, the nonce from the key (SPEC §4 `nonce`),
 //             rotations m → m+1 voluntary with iat 0. A second copy of a rotation is the same
 //             rotation, never a fork.
-//   operator: issue({ carrier, file, i, n, name, keeper, relay? })  → a short code (short.mjs, 10
-//             minutes, once) for a normal invite (at `relay`, else the carrier's), and a pending
-//             enrolment kept in `file` for 24 hours, with the operator attestation signed now (`days`,
-//             ≤ 90; a device's 14)
+//   operator: issue({ carrier, file, i, n, name, keeper, relay?, operatorName?, started? })  → a short
+//             code (short.mjs, 10 minutes, once) for a normal invite (at `relay`, else the carrier's), and
+//             a pending enrolment kept in `file` for 24 hours, with the operator attestation signed now
+//             (`days`, ≤ 90; a device's 14). operatorName: how the worker files its operator (default
+//             "operator"); started: the carrier's (a search the human started, carrier.mjs POW_SEARCHES);
+//             confirmWords: kept with it, handed to confirm() as `ask` (the optional words switch)
 //   machine:  accept({ carrier, file, code, temp })  → `carrier` is a TEMPORARY identity (`temp`, its
 //             file): it fetches the code, pairs, and once paired sends a request, label LABEL_ENROL,
 //             {v, typ: "enrol-request", proof}
 //   both:     complete({ carrier, file, wait, until, keeper | place, temp, confirm }) → one inbox or more:
 //             the operator answers a request whose proof matches an enrolment it issued with the
 //             worker's identity, label LABEL_IDENTITY, end to end, once per enrolment (after
-//             confirm({ words, … }) says yes, when given: the device words gate), with a long
+//             confirm({ words, … }) says yes, when given: the device words gate, or the operator's
+//             optional "confirm the four words" switch; null: not yet, the request comes back in
+//             `held`), with a long
 //             invite the worker accepts; once the worker has paired, the operator files it (observe:
 //             ours by the attestation; tier own unless the operator chose one) and forgets the
-//             temporary DID. The machine takes the identity only from the DID it paired with
+//             temporary DID. `verified`: the worker that paired is the DID derived HERE from K (own
+//             enrolment needs no four words: the operator's side checks the result itself; THREAT-MODEL
+//             §2.11 says what is left). The machine takes the identity only from the DID it paired with
 //             through the code, checks it (checkIdentity)
 //             and hands it to place(), which writes the file and pairs as the worker; then it
 //             forgets the operator on the temporary identity, which gives its mailboxes up.
@@ -155,8 +161,11 @@ export function matches(content, key, pair) {
   return d === 0;
 }
 
-/** The message that carries the worker: its identity file and a long invite to pair as it. */
-export const identityMessage = (identity, invite, worker = null) => ({ v: ENROL_V, typ: TYP_IDENTITY, identity, invite, worker });
+/** The message that carries the worker: its identity file, a long invite to pair as it, and how it files its operator (optional). */
+export const identityMessage = (identity, invite, worker = null, operatorName = null) => ({ v: ENROL_V, typ: TYP_IDENTITY, identity, invite, worker, ...(operatorName !== null && { operator_name: operatorName }) });
+// The operator's label for itself, as the worker files it: a contact name (1 to 64, no control or bidi characters).
+const LABEL_BAD = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+export const operatorLabel = (v) => (typeof v === 'string' && v.trim() !== '' && [...v.trim()].length <= 64 && !LABEL_BAD.test(v) ? v.trim() : null);
 
 /**
  * The machine: an identity message from `operator` (the contact store's record of whoever it paired
@@ -186,7 +195,8 @@ export function checkIdentity(content, { operator, relay, now }) {
   try { code = readCode(content.invite, now); } catch (e) { fail('enrol_invite', `the worker's invite does not parse (${e.message})`); }
   if (code.did !== operator.current_did) fail('enrol_invite', `the worker's invite names ${code.did}, not the operator ${operator.current_did}`);
   const worker = Number.isSafeInteger(content.worker) && content.worker >= 0 ? content.worker : null;
-  return { identity: { v: 'sigelo/0', secret: x.secret, genesis: x.genesis, rotations: x.rotations, attestations: [{ body: b, sig: a.sig }], issuers: x.issuers }, did: r.did, original: r.chain[0], invite: content.invite, worker, exp: b.exp };
+  return { identity: { v: 'sigelo/0', secret: x.secret, genesis: x.genesis, rotations: x.rotations, attestations: [{ body: b, sig: a.sig }], issuers: x.issuers }, did: r.did, original: r.chain[0], invite: content.invite, worker, exp: b.exp,
+    operator_name: operatorLabel(content.operator_name) ?? 'operator' };
 }
 
 // ---------------------------------------------------------------- the pending file
@@ -244,17 +254,18 @@ const checkKeeper = (k) => {
  * stands for (24 hours). The operator attestation is signed here, at derivation time.
  * → { short, short_exp, code, id, did (the worker's current DID), original }.
  */
-export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR_DAYS, relay }) {
+export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR_DAYS, relay, operatorName, started, confirmWords = false }) {
   checkKeeper(keeper);
+  if (operatorName !== undefined && operatorName !== null && operatorLabel(operatorName) === null) fail('enrol', 'operatorName: 1 to 64 characters, no control characters');
   const w = workerChain(keeper.K, i, n, keeper.recovery);
   // The temporary identity's contact, named apart from the worker's (forgotten once it has paired).
-  const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true, ...(relay !== undefined && relay !== carrier.relay && { relay }) });
+  const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true, ...(relay !== undefined && relay !== carrier.relay && { relay }), ...(started !== undefined && { started }) });
   const now = nowOf(carrier), code = readCode(r.code, now), me = self(carrier, now);
   const attestation = operatorAttestation({ sign: me.sign, iss: me.did, sub: w.original, relay: code.relay, now, days });
   const old = liveHolding(carrier, w.original);
   pendingOf(carrier)(file, now, (s) => {
     s.issued[code.nonce] = { key: bytesToHex(enrolKey(code.secret)), i, n, name: name ?? null, did: w.did, original: w.original, old_pair: old ? pairOf(old) : null,
-      relay: code.relay, exp: now + PENDING_TTL, attestation, issuer: me.genesis };
+      relay: code.relay, exp: now + PENDING_TTL, attestation, issuer: me.genesis, ...(operatorLabel(operatorName) !== null && { operator_name: operatorLabel(operatorName) }), ...(confirmWords && { confirm_words: true }) };
   });
   return { ...r, id: code.nonce, did: w.did, original: w.original };
 }
@@ -287,7 +298,7 @@ export async function accept({ carrier, file, code: text, name, wait = 10, temp 
  */
 export async function complete({ carrier, file, wait = 0, until = () => false, keeper = null, place = null, temp = null, confirm = null }) {
   if (keeper) checkKeeper(keeper);
-  const out = { delivered: [], placed: [], refused: [], sent: [], rest: { messages: [], events: [], dropped: {} } };
+  const out = { delivered: [], placed: [], refused: [], sent: [], held: [], rest: { messages: [], events: [], dropped: {} } };
   const end = Date.now() + wait * 1000;
   for (let first = true; ; first = false) {
     if (first && place) await sendRequests(carrier, file, temp, out, true);
@@ -354,12 +365,16 @@ async function onRequest(carrier, file, keeper, m, out, confirm) {
   const { id, e } = r;
   // The words gate (devices.md §5.1): the human compares the pairing's four words on this side
   // before the key goes. Declined: the enrolment is dropped, nothing is ever sent for it.
-  if (confirm && !e.confirmed && !(await confirm({ id, name: e.name, i: e.i, did: e.did, temp: c.did, words: fingerprint(pair) }))) {
+  // An enrolment made with the switch on is never sent unasked: without a confirm() here, it waits.
+  const said = e.confirmed ? true : confirm ? await confirm({ id, name: e.name, i: e.i, did: e.did, temp: c.did, words: fingerprint(pair), ask: e.confirm_words === true }) : e.confirm_words ? null : true;
+  // Not yet (the page waits for the human's tap): the request is kept, nothing goes.
+  if (said === null || said === undefined) { out.held.push(m); return; }
+  if (!said) {
     pendingOf(carrier)(file, nowOf(carrier), (s) => { delete s.issued[id]; });
     out.refused.push({ check: 'device_words', detail: `the four words of ${who} were not confirmed: worker ${e.i} not sent, the code is dropped; make a new one`, from: m.from });
     return;
   }
-  if (confirm) pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].confirmed = true; });
+  if (confirm || e.confirm_words) pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].confirmed = true; });
   try {
     // The worker's own invite, made once per enrolment: a repeated request gets the same.
     let invite = e.invite;
@@ -369,7 +384,7 @@ async function onRequest(carrier, file, keeper, m, out, confirm) {
     }
     const identity = workerIdentity({ K: keeper.K, i: e.i, n: e.n, recovery: keeper.recovery, attestation: e.attestation, issuer: e.issuer });
     if (didOf([identity.genesis, ...identity.rotations.map((x) => x.next_genesis)].at(-1)) !== e.did) fail('keeper', `worker ${e.i} derives to another DID than at enrol: the keeper root changed since (sigelo-agent keeper)`);
-    const sent = await carrier.send(c.did, identityMessage(identity, invite, e.i), { label: LABEL_IDENTITY });
+    const sent = await carrier.send(c.did, identityMessage(identity, invite, e.i, e.operator_name ?? null), { label: LABEL_IDENTITY });
     out.delivered.push({ id, name: e.name, temp: c.did, did: e.did, status: sent.status });
   } catch (x) {
     if (!(x instanceof MsgError)) throw x;
@@ -387,10 +402,12 @@ async function settle(carrier, file, keeper, out) {
     const identity = workerIdentity({ K: keeper.K, i: e.i, n: e.n, recovery: keeper.recovery, attestation: e.attestation, issuer: e.issuer });
     const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: identity.genesis, rotations: identity.rotations, bindings: [], attestations: identity.attestations, issuers: identity.issuers };
     const seen = carrier.observe(bundle), tier = seen?.tier ?? null, ours = seen?.ours ?? null;
+    // Derived here from K, not read from the pending file: the DID that paired IS worker i of these words.
+    const verified = c.did === didOf(identity.genesis) && c.did === workerChain(keeper.K, e.i, 0, keeper.recovery).original;
     let released = false;
     try { released = (await carrier.forget(e.temp)).released; } catch (x) { if (!(x instanceof MsgError) || x.check !== 'not_contact') throw x; }
     pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].done = nowOf(carrier); });
-    out.placed.push({ id, name: c.name, did: c.current_did, original: c.did, i: e.i, n: e.n, ours, tier, temp: e.temp, released, exp: e.attestation.body.exp });
+    out.placed.push({ id, name: c.name, did: c.current_did, original: c.did, i: e.i, n: e.n, ours, tier, temp: e.temp, released, exp: e.attestation.body.exp, verified, words: c.pair_key ? fingerprint(pairOf(c)) : null });
   }
 }
 

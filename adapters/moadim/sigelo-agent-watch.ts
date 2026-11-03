@@ -22,6 +22,14 @@
  * them by code (handle) at each `link` or `paired` event, each round and each kick (links accept),
  * and says what it did. An introduction from a contact that is not quiet here → --on-notice CMD with
  * {type: "link", id, from, name, peer, peer_name, purpose, note} (purpose and note are data).
+ * Groups (GROUPS.md): group messages are checked by code at start, at each `group` event and each round
+ * (the creator carries copies on, rosters are filed, notices said), then handed on by the sender's tier
+ * as messages are: own → --on-message (the item as inbox gives it, SIGELO_TYPE group, SIGELO_GROUP its
+ * gid; taken once CMD exits 0), friend → --on-notice {type: "group", group, from, name, tier, count}.
+ * Transfers (TRANSFER.md, contact/transfer-node.mjs): the watcher holds the session, so its engine makes
+ * and answers the offers and moves the bytes, at each `transfer` event, each round and each kick (a CLI
+ * transfer verb beside it). A file offered → a line, or --on-notice CMD with {type: "transfer", id, from,
+ * name, file, size}; nothing is written before the operator's `transfer accept`.
  * Devices (DEVICES.md): device messages are handled by code at each `device` event and each round; on
  * the operator's file the watcher starts only at the seat, and stops once it gave the seat away.
  */
@@ -30,7 +38,8 @@ import { existsSync, rmSync, unwatchFile, watchFile } from 'node:fs';
 import { resolve } from 'node:path';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
-import { actingFile, contactLib, debug, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
+import { actingFile, contactLib, contactModule, debug, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
+import type { GroupItem, GroupLib } from './sigelo-agent-group.ts';
 import { takeLock } from './sigelo-agent-ui.ts';
 import { deviceRound, seatGate } from './sigelo-agent-device.ts';
 
@@ -160,7 +169,48 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
       if (r.gave !== undefined) { say(`the seat went to ${r.gave}: this watcher stops`); endWith(`seat: ${r.gave}`); }
       if (r.wiped) endWith('wiped');
     });
+    // Groups: by code (filed, carried on, rosters taken), then pushed by the sender's tier as messages are:
+    // own → --on-message with the item as inbox gives it (group, mid, name, role, tier, note "not your
+    // operator"…), taken once CMD exits 0; friend → --on-notice {type: "group", group, from, name, tier,
+    // count}, the messages left for inbox; quiet → nothing. Each item handed on once per run.
+    const pushed = new Set<string>();
+    const groupTurn = (): void => later(async () => {
+      const GR = await import('./sigelo-agent-group.ts');
+      await GR.groupRound(carrier, path, { messages: [], events: [], dropped: {} }, { tiers: [], said: say });
+      const G = await contactModule<GroupLib>('group'), file = G.groupsPath(path);
+      const fresh = G.unread({ carrier, file }).filter((i) => !pushed.has(`${i.group.gid}.${i.mid}`));
+      const friends = new Map<string, { group: GroupItem['group']; from: string; name: string; count: number }>();
+      for (const i of fresh) {
+        pushed.add(`${i.group.gid}.${i.mid}`);
+        if (i.tier === 'own') {
+          if (o.onMessage === undefined) { say(`own ${i.name} in ${i.group.name} (${i.role}${i.note ? `, ${i.note}` : ''}): ${textOf(i as unknown as Item)}`); continue; }
+          const env = { ...base, SIGELO_TYPE: 'group', SIGELO_FROM: i.from, SIGELO_NAME: i.name, SIGELO_TIER: i.tier, SIGELO_GROUP: i.group.gid };
+          if (await hook(o.onMessage, i, env)) G.unread({ carrier, file, pick: (x) => x.group.gid === i.group.gid && x.mid === i.mid });
+        } else if (i.tier === 'friend') {
+          const k = `${i.group.gid} ${i.from}`, f = friends.get(k);
+          friends.set(k, { group: i.group, from: i.from, name: i.name, count: (f?.count ?? 0) + 1 });
+        }
+      }
+      for (const f of friends.values()) {
+        if (o.onNotice === undefined) say(`friend ${f.name} in ${f.group.name}: ${f.count} new message${f.count === 1 ? '' : 's'} (not shown: sigelo-agent inbox)`);
+        else await hook(o.onNotice, { type: 'group', group: f.group, from: f.from, name: f.name, tier: 'friend', count: f.count }, { ...base, SIGELO_TYPE: 'group', SIGELO_FROM: f.from, SIGELO_NAME: f.name, SIGELO_TIER: 'friend', SIGELO_GROUP: f.group.gid });
+      }
+    });
+    // Transfers: the engine of this session (made below, once the carrier is).
+    let engine: { kick(): Promise<void>; close(): Promise<void> } | null = null;
+    const onTransfer = (e: Ev): void => {
+      const what = String(e['what'] ?? '');
+      if (what === 'asked') {
+        const n = { type: 'transfer', id: e['id'], from: e['from'], name: e['contact'], file: e['name'], size: e['size'] };
+        if (o.onNotice === undefined) say(`transfer ${String(e['id'])}: ${String(e['contact'])} offers ${String(e['name'])} (${(Number(e['size']) / 1e6).toFixed(1)} MB): sigelo-agent transfer accept ${String(e['id'])} | decline ${String(e['id'])}`);
+        else later(() => hook(o.onNotice!, n, { ...base, SIGELO_TYPE: 'transfer', SIGELO_FROM: String(e['from']), SIGELO_NAME: String(e['contact']) }));
+      } else if (['done', 'failed', 'declined', 'cancelled', 'interrupted'].includes(what)) {
+        say(`transfer ${String(e['id'])}: ${what}${e['reason'] ? ` (${String(e['reason'])})` : ''}${e['path'] ? ` → ${String(e['path'])}` : ''}${typeof e['rate'] === 'number' ? `, ${(e['rate'] as number).toFixed(2)} MB/s` : ''}`);
+      }
+    };
     const onEvent = (e: Ev): void => {
+      if (e.type === 'transfer') void engine?.kick();
+      if (e.type === 'group') groupTurn();
       if (e.type === 'link' || e.type === 'paired') linkRound();
       if (e.type === 'device') deviceTurn();
       switch (e.type) {
@@ -177,15 +227,18 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
       identity: () => { let s; try { s = id.load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: id.bundleOf(s) }; },
       ...lib.pathsFor(path), ...lib.optionsFromEnv(), backoff: WATCH_BACKOFF, ...o.carrier, keep: true, onEvent,
     }) as unknown as Car;
+    const X = await (await import('./sigelo-agent-contact.ts')).contactModule<{ Engine: new (o: object) => { kick(): Promise<void>; close(): Promise<void> } }>('transfer-node');
+    engine = new X.Engine({ carrier, identity: path, onEvent: onTransfer });
     // What waited before this start: own pushed, one notice per friend.
     for (const m of carrier.peek()) if (m.tier === 'own' || m.tier === 'friend') later(() => onMessage(m));
     await carrier.start();
     linkRound();
     deviceTurn();
-    const timer = setInterval(() => { carrier.sync().then(() => { linkRound(); deviceTurn(); }, () => {}); }, o.syncMs ?? SYNC_MS);
+    groupTurn();
+    const timer = setInterval(() => { carrier.sync().then(() => { linkRound(); deviceTurn(); groupTurn(); void engine?.kick(); }, () => {}); }, o.syncMs ?? SYNC_MS);
     timer.unref();
     // A CLI or MCP send beside us queued something: send it now.
-    const kicks = kickPath(path), onKick = (): void => { carrier.sync().then(linkRound, () => {}); };
+    const kicks = kickPath(path), onKick = (): void => { void engine?.kick(); carrier.sync().then(linkRound, () => {}); };
     watchFile(kicks, { interval: KICK_MS, persistent: false }, onKick);
     let closed = false;
     return {
@@ -198,7 +251,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
         unwatchFile(kicks, onKick);
         rmSync(kicks, { force: true });
         if (noticeTimer) clearTimeout(noticeTimer);
-        try { await carrier.stop(); await queue; } finally { release(); }
+        try { await engine?.close(); await carrier.stop(); await queue; } finally { release(); }
       },
     };
   } catch (e) { release(); throw e; }

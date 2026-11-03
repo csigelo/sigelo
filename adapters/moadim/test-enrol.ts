@@ -137,8 +137,12 @@ try {
   const res = JSON.parse(e1.m.stdout || '{}') as { did: string; operator: string; worker: number };
   ok('init --enrol: exit 0; the server is worker 0, the DID derived directly from the same root', e1.m.status === 0 && res.did === w0.did && res.worker === 0 && res.operator === opDid, e1.m.stderr);
   ok('the server says it: paired, then replaced its identity with the operator\'s', e1.m.stderr.includes(`replaced this machine's identity with the operator's: worker 0 (${w0.did}), run by ${opDid}`), e1.m.stderr);
-  ok('enrol --wait: exit 0, "paired, then replaced its identity with yours: worker 0", the same four words on both sides', e1.op.status === 0
-    && e1.op.stderr.includes(`paired, then replaced its identity with yours: worker 0 (${w0.did}), run by you`) && words4(e1.op.stderr) !== undefined && words4(e1.op.stderr) === words4(e1.m.stderr), e1.op.stderr);
+  ok('enrol --wait: exit 0, "paired, then replaced its identity with yours: worker 0", checked by its derived DID; no four words asked on either side', e1.op.status === 0
+    && e1.op.stderr.includes(`paired, then replaced its identity with yours: worker 0 (${w0.did}), run by you`) && e1.op.stderr.includes('Checked: its DID is worker 0 derived here from your words')
+    && words4(e1.op.stderr) === undefined && words4(e1.m.stderr) === undefined, e1.op.stderr + e1.m.stderr);
+  const uiData = JSON.parse(readFileSync(human.replace(/\.json$/, '.ui.json'), 'utf8')) as { checked: Record<string, string> };
+  ok('the worker is words-checked for the page (ui.json checked), without a tap', typeof uiData.checked[w0.did] === 'string' && uiData.checked[w0.did]!.length === 32, JSON.stringify(uiData));
+  ok('init --enrol --name: not the operator\'s name any more (said so)', e1.m.stderr.includes('--name "owner" is not used'), e1.m.stderr);
   const sfile = agentFile(SRV), stored = JSON.parse(readFileSync(sfile, 'utf8')) as { secret: string; genesis: { recovery: string } };
   ok('the server\'s identity file: worker 0\'s derived key, 0600, committing to the seed\'s recovery key', stored.secret === Buffer.from(w0.seed).toString('hex') && (statSync(sfile).mode & 0o777) === 0o600 && stored.genesis.recovery === RC);
   const b = await cli(SRV, ['bundle']);
@@ -151,7 +155,7 @@ try {
   const l0 = (await listOp()).list.find((x) => x.did === w0.did);
   ok('contacts JSON: the default enrolment is ours, tier own (detected)', l0?.ours === true && l0.tier === 'own' && l0.tier_by === 'auto' && e1.op.stderr.includes('vps: yours (worker 0), trusted'), JSON.stringify(l0));
   const sc = contactsOf(sfile);
-  ok('the server\'s contacts start with the operator (own); no temporary file is left', Object.keys(sc).join() === opDid && sc[opDid]!.tier === 'own'
+  ok('the server\'s contacts start with the operator (own), filed as "operator", not the --name given; no temporary file is left', Object.keys(sc).join() === opDid && sc[opDid]!.tier === 'own' && sc[opDid]!.name === 'operator'
     && !readdirSync(join(SRV, '.config', 'moadim')).some((f) => f.includes('.enrol-')), readdirSync(join(SRV, '.config', 'moadim')).join());
   const again = await cli(OTHER, ['init', '--enrol', e1.code, '--wait', '2']);
   ok('the same code a second time: exit 1, park_unknown, no identity left behind', again.status === 1 && again.stderr.includes('park_unknown') && !existsSync(agentFile(OTHER))
@@ -215,7 +219,9 @@ try {
 
   // Low trust at enrolment: ours by key, its messages not pushed (--tier friend|quiet, tier_by owner).
   ok('enrol --tier own: refused, exit 2 (own is the default)', (await cli(OP, ['enrol', '--name', 'x', '--tier', 'own'])).status === 2);
-  const w4 = derived(4, 0), e6 = await enrolOn(SIXTH, ['--name', 'reviewer', '--tier', 'friend']);
+  ok('enrol --confirm-words without a terminal: refused, exit 2, nothing issued', ((r) => r.status === 2 && r.stderr.includes('/dev/tty'))(await cli(OP, ['enrol', '--name', 'asked', '--confirm-words'])));
+  const w4 = derived(4, 0), e6 = await enrolOn(SIXTH, ['--name', 'reviewer', '--tier', 'friend', '--operator-name', 'boss']);
+  ok('enrol --operator-name boss: the worker files its operator as "boss"', contactsOf(agentFile(SIXTH))[opDid]?.name === 'boss', JSON.stringify(contactsOf(agentFile(SIXTH))));
   const r6 = JSON.parse(e6.op.stdout.split('\n').slice(1).join('\n') || '{}') as { ours?: boolean; tier?: string; did?: string };
   const l4 = (await listOp()), c4 = l4.list.find((x) => x.did === w4.did);
   ok('enrol --tier friend: the contact is ours, tier friend, tier_by owner; the output says both', e6.op.status === 0 && e6.m.status === 0 && r6.did === w4.did && r6.ours === true && r6.tier === 'friend'

@@ -50,12 +50,13 @@ const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, numb
   accept: { flags: { '--name': true, '--wait': true, '--tier': true, '--relay': true }, args: [1, Infinity] },
   contacts: { flags: {}, args: [0, 0] },
   tier: { flags: {}, args: [2, 2] },
+  presence: { flags: {}, args: [2, 2] },
   send: { flags: { '--label': true, '--lines': false }, args: [2, Infinity] },
   'send-file': { flags: {}, args: [2, 2] },
   inbox: { flags: { '--wait': true, '--expect': false, '--tier': true, '--quiet-too': false }, args: [0, 0] },
   history: { flags: { '--since': true }, args: [0, 0] },
   forget: { flags: {}, args: [1, 1] },
-  link: { flags: { '--purpose': true, '--tier-a': true, '--tier-b': true, '--days': true, '--wait': true, '--finish': false, '--note': true, '--relay': true }, args: [0, 2] },
+  link: { flags: { '--purpose': true, '--tier-a': true, '--tier-b': true, '--days': true, '--wait': true, '--finish': false, '--note': true, '--relay': true, '--name-a': true, '--name-b': true }, args: [0, 2] },
   links: { flags: { '--tell': false, '--tier': true, '--days': true }, args: [0, 2] },
   unlink: { flags: {}, args: [1, 1] },
   pro: { flags: {}, args: [2, 4] },
@@ -80,10 +81,13 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
                                            tier: how far you trust it), pending codes and answers
   tier <did|name> own|friend|quiet         own: messages pushed in full (watch --on-message); friend: a notice
                                            only; quiet: nothing, read when you ask
+  presence allow|deny <did|name>           may that contact see when this agent is online (off by default;
+                                           own agents always): a green dot, or "last seen"
   send <did|name> <text|-> [--label <l>]   an encrypted message; - reads it from stdin
        [--lines]                           with -: each line of stdin is a message, one login
   send-file <did|name> <path>              a file, at most 8 MiB, end-to-end encrypted, one login;
-                                           inbox saves one received to <identity>.files/<contact>-<id>/ (0600)
+                                           inbox saves one received to <identity>.files/<contact>-<id>/ (0600);
+                                           larger (16 GiB), direct or over Tor: sigelo-agent transfer send
   inbox [--wait <s>] [--expect]            messages and events since the last call (shown once), waiting up
        [--tier own,friend] [--quiet-too]   to 0 to 300 s for a message; --expect: exit 3 if none came;
                                            --tier: only from those tiers, the rest stay; --quiet-too: and quiet
@@ -94,6 +98,7 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
        [--tier-a|--tier-b friend|quiet]    contact of yours (external: B's operator decides; 30 days, --note
        [--note <text>] [--relay <host>]    ≤ 280 for it); purpose ≤ 120; tier: how A files B, how B files A
        [--wait <s>] | link --finish        (own never); wait 0 to 300 s (default 120); --finish: pending steps
+       [--name-a <n>] [--name-b <n>]       what B files A as, what A files B as (default: your contact names)
   links                                    this identity's links, introductions waiting for you, allow rules
   links accept|refuse <id> [--tell]        an introduction: accept (quiet, or --tier friend), or refuse
                                            (silent; --tell: the introducer learns it)
@@ -132,6 +137,8 @@ interface Carrier {
   accept(code: string, o: { name?: string; wait?: number; tier?: string; relay?: string }): Promise<{ status?: string; did?: string; contact?: Contact }>;
   contacts(): { contacts: Contact[]; failed?: Failed[] };
   setTier(who: string, tier: string): { did: string; name: string; tier: string; ours?: boolean };
+  setPresence(who: string, allow: boolean): { did: string; name: string; presence: string };
+  sync(o?: { wait?: number }): Promise<void>;
   send(to: string, text: string, o: { label?: string; local?: boolean }): Promise<unknown>;
   sendAll(to: string, texts: string[], o: { label?: string; local?: boolean }): Promise<{ status: string }[]>;
   sendFile(to: string, path: string, o?: { local?: boolean }): Promise<{ status: string; name: string; detail?: string; file: FileSent }>;
@@ -150,7 +157,8 @@ interface CarrierLib {
   readCode(text: string, now: number, how?: string): { did: string };
   keepLong(e: unknown, long: string): unknown;
 }
-interface Contact { name: string; did: string; re_pair?: string | null; fingerprint?: string | null; ours?: boolean; tier?: string; link?: { id: string; purpose: string; expires: number | null } | null }
+interface Contact { name: string; did: string; re_pair?: string | null; fingerprint?: string | null; ours?: boolean; tier?: string; link?: { id: string; purpose: string; expires: number | null } | null;
+  presence?: string; online?: boolean | null; last_seen?: number | null }
 interface FileSent { name: string; size: number; sha256: string; chunks: number }
 /** A file received whole (carrier.mjs #onFile), as an inbox item. */
 interface FileItem { type: 'file'; contact?: string | null; from: string; name: string; size: number; path: string }
@@ -165,7 +173,7 @@ export interface LinkOut { linked: { id: string; name?: string; a_name?: string;
 export interface LinkRec { id: string; a: string; b: string; a_name: string; b_name: string; kind?: string; purpose: string; status: string; step?: string; check: string | null; expires: number | null }
 export interface LinkLib {
   linksPath(identityFile: string): string;
-  link(o: { carrier: unknown; file: string; a: string; b: string; purpose: string; tierA?: string; tierB?: string; days?: number; note?: string; relay?: string }): Promise<LinkRec>;
+  link(o: { carrier: unknown; file: string; a: string; b: string; purpose: string; tierA?: string; tierB?: string; days?: number; note?: string; relay?: string; nameA?: string; nameB?: string }): Promise<LinkRec>;
   unlink(o: { carrier: unknown; file: string; id: string }): Promise<{ id: string; status: string; role: string; name?: string; forgot?: boolean }>;
   list(o: { carrier: unknown; file: string }): { links: { id: string; name: string; purpose: string; tier: string; expires: number | null }[]; made: LinkRec[];
     received: { id: string; from: string; name: string | null; peer: string; peer_name: string | null; purpose: string; note: string | null; exp: number; answer?: string }[];
@@ -250,7 +258,7 @@ export async function contactDependency(spec: string): Promise<unknown> {
 }
 
 /** Another module of the same sigelo-contact (device, qr, qr-decode, page), from the directory contactLib checks. */
-export async function contactModule<T = Record<string, unknown>>(name: 'device' | 'qr' | 'qr-decode' | 'page' | 'control' | 'invite'): Promise<T> {
+export async function contactModule<T = Record<string, unknown>>(name: 'device' | 'qr' | 'qr-decode' | 'page' | 'control' | 'invite' | 'group' | 'transfer-node'): Promise<T> {
   await contactLib();
   try { return await import(pathToFileURL(join(contactDir(), `${name}.mjs`)).href) as T; } catch (e) {
     if (absent(e)) throw notFound(`sigelo-contact is incomplete: ${(e as Error).message.split('\n')[0]}`);
@@ -393,7 +401,7 @@ export function holderFor(identity: string, what: string, through = false): { pi
   throw Object.assign(new Error(busyText(identity, h, what)), { check: 'busy' });
 }
 // The contact verbs that log in, and those of them that go through a watcher.
-const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'inbox', 'forget', 'pro', 'link', 'unlink'], THROUGH = ['send', 'send-file', 'inbox'];
+const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'inbox', 'forget', 'pro', 'link', 'unlink', 'presence'], THROUGH = ['send', 'send-file', 'inbox', 'presence'];
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch (e) { return (e as { code?: string }).code === 'EPERM'; } };
 /** The live process holding the lock on this identity file, or null. */
 export function lockHolder(identity: string): { pid: number; kind: 'ui' | 'watch' } | null {
@@ -630,7 +638,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         out({ ...r, contacts: r.contacts.map((x) => ({ ...x, pair: pairOf(x.did) })) });
         for (const x of r.contacts.filter((y) => y.fingerprint)) note(`${x.name}: Check with them: ${x.fingerprint}`);
         const roster = workersBeside(path);
-        for (const x of r.contacts.filter((y) => y.fingerprint)) note(trustOf(x.name, x.ours, x.tier, roster.get(x.did)) + (x.link ? `; linked (${x.link.id}): ${x.link.purpose}` : ''));
+        for (const x of r.contacts.filter((y) => y.fingerprint)) note(trustOf(x.name, x.ours, x.tier, roster.get(x.did)) + (x.link ? `; linked (${x.link.id}): ${x.link.purpose}` : '')
+          + (x.online === true ? '; online' : x.last_seen ? `; last seen ${new Date(x.last_seen * 1000).toISOString().replace('.000', '')}` : ''));
         for (const x of r.contacts.filter((y) => y.re_pair)) {
           note(`${x.name}: re-pair needed (${x.re_pair === 'own_recovery' ? 'this agent recovered its identity' : 'it recovered its identity'}): nothing goes to it until a new invite and accept`);
         }
@@ -643,6 +652,18 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         out(r);
         note(`${r.name} is ${r.tier}: ${r.tier === 'own' ? 'its messages are pushed in full (watch --on-message)' : r.tier === 'friend' ? 'a notice when it writes, the message read when you ask' : 'nothing until you ask (inbox)'}`);
         note(trustOf(r.name, r.ours, r.tier, workersBeside(path).get(r.did)));
+        break;
+      }
+      case 'presence': {
+        // Allowed: shown at the holder's (or the next started carrier's) round. Denied: the marker
+        // toward the contact is cleared now, through the watcher, or in a session of its own.
+        if (args[0] !== 'allow' && args[0] !== 'deny') throw misuse(`presence allow|deny <did|name>: not ${JSON.stringify(args[0])}`);
+        const r = c.setPresence(args[1]!, args[0] === 'allow');
+        if (w) kick(path); else if (args[0] === 'deny') await c.sync();
+        out(r);
+        note(r.presence === 'own' ? `${r.name} is your own agent: it always sees when this agent is online`
+          : r.presence === 'allow' ? `${r.name} sees when this agent is online (a green dot, else "last seen"), while it runs watch or ui`
+          : `${r.name} no longer sees when this agent is online`);
         break;
       }
       case 'send': {
@@ -666,7 +687,10 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         break;
       }
       case 'send-file': {
-        const r = await c.sendFile(args[0]!, args[1]!, { ...queuedFor });
+        const r = await c.sendFile(args[0]!, args[1]!, { ...queuedFor }).catch((e: Error & { check?: string }) => {
+          if (e.check === 'file_too_large') e.message += '; larger files (up to 16 GiB): sigelo-agent transfer send <contact> <path>';
+          throw e;
+        });
         out(r);
         note(`📎 ${r.file.name} ${sizeText(r.file.size)} → ${r.name}: ${r.status}${r.status === 'queued' && !w ? ` (exit 0; do not send it again): ${r.detail ?? ''}` : ''}`);
         kicked();
@@ -689,6 +713,15 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
           for (const l of linkNotes(h)) note(l);
           // Device messages (DEVICES.md): by code too; beside a watcher, by it.
           if (w?.kind !== 'watch') fresh = (await (await import('./sigelo-agent-device.ts')).deviceRound(c, path, fresh)).batch ?? fresh;
+          // Group messages (GROUPS.md): checked by code, labelled; beside a watcher, from the state it fills.
+          fresh = (await (await import('./sigelo-agent-group.ts')).groupRound(c, path, fresh, { local: w?.kind === 'watch', tiers })).batch;
+          // Files offered (TRANSFER.md): filed as asked, one event each; beside a watcher, by it.
+          if (w?.kind !== 'watch') {
+            const X = await contactModule<{ intake(o: object): Promise<{ id: string; contact: string; from: string; name: string; size: number }[]> }>('transfer-node');
+            const asked = await X.intake({ carrier: c, identity: path });
+            for (const x of asked) note(`transfer ${x.id}: ${x.contact} offers ${x.name} (${sizeText(x.size)}): sigelo-agent transfer accept ${x.id} | decline ${x.id}`);
+            if (asked.length) fresh = { ...fresh, events: [...fresh.events, ...asked.map((x) => ({ type: 'transfer', what: 'asked', id: x.id, from: x.from, name: x.contact, file: x.name, size: x.size }))] };
+          }
         } catch (e) { putBack(held, got); throw e; }
         const r = merge(takeHeld(held), fresh);
         if (!(await printInbox(r))) {
@@ -758,7 +791,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
           const d = flags.get('--days');
           if (d !== undefined && !/^\d+$/.test(d)) throw misuse(`--days: whole days, 1 to 365, not ${JSON.stringify(d)}`);
           const rec = await L.link({ carrier: c, file, a: args[0]!, b: args[1]!, purpose, ...(flags.has('--tier-a') && { tierA: flags.get('--tier-a')! }), ...(flags.has('--tier-b') && { tierB: flags.get('--tier-b')! }), ...(d !== undefined && { days: Number(d) }),
-            ...(flags.has('--note') && { note: flags.get('--note')! }), ...(flags.has('--relay') && { relay: flags.get('--relay')! }) });
+            ...(flags.has('--note') && { note: flags.get('--note')! }), ...(flags.has('--relay') && { relay: flags.get('--relay')! }),
+            ...(flags.has('--name-a') && { nameA: flags.get('--name-a')! }), ...(flags.has('--name-b') && { nameB: flags.get('--name-b')! }) });
           id = rec.id;
           note(`link ${id}: asked ${rec.a_name} for a one-use code for ${rec.b_name}${rec.kind === 'external' ? ` (external: ${rec.b_name}'s operator decides; ${rec.b_name} learns ${rec.a_name}'s identity, the purpose and your note)` : ''}`);
         }

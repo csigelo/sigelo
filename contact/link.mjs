@@ -16,8 +16,9 @@
 // (answer: accept, or refuse, silent unless tell) or the code lapses (≤ 7 days); an allow rule for
 // that contact accepts it at the rule's tier (default quiet, never own). Purpose and note are data.
 //
-//   operator: link({ carrier, file, a, b, purpose, tierA, tierB, days, ttl, note, relay }) → the
-//             record, pending; the ask is sent to A
+//   operator: link({ carrier, file, a, b, purpose, tierA, tierB, days, ttl, note, relay, nameA, nameB }) →
+//             the record, pending; the ask is sent to A. nameB: what A files B as (peer_name in the ask),
+//             nameA: what B files A as (peer_name in the offer); without them, the operator's names (name)
 //   X:        answer({ carrier, file, id, accept, tell, tier }) → { id, status }: an introduction
 //             accepted or refused (carried out at the next handle, which needs the session; a
 //             silent refusal at once); allow({ carrier, file, contact, tier, days }) / deny({ …,
@@ -36,10 +37,13 @@
 //
 // The messages: label LINK_LABEL on sigelo-msg/0, content {v, typ, id, iat, …}, id 8 characters of
 // short.mjs's alphabet:
-//   ask     operator → A  {peer: B's original DID, name, kind: own|external, tier?, purpose, expires?, ttl, relay?}
+//   ask     operator → A  {peer: B's original DID, name, peer_name?, kind: own|external, tier?, purpose, expires?, ttl, relay?}
 //   invite  A → operator  {code} (a long code, A's own), or {paired: true} (A and B were paired)
 //   offer   operator → B  {from: A's original DID, did: the DID the code names, code | paired, name,
-//                          purpose, expires?, tier? (own only), note?, ttl}
+//                          peer_name?, purpose, expires?, tier? (own only), note?, ttl}
+//   name is the operator's own name for the peer; peer_name, when present, the name the operator chose
+//   for the receiver to file it under: the receiver files the peer as peer_name ?? name (never as
+//   "contact-…"). peer_name goes only when the operator gave one (a receiver before it refuses the key).
 //   status  A or B → the operator (or the asker of a refused ask)  {status: linked|refused|ended, check?}
 //   end     operator → A or B, A ↔ B  {reason: unlink|expired|forgot}
 // Checks, by name: link_from (an ask or offer not from the receiver's operator: a DID holding an
@@ -105,9 +109,9 @@ export function checkPurpose(p) {
 const checkName = (n) => (n === undefined ? n : typeof n === 'string' && n.trim() !== '' && [...n].length <= NAME_MAX && !CONTROL.test(n) ? n : fail('link_text', `a name is 1 to ${NAME_MAX} characters, no control characters`));
 
 const SHAPES = {
-  ask: { need: ['peer', 'kind', 'purpose', 'ttl'], may: ['name', 'tier', 'expires', 'relay'] },
+  ask: { need: ['peer', 'kind', 'purpose', 'ttl'], may: ['name', 'peer_name', 'tier', 'expires', 'relay'] },
   invite: { need: [], may: ['code', 'paired'] },
-  offer: { need: ['from', 'did', 'purpose', 'ttl'], may: ['code', 'paired', 'name', 'tier', 'expires', 'note'] },
+  offer: { need: ['from', 'did', 'purpose', 'ttl'], may: ['code', 'paired', 'name', 'peer_name', 'tier', 'expires', 'note'] },
   status: { need: ['status'], may: ['check'] },
   end: { need: ['reason'], may: [] },
 };
@@ -135,8 +139,11 @@ export function checkMessage(x) {
   if (Object.hasOwn(x, 'purpose')) checkPurpose(x.purpose);
   if (Object.hasOwn(x, 'note')) { if (x.note === null) bad('note: a string'); checkNote(x.note); }
   checkName(x.name);
+  checkName(x.peer_name);
   return x;
 }
+/** The name a receiver files the introduced peer under: the operator's choice for it, else the operator's own name for it. */
+export const peerName = (x) => x.peer_name ?? x.name;
 
 // ---------------------------------------------------------------- the file
 
@@ -216,7 +223,7 @@ function contactNamed(carrier, who) {
  * DAYS_EXTERNAL); note: for X (external), data; relay: the relay A's code names (external default:
  * the relay of the operator's pairing with X). → the record { id, a, b, kind, …, status: "pending" }.
  */
-export async function link({ carrier, file, a, b, purpose, tierA, tierB, days, ttl, note, relay }) {
+export async function link({ carrier, file, a, b, purpose, tierA, tierB, days, ttl, note, relay, nameA, nameB }) {
   for (const t of [tierA, tierB]) {
     if (t === 'own') fail('link_tier', 'a link never makes a contact own: own comes from your operator attestation alone (leave the tier out: two of your agents find each other own)');
     if (t !== undefined && t !== null && !LINK_TIERS.includes(t)) fail('tier', `a link's tier is ${LINK_TIERS.join(' or ')}, not ${JSON.stringify(t)}`);
@@ -228,7 +235,8 @@ export async function link({ carrier, file, a, b, purpose, tierA, tierB, days, t
   let A = contactNamed(carrier, a), B = contactNamed(carrier, b);
   if (A.did === B.did) fail('link_peer', `${A.name} twice: a link joins two agents`);
   if (!A.ours && !B.ours) fail('link_not_ours', `neither ${A.name} nor ${B.name} is yours by key (an operator attestation of yours): a link introduces one of your agents`);
-  if (!A.ours) [A, B] = [B, A];
+  for (const x of [nameA, nameB]) if (x !== undefined && x !== null) checkName(x);
+  if (!A.ours) { [A, B] = [B, A]; [nameA, nameB] = [nameB, nameA]; }
   const kind = B.ours ? 'own' : 'external';
   if (kind === 'external' && tierB) fail('link_tier', `${B.name} is not yours: how it files ${A.name} is its operator's choice (leave --tier-b out)`);
   const tA = tierA ?? (kind === 'external' ? 'friend' : null), life = days ?? (kind === 'external' ? DAYS_EXTERNAL : null);
@@ -237,12 +245,12 @@ export async function link({ carrier, file, a, b, purpose, tierA, tierB, days, t
   const rec = state(file, now, (s) => {
     let id;
     do id = newId(); while (Object.hasOwn(s.links, id));
-    s.links[id] = { id, a: A.did, b: B.did, a_name: A.name, b_name: B.name, kind, purpose: p, note: n, tier_a: tA, tier_b: tierB ?? null, expires, relay: at,
+    s.links[id] = { id, a: A.did, b: B.did, a_name: A.name, b_name: B.name, ...(nameA && { a_peer_name: nameA.trim() }), ...(nameB && { b_peer_name: nameB.trim() }), kind, purpose: p, note: n, tier_a: tA, tier_b: tierB ?? null, expires, relay: at,
       status: 'pending', step: 'ask', check: null, at: now, exp: now + t, ttl: t, steps: { a: null, b: null } };
     return s.links[id];
   }, platformOf(carrier));
   try {
-    await send(carrier, A.did, msg('ask', rec.id, now, { peer: B.did, name: B.name, kind, purpose: p, ttl: t, ...(tA && { tier: tA }), ...(expires && { expires }), ...(at && { relay: at }) }));
+    await send(carrier, A.did, msg('ask', rec.id, now, { peer: B.did, name: B.name, ...(rec.b_peer_name && { peer_name: rec.b_peer_name }), kind, purpose: p, ttl: t, ...(tA && { tier: tA }), ...(expires && { expires }), ...(at && { relay: at }) }));
   } catch (e) {
     if (!(e instanceof MsgError)) throw e;
     state(file, nowOf(carrier), (s) => { Object.assign(s.links[rec.id], { status: 'refused', check: e.check, at: nowOf(carrier) }); }, platformOf(carrier));
@@ -370,7 +378,7 @@ async function onMessage(carrier, file, m, out, wait) {
   }
   if (x.typ === 'ask') {
     if (x.tier) carrier.presetTier(x.peer, x.tier);
-    const inv = await carrier.invite({ name: x.name, ttl: Math.max(TTL_MIN, x.iat + x.ttl - now), ...(x.relay && { relay: x.relay }) });
+    const inv = await carrier.invite({ name: peerName(x), ttl: Math.max(TTL_MIN, x.iat + x.ttl - now), ...(x.relay && { relay: x.relay }) });
     const code = readCode(inv.code, now);
     state(file, now, (s) => { s.pending[`${m.from} ${x.id}`] = { ...base, role: 'a', peer: x.peer, nonce: code.nonce, exp: code.exp + 3600 }; }, platformOf(carrier));
     await send(carrier, m.from, msg('invite', x.id, now, { code: inv.code }));
@@ -381,7 +389,7 @@ async function onMessage(carrier, file, m, out, wait) {
   try { code = readCode(x.code, now); } catch (e) { return refuse(carrier, out, m.from, x.id, 'link_message', `the offer's code does not parse (${e.message})`); }
   if (code.did !== x.did) return refuse(carrier, out, m.from, x.id, 'link_peer', `the offer's code names ${code.did}, not ${x.did}`);
   state(file, now, (s) => { s.pending[`${m.from} ${x.id}`] = { ...base, role: 'b', peer: x.from, code_did: code.did, exp: code.exp + 3600 }; }, platformOf(carrier));
-  try { await carrier.accept(x.code, { name: x.name, wait, ...(x.tier && { tier: x.tier }) }); } catch (e) {
+  try { await carrier.accept(x.code, { name: peerName(x), wait, ...(x.tier && { tier: x.tier }) }); } catch (e) {
     if (!(e instanceof MsgError)) throw e;
     state(file, nowOf(carrier), (s) => { delete s.pending[`${m.from} ${x.id}`]; }, platformOf(carrier));
     return refuse(carrier, out, m.from, x.id, e.check, `the link's code was not accepted (${e.message})`);
@@ -423,7 +431,7 @@ async function onOperator(carrier, file, m, x, out) {
     offer = { code: x.code, did: code.did };
   }
   try {
-    await send(carrier, rec.b, msg('offer', x.id, now, { from: rec.a, ...offer, name: rec.a_name, purpose: rec.purpose, ttl: rec.ttl, ...(rec.tier_b && { tier: rec.tier_b }), ...(rec.expires && { expires: rec.expires }), ...(rec.note && { note: rec.note }) }));
+    await send(carrier, rec.b, msg('offer', x.id, now, { from: rec.a, ...offer, name: rec.a_name, ...(rec.a_peer_name && { peer_name: rec.a_peer_name }), purpose: rec.purpose, ttl: rec.ttl, ...(rec.tier_b && { tier: rec.tier_b }), ...(rec.expires && { expires: rec.expires }), ...(rec.note && { note: rec.note }) }));
     set((l) => { l.step = 'offer'; });
   } catch (e) {
     if (!(e instanceof MsgError)) throw e;
@@ -481,7 +489,7 @@ async function introduced(carrier, file, m, x, mine, out, wait) {
     exp = code.exp;
   }
   const by = carrier.contacts().contacts.find((c) => c.did === m.from);
-  const key = `${m.from} ${x.id}`, rec = { id: x.id, from: m.from, peer: x.from, did: x.did, name: x.name ?? null, purpose: x.purpose, note: x.note ?? null,
+  const key = `${m.from} ${x.id}`, rec = { id: x.id, from: m.from, peer: x.from, did: x.did, name: peerName(x) ?? null, purpose: x.purpose, note: x.note ?? null,
     expires: x.expires ?? null, ...(x.code !== undefined ? { code: x.code } : { paired: true }), exp, at: now };
   const kept = state(file, now, (s) => {
     // One contact cannot crowd out the others: at most a quarter of the places each.
@@ -493,7 +501,7 @@ async function introduced(carrier, file, m, x, mine, out, wait) {
   }, platformOf(carrier));
   if (kept === 'full') return quietly('link_full', `${RECEIVED_MAX} introductions wait already (sigelo-agent links)`);
   if (kept === 'allowed') return;   // carried out by this handle's rounds
-  out.received.push({ id: x.id, from: m.from, name: by?.name ?? who, peer: x.from, peer_name: x.name ?? null, purpose: x.purpose, note: x.note ?? null, exp, notice: by?.tier !== 'quiet' });
+  out.received.push({ id: x.id, from: m.from, name: by?.name ?? who, peer: x.from, peer_name: peerName(x) ?? null, purpose: x.purpose, note: x.note ?? null, exp, notice: by?.tier !== 'quiet' });
 }
 
 // X's operator's answer, carried out (it needs the session): accept the code at the tier (quiet by

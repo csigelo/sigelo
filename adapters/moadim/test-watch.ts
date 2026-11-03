@@ -118,6 +118,23 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
       w2.c.kill('SIGTERM');
       ok('watch with hooks: SIGTERM → exit 0', (await w2.exit) === 0);
       w2 = null;
+
+      // examples/reply-hook.sh (README "Answering by itself"): the own message's text through
+      // $SIGELO_REPLY_CMD, the answer sent back labelled reply; a reply is never answered.
+      const hookPath = CLI.replace(/cli\.ts$/, 'examples/reply-hook.sh');
+      w2 = watcher('--on-message', `SIGELO_REPLY_CMD="tr a-z A-Z" sh '${hookPath}'`);
+      await until(() => w2!.err.includes('connected to relay.test'));
+      await cli('mine', 'send', 'alice', 'ping from mine');
+      const back: { content?: unknown; label?: string }[] = [], t2 = Date.now();
+      while (Date.now() - t2 < 40000 && !back.some((m) => m.content === 'PING FROM MINE')) back.push(...(JSON.parse((await cli('mine', 'inbox', '--wait', '5')).stdout || '{"messages":[]}') as { messages: typeof back }).messages);
+      ok('reply-hook.sh: an own message answered by the command in SIGELO_REPLY_CMD, sent back labelled reply', back.some((m) => m.content === 'PING FROM MINE' && m.label === 'reply'), JSON.stringify(back) + w2.err.slice(-400));
+      await cli('mine', 'send', 'alice', 'a reply itself', '--label', 'reply');
+      await new Promise((r) => setTimeout(r, 4000));
+      const none = (JSON.parse((await cli('mine', 'inbox', '--wait', '3')).stdout || '{"messages":[]}') as { messages: unknown[] }).messages;
+      ok('reply-hook.sh: a message labelled reply is not answered (no loop between two such agents)', none.length === 0, JSON.stringify(none));
+      w2.c.kill('SIGTERM');
+      await w2.exit;
+      w2 = null;
       const fr = await cli('alice', 'inbox', '--tier', 'own,friend');
       const frm = (JSON.parse(fr.stdout) as { messages: { content: string }[] }).messages.map((m) => m.content);
       ok('inbox --tier own,friend: the friend\'s two messages; the quiet ones stay', frm.join() === 'hello from pal,again from pal', fr.stdout);

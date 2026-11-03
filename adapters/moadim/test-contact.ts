@@ -398,6 +398,12 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
       const t1 = await cli('tier', 'rev', 'quiet', '--operator'), q = tierOf(me), t2 = await plain('tier', 'rev', 'friend', '--identity', me);
       ok('tier on the operator file: via SIGELO_HUMAN + --operator (quiet), via --identity (friend); the agent\'s contacts untouched',
         t1.status === 0 && q === 'quiet' && t2.status === 0 && tierOf(me) === 'friend' && tierOf(rev) !== 'quiet', t1.stderr + t2.stderr);
+      const presenceOf = (f: string): boolean | undefined => (Object.values((JSON.parse(readFileSync(f.replace(/\.json$/, '.contacts.json'), 'utf8')) as { contacts: Record<string, { presence?: boolean }> }).contacts)[0])?.presence;
+      const p1 = await cli('presence', 'allow', 'rev', '--operator'), pa = presenceOf(me), p2 = await cli('presence', 'deny', 'rev', '--operator'), p3 = await cli('presence', 'maybe', 'rev', '--operator');
+      const pc = ((json(await cli('contacts', '--operator'))['contacts'] ?? []) as { presence?: string; online?: unknown }[])[0];
+      ok('presence allow|deny <name>: the contact may see when this agent is online, or no longer (a deny clears it in a session); another word: usage, exit 2; contacts shows presence and online',
+        p1.status === 0 && json(p1)['presence'] === 'allow' && pa === true && p2.status === 0 && json(p2)['presence'] === 'deny' && presenceOf(me) === undefined && p3.status === 2
+        && pc?.presence === 'deny' && pc.online === null, p1.stderr + p2.stderr + p3.stderr);
       const s1 = await plain('send', 'rev', 'by --identity', '--identity', me), s2 = await cli('send', 'rev', 'by SIGELO_HUMAN', '--operator');
       const got = ((json(await cli('inbox', '--wait', '10')).messages ?? []) as { content: unknown; from: string }[]);
       ok('send on the operator file via --identity and via SIGELO_HUMAN + --operator: both arrive from the operator\'s DID', s1.status === 0 && s2.status === 0

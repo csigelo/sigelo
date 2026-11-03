@@ -230,11 +230,13 @@ export async function relayControls(o: {
 // computer), its key sealed in the OS keyring as an identity's `--keychain` key is (keychain.wrap,
 // account = the control's DID); no keyring answering: plain in the file, with a warning
 // (SIGELO_KEY_PROVIDER=file: plain, =keychain: refused without one); the code accepted; prints
-// {words, operator}: the four words to compare with the computer's.
+// {words, operator, original}: the four words to compare with the computer's. --operator <did> (an app's profile
+// whose computers serve that operator, design/profiles.md P2): a computer whose page is another identity is
+// refused other_operator after the code, its contact forgotten and the control's files deleted (exit 1).
 // `sigelo-agent control ui [--app | --no-open] [--port <p>]`: the page on 127.0.0.1 (pageServer), every
 // call a request to the computer over the relay, the state pushed (contact/control.mjs).
 // `sigelo-agent control forget`: the control's files deleted here (revoke it on the computer too).
-export const CONTROL_USAGE = 'control pair <SIGELO:CTL:…> [--force] | control ui [--app | --no-open] [--port <p>] | control forget   (--file <f>: else $SIGELO_CONTROL, else ~/.config/sigelo/control.local.json)';
+export const CONTROL_USAGE = 'control pair <SIGELO:CTL:…> [--force] [--operator <did>] | control ui [--app | --no-open] [--port <p>] | control forget   (--file <f>: else $SIGELO_CONTROL, else ~/.config/sigelo/control.local.json)';
 const note = (s: string): void => console.error(`sigelo-agent: ${safeText(s)}`);
 const controlFile = (flag: string | undefined): string => resolve(flag ?? process.env['SIGELO_CONTROL'] ?? join(homedir(), '.config', 'sigelo', 'control.local.json'));
 interface ControlFile { provider?: string; secret: string | keychain.WrappedSecret; genesis: object; operator: string | null; relay: string | null }
@@ -257,7 +259,7 @@ function dropSealed(f: string): void {
 }
 /** The control's seed: plain hex, or unsealed from the keyring (once per carrier). */
 const seedOf = (idf: ControlFile): Uint8Array => (typeof idf.secret === 'string' ? Buffer.from(idf.secret, 'hex') : keychain.unwrap(idf as unknown as Store));
-async function controlCarrier(file: string, idf: ControlFile, onEvent?: (e: unknown) => void): Promise<{ accept(c: string, o: object): Promise<{ status: string; contact?: { did: string } }>; contacts(): { contacts: { did: string; fingerprint: string | null }[] }; start(): Promise<void>; stop(): Promise<void> }> {
+async function controlCarrier(file: string, idf: ControlFile, onEvent?: (e: unknown) => void): Promise<{ accept(c: string, o: object): Promise<{ status: string; contact?: { did: string } }>; contacts(): { contacts: { did: string; chain?: string[]; fingerprint: string | null }[] }; forget(did: string): Promise<unknown>; start(): Promise<void>; stop(): Promise<void> }> {
   const { lib } = await contactLib();
   const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: idf.genesis, rotations: [], bindings: [], attestations: [], issuers: [] }, seed = seedOf(idf);
   return new lib.Carrier({ identity: () => ({ secret: seed, bundle }), ...lib.pathsFor(file), ...lib.optionsFromEnv(), ...(idf.relay && { relay: idf.relay }), ...(onEvent && { onEvent }) }) as never;
@@ -265,11 +267,12 @@ async function controlCarrier(file: string, idf: ControlFile, onEvent?: (e: unkn
 
 export async function controlMain(rest: string[]): Promise<number> {
   const sub = rest[0], args = rest.slice(1);
-  let file: string | undefined, port: number | undefined, app = false, force = false, text: string | undefined;
+  let file: string | undefined, port: number | undefined, app = false, force = false, text: string | undefined, operator: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!, v = args[i + 1];
     if (a === '--file' && v !== undefined && file === undefined) { file = v; i++; }
     else if (a === '--port' && v !== undefined && /^\d{1,5}$/.test(v) && port === undefined) { port = Number(v); i++; }
+    else if (a === '--operator' && v !== undefined && /^did:sigelo:z[1-9A-HJ-NP-Za-km-z]{1,100}$/.test(v) && sub === 'pair' && operator === undefined) { operator = v; i++; }
     else if (a === '--app') app = true;
     else if (a === '--no-open') continue;
     else if (a === '--force') force = true;
@@ -288,16 +291,29 @@ export async function controlMain(rest: string[]): Promise<number> {
     mkdirSync(dirname(f), { recursive: true, mode: 0o700 });
     writeFileSync(f, JSON.stringify(idf), { mode: 0o600 });
     const car = await controlCarrier(f, idf);
+    let other: string | null = null;
     try {
       const r = await car.accept(t.code, { name: 'computer', wait: 20, ...(t.relay && { relay: t.relay }) });
       if (!r.contact) { note(`control pair: the computer did not answer (${r.status}): is sigelo-agent ui --remote --relay still running, its code under 10 minutes old?`); return 1; }
-      idf.operator = r.contact.did;
-      writeFileSync(f, JSON.stringify(idf), { mode: 0o600 });
-      const words = car.contacts().contacts.find((c) => c.did === r.contact!.did)?.fingerprint ?? null;
-      console.log(safeJson(JSON.stringify({ operator: idf.operator, words })));
-      note(`paired: compare the four words with the computer's (${words}); it answers once you confirm them there`);
-      return 0;
+      const ct = car.contacts().contacts.find((c) => c.did === r.contact!.did), chain = ct?.chain?.length ? ct.chain : [r.contact.did];
+      if (operator !== undefined && !chain.includes(operator)) {
+        other = chain[0]!;
+        try { await car.forget(r.contact.did); } catch {}
+      } else {
+        idf.operator = r.contact.did;
+        writeFileSync(f, JSON.stringify(idf), { mode: 0o600 });
+        const words = ct?.fingerprint ?? null;
+        console.log(safeJson(JSON.stringify({ operator: idf.operator, original: chain[0], words })));
+        note(`paired: compare the four words with the computer's (${words}); it answers once you confirm them there`);
+        return 0;
+      }
     } catch (e) { note(`control pair: ${(e as Error).message}`); return 1; } finally { await car.stop(); }
+    // Another operator's computer: nothing of it kept here (its key, its carrier state); the computer drops it at "no".
+    const { lib } = await contactLib(), p = lib.pathsFor(f) as { store: string; state: string; log?: string };
+    dropSealed(f);
+    for (const x of [f, p.store, p.state, p.log, `${p.state}.lock`]) if (x) rmSync(x, { force: true });
+    note(`control pair: other_operator: this computer's page is another identity (${other}), not ${operator}: all the computers of a profile serve one operator. Pair it in a profile of its own; on the computer, answer no to its four words`);
+    return 1;
   }
   if (sub === 'forget') {
     const { lib } = await contactLib(), p = lib.pathsFor(f) as { store: string; state: string; log?: string; files?: string };

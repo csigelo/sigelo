@@ -134,7 +134,7 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   for (const f of xmlFiles) for (const m of read(f).matchAll(/"@(string|color|drawable|mipmap|xml|style)\/([\w.]+)"/g)) refs.add(`${m[1]}/${m[2]}`);
   for (const f of walk(JAVA)) for (const m of read(f).matchAll(/(?<!android\.)\bR\.(string|drawable|mipmap|xml|color)\.(\w+)/g)) refs.add(`${m[1]}/${m[2]}`);
   const missing = [...refs].filter((r) => !have.has(r));
-  ok(missing.length === 0 && refs.size > 10, `resources: every reference resolves (${refs.size}; missing ${missing})`);
+  ok(missing.length === 0 && refs.size > 8, `resources: every reference resolves (${refs.size}; missing ${missing})`);
   ok(read(MAIN, 'res', 'values-v35', 'themes.xml').includes('windowOptOutEdgeToEdgeEnforcement') && read(MAIN, 'res', 'values', 'themes.xml').includes('@android:style/Theme.Material.Light.DarkActionBar'), 'theme: the platform\'s Material (no AndroidX); Android 15 not edge to edge');
 }
 {
@@ -205,10 +205,23 @@ ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooser
 ok(/r\.hasGesture\(\)/.test(ma) && /ACTION_VIEW/.test(ma) && /CATEGORY_BROWSABLE/.test(ma), 'links: elsewhere opens in the browser, on a tap');
 ok(/setEndpointIdentificationAlgorithm\("HTTPS"\)/.test(java['SigeloBridge.java']) && /getDefaultHostnameVerifier\(\)\.verify\(host/.test(java['SigeloBridge.java']) && /setInstanceFollowRedirects\(false\)/.test(java['SigeloBridge.java'])
   && !/TrustManager|setHostnameVerifier|ALLOW_ALL/.test(code(java['SigeloBridge.java'])), 'network: TLS names checked twice, no custom trust, no redirect followed');
-// Review 2026-10-28 (LOW): switching forms deletes every keystore key, whichever form is left (remote
-// seals its control identity under alias 0 as well as its text under alias 2).
-const switchBody = /void switchTo\(String to\) \{([\s\S]*?)\n    \}/.exec(java['SigeloBridge.java'])?.[1] ?? '';
-ok(/for \(int a = 0; a < ALIASES\.length; a\+\+\) deleteKey\(a\);/.test(switchBody) && !/equals\(from\)/.test(switchBody), 'switch: every keystore alias deleted whichever form is left (no alias 0 kept from remote into self)');
+// Review 2026-10-28 (LOW), now per profile (design/profiles.md §4): removing a profile deletes all three of its
+// aliases (a remote profile seals its control identity under alias 0 as well as its text under alias 2); the
+// menu's form switch, which erased everything, is gone.
+const jb = java['SigeloBridge.java'];
+const forgetBody = /static void forgetProfile\(String profile\) \{([\s\S]*?)\n    \}/.exec(jb)?.[1] ?? '';
+ok(/for \(int a = 0; a < ALIASES\.length; a\+\+\) deleteKey\(alias\(profile, a\)\);/.test(forgetBody) && !/switchTo|WebStorage|M_SWITCH|M_FORGET/.test(code(jb) + code(java['MainActivity.java'])),
+  'forget-profile: every alias of that profile deleted; no form switch erasing all profiles');
+ok(/P1\.equals\(profile\) \? ALIASES\[a\] : "sigelo-" \+ profile \+ SUFFIXES\[a\]/.test(jb) && /\{"-identity", "-identity-full", "-control"\}/.test(jb) && /"\^p\[1-9\]\[0-9\]\{0,2\}\$"/.test(jb)
+  && /m\.optString\("profile", P1\)/.test(jb), 'keystore: p1 keeps the three aliases of before; profile <id> sigelo-<id>-identity, -identity-full, -control; the profile id checked, p1 when none is named');
+ok(/out\[0\] = \(byte\) \(name\.length == 0 \? 1 : 2\);/.test(jb) && /if \(!P1\.equals\(profile\)\) throw new Refused\("sealed", "sealed for another profile"\);/.test(jb)
+  && /if \(!owner\.equals\(profile\) && !owner\.startsWith\(profile \+ ":"\)\) throw new Refused\("sealed", "sealed for another profile"\);/.test(jb) && /\(P1\.equals\(profile\) \? "" : " " \+ profile\)/.test(jb),
+  'keystore: blob version 1 for p1 (as before), version 2 naming the profile for the others, the AAD naming it; a blob opens in its own profile only');
+// design/profiles.md P2: several computers in a profile, one blob each under the profile's aliases (no alias per computer).
+ok(/"\^c\[1-9\]\[0-9\]\{0,2\}\$"/.test(jb) && /m\.optString\("computer", C1\)/.test(jb) && /String owner = C1\.equals\(computer\) \? \(P1\.equals\(profile\) \? "" : profile\) : profile \+ ":" \+ computer;/.test(jb)
+  && /seal\(kind, m\.optBoolean\("full", false\), profile, computer, data\) : open\(kind, profile, computer, data\)/.test(jb) && /: " " \+ profile \+ " " \+ computer;/.test(jb),
+  'keystore (computers): the computer id checked, c1 when none is named; another computer\'s blob version 2 naming "<profile>:<computer>", the AAD naming it; no alias per computer');
+ok(!/now != null && !now\.equals\(want\)/.test(jb) && /if \(!want\.equals\(mode\(\)\)\) prefs\.edit\(\)\.putString\("mode", want\)\.commit\(\);/.test(jb), 'mode: set by each profile\'s first run (no refusal of the other form)');
 ok(/setUserAuthenticationRequired\(true\)/.test(java['SigeloBridge.java']) && /BLOCK_MODE_GCM/.test(java['SigeloBridge.java']) && /setKeySize\(256\)/.test(java['SigeloBridge.java']) && /"AndroidKeyStore"/.test(java['SigeloBridge.java']),
   'keystore: AES-256-GCM in AndroidKeyStore; FULL under the screen lock');
 {
@@ -356,6 +369,74 @@ import json; print(json.dumps({'jobs': list(d['jobs']), 'steps': len(d['jobs']['
   } catch (e) { parsed = e.code === 'ENOENT' || /No module named/.test(String(e.stderr)) ? 'skip' : String(e.stderr || e.message); }
   if (parsed === 'skip') console.log('note: no python3 with PyYAML here: the workflow\'s YAML not parsed');
   else { let j = null; try { j = JSON.parse(parsed); } catch {} ok(j?.jobs?.join() === 'apk' && j.steps >= 8, `workflow: YAML parses strictly, one job (apk) (${typeof parsed === 'string' ? parsed.trim().slice(0, 200) : ''})`); }
+}
+
+// Where `java` runs a source file (JDK 11+, no Android SDK needed): SigeloBridge.java's keystore methods as they
+// are in the file (aad, profileOf, alias, forgetProfile, seal, open), with a software AES key store in place of
+// AndroidKeyStore, run on the profiles' cases (design/profiles.md §4). Its other code needs the platform: not run.
+{
+  const jb = java['SigeloBridge.java'];
+  const grab = (a, b) => { const i = jb.indexOf(a), j = jb.indexOf(b, i); return i < 0 || j < 0 ? null : jb.slice(i, j); };
+  const parts = [grab('    private static final String[] ALIASES', '    private static final int HTTP_MAX'), grab('    /**\n     * p1 (or none given)', '    @SuppressWarnings("deprecation")   // setUserAuthenticationValidityDurationSeconds'),
+    grab('    /** A profile\'s removal', '    private void keystore(')];
+  let probe = null;
+  try { probe = execFileSync('java', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch {}
+  if (!probe) console.log('note: no java here: the keystore methods not run');
+  else {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const t = mkdtempSync(join(tmpdir(), 'sigelo-ks-'));
+    try {
+      writeFileSync(join(t, 'KS.java'), `import java.nio.charset.StandardCharsets; import java.security.*; import java.io.IOException; import java.util.*; import java.util.regex.Pattern;
+import javax.crypto.*; import javax.crypto.spec.GCMParameterSpec;
+public class KS {
+  static final class Refused extends Exception { final String check; Refused(String c, String m) { super(m); check = c; } }
+  static final class JSONObject { final Map<String, String> m = new HashMap<>(); JSONObject put(String k, String v) { m.put(k, v); return this; } String optString(String k, String f) { return m.getOrDefault(k, f); } }
+  static final Map<String, SecretKey> STORE = new HashMap<>();
+${parts.join('')}
+  static SecretKey key(String profile, int a, boolean make) throws GeneralSecurityException { String al = alias(profile, a); if (STORE.containsKey(al)) return STORE.get(al); if (!make) return null; KeyGenerator g = KeyGenerator.getInstance("AES"); g.init(256); STORE.put(al, g.generateKey()); return STORE.get(al); }
+  static void deleteKey(String alias) { STORE.remove(alias); }
+  interface X { Object run() throws Exception; }
+  static String t(X x) { try { Object o = x.run(); return o instanceof byte[] ? new String((byte[]) o, StandardCharsets.UTF_8) : String.valueOf(o); } catch (Refused e) { return "refused " + e.check; } catch (Exception e) { return "error " + e.getClass().getSimpleName(); } }
+  public static void main(String[] a) throws Exception {
+    byte[] m = "secret".getBytes(StandardCharsets.UTF_8);
+    byte[] b1 = seal("identity", false, "p1", "c1", m), b2 = seal("identity", true, "p2", "c1", m), k2 = seal("keeper", true, "p2", "c1", m);
+    byte[] forged = b2.clone(); forged[4] = '3';
+    System.out.println(String.join("|", "v" + b1[0] + " a" + b1[1] + " " + b1.length, "v" + b2[0] + " a" + b2[1] + " " + new String(b2, 3, b2[2], StandardCharsets.US_ASCII) + " " + b2.length,
+      t(() -> open("identity", "p1", "c1", b1)), t(() -> open("identity", "p2", "c1", b1)), t(() -> open("identity", "p2", "c1", b2)), t(() -> open("identity", "p1", "c1", b2)), t(() -> open("identity", "p3", "c1", b2)),
+      t(() -> open("identity", "p2", "c1", k2)), t(() -> open("keeper", "p2", "c1", k2)), t(() -> open("identity", "p3", "c1", forged)), t(() -> open("identity", "p2", "c1", new byte[] {2, 0, 2, 'p', '2'})),
+      t(() -> profileOf(new JSONObject())), t(() -> profileOf(new JSONObject().put("profile", "p0"))), t(() -> profileOf(new JSONObject().put("profile", "p1/x"))), t(() -> profileOf(new JSONObject().put("profile", "p999"))),
+      String.valueOf(new TreeSet<>(STORE.keySet()))));
+    // P2: a computer's blob under its profile's aliases, naming the computer; it opens as that computer of that profile only.
+    byte[] c12 = seal("control", false, "p1", "c2", m), c22 = seal("control", false, "p2", "c2", m), c21 = seal("control", false, "p2", "c1", m);
+    byte[] relabel = c22.clone(); relabel[7] = '3';
+    System.out.println(String.join("|", "v" + c12[0] + " a" + c12[1] + " " + new String(c12, 3, c12[2], StandardCharsets.US_ASCII), "v" + c22[0] + " " + new String(c22, 3, c22[2], StandardCharsets.US_ASCII), "v" + c21[0] + " " + new String(c21, 3, c21[2], StandardCharsets.US_ASCII),
+      t(() -> open("control", "p1", "c2", c12)), t(() -> open("control", "p1", "c1", c12)), t(() -> open("control", "p1", "c3", c12)), t(() -> open("control", "p2", "c2", c12)),
+      t(() -> open("control", "p2", "c2", c22)), t(() -> open("control", "p2", "c1", c22)), t(() -> open("control", "p2", "c1", c21)), t(() -> open("control", "p2", "c2", c21)), t(() -> open("control", "p2", "c3", relabel)),
+      t(() -> open("identity", "p2", "c2", c22)), t(() -> computerOf(new JSONObject())), t(() -> computerOf(new JSONObject().put("computer", "c0"))), t(() -> computerOf(new JSONObject().put("computer", "p2"))), t(() -> computerOf(new JSONObject().put("computer", "c999"))),
+      String.valueOf(new TreeSet<>(STORE.keySet()))));
+    forgetProfile("p2");
+    System.out.println(String.join("|", String.valueOf(new TreeSet<>(STORE.keySet())), t(() -> open("identity", "p2", "c1", b2)), t(() -> open("identity", "p1", "c1", b1)), t(() -> open("control", "p2", "c2", c22)), t(() -> open("control", "p1", "c2", c12))));
+    // The kept words (kind "words"): under the FULL alias, their own AAD; never opened as another kind, nor another kind as them.
+    byte[] w1 = seal("words", false, "p1", "c1", m), w3 = seal("words", true, "p3", "c1", m), k3 = seal("keeper", true, "p3", "c1", m);
+    System.out.println(String.join("|", "v" + w1[0] + " a" + w1[1], "v" + w3[0] + " a" + w3[1], t(() -> open("words", "p1", "c1", w1)), t(() -> open("words", "p3", "c1", w3)), t(() -> open("keeper", "p3", "c1", w3)),
+      t(() -> open("identity", "p3", "c1", w3)), t(() -> open("words", "p3", "c1", k3)), t(() -> open("words", "p1", "c1", w3)), t(() -> open("words", "p2", "c1", w3)), t(() -> seal("seed", true, "p1", "c1", m))));
+    forgetProfile("p3");
+    System.out.println(String.join("|", String.valueOf(new TreeSet<>(STORE.keySet())), t(() -> open("words", "p3", "c1", w3)), t(() -> open("words", "p1", "c1", w1))));
+  }
+}
+`);
+      let out = '';
+      try { out = execFileSync('java', [join(t, 'KS.java')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], cwd: t }); } catch (e) { out = `${e.stdout ?? ''}${e.stderr ?? e.message}`; }
+      const want = ['v1 a0 36|v2 a1 p2 39|secret|refused sealed|secret|refused sealed|refused sealed|error AEADBadTagException|secret|refused sealed|refused sealed|p1|refused profile|refused profile|p999|[sigelo-identity, sigelo-p2-identity-full]',
+        'v2 a2 p1:c2|v2 p2:c2|v2 p2|secret|refused sealed|refused sealed|refused sealed|secret|refused sealed|secret|refused sealed|error AEADBadTagException|refused sealed|c1|refused computer|refused computer|c999|[sigelo-control, sigelo-identity, sigelo-p2-control, sigelo-p2-identity-full]',
+        '[sigelo-control, sigelo-identity]|refused sealed|secret|refused sealed|secret',
+        'v1 a1|v2 a1|secret|secret|error AEADBadTagException|error AEADBadTagException|error AEADBadTagException|refused sealed|refused sealed|refused kind',
+        '[sigelo-control, sigelo-identity, sigelo-identity-full]|refused sealed|secret'];
+      ok(parts.every(Boolean) && out.trim().split('\n').join('\n') === want.join('\n'),
+        `keystore (SigeloBridge.java's own methods under java): p1 blob version 1 under the aliases of before; p2 version 2 naming it, its own alias; each opens in its own profile only (a relabelled header, a keeper as an identity, a short blob refused); profile ids checked; the kept words (kind words) under the FULL alias with their own AAD, never opened as a keeper or identity nor a keeper as them, an unknown kind refused, gone with forget-profile; computers (P2): another computer's blob version 2 naming profile and computer, under the profile's control alias, opening as that computer only (a relabelled owner refused by its AAD), computer ids checked; forget-profile erases p2's aliases (its computers' blobs too), p1 kept (${out.trim().split('\n').join(' / ').slice(0, 400)})`);
+    } finally { rmSync(t, { recursive: true, force: true }); }
+  }
 }
 
 for (const f of fails) console.log('FAIL ' + f);

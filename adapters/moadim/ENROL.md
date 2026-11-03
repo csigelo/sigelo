@@ -3,9 +3,9 @@
 An enrolled agent is **worker i** of your keeper root: its key is `agentIdentitySeed(K, i, n)`
 (`ts/src/keys.ts`, MONERO.md §2), its genesis commits to your seed's recovery key, and it carries
 your operator attestation (`sigelo-relay/operator`, 90 days). Your 25 words bring the same DID back.
-Enrolment is contact addition with one extra step: the other machine pairs like any contact (a
-code, four words), then its temporary DID is replaced by worker i: yours, at tier own unless you
-lower it (below).
+Enrolment is contact addition with one extra step: the other machine pairs through a code, then its
+temporary DID is replaced by worker i: yours, at tier own unless you lower it (below). No four words to
+compare: your side derives worker i's DID and marks it checked when that DID pairs (THREAT-MODEL §2.11).
 
 ## Once: your identity and K
 
@@ -46,7 +46,9 @@ sigelo-agent enrol --name helper --here   # into ~/.config/moadim/sigelo.helper.
 SIGELO_IDENTITY=~/.config/moadim/sigelo.helper.local.json sigelo-agent bundle
 ```
 
-Remote: the server makes a temporary identity only to pair; the four words show on both sides.
+Remote: the server makes a temporary identity only to pair; the four words are printed, not asked
+(`enrol --confirm-words` asks them on your terminal before the key goes). The worker files you as
+`operator`, or as `--operator-name <label>`.
 Then you send the worker's identity (key, chain, attestation) once over that end-to-end channel
 (label `sigelo-identity/0`) with an invite the worker answers, so its contacts start with you. The
 temporary DID is forgotten on both sides and its mailboxes given up. Without `--wait`, or with

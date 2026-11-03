@@ -3,7 +3,7 @@
 
 Not submitted. This file says what F-Droid needs, what is ready, and what waits for a release
 that ships the app. The recipe is [`fdroid/io.sigelo.app.yml`](fdroid/io.sigelo.app.yml) (route B,
-below); the merge request, ready to open after v0.1.13, is [`fdroid/MR.md`](fdroid/MR.md);
+below); the merge request, ready to open after v0.1.14, is [`fdroid/MR.md`](fdroid/MR.md);
 the store listing is [`app/fastlane/metadata/android/en-US/`](app/fastlane/metadata/android/en-US/).
 `node apps/android/check.mjs` checks both.
 
@@ -115,8 +115,11 @@ v0.1.10 is not reproducible for F-Droid (it predates the ceremony); v0.1.11 ship
 v0.1.12 is the first that is, signed with `--alignment-preserved` on JDK 21 (release/apk-ceremony.md).
 v0.1.12, run 41235807092 (2026-10-31, `ref=v0.1.12`): `ref: the published sigelo-0.1.12.apk vs debian-21:
 MATCH`; Debian 21's unsigned build = CI's (5be2fae4c46f); verdict REPRODUCIBLE, the recipe as written.
-v0.1.12 is reproducible, but its app could not log in to a relay; v0.1.13 is the version to submit:
-the recipe names 0.1.13 / 5, its `commit:` (still c8fa6eb, v0.1.12's) moves to the v0.1.13 tag at the
+v0.1.12 is reproducible, but its app could not log in to a relay; v0.1.13 is the version to submit.
+v0.1.13, run 41247457205 (2026-10-31, `ref=v0.1.13`): `ref: the published sigelo-0.1.13.apk vs debian-21:
+MATCH`; Debian 21's unsigned build = CI's (d7370697b091); verdict REPRODUCIBLE, the recipe as written,
+`commit:` e747ebc (the v0.1.13 tag). Its merge request was never opened; v0.1.14 is the version to submit:
+the recipe names 0.1.14 / 6, its `commit:` (still e747ebc, v0.1.13's) moves to the v0.1.14 tag at the
 sync, and the merge request opens after its compare run (fdroid/MR.md).
 
 ## Steps and who acts

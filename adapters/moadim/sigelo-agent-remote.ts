@@ -26,13 +26,22 @@ export interface Control { id: string; key: string; scope: Scope; ctr: number; c
 // is read; answering an introduction pairs as accept does (chat); making or ending a link and an allow
 // rule set who the agents talk to and at what trust, as tier and forget do (all). The relay setting
 // and the registry's list: all (where new codes point is the operator's choice). The agents list (the
-// keeper's workers) is read; enrolling, revoking or renaming a worker is all.
-const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages', 'GET /api/links', 'GET /api/agents/workers'];
+// keeper's workers) is read; enrolling (its optional words answer too), revoking or renaming a worker is all.
+// "Try now" (a proof-of-work search the human starts) is chat, as sync is.
+// Transfers: the list is read; answering, stopping, the direct switch and the settings are all; sending a
+// file of this computer by its path is never remote (whoever holds a control would read any file).
+// Groups (GROUPS.md): the list and a chat are read; writing in one, making one, adding to it, renaming it,
+// joining an invitation, Share and a notice put away are chat; who leaves, a member removed, a role or the
+// brake set (who the agents talk to and how long they run) are all.
+const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages', 'GET /api/links', 'GET /api/agents/workers', 'GET /api/groups', 'GET /api/groups/history', 'GET /api/transfers'];
 const CHAT = [...READ, 'POST /api/send', 'POST /api/accept', 'POST /api/invite', 'POST /api/invite/cancel', 'POST /api/words', 'POST /api/rename', 'POST /api/tag', 'POST /api/sync',
-  'POST /api/links/answer'];
-const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/history/clear', 'GET /api/agents', 'POST /api/agents/enrol', 'POST /api/agents/pair',
+  'POST /api/links/answer', 'POST /api/pow/try', 'POST /api/groups/send', 'POST /api/groups/create', 'POST /api/groups/add', 'POST /api/groups/rename', 'POST /api/groups/join', 'POST /api/groups/share', 'POST /api/groups/dismiss'];
+const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/presence', 'POST /api/history/clear', 'GET /api/agents', 'POST /api/agents/enrol', 'POST /api/agents/pair',
+  'POST /api/groups/remove', 'POST /api/groups/leave', 'POST /api/groups/role', 'POST /api/groups/brake',
   'POST /api/link', 'POST /api/unlink', 'POST /api/links/allow', 'GET /api/settings', 'POST /api/settings', 'GET /api/relays', 'POST /api/relays/test',
-  'POST /api/agents/enrol-code', 'POST /api/agents/revoke', 'POST /api/agents/rename'];
+  'POST /api/agents/enrol-code', 'POST /api/agents/enrol-words', 'POST /api/agents/revoke', 'POST /api/agents/rename',
+  'POST /api/transfers/accept', 'POST /api/transfers/decline', 'POST /api/transfers/cancel', 'POST /api/transfers/resume', 'POST /api/transfers/forget', 'POST /api/transfers/direct',
+  'GET /api/transfers/settings', 'POST /api/transfers/settings'];
 export const SCOPES: Record<Scope, ReadonlySet<string>> = { read: new Set(READ), chat: new Set(CHAT), all: new Set(ALL) };
 export const isScope = (s: unknown): s is Scope => s === 'read' || s === 'chat' || s === 'all';
 /** Moving keys needs a human at the computer: never remote, whatever the scope. */
@@ -70,6 +79,7 @@ export async function remoteCall(scope: Scope, msg: { method: string; path: stri
   const b = msg.body === undefined ? {} : msg.body;
   if (url === null || !url.pathname.startsWith('/api/') || url.origin !== 'http://remote') return [404, { error: { check: 'route', message: 'not a route' } }];
   if (deviceRoute(url.pathname)) return [403, { error: { check: 'remote', message: 'device routes are never remote: moving keys needs a human at the computer' } }];
+  if (url.pathname === '/api/transfers/send') return [403, { error: { check: 'remote', message: 'sending a file of the computer by its path is never remote: a human at the computer picks it' } }];
   if (!SCOPES[scope].has(`${msg.method} ${url.pathname}`)) {
     return routes[`${msg.method} ${url.pathname}`] ? [403, { error: { check: 'scope', message: `${msg.method} ${url.pathname} is outside this control's scope (${scope})` } }]
       : [404, { error: { check: 'route', message: `no ${msg.method} ${url.pathname}` } }];

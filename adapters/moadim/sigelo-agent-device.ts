@@ -342,7 +342,7 @@ async function scan(rest: string[]): Promise<number> {
     if (existsSync(into)) refuse('enrol_exists', `${into} holds an identity: --into <another file>, or move it away`);
     const code = online.code.slice(0, 4) + '-' + online.code.slice(4);
     note(`online code ${code}: pairing with the operator; compare the four words with the giving screen, which asks for them`);
-    const t0 = Date.now(), r = await initEnrol(into, code, ['--wait', String(wait), '--name', 'operator', ...(online.relay ? ['--relay', online.relay] : [])]);
+    const t0 = Date.now(), r = await initEnrol(into, code, ['--wait', String(wait), ...(online.relay ? ['--relay', online.relay] : [])], { words: true });
     if (r !== 0) return r;
     note(`this device's identity: ${into} (SIGELO_IDENTITY=${into}). ${images.length ? `Delete the image now: ${images.join(', ')}` : ''}`);
     // The operator sends the device list (and, FULL, its identity and keeper root first) once the device paired.
@@ -1530,7 +1530,7 @@ export async function devicePage(o: { op: string; agentsDir: string; carrier: un
       let r;
       try { r = await enrol.accept({ carrier: tc, file: enrol.enrolPath(j.file), code: long, name: 'operator', wait: 30, temp }); } finally { await tc.stop(); }
       j.operator = r.did; j.words = r.contact?.fingerprint ?? null; j.state = 'words';
-      const res = await runMachine(await libs(), j.file, temp, 'operator', JOIN_WAIT);
+      const res = await runMachine(await libs(), j.file, temp, JOIN_WAIT);
       const p = res.placed[0];
       if (!p) {
         const x = res.refused[0];

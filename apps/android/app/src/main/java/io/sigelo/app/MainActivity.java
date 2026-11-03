@@ -3,7 +3,6 @@ package io.sigelo.app;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.KeyguardManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
@@ -45,8 +44,8 @@ import java.util.regex.Pattern;
  * Rules: JavaScript on; file access off; mixed content never; no other origin is ever loaded (a
  * link elsewhere opens in the browser, on a tap); the camera is granted to this origin only, for
  * video only, after Android's CAMERA permission is asked at the first scan; the image picker for a
- * file input. The menu switches between the two forms (this phone's identity, a computer's page):
- * after a confirmation the other form's storage and keys are erased.
+ * file input. Profiles (several identities, each its own storage and keystore aliases) are the page's
+ * (apps/web/profiles.mjs): removing one erases its keys (SigeloBridge forget-profile). The menu: Reload.
  *
  * The app lock: once a form is set and the phone has a screen lock, the screen lock is asked at a
  * start, at a return after LOCK_AFTER_MS away, and by the page before a screen that shows or spends
@@ -60,7 +59,7 @@ public final class MainActivity extends Activity {
     static final String START = ORIGIN + "/index.html";
 
     private static final int REQ_FILE = 1, REQ_CAMERA = 2, REQ_AUTH = 3;
-    private static final int M_RELOAD = 1, M_SWITCH = 2, M_FORGET = 3;
+    private static final int M_RELOAD = 1;
     /** Away from the screen this long (elapsed time, milliseconds): the screen lock again at the return. */
     static final long LOCK_AFTER_MS = 60_000;
     /** The page's files by name: letters, digits and . _ @ - / only (vendor/@noble/...). */
@@ -392,64 +391,24 @@ public final class MainActivity extends Activity {
         super.onActivityResult(req, result, data);
     }
 
-    // ---------------------------------------------------------------- the menu: the two forms
+    // ---------------------------------------------------------------- the menu
 
     @Override
     public boolean onCreateOptionsMenu(Menu m) {
-        return onPrepareOptionsMenu(m);
-    }
-
-    @Override
-    public boolean onPrepareOptionsMenu(Menu m) {
-        m.clear();
-        String mode = bridge.mode();
-        if ("self".equals(mode)) m.add(Menu.NONE, M_SWITCH, 1, R.string.switch_to_remote);
-        if ("remote".equals(mode)) {
-            m.add(Menu.NONE, M_FORGET, 1, R.string.forget_computer);
-            m.add(Menu.NONE, M_SWITCH, 2, R.string.switch_to_self);
-        }
-        m.add(Menu.NONE, M_RELOAD, 3, R.string.reload);
+        m.add(Menu.NONE, M_RELOAD, 1, R.string.reload);
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        String mode = bridge.mode();
-        switch (item.getItemId()) {
-            case M_RELOAD:
-                if (web != null) web.loadUrl(START);
-                return true;
-            case M_SWITCH:
-                confirmErase("self".equals(mode) ? R.string.switch_from_self : R.string.switch_from_remote, R.string.erase_and_switch,
-                        "self".equals(mode) ? "remote" : "self");
-                return true;
-            case M_FORGET:
-                confirmErase(R.string.switch_from_remote, R.string.forget, "remote");
-                return true;
-            default:
-                return super.onOptionsItemSelected(item);
+        if (item.getItemId() == M_RELOAD) {
+            if (web != null) web.loadUrl(START);
+            return true;
         }
-    }
-
-    /** Asks; on yes, the current form's keys and the page's storage are erased and the page starts in `to`. */
-    private void confirmErase(int message, int yes, String to) {
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.switch_title)
-                .setMessage(message)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(yes, (d, w) -> {
-                    bridge.switchTo(to);
-                    invalidateOptionsMenu();
-                    if (web != null) {
-                        web.clearCache(true);
-                        web.loadUrl(START);
-                    }
-                })
-                .show();
+        return super.onOptionsItemSelected(item);
     }
 
     void modeChanged() {
-        invalidateOptionsMenu();
         // The first run's screens are behind it now: Back must not walk into them after the reload.
         if (web != null) web.clearHistory();
     }

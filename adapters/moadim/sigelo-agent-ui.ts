@@ -23,6 +23,8 @@
  * into the same routes, within the control's scope; `/api/devices/*` never.
  * `--app`: for a shell that shows the page itself (apps/gtk): no browser opened, and the page stops when
  * stdin ends, so a shell that dies takes its page (and the file's lock) with it.
+ * Transfers (TRANSFER.md, contact/transfer-node.mjs): the page's engine answers offers and moves the
+ * bytes; the Transfers view (ui.js) lists, asks, shows progress; `/api/transfers*` (send never remote).
  * Links (LINKS.md, contact/link.mjs): the page owns the session, so it runs link.mjs handle() as `watch`
  * does (at each `link` or `paired` event, each minute, after each link route): the operator's links
  * complete here, introductions to this identity wait for an answer (`/api/links*`). Never in the history.
@@ -48,6 +50,7 @@ import { CONTROL_NAME, controlLine, defaultAddress, isRelay, isScope, lanControl
 import { relayControls, type RelayCarrier, type Relays } from './sigelo-agent-control.ts';
 import { devicePage, type DevicePage } from './sigelo-agent-device.ts';
 import { agentsDirFor, busyText, contactDir, contactLib, contactModule, humanPath, insideAgents, operatorFile, lockHolder, lockPath, safeJson, safeText, unreadable, type LinkLib } from './sigelo-agent-contact.ts';
+import type { GroupLib } from './sigelo-agent-group.ts';
 
 export const OPERATOR_CTX = 'sigelo-relay/operator';
 const DAY = 86400, OPERATOR_DAYS = 90, RENEW_DAYS = 14, BODY_MAX = 256 * 1024;
@@ -58,6 +61,8 @@ const STATIC: Record<string, [string, string]> = {
   '/shim-zlib.mjs': ['shim-zlib.mjs', 'text/javascript'], '/shim-kdf.mjs': ['shim-kdf.mjs', 'text/javascript'],
   // QR reading and drawing in the page (design/devices.md §6.4): sigelo-contact's own files, as they are.
   '/qr.mjs': ['contact:qr.mjs', 'text/javascript'], '/qr-decode.mjs': ['contact:qr-decode.mjs', 'text/javascript'],
+  // The words password's crypto (WebCrypto only), for Me → Security in the GTK phone app's page (design/apps-seed.md §8).
+  '/words-lock.mjs': ['contact:words-lock.mjs', 'text/javascript'],
 };
 const HERE = dirname(fileURLToPath(import.meta.url));
 const staticFile = (f: string): string => (f.startsWith('contact:') ? join(contactDir(), f.slice(8)) : join(HERE, f));
@@ -141,9 +146,11 @@ type Route = (b: Record<string, unknown>, q: URLSearchParams) => unknown;
 interface PageLib {
   makePage(o: {
     makeCarrier: (onEvent: (e: Ev) => void, kept: { relay?: string }) => unknown; link: LinkLib; relayFixed: string | null; linksFile: string; enrolFile: string; codeKind: (t: string) => string; unlogged: RegExp;
+    groups: GroupLib; groupsFile: string;
     store: { readHistory(): string | null; append(line: string): void; clearHistory(): void; readData(): string | null; writeData(text: string): void };
     hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string; restored?: unknown };
       agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean;
+      transfers: { lib: unknown; identity: string; make(carrier: unknown, onEvent: (e: unknown) => void): unknown };
       controls: { pending(): { name: string; scope: string; words: string | null }[]; confirm(name: string, match: boolean): Promise<boolean> };
       keeper: { read(): Promise<Keeper | null>; root(k: Keeper): Promise<{ K: Uint8Array; recovery: string }>; update(fn: (k: Keeper) => void): Promise<void> } };
   }): {
@@ -239,6 +246,10 @@ export async function startUi(o: UiOptions): Promise<Ui> {
   const { lib, short, link: L } = await contactLib();
   // The routes over the carrier, shared with the self-contained app (contact/page.mjs, apps/web/router.mjs).
   const P = await contactModule<PageLib>('page');
+  // Transfers (TRANSFER.md): the page owns the session, so its engine moves the files (contact/page.mjs hooks.transfers).
+  const TX = await contactModule<{ Engine: new (o: object) => unknown }>('transfer-node');
+  // Groups (GROUPS.md): the page handles them at each drain (contact/page.mjs groupRound); the verbs beside it refuse busy.
+  const G = await contactModule<GroupLib>('group');
   const linksFile = L.linksPath(path);
   const UNLOGGED = (lib as unknown as { UNLOGGED: RegExp }).UNLOGGED;
   let devices: DevicePage | null = null, relay: Relays | null = null, handling = Promise.resolve();
@@ -258,6 +269,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     }),
     relayFixed: typeof opts.relay === 'string' ? opts.relay : null,
     link: L, linksFile, enrolFile: `${base}.enrol.json`, codeKind: (t) => short.codeKind(t), unlogged: UNLOGGED,
+    groups: G, groupsFile: G.groupsPath(path),
     store: {
       readHistory: () => (existsSync(historyFile) ? readFileSync(historyFile, 'utf8') : null),
       append: (line) => appendFileSync(historyFile, line, { mode: 0o600 }),
@@ -287,6 +299,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
         return r;
       },
       defer: (f) => { setImmediate(f); },
+      transfers: { lib: TX, identity: path, make: (carrier, onEvent) => new TX.Engine({ carrier, identity: path, onEvent }) },
       hidden: (x) => relay?.hidden(x) ?? false,
       // The Controls card (GET /api/controls, POST /api/controls/confirm): relay controls paired, their
       // four words not confirmed; the same effect as the terminal's y/N (relayTerminal).

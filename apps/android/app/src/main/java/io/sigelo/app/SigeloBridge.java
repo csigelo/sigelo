@@ -22,7 +22,6 @@ import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebMessage;
 import android.webkit.WebMessagePort;
-import android.webkit.WebStorage;
 import android.webkit.WebView;
 
 import org.json.JSONException;
@@ -76,8 +75,18 @@ import javax.net.ssl.SSLSocketFactory;
  *          certificate authorities, the host name checked; then data both ways until either closes.
  *   seal / open   AES-256-GCM under a key made in AndroidKeyStore that never leaves it: the identity
  *          (SAFE; FULL under a key that needs the screen lock, valid 5 minutes), the keeper root of a
- *          restore from seed (under the FULL key, its own AAD) or a computer's text.
- *   mode / wiped  the form picked at first start; a switch (the menu) erases the other's storage.
+ *          restore from seed (under the FULL key, its own AAD), the kept words (kind "words": the 25 words
+ *          already encrypted under the words password, apps/web/words.mjs; the FULL key, its own AAD) or a
+ *          computer's text. Per profile
+ *          (apps/web/profiles.mjs, design/profiles.md §4): p1 under the three aliases of before, blob
+ *          version 1 as before (nothing resealed at the upgrade); another profile under its own three
+ *          aliases, blob version 2 naming it, the AAD naming kind and profile: no blob opens elsewhere.
+ *          Several computers in a profile (design/profiles.md P2): one blob each under the profile's aliases,
+ *          the first as above, another version 2 naming profile and computer, its AAD too.
+ *   forget-profile  a profile's three aliases deleted (its removal: whatever copy of its blobs is left
+ *          never opens again).
+ *   mode / wiped  the active profile's form, set once its first run commits (it turns the app lock on);
+ *          wiped: the page cleared its storage after a switch of an older version (wipe).
  *   secure        FLAG_SECURE on the window while a seed screen is up (no screenshot, no recents
  *          thumbnail, no screen recording of the 25 words); off again after. door: while on, the system
  *          Back does nothing (a new identity's words: the review screen's one button is the only way on).
@@ -92,7 +101,13 @@ public final class SigeloBridge {
     static final String SHELL = "sigelo-shell/0", PORT_MESSAGE = "sigelo-bridge/0";
     private static final String KEYSTORE = "AndroidKeyStore", CLIP_LABEL = "sigelo stagenet words";
     // Aliases by the byte that starts a sealed blob after its version: 0 SAFE identity, 1 FULL identity, 2 a computer's text.
+    // Profile p1 keeps these; profile <id> has "sigelo-<id>" + the suffix of the same index.
     private static final String[] ALIASES = {"sigelo-identity", "sigelo-identity-full", "sigelo-control"};
+    private static final String[] SUFFIXES = {"-identity", "-identity-full", "-control"};
+    private static final String P1 = "p1";
+    private static final Pattern PROFILE = Pattern.compile("^p[1-9][0-9]{0,2}$");
+    private static final String C1 = "c1";
+    private static final Pattern COMPUTER = Pattern.compile("^c[1-9][0-9]{0,2}$");
     private static final int HTTP_MAX = 1 << 20, CHUNK = 16384, TIMEOUT_MS = 20000, MAX_STREAMS = 16, AUTH_SECONDS = 300;
     private static final Pattern IPV4 = Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$");
     private static final Pattern HOSTNAME = Pattern.compile("^[A-Za-z0-9.-]{1,253}$");
@@ -276,6 +291,12 @@ public final class SigeloBridge {
             case "seal":
             case "open":
                 keystore(to, id, m, op.equals("seal"), false);
+                break;
+            case "forget-profile":
+                answer(to, id, () -> {
+                    forgetProfile(profileOf(m));
+                    return ok(id);
+                });
                 break;
             case "mode":
                 setMode(to, id, m.optString("mode"));
@@ -539,18 +560,41 @@ public final class SigeloBridge {
 
     // ---------------------------------------------------------------- the keystore
 
-    private static byte[] aad(String kind) {
-        return ("sigelo-app " + kind + "/0").getBytes(StandardCharsets.UTF_8);
+    /**
+     * p1 (or none given): the kind alone, as before profiles; another profile: the kind and the profile; a computer
+     * other than a profile's first (design/profiles.md P2): the kind, the profile and the computer.
+     */
+    private static byte[] aad(String kind, String profile, String computer) {
+        String who = C1.equals(computer) ? (P1.equals(profile) ? "" : " " + profile) : " " + profile + " " + computer;
+        return ("sigelo-app " + kind + "/0" + who).getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** The request's profile: "p1" when it names none (a page of before profiles). */
+    static String profileOf(JSONObject m) throws Refused {
+        String p = m.optString("profile", P1);
+        if (!PROFILE.matcher(p).matches()) throw new Refused("profile", "a profile id: p1, p2, ...");
+        return p;
+    }
+
+    /** The request's computer of its profile: "c1" when it names none (the first, or a page of before P2). */
+    static String computerOf(JSONObject m) throws Refused {
+        String c = m.optString("computer", C1);
+        if (!COMPUTER.matcher(c).matches()) throw new Refused("computer", "a computer id: c1, c2, ...");
+        return c;
+    }
+
+    static String alias(String profile, int a) {
+        return P1.equals(profile) ? ALIASES[a] : "sigelo-" + profile + SUFFIXES[a];
     }
 
     @SuppressWarnings("deprecation")   // setUserAuthenticationValidityDurationSeconds: API 28 and 29 only
-    private static SecretKey key(int a, boolean make) throws GeneralSecurityException, IOException {
+    private static SecretKey key(String profile, int a, boolean make) throws GeneralSecurityException, IOException {
         KeyStore ks = KeyStore.getInstance(KEYSTORE);
         ks.load(null);
-        Key k = ks.getKey(ALIASES[a], null);
+        Key k = ks.getKey(alias(profile, a), null);
         if (k instanceof SecretKey) return (SecretKey) k;
         if (!make) return null;
-        KeyGenParameterSpec.Builder b = new KeyGenParameterSpec.Builder(ALIASES[a], KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+        KeyGenParameterSpec.Builder b = new KeyGenParameterSpec.Builder(alias(profile, a), KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
@@ -565,52 +609,86 @@ public final class SigeloBridge {
         return g.generateKey();
     }
 
-    private static void deleteKey(int a) {
+    private static void deleteKey(String alias) {
         try {
             KeyStore ks = KeyStore.getInstance(KEYSTORE);
             ks.load(null);
-            ks.deleteEntry(ALIASES[a]);
+            ks.deleteEntry(alias);
         } catch (GeneralSecurityException | IOException e) {
             // gone already, or no keystore: nothing to erase
         }
     }
 
-    /** [1][alias][IV 12][ciphertext ‖ tag 16]; the AAD names the kind, so one kind's blob never opens as another's. */
-    static byte[] seal(String kind, boolean full, byte[] plain) throws GeneralSecurityException, IOException, Refused {
-        int a = "identity".equals(kind) ? (full ? 1 : 0) : "keeper".equals(kind) ? 1 : "control".equals(kind) ? 2 : -1;
-        if (a < 0) throw new Refused("kind", "identity, keeper or control");
+    /** A profile's removal: its three aliases deleted, so its blobs never open again (crypto-erase). */
+    static void forgetProfile(String profile) {
+        for (int a = 0; a < ALIASES.length; a++) deleteKey(alias(profile, a));
+    }
+
+    /**
+     * p1: [1][alias][IV 12][ciphertext ‖ tag 16], as before profiles. Another profile: [2][alias][n][its id, n
+     * bytes][IV 12][ciphertext ‖ tag 16]. A computer other than the first (P2: one blob per computer under the
+     * profile's aliases): version 2, the n bytes "<profile>:<computer>". The AAD names the kind (and the profile,
+     * and the computer), so one kind's blob never opens as another's, nor one profile's or computer's in another.
+     */
+    static byte[] seal(String kind, boolean full, String profile, String computer, byte[] plain) throws GeneralSecurityException, IOException, Refused {
+        int a = "identity".equals(kind) ? (full ? 1 : 0) : "keeper".equals(kind) || "words".equals(kind) ? 1 : "control".equals(kind) ? 2 : -1;
+        if (a < 0) throw new Refused("kind", "identity, keeper, words or control");
         Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
-        c.init(Cipher.ENCRYPT_MODE, key(a, true));
-        c.updateAAD(aad(kind));
+        c.init(Cipher.ENCRYPT_MODE, key(profile, a, true));
+        c.updateAAD(aad(kind, profile, computer));
         byte[] ct = c.doFinal(plain), iv = c.getIV();
         if (iv == null || iv.length != 12) throw new GeneralSecurityException("an IV of " + (iv == null ? 0 : iv.length) + " bytes");
-        byte[] out = new byte[2 + 12 + ct.length];
-        out[0] = 1;
+        String owner = C1.equals(computer) ? (P1.equals(profile) ? "" : profile) : profile + ":" + computer;
+        byte[] name = owner.getBytes(StandardCharsets.US_ASCII);
+        int at = name.length == 0 ? 2 : 3 + name.length;
+        byte[] out = new byte[at + 12 + ct.length];
+        out[0] = (byte) (name.length == 0 ? 1 : 2);
         out[1] = (byte) a;
-        System.arraycopy(iv, 0, out, 2, 12);
-        System.arraycopy(ct, 0, out, 14, ct.length);
+        if (name.length > 0) {
+            out[2] = (byte) name.length;
+            System.arraycopy(name, 0, out, 3, name.length);
+        }
+        System.arraycopy(iv, 0, out, at, 12);
+        System.arraycopy(ct, 0, out, at + 12, ct.length);
         return out;
     }
 
-    static byte[] open(String kind, byte[] blob) throws GeneralSecurityException, IOException, Refused {
-        if (blob.length < 2 + 12 + 16 || blob[0] != 1) throw new Refused("sealed", "not sealed by this app");
+    static byte[] open(String kind, String profile, String computer, byte[] blob) throws GeneralSecurityException, IOException, Refused {
+        if (blob.length < 2) throw new Refused("sealed", "not sealed by this app");
+        int at;   // where the IV starts
+        if (blob[0] == 1) {
+            if (!P1.equals(profile)) throw new Refused("sealed", "sealed for another profile");
+            if (!C1.equals(computer)) throw new Refused("sealed", "sealed for another computer");
+            at = 2;
+        } else if (blob[0] == 2) {
+            int n = blob.length > 2 ? blob[2] : -1;
+            if (n < 2 || n > 9 || blob.length < 3 + n) throw new Refused("sealed", "not sealed by this app");
+            String owner = new String(blob, 3, n, StandardCharsets.US_ASCII);
+            String want = C1.equals(computer) ? profile : profile + ":" + computer;
+            if (!owner.equals(profile) && !owner.startsWith(profile + ":")) throw new Refused("sealed", "sealed for another profile");
+            if ((P1.equals(profile) && C1.equals(computer)) || !owner.equals(want)) throw new Refused("sealed", "sealed for another computer");
+            at = 3 + n;
+        } else {
+            throw new Refused("sealed", "not sealed by this app");
+        }
+        if (blob.length < at + 12 + 16) throw new Refused("sealed", "not sealed by this app");
         int a = blob[1];
-        boolean fits = "identity".equals(kind) ? (a == 0 || a == 1) : "keeper".equals(kind) ? a == 1 : "control".equals(kind) && a == 2;
+        boolean fits = "identity".equals(kind) ? (a == 0 || a == 1) : "keeper".equals(kind) || "words".equals(kind) ? a == 1 : "control".equals(kind) && a == 2;
         if (!fits) throw new Refused("sealed", "sealed as something else");
-        SecretKey k = key(a, false);
+        SecretKey k = key(profile, a, false);
         if (k == null) throw new Refused("sealed", "its key is gone from this phone's keystore");
         Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
-        c.init(Cipher.DECRYPT_MODE, k, new GCMParameterSpec(128, blob, 2, 12));
-        c.updateAAD(aad(kind));
-        return c.doFinal(blob, 14, blob.length - 14);
+        c.init(Cipher.DECRYPT_MODE, k, new GCMParameterSpec(128, blob, at, 12));
+        c.updateAAD(aad(kind, profile, computer));
+        return c.doFinal(blob, at + 12, blob.length - at - 12);
     }
 
     private void keystore(WebMessagePort to, int id, JSONObject m, boolean sealing, boolean retried) {
         spawn(() -> {
             try {
-                String kind = m.optString("kind");
+                String kind = m.optString("kind"), profile = profileOf(m), computer = computerOf(m);
                 byte[] data = Base64.decode(m.optString("data"), Base64.NO_WRAP);
-                byte[] out = sealing ? seal(kind, m.optBoolean("full", false), data) : open(kind, data);
+                byte[] out = sealing ? seal(kind, m.optBoolean("full", false), profile, computer, data) : open(kind, profile, computer, data);
                 post(to, ok(id).put("data", Base64.encodeToString(out, Base64.NO_WRAP)));
             } catch (UserNotAuthenticatedException e) {
                 // The FULL key: the screen lock first, then once more.
@@ -633,44 +711,27 @@ public final class SigeloBridge {
         });
     }
 
-    // ---------------------------------------------------------------- the two forms
+    // ---------------------------------------------------------------- the form
 
     String mode() {
         return prefs.getString("mode", null);
     }
 
-    /** At first start the page sets the form; after that only the menu changes it (switchTo, after a confirmation). */
+    /**
+     * The page sets the form when a profile's first run commits; each profile has its own (the page's
+     * registry), so a change is no refusal. Set at all: the app lock is on.
+     */
     private void setMode(WebMessagePort to, int id, String want) {
         if (!"self".equals(want) && !"remote".equals(want)) {
             fail(to, id, "mode", "self or remote");
             return;
         }
-        String now = mode();
-        if (now != null && !now.equals(want)) {
-            fail(to, id, "mode", "switch from the app's menu: it asks first, then erases the other form");
-            return;
-        }
-        if (now == null) {
-            prefs.edit().putString("mode", want).commit();
-            activity.modeChanged();
-        }
+        if (!want.equals(mode())) prefs.edit().putString("mode", want).commit();
+        activity.modeChanged();
         try {
             post(to, ok(id).put("mode", want));
         } catch (JSONException e) {
             // unreachable: a string
         }
-    }
-
-    /**
-     * The user confirmed: the form now in use is erased (its keys deleted from the keystore, the
-     * page's storage cleared here and, at its next load, by the page itself: wipe), then `to` starts.
-     */
-    void switchTo(String to) {
-        // Every alias, whichever form is left: remote seals its control identity under alias 0 as
-        // well as the computer's text under 2, so keeping 0 would carry a key into self.
-        for (int a = 0; a < ALIASES.length; a++) deleteKey(a);
-        closePort();
-        WebStorage.getInstance().deleteAllData();
-        prefs.edit().putString("mode", to).putBoolean("wipe", true).commit();
     }
 }

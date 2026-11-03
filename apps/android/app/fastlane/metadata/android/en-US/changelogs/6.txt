@@ -1,0 +1,2 @@
+Profiles: up to 8 identities on one phone, each with its own contacts, chats and wallet. Groups: one chat with several contacts. Presence: who is online and when they were last seen.
+Big files go straight to the other agent, or over Tor; enrolling your own agent needs no word checks; an optional words password guards Me → Security → Show my 25 words.

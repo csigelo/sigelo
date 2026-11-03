@@ -25,6 +25,12 @@
 // confirm(name, match) → whether one was pending } (relay controls whose four words wait: the
 // Controls card; routes in no remote scope, so never asked over the relay or the LAN).
 //
+// Groups (adapters/moadim/GROUPS.md, design/groups.md §5): groups: group.mjs (the module) and groupsFile
+// (groupsPath of the identity). Each drain hands the carrier's group messages to group.mjs handle(), here
+// in code: without it the page never takes a roster, carries a copy on or files a message. The page's
+// own marks in data: gread (gid → the newest item shown: {mid, at}), gnotices (a stranger added, the
+// creator gone, a refusal: until dismissed). /api/groups/* (UI-API.md "Groups").
+//
 // Agents (ENROL.md, the app's main list): hooks.keeper, where the host has the operator's keeper root:
 // { read() → the keeper file as JSON (workers, …) | null, root(k) → { K, recovery } (K zeroed after use),
 // update(fn) → fn(keeper) applied and kept }. enrolFile: the pending enrolments (enrol.mjs enrolPath). The
@@ -32,7 +38,19 @@
 // `sigelo-agent enrol --name`, which refuses busy beside a page), takes the requests that come through
 // it (kept apart from the devices'), answers them with the worker's identity and files the worker
 // when it pairs (complete). Worker indices are allocated at the seat only (DEVICES.md): a page whose
-// seat is on another device refuses seat_elsewhere.
+// seat is on another device refuses seat_elsewhere. No four words to tap: a worker that pairs as the DID
+// derived from K (enrol.mjs `verified`) is words-checked here at once; the words stay to see, and the
+// optional switch (`confirm_words`) holds the key until "They match" (POST /api/agents/enrol-words).
+//
+// Transfers (adapters/moadim/TRANSFER.md, contact/transfer-node.mjs): hooks.transfers, where the host
+// moves big files ({ lib: transfer-node.mjs, make(carrier, onEvent) → its Engine }; Node only, until the
+// WebView's platform.rtc): the page owns the session, so its engine answers offers and moves the bytes;
+// the /api/transfers* routes; none without the hook (404 route).
+//
+// Proof of work (design/profiles.md §6): what the human starts here (the page's start, a code, an
+// answer, "Try now") passes the carrier's `started: 'user'`; past the day's three the route answers
+// 409 pow_confirm, and the same call with `pow_confirmed: true` goes on. The carrier's automatic
+// retries stay capped: state's me.pow_capped {relay, next} says when the next one is.
 //
 // The relay setting (UI-API.md "Settings"): the relay new codes name, kept in data.settings.relay.
 // Precedence: relayFixed (the host's environment: SIGELO_RELAY, or a relay the host was given) wins,
@@ -44,6 +62,7 @@ import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
 import { DEFAULT_RELAY } from './carrier.mjs';
 import * as E from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
+import { didWords } from './short.mjs';
 
 const DAY = 86400, TAG_MAX = 20, NAME_MAX = 64, TEXT_MAX = 100_000;
 // An agent's name: a contact name and, placed here, a file name (sigelo.<name>.local.json), as `enrol --name` takes it.
@@ -51,9 +70,11 @@ const AGENT_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const goodRelay = (h) => { try { checkRelay(h); return true; } catch { return false; } };
 const nowS = () => Math.floor(Date.now() / 1000);
 const hexOf = (n) => bytesToHex(randomBytes(n));
+// A short change mark of a string (FNV-1a, 32 bits): not a check of anything, only "something changed".
+const hashOf = (t) => { let x = 0x811c9dc5; for (let i = 0; i < t.length; i++) { x ^= t.charCodeAt(i); x = Math.imul(x, 0x01000193) >>> 0; } return x.toString(36); };
 export const refuse = (status, check, message) => { throw Object.assign(new Error(message), { check, status }); };
 
-export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, codeKind, unlogged, store, hooks = {}, relayFixed = null }) {
+export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, groupsFile = null, enrolFile = null, codeKind, unlogged, store, hooks = {}, relayFixed = null }) {
   const defer = hooks.defer ?? ((f) => setTimeout(f, 0));
   const every = hooks.every ?? ((f, ms) => { const t = setInterval(f, ms); t.unref?.(); return t; });
   const watchers = new Set();
@@ -82,12 +103,15 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
   };
   let data;
   try { data = JSON.parse(store.readData() ?? 'null') ?? {}; } catch { data = {}; }
-  for (const k of ['tags', 'checked', 'read', 'controls', 'settings']) data[k] ??= {};
+  for (const k of ['tags', 'checked', 'read', 'controls', 'settings', 'gread']) data[k] ??= {};
+  data.gnotices ??= [];
   delete data.waiting;   // kept by an earlier page; the carrier says it now (contacts: prekeys, waiting)
   const saveData = () => store.writeData(JSON.stringify(data));
 
   // ---- live status, not kept
-  const live = { online: new Set(), pow: null, powDone: null, error: null, seatGone: null };
+  const live = { online: new Set(), pow: null, powDone: null, error: null, seatGone: null, powCapped: null, powConfirm: null };
+  // A call the human made: past the day's searches it asks (pow_confirm) unless they said go on.
+  const startedBy = (b) => (b?.['pow_confirmed'] === true ? 'confirmed' : 'user');
   // Writes, one at a time. Once the seat went to another device, every write is refused.
   let chain = Promise.resolve();
   const gone = (fn) => () => (live.seatGone !== null ? refuse(409, 'seat_elsewhere', `the seat went to ${live.seatGone}: this page no longer logs in as you`) : fn());
@@ -137,7 +161,7 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
     if (draining) { again = true; return draining; }
     draining = (async () => {
       try {
-        do { again = false; take(await carrier.inbox({ local: true })); } while (again);
+        do { again = false; take(await carrier.inbox({ local: true })); await groupRound(); } while (again);
         // Device messages: wiped answers, a standby asking for the seat (it goes, and this page stops logging in as you).
         if (live.seatGone === null && hooks.deviceRound) {
           const r = await hooks.deviceRound();
@@ -161,6 +185,7 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
     return linking;
   };
   const onEvent = (e) => {
+    if (e.type === 'transfer') defer(() => void transfers?.engine.kick());
     if (e.type === 'link' || e.type === 'paired') defer(() => void linkRound());
     try {
       const d = e['did'] ?? e['from'] ?? e['peer'];
@@ -178,10 +203,19 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
         }
         case 'pow': live.pow = { bits: Number(e['bits']), since: Date.now() }; break;
         case 'pow_done': live.pow = null; live.powDone = Number(e['ms']); break;
-        case 'connected': live.online.add(String(e['relay'])); live.error = null; void checkClock(); break;
+        case 'connected':
+          live.online.add(String(e['relay'])); live.error = null; void checkClock();
+          if (live.powCapped?.relay === e['relay']) live.powCapped = null;
+          if (live.powConfirm?.relay === e['relay']) live.powConfirm = null;
+          break;
         case 'disconnected': live.online.delete(String(e['relay'])); break;
-        case 'error': live.error = `${e['check']}: ${e['detail']}`; break;
-        case 'notice': break;
+        case 'error':
+          live.error = `${e['check']}: ${e['detail']}`;
+          // The day's searches spent: when the next automatic try is, and "Try now" (POST /api/pow/try).
+          if (e['check'] === 'pow' && Number.isSafeInteger(e['next'])) live.powCapped = { relay: String(e['relay']), next: e['next'] };
+          if (e['check'] === 'pow_confirm') live.powConfirm = { relay: String(e['relay']), detail: String(e['detail']).replace(/^pow_confirm: /, '') };
+          break;
+        case 'notice': case 'presence': case 'group_tier': break;   // presence, the group tier: the state says it, nothing to take
         default: soon();
       }
     } catch (err) { live.error = `history: ${err.message}`; }
@@ -189,6 +223,14 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
   };
   const kept = () => (typeof data.settings.relay === 'string' && goodRelay(data.settings.relay) ? data.settings.relay : null);
   const carrier = makeCarrier(onEvent, kept() !== null ? { relay: kept() } : {});
+  // The engine's events: a file offered, done, failed (into the history as events; the view reads GET /api/transfers).
+  const onTransfer = (e) => {
+    if (['asked', 'done', 'failed', 'declined', 'cancelled'].includes(e.what)) {
+      try { record({ kind: 'event', type: 'transfer', what: e.what, id: e.id, did: e.from ?? null, name: e.contact ?? null, code: e.reason ?? null, detail: e.what === 'asked' ? `${e.name} (${e.size} bytes)` : e.path ?? null }); } catch {}
+    }
+    changed();
+  };
+  const transfers = hooks.transfers ? { lib: hooks.transfers.lib, engine: hooks.transfers.make(carrier, onTransfer) } : null;
   // The relay new codes name, as the precedence says.
   const newCodes = () => relayFixed ?? kept() ?? DEFAULT_RELAY;
   const settings = () => ({ relay: kept() ?? DEFAULT_RELAY, default: DEFAULT_RELAY, fixed: relayFixed, in_use: carrier.relay });
@@ -198,13 +240,15 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
   async function start() {
     void checkClock();
     timers = [every(() => void checkClock(), 600_000), every(() => void drain().then(() => linkRound()), 60_000)];
-    await carrier.start();
+    await carrier.start({ started: 'user' });
     await drain();
     void linkRound();
+    void transfers?.engine.kick();
   }
   async function halt() {
     for (const t of timers) clearInterval(t);
     await linking.catch(() => {});
+    await transfers?.engine.close().catch(() => {});
   }
 
 
@@ -231,6 +275,7 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
   const keeperOr = async () => (K ? await K.read() : null) ?? refuse(400, 'keeper', 'no keeper root here: your 25 words make it (sigelo-agent keeper --from-words on a computer; in the app, Create or Restore from seed)');
   const seatHere = () => { const st = hooks.seat?.(); if (st && st.here === false) refuse(409, 'seat_elsewhere', `the seat is with ${st.holder}: agents are enrolled there (DEVICES.md)`); };
   const pub = (e) => ({ id: e.id, state: e.state, code: e.state === 'code' ? e.short : null, exp: e.exp, relay: e.relay, words: e.words ?? null,
+    confirm_words: e.confirmWords === true, words_ok: e.wordsOk ?? null, verified: e.verified === true,
     command: e.state === 'code' ? `${e.relay !== DEFAULT_RELAY ? `SIGELO_RELAY=${e.relay} ` : ''}sigelo-agent init --enrol ${e.short}` : null, ...(e.check !== undefined && { check: e.check, detail: e.detail ?? null }) });
   // Who answered each code (its four words), codes dead unanswered (the index free again), enrolments done.
   async function look() {
@@ -266,14 +311,23 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
     const root = await K.root(k);
     // The carrier as enrolment sees it: its inbox is what the page kept apart.
     const proxy = new Proxy(carrier, { get: (x, p) => (p === 'inbox' ? async () => ({ messages: pass.splice(0), events: [], dropped: {} }) : typeof x[p] === 'function' ? x[p].bind(x) : x[p]) });
+    // The optional switch: the key waits for "They match" (null: not yet, the request kept for the next round).
+    const confirm = async (o) => { if (!o.ask) return true; const e = enrolling.get(o.id); if (e && !e.words) e.words = o.words; return e?.wordsOk ?? null; };
     let res;
-    try { res = await E.complete({ carrier: proxy, file: enrolFile, keeper: root, wait: 0 }); } finally { root.K.fill(0); }
+    try { res = await E.complete({ carrier: proxy, file: enrolFile, keeper: root, wait: 0, confirm }); } finally { root.K.fill(0); }
+    agentHeld.push(...(res.held ?? []));
     for (const d of res.delivered) { const e = enrolling.get(d.id); if (e) e.state = 'sending'; }
     for (const x of res.refused) {
       const e = [...enrolling.values()].find((y) => y.temp !== undefined && y.temp === x.from);
       if (e) Object.assign(e, { check: x.check, detail: x.detail });
     }
-    for (const p of res.placed) { const e = enrolling.get(p.id); if (e) Object.assign(e, { state: 'enrolled', at: nowS(), did: p.did }); }
+    for (const p of res.placed) {
+      const e = enrolling.get(p.id);
+      if (e) Object.assign(e, { state: 'enrolled', at: nowS(), did: p.did, verified: p.verified === true });
+      // Worker i of these words, derived here: checked as "They match" checks a contact (no tap).
+      const c = p.verified ? carrier.contacts().contacts.find((x) => x.did === p.original && !x.revoked) : null;
+      if (c) { data.checked[c.did] = c.pair ?? ''; saveData(); }
+    }
     changed();
   }
   const workerOf = (k, v) => {
@@ -292,6 +346,7 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
       const status = w.revoked !== undefined ? 'revoked' : c || here ? 'enrolled' : (e && LIVE.has(e.state)) || waiting.includes(n) ? 'pending' : 'unplaced';
       return { worker: n, name: w.name, did: c?.current_did ?? w.did, original: w.original, rank: w.rank ?? null, placed: w.placed, at: w.at, status, revoked: w.revoked ?? null,
         seen: c ? seen(c.did) : null, tier: c?.tier ?? null, contact: c?.did ?? null, local: here?.name ?? null,
+        online: c?.online ?? null, last_seen: c?.last_seen ?? null,
         attested_until: here?.mine?.exp ?? w.until ?? w.attestation?.body?.exp ?? null, enrolling: e && e.state !== 'expired' ? pub(e) : null };
     }).sort((a, b) => a.worker - b.worker);
     return { keeper: true, seat, workers: rows };
@@ -320,6 +375,8 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
         waiting, not_collected: queued.length, queued: x.queued,
         status: x.re_pair ? 'pair_again' : waiting ? 'waiting' : queued.length ? 'not_collected' : 'ok', ours: x.ours === true || mine !== null, tier,
         link: x.link ? { id: x.link.id, purpose: x.link.purpose, linked_by: x.link.linked_by, expires: x.link.expires ?? null } : null,
+        // Presence (carrier.mjs): theirs as read now (online true, false, null: not known), and what they see of mine.
+        online: x.online ?? null, online_since: x.online_since ?? null, last_seen: x.last_seen ?? null, presence: x.presence ?? 'deny',
       };
     });
     // Mine: ours by key, whatever the tier (an own agent set to friend is still mine), or tier own.
@@ -340,10 +397,14 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
         // The seat (DEVICES.md): null without one; here false = another device logs in as you: the page shows a banner.
         seat: hooks.seat?.() ?? null,
         pow: live.pow && { bits: live.pow.bits, elapsed_s: Math.round((Date.now() - live.pow.since) / 1000), expected_s: Math.ceil(2 ** live.pow.bits / 180000) },
+        pow_capped: live.powCapped, pow_confirm: live.powConfirm,
       },
       groups: { mine: mineGroup, contacts: rest },
+      // Chat groups (GROUPS.md): the tab's badge and its notices; the list is GET /api/groups.
+      chats: chatsState(),
       pending: { invites: pendingInvites, paired, answers: c.answers, failed },
       introductions: introductions(c.contacts),
+      transfers: transferCounts(),
       events: recs.filter((r) => r.kind === 'event' && r.n > since).slice(-50),
     };
   }
@@ -356,6 +417,122 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
         .map((x) => ({ id: x.id, from: x.from, name: x.name ?? x.from, purpose: x.purpose }));
     } catch { return []; }
   }
+
+  // Files offered and waiting for a yes, and those moving: the page's badge (GET /api/transfers has the rest).
+  function transferCounts() {
+    if (!transfers) return null;
+    try {
+      const l = transfers.lib.list({ carrier, identity: hooks.transfers.identity });
+      return { asked: l.in.filter((r) => r.state === 'asked').length, active: [...l.in, ...l.out].filter((r) => ['accepted', 'offering', 'active'].includes(r.state)).length };
+    } catch { return null; }
+  }
+  // ---- groups (GROUPS.md): the inbox side by code at each drain; the lists and the verbs below
+  const GROUP_NOTICES = 20;
+  const gfile = () => groupsFile ?? refuse(404, 'route', 'no groups here');
+  // A notice for the operator, kept until dismissed (data.gnotices): a stranger added, the creator gone, refusals.
+  const gnote = (n) => { data.gnotices.push({ id: hexOf(4), at: nowS(), ...n }); if (data.gnotices.length > GROUP_NOTICES) data.gnotices.splice(0, data.gnotices.length - GROUP_NOTICES); };
+  // The carrier's group messages checked and filed (handle), copies carried on and sent; every item is the
+  // page's to show (taken: no inbox beside a page). Invitations wait as status pending in the list.
+  async function groupRound() {
+    if (!G || !groupsFile) return;
+    try {
+      const r = await G.handle({ carrier, file: groupsFile });
+      let noted = false;
+      for (const n of r.notices) if (n.why !== 'invited') { gnote(n); noted = true; }
+      const by = new Map();
+      for (const x of r.refused) by.set(x.check, (by.get(x.check) ?? 0) + 1);
+      for (const [check, n] of by) { gnote({ type: 'group', why: 'refused', check, count: n }); noted = true; }
+      if (noted) saveData();
+      if (noted || r.filed || r.notices.length || r.joined.length || r.removed.length) changed();
+    } catch (err) { live.error = `groups: ${err.message}`; }
+  }
+  // Unread in a group: the items after the newest shown (data.gread), none of mine.
+  const unreadIn = (gid, items) => {
+    const m = data.gread[gid];
+    if (!m) return items.filter((i) => !i.mine).length;
+    const at = items.findIndex((i) => i.mid === m.mid);
+    return (at >= 0 ? items.slice(at + 1) : items.filter((i) => (i.received ?? 0) > m.at)).filter((i) => !i.mine).length;
+  };
+  const brakeQuiet = (g) => g.brake !== 'off' && g.run >= g.brake;
+  function groupsList() {
+    if (!G || !groupsFile) return [];
+    const gs = G.list({ carrier, file: groupsFile });
+    return gs.map((g) => {
+      const items = ['member', 'frozen'].includes(g.status) ? G.history({ carrier, file: groupsFile, group: g.gid }) : [];
+      const last = items.at(-1);
+      return { ...g, unread: unreadIn(g.gid, items), quiet: brakeQuiet(g),
+        last: last ? { name: last.mine ? null : last.name, text: textOf(last.content).slice(0, 200), at: last.received ?? last.iat, mine: last.mine === true } : null };
+    });
+  }
+  function groupTier() {
+    const told = carrier.groupTier ?? null, { lim, tier } = G.limitsFor(carrier);
+    return { tier, groups: lim.groups, members: lim.members, told: told !== null };
+  }
+  // /api/state's chats: the badge (unread in all), invitations waiting, notices. Never fails the state.
+  function chatsState() {
+    if (!G || !groupsFile || carrier.platform.files.read(groupsFile) === null) return { unread: 0, invited: 0, notices: data.gnotices.length, rev: `0.${data.gnotices.length}` };
+    try {
+      const gs = groupsList();
+      // rev: changes with any group's roster, status, run or newest item (the page fetches a chat again on it).
+      const rev = gs.map((g) => `${g.gid.slice(0, 8)}.${g.ver}.${g.status}.${g.run}.${g.last?.at ?? 0}.${g.unread}`).join(' ');
+      return { unread: gs.reduce((a, g) => a + g.unread, 0), invited: gs.filter((g) => g.status === 'pending').length, notices: data.gnotices.length, rev: `${hashOf(rev)}.${data.gnotices.length}` };
+    } catch { return { unread: 0, invited: 0, notices: data.gnotices.length, rev: '' }; }
+  }
+  // group.mjs refusals by check: unknown → 404, usage → 400, any other (group_*, not_contact, name) → 409.
+  async function groupCall(fn) {
+    gfile();
+    try { return await fn(); } catch (e) {
+      if (e.check !== undefined && e.status === undefined) e.status = ['group_unknown', 'not_contact'].includes(e.check) ? 404 : ['group_message', 'group_text', 'group_members'].includes(e.check) ? 400 : 409;
+      throw e;
+    }
+  }
+  const gid = (b) => (typeof b['group'] === 'string' && b['group'] !== '' ? b['group'] : refuse(400, 'body', 'group: its gid'));
+  const dids = (v, what, need = true) => {
+    if (v === undefined && !need) return [];
+    if (!Array.isArray(v) || (need && v.length === 0) || v.length > 64 || v.some((x) => typeof x !== 'string' || x === '')) refuse(400, 'body', `${what}: a list of contact DIDs`);
+    return v;
+  };
+  // A write's answer: the group as the list shows it, and how its copies went.
+  const gout = (r) => ({ ...(r.group && { group: r.group }), copies: r.copies ?? [], ...(r.offline !== undefined && { offline: r.offline }) });
+  const groupRoutes = {
+    'GET /api/groups': () => groupCall(() => ({ tier: groupTier(), groups: groupsList(), notices: data.gnotices.slice() })),
+    'GET /api/groups/history': (_, q) => groupCall(() => {
+      const g = q.get('group') ?? refuse(400, 'body', 'group: its gid'), one = groupsList().find((x) => x.gid === g) ?? refuse(404, 'group_unknown', `no group ${g} here`);
+      const items = G.history({ carrier, file: groupsFile, group: g }), last = items.at(-1);
+      // Read: the page has shown them.
+      if (last && data.gread[g]?.mid !== last.mid) { data.gread[g] = { mid: last.mid, at: last.received ?? last.iat }; saveData(); }
+      return { group: { ...one, unread: 0 }, messages: items.slice(-200).map((i) => ({ mid: i.mid, re: i.re ?? null, from: i.from, name: i.name, role: i.role, tier: i.tier ?? null, mine: i.mine === true,
+        operator: i.operator === true, note: i.note ?? null, text: textOf(i.content), mentions: i.mentions ?? [], mentioned: i.mentioned === true, via: i.via ?? null, at: i.received ?? i.iat })) };
+    }),
+    'POST /api/groups/create': (b) => serial(() => groupCall(async () => {
+      const brake = b['brake'];
+      return gout(await G.create({ carrier, file: groupsFile, name: b['name'], members: dids(b['members'], 'members'), humans: dids(b['humans'], 'humans', false), ...(brake !== undefined && brake !== null && { brake }),
+        ...(typeof b['role'] === 'string' && { role: b['role'] }) }));
+    })),
+    'POST /api/groups/add': (b) => serial(() => groupCall(async () => gout(await G.add({ carrier, file: groupsFile, group: gid(b), members: dids(b['members'], 'members'), humans: dids(b['humans'], 'humans', false) })))),
+    'POST /api/groups/remove': (b) => serial(() => groupCall(async () => gout(await G.remove({ carrier, file: groupsFile, group: gid(b), members: dids(b['members'], 'members') })))),
+    'POST /api/groups/rename': (b) => serial(() => groupCall(async () => gout(await G.rename({ carrier, file: groupsFile, group: gid(b), name: b['name'] })))),
+    'POST /api/groups/brake': (b) => serial(() => groupCall(async () => gout(await G.setBrake({ carrier, file: groupsFile, group: gid(b), brake: b['brake'] })))),
+    'POST /api/groups/role': (b) => serial(() => groupCall(async () => gout(await G.setRole({ carrier, file: groupsFile, group: gid(b), member: b['member'], role: b['role'] })))),
+    'POST /api/groups/share': (b) => serial(() => groupCall(async () => gout(await G.share({ carrier, file: groupsFile, group: gid(b), member: b['member'] })))),
+    'POST /api/groups/leave': (b) => serial(() => groupCall(async () => { const r = await G.leave({ carrier, file: groupsFile, group: gid(b) }); changed(); return { ...gout(r), told: r.told }; })),
+    'POST /api/groups/join': (b) => serial(() => groupCall(async () => { const r = G.join({ carrier, file: groupsFile, group: gid(b) }); changed(); return gout(r); })),
+    'POST /api/groups/send': (b) => serial(() => groupCall(async () => {
+      const text = b['text'], re = b['re'], mentions = b['mentions'];
+      if (typeof text !== 'string' || text.trim() === '') refuse(400, 'body', 'text: the message');
+      if (mentions !== undefined && (!Array.isArray(mentions) || mentions.some((x) => typeof x !== 'string'))) refuse(400, 'body', 'mentions: member DIDs or names');
+      const r = await G.send({ carrier, file: groupsFile, group: gid(b), text, ...(typeof re === 'string' && re !== '' && { re }), ...(mentions && { mentions }) });
+      changed();
+      return { gid: r.gid, mid: r.mid, copies: r.copies, via_creator: r.via_creator, unreached: r.unreached, ...(r.offline !== undefined && { offline: r.offline }) };
+    })),
+    'POST /api/groups/dismiss': (b) => serial(async () => {
+      const id = b['id'], before = data.gnotices.length;
+      data.gnotices = id === 'all' ? [] : data.gnotices.filter((n) => n.id !== id);
+      if (data.gnotices.length === before && id !== 'all') refuse(404, 'notice', 'no such notice');
+      saveData(); changed();
+      return { dismissed: before - data.gnotices.length };
+    }),
+  };
 
   // ---- writes
   const contactOf = (d) => {
@@ -382,13 +559,13 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
     'GET /api/state': async (_, q) => { if (draining) await draining; return state(Number(q.get('since') ?? 0) || 0); },
     'GET /api/me': () => {
       const m = hooks.me(), i = hooks.meInfo();
-      return { did: m.did, original: m.original, chain: m.chain, identity_file: i.identity_file, recovery: i.recovery, key: i.key, relay: carrier.relay, retention_days: carrier.retentionDays, erase: i.erase,
+      return { did: m.did, original: m.original, words: didWords(m.original), chain: m.chain, identity_file: i.identity_file, recovery: i.recovery, key: i.key, relay: carrier.relay, retention_days: carrier.retentionDays, erase: i.erase,
         ...(i.restored && { restored: i.restored }) };
     },
     'POST /api/invite': (b) => serial(async () => {
       const name = b['name'] === undefined || b['name'] === '' ? `contact-${hexOf(2)}` : cleanName(b['name'], 'name');
       const at = newCodes();
-      const r = await carrier.invite({ name, short: b['long'] !== true, ...(at !== carrier.relay && { relay: at }) });
+      const r = await carrier.invite({ name, short: b['long'] !== true, ...(at !== carrier.relay && { relay: at }), started: startedBy(b) });
       const inv = { id: hexOf(6), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp }) };
       invites.set(inv.id, inv);
       changed();
@@ -407,7 +584,7 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
       // friend or quiet, the human's choice; own is detected, never asked (store.mjs tiers).
       const tier = b['tier'];
       if (tier !== undefined && tier !== 'friend' && tier !== 'quiet') refuse(400, 'body', 'tier: friend or quiet');
-      const r = await carrier.accept(code, { ...(name !== undefined && { name }), wait: 10, ...(tier !== undefined && { tier }) });
+      const r = await carrier.accept(code, { ...(name !== undefined && { name }), wait: 10, ...(tier !== undefined && { tier }), started: startedBy(b) });
       const now = r.contact ? carrier.contacts().contacts.find((x) => x.did === r.contact.did) : undefined;
       return r.contact ? { status: r.status, contact: { ...r.contact, pair: now?.pair ?? null, tier: now?.tier ?? null } }
         : { ...r, exp: carrier.contacts().answers.find((x) => x.did === r.did)?.exp ?? null };
@@ -426,6 +603,11 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
       const c = contactOf(b['contact']), tier = b['tier'];
       if (tier !== 'own' && tier !== 'friend' && tier !== 'quiet') refuse(400, 'body', 'tier: own, friend or quiet');
       return carrier.setTier(c.did, tier);
+    }),
+    'POST /api/presence': (b) => serial(async () => {
+      const c = contactOf(b['contact']), allow = b['allow'];
+      if (typeof allow !== 'boolean') refuse(400, 'body', 'allow: true or false');
+      try { return carrier.setPresence(c.did, allow); } catch (e) { if (e.check === 'presence_own') e.status = 409; throw e; }
     }),
     'POST /api/tag': (b) => serial(async () => {
       const c = contactOf(b['contact']), tags = b['tags'];
@@ -484,8 +666,10 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
     'POST /api/agents/enrol-code': (b) => serial(async () => {
       seatHere();
       if (!enrolFile) refuse(404, 'route', 'no enrolment here');
-      const name = b['name'], tier = b['tier'], relay = b['relay'];
+      const name = b['name'], tier = b['tier'], relay = b['relay'], words = b['confirm_words'], label = b['operator_name'];
       if (typeof name !== 'string' || !AGENT_NAME.test(name)) refuse(400, 'body', 'name: lowercase letters, digits, _ and -, at most 64');
+      if (words !== undefined && typeof words !== 'boolean') refuse(400, 'body', 'confirm_words: true or false (default false: checked by its DID)');
+      if (label !== undefined && label !== null && label !== '' && E.operatorLabel(label) === null) refuse(400, 'body', 'operator_name: how the agent files you, 1 to 64 characters');
       if (tier !== undefined && tier !== 'own' && tier !== 'friend' && tier !== 'quiet') refuse(400, 'body', 'tier: own (the default), friend or quiet');
       if (relay !== undefined && relay !== null && relay !== '' && !(typeof relay === 'string' && goodRelay(relay.trim().toLowerCase()))) refuse(400, 'body', 'relay: a host name, as relay.example.org');
       const at = relayFixed ?? (typeof relay === 'string' && relay !== '' ? relay.trim().toLowerCase() : newCodes());
@@ -495,14 +679,39 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
       const used = Object.keys(k.workers).map(Number), i = used.length ? Math.max(...used) + 1 : 0;
       const root = await K.root(k);
       let r;
-      try { r = await E.issue({ carrier, file: enrolFile, i, n: 0, name, keeper: root, relay: at }); } finally { root.K.fill(0); }
+      try {
+        r = await E.issue({ carrier, file: enrolFile, i, n: 0, name, keeper: root, relay: at, started: startedBy(b), confirmWords: words === true,
+          ...(typeof label === 'string' && label !== '' && { operatorName: label }) });
+      } finally { root.K.fill(0); }
       const until = pend((x) => x.issued[r.id]?.attestation?.body?.exp ?? null);
       await K.update((x) => { x.workers[i] = { name, n: 0, did: r.did, original: r.original, placed: 'remote', at: nowS(), ...(until && { until }) }; });
       if (tier === 'friend' || tier === 'quiet') carrier.presetTier(r.original, tier);
-      const e = { id: r.id, worker: i, name, short: r.short, code: r.code, exp: r.short_exp, relay: r.relay, tier: tier ?? 'own', state: 'code', did: r.did, original: r.original };
+      const e = { id: r.id, worker: i, name, short: r.short, code: r.code, exp: r.short_exp, relay: r.relay, tier: tier ?? 'own', state: 'code', did: r.did, original: r.original, confirmWords: words === true };
       enrolling.set(e.id, e);
       changed();
       return { worker: i, name, did: r.did, original: r.original, tier: e.tier, ...pub(e) };
+    }),
+    // The optional words switch: the human's answer for an enrolment that holds its key until it.
+    'POST /api/agents/enrol-words': (b) => serial(async () => {
+      const e = enrolling.get(String(b['id'])) ?? refuse(404, 'enrol', 'no such enrolment on this page');
+      if (typeof b['match'] !== 'boolean') refuse(400, 'body', 'match: true (the agent\'s machine shows the same four words) or false');
+      if (!LIVE.has(e.state)) refuse(409, 'enrol_state', `this enrolment is ${e.state}`);
+      e.wordsOk = b['match'];
+      await agentRound();
+      if (!b['match']) {
+        pend((x) => { delete x.issued[e.id]; });
+        await K?.update((k) => { if (k.workers[e.worker]?.name === e.name && k.workers[e.worker].placed === 'remote') delete k.workers[e.worker]; });
+        if (e.temp) { try { await carrier.forget(e.temp); } catch {} }
+        Object.assign(e, { state: 'failed', check: 'device_words', detail: 'The four words differed: its key was not sent, and the code is dropped. Make a new one.' });
+      }
+      changed();
+      return pub(e);
+    }),
+    // "Try now" (design/profiles.md §6): the automatic tries paused for the day; the human's goes now.
+    'POST /api/pow/try': (b) => serial(async () => {
+      const r = await carrier.tryNow({ confirmed: b['pow_confirmed'] === true });
+      live.powCapped = null; live.powConfirm = null; changed();
+      return r;
     }),
     'POST /api/agents/revoke': (b) => serial(async () => {
       seatHere();
@@ -552,8 +761,8 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
       };
       const days = b['days'];
       if (days !== undefined && days !== null && !Number.isSafeInteger(days)) refuse(400, 'body', 'days: whole days, 1 to 365');
-      const tierA = str('tier_a'), tierB = str('tier_b'), note_ = str('note'), relay = str('relay');
-      const rec = await L.link({ carrier, file: linksFile, a: str('a', true), b: str('b', true), purpose: str('purpose', true), ...(tierA && { tierA }), ...(tierB && { tierB }),
+      const tierA = str('tier_a'), tierB = str('tier_b'), note_ = str('note'), relay = str('relay'), nameA = str('name_a'), nameB = str('name_b');
+      const rec = await L.link({ carrier, file: linksFile, a: str('a', true), b: str('b', true), purpose: str('purpose', true), ...(tierA && { tierA }), ...(tierB && { tierB }), ...(nameA && { nameA }), ...(nameB && { nameB }),
         ...(typeof days === 'number' && { days }), ...(note_ && { note: note_ }), ...(relay && { relay }) });
       const { code: _c, steps: _s, exp: _e, ttl: _t, ...out } = rec;
       return out;
@@ -593,6 +802,9 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
       return { name, confirmed: match, ...(!match && { forgotten: true }) };
     },
   };
+  // Transfers: the routes exist only where the host moves files (hooks.transfers).
+  if (transfers) Object.assign(routes, transferRoutes({ X: transfers.lib, engine: transfers.engine, carrier, identity: hooks.transfers.identity, serial, contactOf, changed }));
+  if (G) Object.assign(routes, groupRoutes);
   // One handler for every listener: the route's answer as [status, JSON value].
   async function dispatch(method, url, b) {
     const route = routes[`${method} ${url.pathname}`];
@@ -605,5 +817,52 @@ export function makePage({ makeCarrier, link: L, linksFile, enrolFile = null, co
     carrier, routes, dispatch, start, halt, serial, refuse, contactOf, cleanName, record, seen, data, saveData, live, recs, linkRound, drain,
     setDevices: (d) => { devices = d; },
     onChange: (f) => { watchers.add(f); return () => watchers.delete(f); },
+  };
+}
+
+// ---- transfers (UI-API.md "Transfers"): the verbs of contact/transfer-node.mjs over the page's session.
+// Refusals by check: unknown → 404; usage → 400; direct_ask, disk_full, transfer_state and the rest → 409.
+function transferRoutes({ X, engine, carrier, identity, serial, contactOf, changed }) {
+  const call = async (fn) => {
+    try { const r = await fn(); changed(); return r; } catch (e) {
+      if (e.check !== undefined && e.status === undefined) e.status = ['transfer_unknown', 'not_contact'].includes(e.check) ? 404 : ['usage', 'body'].includes(e.check) ? 400 : 409;
+      throw e;
+    }
+  };
+  const idOf = (b) => (typeof b['id'] === 'string' && /^[0-9a-f]{32}$/.test(b['id']) ? b['id'] : refuse(400, 'body', 'id: a transfer id (32 hex digits)'));
+  const directOf = (b) => (b['direct'] === undefined ? undefined : typeof b['direct'] === 'boolean' ? b['direct'] : refuse(400, 'body', 'direct: true or false'));
+  const viaOf = (b) => (b['via'] === undefined || b['via'] === 'auto' || b['via'] === 'tor' ? b['via'] : refuse(400, 'body', 'via: auto or tor'));
+  const strip = ({ file: _f, ...r }) => r;
+  const settings = async () => ({ ...X.settings({ identity }), tor_daemon: await X.torCaps(X.torConfig()), direct_available: (await X.loadRtc()) !== null });
+  return {
+    'GET /api/transfers': () => X.list({ carrier, identity, engine }),
+    'POST /api/transfers/send': (b) => serial(() => call(async () => {
+      if (typeof b['path'] !== 'string' || b['path'] === '') refuse(400, 'body', 'path: a file on this computer');
+      const c = contactOf(b['to']), d = directOf(b), via = viaOf(b);
+      const r = await X.send({ carrier, identity, to: c.did, path: b['path'], ...(via && { via }), ...(d !== undefined && { direct: d }) });
+      void engine.kick();
+      return strip(r);
+    })),
+    'POST /api/transfers/accept': (b) => serial(() => call(async () => {
+      const d = directOf(b), via = viaOf(b), r = X.accept({ carrier, identity, id: idOf(b), ...(via && { via }), ...(d !== undefined && { direct: d }) });
+      void engine.kick();
+      return r;
+    })),
+    'POST /api/transfers/resume': (b) => serial(() => call(async () => { const r = X.accept({ carrier, identity, id: idOf(b), ...(directOf(b) !== undefined && { direct: directOf(b) }) }); void engine.kick(); return r; })),
+    'POST /api/transfers/decline': (b) => serial(() => call(async () => X.decline({ carrier, identity, id: idOf(b) }))),
+    'POST /api/transfers/cancel': (b) => serial(() => call(async () => strip(await X.cancel({ carrier, identity, id: idOf(b), engine })))),
+    'POST /api/transfers/forget': (b) => serial(() => call(async () => strip(X.forget({ carrier, identity, id: idOf(b), engine })))),
+    'POST /api/transfers/direct': (b) => serial(() => call(async () => {
+      if (typeof b['on'] !== 'boolean') refuse(400, 'body', 'on: true or false');
+      return X.setDirect({ carrier, identity, contact: contactOf(b['contact']).did, on: b['on'] });
+    })),
+    'GET /api/transfers/settings': () => settings(),
+    'POST /api/transfers/settings': (b) => serial(() => call(async () => {
+      const patch = {};
+      if (b['tor'] !== undefined) { if (typeof b['tor'] !== 'boolean') refuse(400, 'body', 'tor: true or false'); patch.tor = b['tor']; }
+      if (b['prefer'] !== undefined) { if (b['prefer'] !== 'fast' && b['prefer'] !== 'private') refuse(400, 'body', 'prefer: fast or private'); patch.prefer = b['prefer']; }
+      X.settings({ identity, patch });
+      return settings();
+    })),
   };
 }

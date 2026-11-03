@@ -9,7 +9,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // stores, readonly and readwrite transactions committed whole at oncomplete (or aborted: failNext),
 // get, put, delete, a cursor. Values are copied in (bytes) or kept (a CryptoKey).
 export class FakeIDB {
-  constructor() { this.dbs = new Map(); this.failNext = 0; this.commits = 0; }
+  constructor() { this.dbs = new Map(); this.failNext = 0; this.commits = 0; this.deleted = []; }
+  deleteDatabase(name) { const r = {}; setTimeout(() => { this.dbs.delete(name); this.deleted.push(name); r.onsuccess?.(); }); return r; }
   open(name) {
     const r = {};
     setTimeout(() => {

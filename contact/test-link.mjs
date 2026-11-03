@@ -68,11 +68,12 @@ const D0 = 'did:sigelo:z' + '1'.repeat(44);
     [{ v: LINK_V, typ: 'status', id, iat: now, status: 'maybe' }, 'link_message', 'status maybe'], [{ v: LINK_V, typ: 'status', id, iat: now, status: 'refused', check: 'Bad Check' }, 'link_message', 'a check not a name'],
     [{ v: LINK_V, typ: 'end', id, iat: now, reason: 'bored' }, 'link_message', 'end reason bored'],
     [{ v: LINK_V, typ: 'offer', id, iat: now, from: D0, did: D0, purpose: 'p', ttl: DAY }, 'link_message', 'an offer with neither code nor paired'],
+    [{ ...ask, peer_name: 'x\u202eb' }, 'link_text', 'a peer_name with a bidi control'], [{ ...ask, peer_name: 'n'.repeat(65) }, 'link_text', 'a peer_name of 65'],
   ];
   for (const [x, want, what] of shapes) ok(checkOf(() => checkMessage(x)) === want, `checkMessage, ${what}: ${want}`, checkOf(() => checkMessage(x)));
   for (const x of [{ v: LINK_V, typ: 'invite', id, iat: now, code: 'sgl1abc' }, { v: LINK_V, typ: 'invite', id, iat: now, paired: true }, { v: LINK_V, typ: 'status', id, iat: now, status: 'refused', check: 'link_from' },
     { v: LINK_V, typ: 'end', id, iat: now, reason: 'expired' }, { v: LINK_V, typ: 'offer', id, iat: now, from: D0, did: D0, paired: true, purpose: 'p', ttl: DAY, name: 'a', tier: 'quiet' },
-    { ...ask, kind: 'external', relay: 'relay.example:8883' }, { v: LINK_V, typ: 'offer', id, iat: now, from: D0, did: D0, paired: true, purpose: 'p', ttl: DAY, note: 'ü'.repeat(NOTE_MAX) }]) {
+    { ...ask, kind: 'external', relay: 'relay.example:8883' }, { ...ask, peer_name: 'reviewer' }, { v: LINK_V, typ: 'offer', id, iat: now, from: D0, did: D0, paired: true, purpose: 'p', ttl: DAY, peer_name: 'builder' }, { v: LINK_V, typ: 'offer', id, iat: now, from: D0, did: D0, paired: true, purpose: 'p', ttl: DAY, note: 'ü'.repeat(NOTE_MAX) }]) {
     ok(checkOf(() => checkMessage(x)) === 'accepted', `checkMessage: a well-formed ${x.typ}${x.paired ? ' (paired)' : ''}: accepted`);
   }
   ok(checkPurpose('  review the project ') === 'review the project' && checkPurpose('ü'.repeat(PURPOSE_MAX)).length === PURPOSE_MAX, 'checkPurpose: trimmed; counted in characters');
@@ -306,11 +307,13 @@ try {
     'that code accepted by review, which was not asked (one side alone): refused revoked before anything went; nothing paired');
   await sendLink(H, A, { v: LINK_V, typ: 'ask', id: L.id, iat: now, peer: B.did, kind: 'own', purpose: 'p', ttl: DAY }); await turn(A);
   ok(A.out.at(-1).refused.some((x) => x.id === L.id && x.check === 'link_stale'), 'an ask carrying the ended link\'s id: link_stale', JSON.stringify(A.out.at(-1).refused));
-  const R2 = await link({ carrier: H.c, file: H.f, a: 'project', b: 'review', purpose: 'review again' });
+  const R2 = await link({ carrier: H.c, file: H.f, a: 'project', b: 'review', purpose: 'review again', nameA: 'the-project', nameB: 'the-reviewer' });
   for (let i = 0; i < 4 && recOf(H, R2.id)?.status === 'pending'; i++) await rounds(1, A, H, B, A, B, H);
   const ab2 = contactOf(A, B.did), ba2 = contactOf(B, A.did);
   ok(recOf(H, R2.id).status === 'linked' && R2.id !== L.id && ab2?.link?.id === R2.id && !ab2.revoked && ab2.ended === undefined && ba2?.link?.id === R2.id && !ba2.revoked && ba2.ended === undefined,
     'both asked afresh (project\'s ask, review\'s offer from its operator): linked again under a new id, the records fresh', JSON.stringify([recOf(H, R2.id)?.status, ab2, ba2]));
+  ok(ab2.name === 'the-reviewer' && ba2.name === 'the-project' && contactOf(H, B.did)?.name === 'review',
+    'names from the introduction (peer_name): project files review as the-reviewer, review files project as the-project; the operator\'s own names unchanged', JSON.stringify([ab2.name, ba2.name]));
 
   // ---- expiry: a day and more later, each side ends by itself.
   now += DAY + 60;

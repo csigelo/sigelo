@@ -132,6 +132,9 @@ ok('remote: scope all: forget, tier, agents, link, links/allow in scope (404 not
   && (await full.call('POST', '/api/link', { a: 'did:sigelo:zNope', b: 'did:sigelo:zNope2', purpose: 'p' })).body.error.check === 'not_contact'
   && (await full.call('POST', '/api/links/allow', { contact: 'did:sigelo:zNope', allow: true })).body.error.check === 'not_contact'
   && (await full.call('GET', '/api/agents')).status === 200 && (await full.call('GET', '/api/devices')).body.error.check === 'remote');
+ok('remote: transfers: the list and an answer in scope all; sending a file by its path never (403 remote)', (await full.call('GET', '/api/transfers')).status === 200
+  && (await full.call('POST', '/api/transfers/accept', { id: 'ab'.repeat(16) })).body.error.check === 'transfer_unknown'
+  && (await full.call('POST', '/api/transfers/send', { to: 'did:sigelo:zNope', path: '/etc/passwd' })).body.error.check === 'remote');
 {
   const [ec, rv, rt] = [await full.call('POST', '/api/agents/enrol-code', { name: 'vps' }), await full.call('POST', '/api/agents/revoke', { worker: 7 }), await full.call('POST', '/api/relays/test', { relay: 'relay.test' })];
   ok('remote: scope all: enrol-code reaches the route (no relay here: 409 connect), revoke an unknown worker 404, relays/test answers (the relay unreachable: ok false)',
@@ -165,7 +168,7 @@ await page.close();
 {
   const all = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/-]+)`/gm)].map((m) => m[1]!);
   // The device routes (D4) are documented too, and in no scope: deviceRoute refuses them before any scope.
-  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x));
+  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && x !== 'POST /api/transfers/send');
   const [r, c, a] = [rm.SCOPES.read, rm.SCOPES.chat, rm.SCOPES.all];
   ok('remote: every UI-API.md route but the device ones is in scope all; read ⊂ chat ⊂ all', routes.length >= 17 && routes.every((x) => a.has(x)) && a.size === routes.length
     && [...r].every((x) => c.has(x)) && [...c].every((x) => a.has(x)), JSON.stringify(routes.filter((x) => !a.has(x))));
@@ -280,10 +283,10 @@ else {
     await bcall('POST', '/api/words', { contact: acc.contact.did, match: true });
     const steps = [
       await call('POST', '/api/words', { contact: bob!.did, match: true }), await call('POST', '/api/rename', { contact: bob!.did, name: 'Bob' }),
-      await call('POST', '/api/tag', { contact: bob!.did, tags: ['work'] }), await call('POST', '/api/tier', { contact: bob!.did, tier: 'quiet' }),
+      await call('POST', '/api/tag', { contact: bob!.did, tags: ['work'] }), await call('POST', '/api/tier', { contact: bob!.did, tier: 'quiet' }), await call('POST', '/api/presence', { contact: bob!.did, allow: true }),
       await call('POST', '/api/send', { to: bob!.did, text: 'from the phone' }), await call('POST', '/api/sync'),
     ];
-    ok('remote e2e: words, rename, tag, tier, send, sync → 200; the send sent', steps.every((x) => x.status === 200) && steps[4]!.body.status === 'sent', JSON.stringify(steps.map((x) => x.status)));
+    ok('remote e2e: words, rename, tag, tier, presence, send, sync → 200; the send sent', steps.every((x) => x.status === 200) && steps[5]!.body.status === 'sent', JSON.stringify(steps.map((x) => x.status)));
     const got = await until(async () => ((await bcall('GET', `/api/messages?contact=${encodeURIComponent(acc.contact.did)}`)).messages as { text: string }[]).find((m) => m.text === 'from the phone'));
     await bcall('POST', '/api/send', { to: acc.contact.did, text: 'to the phone' });
     const back = await until(async () => ((await call('GET', `/api/messages?contact=${encodeURIComponent(bob!.did)}`)).body.messages as { text: string }[]).find((m) => m.text === 'to the phone'));
@@ -326,6 +329,22 @@ else {
       const closed = new Promise((x) => hw.on('close', x));
       hw.kill('SIGTERM'); await closed;
     }
+    // Groups, sealed (GROUPS.md): every verb from the phone; an invitation from the other page joined, then left.
+    {
+      const bot = pr.body.contact.did as string;
+      const gl = await call('GET', '/api/groups'), mk = await call('POST', '/api/groups/create', { name: 'crew', members: [bob!.did] });
+      const gid = mk.body.group?.gid as string;
+      const gs = [gl, mk, await call('GET', `/api/groups/history?group=${gid}`), await call('POST', '/api/groups/send', { group: gid, text: 'to the group' }),
+        await call('POST', '/api/groups/add', { group: gid, members: [bot] }), await call('POST', '/api/groups/role', { group: gid, member: bot, role: 'human' }),
+        await call('POST', '/api/groups/brake', { group: gid, brake: 'off' }), await call('POST', '/api/groups/rename', { group: gid, name: 'ship' }),
+        await call('POST', '/api/groups/share', { group: gid, member: bob!.did }), await call('POST', '/api/groups/remove', { group: gid, members: [bot] }),
+        await call('POST', '/api/groups/dismiss', { id: 'all' })];
+      const theirs = await bcall('POST', '/api/groups/create', { name: 'theirs', members: [acc.contact.did] });
+      const inv_ = await until(async () => ((await call('GET', '/api/groups')).body.groups as { gid: string; status: string }[]).find((x) => x.gid === theirs.group?.gid && x.status === 'pending'), 30000);
+      const jn = await call('POST', '/api/groups/join', { group: theirs.group?.gid }), lv = await call('POST', '/api/groups/leave', { group: theirs.group?.gid });
+      ok('remote e2e groups: list, create, history, send, add, role, brake, rename, share, remove, dismiss sealed (scope all) → 200; the other page\'s group an invitation here, joined and left',
+        gs.every((x) => x.status === 200) && inv_ !== undefined && jn.status === 200 && lv.status === 200 && lv.body.told === true, JSON.stringify([...gs, jn, lv].map((x) => [x.status, x.body?.error?.check])));
+    }
     const me2 = await call('GET', '/api/me'), fg = await call('POST', '/api/forget', { contact: bob!.did }), cl = await call('POST', '/api/history/clear');
     ok('remote e2e: me, forget, history/clear → 200', me2.status === 200 && fg.body.forgotten === bob!.did && cl.body.cleared === true);
     const se = await call('GET', '/api/settings'), sp = await call('POST', '/api/settings', { relay: 'corp.example.com' }), rl = await call('GET', '/api/relays');
@@ -335,6 +354,17 @@ else {
     const rn = await call('POST', '/api/agents/rename', { worker: ec.body.worker, name: 'vps2' }), rv = await call('POST', '/api/agents/revoke', { worker: ec.body.worker }), rt = await call('POST', '/api/relays/test', { relay: 'relay.test' });
     ok('remote e2e agents: the list, a code (12 characters: relay.test names its tag), rename, revoke (the unused code cancelled), the relay Test, sealed (scope all) → 200', wk.status === 200 && wk.body.keeper === true && ec.status === 200
       && /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(ec.body.code) && rn.body.name === 'vps2' && rv.body.cancelled === true && rt.body.ok === true, JSON.stringify([ec, rn, rv, rt]).slice(0, 900));
+    const ec3 = await call('POST', '/api/agents/enrol-code', { name: 'vps3', confirm_words: true }), ew = await call('POST', '/api/agents/enrol-words', { id: ec3.body.id, match: false }), pt = await call('POST', '/api/pow/try', {});
+    ok('remote e2e agents: the words answer (false: the code dropped, its key never sent) and Try now, sealed → 200', ec3.status === 200 && ew.status === 200 && ew.body.state === 'failed' && ew.body.check === 'device_words'
+      && pt.status === 200 && Array.isArray(pt.body.tried), JSON.stringify([ec3, ew, pt]).slice(0, 600));
+    // Transfers: the list and the settings answer 200; the verbs on a transfer or a contact answer by the route itself (none here: 404).
+    const tl = await call('GET', '/api/transfers'), ts = await call('GET', '/api/transfers/settings'), tp = await call('POST', '/api/transfers/settings', { prefer: 'private' });
+    const BY_ID = ['accept', 'decline', 'cancel', 'resume', 'forget'].map((v) => `POST /api/transfers/${v}`);
+    const byId = await Promise.all(BY_ID.map((x) => call('POST', x.split(' ')[1]!, { id: 'ab'.repeat(16) })));
+    const td = await call('POST', '/api/transfers/direct', { contact: 'did:sigelo:zNope', on: true });
+    ok('remote e2e transfers: the list and settings sealed → 200; accept, decline, cancel, resume, forget of an unknown id → 404 transfer_unknown; direct of no contact → 404', tl.status === 200 && ts.status === 200 && tp.body.prefer === 'private'
+      && byId.every((x) => x.status === 404 && x.body.error.check === 'transfer_unknown') && td.status === 404, JSON.stringify([tl, tp, byId, td]).slice(0, 900));
+    for (const x of [...BY_ID, 'POST /api/transfers/direct']) done_.set(x, 200);
     const all = [...rm.SCOPES.all], missed = all.filter((x) => done_.get(x) !== 200);
     ok(`remote e2e: every route in scope all answered 200 sealed (${all.length})`, missed.length === 0, JSON.stringify(missed));
   } finally {
@@ -484,6 +514,26 @@ else {
     const many = await Promise.all(Array.from({ length: 14 }, () => all.ctl.call('GET', '/api/me')));
     const n200 = many.filter((r) => r.status === 200).length, n429 = many.filter((r) => r.status === 429).length;
     ok('relay: rate cap: of 14 at once, about 10 answered, one 429 rate, the rest dropped (no answer)', n200 >= 9 && n200 <= 12 && n429 === 1 && many.find((r) => r.status === 429)?.body.error.check === 'rate', JSON.stringify(many.map((r) => r.status)));
+    // design/profiles.md P2: control pair --operator <did> (the app profile's operator, the GTK phone app): a computer whose
+    // page is another identity refused other_operator after the code, nothing kept; the profile's own → paired, its original DID said.
+    const { spawn } = await import('node:child_process'), { existsSync } = await import('node:fs');
+    const cliPair = (line: string, operator: string, file: string) => new Promise<{ status: number | null; o: string; e: string }>((res) => {
+      const c = spawn('node', [CLI, 'control', 'pair', line, '--operator', operator], { env: { ...env, SIGELO_RELAY_ENDPOINTS: JSON.stringify(relay.endpoints), SIGELO_RELAY_REGISTRY: 'off', SIGELO_CONTROL: file }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let o = '', e = ''; c.stdout.on('data', (d: Buffer) => { o += d; }); c.stderr.on('data', (d: Buffer) => { e += d; });
+      c.on('close', (status) => res({ status, o, e }));
+    });
+    const opDid = localMe.original as string, stranger = didOf(C.newControlIdentity().genesis);
+    const n1 = await pr.relay.issue('cli-no', 'read'), f1 = join(Pd, 'cli-no.control.json');
+    const no = await cliPair(n1!.line, stranger, f1);
+    ok('control pair --operator another DID: the computer answered, then refused other_operator (exit 1), no control file kept, its contact forgotten', no.status === 1 && /other_operator/.test(no.e) && /answer no to its four words/.test(no.e) && !existsSync(f1)
+      && !existsSync(f1.replace(/\.json$/, '.contacts.json')), JSON.stringify(no).slice(0, 400));
+    const n2 = await pr.relay.issue('cli-yes', 'read'), f2 = join(Pd, 'cli-yes.control.json');
+    const yes = await cliPair(n2!.line, opDid, f2);
+    let yj: { operator?: string; original?: string; words?: string } = {};
+    try { yj = JSON.parse(yes.o); } catch {}
+    ok('control pair --operator the operator\'s DID: paired (exit 0), prints {operator, original, words}, the file kept', yes.status === 0 && yj.original === opDid && typeof yj.words === 'string' && existsSync(f2), JSON.stringify(yes).slice(0, 400));
+    const notDid = spawnSync('node', [CLI, 'control', 'pair', n2!.line, '--operator', 'nope'], { env: { ...env, SIGELO_CONTROL: join(Pd, 'x.json') }, encoding: 'utf8' });
+    ok('control pair --operator not a DID → exit 2', notDid.status === 2, notDid.stderr);
     // Revoke: the contact forgotten; the app's requests go unanswered.
     const rv = await pr.relay.revoke('phone');
     const after = await a.ctl.call('POST', '/api/sync');  // 15 s: nobody answers

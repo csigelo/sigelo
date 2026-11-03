@@ -55,7 +55,7 @@ const html = readFileSync(join(HERE, 'index.html'), 'utf8'), map = C.importMap(h
   // remote-client.mjs imports node:module and node:url only in Node (its own dependencies), never in the page: C.NODE_ONLY.
   const nodeImports = vendored.filter(([rel]) => /\.m?js$/.test(rel)).flatMap(([rel, src]) => C.importsOf(readFileSync(src, 'utf8')).filter((s) => s.startsWith('node:') && !C.NODE_ONLY[rel]?.includes(s)).map((s) => `${rel}: ${s}`));
   ok(nodeImports.every((x) => x.endsWith('node:zlib') && /qr(-decode)?\.mjs/.test(x)), `no node: import in the page but the QR codec's node:zlib, mapped to the shim (${nodeImports})`);
-  const own = ['app.mjs', 'router.mjs', 'platform-web.mjs', 'platform-stub.mjs', 'pow-worker.mjs', 'platform-android.mjs', 'ws-over-stream.mjs', 'shell.mjs', 'seed.mjs', 'create.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8'));
+  const own = ['app.mjs', 'boot.mjs', 'profiles.mjs', 'router.mjs', 'platform-web.mjs', 'platform-stub.mjs', 'pow-worker.mjs', 'platform-android.mjs', 'ws-over-stream.mjs', 'shell.mjs', 'seed.mjs', 'create.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8'));
   ok(own.every((t) => !/from 'node:|innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(t)), 'the app\'s modules: no node: import, no HTML strings, no eval');
   const manifest = JSON.parse(readFileSync(join(HERE, 'vendor.json'), 'utf8'));
   ok(Object.keys(manifest.files).length === vendored.length && Object.entries(manifest.files).every(([rel, f]) => f.sha256 === createHash('sha256').update(readFileSync(join(HERE, ...rel.split('/')))).digest('hex')),
@@ -225,7 +225,11 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   // Standby: the seat on another device. Started, it never logs in; writes refused seat_elsewhere; reads answer.
   const p2 = await W.webPlatform({ name: 'seed2', indexedDB: new FakeIDB(), mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
   await SD.restoreInto(p2, { words, name: 'tab', relay: 'relay.sigelo.ai', restore: { restore_height: 3100000 }, seat: 'elsewhere', now: 1761400000 });
-  const me2 = JSON.parse(new TextDecoder().decode(await W.loadIdentity(p2))), r2 = mk({ platform: p2, identity: () => me2, mode: { kind: 'full', standby: true }, seat: SD.seatOf(p2, () => me2), options: { registry: false } });
+  // The words password guards the seat (design/apps-seed.md §8): the router asks words.guard (words.mjs) before the take.
+  const WD = await import(pathToFileURL(join(HERE, 'words.mjs')).href), WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href);
+  const slept = [], fastGate = WL.wrongGate({ sleep: async (ms) => { slept.push(ms); } });
+  const me2 = JSON.parse(new TextDecoder().decode(await W.loadIdentity(p2))), r2 = mk({ platform: p2, identity: () => me2, mode: { kind: 'full', standby: true }, seat: SD.seatOf(p2, () => me2), options: { registry: false },
+    words: { guard: (pw) => WD.guard(p2, pw, fastGate) } });
   let started = 0;
   r2.carrier.start = async () => { started++; };
   r2.carrier.checkClock = async () => {};
@@ -253,7 +257,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
     `standby: the agents list reads (the seat elsewhere); enrol-code refused seat_elsewhere: indices are given at the seat only (${ec2.status})`);
   const noConfirm = await r2.call('POST', '/api/seat/take', {});
   ok(noConfirm.status === 400 && started === 0, 'standby: POST /api/seat/take without confirm → 400, nothing started');
-  const tk = await r2.call('POST', '/api/seat/take', { confirm: true });
+  ok(await checkOf(() => WD.guard(p2, undefined, fastGate)) === 'accepted', 'words guard: no words kept → no password asked (the guards of before)');
+  await WD.keepWords(p2, words, 'correct horse', { iterations: 1000 });
+  const tNo = await r2.call('POST', '/api/seat/take', { confirm: true }), tBad = await r2.call('POST', '/api/seat/take', { confirm: true, password: 'correct horsf' }), tBad2 = await r2.call('POST', '/api/seat/take', { confirm: true, password: 'x' });
+  ok(tNo.status === 403 && tNo.body.error.check === 'words_password_needed' && tBad.status === 403 && tBad.body.error.check === 'words_password' && tBad.body.error.message === 'Wrong password.' && tBad2.status === 403
+    && slept.join() === '2000,4000' && started === 0 && p2.files.read('words.sealed') !== null,
+    `seat take with the words kept: no password → 403 words_password_needed; a wrong one → 403 "Wrong password." after 2 s, then 4 s (the gate doubling: ${slept}); nothing started`);
+  const tk = await r2.call('POST', '/api/seat/take', { confirm: true, password: 'correct horse' });
   ok(tk.status === 200 && tk.body.seat === 'here' && tk.body.holder === 'tab' && started === 1 && (await r2.call('GET', '/api/state')).body.me.seat.here === true && r2.mode().standby === false,
     `seat take: the list signed naming this device, the page starts as the operator (${JSON.stringify(tk.body)})`);
   await r2.stop();
@@ -339,8 +349,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   const root = new El('main'), body = new El('body'), intervals = [];
   const W_ = { workers: [{ worker: 0, name: 'phone', did: 'did:sigelo:zPhone000000000000000000000000000000000000000000', original: 'did:sigelo:zPhone000000000000000000000000000000000000000000', rank: 'full', placed: 'device', at: 1761400000, status: 'enrolled', revoked: null, seen: null, tier: null, contact: null, local: 'phone', attested_until: null, enrolling: null }] };
   const calls = [], now = () => Math.floor(Date.now() / 1000);
-  const snap = () => ({ seq: 1, now: now(), me: { did: 'did:sigelo:zMe', relay: 'relay.sigelo.ai', online: true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: null, pow: null, pow_done_ms: null, seat: { holder: 'phone', epoch: 1, here: true } },
-    groups: { mine: [], contacts: [] }, pending: { invites: [], paired: [], answers: [], failed: [] }, introductions: [], events: [] });
+  const G_ = { mine: [], contacts: [] };
+  const snap = () => ({ seq: 1, now: now(), me: { did: 'did:sigelo:zMe', relay: 'relay.sigelo.ai', online: true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: null, pow: null, pow_done_ms: null, seat: { holder: 'phone', epoch: 1, here: true }, pow_capped: sandbox.capped ?? null, pow_confirm: null },
+    groups: { mine: G_.mine, contacts: G_.contacts }, chats: { ...GR.chats }, pending: { invites: [], paired: [], answers: [], failed: [] }, introductions: [], events: [] });
+  // Groups (GROUPS.md) as GET /api/groups and /api/groups/history answer; rev bumped at each change.
+  const ME = 'did:sigelo:zMe', GR = { tier: { tier: 'free', groups: 3, members: 8, told: true }, groups: [], notices: [], history: {}, chats: { unread: 0, invited: 0, notices: 0, rev: '0' } };
+  const bump = () => { GR.chats.rev = String(Number(GR.chats.rev) + 1); };
+  const gOf = (gid) => GR.groups.find((g) => g.gid === gid);
   const routes = {
     'GET /api/state': () => snap(),
     'GET /api/agents/workers': () => ({ keeper: true, seat: 'here', workers: W_.workers }),
@@ -348,21 +363,44 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
     'GET /api/relays': () => ({ relays: [{ tag: 'ex', host: 'relay.example.org', tier: 'community' }] }),
     'POST /api/relays/test': (b) => (b.relay === 'down.example.org' ? { relay: b.relay, ok: false, ms: 5000, retention_days: null, detail: 'cannot reach the relay' } : { relay: b.relay, ok: true, ms: 42, retention_days: 7 }),
     'POST /api/agents/enrol-code': (b) => {
+      if (sandbox.powAsk && !b.pow_confirmed) return { __error: { check: 'pow_confirm', message: 'pow_confirm: Fourth setup at this relay (relay.example.org) today, up to 2 minutes. Go on?' } };
       const e = { id: 'n1', state: 'code', code: 'K7F3-Q9ZP', exp: now() + 600, relay: b.relay ?? 'relay.sigelo.ai', words: null, command: `SIGELO_RELAY=${b.relay} sigelo-agent init --enrol K7F3-Q9ZP` };
       W_.workers.push({ worker: 1, name: b.name, did: 'did:sigelo:zVps0000000000000000000000000000000000000000000', original: 'did:sigelo:zVps0000000000000000000000000000000000000000000', rank: null, placed: 'remote', at: now(), status: 'pending', revoked: null, seen: null, tier: null, contact: null, local: null, attested_until: now() + 90 * 86400, enrolling: e });
       return { worker: 1, name: b.name, did: W_.workers[1].did, original: W_.workers[1].did, tier: b.tier ?? 'own', ...e };
     },
     'POST /api/words': () => ({ checked: true }),
+    'GET /api/messages': () => ({ messages: [] }),
+    'POST /api/presence': (b) => ({ did: b.contact, name: 'bo', presence: b.allow ? 'allow' : 'deny' }),
+    'GET /api/groups': () => ({ tier: GR.tier, groups: GR.groups, notices: GR.notices }),
+    'GET /api/groups/history': () => { const g = GR.groups.find((x) => x.status !== 'pending') ?? GR.groups[0]; return { group: g, messages: GR.history[g.gid] ?? [] }; },
+    'POST /api/groups/create': (b) => {
+      const c = [...G_.mine, ...G_.contacts], g = { gid: 'a'.repeat(32), name: b.name, status: 'member', ver: 1, brake: 20, creator: ME, creator_name: null, mine: true, foreign: false, run: 0, unread: 0, quiet: false, last: null,
+        members: [{ did: ME, name: 'creator', role: 'human', me: true, contact: false }, ...b.members.map((d) => ({ did: d, name: c.find((x) => x.did === d).name, role: b.humans.includes(d) ? 'human' : 'agent', me: false, contact: true }))] };
+      GR.groups.push(g); bump();
+      return { group: g, copies: [] };
+    },
+    'POST /api/groups/send': (b) => { (GR.history[b.group] ??= []).push({ mid: '1'.repeat(16), from: ME, name: 'creator', role: 'human', tier: null, mine: true, operator: false, note: null, text: b.text, mentions: [], mentioned: false, via: null, at: now() }); bump(); return { gid: b.group, mid: '1'.repeat(16), copies: [], via_creator: [], unreached: [] }; },
+    'POST /api/groups/add': (b) => { const g = gOf(b.group), c = [...G_.mine, ...G_.contacts]; for (const d of b.members) g.members.push({ did: d, name: c.find((x) => x.did === d).name, role: b.humans.includes(d) ? 'human' : 'agent', me: false, contact: true }); g.ver++; bump(); return { group: g, copies: [] }; },
+    'POST /api/groups/remove': (b) => { const g = gOf(b.group); g.members = g.members.filter((m) => !b.members.includes(m.did)); g.ver++; bump(); return { group: g, copies: [] }; },
+    'POST /api/groups/role': (b) => { const g = gOf(b.group); g.members.find((m) => m.did === b.member).role = b.role; g.ver++; bump(); return { group: g, copies: [] }; },
+    'POST /api/groups/rename': (b) => { const g = gOf(b.group); g.name = b.name; g.ver++; bump(); return { group: g, copies: [] }; },
+    'POST /api/groups/brake': (b) => { const g = gOf(b.group); g.brake = b.brake; g.ver++; bump(); return { group: g, copies: [] }; },
+    'POST /api/groups/share': (b) => ({ group: gOf(b.group), copies: [{ to: b.member, status: 'sent' }] }),
+    'POST /api/groups/join': (b) => { const g = gOf(b.group); g.status = 'member'; GR.chats.invited = 0; bump(); return { group: g, copies: [] }; },
+    'POST /api/groups/leave': (b) => { const g = gOf(b.group); g.status = 'left'; bump(); return { group: g, copies: [], told: true }; },
+    'POST /api/groups/dismiss': (b) => { GR.notices = GR.notices.filter((n) => n.id !== b.id); bump(); return { dismissed: 1 }; },
+    'POST /api/agents/enrol-words': (b) => { sandbox.wordsAnswer = b; return { id: b.id, state: 'sending' }; },
+    'POST /api/pow/try': (b) => { sandbox.tried = b; return { tried: ['relay.sigelo.ai'] }; },
     'POST /api/agents/revoke': (b) => { const w = W_.workers.find((x) => x.worker === b.worker); w.status = 'revoked'; w.revoked = now(); return { worker: b.worker, name: w.name, cancelled: false, revoked: w.revoked, forgot: w.contact }; },
   };
   const sandbox = {
     document: { getElementById: () => root, createElement: (t) => new El(t), createTextNode: (t) => new Text_(t), querySelectorAll: () => [], body, get activeElement() { return focus.el; } },
     Node: Node_, location: { hash: '', pathname: '/', protocol: 'https:' }, history: { replaceState() {} }, sessionStorage: { getItem: () => null, setItem() {} },
-    window: { innerHeight: 800, innerWidth: 400, scrollY: 0, scrollTo() {} }, navigator: { clipboard: { writeText: async (t) => { sandbox.copied = t; } } }, confirm: () => true,
+    window: { innerHeight: 800, innerWidth: 400, scrollY: 0, scrollTo() {} }, navigator: { clipboard: { writeText: async (t) => { sandbox.copied = t; } } }, confirm: (m) => { sandbox.asked = m; return true; },
     setInterval: (f, ms) => { intervals.push([f, ms]); return intervals.length; }, clearInterval() {}, setTimeout: (f, ms) => setTimeout(f, Math.min(ms ?? 0, 10)), clearTimeout,
     console, Date, Promise, Object, Array, String, Number, JSON, Math, Map, Set, Error, encodeURIComponent, URL,
     sigeloLocal: {
-      async call(method, path, body) { calls.push([method, path, body]); const f = routes[`${method} ${path.split('?')[0]}`]; return f ? { status: 200, body: JSON.parse(JSON.stringify(f(body ?? {}))) } : { status: 404, body: { error: { check: 'route', message: `no ${method} ${path}` } } }; },
+      async call(method, path, body) { calls.push([method, path, body]); const f = routes[`${method} ${path.split('?')[0]}`], r = f ? f(body ?? {}) : null; if (r?.__error) return { status: 409, body: { error: r.__error } }; return f ? { status: 200, body: JSON.parse(JSON.stringify(r)) } : { status: 404, body: { error: { check: 'route', message: `no ${method} ${path}` } } }; },
       onChange() {}, mode: () => ({ kind: 'full' }),
       async unlock() { sandbox.unlocks = (sandbox.unlocks ?? 0) + 1; if (sandbox.refuseUnlock) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); },
     },
@@ -416,8 +454,12 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   custom.value = 'relay.example.org';
   await btn('OK').click(); await settle();
   ok(root.all().some((e) => e.tagName === 'SPAN' && e.textContent === 'relay.example.org') && !btn('OK'), 'enrol picker: a relay that answers is tested, then taken for this code; the picker closes');
+  sandbox.powAsk = true;
   await btn('Make the code').click(); await settle();
-  const made = calls.find(([, p]) => p === '/api/agents/enrol-code');
+  const made = calls.find(([, p]) => p === '/api/agents/enrol-code'), again = calls.filter(([, p]) => p === '/api/agents/enrol-code')[1];
+  ok(sandbox.asked === 'Fourth setup at this relay (relay.example.org) today, up to 2 minutes. Go on?' && again?.[2]?.pow_confirmed === true,
+    `enrol: past the day's 3 setups the page asks once (pow_confirm), then makes the code with pow_confirmed (${sandbox.asked})`);
+  sandbox.powAsk = false;
   const big = root.all().find((e) => e.className === 'code big');
   ok(JSON.stringify(made?.[2]) === JSON.stringify({ name: 'vps', tier: 'friend', relay: 'relay.example.org' }) && big?.textContent === 'K7F3-Q9ZP' && has('left · once') && has('sigelo-agent init --enrol K7F3-Q9ZP')
     && has('… waiting for the agent to enter it'), `enrol: POST /api/agents/enrol-code {name, tier, relay}; the code shown big with its countdown and the command (${JSON.stringify(made?.[2])})`);
@@ -428,14 +470,27 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
     `enrol: Share, without a share sheet, copies a ready-to-send message: the code, until when, the command, the instructions link (${sandbox.copied})`);
   Object.assign(W_.workers[1].enrolling, { state: 'words', code: null, command: null, words: 'mobile absent bone lion' });
   await poll();
-  ok(!root.all().some((e) => e.className === 'code big') && root.all().find((e) => e.className === 'words')?.textContent === 'mobileabsentbonelion' && btn('They match') && btn("They don't") && has('✓ the agent entered it and paired'),
-    'enrol: once the agent pairs, the code goes and the four words show (They match / They don\'t)');
+  ok(!root.all().some((e) => e.className === 'code big') && root.all().find((e) => e.className === 'words')?.textContent === 'mobileabsentbonelion' && !btn('They match') && !btn("They don't")
+    && root.all().some((e) => e.tagName === 'SUMMARY' && e.textContent === 'Show the words') && has('✓ the agent entered it and paired'),
+    'enrol: once the agent pairs, the code goes; the four words only behind "Show the words", no tap asked');
+  Object.assign(W_.workers[1].enrolling, { confirm_words: true, words_ok: null });
+  await poll();
+  ok(btn('They match') && btn("They don't") && has('Its key goes once you confirm'), 'enrol, the switch on: They match / They don\'t, its key waits');
   await btn('They match').click(); await settle();
+  ok(JSON.stringify(sandbox.wordsAnswer) === JSON.stringify({ id: 'n1', match: true }), `enrol, the switch on: They match → POST /api/agents/enrol-words {id, match: true} (${JSON.stringify(sandbox.wordsAnswer)})`);
+  Object.assign(W_.workers[1].enrolling, { confirm_words: false, words_ok: true, verified: true });
   Object.assign(W_.workers[1], { status: 'enrolled', contact: 'did:sigelo:zVps0000000000000000000000000000000000000000000', tier: 'friend' });
   W_.workers[1].enrolling.state = 'enrolled';
   await poll();
-  ok(has('✓ vps is your agent: worker 1') && has('✓ Words checked') && calls.some(([m, p, b]) => p === '/api/words' && b.contact === W_.workers[1].contact && b.match === true) && btn('Done') && btn('Open conversation'),
-    'enrol: enrolled: said, its words marked checked on its contact (POST /api/words), Done and Open conversation');
+  ok(has('✓ vps is your agent: worker 1') && has('checked: its key is the one your words make') && !calls.some(([m, p]) => p === '/api/words') && btn('Done') && btn('Open conversation'),
+    'enrol: enrolled with no further tap: said, checked by its key (the page marks it, no POST /api/words), Done and Open conversation');
+  // The automatic tries paused for the day: when the next is, and Try now (POST /api/pow/try).
+  sandbox.capped = { relay: 'relay.sigelo.ai', next: now() + 3600 };
+  await poll();
+  ok(has('Setup paused at relay.sigelo.ai: 3 tries today. Next automatic try at') && btn('Try now'), 'the status line: setup paused, the next automatic try, Try now');
+  await btn('Try now').click(); await settle();
+  ok(sandbox.tried !== undefined, 'Try now → POST /api/pow/try');
+  sandbox.capped = null; await poll();
   await btn('Done').click(); await settle(); await poll();
   const rows2 = root.all().filter((e) => e.className === 'row agent');
   ok(rows2.length === 2 && rows2[1].textContent.includes('vps') && rows2[1].textContent.includes('enrolled') && rows2[1].textContent.includes('friend') && rows2[1].textContent.includes('on another machine'),
@@ -444,6 +499,306 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   ok(root.all().some((e) => e.tagName === 'H1' && e.textContent === 'vps') && has('Worker: 1 of your keeper root') && has(W_.workers[1].did) && btn('Rename') && btn('Revoke'), 'agent details: worker, DID, Rename, Revoke');
   await btn('Revoke').click(); await settle();
   ok(calls.some(([m, p, b]) => p === '/api/agents/revoke' && b.worker === 1) && has('revoked') && !btn('Revoke'), 'agent details: Revoke (confirmed) → POST /api/agents/revoke; shown revoked, no Revoke left');
+  // Presence (UI-API.md): a green dot while online, grey with "last seen …" once offline, nothing when not known.
+  const person = (name, o) => ({ did: `did:sigelo:z${name}00000000000000000000000000000000000000000`, name, current_did: null, relay: 'relay.sigelo.ai', re_pair: null, words: null, pair: null, words_checked: true, tags: [], local: null,
+    mine: null, unread: 0, last: null, waiting: null, not_collected: 0, queued: 0, status: 'ok', ours: false, tier: 'friend', link: null, online: null, online_since: null, last_seen: null, presence: 'deny', ...o });
+  G_.mine.push(person('ana', { tier: 'own', ours: true, presence: 'own', online: true, online_since: now() - 60 }));
+  G_.contacts.push(person('bo', { online: false, last_seen: now() - 300 }), person('cy'));
+  W_.workers[0].online = true;
+  await root.all().find((e) => e.attrs['aria-label'] === 'Back').click(); await settle(); await poll();
+  const dotOf = (row) => row?.all().find((e) => /^dot /.test(e.className))?.className ?? null;
+  const phone = root.all().find((e) => e.className === 'row agent' && e.textContent.includes('phone'));
+  ok(dotOf(phone) === 'dot on' && phone.textContent.includes('online'), `agents: an online agent's row has the green dot and says online (${dotOf(phone)})`);
+  await btn('Contacts').click(); await settle(); await poll();
+  const rowOf = (n) => root.all().find((e) => e.className === 'row' && e.tagName === 'BUTTON' && e.all().some((x) => x.className === 'name' && x.textContent === n));
+  ok(dotOf(rowOf('ana')) === 'dot on' && dotOf(rowOf('bo')) === 'dot off' && rowOf('bo').textContent.includes('last seen 5 min ago') && dotOf(rowOf('cy')) === null && !rowOf('cy').textContent.includes('last seen'),
+    `contacts: green dot for online (ana), grey and "last seen 5 min ago" for offline (bo), nothing when not known (cy) (${[dotOf(rowOf('ana')), dotOf(rowOf('bo')), dotOf(rowOf('cy'))]})`);
+  await rowOf('bo').click(); await settle(); await poll();
+  const h1 = root.all().find((e) => e.tagName === 'H1');
+  ok(h1?.textContent === 'bo' && dotOf(h1) === 'dot off' && root.all().some((e) => e.className === 'sub seen' && e.textContent === 'last seen 5 min ago'), 'chat header: the dot and "last seen 5 min ago" under the name');
+  await root.all().find((e) => e.attrs['aria-label'] === 'More').click(); await settle();
+  ok(has('When I am online') && btn('They see it') && btn('Hidden')?.className === 'primary', 'chat ⋯: When I am online, Hidden by default (deny), They see it');
+  await btn('They see it').click(); await settle();
+  ok(calls.some(([m, p, b]) => p === '/api/presence' && b.contact === G_.contacts[0].did && b.allow === true), 'chat ⋯: They see it → POST /api/presence {contact, allow: true}');
+
+  // ---- Groups (design/groups.md §5): the list, New group (two taps and a name), the chat, Group info, Add members, an invitation, a notice
+  {
+    const fire = (el, t) => { for (const f of el.on[t] ?? []) f({ target: el, key: '', preventDefault() {} }); };
+    const h1 = () => root.all().find((e) => e.tagName === 'H1')?.textContent;
+    G_.contacts.push(person('qu', { tier: 'quiet' }));
+    await root.all().find((e) => e.attrs['aria-label'] === 'Back').click(); await settle(); await poll();
+    const tab = root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Groups'));
+    ok(Boolean(tab) && root.all().find((e) => e.tagName === 'NAV')?.kids.map((k) => k.textContent).slice(0, 2).join() === 'Agents,Groups', 'tabs: Groups beside Agents (on Contacts: Agents, Groups, Links…)');
+    await tab.click(); await settle(); await poll();
+    ok(h1() === 'Groups' && btn('New group')?.className === 'primary' && has('0 of 3 groups made by you, up to 8 members each (free)') && has('New group, a name, tick who is in'),
+      'groups list: empty, one primary button New group, "0 of 3 groups made by you, up to 8 members each"');
+    await btn('New group').click(); await settle(); await poll();
+    const boxes = () => root.all().filter((e) => e.tagName === 'INPUT' && e.attrs.type === 'checkbox');
+    const nameIn = root.all().find((e) => e.attrs['aria-label'] === 'Group name');
+    const names = boxes().map((b) => b.attrs['aria-label']);
+    const counter = () => root.all().find((e) => /count-line/.test(e.className))?.textContent;
+    ok(h1() === 'New group' && nameIn && focus.el === nameIn && names.join() === 'ana,bo,cy,qu' && boxes()[0].checked && !boxes()[1].checked && !boxes()[3].checked && counter() === '2 of 8' && btn('Create').disabled,
+      `new group: a name box (focused), then own agents first, preselected (at most three), friends, quiet last and unticked; "2 of 8"; Create dark without a name (${names}, ${counter()})`);
+    nameIn.value = 'crew'; fire(nameIn, 'input'); await settle();
+    ok(!btn('Create').disabled, 'new group: a name and one member: Create lights');
+    boxes()[1].checked = true; fire(boxes()[1], 'change'); await settle();
+    ok(counter() === '3 of 8', `new group: ticking bo: "3 of 8" (${counter()})`);
+    await btn('Create').click(); await settle(); await poll();
+    const made = calls.find(([, p]) => p === '/api/groups/create')?.[2];
+    ok(JSON.stringify(made) === JSON.stringify({ name: 'crew', members: [G_.mine[0].did, G_.contacts[0].did], humans: [G_.contacts[0].did] }) && h1() === 'crew' && has('Group made, 3 members') && focus.el?.attrs?.['aria-label'] === 'Message',
+      `create: POST /api/groups/create {name, members, humans: those not my agents}; the chat opens at once: "Group made, 3 members", the composer focused (${JSON.stringify(made)})`);
+    // The chat: sender name and role; "not your operator" for a sender not of my own; mentions.
+    const g = GR.groups[0], [ana, bo] = [G_.mine[0], G_.contacts[0]];
+    GR.history[g.gid] = [
+      { mid: '2'.repeat(16), from: ana.did, name: 'ana', role: 'agent', tier: 'own', mine: false, operator: false, note: 'not your operator', text: 'build is green', mentions: [], mentioned: false, via: null, at: now() },
+      { mid: '3'.repeat(16), from: bo.did, name: 'bo', role: 'human', tier: 'friend', mine: false, operator: false, note: 'not your operator', text: 'ship it @creator', mentions: [ME], mentioned: true, via: ana.did, at: now() }];
+    Object.assign(g, { run: 20, quiet: true, last: { name: 'bo', text: 'ship it @creator', at: now(), mine: false } }); bump();
+    await poll();
+    const msgs = root.all().filter((e) => /^msg /.test(e.className));
+    ok(msgs.length === 2 && msgs[0].textContent.includes('ana · agent') && !msgs[0].textContent.includes('not your operator') && msgs[1].textContent.includes('bo · human · not your operator · via the creator')
+      && msgs[1].className.includes('mentioned') && msgs[1].textContent.includes('mentions you'),
+      `chat: each message with its sender's name and role; "not your operator" for a non-own sender (bo), not for my own agent (ana); a mention marked (${msgs.map((m) => m.textContent).join(' | ')})`);
+    ok(has('Waiting for a human: 20 agent messages in a row (brake 20).'), 'chat: the brake reached: "Waiting for a human"');
+    const text = root.all().find((e) => e.attrs['aria-label'] === 'Message');
+    text.value = 'go on @'; fire(text, 'input'); await settle();
+    const chip = root.all().find((e) => e.tagName === 'BUTTON' && e.textContent === '@bo');
+    ok(chip && !chip.parent.hidden, 'chat: @ shows the members to mention');
+    await chip.click(); await settle();
+    ok(text.value === 'go on @bo ', `chat: a member tapped: @bo in the text (${JSON.stringify(text.value)})`);
+    await btn('Send').click(); await settle();
+    ok(calls.some(([m, p, b]) => p === '/api/groups/send' && b.group === g.gid && b.text === 'go on @bo ') && text.value === '', 'chat: Send → POST /api/groups/send {group, text}; the box empties');
+    // Group info: members, add, remove, role, Share, rename, the brake, leave.
+    await root.all().find((e) => e.attrs['aria-label'] === 'Group info').click(); await settle(); await poll();
+    const rows = root.all().filter((e) => e.className === 'row member');
+    ok(rows.length === 3 && rows[0].textContent.startsWith('You') && rows[1].textContent.includes('ana') && rows[1].textContent.includes('agent') && rows[2].textContent.includes('human')
+      && btn('Add members') && btn('Rename') && btn('Set the brake') && btn('Leave the group') && has('3 of 8 members'),
+      'group info: the members with their roles, you marked; Add members, Rename, the brake, Leave');
+    await rows[1].all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Make human').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/groups/role' && b.member === ana.did && b.role === 'human'), 'group info: a role changed → POST /api/groups/role');
+    await root.all().filter((e) => e.className === 'row member')[2].all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Share').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/groups/share' && b.member === bo.did), 'group info: Share → POST /api/groups/share {group, member}');
+    const sel = root.all().find((e) => e.attrs['aria-label'] === 'Loop brake');
+    ok(sel?.value === '20', `group info: the brake shows 20, the default (${sel?.value})`);
+    sel.value = 'off';
+    await btn('Set the brake').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/groups/brake' && b.brake === 'off') && GR.groups[0].brake === 'off', 'group info: the brake off → POST /api/groups/brake {brake: "off"}');
+    const rn = root.all().find((e) => e.attrs['aria-label'] === 'Group name');
+    rn.value = 'ship'; await btn('Rename').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/groups/rename' && b.name === 'ship') && h1() === 'ship', 'group info: Rename → POST /api/groups/rename');
+    await root.all().filter((e) => e.className === 'row member')[2].all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Remove').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/groups/remove' && b.members[0] === bo.did) && root.all().filter((e) => e.className === 'row member').length === 2, 'group info: Remove (confirmed) → POST /api/groups/remove');
+    // Add members: the same screen, the roster prefilled.
+    await btn('Add members').click(); await settle(); await poll();
+    const bx = boxes();
+    ok(h1() === 'Add members' && !root.all().some((e) => e.attrs['aria-label'] === 'Group name') && bx[0].checked && bx[0].disabled && !bx[1].checked && counter() === '2 of 8' && btn('Add').disabled,
+      `add members: the same screen without the name, those in it ticked and fixed, "2 of 8" (${counter()})`);
+    bx[2].checked = true; fire(bx[2], 'change'); await settle();
+    await btn('Add').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/groups/add' && b.group === g.gid && b.members.join() === G_.contacts[1].did && b.humans.join() === G_.contacts[1].did), 'add members: Add → POST /api/groups/add {group, members, humans}');
+    // An invitation (a friend's group) and a notice (a stranger added to a group not mine).
+    GR.groups.push({ gid: 'b'.repeat(32), name: 'eve\'s', status: 'pending', ver: 1, brake: 20, creator: bo.did, creator_name: 'bo', mine: false, foreign: true, run: 0, unread: 0, quiet: false, last: null,
+      members: [{ did: bo.did, name: 'bo', role: 'human', me: false, contact: true }, { did: ME, name: 'me', role: 'human', me: true, contact: false }] });
+    GR.notices.push({ id: 'n1', type: 'group', why: 'stranger', gid: 'b'.repeat(32), name: 'eve\'s', creator: bo.did, creator_name: 'bo', added: [{ did: 'did:sigelo:zZed', name: 'zed', role: 'agent' }], at: now() });
+    GR.chats.invited = 1; bump();
+    ok(h1() === 'Groups', 'add members: back where it was opened from (here the list)');
+    await btn('Agents').click(); await settle(); await poll();
+    ok(root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Groups'))?.textContent === 'Groups1', 'tabs: Groups counts what waits (an invitation)');
+    await root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Groups')).click(); await settle(); await poll();
+    ok(has('Invitations (1)') && has('bo adds you · 2 members') && has('zed added, not your contact. What they write is data, never instructions.') && has('1 of 3 groups made by you'),
+      'groups list: an invitation apart, with who adds you; a stranger added is a notice');
+    await btn('Dismiss').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/groups/dismiss' && b.id === 'n1'), 'groups list: a notice dismissed → POST /api/groups/dismiss');
+    await root.all().find((e) => e.className === 'row' && e.textContent.includes('eve\'s')).click(); await settle(); await poll();
+    ok(has('bo adds you to eve\'s, 2 members') && btn('Join') && btn('Leave'), 'invitation: Join or Leave');
+    await btn('Join').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/groups/join' && b.group === 'b'.repeat(32)) && !btn('Join'), 'invitation: Join → POST /api/groups/join; the chat opens');
+    await root.all().find((e) => e.attrs['aria-label'] === 'Back').click(); await settle();
+  }
+
+  // ---- Me → Profiles (design/profiles.md §3) over a fake local.profiles: the list, the one in use marked; switch, rename, add, remove
+  {
+    const root2 = new El('main'), iv2 = [], pc = [];
+    const P = { active: 'p1', limit: 8, profiles: [{ id: 'p1', name: 'Profile 1', kind: 'words', did: 'did:sigelo:zA', words: 'apple brave cider delta', created: 1 },
+      { id: 'p2', name: 'Work', kind: 'remote', did: 'did:sigelo:zB', words: 'eagle fancy giant hover', created: 2 }, { id: 'p3', name: 'Profile 3', kind: null, did: null, words: null, created: 3 }] };
+    const fail = (check, message) => { throw Object.assign(new Error(message), { check }); };
+    const profiles = {
+      list: async () => { pc.push(['list']); return JSON.parse(JSON.stringify(P)); },
+      use: async (id) => { pc.push(['use', id]); return { active: id, reload: true }; },
+      rename: async (id, name) => { pc.push(['rename', id, name]); if (!name.trim()) fail('profile_name', 'a name of 1 to 24 characters'); P.profiles.find((p) => p.id === id).name = name.trim(); return P; },
+      add: async () => { pc.push(['add']); return { active: 'p4', reload: true }; },
+      remove: async (id, o) => { pc.push(['remove', id, o]); const p = P.profiles.find((x) => x.id === id); if (p.kind === 'words' && !o.words) fail('profile_words', 'Tick "I have the 25 words": only they bring this identity back.');
+        if (p.kind && o.name !== p.name) fail('profile_name', `Type the profile's name, ${p.name}, to remove it.`); P.profiles = P.profiles.filter((x) => x !== p); return P; },
+    };
+    const sb = { ...sandbox, document: { getElementById: () => root2, createElement: (t) => new El(t), createTextNode: (t) => new Text_(t), querySelectorAll: () => [], body, get activeElement() { return focus.el; } }, setInterval: (f, ms) => { iv2.push([f, ms]); return iv2.length; }, history: { replaceState() {}, pushState() {}, back() {} },
+      sigeloLocal: { ...sandbox.sigeloLocal, profiles, async call(method, path) { const f = { 'GET /api/state': snap, 'GET /api/agents/workers': () => ({ keeper: true, seat: 'here', workers: [] }), 'GET /api/me': () => ({ did: 'did:sigelo:zA', original: 'did:sigelo:zA', recovery: 'set', key: 'browser', relay: 'relay.sigelo.ai', retention_days: 7, erase: '' }),
+        'GET /api/settings': () => ({ relay: 'relay.sigelo.ai', default: 'relay.sigelo.ai', fixed: null }), 'GET /api/agents': () => [] }[`${method} ${path.split('?')[0]}`]; return f ? { status: 200, body: f() } : { status: 404, body: { error: { check: 'route', message: 'no' } } }; } } };
+    sb.globalThis = sb;
+    vm.runInNewContext(readFileSync(join(HERE, 'vendor', 'ui.js'), 'utf8'), sb);
+    const b2 = (t) => root2.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t), has2 = (t) => root2.textContent.includes(t), poll2 = async () => { await iv2.find(([, ms]) => ms === 2000)[0](); await settle(); };
+    await settle(); await poll2();
+    await b2('Me').click(); await settle(); await poll2();
+    ok(has2('Other identities on this phone') && b2('Profiles'), 'Me: a Profiles section where the shell has profiles');
+    await b2('Profiles').click(); await settle(); await poll2();
+    const cards = root2.all().filter((e) => e.attrs['data-profile']);
+    ok(root2.all().some((e) => e.tagName === 'H1' && e.textContent === 'Profiles') && cards.length === 3 && cards[0].className.includes('current') && cards[0].textContent.includes('in use') && cards[0].textContent.includes('apple brave cider delta · Your identity')
+      && cards[1].textContent.includes('A computer\'s page') && cards[2].textContent.includes('Not set up yet') && !cards[0].all().some((e) => e.textContent === 'Switch') && cards[1].all().some((e) => e.textContent === 'Switch')
+      && b2('Add a profile') && !b2('Add a profile').disabled, 'Profiles: a card per profile (name, four words, what it holds), the one in use marked and without Switch; Add a profile');
+    await cards[1].all().find((e) => e.textContent === 'Switch').click(); await settle();
+    ok(pc.some(([o, id]) => o === 'use' && id === 'p2'), 'Profiles: Switch → profiles.use (the shell asks the lock and reloads)');
+    await cards[1].all().find((e) => e.textContent === 'Rename').click(); await settle();
+    const nameIn = root2.all().find((e) => e.attrs['aria-label'] === 'The profile\'s name');
+    nameIn.focus(); nameIn.value = 'Office';
+    await poll2();
+    ok(focus.el === nameIn && root2.contains(nameIn) && nameIn.value === 'Office', 'Profiles: the name being typed keeps its field and the focus across the poll');
+    await b2('Save').click(); await settle();
+    ok(pc.some(([o, id, n]) => o === 'rename' && id === 'p2' && n === 'Office') && has2('Office') && !b2('Save'), 'Profiles: Rename → Save → profiles.rename, the list again');
+    P.profiles.push(...[4, 5, 6, 7, 8].map((n) => ({ id: `p${n}`, name: `Profile ${n}`, kind: null, did: null, words: null, created: n })));
+    await b2('‹').click(); await settle(); await b2('Me').click(); await settle(); await poll2(); await b2('Profiles').click(); await settle(); await poll2();
+    ok(b2('Add a profile')?.disabled === true && has2('At most 8 profiles'), 'Profiles: at 8, Add a profile off, the limit said');
+    await root2.all().filter((e) => e.attrs['data-profile'])[0].all().find((e) => e.textContent === 'Remove').click(); await settle(); await poll2();
+    ok(root2.all().some((e) => e.tagName === 'H1' && e.textContent === 'Remove a profile') && has2('Its identity, wallet keys, contacts and chats leave this phone. Only its 25 words bring it back.') && has2('I have the 25 words') && has2('Type its name, Profile 1'),
+      'Remove (words): the warning, "I have the 25 words", its name to type');
+    await b2('Remove Profile 1').click(); await settle();
+    ok(has2('Tick "I have the 25 words"') && P.profiles.some((p) => p.id === 'p1'), 'Remove (words): not ticked → refused, said, kept');
+    root2.all().find((e) => e.attrs.type === 'checkbox').checked = true;
+    root2.all().find((e) => e.attrs['aria-label'] === 'Its name').value = 'Profile 1';
+    await b2('Remove Profile 1').click(); await settle(); await poll2();
+    ok(pc.some(([o, id, x]) => o === 'remove' && id === 'p1' && x.words === true && x.name === 'Profile 1') && !P.profiles.some((p) => p.id === 'p1') && root2.all().some((e) => e.tagName === 'H1' && e.textContent === 'Profiles'),
+      'Remove (words): ticked and named → profiles.remove, back on the list');
+    await root2.all().filter((e) => e.attrs['data-profile'])[0].all().find((e) => e.textContent === 'Remove').click(); await settle(); await poll2();
+    ok(has2('The computers keep the pairing until you revoke it there') && !has2('I have the 25 words'), 'Remove (remote): the computers keep the pairing until revoked there; no words to tick');
+  }
+  // ---- Me → Security (design/apps-seed.md §8) over a fake local.words: the lock, the password, the words as at their
+  // creation (FLAG_SECURE, nothing to copy, Done hides them), change, remove; removing a profile and taking the seat guarded.
+  {
+    const root3 = new El('main'), iv3 = [], wc = [], secure = [], posted = [];
+    const PW = { kept: true, pw: 'correct horse', fails: 0 };
+    const twenty5 = Array.from({ length: 25 }, (_, i) => `w${String.fromCharCode(97 + (i % 26))}ord`);
+    const wrong = () => { PW.fails++; throw Object.assign(new Error('Wrong password.'), { check: 'words_password' }); };
+    const words = {
+      status: async (id) => { wc.push(['status', id]); return id === undefined ? { here: true, kept: PW.kept, iterations: 1000000 } : { here: false, kept: id === 'p1' && PW.kept }; },
+      reveal: async (p) => { wc.push(['reveal', p]); await sb3.sigeloLocal.unlock(); if (p !== PW.pw) wrong(); return { words: twenty5 }; },
+      change: async (o, n, r) => { wc.push(['change', o, n, r]); if (o !== PW.pw) wrong(); if (n !== r) throw Object.assign(new Error('The two passwords are not the same.'), { check: 'words_password_rule' }); PW.pw = n; return { kept: true }; },
+      remove: async (p) => { wc.push(['remove', p]); if (p !== PW.pw) wrong(); PW.kept = false; return { kept: false }; },
+      auth: async (id, p) => ({ password: p }),
+    };
+    const P3 = { active: 'p1', limit: 8, profiles: [{ id: 'p1', name: 'Profile 1', kind: 'words', did: 'did:sigelo:zA', words: 'apple brave cider delta', created: 1 }, { id: 'p2', name: 'Work', kind: 'remote', did: 'did:sigelo:zB', words: 'eagle fancy giant hover', created: 2 }] };
+    const removed = [];
+    const profiles = { list: async () => JSON.parse(JSON.stringify(P3)), remove: async (id, o) => { removed.push([id, o]); if (o.password !== PW.pw) throw Object.assign(new Error('Wrong password.'), { check: 'words_password' }); return { reload: true }; } };
+    const seatSnap = () => ({ ...snap(), me: { ...snap().me, seat: { holder: 'laptop', epoch: 1, here: false } } });
+    const sb3 = { ...sandbox, document: { getElementById: () => root3, createElement: (t) => new El(t), createTextNode: (t) => new Text_(t), querySelectorAll: () => [], body, get activeElement() { return focus.el; } }, setInterval: (f, ms) => { iv3.push([f, ms]); return iv3.length; }, history: { replaceState() {}, pushState() {}, back() {} },
+      sigeloLocal: { ...sandbox.sigeloLocal, profiles, words, async secure(on) { secure.push(on); },
+        async call(method, path, b) { posted.push([method, path, b]); const f = { 'GET /api/state': PW.standby ? seatSnap : snap, 'GET /api/agents/workers': () => ({ keeper: true, seat: 'here', workers: [] }), 'GET /api/me': () => ({ did: 'did:sigelo:zA', original: 'did:sigelo:zA', recovery: 'set', key: 'browser', relay: 'relay.sigelo.ai', retention_days: 7, erase: '', restored: { on: '2026-11-03', keeper: 1, seat: 'here' } }),
+          'GET /api/settings': () => ({ relay: 'relay.sigelo.ai', default: 'relay.sigelo.ai', fixed: null }), 'GET /api/agents': () => [], 'POST /api/seat/take': () => { if (b?.password !== PW.pw) throw Object.assign(new Error('Wrong password.'), { check: 'words_password' }); return { seat: 'here', holder: 'phone', epoch: 2 }; } }[`${method} ${path.split('?')[0]}`];
+          try { return f ? { status: 200, body: f() } : { status: 404, body: { error: { check: 'route', message: 'no' } } }; } catch (e) { return { status: 403, body: { error: { check: e.check, message: e.message } } }; } } } };
+    sb3.globalThis = sb3;
+    vm.runInNewContext(readFileSync(join(HERE, 'vendor', 'ui.js'), 'utf8'), sb3);
+    const b3 = (t) => root3.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t), has3 = (t) => root3.textContent.includes(t), poll3 = async () => { await iv3.find(([, ms]) => ms === 2000)[0](); await settle(); };
+    const h1 = () => root3.all().find((e) => e.tagName === 'H1')?.textContent, field = (l) => root3.all().find((e) => e.tagName === 'INPUT' && e.attrs['aria-label'] === l);
+    await settle(); await poll3();
+    await b3('Me').click(); await settle(); await poll3();
+    ok(has3('Your 25 words are kept on this phone behind your password.') && b3('Security'), 'Me: a Security section where this phone keeps its own words');
+    let u = sandbox.unlocks ?? 0;
+    await b3('Security').click(); await settle(); await poll3();
+    ok(h1() === 'Security' && (sandbox.unlocks ?? 0) === u + 1 && b3('Show my 25 words') && b3('Change the password') && b3('Remove the password'), 'Security: the lock first; Show my 25 words, Change the password, Remove the password');
+    u = sandbox.unlocks;
+    await b3('Show my 25 words').click(); await settle(); await poll3();
+    const pw = field('Password');
+    ok(h1() === 'Your 25 words' && pw?.attrs.type === 'password' && pw.attrs.autocomplete === 'current-password' && !root3.all().some((e) => e.tagName === 'OL'), 'Show: the password asked, nothing shown yet');
+    pw.value = 'wrong one'; await b3('Show').click(); await settle();
+    ok(has3('Wrong password.') && !root3.all().some((e) => e.tagName === 'OL') && secure.length === 0, 'Show: a wrong password said plainly, nothing shown, FLAG_SECURE not set');
+    pw.value = 'correct horse'; await b3('Show').click(); await settle(); await poll3();
+    const ol = root3.all().find((e) => e.tagName === 'OL');
+    ok(ol && ol.kids.length === 25 && /seed-list/.test(ol.className) && /nocopy/.test(ol.className) && secure.at(-1) === true && pw.value === '' && b3('Done') && !root3.all().some((e) => e.tagName === 'BUTTON' && /Copy/.test(e.textContent)) && (sandbox.unlocks ?? 0) > u,
+      'Show: after the lock and the password, the 25 words as at their creation (numbered list, not selectable, no copy), FLAG_SECURE on, the field emptied; one button, Done');
+    let prevented = false; ol.on.copy?.forEach((f) => f({ preventDefault: () => { prevented = true; } }));
+    await b3('Done').click(); await settle();
+    ok(prevented && h1() === 'Security' && secure.at(-1) === false && !twenty5.some((w) => root3.textContent.includes(w)), 'Show: a copy refused; Done hides them (FLAG_SECURE off, the words gone from the page), back to Security');
+    await b3('Show my 25 words').click(); await settle();
+    field('Password').value = 'correct horse'; await b3('Show').click(); await settle();
+    const shown = root3.all().some((e) => e.tagName === 'OL') && secure.at(-1) === true;
+    await b3('‹').click(); await settle();
+    ok(shown && secure.at(-1) === false && !twenty5.some((w) => root3.textContent.includes(w)), 'Show: leaving by Back hides them too (FLAG_SECURE off)');
+    await b3('Me').click(); await settle(); await poll3(); await b3('Security').click(); await settle(); await poll3();
+    await b3('Change the password').click(); await settle();
+    field('Current password').value = 'nope'; field('New password').value = 'battery staple'; field('Repeat it').value = 'battery staple';
+    await b3('Save').click(); await settle();
+    ok(has3('Wrong password.') && PW.pw === 'correct horse', 'Change: the old password asked, a wrong one refused');
+    field('Current password').value = 'correct horse';
+    await b3('Save').click(); await settle(); await poll3();
+    ok(PW.pw === 'battery staple' && h1() === 'Security' && wc.some(([o, a, b, c]) => o === 'change' && a === 'correct horse' && b === 'battery staple' && c === 'battery staple'), 'Change: old, new and its repeat → local.words.change, back to Security');
+    // Removing the profile: its words password too; taking the seat: the same.
+    await b3('‹').click(); await settle(); await b3('Profiles')?.click(); await settle(); await poll3();
+    if (!h1()?.startsWith('Profiles')) { await b3('Me').click(); await settle(); await poll3(); await b3('Profiles').click(); await settle(); await poll3(); }
+    await root3.all().filter((e) => e.attrs['data-profile'])[0].all().find((e) => e.textContent === 'Remove').click(); await settle(); await poll3();
+    const ppw = field('Its words password');
+    ok(h1() === 'Remove a profile' && ppw?.attrs.type === 'password' && has3('Its words password'), 'Remove a profile with kept words: its words password asked beside the tick and the name');
+    root3.all().find((e) => e.attrs.type === 'checkbox').checked = true; field('Its name').value = 'Profile 1'; ppw.value = 'correct horse';
+    await b3('Remove Profile 1').click(); await settle();
+    ok(has3('Wrong password.') && removed.at(-1)?.[1].password === 'correct horse', 'Remove a profile: the password goes with the call; a wrong one refused, said');
+    ppw.value = 'battery staple';
+    await b3('Remove Profile 1').click(); await settle();
+    ok(removed.at(-1)?.[1].password === 'battery staple' && removed.at(-1)[1].words === true && removed.at(-1)[1].name === 'Profile 1', 'Remove a profile: ticked, named and the password → profiles.remove');
+    PW.standby = true; await b3('‹').click(); await settle(); await poll3();
+    await b3('Take the seat here').click(); await settle(); await poll3();
+    ok(h1() === 'Take the seat here' && field('Password') && has3('stopped or lost'), 'Seat banner with kept words: Take the seat here opens its screen (the warning, the password)');
+    field('Password').value = 'battery staple';
+    await root3.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === 'Take the seat here').at(-1).click(); await settle();
+    ok(posted.some(([m, p, b]) => m === 'POST' && p === '/api/seat/take' && b.confirm === true && b.password === 'battery staple'), 'Take the seat: POST /api/seat/take {confirm, password}');
+    PW.standby = false;
+    // Remove the password: the words deleted; Security then says they are on paper only.
+    await b3('Me').click(); await settle(); await poll3(); await b3('Security').click(); await settle(); await poll3();
+    await b3('Remove the password').click(); await settle();
+    ok(has3('The words kept on this phone are deleted. Your paper is then the only copy.'), 'Remove the password: the warning');
+    field('Password').value = 'battery staple';
+    await root3.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === 'Remove the password').at(-1).click(); await settle(); await poll3();
+    ok(!PW.kept && h1() === 'Security' && has3('not kept on this phone') && !b3('Show my 25 words'), 'Remove the password: local.words.remove, then Security says the words are on paper only, nothing to show');
+  }
+
+  // ---- Me → Connect → Computers (design/profiles.md P2) over a fake local.computers: the list (the one in use marked),
+  // switch, add, forget with the reminder to revoke on the computer; a profile holding an identity shows no Connect.
+  for (const remote of [true, false]) {
+    const root3 = new El('main'), iv3 = [], cc = [];
+    const t0 = Math.floor(Date.now() / 1000);
+    const C = { active: 'c1', limit: 8, profile: { id: 'p1', name: 'Profile 1', did: 'did:sigelo:zA', words: 'apple brave cider delta' }, computers: [
+      { id: 'c1', name: 'Computer 1', via: 'lan', did: 'did:sigelo:zA', words: 'apple brave cider delta', where: '192.168.1.20:8765', paired: t0 - 86400, last_used: t0 - 120 },
+      { id: 'c2', name: 'Computer 2', via: 'relay', did: 'did:sigelo:zA', words: 'apple brave cider delta', where: 'relay.sigelo.ai', paired: t0 - 3600, last_used: t0 - 7200 }] };
+    const fail = (check, message) => { throw Object.assign(new Error(message), { check }); };
+    const computers = {
+      list: async () => { cc.push(['list']); if (!remote) fail('not_remote', 'This profile holds an identity here, not computers.'); return JSON.parse(JSON.stringify(C)); },
+      use: async (id) => { cc.push(['use', id]); return { active: id, reload: true }; },
+      add: async () => { cc.push(['add']); return { reload: true }; },
+      forget: async (id) => { cc.push(['forget', id]); C.computers = C.computers.filter((c) => c.id !== id); return { ...JSON.parse(JSON.stringify(C)), revoke: 'sigelo-agent ui --revoke-control <name>' }; },
+    };
+    const asked = [];
+    const sb = { ...sandbox, confirm: (t) => { asked.push(t); return true; }, document: { getElementById: () => root3, createElement: (t) => new El(t), createTextNode: (t) => new Text_(t), querySelectorAll: () => [], body, get activeElement() { return focus.el; } }, setInterval: (f, ms) => { iv3.push([f, ms]); return iv3.length; }, history: { replaceState() {}, pushState() {}, back() {} },
+      sigeloLocal: { ...sandbox.sigeloLocal, computers, async call(method, path) { const f = { 'GET /api/state': snap, 'GET /api/agents/workers': () => ({ keeper: true, seat: 'here', workers: [] }), 'GET /api/me': () => ({ did: 'did:sigelo:zA', original: 'did:sigelo:zA', recovery: 'set', key: 'file', relay: 'relay.sigelo.ai', retention_days: 7, erase: '' }),
+        'GET /api/settings': () => ({ relay: 'relay.sigelo.ai', default: 'relay.sigelo.ai', fixed: null }), 'GET /api/agents': () => [] }[`${method} ${path.split('?')[0]}`]; return f ? { status: 200, body: f() } : { status: 404, body: { error: { check: 'route', message: 'no' } } }; } } };
+    sb.globalThis = sb;
+    vm.runInNewContext(readFileSync(join(HERE, 'vendor', 'ui.js'), 'utf8'), sb);
+    const b3 = (t) => root3.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t), has3 = (t) => root3.textContent.includes(t), poll3 = async () => { await iv3.find(([, ms]) => ms === 2000)[0](); await settle(); };
+    await settle(); await poll3();
+    await b3('Me').click(); await settle(); await poll3(); await settle(); await poll3();
+    if (!remote) { ok(!has3('Connect') && !b3('Computers') && cc.some(([o]) => o === 'list'), 'Me: a profile holding an identity (not_remote): no Connect, no Computers'); continue; }
+    ok(has3('Connect') && has3('This phone drives 2 computers of this profile') && b3('Computers'), 'Me: a Connect section where the profile drives computers, how many');
+    await b3('Computers').click(); await settle(); await poll3();
+    const cards = () => root3.all().filter((e) => e.attrs['data-computer']);
+    ok(root3.all().some((e) => e.tagName === 'H1' && e.textContent === 'Computers') && cards().length === 2 && cards()[0].className.includes('current') && cards()[0].textContent.includes('in use')
+      && cards()[0].textContent.includes('apple brave cider delta · on the LAN 192.168.1.20:8765 · used 2 min ago') && cards()[1].textContent.includes('over the relay relay.sigelo.ai · used 2 h ago') && cards()[1].textContent.includes('paired')
+      && !cards()[0].all().some((e) => e.textContent === 'Switch') && cards()[1].all().some((e) => e.textContent === 'Switch') && b3('Add a computer') && !b3('Add a computer').disabled,
+      `Computers: a card per computer (name, four words, LAN or relay, last used, paired), the one in use marked and without Switch; Add a computer (${cards().map((c) => c.textContent).join(' / ')})`);
+    await cards()[1].all().find((e) => e.textContent === 'Switch').click(); await settle();
+    ok(cc.some(([o, id]) => o === 'use' && id === 'c2'), 'Computers: Switch → computers.use (the shell asks the lock and opens that computer\'s page)');
+    await b3('Add a computer').click(); await settle();
+    ok(cc.some(([o]) => o === 'add'), 'Computers: Add a computer → computers.add (the pairing screens: code or scan)');
+    await cards()[1].all().find((e) => e.textContent === 'Forget').click(); await settle(); await poll3();
+    ok(/Forget Computer 2\?/.test(asked.at(-1)) && /revoke it there: sigelo-agent ui --revoke-control <name>/.test(asked.at(-1)) && cc.some(([o, id]) => o === 'forget' && id === 'c2')
+      && cards().length === 1 && has3('Computer 2 forgotten on this phone. Revoke it on the computer too: sigelo-agent ui --revoke-control <name>'),
+      'Computers: Forget asks first (the computer keeps the control until revoked there), then computers.forget, the list again and the reminder to revoke it on the computer');
+    C.computers.push(...[3, 4, 5, 6, 7, 8, 9].map((n) => ({ id: `c${n}`, name: `Computer ${n}`, via: 'lan', did: 'did:sigelo:zA', words: null, where: null, paired: null, last_used: null })));
+    await b3('‹').click(); await settle(); await b3('Me').click(); await settle(); await poll3(); await b3('Computers').click(); await settle(); await poll3();
+    ok(b3('Add a computer')?.disabled === true && has3('At most 8 computers'), 'Computers: at 8, Add a computer off, the limit said');
+  }
 }
 
 // ================================================================ 3. router.mjs against the relay
@@ -507,8 +862,8 @@ try {
   await A.router.start(); await B.router.start();
   ok(A.router.carrier.transport === 'wss' && A.router.carrier.platform === A.platform, 'router: the carrier runs on the web platform, MQTT over WebSocket');
   const st0 = await call(A, 'GET', '/api/state?since=0');
-  ok(st0.status === 200 && Object.keys(st0.body).sort().join() === 'events,groups,introductions,me,now,pending,seq' && st0.body.me.did === ADA.did
-    && Object.keys(st0.body.me).sort().join() === 'clock_checked,clock_offset,did,error,online,pow,pow_done_ms,relay,retention_days,seat' && st0.body.me.seat === null,
+  ok(st0.status === 200 && Object.keys(st0.body).sort().join() === 'chats,events,groups,introductions,me,now,pending,seq,transfers' && st0.body.transfers === null && st0.body.me.did === ADA.did
+    && Object.keys(st0.body.me).sort().join() === 'clock_checked,clock_offset,did,error,online,pow,pow_capped,pow_confirm,pow_done_ms,relay,retention_days,seat' && st0.body.me.seat === null && st0.body.me.pow_capped === null,
   `GET /api/state: UI-API.md's keys, me.did (${JSON.stringify(st0.body).slice(0, 200)})`);
   const me = await call(A, 'GET', '/api/me');
   ok(me.status === 200 && me.body.did === ADA.did && me.body.original === ADA.did && me.body.chain.join() === ADA.did && me.body.key === 'browser' && me.body.identity_file === IDENTITY && me.body.recovery === 'set' && me.body.relay === HOST,
@@ -530,7 +885,7 @@ try {
   const paired = await until(async () => (await call(A, 'GET', '/api/state')).body.groups.contacts.some((c) => c.did === CY.did));
   const cyRow = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
   ok(paired && cyRow.name === 'cy' && cyRow.words === node.contacts().contacts[0].fingerprint, `pair: the Node agent accepted the app's short code; both hold the same four words (${acc.status})`);
-  ok(Object.keys(cyRow).sort().join() === 'current_did,did,last,link,local,mine,name,not_collected,ours,pair,queued,re_pair,relay,status,tags,tier,unread,waiting,words,words_checked',
+  ok(Object.keys(cyRow).sort().join() === 'current_did,did,last,last_seen,link,local,mine,name,not_collected,online,online_since,ours,pair,presence,queued,re_pair,relay,status,tags,tier,unread,waiting,words,words_checked',
     `a contact in groups: UI-API.md's keys (${Object.keys(cyRow).sort()})`);
   ok(await until(async () => (await call(A, 'GET', '/api/state')).body.me.online), 'GET /api/state: online once paired, the session up (MQTT.js over WebSocket, proof of work in the worker)');
   ok((await call(A, 'GET', '/api/state')).body.pending.paired.some((x) => x.id === inv.body.id && x.paired === CY.did), 'GET /api/state: pending.paired names the invite that paired');
@@ -581,6 +936,38 @@ try {
   release2();
   ok(await until(() => A.acks > a0, 10000), 'flush released: then acknowledged');
   ok(await until(async () => (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.some((m) => m.text === 'acknowledged after the commit')), 'and read in the page');
+  // Groups (GROUPS.md): the page's drain runs group.mjs handle(): a roster to the Node agent, its answer filed and
+  // labelled in the page, the page's message read there.
+  {
+    const NG = await import(pathToFileURL(join(REPO, 'contact', 'group.mjs')).href), nf = NG.groupsPath(join(dir, `${CY.label}.local.json`));
+    const g0 = await call(A, 'GET', '/api/groups');
+    ok(g0.status === 200 && g0.body.groups.length === 0 && g0.body.tier.members >= 8 && typeof g0.body.tier.told === 'boolean', `GET /api/groups: none yet, the tier (${JSON.stringify(g0.body.tier)})`);
+    const mk = await call(A, 'POST', '/api/groups/create', { name: 'crew', members: [CY.did], humans: [CY.did] });
+    ok(mk.status === 200 && mk.body.group.members.length === 2 && mk.body.group.members.find((m) => m.did === CY.did)?.role === 'human' && mk.body.copies.length === 1,
+      `POST /api/groups/create: crew, cy a human; the roster sent (${JSON.stringify(mk.body.copies)})`);
+    const gid = mk.body.group.gid;
+    let nh = null;
+    ok(await until(async () => { nh = await NG.handle({ carrier: node, file: nf, batch: await node.inbox({ wait: 0.5 }) }); return NG.list({ carrier: node, file: nf }).some((x) => x.gid === gid); }),
+      'the Node agent has the roster (a friend\'s group: an invitation)');
+    NG.join({ carrier: node, file: nf, group: gid });
+    await NG.send({ carrier: node, file: nf, group: gid, text: 'hi group @ada' });
+    ok(await until(async () => (await call(A, 'GET', '/api/state')).body.chats.unread === 1), 'the page took it at its drain: chats.unread 1 (the Groups tab\'s count)');
+    const gl = (await call(A, 'GET', '/api/groups')).body.groups[0];
+    ok(gl.unread === 1 && gl.last?.text === 'hi group @ada' && gl.status === 'member' && gl.mine, `GET /api/groups: unread 1, the last message (${JSON.stringify(gl.last)})`);
+    const hi = (await call(A, 'GET', `/api/groups/history?group=${gid}`)).body;
+    const m = hi.messages.find((x) => x.text === 'hi group @ada');
+    ok(m && m.name === 'cyrus' && m.role === 'human' && m.note === 'not your operator' && m.mine === false && m.mentioned === true && m.from === CY.did,
+      `GET /api/groups/history: labelled with name, role, "not your operator", mentioned (${JSON.stringify(m)})`);
+    ok((await call(A, 'GET', '/api/groups')).body.groups[0].unread === 0, 'read once shown: unread 0');
+    const snd = await call(A, 'POST', '/api/groups/send', { group: gid, text: 'back to the group' });
+    ok(snd.status === 200 && snd.body.copies.length === 1, `POST /api/groups/send: one copy (${JSON.stringify(snd.body.copies)})`);
+    const got = [];
+    ok(await until(async () => { got.push(...(await NG.handle({ carrier: node, file: nf, batch: await node.inbox({ wait: 0.5 }) })).batch.messages); return got.some((x) => x.content === 'back to the group' && x.group?.gid === gid); }),
+      'the Node agent reads the page\'s group message');
+    const rn = await call(A, 'POST', '/api/groups/rename', { group: gid, name: 'ship' }), bad = await call(A, 'POST', '/api/groups/rename', { group: 'nope', name: 'x' });
+    ok(rn.status === 200 && rn.body.group.name === 'ship' && rn.body.group.ver === 2 && bad.status === 404 && bad.body.error.check === 'group_unknown', 'POST /api/groups/rename; an unknown group: 404 group_unknown');
+    void nh;
+  }
 
   // Enrol from the app (the operator's own: restored from seed, the seat here): a one-time code made on the app's own
   // session; a Node machine pairs through it as a temporary identity (enrol.mjs accept), is sent worker 1 and pairs

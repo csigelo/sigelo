@@ -5,7 +5,7 @@
 //   { v, self, invites: { nonce: { secret, exp, name, peer, relay } },
 //              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as, named?, tier? } },
 //              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key, re_pair?,
-//                                          tier, tier_by, operator_exp?, link? } },
+//                                          tier, tier_by, operator_exp?, link?, presence? } },
 //              preset?: { original DID: tier } }
 // invites: codes this owner handed out, keyed by inviteNonce(code bytes); peer: the original DID of
 // the contact a re-key code is for, null on a new contact's code. accepts: codes this owner
@@ -29,6 +29,9 @@
 // set own (link_tier). ended: {id, by, at} on a contact a link's end revoked (revoke(did, ended)), and
 // relink: {id, until}, the one-use permit a NEW link leaves on it (design/links.md §7.1a): the pairing
 // through that link's code is admitted, the record written afresh. Forgotten by hand: no ended, never.
+// presence: true when the owner lets this contact see whether this agent is online (setPresence; off
+// by default, design/transfer.md §8 T0). An own agent (ours, or tier own) always sees it: presenceOf.
+// Kept by a re-pair, a merge and a rename, as the tier is.
 // The file holds one-time secrets, Bob's one-time key and
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
 import { utf8ToBytes } from '@noble/hashes/utils.js';
@@ -43,7 +46,7 @@ export const OPERATOR_CTX = 'sigelo-relay/operator';
 // The longest name rename() gives a contact, in characters.
 export const NAME_MAX = 64;
 // What a record keeps of its tier through admit (a re-pair, a merged notice).
-const TIER_KEYS = ['tier', 'tier_by', 'operator_exp', 'link'];
+const TIER_KEYS = ['tier', 'tier_by', 'operator_exp', 'link', 'presence'];
 // A recovery key used and replaced still governs every node up to its retirement (SPEC §7.2), and
 // no offline verifier tells its thief from its owner (THREAT-MODEL §2.5a). A known contact's record
 // remembers: its chain holds the recovery rotation that retired the key. → commitment → JCS of that
@@ -123,6 +126,22 @@ export class Contacts {
     c.tier = tier; c.tier_by = 'owner';
     this.save();
     return { did: c.did, name: c.name, tier: this.tierOf(c, now), ours: this.oursOf(c, now) };
+  }
+
+  /** What contact c sees of this agent's presence: "own" (an own agent: always), "allow" (the owner's choice), or "deny" (the default). */
+  presenceOf(c, now) { return this.oursOf(c, now) || this.tierOf(c, now) === 'own' ? 'own' : c.presence === true ? 'allow' : 'deny'; }
+
+  /**
+   * The owner's choice for a contact (a name or any DID of its chain): may it see whether this agent
+   * is online. An own agent always may (presence_own). → { did, name, presence: presenceOf }.
+   */
+  setPresence(who, allow, now) {
+    if (typeof allow !== 'boolean') fail('presence', 'allow: true or false');
+    const c = this.#find(who);
+    if (!allow && this.presenceOf(c, now) === 'own') fail('presence_own', `${c.name} is your own agent (${this.oursOf(c, now) ? 'yours by key' : 'tier own'}): own agents always see each other's presence`);
+    if (allow) c.presence = true; else delete c.presence;
+    this.save();
+    return { did: c.did, name: c.name, presence: this.presenceOf(c, now) };
   }
 
   /**

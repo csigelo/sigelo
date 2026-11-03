@@ -22,6 +22,11 @@ elsewhere, then one decision per screen, Back one step at a time. What each does
   on stdin, to `sigelo-agent keeper --from-words --keychain`, which seals your key and K_1 in the keyring
   before anything is written. Then `device seat init` makes this phone the seat. If sigelo already runs
   as you elsewhere, the phone is a standby: its page stays closed until "Take the seat here".
+- **The words password** (after a create or a restore, optional; design/apps-seed.md §8): Set encrypts the 25 words in
+  the page (`words-lock.mjs`, PBKDF2-SHA256, 1,000,000 rounds) and the app keeps them in the keyring, one item per
+  profile; Skip keeps nothing. Me → Security shows them after the password, changes or removes it. The same password
+  guards removing the profile and taking the seat (the app compares the page's proof; it never sees the password).
+  No lock of its own here: the session's login, then the password.
 - **Connect, on the LAN** (Advanced): the computer runs `sigelo-agent ui --remote`; the app scans its QR, reads it from an
   image, or takes the pasted `SIGELO:UI:` text, and drives that computer's page. Every call is sealed
   in the app (sigelo-remote/0, UI-API.md "Remote"); the page's files are the app's own. The phone
@@ -31,6 +36,22 @@ elsewhere, then one decision per screen, Back one step at a time. What each does
   code, `sigelo-agent control pair` makes this phone's control key (`~/.config/sigelo/control.local.json`,
   0600, never attested) and shows four words to confirm on the computer; then `control ui --app` serves
   that computer's page here, each call a relay message, the state pushed.
+
+## Profiles
+
+Up to 8 profiles (design/profiles.md P1), each its own files: Profile 1 those of before (`me.local.json`, the keyring
+text, `control.local.json`, the standby mark); profile `<id>` `me.<id>.local.json` beside it (keeper beside it, wrapped
+in the keyring under its own DID), `control.<id>.local.json`, the keyring text under its own kind, `standby.<id>`; the
+list in `profiles.json` beside them (0600, no secret). Only the active profile's page runs (`ui --app --identity <its
+file>`; its verbs see `SIGELO_HUMAN` and `SIGELO_CONTROL` naming its files). More than one at the app's start: the
+picker. Me → Profiles: switch, rename, add, remove (its files, its keyring items and this phone's device file of it in
+the agents' directory; a words profile needs "I have the 25 words" and its name typed). No lock of its own here.
+
+A remote profile holds up to 8 computers (design/profiles.md P2), listed in its `profiles.json` entry; one is in use.
+The first keeps the files of before; computer `<cid>` has its LAN text in the keyring under kind `sigelo-remote/0[ <id>]
+<cid>` with the attribute `computer`, its relay control in `control[.<id>].<cid>.local.json`. Me → Connect →
+Computers: switch, add (the pairing screens; over the relay `control pair --operator <the profile's>`), forget (its
+keyring item or `control forget`; revoke it on the computer too). Another operator's page is refused `other_operator`.
 
 ## Install (no root)
 
@@ -59,7 +80,7 @@ Where WebKitGTK finds no camera (0 devices): take a photo with the Camera app an
   `default-src 'self'`) or, for "This phone", from that `ui` page's address; any other link opens in
   the browser.
 - The bridge (`sigelo` script message handler) answers only the start page (start, connect, forget)
-  and `ui.html` (sealed calls); never the local page.
+  and `ui.html` (sealed calls); the local page only its profile operations (Me → Profiles).
 - No microphone; nothing remote is loaded.
 
 ## Tests

@@ -16,6 +16,8 @@ import * as enrol from './sigelo-agent-enrol.ts';
 import * as watch from './sigelo-agent-watch.ts';
 import * as device from './sigelo-agent-device.ts';
 import * as control from './sigelo-agent-control.ts';
+import * as group from './sigelo-agent-group.ts';
+import * as transfer from './sigelo-agent-transfer.ts';
 
 const USAGE = `sigelo-agent — a portable sigelo/0 identity for an AI agent, and its contacts
 
@@ -111,6 +113,8 @@ if (cmd === 'enrol') await contact.exit(await enrol.main(rest));
 if (cmd === 'keeper') await contact.exit(await enrol.keeperMain(rest));
 if (cmd === 'watch') await contact.exit(await watch.main(rest));
 if (cmd === 'device') await contact.exit(await device.main(rest));
+if (cmd === 'group') await contact.exit(await group.main(rest));
+if (cmd === 'transfer') await contact.exit(await transfer.main(rest));
 if (cmd === 'control') await contact.exit(await control.controlMain(rest));
 const flag = (name: string): string | undefined => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
 /** A command line missing what it needs: exit 2, as an unknown command (USAGE). */
@@ -273,7 +277,7 @@ try {
       break;
     }
     default:
-      console.error(`${USAGE}\n\n${contact.USAGE}\n\n${enrol.USAGE}\n\n${device.USAGE}`);
+      console.error(`${USAGE}\n\n${contact.USAGE}\n\n${group.USAGE}\n\n${transfer.USAGE}\n\n${enrol.USAGE}\n\n${device.USAGE}`);
       process.exit(2);
   }
 } catch (e) {

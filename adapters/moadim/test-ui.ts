@@ -81,6 +81,19 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui links: unknown contacts 404 not_contact; no purpose 400; tier own 409 link_tier; bad days 400; unknown link or introduction 404 link_unknown; answer at own 400; allow unknown 404, without allow 400',
     JSON.stringify(refusals.map((r) => [r.status, r.check])) === JSON.stringify([[404, 'not_contact'], [400, 'body'], [409, 'link_tier'], [400, 'body'], [404, 'link_unknown'], [404, 'link_unknown'], [400, 'body'], [404, 'not_contact'], [400, 'body']]), JSON.stringify(refusals));
   ok('ui links: the state carries introductions (none yet)', Array.isArray((JSON.parse((await http(P, 'GET', '/api/state', T)).body) as { introductions: unknown[] }).introductions));
+  // Transfers (TRANSFER.md): the routes of the page's engine; nothing yet; refusals by check; the view in ui.js.
+  const tr = async (method: string, path: string, body?: unknown, h: Record<string, string> = method === 'POST' ? W : T) => { const r = await http(P, method, path, h, body); return { status: r.status, j: JSON.parse(r.body) as Record<string, any> }; };
+  const t0 = await tr('GET', '/api/transfers'), tNo = await tr('GET', '/api/transfers', undefined, {}), tSt = JSON.parse((await http(P, 'GET', '/api/state', T)).body) as { transfers: { asked: number; active: number } | null };
+  ok('ui transfers: GET /api/transfers without the token → 403; with it → {out, in} empty, settings Tor on; the state counts {asked: 0, active: 0}', tNo.status === 403 && t0.status === 200
+    && t0.j['out'].length === 0 && t0.j['in'].length === 0 && t0.j['settings'].tor === true && tSt.transfers?.asked === 0 && tSt.transfers.active === 0, JSON.stringify(t0.j));
+  const tRef = [await tr('POST', '/api/transfers/accept', { id: 'ab'.repeat(16) }), await tr('POST', '/api/transfers/accept', { id: 'nope' }), await tr('POST', '/api/transfers/send', { to: 'did:sigelo:zNope', path: '/etc/hostname' }),
+    await tr('POST', '/api/transfers/send', { to: 'did:sigelo:zNope' }), await tr('POST', '/api/transfers/settings', { prefer: 'cheap' }), await tr('POST', '/api/transfers/direct', { contact: 'did:sigelo:zNope', on: 'yes' })];
+  ok('ui transfers: unknown id 404 transfer_unknown; a bad id, no path, a bad prefer, on not a boolean 400; unknown contact 404 not_contact',
+    JSON.stringify(tRef.map((r) => [r.status, r.j['error']?.check])) === JSON.stringify([[404, 'transfer_unknown'], [400, 'body'], [404, 'not_contact'], [400, 'body'], [400, 'body'], [400, 'body']]), JSON.stringify(tRef.map((r) => r.j)));
+  const tSet = await tr('POST', '/api/transfers/settings', { tor: false, prefer: 'private' });
+  ok('ui transfers: settings kept (tor off, prefer private), the tor daemon probed', tSet.status === 200 && tSet.j['tor'] === false && tSet.j['prefer'] === 'private' && typeof tSet.j['tor_daemon']?.serve === 'boolean', JSON.stringify(tSet.j));
+  ok('ui.js: the Files view (Accept / Decline → /api/transfers/accept, decline; the direct question; progress; Tor checkbox off without a daemon)',
+    js.body.includes('function viewTransfers()') && js.body.includes('/api/transfers/accept') && js.body.includes('/api/transfers/decline') && js.body.includes("e?.check !== 'direct_ask'") && js.body.includes('no tor daemon found'));
   // The relay setting (UI-API.md Settings): the same token and Origin rules; the caller's relay wins (fixed).
   type RelaySet = { relay: string; default: string; fixed: string | null; in_use: string; error?: { check: string } };
   const sj = async (method: string, body?: unknown, h: Record<string, string> = method === 'POST' ? W : T): Promise<{ status: number } & RelaySet> => { const r = await http(P, method, '/api/settings', h, body); return { status: r.status, ...(JSON.parse(r.body) as RelaySet) }; };
@@ -137,6 +150,9 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
     && String(page0.headers['content-security-policy']).startsWith(`default-src 'self'; script-src 'self' 'sha256-${hash}'`) && !/<script>(?!<)/.test(page0.body), String(page0.headers['content-security-policy']));
   ok('ui devices: qr.mjs and qr-decode.mjs (sigelo-contact\'s, byte for byte) and the shims served as JavaScript', served.every((r) => r.status === 200 && String(r.headers['content-type']).startsWith('text/javascript'))
     && served[1]!.body === readFileSync(join(import.meta.dirname, '..', '..', 'contact', 'qr-decode.mjs'), 'utf8'));
+  const wl = await http(P, 'GET', '/words-lock.mjs', {});
+  ok('ui security: words-lock.mjs (sigelo-contact\'s, byte for byte) served as JavaScript, for Me → Security in the GTK phone app (design/apps-seed.md §8)', wl.status === 200 && String(wl.headers['content-type']).startsWith('text/javascript')
+    && wl.body === readFileSync(join(import.meta.dirname, '..', '..', 'contact', 'words-lock.mjs'), 'utf8'));
   ok('ui devices: the page has a Devices view: camera by getUserMedia (feature-detected), an image file, paste; BarcodeDetector first, jsQR after', /getUserMedia/.test(js.body) && /enumerateDevices/.test(js.body)
     && /createImageBitmap/.test(js.body) && /BarcodeDetector/.test(js.body) && /\/qr-decode\.mjs/.test(js.body) && /\/api\/devices\/scan/.test(js.body));
   if (posixModes) {
@@ -239,6 +255,17 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       const tf = await A.call('POST', '/api/tier', { contact: bob!.did, tier: 'friend' });
       ok('ui e2e: /api/tier back to friend; a bad tier → 400; no contact → 404', tf['tier'] === 'friend' && (await A.call('POST', '/api/tier', { contact: bob!.did, tier: 'vip' }))['http'] === 400
         && (await A.call('POST', '/api/tier', { contact: 'did:sigelo:zNope', tier: 'quiet' }))['http'] === 404);
+      // Presence: bob's page lets alice see when bob is online; alice's state shows it, then nothing once denied.
+      const bobAt = async () => ((await A.call('GET', '/api/state'))['groups'].contacts as { did: string; online: boolean | null; last_seen: number | null; presence: string }[]).find((c) => c.did === bob!.did);
+      const p0 = await bobAt();
+      ok('ui presence: by default alice reads nothing of bob (online null), and bob sees nothing of her (presence deny)', p0?.online === null && p0?.last_seen === null && p0?.presence === 'deny', JSON.stringify(p0));
+      const pa = await B.call('POST', '/api/presence', { contact: acc['contact'].did, allow: true });
+      const on = await until(async () => ((await bobAt())?.online === true ? true : undefined));
+      ok('ui presence: /api/presence {allow: true} on bob\'s page → {presence: allow}; alice\'s page shows bob online', pa['http'] === 200 && pa['presence'] === 'allow' && on === true, JSON.stringify(pa));
+      const bad = await B.call('POST', '/api/presence', { contact: acc['contact'].did, allow: 'yes' });
+      const pd = await B.call('POST', '/api/presence', { contact: acc['contact'].did, allow: false });
+      const gone = await until(async () => ((await bobAt())?.online === null ? true : undefined));
+      ok('ui presence: allow not a boolean → 400; {allow: false} → deny, and alice\'s page knows nothing again (null, not offline)', bad['http'] === 400 && pd['presence'] === 'deny' && gone === true, JSON.stringify([bad, pd]));
       const paired = (await A.call('GET', '/api/state'))['pending'].paired as { id: string; paired: string }[];
       ok('ui e2e: the pairing view finds its code paired', paired.some((x) => x.id === inv['id'] && x.paired === bob?.did));
       await A.call('POST', '/api/words', { contact: bob!.did, match: true });
@@ -260,6 +287,26 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       const tagged = await A.call('POST', '/api/tag', { contact: bob!.did, tags: ['#work', 'family'] });
       const after = ((await A.call('GET', '/api/state'))['groups'].contacts as { did: string; name: string; tags: string[] }[]).find((c) => c.did === bob!.did);
       ok('ui e2e: rename and tag', renamed['http'] === 200 && tagged['http'] === 200 && after?.name === 'Bob B' && after.tags.join() === 'work,family', JSON.stringify(after));
+      // Groups (GROUPS.md): the pages handle them at each drain; a friend's group waits for its operator; labels.
+      // alice is quiet at bob's page (accepted so): a quiet creator's roster is ignored outright.
+      const quietMk = await A.call('POST', '/api/groups/create', { name: 'hush', members: [bob!.did] });
+      await new Promise((r) => setTimeout(r, 1500));
+      ok('ui groups: a group from a creator quiet here: ignored, nothing filed', quietMk['http'] === 200 && ((await B.call('GET', '/api/groups'))['groups'] as unknown[]).length === 0);
+      await A.call('POST', '/api/groups/leave', { group: (quietMk['group'] as { gid: string }).gid });
+      await B.call('POST', '/api/tier', { contact: acc['contact'].did, tier: 'friend' });
+      const mk = await A.call('POST', '/api/groups/create', { name: 'crew', members: [bob!.did], humans: [bob!.did] });
+      const gid = (mk['group'] as { gid: string } | undefined)?.gid ?? '';
+      const invited = await until(async () => ((await B.call('GET', '/api/groups'))['groups'] as { gid: string; status: string; creator_name: string }[] | undefined)?.find((g) => g.gid === gid && g.status === 'pending'));
+      const st = await B.call('GET', '/api/state');
+      ok('ui groups: create on one page; the other page takes the roster at its drain: an invitation (alice is a friend there), counted in chats', mk['http'] === 200 && invited?.creator_name === 'alice' && st['chats'].invited === 1, JSON.stringify([mk['copies'], invited, st['chats']]).slice(0, 600));
+      const early = await B.call('POST', '/api/groups/send', { group: gid, text: 'too early' });
+      const jn = await B.call('POST', '/api/groups/join', { group: gid });
+      ok('ui groups: send before joining → 409 group_pending; join → member', early['http'] === 409 && early['error']?.check === 'group_pending' && jn['http'] === 200 && (jn['group'] as { status: string }).status === 'member', JSON.stringify([early, jn]));
+      await A.call('POST', '/api/groups/send', { group: gid, text: 'hello crew @Bob B' });
+      const seen = await until(async () => (((await B.call('GET', `/api/groups/history?group=${gid}`))['messages'] ?? []) as { text: string; name: string; role: string; note: string | null; mentioned: boolean }[]).find((m) => m.text.startsWith('hello crew')));
+      ok('ui groups: the message on the other page, labelled: name, role, "not your operator"', seen?.name === 'alice' && seen.role === 'human' && seen.note === 'not your operator', JSON.stringify(seen));
+      const busyCli = spawnSync('node', [CLI, 'group', 'send', 'crew', 'beside the page'], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(A.dir, 'me.local.json') }, encoding: 'utf8' });
+      ok('ui groups: the CLI\'s group send beside the page refuses (exit 1, busy): the page owns the session', busyCli.status === 1 && /busy|page/.test(busyCli.stderr), busyCli.stderr);
       const carrierState = JSON.parse(readFileSync(join(A.dir, 'me.local.carrier.json'), 'utf8')) as { events: unknown[]; inbox: unknown[] };
       ok('ui e2e: the page takes what the carrier keeps through inbox(): no events, no messages left in its state', carrierState.events.length === 0 && carrierState.inbox.length === 0, JSON.stringify(carrierState.events).slice(0, 300));
       const inv2 = await A.call('POST', '/api/invite', { name: 'later', long: true });
@@ -439,7 +486,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
         const noTok = await http(A.u.port, 'GET', '/api/agents/workers', {}), noOrig = await http(A.u.port, 'POST', '/api/agents/enrol-code', { 'X-Sigelo-Token': A.u.token, 'Content-Type': 'application/json' }, { name: 'x' });
         ok('ui agents: GET /api/agents/workers without the token, POST /api/agents/enrol-code without Origin → 403', noTok.status === 403 && noOrig.status === 403);
         type Wk = { worker: number; name: string; did: string; original: string; placed: string; status: string; tier: string | null; contact: string | null; local: string | null; revoked: number | null; attested_until: number | null;
-          enrolling: { id: string; state: string; code: string | null; words: string | null; command: string | null } | null };
+          enrolling: { id: string; state: string; code: string | null; words: string | null; command: string | null; verified?: boolean; confirm_words?: boolean; words_ok?: boolean | null } | null };
         const wl = async () => (await A.call('GET', '/api/agents/workers')) as { http: number; keeper: boolean; seat: string | null; workers: Wk[] };
         const w0 = await wl();
         ok('ui agents: the list from the keeper: bot worker 0 on this machine, enrolled; phone revoked; tab a device', w0.http === 200 && w0.keeper === true
@@ -474,6 +521,9 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
         const st1 = await A.call('GET', '/api/state'), inMine = (st1['groups'].mine as { did: string; ours: boolean; name: string }[]).find((c) => c.did === vps?.contact);
         ok('ui agents: it sits in Mine (ours by the attestation), named vps; the temporary DID forgotten', inMine?.ours === true && inMine.name === 'vps'
           && !([...st1['groups'].mine, ...st1['groups'].contacts] as { name: string }[]).some((c) => c.name.includes('(enrolling)')), JSON.stringify(st1['groups']).slice(0, 500));
+        const vc = (st1['groups'].mine as { did: string; words_checked: boolean }[]).find((c) => c.did === vps?.contact);
+        ok('ui agents: own enrolment, no tap: the worker is words-checked (its DID is the one derived here), the row says verified', vc?.words_checked === true && vps?.enrolling?.verified === true
+          && vps.enrolling.confirm_words === false, JSON.stringify([vc, vps?.enrolling]));
         const rn = await A.call('POST', '/api/agents/rename', { worker: 3, name: 'vps2' });
         ok('ui agents: rename → the roster and its contact', rn['http'] === 200 && (await wl()).workers.find((x) => x.worker === 3)?.name === 'vps2'
           && ((await A.call('GET', '/api/state'))['groups'].mine as { did: string; name: string }[]).find((c) => c.did === vps?.contact)?.name === 'vps2', JSON.stringify(rn));
@@ -490,6 +540,23 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
           && rv['attested_until'] === vps?.attested_until && after?.status === 'revoked' && gone && (await A.call('POST', '/api/agents/revoke', { worker: 3 }))['error']?.check === 'revoked', JSON.stringify([rv, after]));
         const ec2 = await A.call('POST', '/api/agents/enrol-code', { name: 'later' }), cn = await A.call('POST', '/api/agents/revoke', { worker: ec2['worker'] });
         ok('ui agents: a code nobody used, revoked → cancelled, the index free again', ec2['worker'] === 4 && cn['cancelled'] === true && !(await wl()).workers.some((x) => x.worker === 4), JSON.stringify([ec2, cn]));
+        // The optional switch: confirm_words holds the key until "They match" (enrol-words).
+        const ec3 = await A.call('POST', '/api/agents/enrol-code', { name: 'asked', confirm_words: true, operator_name: 'boss' });
+        const askedFile = join(H, 'asked', 'sigelo.local.json');
+        mkdirSync(join(H, 'asked'), { recursive: true, mode: 0o700 });
+        const joining = cli(['init', '--enrol', String(ec3['code']), '--wait', '90'], { ...relayEnv, SIGELO_IDENTITY: askedFile });
+        const waits = await until(async () => { const w = (await wl()).workers.find((x) => x.worker === 4); return w?.enrolling?.state === 'words' && w.enrolling.words ? w : undefined; }, 30000);
+        await new Promise((r) => setTimeout(r, 3000));
+        const still = (await wl()).workers.find((x) => x.worker === 4);
+        ok('ui agents: confirm_words → the agent answered, its words shown, its key held (not enrolled) until the human says', ec3['confirm_words'] === true && waits !== undefined
+          && still?.status === 'pending' && still.enrolling?.words_ok === null && !existsSync(askedFile), JSON.stringify(still));
+        const yes = await A.call('POST', '/api/agents/enrol-words', { id: ec3['id'], match: true }), joined3 = await joining;
+        const asked = await until(async () => { const w = (await wl()).workers.find((x) => x.worker === 4); return w?.status === 'enrolled' ? w : undefined; }, 30000);
+        const askedOp = (JSON.parse(readFileSync(askedFile.replace(/\.json$/, '.contacts.json'), 'utf8')) as { contacts: Record<string, { name: string }> }).contacts;
+        ok('ui agents: "They match" → its key goes, enrolled; the agent files me as the label I gave (operator_name)', yes['http'] === 200 && joined3.status === 0 && asked !== undefined
+          && Object.values(askedOp).map((c) => c.name).join() === 'boss', JSON.stringify([yes, asked, askedOp]) + joined3.out.slice(-300));
+        const nw = await A.call('POST', '/api/agents/enrol-words', { id: 'nope', match: true }), pt = await A.call('POST', '/api/pow/try', {});
+        ok('ui agents: enrol-words for no such enrolment 404; pow/try with every relay connected → tried none', nw['http'] === 404 && pt['http'] === 200 && Array.isArray(pt['tried']), JSON.stringify([nw, pt]));
         const rt = await A.call('POST', '/api/relays/test', { relay: 'relay.test' }), rb = await A.call('POST', '/api/relays/test', { relay: 'not a host' }), rn2 = await A.call('POST', '/api/relays/test', { relay: 'nowhere.invalid' });
         ok('ui relay picker: Test → the test relay answers (ms); a bad host 400; a host that does not answer → ok false, why', rt['http'] === 200 && rt['ok'] === true && typeof rt['ms'] === 'number'
           && rb['http'] === 400 && rn2['http'] === 200 && rn2['ok'] === false && typeof rn2['detail'] === 'string', JSON.stringify([rt, rb, rn2]));

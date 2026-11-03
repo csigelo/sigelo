@@ -1,6 +1,6 @@
 {
   "name": "sigelo-agent",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Agent-side sigelo CLI: create an identity (DID), sign world challenges, collect attestations, build verifiable bundles",
   "keywords": [
     "ai-agents",
@@ -42,8 +42,10 @@
     "WATCH.md",
     "ENROL.md",
     "LINKS.md",
+    "GROUPS.md",
     "DEVICES.md",
-    "APPS.md"
+    "APPS.md",
+    "TRANSFER.md"
   ],
   "engines": {
     "node": ">=22.18"

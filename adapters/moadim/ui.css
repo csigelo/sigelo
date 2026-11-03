@@ -69,6 +69,7 @@ video.scan:not([hidden]) { display: block; width: 100%; max-height: 50vh; border
 .pick { display: flex; align-items: center; gap: 8px; }
 .pick > .row { flex: 1; min-width: 0; }
 .row.current { background: var(--card); border-left: 3px solid var(--acc); }
+.card.current { border-left: 3px solid var(--acc); }
 input[type=radio], input[type=checkbox] { width: 1.4em; height: 1.4em; margin: 0; flex: none; accent-color: var(--acc); }
 label.opt { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 1rem; color: var(--fg); margin: 4px 0; }
 .choice { display: flex; flex-direction: column; }
@@ -78,6 +79,7 @@ label.opt { display: flex; align-items: center; gap: 10px; min-height: 44px; fon
 .welcome.home { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 12vh; }
 .welcome.home h1 { font-size: 2rem; margin: 12px 0 4px; }
 .welcome .seal { width: 96px; height: 96px; }
+.welcome .seal.small { width: 40px; height: 40px; }
 .welcome .choices { display: flex; flex-direction: column; gap: 12px; width: 100%; margin: 28px 0 8px; }
 .welcome .choices button { min-height: 56px; font-size: 1.1rem; }
 .welcome .bar > button { flex: 1 1 100%; min-height: 52px; }
@@ -96,3 +98,28 @@ label.opt { display: flex; align-items: center; gap: 10px; min-height: 44px; fon
 details.advanced > summary::before { content: '▸'; margin-right: 8px; }
 details.advanced[open] > summary::before { content: '▾'; }
 button.on { border: 2px solid var(--acc); color: var(--acc); font-weight: 600; }
+/* Presence (UI-API.md): green online, grey with "last seen" once offline. */
+.dot { display: inline-block; width: .62em; height: .62em; border-radius: 50%; margin-right: 6px; vertical-align: .05em; flex: none; }
+.dot.on { background: var(--ok); }
+.dot.off { background: var(--mut); opacity: .7; }
+.sub.seen { color: var(--mut); font-size: .85rem; }
+header .title { flex: 1 1 auto; min-width: 6em; overflow: hidden; }
+header .title h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Groups (ui.js GROUPS) */
+.count.tab { display: inline-block; margin-left: 6px; }
+.count-line { flex: 1; align-self: center; }
+.foot .inner.col { flex-direction: column; align-items: stretch; }
+.foot .compose { display: flex; gap: 8px; align-items: flex-end; }
+.foot .compose > textarea { flex: 1; resize: none; max-height: 33vh; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.chips > .chip { min-height: 36px; padding: 4px 10px; border-radius: 99px; flex: none; }
+.msg.mentioned { border-left: 3px solid var(--acc); }
+.sys { text-align: center; font-size: .85rem; }
+.pick-row .main { flex: 1; min-width: 0; }
+.row.member { flex-wrap: wrap; }
+.row.member .main { flex: 1 1 8em; }
+.row.member .acts { display: flex; gap: 6px; flex-wrap: wrap; flex: 1 1 100%; }
+.row.member .acts > button { min-height: 36px; padding: 4px 10px; }
+.chips[hidden] { display: none; }
+header nav.tabs > button { min-width: 0; padding: 8px 2px; font-size: .88rem; }

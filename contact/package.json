@@ -1,6 +1,6 @@
 {
   "name": "sigelo-contact",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": false,
   "description": "Agent contacts for sigelo identities: invite codes, a contact store, end-to-end encrypted envelopes with hybrid post-quantum key agreement, and an MQTT carrier. Client code (MIT); the relay server is csigelo/sigelo-relay (AGPL-3.0).",
   "keywords": [
@@ -52,6 +52,8 @@
     "./enrol.mjs": "./enrol.mjs",
     "./link": "./link.mjs",
     "./link.mjs": "./link.mjs",
+    "./group": "./group.mjs",
+    "./group.mjs": "./group.mjs",
     "./page": "./page.mjs",
     "./page.mjs": "./page.mjs",
     "./platform-node": "./platform-node.mjs",
@@ -68,6 +70,12 @@
     "./restore.mjs": "./restore.mjs",
     "./create": "./create.mjs",
     "./create.mjs": "./create.mjs",
+    "./transfer": "./transfer.mjs",
+    "./transfer.mjs": "./transfer.mjs",
+    "./transfer-node": "./transfer-node.mjs",
+    "./transfer-node.mjs": "./transfer-node.mjs",
+    "./words-lock": "./words-lock.mjs",
+    "./words-lock.mjs": "./words-lock.mjs",
     "./package.json": "./package.json"
   },
   "files": [
@@ -83,6 +91,7 @@
     "invite.mjs",
     "kdf.mjs",
     "link.mjs",
+    "group.mjs",
     "page.mjs",
     "platform-node.mjs",
     "prekeys.mjs",
@@ -92,6 +101,9 @@
     "restore.mjs",
     "short.mjs",
     "store.mjs",
+    "transfer.mjs",
+    "transfer-node.mjs",
+    "words-lock.mjs",
     "fixtures/carrier-v0.json",
     "fixtures/device-v1.json",
     "fixtures/envelope-v0.json",
@@ -107,18 +119,21 @@
     "test-envelope.mjs",
     "test-file.mjs",
     "test-tier.mjs",
+    "test-presence.mjs",
     "test-ws.mjs",
     "test-invite.mjs",
     "test-link.mjs",
+    "test-group.mjs",
     "test-platform.mjs",
     "test-short.mjs",
-    "test-device.mjs"
+    "test-device.mjs",
+    "test-transfer.mjs"
   ],
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-ws.mjs && node test-short.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs && node test-link.mjs && node test-device.mjs && node test-platform.mjs",
+    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-ws.mjs && node test-short.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs && node test-presence.mjs && node test-link.mjs && node test-device.mjs && node test-platform.mjs && node test-group.mjs && node test-transfer.mjs",
     "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs && node gen-short.mjs && node gen-device.mjs",
     "prepack": "node ../release/prepack.mjs pre",
     "postpack": "node ../release/prepack.mjs post",

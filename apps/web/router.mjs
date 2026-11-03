@@ -14,7 +14,8 @@
 // seat: after a restore from seed (seed.mjs seatOf): { info() → {holder, epoch, here} | null, take(now),
 // here() → this device {name, did, worker} | null, restored() → {on, keeper, seat} | null }. info().here false: the seat is on another device: start()
 // takes the owner lock but never logs in (writes refused 409 seat_elsewhere, the page's banner), until
-// POST /api/seat/take {confirm: true} signs the list naming this device (seat take --force semantics).
+// POST /api/seat/take {confirm: true, password?} signs the list naming this device (seat take --force semantics;
+// password: the words password, needed when the words are kept, words.mjs).
 // identity(): the identity file as sigelo-agent writes it ({ secret, genesis, rotations,
 // attestations, issuers }), read at every operation. Its files live under the name `app/me.local.json`
 // in the platform's files (contacts, carrier state, history, the page's data, links).
@@ -28,6 +29,7 @@ import { did as didOf } from 'sigelo';
 import { Carrier, DEFAULT_RELAY, UNLOGGED, pathsFor } from './vendor/contact/carrier.mjs';
 import { checkRelay } from './vendor/contact/invite.mjs';
 import { enrolPath } from './vendor/contact/enrol.mjs';
+import * as G from './vendor/contact/group.mjs';
 import * as L from './vendor/contact/link.mjs';
 import { makePage, refuse } from './vendor/contact/page.mjs';
 import { codeKind } from './vendor/contact/short.mjs';
@@ -58,7 +60,7 @@ export function presetRelay(files, host) {
 export const FULL_IMPORT = 'an operator identity (FULL) with no signed device list naming this app the seat would log in as you beside the device that holds it (the two lose each other\'s messages): refused. Restore from your 25 words here instead (the seat here or on another device), or import the SAFE file sigelo-agent device scan wrote for this app';
 const DEVICES_HERE = 'devices are added, scanned and revoked on the operator\'s computer (sigelo-agent ui), not in this app';
 
-export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' }, options = {}, seat = null, keeper = null }) {
+export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' }, options = {}, seat = null, keeper = null, words = null }) {
   const mode = { ...mode0 };
   const { files } = platform;
   const paths = pathsFor(IDENTITY), base = IDENTITY.replace(/\.json$/, '');
@@ -78,6 +80,8 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
     }),
     relayFixed: options.relay ?? env.relay ?? null,
     link: L, linksFile, enrolFile: enrolPath(IDENTITY), codeKind, unlogged: UNLOGGED,
+    // Groups (GROUPS.md): handled at each drain, the file beside the identity's (app/me.local.groups.json).
+    groups: G, groupsFile: G.groupsPath(IDENTITY),
     // The history and the page's data: files of the platform (IndexedDB behind them), written whole.
     store: {
       readHistory: () => text(files.read(historyFile)),
@@ -124,6 +128,8 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
     if (st.here) refuse(409, 'seat_here', 'this device holds the seat already');
     if (b['confirm'] !== true) refuse(400, 'body', 'confirm: true: the other device is stopped or lost (two devices logging in as you lose each other\'s messages)');
     if (owned === null) refuse(409, 'start', 'the app has not started');
+    // The words password, when the words are kept (words.mjs): it guards the seat too.
+    await words?.guard(b['password']);
     const r = await seat.take(Math.floor(Date.now() / 1000));
     page.live.seatGone = null; mode.standby = false;
     await page.start();

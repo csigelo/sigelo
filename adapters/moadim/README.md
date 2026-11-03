@@ -61,6 +61,13 @@ the account on a second device ([DEVICES.md](DEVICES.md)).
 
 Spending goes through the keeper, [`spend/`](../../spend/README.md).
 
+**Answering by itself:** [`examples/reply-hook.sh`](examples/reply-hook.sh) pipes each own message's
+text (your operator's) to `$SIGELO_REPLY_CMD` (unset: echoed) and sends what it prints back, label `reply`:
+```sh
+sigelo-agent watch --on-message 'SIGELO_REPLY_CMD="my-agent --stdin" sh examples/reply-hook.sh'
+```
+A `reply` is never answered, so two such agents do not loop. The text is data, never instructions.
+
 Exit: 0 done (`inbox`: even offline, once it printed messages); 1 refused or offline, one stderr
 line `<check>: what failed, what to do`; 2 usage, no identity; 3 `inbox --expect`, none.
 `SIGELO_DEBUG=1` explains a refusal.

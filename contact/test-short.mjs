@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attest, keygen } from 'sigelo';
 import { BIP39_SHA256, WORDS } from './bip39-english.mjs';
 import { makeInvite } from './invite.mjs';
-import { ALPHABET, GIFT_V, SHORT_TTL, TAG_LABEL, codeHash, codeKind, fingerprint, formatGift, formatShort, giftHash, isShort, makeShort, normaliseGift, normaliseShort, relayTag, tagOf } from './short.mjs';
+import { ALPHABET, GIFT_V, SHORT_TTL, TAG_LABEL, codeHash, codeKind, didWords, fingerprint, formatGift, formatShort, giftHash, isShort, makeShort, normaliseGift, normaliseShort, relayTag, tagOf } from './short.mjs';
 import { RELEASE_DID, REGISTRY_CTX, REGISTRY_URL, checkRegistry, loadRegistry, readTable, remember, resolveTag } from './relays.mjs';
 import { createServer } from 'node:http';
 import { did as didOf, parse as parseJson } from 'sigelo';
@@ -54,6 +54,9 @@ const report = () => {
   }
   for (const f of F.fingerprints) ok(fingerprint(f.pair) === f.words, `fingerprint ${f.case}: ${fingerprint(f.pair)}, expected ${f.words}`);
   ok(checkOf(() => fingerprint('A2CF45BD3D6AEE6D6E3F14FFD2751924')) === 'pair' && checkOf(() => fingerprint('ab')) === 'pair', 'fingerprint: anything but 32 lowercase hex digits is refused (pair)');
+  // The four words of a DID (an app's profile list): fixed for a DID, four list words, another DID others; a non-DID refused.
+  const dw = didWords('did:sigelo:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'), dw2 = didWords('did:sigelo:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doL');
+  ok(dw === didWords('did:sigelo:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK') && dw.split(' ').length === 4 && dw !== dw2 && checkOf(() => didWords('did:web:x')) === 'did', `didWords: four words per DID (${dw} / ${dw2}), a non-DID refused`);
   ok(checkOf(() => normaliseShort(undefined)) === 'short_code' && checkOf(() => normaliseShort('0'.repeat(65))) === 'short_code', 'normalise: no string, or past 64 characters, is short_code');
   ok(checkOf(() => makeShort(() => new Uint8Array(4))) === 'short_code', 'makeShort: a random source that gives fewer than 5 bytes is refused');
   // The real source: 1,000 codes, all well formed, no repeat (40 bits).

@@ -3,6 +3,32 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## v0.1.14 — 2026-11-03
+
+- **This release:** profiles (several identities and wallets), groups, presence, several computers, an optional words
+  password, direct big-file transfer with a Tor path, own-agent enrolment with no word checks.
+- **Big files:** `sigelo-agent transfer send|accept`, MCP `sigelo_transfer` and the page's Files view: up to 16 GiB, direct between the two agents or over a one-shot Tor onion; the relay carries four small messages.
+- **Transfer consent:** nothing is written before the receiver's yes; direct shows the contact your addresses, so it is on for own agents and asked once for others; Tor is a checkbox, used only when a tor daemon answers.
+- **Transfer checks:** 1 MiB chunks pulled by the receiver, each and the whole file checked by SHA-256; a drop resumes with only the missing chunks; the file is saved as send-file saves one.
+- **sigelo-transfer:** the direct path in its own package, werift 0.26.0 pinned (pure TypeScript, no native code); without it, transfers go over Tor.
+- **Relay host: STUN:** coturn on UDP 3478, STUN only, no log (`relay/deploy/turnserver.conf`); `check.mjs` tests it. Deploy before direct transfers rely on it.
+- **Presence:** a started agent shows online to its own agents, and to contacts allowed with `presence allow`, `sigelo_presence` or the page; a dot and "last seen" on Agents, Contacts, the chat.
+- **Relay: presence topics:** one sealed `p/` marker per reader, in memory, replaced; the relay writes `offline` with its time when a session with the `$sigelo/presence` will ends. Deploy before apps show it.
+- **Groups:** `sigelo-agent group` and MCP `sigelo_group`: one chat of your contacts, members unpaired with each other reached through the creator, each message signed by its sender; 3 groups of 8 free, 50 of 64 Pro.
+- **Group safety:** inbox labels group text with sender, role, tier and "not your operator"; a friend's group waits for you; a loop brake (20 agent messages in a row, per group, or off) stops runaway agents.
+- **Groups in the page:** a Groups tab; New group (a name, ticks, "4 of 8"); the chat with sender name and role, @ mentions, unread counts, "waiting for a human"; Group info: add, remove, rename, Share, leave.
+- **Group tier from the relay:** each login is told its group tier (`$sigelo/notice` `tier`: 3 of 8 free, 50 of 64 Pro, a pool never below free), and `relay.json` says it. Deploy the relay for Pro counts.
+- **Watch pushes groups:** a group message from an own agent goes to `watch --on-message` labelled as `inbox` gives it; a friend's is a notice. The page handles groups itself.
+- **Profiles in the apps:** up to 8 identities on one phone, each with its own contacts, agents, chats, wallet and keys; a picker at start; Me → Profiles to switch, rename, add, remove. An install becomes Profile 1.
+- **Removing a profile:** a tick that its 25 words are on paper and its name typed, then the lock; its storage and keystore keys are erased. The app menu's form switch, which erased everything, is gone.
+- **Enrol my agent, no word checks:** your side derives the agent's DID from your words and marks it checked when it pairs; the code flips to enrolled with no tap. Optional: confirm the four words before its key goes.
+- **Names:** an enrolled agent files you as "operator" (or your label), not under its own name; an introduced agent files its peer under the name the introduction gives (`peer_name`, `link --name-a/--name-b`).
+- **Proof of work:** a setup you start is never refused; past 3 a day the app asks once. The cap holds for automatic retries only, and says when the next one is, with Try now.
+- **Answering by itself:** `examples/reply-hook.sh` for `watch --on-message` pipes each own message to a command and sends its output back.
+- **Several computers in the apps:** a remote profile lists its computers; Me → Connect → Computers to switch, add by code or scan, forget (then revoke it on the computer). Another operator's computer is refused.
+- **Words password (apps):** after a create or a restore, optional: Set keeps your 25 words encrypted on the phone (PBKDF2-SHA256, 1,000,000 rounds, then the keystore); Skip keeps nothing, as before.
+- **Me → Security:** Show my 25 words after the lock and the password; change or remove it. It also guards removing that profile and taking the seat. A wrong one waits 2 s, doubling.
+
 ## v0.1.13 — 2026-10-31
 
 - **This release:** the app logs in to the relay (the MQTT library's Worker was refused by the page's policy), spends no

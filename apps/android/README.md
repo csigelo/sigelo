@@ -18,7 +18,9 @@ set only when a path commits.
   words". Copy is offered on stagenet only (the clipboard is marked sensitive and emptied after 60 s).
   Then three words are asked by number; a wrong one goes back to the words. Right: the identity and
   K_1 are made from them as a restore makes them, sealed under the FULL key, and the phone holds the
-  seat. The words are gone after; Me says "Created on <day>; the 25 words are on your paper".
+  seat. Then, as at the end of a restore: "Want to be able to see your words again on this phone? Set a password."
+  Skip: the words are gone. Set: Me → Security → Show my 25 words, after the screen lock and that password
+  (`FLAG_SECURE`, nothing copied, Done hides them); the password also guards removing the profile and taking the seat.
 - **This phone:** the phone holds an identity, SAFE (the file `sigelo-agent device scan` wrote for it
   on your computer). Import the file once (Advanced, on the welcome); the app runs its own carrier and talks to the relay
   itself. The operator's file (FULL) is not imported: restore from seed (design/apps.md §18).
@@ -27,7 +29,7 @@ set only when a path commits.
   words on paper", then one box: the words are checked as you type (count, word list, checksum),
   pasting is allowed and the clipboard is cleared after it, and screenshots are blocked while the
   screen is up. Add a restore height or date, the network and the device's name. Both files are sealed under the FULL key
-  (your screen lock is asked); the words are kept nowhere and never shown back. The phone takes the
+  (your screen lock is asked); the words are kept nowhere unless you set the words password at the end. The phone takes the
   seat, or, if sigelo already runs as you elsewhere, waits as a standby until "Take the seat here".
 - **A computer:** the phone drives the page of a computer running `sigelo-agent ui --remote` on the
   same network. Scan its QR (camera), pick a screenshot of it, or paste its `SIGELO:UI:` text. The
@@ -36,18 +38,33 @@ set only when a path commits.
 The relay is configurable: relay.sigelo.ai by default, set when importing and under Me (codes
 name it; a 12-character code always names its own relay).
 
-The menu switches between them. Switching asks first, then erases what the app held for the form it
-leaves (its keys and its storage): keep the identity file or your 25 words on the computer. "Forget
-the computer" erases the computer's text; revoke it there too (`ui --revoke-control <name>`).
+## Profiles
+
+Up to 8 profiles, each an identity (or a computer's page) with its own storage and keystore keys
+(design/profiles.md P1). An install of before becomes Profile 1 as it is (nothing resealed). With more
+than one, the app starts on a picker (name, four words, what it holds), then the lock. Me → Profiles:
+switch (the lock once; the new profile asks nothing more), rename, add (its first run, with "Back to my
+profiles"), remove: a profile holding an identity needs "I have the 25 words" ticked and its name typed,
+then the lock; its storage and its keystore keys are erased (a computer keeps the pairing until revoked
+there: `ui --revoke-control <name>`). Only the profile in use connects. The menu's former form switch,
+which erased everything, is gone.
+
+A remote profile holds up to 8 computers (design/profiles.md P2), one in use. Me → Connect → Computers: switch (the lock
+once), add (the pairing screens: code or scan), forget (the lock; its control key goes from this phone; revoke it on
+the computer: `ui --revoke-control <name>`). A computer serving another identity is refused `other_operator`. Each
+computer's text or control identity is sealed under the profile's keys, a blob naming that computer (version 2,
+`<profile>:<computer>`); the first keeps its blob of before.
 
 ## What the keystore holds
 
-Three AES-256-GCM keys made in AndroidKeyStore, which never leave it:
+Three AES-256-GCM keys per profile made in AndroidKeyStore, which never leave it (Profile 1: the names
+below, blobs of version 1 as before; profile `<id>`: `sigelo-<id>-identity`, `-identity-full`, `-control`, blobs of
+version 2 naming it, the AAD naming kind and profile, so no blob opens in another profile):
 
 | Key | Seals |
 |---|---|
 | `sigelo-identity` | the SAFE identity file |
-| `sigelo-identity-full` | the FULL identity file and, after a restore from seed, the keeper root (its own AAD); usable 5 minutes after you confirm the screen lock (no screen lock, no FULL) |
+| `sigelo-identity-full` | the FULL identity file and, after a restore from seed, the keeper root and the kept words (kind `words`, already encrypted under the words password), each its own AAD; usable 5 minutes after you confirm the screen lock (no screen lock, no FULL) |
 | `sigelo-control` | a computer's `SIGELO:UI:` text |
 
 The app lock: with a screen lock set, the app asks it at each start, at a return after a minute
@@ -68,8 +85,9 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
 - `tls`: a TLS stream (the system's certificate authorities, the host name checked). MQTT on 8883
   is the stream itself; on 443 the page frames WebSocket over it (`apps/web/ws-over-stream.mjs`).
   The relay refuses requests from web pages; these are not.
-- `seal`, `open`: the keystore above (kinds `identity`, `keeper`, `control`). `mode`, `wiped`: the form.
-- `secure`: `FLAG_SECURE` on the window while the restore screen is up (no screenshot, no recents
+- `seal`, `open`: the keystore above (kinds `identity`, `keeper`, `words`, `control`; `profile`, p1 when none). `forget-profile`:
+  a profile's three keys deleted (its removal). `mode`: the active profile's form; `wiped`: an older version's switch.
+- `secure`: `FLAG_SECURE` on the window while the restore screen or the kept words are up (no screenshot, no recents
   thumbnail), off after; with `door` (a new identity's words) the system Back does nothing meanwhile.
   `clip-clear`: the clipboard emptied after the 25 words were pasted. `share`: the system's share
   sheet with a ready-to-send message (a code, until when, the instructions link). `clip-copy`: stagenet words on
@@ -126,5 +144,7 @@ icon as `apps/gtk`'s SVG), Gradle (versions, no dependency), the wrapper by SHA-
 bridge's operations as the page sends them, the WebView's settings, every asset type served), the
 workflow (actions pinned by SHA, no secret; strict YAML where PyYAML is). With
 `SIGELO_ANDROID_JAR=<a platform's android.jar>` and a JDK, it also compiles the Java against it
-(platform 35 clean; 28, the minSdk, only behind SDK_INT checks). Resources link, lint runs and the
+(platform 35 clean; 28, the minSdk, only behind SDK_INT checks). Where `java` runs a source file (JDK 11+), it
+runs the bridge's own keystore methods (seal, open, aliases, forget-profile) on the profiles' cases with a software
+key store. Resources link, lint runs and the
 app runs only where the SDK is: on CI, and on a phone.

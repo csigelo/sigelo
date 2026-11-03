@@ -27,7 +27,8 @@ const ins = spawnSync('sh', [join(HERE, 'install.sh'), '--prefix', P], { encodin
 const S = join(P, 'share', 'sigelo-app');
 const want = ['bin/sigelo-app', 'share/applications/io.sigelo.App.desktop', 'share/icons/hicolor/scalable/apps/io.sigelo.App.svg', 'share/sigelo-app/sigelo-app.js',
   'share/sigelo-app/lib/remote-client.mjs', 'share/sigelo-app/lib/jcs.js', 'share/sigelo-app/lib/noble-ciphers/chacha.js', 'share/sigelo-app/web/start.html', 'share/sigelo-app/web/ui.js',
-  'share/sigelo-app/web/shim-zlib.mjs', 'share/sigelo-app/web/shim-kdf.mjs', 'share/sigelo-app/web/seed-check.mjs', 'share/sigelo-app/web/monero-words.js', 'share/sigelo-app/web/welcome.mjs'];
+  'share/sigelo-app/web/shim-zlib.mjs', 'share/sigelo-app/web/shim-kdf.mjs', 'share/sigelo-app/web/seed-check.mjs', 'share/sigelo-app/web/monero-words.js', 'share/sigelo-app/web/welcome.mjs',
+  'share/sigelo-app/web/words-lock.mjs'];
 ok('install.sh --prefix: the launcher, desktop file, icon, app and page files', ins.status === 0 && want.every((f) => existsSync(join(P, f))), ins.stderr + want.filter((f) => !existsSync(join(P, f))).join(' '));
 ok('install.sh: QR reading installed beside the page (contact/qr-decode.mjs, qr.mjs), no "scanning off" warning', ['qr-decode.mjs', 'qr.mjs'].every((f) => existsSync(join(S, 'web', f))) && !/scanning off/.test(ins.stderr), ins.stderr);
 const desk = readFileSync(join(P, 'share/applications/io.sigelo.App.desktop'), 'utf8');
@@ -72,6 +73,39 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
   await b.stop();
   const gone = await gjs({ SIGELO_APP_TEST: 'remote', SIGELO_APP_CONTROL: b.line });
   ok('gjs, remote: the computer\'s page stopped → "No answer"', gone.ok === false && /No answer from 127\.0\.0\.1/.test(gone.message ?? ''), JSON.stringify(gone));
+}
+
+// ── several computers (design/profiles.md P2): three computers' `ui --remote` on 127.0.0.1, two of one operator (one
+// identity's copies), one of another; the app's computer operations headless (the keyring's matching in memory)
+{
+  const pageOf = async (identity) => {
+    const c = spawn(process.execPath, [CLI, 'ui', '--identity', identity, '--no-open', '--remote', '--listen', '127.0.0.1', '--name', 'phone', '--scope', 'chat'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let so = ''; c.stdout.on('data', (d) => { so += d; }); c.stderr.on('data', () => {});
+    const end = Date.now() + 20000;
+    while (!/SIGELO:UI:[^\n]+\n/.test(so) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+    return { line: /SIGELO:UI:[^\n]+/.exec(so)?.[0] ?? '', stop: () => new Promise((r) => { c.on('close', r); c.kill('SIGTERM'); }) };
+  };
+  const CH = join(T, 'computers'); mkdirSync(join(CH, 'b'), { recursive: true }); mkdirSync(join(CH, 'o'), { recursive: true });
+  const twin = join(CH, 'b', 'me.local.json'), other = join(CH, 'o', 'me.local.json');
+  writeFileSync(twin, readFileSync(human), { mode: 0o600 });
+  spawnSync(process.execPath, [CLI, 'keeper', '--from-words', '--identity', other], { env, input: newRoot(), encoding: 'utf8' });
+  const [ca, cb, co] = await Promise.all([pageOf(human), pageOf(twin), pageOf(other)]);
+  const AH = join(CH, 'app'); mkdirSync(AH, { recursive: true, mode: 0o700 });
+  const r = await gjs({ HOME: AH, SIGELO_APP_TEST: 'computers', SIGELO_APP_CONTROLS: JSON.stringify([ca.line, cb.line, co.line]), SIGELO_AGENT: JSON.stringify([process.execPath, CLI]) });
+  await Promise.all([ca.stop(), cb.stop(), co.stop()]);
+  const J = JSON.stringify(r).slice(0, 600);
+  ok('gjs, computers: a remote p1 of before P2 (its text under the kind of before) migrated as c1, LAN, in use; the item left as it was', r.migrated?.kind === 'remote' && r.migrated.computers.join() === 'c1:lan' && r.migrated.active === 'c1'
+    && JSON.stringify(r.migrated.items) === '[{"kind":"sigelo-remote/0"}]', J);
+  ok('gjs, computers: c1 opened (sealed GET /api/me), its page\'s DID learned, the profile\'s operator, last used', r.c1?.ok === true && r.c1.did?.startsWith('did:sigelo:') && r.c1.learned === r.c1.did && r.c1.profile === r.c1.did && r.c1.used === true, J);
+  ok('gjs, computers: add → the pairing; a second computer of the same operator paired as c2, in use; its text under its own kind and the attribute computer, c1\'s kept',
+    r.adding?.reload === true && r.adding.adding === true && r.c2?.ok === true && r.c2.computer === 'c2' && r.c2.active === 'c2' && r.c2.adding === false && r.c2.same === true && r.c2.c1 === true && r.c2.c2 === true
+    && JSON.stringify(r.c2.items) === '[{"kind":"sigelo-remote/0"},{"kind":"sigelo-remote/0 c2","computer":"c2"}]', JSON.stringify(r.c2 ?? null));
+  ok('gjs, computers: a computer of another operator refused other_operator, nothing kept (no item, no entry, no id taken), not connected', r.other?.ok === false && r.other.check === 'other_operator' && /another identity/.test(r.other.message ?? '')
+    && r.other.count === 2 && r.other.items === 2 && r.other.next === 3 && r.other.client === true, JSON.stringify(r.other ?? null));
+  ok('gjs, computers: Cancel; switch to c1 (reopened) and its page; an unknown computer refused', r.switched?.cancel === false && r.switched.active === 'c1' && r.switched.ok === true && r.switched.reload === true && r.switched.unknown === 'computer', JSON.stringify(r.switched ?? null));
+  ok('gjs, computers: forget c2: its item gone, c1\'s kept, the reminder to revoke it on the computer (ui --revoke-control)', r.forgot?.c2 === null && r.forgot.c1 === true && r.forgot.ids.join() === 'c1' && /ui --revoke-control/.test(r.forgot.revoke) && r.forgot.reload === false, JSON.stringify(r.forgot ?? null));
+  ok('gjs, computers: the list (Me → Connect → Computers): kind remote, the one in use, limit 8, the profile\'s operator', r.listed?.ok === true && r.listed.kind === 'remote' && r.listed.active === 'c1' && r.listed.limit === 8 && r.listed.profile.did === r.c1.did, JSON.stringify(r.listed ?? null).slice(0, 300));
+  ok('gjs, computers: the remote profile removed → every computer\'s keyring item gone', r.beforeWipe === 2 && r.wiped?.ok === true && r.wiped.items === 0, JSON.stringify(r.wiped ?? null));
 }
 
 // ── this phone: `ui --app` spawned by the app, the page answers, the child ends with the app
@@ -163,6 +197,38 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
     c.ok === true && c.kept === false && c.again === false && idc.provider === 'keychain' && typeof idc.secret === 'object' && idc.derived?.n === 0 && kpc.root_hex === undefined && kpc.root?.provider === 'keychain'
     && kpc.made === 'here' && kpc.net === 'stagenet' && kpc.created === today && kpc.restore_date === today && c.seat === 'pending', JSON.stringify(c).slice(0, 400) + JSON.stringify(kpc).slice(0, 300));
   ok('gjs, create: nothing the app printed carries a word of the 25 (only counts, positions, the address)', Object.keys(c).every((k) => ['new', 'count', 'vault', 'wrong', 'unasked', 'ok', 'seat', 'message', 'kept', 'again', 'standby', 'refused', 'stderr'].includes(k)), Object.keys(c).join());
+
+  // ── the words password (design/apps-seed.md §8): the start page encrypts (words-lock.mjs), the app keeps {blob, check}
+  // in the keyring (libsecret, an item per profile under its identity file, a temporary one here) and compares proofs
+  const WL = await import(pathToFileURL(join(S, 'web', 'words-lock.mjs')).href), lk = await WL.lockWords(w, 'correct horse', { iterations: 1000 });
+  const HW = join(T, 'home-words'), wr = await restoreIn(HW, { SIGELO_APP_TEST: 'words', SIGELO_APP_BLOB: Buffer.from(lk.blob).toString('base64'), SIGELO_APP_CHECK: lk.check });
+  const sjs = readFileSync(join(S, 'web', 'start.js'), 'utf8');
+  ok('start.js: the words password offered (keepWords: encrypted here by words-lock.mjs, then words-keep), the standby\'s take carries the proof when words are kept',
+    /api\.keepWords = async \(words, password\) => \{ const r = await WL\.lockWords\(words, password\); await must\('words-keep', \{ blob: b64\(r\.blob\), check: r\.check \}\); \}/.test(sjs)
+    && /WL\.proofOf\(unb64\(\(await must\('words-get'\)\)\.blob\), pw\.value\)/.test(sjs) && existsSync(join(S, 'web', 'words-lock.mjs')));
+  ok('gjs, words: nothing to keep before an identity from the words; then kept in the keyring, handed back as the blob only (never the check)',
+    wr.before?.join() === 'false,false,true' && wr.noIdentity === 'words_none' && wr.restored?.join() === 'true,true,false' && wr.junk === 'words_blob' && wr.kept === true && wr.get === true
+    && wr.status?.join() === 'true,true,profile', JSON.stringify(wr).slice(0, 600));
+  ok('gjs, words: kept words are not replaced or dropped without the proof of their password (words_password_needed, words_password)',
+    wr.overwrite?.join() === 'words_password_needed,words_password,true' && wr.drop?.join() === 'words_password_needed,words_password', JSON.stringify(wr));
+  ok('gjs, words: the same password guards removing the profile (no proof, a wrong one: refused, kept); the right proof drops the words; kept again, the profile removed with them',
+    wr.remove?.join() === 'words_password_needed,words_password' && wr.dropped?.join() === 'true,true,words_none' && wr.again === true && wr.removed?.join() === 'true,true,false', JSON.stringify(wr));
+
+  // ── profiles (design/profiles.md P1): p1 as before (migrated), p2 in its own files and keyring item, the limit, a switch, a removal
+  const HP = join(T, 'home-profiles'), w2 = newRoot(), pr = await restoreIn(HP, { SIGELO_APP_TEST: 'profiles', SIGELO_APP_WORDS: w, SIGELO_APP_WORDS2: w2 });
+  const cfg = join(HP, '.config', 'sigelo'), ring = existsSync(join(HP, '.fake-keyring')) ? readdirSync(join(HP, '.fake-keyring')) : [];
+  ok('gjs, profiles: the install before profiles migrated as p1 (Profile 1, words: its identity, files where they were)', pr.p1restored === true && pr.migrated?.join() === 'p1:Profile 1:words' && existsSync(join(cfg, 'me.local.json')), JSON.stringify(pr).slice(0, 400));
+  ok('gjs, profiles: an added profile gets its own files: me.p2.local.json, control.p2.local.json, standby.p2, the keyring text under its own kind',
+    pr.added?.active === 'p2' && pr.added.identity === join(cfg, 'me.p2.local.json') && pr.added.control === join(cfg, 'control.p2.local.json') && pr.added.standby.endsWith('/sigelo-app/standby.p2') && pr.added.attr === 'sigelo-remote/0 p2', JSON.stringify(pr.added));
+  ok('gjs, profiles: p2 restored by keeper --from-words with SIGELO_HUMAN naming its file: its key wrapped in the keyring under its own DID, p1\'s file untouched; its page (ui --app --identity) told its DID and four words',
+    pr.p2?.restored === true && pr.p2.page === true && pr.p2.kind === 'words' && /^did:sigelo:/.test(pr.p2.did ?? '') && /^\w+ \w+ \w+ \w+$/.test(pr.p2.words ?? '') && pr.p2.account === pr.p2.did && pr.p2.p1account !== pr.p2.account
+    && pr.p2.files.includes('me.p2.local.json') && pr.p2.files.includes('me.p2.local.keeper.json') && pr.p2.files.includes('me.local.json'), JSON.stringify(pr.p2).slice(0, 600));
+  ok('gjs, profiles: rename trimmed; empty or over 24 characters refused (profile_name); 8 at most, the ninth refused profile_limit; a switch back to p1 (its file again)',
+    pr.rename?.join() === 'true,profile_name,profile_name,Work' && pr.limit?.count === 8 && pr.limit.ninth === 'profile_limit' && pr.switched?.active === 'p1' && pr.switched.identity === join(cfg, 'me.local.json') && pr.switched.reload === true, JSON.stringify([pr.rename, pr.limit, pr.switched]));
+  ok('gjs, profiles: removing a words profile needs "I have the 25 words" and its name typed; then its files, its keyring items and this phone\'s device file of it (agents\' directory) go, p1\'s stay; profiles.json 0600',
+    pr.refused?.join() === 'profile_words,profile_name' && pr.removed?.ok === true && pr.removed.reload === false && pr.removed.ids.join() === 'p1' && !pr.removed.files.some((f) => f.startsWith('me.p2.local'))
+    && pr.removed.files.includes('me.local.json') && pr.removed.files.includes('profiles.json') && !ring.includes(pr.p2.account) && ring.includes(pr.p2.p1account) && pr.registryMode === 0o600
+    && pr.p2.agents.includes('sigelo.gtab.local.json') && !pr.removed.agents.includes('sigelo.gtab.local.json') && ring.length === 1, JSON.stringify([pr.refused, pr.removed, pr.p2.agents, ring, pr.registryMode]));
 }
 
 // ── over the relay: a computer's `ui --remote --relay` (in this process), the app pairs by SIGELO:CTL:
@@ -224,6 +290,24 @@ else {
     const pf = existsSync(plainFile) ? JSON.parse(readFileSync(plainFile, 'utf8')) : {};
     ok('control pair, no keyring answering: paired all the same, the key plain in a 0600 file, one warning saying so', pp.status === 0 && /^[0-9a-f]{64}$/.test(pf.secret ?? '') && pf.provider === undefined
       && ((await import('node:fs')).statSync(plainFile).mode & 0o777) === 0o600 && pp.e2.includes('no OS keyring answers here, so the control key is a plain file (0600)'), JSON.stringify(pp).slice(0, 500));
+    // Several computers over the relay (P2): c1 paired with the operator's code; a code of another operator refused other_operator
+    // (control pair --operator), no control file kept for it; c1 forgotten (control forget: its file gone).
+    {
+      const op2 = join(H, 'op2.local.json');
+      mkdirSync(join(H, 'op2-agents'), { recursive: true });
+      spawnSync(process.execPath, [CLI, 'keeper', '--from-words', '--identity', op2], { env, input: newRoot(), encoding: 'utf8' });
+      const pg2 = await U.startUi({ identity: op2, agents: join(H, 'op2-agents'), carrier: { relay: 'relay.test', endpoints }, remote: { relay: true, name: 'phone', scope: 'read' } });
+      try {
+        const mine = await pg.relay.issue('laptop', 'read'), CR = join(T, 'computers-relay'); mkdirSync(join(CR, 'ctl'), { recursive: true, mode: 0o700 });
+        const rr = await gjs({ ...renv, HOME: CR, SIGELO_CONTROL: join(CR, 'ctl', 'control.local.json'), SIGELO_APP_TEST: 'computers', SIGELO_APP_CODES: JSON.stringify([mine.line, pg2.relay.line]) });
+        const JR = JSON.stringify(rr).slice(0, 700);
+        ok('gjs, computers over the relay: c1 paired by the operator\'s code (control pair --operator none yet), its control file, the page\'s original DID kept', rr.relay?.ok === true && rr.relay.computer === 'c1' && rr.relay.file === true
+          && rr.relay.list.join() === 'c1:relay:relay.test' && rr.relay.did === did, JR);
+        ok('gjs, computers over the relay: another operator\'s code refused other_operator (control pair --operator the profile\'s), no control file for it, nothing listed', rr.relayOther?.ok === false && rr.relayOther.check === 'other_operator'
+          && /another identity/.test(rr.relayOther.message ?? '') && rr.relayOther.file === false && rr.relayOther.count === 1, JR);
+        ok('gjs, computers over the relay: forget c1 → control forget (its file gone), none left, the reminder', rr.relayForgot?.file === false && rr.relayForgot.count === 0 && rr.relayForgot.active === null && /ui --revoke-control/.test(rr.relayForgot.revoke ?? ''), JR);
+      } finally { await pg2.close(); }
+    }
     const fg = spawnSync(process.execPath, [CLI, 'control', 'forget'], { env: renv, encoding: 'utf8' });
     ok('control forget: the file and its keyring item gone', fg.status === 0 && !existsSync(join(H, 'control.local.json')) && !readdirSync(join(H, '.fake-keyring')).includes(cf.secret?.account), fg.stderr);
   } finally {

@@ -15,9 +15,11 @@
 //      both ways, and none refused as a browser's.
 //   3. The remote form (shell.mjs): a computer's `sigelo-agent ui --remote`, sealed calls carried by
 //      the shell's http to the LAN; scope; the computer gone.
+//   3b. Several computers (computers.mjs, design/profiles.md P2): three computers' pages on the LAN, two of
+//      one operator, one of another; today's one migrated as c1, add (Cancel), other_operator, switch, forget.
 //   4. The remote form over the relay: a computer's `ui --remote --relay` in this process, the app's
 //      control identity paired by SIGELO:CTL: and four words, requests answered, state pushed (the
-//      poll sends nothing), scope, seat elsewhere, revoked.
+//      poll sends nothing), scope, seat elsewhere, revoked; a second computer of another operator refused.
 //   node apps/web/test-shell.mjs   → ALL PASS (n); without the relay checkout, part 2's relay half SKIPs
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -254,7 +256,13 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const target = new EventTarget(), keys = new Map(), log = { ops: [], streams: [], seals: [] };
   const state = { mode, wipe, locked: false, secure: false, door: false, secureLog: [], clipCleared: 0, clip: null };
   const ALIASES = { 'identity:false': 0, 'identity:true': 1, control: 2 };
-  const AAD = { identity: 'sigelo-app identity/0', keeper: 'sigelo-app keeper/0', control: 'sigelo-app control/0' };
+  // Per profile, as SigeloBridge.java: p1 the aliases and blob version 1 of before; another its own aliases,
+  // blob version 2 naming it ([2][alias][n][id][IV][ct ‖ tag]), the AAD naming kind and profile.
+  const aliasOf = (profile, a) => (profile === 'p1' ? ['sigelo-identity', 'sigelo-identity-full', 'sigelo-control'][a] : `sigelo-${profile}${['-identity', '-identity-full', '-control'][a]}`);
+  // A computer other than a profile's first (P2): version 2 naming "<profile>:<computer>", the AAD naming both.
+  const aadOf = (kind, profile, computer = 'c1') => `sigelo-app ${kind}/0${computer === 'c1' ? (profile === 'p1' ? '' : ` ${profile}`) : ` ${profile} ${computer}`}`;
+  const profileOf = (m) => { const p = m.profile ?? 'p1'; if (typeof p !== 'string' || !/^p[1-9]\d{0,2}$/.test(p)) throw Object.assign(new Error('a profile id'), { check: 'profile' }); return p; };
+  const computerOf = (m) => { const c = m.computer ?? 'c1'; if (typeof c !== 'string' || !/^c[1-9]\d{0,2}$/.test(c)) throw Object.assign(new Error('a computer id'), { check: 'computer' }); return c; };
   const route = (host, port) => { const p = hosts[host]?.[port]; if (!p) throw Object.assign(new Error(`${host}:${port}: unreachable`), { check: 'connect' }); return p; };
   const shell = {
     info: () => JSON.stringify({ v: 'sigelo-shell/0', mode: state.mode, wipe: state.wipe, version: 'test' }),
@@ -292,31 +300,45 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             post({ id: m.id });
           } else if (m.op === 'close') { const sock = streams.get(m.s); streams.delete(m.s); sock?.destroy(); }
           else if (m.op === 'seal' || m.op === 'open') {
-            const kind = ['identity', 'keeper', 'control'].includes(m.kind) ? m.kind : null;
+            const kind = ['identity', 'keeper', 'words', 'control'].includes(m.kind) ? m.kind : null;
             if (!kind) throw Object.assign(new Error('kind'), { check: 'kind' });
-            const data = Buffer.from(m.data, 'base64');
+            const data = Buffer.from(m.data, 'base64'), profile = profileOf(m), computer = computerOf(m);
             if (m.op === 'seal') {
-              // The keeper root of a restore: under the FULL key (alias 1), its own AAD, as SigeloBridge.java.
-              const a = kind === 'identity' ? ALIASES[`identity:${Boolean(m.full)}`] : kind === 'keeper' ? 1 : 2;
-              log.seals.push({ kind, full: Boolean(m.full), alias: a });
+              // The keeper root of a restore and the kept words: under the FULL key (alias 1), each its own AAD, as SigeloBridge.java.
+              const a = kind === 'identity' ? ALIASES[`identity:${Boolean(m.full)}`] : kind === 'keeper' || kind === 'words' ? 1 : 2, al = aliasOf(profile, a);
+              log.seals.push({ kind, full: Boolean(m.full), alias: a, profile, computer, name: al });
               if (a === 1 && state.locked) throw Object.assign(new Error('not unlocked'), { check: 'cancelled' });
-              if (!keys.has(a)) keys.set(a, randomBytes(32));
-              const iv = randomBytes(12), c = createCipheriv('aes-256-gcm', keys.get(a), iv);
-              c.setAAD(Buffer.from(AAD[kind]));
-              post({ id: m.id, data: Buffer.concat([Buffer.from([1, a]), iv, c.update(data), c.final(), c.getAuthTag()]).toString('base64') });
+              if (!keys.has(al)) keys.set(al, randomBytes(32));
+              const iv = randomBytes(12), c = createCipheriv('aes-256-gcm', keys.get(al), iv);
+              c.setAAD(Buffer.from(aadOf(kind, profile, computer)));
+              const owner = computer === 'c1' ? (profile === 'p1' ? '' : profile) : `${profile}:${computer}`;
+              const head = owner === '' ? Buffer.from([1, a]) : Buffer.concat([Buffer.from([2, a, owner.length]), Buffer.from(owner, 'ascii')]);
+              post({ id: m.id, data: Buffer.concat([head, iv, c.update(data), c.final(), c.getAuthTag()]).toString('base64') });
             } else {
               const a = data[1];
-              if (data[0] !== 1 || data.length < 30 || (kind === 'identity' ? a > 1 : kind === 'keeper' ? a !== 1 : a !== 2) || !keys.has(a)) throw Object.assign(new Error('not sealed here'), { check: 'sealed' });
+              let at;
+              if (data[0] === 1) { if (profile !== 'p1' || computer !== 'c1') throw Object.assign(new Error('sealed for another profile'), { check: 'sealed' }); at = 2; }
+              else if (data[0] === 2) {
+                const n = data[2] ?? -1, want = computer === 'c1' ? profile : `${profile}:${computer}`;
+                if (n < 2 || n > 9 || (profile === 'p1' && computer === 'c1') || data.subarray(3, 3 + n).toString('ascii') !== want) throw Object.assign(new Error('sealed for another profile or computer'), { check: 'sealed' });
+                at = 3 + n;
+              } else throw Object.assign(new Error('not sealed here'), { check: 'sealed' });
+              const al = aliasOf(profile, a);
+              if (data.length < at + 28 || (kind === 'identity' ? a > 1 : kind === 'keeper' || kind === 'words' ? a !== 1 : a !== 2) || !keys.has(al)) throw Object.assign(new Error('not sealed here'), { check: 'sealed' });
               if (a === 1 && state.locked) throw Object.assign(new Error('not unlocked'), { check: 'cancelled' });
-              const d = createDecipheriv('aes-256-gcm', keys.get(a), data.subarray(2, 14));
-              d.setAAD(Buffer.from(AAD[kind])); d.setAuthTag(data.subarray(data.length - 16));
+              const d = createDecipheriv('aes-256-gcm', keys.get(al), data.subarray(at, at + 12));
+              d.setAAD(Buffer.from(aadOf(kind, profile, computer))); d.setAuthTag(data.subarray(data.length - 16));
               let out;
-              try { out = Buffer.concat([d.update(data.subarray(14, data.length - 16)), d.final()]); } catch { throw Object.assign(new Error('does not open'), { check: 'sealed' }); }
+              try { out = Buffer.concat([d.update(data.subarray(at + 12, data.length - 16)), d.final()]); } catch { throw Object.assign(new Error('does not open'), { check: 'sealed' }); }
               post({ id: m.id, data: out.toString('base64') });
             }
+          } else if (m.op === 'forget-profile') {
+            const profile = profileOf(m);
+            for (let a = 0; a < 3; a++) keys.delete(aliasOf(profile, a));
+            log.forgot = [...(log.forgot ?? []), profile];
+            post({ id: m.id });
           } else if (m.op === 'mode') {
             if (m.mode !== 'self' && m.mode !== 'remote') throw Object.assign(new Error('mode'), { check: 'mode' });
-            if (state.mode !== null && state.mode !== m.mode) throw Object.assign(new Error('switch from the menu'), { check: 'mode' });
             state.mode = m.mode; post({ id: m.id, mode: state.mode });
           } else if (m.op === 'wiped') { state.wipe = false; post({ id: m.id }); }
           else if (m.op === 'secure') { state.secure = m.on === true; state.door = state.secure && m.door === true; state.secureLog.push(`${state.secure}${state.door ? '+door' : ''}`); post({ id: m.id }); }
@@ -433,10 +455,14 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const WM = await import(pathToFileURL(join(HERE, 'welcome.mjs')).href);
   ok(WM.WORDS_ATTRS.autocomplete === 'off' && WM.WORDS_ATTRS.autocorrect === 'off' && WM.WORDS_ATTRS.autocapitalize === 'none' && WM.WORDS_ATTRS.spellcheck === 'false',
     'welcome.mjs: the words\' boxes without autocomplete, autocorrect, capitals or spellcheck');
-  // The code, not its comments (which say there is none): no way from a root to its 25 words, no "show seed".
-  const pages = ['app.mjs', 'shell.mjs', 'seed.mjs', 'router.mjs', 'create.mjs', 'setup.mjs', 'welcome.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8')).join('\n') + readFileSync(join(REPO, 'adapters', 'moadim', 'ui.js'), 'utf8');
-  const code = pages.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  ok(!/show (the |your )?(seed|25 words)|show seed|reveal|mnemonicFromRoot|encodeMoneroWords|newRoot/i.test(code), 'no "show seed" anywhere in the app (nothing turns a root into words)');
+  // The code, not its comments: no way from a root to its 25 words anywhere; the words shown again only by Me → Security
+  // (design/apps-seed.md §8), from what the words password opens (WORDS.reveal), nowhere else.
+  const uiSrc = readFileSync(join(REPO, 'adapters', 'moadim', 'ui.js'), 'utf8'), secAt = uiSrc.indexOf('// ---- SECURITY'), secEnd = uiSrc.indexOf('const WORDS_VIEWS');
+  const pages = ['app.mjs', 'boot.mjs', 'profiles.mjs', 'computers.mjs', 'shell.mjs', 'seed.mjs', 'router.mjs', 'create.mjs', 'setup.mjs', 'welcome.mjs', 'words.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8')).join('\n') + uiSrc.slice(0, secAt) + uiSrc.slice(secEnd);
+  const code = pages.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), sec = uiSrc.slice(secAt, secEnd);
+  ok(secAt > 0 && secEnd > secAt && !/show (the |your )?(seed|25 words)|show seed|mnemonicFromRoot|encodeMoneroWords|newRoot/i.test(code) && !/mnemonicFromRoot|encodeMoneroWords|newRoot|clipboard|copy\(/.test(sec)
+    && (sec.match(/WORDS\.reveal\(/g) ?? []).length === 1 && /const r = await WORDS\.reveal\(pw\.value\)/.test(sec),
+    'no "show seed" outside Me → Security; there, the words only from what the password opens (WORDS.reveal), nothing turns a root into words, nothing copied');
   // Seat elsewhere: a standby; the seat taken later signs the list naming this phone.
   const F2 = fakeShell({ mode: 'self' }), b2 = await F2.connect(), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
   await SD.restoreInto(p2, { words, name: 'tab', relay: '', restore: { restore_date: '2024-02-29' }, seat: 'elsewhere', now: 1761400000 });
@@ -461,6 +487,8 @@ class FakeEl {
   addEventListener(t, f) { (this.on[t] ??= []).push(f); }
   contains(x) { return this.all().includes(x); }
   focus() {}
+  getContext() { return {}; }   // a canvas (the scan's), never drawn on here
+  get firstChild() { return this.kids.find((k) => typeof k === 'object') ?? null; }
   all() { return [this, ...this.kids.filter((k) => typeof k === 'object').flatMap((k) => k.all())]; }
 }
 {
@@ -527,8 +555,26 @@ class FakeEl {
     const q2 = asked();
     inputs().forEach((x, i) => { x.value = list[q2[i] - 1]; });
     await button('Check').onclick();
+    // The words password, offered once: one screen, two fields, Set and Skip, no Back (the identity is made).
+    await until(() => title() === 'Your words on this phone', 5000);
+    await until(() => F.state.secure === false, 2000);
+    const pwIns = box.all().filter((e) => e.tagName === 'INPUT');
+    const offerOk = pwIns.length === 2 && pwIns.every((x) => x.type === 'password' && x.attrs.autocomplete === 'new-password') && buttons().map((b) => b.textContent).join('|') === 'Set|Skip'
+      && /Want to be able to see your words again on this phone\? Set a password\./.test(box.textContent) && reloaded === 0 && F.state.secure === false;
+    pwIns[0].value = 'short'; pwIns[1].value = 'short';
+    await button('Set').onclick();
+    const tooShort = /at least 8 characters/.test(box.textContent) && title() === 'Your words on this phone';
+    pwIns[0].value = 'long enough'; pwIns[1].value = 'long enougj';
+    await button('Set').onclick();
+    const differ = /not the same/.test(box.textContent) && p.files.read('words.keystore') === null;
+    const back0 = pushed.length;
+    pop();
+    ok(offerOk && tooShort && differ && title() === 'Your words on this phone' && pushed.length === back0 + 1 && !button('‹'),
+      'create 4: "Your words on this phone": a password and its repeat, Set and Skip, nothing else; too short or not the same said under it; Back held (the identity is made)');
+    await button('Skip').onclick();
     await until(() => reloaded === 1, 5000);
     await sleep(100);
+    ok(p.files.read('words.keystore') === null && p.files.read('words.sealed') === null && !F.log.seals.some((x) => x.kind === 'words'), 'create 4, Skip: nothing kept, no words sealed (as before)');
     ok(reloaded === 1 && F.state.mode === 'self' && F.log.seals.length === 2 && F.log.seals.every((x) => x.full === true && x.alias === 1) && F.state.secure === false && F.state.door === false && W.network.held === 0,
       `create: the form set to self at the commit, identity and keeper sealed under the FULL key, FLAG_SECURE off, the network released, the page restarts (${F.state.secureLog})`);
     const files = idb.dbs.get('sigelo').stores.get('files'), stored = [...files.values()].map((v) => Buffer.from(v).toString('latin1')).join('\n');
@@ -581,10 +627,22 @@ class FakeEl {
     b('Next').onclick();
     box3.all().find((e) => e.attrs['aria-label'] === 'Restore date or height').value = '2024-02-29';
     await b('Restore').onclick();
-    await until(() => reloads === 1, 5000);
+    // At the end of a restore: the same offer; Set keeps the words encrypted under the password, sealed as kind words.
+    await until(() => t3() === 'Your words on this phone', 5000);
+    const [w1, w2] = box3.all().filter((e) => e.tagName === 'INPUT');
+    w1.value = 'correct horse'; w2.value = 'correct horse';
+    const t0 = Date.now();
+    await b('Set').onclick();
+    await until(() => reloads === 1, 10000);
+    const took = Date.now() - t0;
     await sleep(100);
     const kp = JSON.parse(new TextDecoder().decode(await W.loadSealed(p3, 'keeper')));
     ok(reloads === 1 && F3.state.mode === 'self' && kp.restore_date === '2024-02-29' && F3.state.secure === false && W.network.held === 0, 'restore: sealed, the form set to self at the commit, FLAG_SECURE off, the page restarts');
+    const WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href);
+    const wseal = F3.log.seals.find((x) => x.kind === 'words'), kept = await W.loadSealed(p3, 'words'), meta = WL.wordsMeta(kept), plainKept = Buffer.from(p3.files.read('words.keystore')).toString('latin1');
+    ok(wseal?.full === true && wseal.alias === 1 && meta.iter === 1_000_000 && meta.kdf === 'PBKDF2-SHA256' && !plainKept.includes(words.split(' ')[0] + ' ') && !Buffer.from(kept).toString().includes(words.split(' ')[0] + ' ')
+      && (await WL.openWords(kept, 'correct horse')).words.join(' ') === words && await checkOf(() => WL.openWords(kept, 'correct horsf')) === 'words_password',
+      `restore, Set: the words kept as kind words under the FULL key, encrypted under PBKDF2-SHA256 (1,000,000 rounds; set in ${took} ms), opened by that password only`);
     fr3.stop();
   }
   // Connect: an 8-character code is all the first screen asks; a plain tab says it needs the app.
@@ -601,6 +659,222 @@ class FakeEl {
   restoreGlobals();
   const src = readFileSync(join(HERE, 'setup.mjs'), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   ok(!/mnemonicFromRoot|encodeMoneroWords|newRoot\b|localStorage\.setItem|sessionStorage|console\./.test(src) && /session\.words\(\)/.test(src), 'setup.mjs: the words only from the session (contact/create.mjs), never stored or logged');
+}
+
+// ================================================================ 1d. profiles (profiles.mjs, boot.mjs; design/profiles.md P1) over the fake shell:
+// a single-profile install migrated as p1 (nothing resealed), add, the picker and the lock, the switch (the lock once,
+// none at the new profile's start), rename, the limit of 8, remove (the words ticked, the name typed, the lock, the wipe:
+// database, keystore aliases, storage), and the proof-of-work counts per profile (each its own carrier state).
+{
+  const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href), B = await import(pathToFileURL(join(HERE, 'boot.mjs')).href);
+  const PR = await import(pathToFileURL(join(HERE, 'profiles.mjs')).href);
+  const { mnemonicFromRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
+  const { did: didOf } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
+  const wordsOf = (b) => { const S = new Uint8Array(32).fill(b); S[31] = 0x0f; return mnemonicFromRoot(S); };
+  const saved = Object.fromEntries(['document', 'location', 'history', 'addEventListener', 'removeEventListener'].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  Object.assign(globalThis, { document: { createElement: (t) => new FakeEl(t) }, location: { hash: '', reload() {} }, history: { pushState() {}, back() {} }, addEventListener() {}, removeEventListener() {} });
+  const memStore = () => { const m = new Map(); return { m, get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+  const F = fakeShell({ mode: 'self' }), idb = new FakeIDB(), storage = memStore(), pow = A.androidPow(W.workerPow(() => new FakeWorker()));
+  const unlocks = () => F.log.ops.filter((o) => o === 'unlock').length;
+  let reloads = 0, app = null;
+  const page = (session = memStore()) => {
+    const box = new FakeEl('section'), main = new FakeEl('main');
+    app = B.boot({ shell: F.shell, target: F.target, box, main, mqtt: mqttEsm, indexedDB: idb, storage, session, reload: () => { reloads++; }, pow });
+    return { box, main, session, app };
+  };
+  const stopApp = async () => { try { await (await app.ready).stop?.(); } catch {} };
+  const title = (box) => box.all().find((e) => e.tagName === 'H1')?.textContent;
+  const regOf = () => JSON.parse(new TextDecoder().decode(idb.dbs.get(PR.REGISTRY_DB).stores.get('files').get(PR.REGISTRY)));
+  try {
+    // ---- a single-profile install, as before profiles: an identity restored into `sigelo`, sealed with no profile named
+    const b0 = await F.connect(), p0 = await A.androidPlatform({ bridge: b0, mqtt: mqttEsm, indexedDB: idb, pow });
+    await SD.restoreInto(p0, { words: wordsOf(5), name: 'tab', relay: 'relay.test', restore: {}, seat: 'here', now: 1761400000 });
+    const blob1 = Buffer.from(p0.files.read('identity.keystore')), did1 = didOf(JSON.parse(new TextDecoder().decode(await W.loadIdentity(p0))).genesis);
+    storage.setItem('kept-before', 'x');
+    const seals0 = F.log.seals.length;
+    let pg = page();
+    const r1 = await pg.app.ready;
+    ok(await until(() => regOf().profiles[0].did === did1, 5000) && regOf().profiles.length === 1 && regOf().active === 'p1' && regOf().profiles[0].kind === 'words' && regOf().profiles[0].name === 'Profile 1'
+      && /^\w+ \w+ \w+ \w+$/.test(regOf().profiles[0].words) && F.log.seals.length === seals0 && blob1[0] === 1 && Buffer.from(idb.dbs.get('sigelo').stores.get('files').get('identity.keystore')).equals(blob1)
+      && storage.getItem('kept-before') === 'x' && r1.mode().kind === 'full' && unlocks() === 0,
+      `profiles: a single-profile install migrated as p1, Profile 1, words, its DID and four words learned; nothing resealed (blob version 1 kept), storage untouched, no lock asked (${JSON.stringify(regOf().profiles[0])})`);
+    ok(title(pg.box) === undefined && pg.main.hidden === false, 'profiles: one profile: no picker, the page at once');
+    // ---- add: the lock, a new profile not set up yet, its first run with a way back
+    let u = unlocks();
+    let r = await pg.app.local.profiles.add();
+    ok(r.reload === true && reloads === 1 && unlocks() === u + 1 && regOf().active === 'p2' && regOf().profiles.map((p) => `${p.id}:${p.name}:${p.kind}`).join() === 'p1:Profile 1:words,p2:Profile 2:null',
+      `profiles: add → Profile 2 (not set up), active, the lock once, a reload (${JSON.stringify(regOf().profiles)})`);
+    await stopApp();
+    const s2 = pg.session; pg = page(s2);
+    ok(await checkOf(() => pg.app.ready) === 'identity' && title(pg.box) === 'sigelo' && pg.box.all().some((e) => e.tagName === 'BUTTON' && e.textContent === 'Back to my profiles') && pg.main.hidden === true,
+      'profiles: the new profile opens on its first run (the welcome\'s three choices) with "Back to my profiles"; no picker (just chosen)');
+    // Its identity (restored here as the welcome would): sealed under its own aliases, blob version 2 naming p2.
+    const b2 = A.profileBridge(await F.connect(), 'p2'), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: idb, pow, name: PR.dbName('p2') });
+    await SD.restoreInto(p2, { words: wordsOf(6), name: 'tab', relay: 'relay.test', restore: {}, seat: 'here', now: 1761400000 });
+    const blob2 = Buffer.from(p2.files.read('identity.keystore')), did2 = didOf(JSON.parse(new TextDecoder().decode(await W.loadIdentity(p2))).genesis);
+    const s2seals = F.log.seals.slice(-2);
+    ok(blob2[0] === 2 && blob2.subarray(3, 5).toString() === 'p2' && s2seals.every((x) => x.profile === 'p2' && x.name === 'sigelo-p2-identity-full') && did2 !== did1 && idb.dbs.has('sigelo-p2')
+      && await checkOf(() => b0.open(new Uint8Array(blob2), { kind: 'identity' })) === 'sealed' && await checkOf(() => b2.open(new Uint8Array(blob1), { kind: 'identity' })) === 'sealed'
+      && await checkOf(() => A.profileBridge(b0, 'p3').open(new Uint8Array(blob2), { kind: 'identity' })) === 'sealed' && await checkOf(() => b2.open(new Uint8Array(blob2), { kind: 'identity' })) === 'accepted',
+      'profiles: p2 sealed under sigelo-p2-identity-full in database sigelo-p2, blob version 2 naming p2; p1\'s blob never opens as p2\'s nor p2\'s as p1\'s or p3\'s');
+    // ---- a cold start with two profiles: the picker, then the lock, then the chosen one
+    u = unlocks();
+    pg = page();
+    await until(() => title(pg.box) === 'Profiles', 3000);
+    const rows = pg.box.all().filter((e) => e.attrs?.['data-profile']);
+    ok(rows.length === 2 && rows[1].textContent.includes('Profile 2') && rows[0].textContent.includes('Profile 1') && rows[0].textContent.includes(regOf().profiles[0].words) && rows[0].textContent.includes('Your identity')
+      && rows[1].className.includes('current') && pg.main.hidden === true && unlocks() === u, 'picker: a row per profile (name, four words, what it holds), the last used marked, the page hidden, no lock yet');
+    rows[0].onclick();
+    const rp = await pg.app.ready;
+    ok(unlocks() === u + 1 && regOf().active === 'p1' && pg.main.hidden === false && pg.box.hidden === true && (await rp.call('GET', '/api/me')).body.original === did1,
+      'picker: a tap → the lock once → that profile\'s page (p1\'s DID)');
+    // ---- switch: the lock once; the new profile's start asks nothing more
+    u = unlocks();
+    r = await pg.app.local.profiles.use('p2');
+    ok(r.reload === true && unlocks() === u + 1 && regOf().active === 'p2', 'switch: the lock once, the active id kept, a reload');
+    await stopApp();
+    const ops = F.log.ops.length;
+    pg = page(pg.session);
+    const r2 = await pg.app.ready;
+    ok((await r2.call('GET', '/api/me')).body.original === did2 && unlocks() === u + 1 && F.log.ops.slice(ops).includes('open') && title(pg.box) === undefined && await until(() => regOf().profiles[1].did === did2, 3000),
+      `switch: p2 starts (its DID) with no second lock (its FULL key opened inside the lock's window); its DID learned (${F.log.ops.slice(ops)})`);
+    // ---- proof-of-work counts per profile: each profile's carrier state is its own database's
+    const st = (db) => idb.dbs.get(db)?.stores.get('files');
+    const stateOf = (db) => { const b = st(db)?.get('app/me.local.carrier.json'); return b ? JSON.parse(new TextDecoder().decode(b)) : null; };
+    const c1 = stateOf('sigelo'), c2 = stateOf('sigelo-p2');
+    ok(c1 && c2 && JSON.stringify(c1).includes(did1) && !JSON.stringify(c1).includes(did2) && JSON.stringify(c2).includes(did2) && !JSON.stringify(c2).includes(did1),
+      'proof of work: each profile\'s carrier state (where its searches are counted, per relay) is its own, in its own database: never shared');
+    // ---- rename
+    const rn = await pg.app.local.profiles.rename('p2', '  Work  ');
+    ok(rn.profiles.find((p) => p.id === 'p2').name === 'Work' && await checkOf(() => pg.app.local.profiles.rename('p2', ' ')) === 'profile_name' && await checkOf(() => pg.app.local.profiles.rename('p2', 'x'.repeat(25))) === 'profile_name'
+      && await checkOf(() => pg.app.local.profiles.rename('p2', 'a\u202eb')) === 'profile_name' && await checkOf(() => pg.app.local.profiles.rename('p9', 'x')) === 'profile',
+      'rename: trimmed, kept; empty, over 24 characters, a direction override, an unknown profile refused');
+    // ---- the limit: 8 profiles; the ninth refused before any lock
+    for (let i = 0; i < 6; i++) await pg.app.local.profiles.add();
+    u = unlocks();
+    ok(regOf().profiles.length === 8 && await checkOf(() => pg.app.local.profiles.add()) === 'profile_limit' && unlocks() === u && regOf().profiles.length === 8 && regOf().next === 9,
+      `limit: 8 profiles; the ninth refused profile_limit, no lock asked (${regOf().profiles.map((p) => p.id)})`);
+    // ---- remove an inactive profile not set up yet: no lock, wiped at once
+    await pg.app.local.profiles.use('p2'); await stopApp(); pg = page(pg.session); await pg.app.ready;
+    u = unlocks();
+    storage.setItem('p3:sigelo-control', 'x');
+    const rm3 = await pg.app.local.profiles.remove('p3', {});
+    ok(!rm3.profiles.some((p) => p.id === 'p3') && unlocks() === u && idb.deleted.includes('sigelo-p3') && storage.getItem('p3:sigelo-control') === null && storage.getItem('kept-before') === 'x' && F.log.forgot.includes('p3') && regOf().wipe.length === 0,
+      'remove: a profile not set up yet goes at once, no lock: its database, its storage keys, its aliases (forget-profile); p1\'s storage kept');
+    // ---- remove the active words profile: the words ticked and the name typed, the lock, then the wipe at the next start
+    const pr = pg.app.local.profiles;
+    ok(await checkOf(() => pr.remove('p2', { name: 'Work' })) === 'profile_words' && await checkOf(() => pr.remove('p2', { name: 'work', words: true })) === 'profile_name' && unlocks() === u && regOf().profiles.some((p) => p.id === 'p2'),
+      'remove a words profile: refused without "I have the 25 words" (profile_words) or its name typed exactly (profile_name); nothing asked, nothing dropped');
+    storage.setItem('p2:sigelo-control-relay', 'y');
+    r = await pr.remove('p2', { name: 'Work', words: true });
+    ok(r.reload === true && unlocks() === u + 1 && !regOf().profiles.some((p) => p.id === 'p2') && regOf().wipe.includes('p2') && regOf().active === 'p1', 'remove the active one: the lock, out of the list, its wipe recorded, p1 active, a reload');
+    await stopApp();
+    pg = page(pg.session); await pg.app.ready.catch(() => {});
+    ok(regOf().wipe.length === 0 && idb.deleted.includes('sigelo-p2') && !idb.dbs.has('sigelo-p2') && ![...F.keys.keys()].some((k) => k.startsWith('sigelo-p2-')) && [...F.keys.keys()].includes('sigelo-identity-full')
+      && storage.getItem('p2:sigelo-control-relay') === null && await checkOf(() => b2.open(new Uint8Array(blob2), { kind: 'identity' })) === 'sealed' && (await (await pg.app.ready).call('GET', '/api/me')).body.original === did1,
+      'remove: at the next start p2 is wiped: its database deleted, its keystore aliases gone (its blob never opens again), its storage keys; p1 untouched, open');
+    // ---- the welcome's way back: an added profile left before its first run → the one it was added from, no lock
+    await pr.add(); await stopApp(); pg = page(pg.session); await pg.app.ready.catch(() => {});
+    const added = regOf().active;
+    u = unlocks();
+    await pg.box.all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Back to my profiles').onclick();
+    await until(() => regOf().active === 'p1', 3000);
+    ok(regOf().active === 'p1' && !regOf().profiles.some((p) => p.id === added) && unlocks() === u, `welcome: "Back to my profiles" drops the empty ${added} and returns to p1, no lock`);
+    await stopApp(); pg = page(pg.session); await pg.app.ready;
+    // ---- remote p1 migrated as remote
+    const FR = fakeShell({ mode: 'remote' }), idbR = new FakeIDB();
+    const boxR = new FakeEl('section'), appR = B.boot({ shell: FR.shell, target: FR.target, box: boxR, main: new FakeEl('main'), mqtt: mqttEsm, indexedDB: idbR, storage: memStore(), session: memStore(), reload() {}, pow });
+    await appR.ready.catch(() => {});
+    const regR = JSON.parse(new TextDecoder().decode(idbR.dbs.get(PR.REGISTRY_DB).stores.get('files').get(PR.REGISTRY)));
+    ok(regR.profiles.length === 1 && regR.profiles[0].kind === 'remote', 'profiles: a single-profile install of the remote form migrated as p1, remote');
+    const ps = PR.prefixed(storage, 'p2'), p1s = PR.prefixed(storage, 'p1');
+    ps.setItem('a', '1'); p1s.setItem('a', '2');
+    ok(storage.getItem('p2:a') === '1' && storage.getItem('a') === '2' && ps.getItem('a') === '1' && p1s.getItem('a') === '2' && (ps.clear(), storage.getItem('a') === '2' && storage.getItem('p2:a') === null),
+      'storage: p1 keeps its keys as before, p2 under p2:, each clear() its own');
+  } finally {
+    await stopApp();
+    for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; }
+  }
+}
+
+// ================================================================ 1e. the words password (words.mjs, boot.mjs local.words; design/apps-seed.md §8)
+// over the fake shell: kept as kind words under the FULL key; Show after the lock and the password; a wrong password
+// said after 2 s, then 4 (no lockout); change (the old one asked); remove (the words deleted); removing a profile
+// whose words are kept needs that password (another profile's, opened under its own aliases).
+{
+  const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href), B = await import(pathToFileURL(join(HERE, 'boot.mjs')).href);
+  const PR = await import(pathToFileURL(join(HERE, 'profiles.mjs')).href), WD = await import(pathToFileURL(join(HERE, 'words.mjs')).href);
+  const { mnemonicFromRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
+  const wordsOf = (b) => { const S = new Uint8Array(32).fill(b); S[31] = 0x0d; return mnemonicFromRoot(S); };
+  const saved = Object.fromEntries(['document', 'location', 'history', 'addEventListener', 'removeEventListener'].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  Object.assign(globalThis, { document: { createElement: (t) => new FakeEl(t) }, location: { hash: '', reload() {} }, history: { pushState() {}, back() {} }, addEventListener() {}, removeEventListener() {} });
+  const memStore = () => { const m = new Map(); return { m, get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+  const F = fakeShell({ mode: 'self' }), idb = new FakeIDB(), storage = memStore(), pow = A.androidPow(W.workerPow(() => new FakeWorker()));
+  const unlocks = () => F.log.ops.filter((o) => o === 'unlock').length;
+  let app = null;
+  const page = (picked) => { const session = memStore(); if (picked) session.setItem('sigelo-picked', picked); app = B.boot({ shell: F.shell, target: F.target, box: new FakeEl('section'), main: new FakeEl('main'), mqtt: mqttEsm, indexedDB: idb, storage, session, reload() {}, pow }); return app; };
+  const stopApp = async () => { try { await (await app.ready).stop?.(); } catch {} };
+  const timed = async (f) => { const t = Date.now(); const c = await checkOf(f); return [c, Date.now() - t]; };
+  try {
+    // The gate alone: 2 s doubling to 256 s at most, one attempt at a time (taps in parallel wait), reset by a right one.
+    const WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href), slept = [], g = WL.wrongGate({ sleep: async (ms) => { slept.push(ms); await sleep(1); } });
+    const bad = () => Promise.reject(Object.assign(new Error('Wrong password.'), { check: 'words_password' })), order = [];
+    await Promise.allSettled([1, 2, 3].map((i) => g.run(async () => { order.push(i); return bad(); })));
+    for (let i = 0; i < 7; i++) await g.run(bad).catch(() => {});
+    const capped = slept.slice(-2).join(), f10 = g.fails;
+    await g.run(async () => 1);
+    ok(slept.slice(0, 4).join() === '2000,4000,8000,16000' && capped === '256000,256000' && order.join() === '1,2,3' && f10 === 10 && g.fails === 0 && await checkOf(() => g.run(async () => { throw Object.assign(new Error('x'), { check: 'other' }); })) === 'other' && slept.length === 10,
+      `gate: 2 s, doubling per wrong password to 256 s at most, attempts one at a time, reset by a right one, other errors not delayed; never a lockout (${slept.join(' ')})`);
+    const wa = wordsOf(3), wb = wordsOf(4);
+    const b0 = await F.connect(), p0 = await A.androidPlatform({ bridge: b0, mqtt: mqttEsm, indexedDB: idb, pow });
+    await SD.restoreInto(p0, { words: wa, name: 'tab', relay: 'relay.test', restore: {}, seat: 'here', now: 1761400000 });
+    const tk = Date.now();
+    await WD.keepWords(p0, wa, 'correct horse');
+    const keepMs = Date.now() - tk, ws = F.log.seals.at(-1);
+    ok(ws.kind === 'words' && ws.full === true && ws.alias === 1 && ws.name === 'sigelo-identity-full' && p0.files.read('words.keystore')?.[0] === 1 && p0.files.read('words.sealed') === null,
+      `words: kept as kind words under p1's FULL alias (blob version 1), no WebCrypto copy (PBKDF2 1,000,000 rounds + seal: ${keepMs} ms here)`);
+    const L = page().local;
+    await app.ready;
+    const st = await L.words.status();
+    ok(st.here === true && st.kept === true && st.iterations === 1_000_000, `local.words.status: an identity from the words, kept (${JSON.stringify(st)})`);
+    F.state.locked = true;
+    let u = unlocks();
+    ok(await checkOf(() => L.words.reveal('correct horse')) === 'cancelled' && unlocks() === u + 1, 'Show: the screen lock first; not confirmed → cancelled, nothing opened');
+    F.state.locked = false;
+    const [c1, t1] = await timed(() => L.words.reveal('correct horsf')), [c2, t2] = await timed(() => L.words.reveal('Correct horse'));
+    ok(c1 === 'words_password' && c2 === 'words_password' && t1 >= 2000 && t2 >= 4000 && t2 > t1 + 1500, `Show: a wrong password → words_password after 2 s, then 4 s (${t1}, ${t2} ms); no lockout`);
+    u = unlocks();
+    const tr = Date.now(), r = await L.words.reveal('correct horse'), revealMs = Date.now() - tr;
+    ok(r.words.join(' ') === wa && unlocks() === u + 1 && revealMs < 5000, `Show: the lock, then the right password → the 25 words; the delay reset (${revealMs} ms)`);
+    ok(await checkOf(() => L.words.change('correct horse', 'battery staple', 'battery stapler')) === 'words_password_rule' && await checkOf(() => L.words.change('correct horse', 'short', 'short')) === 'words_password_rule',
+      'Change: the new password and its repeat checked (the same, at least 8 characters)');
+    await L.words.change('correct horse', 'battery staple', 'battery staple');
+    const [c3, t3] = await timed(() => L.words.reveal('correct horse'));
+    ok(c3 === 'words_password' && t3 >= 2000 && (await L.words.reveal('battery staple')).words.join(' ') === wa && F.log.seals.at(-1).kind === 'words', 'Change: resealed under the new password; the old one refused');
+    // ---- a second profile: p1's words guard p1's removal from there (its database and aliases opened for the check)
+    await L.profiles.add();
+    await stopApp();
+    const b2 = A.profileBridge(await F.connect(), 'p2'), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: idb, pow, name: PR.dbName('p2') });
+    await SD.restoreInto(p2, { words: wb, name: 'tab', relay: 'relay.test', restore: {}, seat: 'here', now: 1761400000 });
+    await WD.keepWords(p2, wb, 'p2 password', { iterations: 1000 });
+    const L2 = page('p2').local;
+    await app.ready;
+    ok((await L2.words.status('p1')).kept === true && (await L2.words.status()).kept === true, 'status of another profile: p1\'s words kept (read from its database)');
+    const need = await checkOf(() => L2.profiles.remove('p1', { name: 'Profile 1', words: true }));
+    const [c4] = await timed(() => L2.profiles.remove('p1', { name: 'Profile 1', words: true, password: 'p2 password' }));
+    ok(need === 'words_password_needed' && c4 === 'words_password' && JSON.parse(new TextDecoder().decode(idb.dbs.get(PR.REGISTRY_DB).stores.get('files').get(PR.REGISTRY))).profiles.some((p) => p.id === 'p1'),
+      'Remove a profile with kept words: no password → words_password_needed; another profile\'s password → words_password; kept');
+    const rm = await L2.profiles.remove('p1', { name: 'Profile 1', words: true, password: 'battery staple' });
+    ok(!rm.profiles.some((p) => p.id === 'p1') && idb.deleted.includes('sigelo') && F.log.forgot.includes('p1'), 'Remove a profile: its words password right → removed, its database deleted, its aliases forgotten (the kept words with them)');
+    // ---- remove the password: the old one asked, then the words deleted
+    const [c5] = await timed(() => L2.words.remove('battery staple'));
+    ok(c5 === 'words_password' && (await L2.words.status()).kept === true, 'Remove the password: a wrong one refused, the words kept');
+    await L2.words.remove('p2 password');
+    ok((await L2.words.status()).kept === false && (await checkOf(() => L2.words.reveal('p2 password'))) === 'words_none', 'Remove the password: the kept words deleted; Show says none are kept');
+    await stopApp();
+    const p2b = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: idb, pow, name: PR.dbName('p2') });
+    ok(p2b.files.read('words.keystore') === null && p2b.files.read('identity.keystore') !== null, 'Remove the password: words.keystore gone from storage, the identity kept');
+  } finally { for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } }
 }
 
 // ================================================================ 2. platform-android.mjs
@@ -770,9 +1044,9 @@ try {
     await until(() => /SIGELO:UI:[^\n]+\n/.test(so), 30000);
     const line = /SIGELO:UI:[^\n]+/.exec(so)?.[0] ?? '';
     const R = fakeShell({ mode: 'remote' }), rb = await R.connect();
-    const kept = new Map(), storage = { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), clear: () => kept.clear() };
+    const kept = new Map(), storage = { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k), clear: () => kept.clear() };
     storage.setItem('sigelo-control', A.b64(await rb.seal(new TextEncoder().encode(line), { kind: 'control' })));
-    const be = await S.remoteBackend(rb, null, { storage });
+    const be = await S.remoteBackend(rb, { storage });
     const me = await be.call('GET', '/api/me'), st = await be.call('GET', '/api/state'), forget = await be.call('POST', '/api/forget', { contact: 'did:sigelo:zNope' }), dv = await be.call('GET', '/api/devices');
     ok(line !== '' && me.status === 200 && me.body.did?.startsWith('did:sigelo:') && st.status === 200 && be.mode().kind === 'remote',
       `remote: the computer's text kept sealed (control key); sealed GET /api/me and /api/state over the shell's http to the LAN (${me.status} ${st.status})`);
@@ -791,7 +1065,131 @@ try {
     ok(wiped === true && deleted === 'sigelo' && kept.size === 0 && Wp.state.wipe === false && await S.wipeIfAsked(await fakeShell({ mode: 'self' }).connect()) === false,
       'switch: the page deletes its IndexedDB and localStorage once, then tells the shell (wiped)');
     const M = fakeShell({ mode: null }), mb = await M.connect();
-    ok(mb.info.mode === null && (await mb.request('mode', { mode: 'self' })).mode === 'self' && await checkOf(() => mb.request('mode', { mode: 'remote' })) === 'mode', 'first start: the form is set once; a switch only through the shell (its menu, with a confirmation)');
+    ok(mb.info.mode === null && (await mb.request('mode', { mode: 'self' })).mode === 'self' && (await mb.request('mode', { mode: 'remote' })).mode === 'remote' && await checkOf(() => mb.request('mode', { mode: 'x' })) === 'mode',
+      'the form: set by each profile\'s first run, self then remote (no refusal: profiles differ); anything else refused');
+  }
+  // ================================================================ 3b. several computers (computers.mjs, boot.mjs; design/profiles.md P2) over the
+  // fake shell: three computers' `ui --remote` on the LAN, two of one operator (one identity's copies), one of another. Today's
+  // one computer migrated as c1 (nothing resealed); add by the pairing screens (Cancel), the second's text sealed naming it;
+  // another operator refused other_operator, nothing kept; switch (the lock once); forget (the lock, the reminder to revoke).
+  {
+    const S = await import(pathToFileURL(join(HERE, 'shell.mjs')).href), B = await import(pathToFileURL(join(HERE, 'boot.mjs')).href);
+    const CM = await import(pathToFileURL(join(HERE, 'computers.mjs')).href), PR = await import(pathToFileURL(join(HERE, 'profiles.mjs')).href);
+    const CLI = join(REPO, 'adapters', 'moadim', 'cli.ts'), H = join(dir, 'home-computers');
+    mkdirSync(join(H, 'a'), { recursive: true, mode: 0o700 }); mkdirSync(join(H, 'b'), { recursive: true, mode: 0o700 }); mkdirSync(join(H, 'other'), { recursive: true, mode: 0o700 });
+    const { newRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
+    const env = { PATH: process.env.PATH, HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_RELAY: HOST, SIGELO_RELAY_ENDPOINTS: JSON.stringify({ [HOST]: { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }) };
+    const ida = join(H, 'a', 'me.local.json'), idb2 = join(H, 'b', 'me.local.json'), ido = join(H, 'other', 'me.local.json');
+    spawnSync(process.execPath, [CLI, 'keeper', '--from-words', '--identity', ida], { env, input: newRoot(), encoding: 'utf8' });
+    spawnSync(process.execPath, [CLI, 'keeper', '--from-words', '--identity', ido], { env, input: newRoot(), encoding: 'utf8' });
+    writeFileSync(idb2, readFileSync(ida), { mode: 0o600 });   // the operator's identity on a second computer
+    const lan = async (identity) => {
+      const c = spawn(process.execPath, [CLI, 'ui', '--identity', identity, '--no-open', '--remote', '--listen', '127.0.0.1', '--name', 'phone', '--scope', 'chat'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let so = ''; c.stdout.on('data', (d) => { so += d; }); c.stderr.on('data', () => {});
+      await until(() => /SIGELO:UI:[^\n]+\n/.test(so), 30000);
+      return { line: /SIGELO:UI:[^\n]+/.exec(so)?.[0] ?? '', stop: () => new Promise((r) => { c.on('close', r); c.kill('SIGTERM'); }) };
+    };
+    const [ca, cb, co] = await Promise.all([lan(ida), lan(idb2), lan(ido)]);
+    const saved = Object.fromEntries(['document', 'location', 'history', 'addEventListener', 'removeEventListener'].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+    Object.assign(globalThis, { document: { createElement: (t) => new FakeEl(t) }, location: { hash: '', reload() {} }, history: { pushState() {}, back() {} }, addEventListener() {}, removeEventListener() {} });
+    const memStore = () => { const m = new Map(); return { m, get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+    const F = fakeShell({ mode: 'remote' }), idb = new FakeIDB(), storage = memStore(), session = memStore();
+    const unlocks = () => F.log.ops.filter((o) => o === 'unlock').length;
+    let reloads = 0, app = null;
+    const page = () => { const box = new FakeEl('section'), main = new FakeEl('main'); app = B.boot({ shell: F.shell, target: F.target, box, main, mqtt: mqttEsm, indexedDB: idb, storage, session, reload: () => { reloads++; } }); return { box, main, app }; };
+    const title = (box) => box.all().find((e) => e.tagName === 'H1')?.textContent;
+    const btn = (box, t) => box.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t);
+    const pasteIn = async (box, text) => { box.all().find((e) => e.attrs?.['aria-label'] === 'A SIGELO:UI: or SIGELO:CTL: text').value = text; await btn(box, 'Connect').onclick(); };
+    const said = (box) => box.all().find((e) => /\bsay\b/.test(e.className))?.textContent ?? '';
+    const listOf = () => JSON.parse(storage.getItem('sigelo-computers'));
+    const regOf = () => JSON.parse(new TextDecoder().decode(idb.dbs.get(PR.REGISTRY_DB).stores.get('files').get(PR.REGISTRY)));
+    try {
+      const rb = await F.connect();
+      // ---- today's one computer (before P2): its text sealed under the control alias, no computer named
+      storage.setItem('sigelo-control', A.b64(await rb.seal(new TextEncoder().encode(ca.line), { kind: 'control' })));
+      const blob1 = storage.getItem('sigelo-control'), seals0 = F.log.seals.length;
+      let pg = page(), be = await pg.app.ready;
+      const meA = await be.call('GET', '/api/me');
+      ok(meA.status === 200 && be.cid === 'c1' && await until(() => listOf().computers[0]?.did === meA.body.original, 3000) && listOf().active === 'c1' && listOf().computers.length === 1 && listOf().computers[0].via === 'lan'
+        && storage.getItem('sigelo-control') === blob1 && F.log.seals.length === seals0 && await until(() => regOf().profiles[0].did === meA.body.original, 3000),
+        `computers: today's one computer migrated as c1 (LAN), its sealed text left where it was (nothing resealed); its page's DID learned, the profile's operator (${JSON.stringify(listOf().computers[0])})`);
+      let l = await pg.app.local.computers.list();
+      ok(l.active === 'c1' && l.computers.length === 1 && l.computers[0].words === meA.body.words && l.computers[0].last_used > 0 && l.profile.did === meA.body.original, 'computers: list → the one in use, its four words, last used, the profile\'s operator');
+      // ---- add: the lock, then the pairing screens (Cancel back), the second computer's text sealed naming it
+      let u = unlocks(), r0 = reloads;
+      let r = await pg.app.local.computers.add();
+      ok(r.reload === true && unlocks() === u + 1 && reloads === r0 + 1 && listOf().adding === true, 'add: the lock once, a reload into the pairing screens');
+      await be.stop?.();
+      pg = page();
+      ok(await checkOf(() => pg.app.ready) === 'connect' && title(pg.box) === 'Connect to my agent' && btn(pg.box, 'Cancel') && pg.main.hidden === true, 'add: the pairing screens (code, or a SIGELO:UI: / SIGELO:CTL: text pasted or scanned) with Cancel, the page hidden');
+      r0 = reloads;
+      await pasteIn(pg.box, cb.line);
+      const blob2 = Buffer.from(storage.getItem('sigelo-control:c2') ?? '', 'base64');
+      ok(reloads === r0 + 1 && listOf().active === 'c2' && listOf().computers.map((c) => `${c.id}:${c.via}`).join() === 'c1:lan,c2:lan' && listOf().adding === false
+        && blob2[0] === 2 && blob2.subarray(3, 3 + blob2[2]).toString() === 'p1:c2' && F.log.seals.at(-1).computer === 'c2' && F.log.seals.at(-1).name === 'sigelo-control' && listOf().computers[1].did === meA.body.original,
+        `add: the second computer of the same operator paired on the LAN, in use; its text sealed under the profile's control alias, blob version 2 naming p1:c2 (${JSON.stringify(listOf().computers[1])})`);
+      ok(await checkOf(() => rb.open(new Uint8Array(blob2), { kind: 'control' })) === 'sealed' && await checkOf(() => A.computerBridge(rb, 'c3').open(new Uint8Array(blob2), { kind: 'control' })) === 'sealed'
+        && await checkOf(() => A.computerBridge(A.profileBridge(rb, 'p2'), 'c2').open(new Uint8Array(blob2), { kind: 'control' })) === 'sealed' && await checkOf(() => A.computerBridge(rb, 'c2').open(new Uint8Array(blob2), { kind: 'control' })) === 'accepted'
+        && await checkOf(() => A.computerBridge(rb, 'c2').open(new Uint8Array(Buffer.from(blob1, 'base64')), { kind: 'control' })) === 'sealed',
+        'blobs: c2\'s opens as p1\'s c2 only (not as c1, c3, nor p2\'s c2); c1\'s never as c2');
+      pg = page(); be = await pg.app.ready;
+      const meB = await be.call('GET', '/api/me');
+      ok(be.cid === 'c2' && meB.status === 200 && meB.body.original === meA.body.original && (await be.call('GET', '/api/state')).status === 200, 'switch by add: the second computer\'s page, the same operator');
+      // ---- another operator: refused other_operator at pairing time, nothing kept; Cancel back
+      await pg.app.local.computers.add(); pg = page(); await pg.app.ready.catch(() => {});
+      await pasteIn(pg.box, co.line);
+      ok(/another identity/.test(said(pg.box)) && /Add it in a profile of its own/.test(said(pg.box)) && storage.getItem('sigelo-control:c3') === null && listOf().computers.length === 2 && listOf().next === 3 && title(pg.box) === 'Connect to my agent',
+        `other_operator: a computer whose page is another identity refused at pairing, said, nothing kept (${said(pg.box)})`);
+      const st0 = (await (await S.remoteBackend(rb, { storage: memStore() }).catch((e) => e)));
+      ok(st0.check === 'connect', 'remote form: no computer → the pairing screens (connect)');
+      const direct = await checkOf(() => S.connectLan(rb, co.line, { storage: memStore(), cid: 'c3', expect: meA.body.original }));
+      ok(direct === 'other_operator', `connectLan: another operator → other_operator (${direct})`);
+      r0 = reloads;
+      await btn(pg.box, 'Cancel').onclick();
+      ok(reloads === r0 + 1 && listOf().adding === false && listOf().active === 'c2', 'Cancel: back to the computer in use, nothing added');
+      // ---- switch: the lock once, that computer's page
+      pg = page(); be = await pg.app.ready;
+      u = unlocks();
+      r = await pg.app.local.computers.use('c1');
+      ok(r.reload === true && unlocks() === u + 1 && listOf().active === 'c1' && await checkOf(() => pg.app.local.computers.use('c9')) === 'computer', 'switch: the lock once, c1 in use, a reload; an unknown computer refused');
+      await be.stop?.();
+      pg = page(); be = await pg.app.ready;
+      ok(be.cid === 'c1' && (await be.call('GET', '/api/me')).body.original === meA.body.original && (await pg.app.local.computers.use('c1')).reload === undefined, 'switch: c1\'s page; switching to the one in use does nothing');
+      // ---- the race CI showed (0.1.14 export): a list opened before the switch (the page going away, its late GET /api/me)
+      // wrote its stale copy back, the computer in use set back to c2. Each call reads the list again: the switch stands.
+      {
+        const other = CM.openComputers(storage);
+        other.use('c2');
+        const stale = CM.openComputers(storage), lists = Array.from({ length: 20 }, () => CM.openComputers(storage));   // opened while c2 is in use
+        other.use('c1');   // the switch
+        stale.learn('c2', {});
+        await Promise.all(lists.map(async (l, i) => { await sleep(i % 3); l.learn(i % 2 ? 'c1' : 'c2', {}); }));
+        ok(listOf().active === 'c1' && listOf().computers.length === 2 && stale.active().id === 'c1' && !stale.adding,
+          `computers: lists open at once on one storage never write a stale copy over a newer one (the switch to c1 stands after 21 late writes) (${listOf().active})`);
+      }
+      // ---- forget: the lock, its control key gone here, the reminder to revoke it on the computer
+      const shaped = (x) => Array.isArray(x?.computers) && typeof x.active !== 'undefined' && typeof x.revoke === 'string' && typeof x.reload === 'boolean';
+      u = unlocks();
+      r = await pg.app.local.computers.forget('c2');
+      ok(shaped(r) && unlocks() === u + 1 && /sigelo-agent ui --revoke-control/.test(r.revoke) && r.computers.map((c) => c.id).join() === 'c1' && storage.getItem('sigelo-control:c2') === null && r.reload === false,
+        'forget (not in use): the lock, its sealed text gone, the reminder: revoke it on the computer (ui --revoke-control)');
+      r0 = reloads;
+      r = await pg.app.local.computers.forget('c1');
+      ok(shaped(r) && r.computers.length === 0 && r.reload === true && reloads === r0 + 1 && listOf().computers.length === 0 && listOf().active === null && storage.getItem('sigelo-control') === null, 'forget (in use): gone, a reload');
+      await be.stop?.();
+      pg = page();
+      ok(await checkOf(() => pg.app.ready) === 'connect' && title(pg.box) === 'Connect to my agent' && !btn(pg.box, 'Cancel') && !btn(pg.box, 'Back to my computers'), 'no computer left: the pairing screens, nothing to go back to');
+      // ---- the computer keeps the control until revoked there: its text still opens its page (another phone that kept it)
+      const still = await (await import(pathToFileURL(join(REPO, 'adapters', 'moadim', 'remote-client.mjs')).href)).remoteClient(cb.line).then((c) => c.call('GET', '/api/me')).catch((e) => ({ status: e.status }));
+      ok(still.status === 200, 'forgetting does not revoke: the computer answers that text until ui --revoke-control there (THREAT-MODEL)');
+      // ---- list on a words profile: refused not_remote (Me shows no Computers)
+      ok(await checkOf(() => CM.openComputers(memStore()).use('c1')) === 'computer' && CM.otherOperator(null, 'did:sigelo:zX') === null && CM.otherOperator('did:sigelo:zA', ['did:sigelo:zB', 'did:sigelo:zA']) === null
+        && CM.otherOperator('did:sigelo:zA', 'did:sigelo:zB')?.check === 'other_operator', 'computers.mjs: unknown id refused; other_operator only when the profile\'s operator is known and not in the chain');
+    } finally {
+      try { await (await app?.ready)?.stop?.(); } catch {}
+      for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; }
+      await Promise.all([ca.stop(), cb.stop(), co.stop()]);
+    }
   }
   // ================================================================ 4. the remote form over the relay (shell.mjs, contact/control.mjs)
   {
@@ -805,7 +1203,7 @@ try {
     const computer = { relay: HOST, shortRelay: HOST, registry: false, endpoints: { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } } };
     const pg = await U.startUi({ identity: human, agents: join(H, 'agents'), carrier: computer, remote: { relay: true, name: 'phone', scope: 'chat' } });
     const R = fakeShell({ mode: 'remote', hosts: globalThis.HOSTS, ca: globalThis.CA }), rb = await R.connect();
-    const kept = new Map(), storage = { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), clear: () => kept.clear() };
+    const kept = new Map(), storage = { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k), clear: () => kept.clear() };
     // The control's relay comes from its code, never from the page's relay setting (kept here first) nor a relay of its own.
     const { relay: _own, ...codeNamesIt } = relayOpts;
     const idb = new FakeIDB(), shellOpts = { storage, mqtt: mqttEsm, indexedDB: idb, pow: A.androidPow(W.workerPow(() => new FakeWorker())), options: { ...codeNamesIt, endpoints: appEnds } };
@@ -821,7 +1219,7 @@ try {
       const held = JSON.parse(kept.get('sigelo-control-relay') ?? '{}');
       ok(held.operator === pr.operator && !JSON.stringify([...kept.values()]).includes('secret') && idb.dbs.get('sigelo').stores.get('files').has('identity.keystore'),
         'relay: the control identity sealed by the shell (identity.keystore), the operator\'s DID kept, no key in localStorage');
-      be = await S.remoteBackend(rb, null, { ...shellOpts, timeout: 8000 });
+      be = await S.remoteBackend(rb, { ...shellOpts, timeout: 8000 });
       ok(be.carrier.relay === HOST && readControlText('SIGELO:CTL:K7F3-Q9ZP').relay === null && (await be.carrier.relayForShort('K7F3-Q9ZP')).from === 'short',
         `relay: the control's relay is the one its code names (${be.carrier.relay}), not the page's setting; an 8-character code is the public relay's (shortRelay)`);
       const early = await be.call('GET', '/api/me');
@@ -849,6 +1247,11 @@ try {
       await pg.relay.revoke('phone');
       const after = await be.call('GET', '/api/me');
       ok(after.status !== 200, `relay: revoked on the computer → the app's requests unanswered (${after.status})`);
+      // A second computer over the relay whose page is not this profile's operator: refused other_operator, nothing kept.
+      const again = await pg.relay.issue('phone2', 'chat'), other = 'did:sigelo:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH';
+      const no = await checkOf(() => S.pairRelay(rb, again?.line ?? '', { ...shellOpts, cid: 'c2', expect: other }));
+      ok(no === 'other_operator' && kept.get('sigelo-control-relay:c2') === undefined && idb.deleted.includes('sigelo-c2') && !idb.dbs.has('sigelo-c2'),
+        `relay: a computer of another operator refused other_operator after the code: its contact forgotten, its database deleted, nothing kept (${no})`);
     } finally {
       await be?.stop?.();
       await pg.close();

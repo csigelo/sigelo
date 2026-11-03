@@ -523,7 +523,7 @@ try {
     });
     let uNow = now;
     const U = agent('una'), una = make(U, { clock: () => uNow, endpoints: { ...endpoints, 'loop.test': { mqtt: `mqtt://127.0.0.1:${loop.port}`, http: `${base}/loop.test` } } });
-    const powErrors = () => seen('una', (e) => e.type === 'error' && e.check === 'pow' && /searches at loop\.test within 24 hours/.test(e.detail)).length;
+    const powErrors = () => seen('una', (e) => e.type === 'error' && e.check === 'pow' && /setup paused at loop\.test: 3 proof-of-work searches today/.test(e.detail)).length;
     ok((await una.accept(makeInvite({ did: A.did, relay: 'loop.test', now, ttl: 7 * DAY }).text, { wait: 0.3 })).status === 'waiting' && searches === 1, `una answers a code naming loop.test: one search (${searches}), the answer delivered`);
     await una.start();
     ok(await until(() => powErrors() === 1, 30000), 'started, una stops at loop.test with pow, the searches of the day spent');
@@ -536,6 +536,19 @@ try {
     ok(await until(() => powErrors() === 3, 30000), '24 hours later, una searches again, and stops again');
     await sleep(1500);
     ok(searches === 2 * POW_SEARCHES, `${searches} searches in all, ${POW_SEARCHES} in each 24 hours`);
+    // design/profiles.md §6: the cap is the automatic retries'. Its refusal names the next automatic try;
+    // one the human starts (Try now) is never refused: past the cap it asks (pow_confirm), then goes.
+    const cap = seen('una', (e) => e.type === 'error' && e.check === 'pow').at(-1);
+    ok(Number.isSafeInteger(cap?.next) && cap.next > uNow && cap.detail.includes(`Next automatic try at ${new Date(cap.next * 1000).toISOString().slice(11, 16)} UTC`),
+      `the capped refusal (automatic) carries the next automatic try, and says it (${cap?.detail})`);
+    let asked;
+    try { await una.tryNow(); asked = { check: 'accepted' }; } catch (e) { asked = e; }
+    ok(asked.check === 'pow_confirm' && asked.message.endsWith('Fourth setup at this relay (loop.test) today, up to 2 minutes. Go on?') && searches === 2 * POW_SEARCHES,
+      `Try now past the cap: asked (pow_confirm), no search yet (${asked.check}: ${asked.message}; ${searches} searches)`);
+    await una.tryNow({ confirmed: true }).catch(() => {});
+    ok(await until(() => searches === 2 * POW_SEARCHES + 1, 10000), `confirmed: the search goes, past the day's cap (${searches})`);
+    await sleep(1500);
+    ok(searches === 2 * POW_SEARCHES + 1, `and the automatic retries after it stay capped (${searches} searches)`);
     await una.stop();
     loop.close();
     inside.close();
@@ -1079,7 +1092,7 @@ try {
     const id = await import(pathToFileURL(join(HERE, '..', 'adapters', 'moadim', 'sigelo-agent.ts')).href);
     const env = { SIGELO_RELAY: HOST, SIGELO_RELAY_ENDPOINTS: JSON.stringify(endpoints) };
     const tools = await mcp.load({ installed: false, id, env, clock: () => now });
-    ok(tools && tools.tools.map(([n]) => n).join() === 'sigelo_invite,sigelo_accept,sigelo_contacts,sigelo_set_tier,sigelo_send,sigelo_send_file,sigelo_inbox,sigelo_forget_contact,sigelo_links,sigelo_history', 'the MCP module lists the ten tools');
+    ok(tools && tools.tools.map(([n]) => n).join() === 'sigelo_invite,sigelo_accept,sigelo_contacts,sigelo_set_tier,sigelo_presence,sigelo_send,sigelo_send_file,sigelo_inbox,sigelo_forget_contact,sigelo_links,sigelo_group,sigelo_transfer,sigelo_history', 'the MCP module lists the thirteen tools');
     ok(tools.tools.every(([, d, s]) => typeof d === 'string' && s.type === 'object' && s.additionalProperties === false && s.properties.identity), 'each with a closed schema and the profile argument');
     const daveFile = join(dir, 'dave.local.json');
     id.init(daveFile, keygen({ seed: seed('dave recovery'), recovery: 'sha256:' + '0'.repeat(64) }).key);
@@ -1703,12 +1716,13 @@ try {
     await hugo90.start();
     ok(await until(() => held().size === 20 && subscribes >= 128), `started, hugo asks for his topics: 20 claimed (${held().size}), ${subscribes} asked`);
     await sleep(500);
-    ok(subscribes === 128 && connects() === 1, `one SUBSCRIBE of 128 and no more: the round stops at the brake, the rest wait (${subscribes} asked, ${connects()} connection)`);
+    // Beside the 128 mailboxes, one presence topic per contact (carrier.mjs "Presence"): a subscribe, never a claim.
+    ok(subscribes === 128 + Ps.length && connects() === 1, `one SUBSCRIBE of 128 mailboxes and no more, and the ten presence topics: the claims stop at the brake, the rest wait (${subscribes} asked, ${connects()} connection)`);
     const h1 = held();
     ok([...mailboxes(W), ...mailboxes(ahead)].every((x) => h1.has(x)), 'the 20 claimed: this week\'s mailbox and next week\'s of each of the ten contacts');
     t += 600;
     await hugo90.sync();
-    ok(subscribes === 128 && held().size === 20, `a round 10 minutes later asks for nothing refused (${subscribes} asked)`);
+    ok(subscribes === 128 + Ps.length && held().size === 20, `a round 10 minutes later asks for nothing refused (${subscribes} asked)`);
     t += 3000;
     await hugo90.sync();
     const h2 = held();

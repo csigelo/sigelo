@@ -53,7 +53,7 @@ async function enrolOn(home: string, name: string): Promise<boolean> {
   const got = new Promise<void>((r) => { const t = setInterval(() => { if (code) { clearInterval(t); r(); } }, 50); });
   const op = cli(OP, ['enrol', '--name', name, '--wait', '90'], { onLine: (l) => { code = l.trim(); } });
   await Promise.race([got, op]);
-  const m = await cli(home, ['init', '--enrol', code, '--wait', '90', '--name', 'owner']);
+  const m = await cli(home, ['init', '--enrol', code, '--wait', '90']);
   const o = await op;
   verbose(`enrol ${name}`, o); verbose(`init --enrol ${name}`, m);
   return o.status === 0 && m.status === 0;
@@ -121,7 +121,7 @@ try {
   await stop(wb);
 
   // ---- link_from: vps-b (own, not vps-a's operator) asks vps-a, which is watching.
-  const lf = await cli(HB, ['link', 'vps-a', 'owner', '--purpose', 'sneak', '--wait', '60']);
+  const lf = await cli(HB, ['link', 'vps-a', 'operator', '--purpose', 'sneak', '--wait', '60']);
   ok('an own agent that is not the operator asks: refused link_from, exit 1', lf.status === 1 && json<{ status: string; check: string }>(lf).check === 'link_from' && lf.stderr.includes('link_from'), lf.stdout + lf.stderr);
   for (const w of [wa, wc]) await stop(w);
 

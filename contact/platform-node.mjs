@@ -222,12 +222,23 @@ export async function pow(prefix, bits, { deadline = Infinity, signal } = {}) {
  * → { bytes, name }.
  */
 export function openPath(file, own) {
-  let real, bytes;
+  const { real } = sendable(file, own, MAX_FILE);
+  let bytes;
+  try { bytes = readFileSync(real); } catch (e) { fail('file', `cannot read ${file}: ${e.code ?? e.message}`, { cause: e }); }
+  return { bytes, name: basename(real) };
+}
+
+/**
+ * The checks of openPath without the read (a transfer's file is read in place, chunk by chunk):
+ * a regular file of at most max bytes, none of this identity's own. → { real, name, size, mtimeMs }.
+ */
+export function sendable(file, own, max) {
+  let real, s;
   try {
     real = realpathSync(file);
-    const s = statSync(real);
+    s = statSync(real);
     if (!s.isFile()) fail('file', `${file} is not a regular file`);
-    if (s.size > MAX_FILE) fail('file_too_large', `${file} is ${s.size} bytes, at most ${MAX_FILE} (8 MiB) a file`);
+    if (s.size > max) fail('file_too_large', `${file} is ${s.size} bytes, at most ${max}${max === MAX_FILE ? ' (8 MiB)' : ''} a file`);
   } catch (e) {
     if (e instanceof MsgError) throw e;
     fail('file', `cannot read ${file}: ${e.code === 'ENOENT' ? 'no such file' : e.code ?? e.message}`, { cause: e });
@@ -240,8 +251,7 @@ export function openPath(file, own) {
   if (real.startsWith(received + sep) || real === own.log || (dirname(real) === ownDir && (leaf.startsWith(`${basename(base)}.`) || leaf.includes('.local.')))) {
     fail('file', `${file} is one of this agent's identity files (key, contacts, state, files received, inbox log): not sent`);
   }
-  try { bytes = readFileSync(real); } catch (e) { fail('file', `cannot read ${file}: ${e.code ?? e.message}`, { cause: e }); }
-  return { bytes, name: basename(real) };
+  return { real, name: basename(real), size: s.size, mtimeMs: s.mtimeMs };
 }
 
 // ---------------------------------------------------------------- the platform

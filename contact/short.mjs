@@ -145,6 +145,18 @@ export const formatGift = (norm) => `${GIFT_PREFIX}-${formatShort(norm)}`;
 /** The key the relay holds a gift under: hex SHA-256("sigelo-gift/0" ‖ the normalised code). */
 export const giftHash = (text) => bytesToHex(sha256(concatBytes(utf8ToBytes(GIFT_V), utf8ToBytes(normaliseGift(text)))));
 
+/**
+ * Four words naming a DID on a screen (an app's profile list): HKDF-SHA-256 of the DID's text under
+ * "sigelo-did-words/0", 44 bits as four BIP-39 words. A label to tell profiles apart, not a check:
+ * a pairing's own four words (fingerprint) are what two sides compare.
+ */
+export function didWords(did) {
+  if (typeof did !== 'string' || !/^did:sigelo:z[1-9A-HJ-NP-Za-km-z]{1,100}$/.test(did)) fail('did', 'not a did:sigelo DID');
+  const b = hkdf(sha256, utf8ToBytes(did), utf8ToBytes('sigelo-did-words/0'), new Uint8Array(0), 6);
+  let x = 0n;
+  for (const v of b) x = (x << 8n) | BigInt(v);
+  return [0, 1, 2, 3].map((i) => WORDS[Number((x >> BigInt(48 - 11 * (i + 1))) & 2047n)]).join(' ');
+}
 /** The four words of a pairing, from its pair id (32 lowercase hex digits, kdf.pairId). */
 export function fingerprint(pair) {
   const b = hkdf(sha256, unhex(pair, 16, 'pair'), utf8ToBytes(FINGERPRINT_LABEL), new Uint8Array(0), 6);

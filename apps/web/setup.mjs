@@ -6,7 +6,8 @@
 //   create   contact/create.mjs newSeed (S drawn here, the network held from the draw to the end),
 //            the three words checked here, then createInto (create.mjs): sealed under the FULL key
 //   restore  restoreInto (seed.mjs), the same seal
-//   connect  SIGELO:CTL: pairRelay (shell.mjs, the four words), SIGELO:UI: connectLan (shell.mjs)
+//   then     the words password, optional (keepWords: words.mjs, sealed as a third kind); skipped, nothing kept
+//   connect  pairComputer (shell.mjs): SIGELO:CTL: over the relay (the four words), SIGELO:UI: on the LAN; the profile's first computer
 //   import   Advanced: the file a computer wrote for this device (SAFE); the operator's is refused
 import { parseBytes } from 'sigelo';
 import { DEFAULT_RELAY } from './vendor/contact/carrier.mjs';
@@ -16,7 +17,8 @@ import { holdNetwork, saveIdentity } from './platform-web.mjs';
 import { presetRelay } from './router.mjs';
 import { createInto } from './create.mjs';
 import { restoreInto } from './seed.mjs';
-import { connectLan, pairRelay } from './shell.mjs';
+import { keepWords } from './words.mjs';
+import { pairComputer } from './shell.mjs';
 import { scanner } from './welcome.mjs';
 
 export const SETTINGS = 'app/settings.json';
@@ -24,11 +26,15 @@ let jsQR = null;   // the QR decoder, when this build has it (the import map's /
 if (globalThis.document) import('/qr-decode.mjs').then((m) => { jsQR = m.jsQR; }, () => {});
 const gone = (e) => Object.assign(e instanceof Error ? e : new Error(String(e)), { gone: true });
 
-/** welcome.mjs's api over this page's platform. o: { bridge (Android) | null, mqtt, storage, reload, seal } */
-export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.localStorage, reload = () => { location.hash = ''; location.reload(); }, seal = './vendor/icon.svg' } = {}) {
+/**
+ * welcome.mjs's api over this page's platform. o: { bridge (Android) | null, mqtt, storage, reload, seal,
+ * profile: { name (its database), kind(k) (the registry's kind once a path commits: 'words' | 'remote'), leave? } }
+ * (profiles.mjs; leave: the welcome's way back to the other profiles, for one added and not set up yet)
+ */
+export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.localStorage, reload = () => { location.hash = ''; location.reload(); }, seal = './vendor/icon.svg', profile = {}, words = {} } = {}) {
   let session = null, release = null;
   const drop = () => { session?.discard(); session = null; release?.(); release = null; };
-  const mode = async (m) => { if (bridge) await bridge.request('mode', { mode: m }); };
+  const mode = async (m) => { if (bridge) await bridge.request('mode', { mode: m }); await profile.kind?.(m === 'remote' ? 'remote' : 'words'); };
   return {
     seal,
     async newWords(net) {
@@ -49,6 +55,8 @@ export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.l
       return { ok: true };
     },
     discard: drop,
+    // The offer after the check and after a restore (welcome.mjs offerWords): the words kept behind the password (words.mjs).
+    keepWords: (list, password) => keepWords(platform, list, password, words),
     checkWords,
     async restore({ words, name, height, net, elsewhere, relay }) {
       const restore = parseRestore(height, Math.floor(Date.now() / 1000));
@@ -58,15 +66,11 @@ export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.l
     },
     async connect(text) {
       if (!bridge) throw new Error('Connecting to a computer needs the app: a browser tab cannot reach the relay or the LAN.');
-      if (/^\s*SIGELO:CTL:/i.test(text)) {
-        const r = await pairRelay(bridge, text.trim(), { mqtt, storage });
-        await mode('remote');
-        return { words: r.words };
-      }
-      await connectLan(bridge, text, { storage });
+      // The profile's first computer (computers.mjs c1): over the relay the four words to compare, on the LAN opened.
+      const r = await pairComputer(bridge, text, { mqtt, storage, ...(profile.name && { name: profile.name }) });
       await mode('remote');
-      reload();
-      return { opened: true };
+      if (r.opened) reload();
+      return r;
     },
     async open() { reload(); },
     async done() { reload(); },
@@ -75,6 +79,7 @@ export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.l
     clipClear: () => (bridge ? bridge.clipClear() : navigator.clipboard?.writeText?.('')),
     scan: bridge ? (onText) => scanner(onText, jsQR) : undefined,
     advanced: [{ label: 'Import a device file', run: (ui) => importScreen(ui, platform, { mode, reload }) }],
+    ...(profile.leave && { leave: profile.leave }),
   };
 }
 

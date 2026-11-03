@@ -43,12 +43,22 @@
 //                                            (`log`: x.inbox.log, pathsFor), received at or after since (unix seconds);
 //                                            no session, nothing taken
 //   c.setTier(who, tier)                   the owner's tier for a contact (store.mjs setTier) → { did, name, tier, ours }
+//   c.setPresence(who, allow)              may that contact see whether this agent is online (store.mjs setPresence;
+//                                            off by default, own agents always) → { did, name, presence }; a started
+//                                            carrier applies it at once, another at its next round
 //   c.presetTier(did, tier)                the same for an original DID not yet a contact, filed when it pairs
 //   c.takeLinks(), c.setLink(who, link)   link.mjs's: the sigelo-link/1 messages received (never in inbox(), the log
 //                                            or onEvent: a `link` event without content says one came), taken; a
 //                                            contact's link record (store.mjs setLink)
+//   c.takeGroups()                         group.mjs's: the sigelo-group/1 messages received (never in inbox(), the
+//                                            log or onEvent: a `group` event without content says one came), taken
+//   c.groupTier                            what this agent's relay told its last login of its group tier ($sigelo/notice
+//                                            "tier": { tier, groups: { max, members } }, event `group_tier`), or null
 //   c.takeDevices()                        device.mjs's: the sigelo-device/1 messages received (never in inbox(), the
 //                                            log or onEvent: a `device` event without content says one came), taken
+//   c.takeTransfers(), c.deliver(item)     transfer-node.mjs's: the sigelo-transfer/0 messages received (never in inbox(),
+//                                            the log or onEvent: a `transfer` event without content says one came), taken;
+//                                            a file a transfer saved whole, as an inbox item (kept as #onFile keeps one)
 //   c.freshEpochs({ only, retire })        every session (or only's) afresh, as after a rotation (a snapshot's
 //                                            state imported where the seat moved, devices.md §4.3) → the DIDs
 //   c.answeredBy(nonce)                    the original DID that paired through this agent's code `nonce`, or null
@@ -61,6 +71,10 @@
 //   c.lastError                            the error behind the last offline of inbox or forget (SIGELO_DEBUG)
 //   c.clockOffset(), await c.checkClock()  → { relay, offset, checked } | null: the relay's clock less this one's, seconds
 //   await c.start(), c.sync(), c.stop()    stay connected, reconnecting with backoff; events reach onEvent
+//   await c.tryNow({ confirmed })          the human's "Try now": a login at each relay in use not connected
+//   started: 'user' | 'confirmed'          (start, invite, accept, tryNow) a search the human started: past
+//                                          POW_SEARCHES a day it is never refused, it asks (pow_confirm),
+//                                          and 'confirmed' goes on; without it (automatic retries) the cap holds
 //
 // identity() → { sign, bundle }: the agent's signer for its current key (sign(body) → the SPEC §3
 // signature; sigelo-agent-keys.ts) and its SPEC §8 bundle, read again at every operation, so a
@@ -191,6 +205,20 @@
 //     hinted and proved again; asks for the same operators go at most every RESYNC. A contact
 //     learns from the hints only which operator DIDs it guesses right (THREAT-MODEL §2.12). An
 //     agent on an older version gets the hints as messages with that label. send refuses the label.
+//   - Presence (design/transfer.md §8 T0): a started carrier sets the will $sigelo/presence on its
+//     CONNECT and publishes, to each contact that may see it (store.mjs presenceOf: own agents
+//     always, others when the owner allowed them), one marker on presenceTopic(K, own original DID,
+//     contact's): a kind 6 frame under presenceKey(K, …), {v: "sigelo-presence/0", state: "online",
+//     since}. The relay (relay/presence.mjs) holds it, sends it at once to whoever subscribes, and
+//     replaces it with its own {"presence": "offline", "at"} when that session ends. A marker toward a
+//     contact no longer allowed is cleared (an empty publish, st.presence_out). Sealed by the
+//     pairing key, not as an envelope: an envelope is read once (its counter, its replay window), a
+//     marker again at every subscribe, and the relay's offline is written after the writer is gone;
+//     not signed, so a reader cannot show anyone else when this agent was online. A started
+//     carrier subscribes, at QoS 0, to each contact's marker toward it (a short session does not:
+//     it would forget it at once, and the subscribes draw on the relay's brake); what it reads is st.presence, which
+//     contacts() reports as online, online_since, last_seen, and forgets when the connection to that
+//     relay closes (a marker read is true only while the reader is connected).
 //   - Mailboxes: an agent holds the topics of every ISO week from `retention` ago to AHEAD (7 days,
 //     or its retention if shorter) ahead. The relay drops a publish to a topic nobody claimed (and
 //     says no_reader), so next week's topic must be claimed before a contact writes in it while
@@ -261,7 +289,11 @@ export const POW_MAX = 26, POW_MAX_OTHER = 22, POW_MS = 280000;
 // An honest relay asks once per identity, and again only if it forgot it. Without a count, a relay
 // that grants a proven login, closes, then refuses the next login's SUBSCRIBE `pow` had this client
 // search again at each reconnection, without end: success reset every other bound.
+// The cap is for this client's AUTOMATIC retries only (design/profiles.md §6): a search the human
+// started (`started: 'user'`) past it answers pow_confirm, and one confirmed (`'confirmed'`) goes.
 export const POW_SEARCHES = 3;
+const ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
+const hhmmUtc = (t) => new Date(t * 1000).toISOString().slice(11, 16);
 // A delivery this process failed on this many times, its files sound each time, is dropped.
 const POISON_TRIES = 3;
 // Events kept for the next inbox(): pairings, rotations, failed pairings. The oldest go first.
@@ -272,16 +304,25 @@ const EVENTS_MAX = 1000, INBOX_MAX = 1000;
 // devices', and links' (a live invite code).
 export const LOG_MAX = 500, LOG_BYTES = 4 * 1024 * 1024;
 // Labels whose messages carry keys, device material or a live code (enrol, device, link): never logged.
-export const UNLOGGED = /^sigelo-(identity|enrol|device|link)\//;
+export const UNLOGGED = /^sigelo-(identity|enrol|device|link|transfer)\//;
 // Links (link.mjs, sigelo-link/1): never an inbox message. Kept apart in the state (st.links, at most
 // LINKS_MAX, the oldest go) for link.mjs handle(), which takeLinks() them; sent only by link.mjs
 // (send's internal: LINK_SEND), so a caller's label (an MCP client's, a model's) cannot forge one.
 export const LINK_LABEL = 'sigelo-link/1', LINK_SEND = Symbol('sigelo-link send');
 const LINKS_MAX = 64;
+// Groups (group.mjs, sigelo-group/1): the same, kept apart in st.groups (at most GROUPS_MAX) for
+// group.mjs handle(), which checks the sender's inner signature and the roster; sent only with GROUP_SEND.
+export const GROUP_LABEL = 'sigelo-group/1', GROUP_SEND = Symbol('sigelo-group send');
+const GROUPS_MAX = 256;
 // Devices (device.mjs, sigelo-device/1): the same, kept apart in st.devices for sigelo-agent's
 // `device` verbs (takeDevices); sent only with DEVICE_SEND: one carries the operator's keys.
 export const DEVICE_LABEL = 'sigelo-device/1', DEVICE_SEND = Symbol('sigelo-device send');
 const DEVICES_MAX = 16;
+// Transfers (transfer.mjs, sigelo-transfer/0): the introduction of a big file, sent direct or over Tor
+// (design/transfer.md §3). The same: kept apart in st.transfers (at most TRANSFERS_MAX) for the transfer
+// engine, never logged (an offer carries addresses, an onion message a client key); sent only with TRANSFER_SEND.
+export const TRANSFER_LABEL = 'sigelo-transfer/0', TRANSFER_SEND = Symbol('sigelo-transfer send');
+const TRANSFERS_MAX = 256;
 // Received files of one name and hash prefix kept side by side, at most (#onFile).
 const FILE_COPIES = 64;
 // A contact's folder of received files: its name as safeName keeps it, and 16 hex digits of the
@@ -322,7 +363,7 @@ const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challeng
 // Refusals of an invite reply that a later round may get past: the reply stays queued.
 const REPLY_RETRY = new Set(['rate', 'relay_full', 'quota_messages']);
 // $sigelo/notice codes that refuse the publish, or the SUBSCRIBE, in flight (relay-plan §3 "Errors").
-const PUBLISH_CODES = new Set(['too_large', 'quota_storage', 'quota_messages', 'rate', 'relay_full', 'pow', 'no_reader']);
+const PUBLISH_CODES = new Set(['too_large', 'quota_storage', 'quota_messages', 'rate', 'relay_full', 'pow', 'no_reader', 'presence_taken', 'presence_will', 'presence_full']);
 // A contact's envelope this agent cannot open for want of its epoch asks the writer for a new epoch
 // by a fresh prekey bundle (RESYNC_CHECKS), at most once in this many seconds per contact after
 // the last such bundle: the check comes before any decryption, so a relay can make one up. A
@@ -552,6 +593,10 @@ export const operatorHint = (K, kind, from, op) => hex(hmac(sha256, K, utf8ToByt
 export const noticeKey = (K, from, to) => hkdf(sha256, K, utf8ToBytes('sigelo-notice/0'), utf8ToBytes(`${from}\n${to}`), 32);
 /** The prekeys frame's key: HKDF-SHA256(K, salt "sigelo-prekeys/0", info = from ‖ "\n" ‖ to), original DIDs. */
 export const prekeysKey = (K, from, to) => hkdf(sha256, K, utf8ToBytes('sigelo-prekeys/0'), utf8ToBytes(`${from}\n${to}`), 32);
+/** Presence (the header's "Presence"): the topic from → to, and its marker's key; original DIDs. */
+export const KIND_PRESENCE = 6, PRESENCE_V = 'sigelo-presence/0', PRESENCE_WILL = '$sigelo/presence';
+export const presenceTopic = (K, from, to) => 'p/' + hex(hkdf(sha256, K, utf8ToBytes('sigelo-presence/0'), utf8ToBytes(`${from}\n${to}`), 16));
+export const presenceKey = (K, from, to) => hkdf(sha256, K, utf8ToBytes('sigelo-presence-key/0'), utf8ToBytes(`${from}\n${to}`), 32);
 
 /** A kind 1, 2, 4 or 5 frame (the header's "Frames"). rng(24) gives the nonce: a parameter so a test fixes every byte. */
 export function seal(kind, key, t, value, rng = randomBytes) {
@@ -725,6 +770,14 @@ export function keepLong(e, long) {
 // Whose quota a quota_storage refusal is (relay/allowance.mjs `side`), in this client's words: a
 // contact whose own queue is full, or whose operator's Pro lapsed, must not read as a broken relay.
 const QUOTA_SIDES = new Set(['reader', 'sender', 'relay']);
+// The relay's "tier" notice (relay/allowance.mjs): {tier: free | pro, groups: {max, members}}, whole
+// numbers within what a roster can hold (group.mjs LIMITS.pro.members), else ignored. → {tier, groups} | null.
+const GROUP_MEMBERS_MAX = 64, GROUPS_TOLD_MAX = 10000;
+export function groupTierOf(n) {
+  const g = n?.groups, whole = (x, lo, hi) => Number.isSafeInteger(x) && x >= lo && x <= hi;
+  if ((n?.tier !== 'free' && n?.tier !== 'pro') || g === null || typeof g !== 'object' || !whole(g.max, 0, GROUPS_TOLD_MAX) || !whole(g.members, 2, GROUP_MEMBERS_MAX)) return null;
+  return { tier: n.tier, groups: { max: g.max, members: g.members } };
+}
 const quotaWhy = (r, name) => (r.code !== 'quota_storage' ? null
   : r.side === 'reader' ? `${name}'s side is over its storage quota (its queue is full, or its operator's Pro lapsed): nothing is wrong with your relay or your allowance; send again once ${name}'s agent has collected its messages (${relaySays(r.detail)})`
     : r.side === 'sender' ? `your network has used its share of this relay's free storage: send again once messages are collected or expire (${relaySays(r.detail)})` : null);
@@ -814,10 +867,12 @@ export function limitPackets(stream, max, cut) {
 
 // url: mqtts://, or wss:// (MQTT over WebSocket: through the HTTPS proxy when one applies, platform-node.mjs proxyFor;
 // a frame over the largest packet, its fixed header included, refused by ws before it is held).
+// creds.will: the presence will of a started carrier (the header's "Presence").
 function mqttConnect(platform, url, creds, link, onPacket, timeout = CONNECT_MS) {
   return new Promise((resolve, reject) => {
     const client = platform.mqtt(url, { protocolVersion: 4, clean: false, clientId: creds.clientId, username: creds.username, password: creds.password,
-      reconnectPeriod: 0, connectTimeout: timeout, keepalive: 60, resubscribe: false, wsOptions: { maxPayload: MAX_PACKET + 5, perMessageDeflate: false } });
+      reconnectPeriod: 0, connectTimeout: timeout, keepalive: 60, resubscribe: false, wsOptions: { maxPayload: MAX_PACKET + 5, perMessageDeflate: false },
+      ...(creds.will && { will: creds.will }) });
     link.client = client;
     // connect() has built the socket and nothing has arrived yet. The cut is permanent at a relay
     // other than this agent's own (#retry, accept): it would send the same packet again.
@@ -864,6 +919,9 @@ class Link {
     this.collect = null; this.lastIn = 0; this.since = Date.now(); this.tokens = RATE.burst; this.at = Date.now(); this.pow = false; this.closing = false;
     this.abort = null;   // rejects the PUBLISH or SUBSCRIBE in flight when the connection closes
     this.cut = null;     // the MsgError of limitPackets, once it cut the connection
+    // Presence: the contacts' marker topics subscribed on this connection; this agent's markers
+    // published on it (topic → its contact); when it connected (a marker's since); the will set.
+    this.presenceIn = new Set(); this.presenceOut = new Map(); this.onlineAt = 0; this.will = false;
   }
   // Nothing delivered for QUIET ms since connecting: the relay's queue for this agent is drained.
   get quiet() { return Date.now() - Math.max(this.lastIn, this.since) >= QUIET; }
@@ -885,7 +943,7 @@ class Link {
 export class Carrier {
   #links = new Map(); #work = Promise.resolve(); #busy = 0; #lastWork = 0; #routes = new Map(); #results = new Map();
   #claimed = new Set(); #refusedTopics = new Map(); #handshakes = new Map(); #soon = new Set();
-  #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #ask = false;
+  #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #powWaits = new Set(); #ask = false;
   #mineMemo = null; #clocks = new Map();
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
@@ -1137,6 +1195,7 @@ export class Carrier {
     this.#routes = this.#read(({ now, me, store }) => {
       const m = new Map(), wide = this.retention + 7 * DAY;
       for (const c of this.#liveContacts(store)) for (const w of this.#weeks(now, wide, wide)) m.set(topic(hexToBytes(c.pair_key), c.did, me.did, w.week), { type: 'peer', did: c.did });
+      for (const c of this.#liveContacts(store)) m.set(presenceTopic(hexToBytes(c.pair_key), c.did, me.did), { type: 'presence', did: c.did });
       for (const [nonce, p] of Object.entries(store.s.invites)) m.set(inviteKeys(hexToBytes(p.secret)).answer_topic, { type: 'answer', nonce });
       for (const [id, p] of Object.entries(store.s.accepts)) m.set(inviteKeys(hexToBytes(p.secret)).reply_topic, { type: 'reply', id });
       return m;
@@ -1184,6 +1243,7 @@ export class Carrier {
       if (!this.#routes.has(t)) this.#rebuildRoutes();
       route = this.#routes.get(t) ?? fail('route', 'a message on a topic this agent does not read');
       const events = this.#locked((ctx) => (route.type === 'peer' ? this.#onPeer(ctx, route.did, t, bytes)
+        : route.type === 'presence' ? this.#onPresence(ctx, route.did, t, bytes)
         : route.type === 'answer' ? this.#onAnswer(ctx, t, bytes) : this.#onReply(ctx, t, bytes)));
       for (const e of events) this.#emit(e);
     } catch (e) {
@@ -1251,10 +1311,37 @@ export class Carrier {
     let n;
     try { n = parseBytes(bytes); } catch { return; }
     if (n === null || typeof n !== 'object' || typeof n.code !== 'string') return;
+    // The relay's group tier for this login (relay/allowance.mjs "tier"): kept per relay in the state, refuses nothing.
+    if (n.code === 'tier') {
+      const g = groupTierOf(n);
+      if (g) { try { this.#locked(({ st }) => { (st.group_tier ??= {})[link.relay] = g; }); } catch {} this.#emit({ type: 'group_tier', relay: link.relay, ...g }); }
+      return;
+    }
     const note = { code: n.code.slice(0, 64), detail: typeof n.detail === 'string' ? n.detail.slice(0, 200) : '', ...(QUOTA_SIDES.has(n.side) && { side: n.side }) };
     // id: the packet id of the PUBLISH a refusal names (#publish), kept out of events.
     if (link.collect) link.collect.push(Number.isSafeInteger(n.id) ? { ...note, id: n.id } : note);
     else this.#emit({ type: 'notice', relay: link.relay, ...note });
+  }
+
+  // A contact's presence marker toward this agent (the header's "Presence"): its sealed online, the
+  // relay's offline, or nothing (cleared). → the presence event.
+  #onPresence({ me, store, st }, did, t, bytes) {
+    const c = store.lookup(did);
+    if (!c || c.revoked || !c.pair_key) return [];
+    const p = (st.presence ??= {});
+    let e = null;
+    if (bytes.length > 0 && bytes[0] === 0x7b) {
+      let v;
+      try { v = parseBytes(bytes); } catch (err) { fail('presence', `the relay's offline marker is not JSON: ${err.message}`); }
+      if (!exact(v, ['at', 'presence']) || v.presence !== 'offline' || !Number.isSafeInteger(v.at) || v.at < 0) fail('presence', 'not the relay\'s {presence: "offline", at}');
+      e = { online: false, since: null, last_seen: v.at };
+    } else if (bytes.length > 0) {
+      const v = unseal(KIND_PRESENCE, presenceKey(hexToBytes(c.pair_key), c.did, me.did), t, bytes);
+      if (!exact(v, ['since', 'state', 'v']) || v.v !== PRESENCE_V || v.state !== 'online' || !Number.isSafeInteger(v.since) || v.since < 0) fail('presence', `not a ${PRESENCE_V} online marker`);
+      e = { online: true, since: v.since, last_seen: null };
+    }
+    if (e) p[c.did] = { ...e, relay: c.relay }; else delete p[c.did];
+    return [{ type: 'presence', did: c.did, name: c.name, online: e ? e.online : null, since: e?.since ?? null, last_seen: e?.last_seen ?? null }];
   }
 
   // A contact's mailbox: an envelope (kind 0), its rotation notice (kind 4) or its prekeys (kind 5).
@@ -1308,6 +1395,18 @@ export class Carrier {
       l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
       if (l.length > LINKS_MAX) { st.dropped.links_full = (st.dropped.links_full ?? 0) + l.length - LINKS_MAX; l.splice(0, l.length - LINKS_MAX); }
       events.push({ type: 'link', from: c.did, name: c.name });
+    } else if (r.body.label === GROUP_LABEL) {
+      // A group message (group.mjs): kept for handle(), never for inbox() nor onEvent's readers.
+      const l = (st.groups ??= []);
+      l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
+      if (l.length > GROUPS_MAX) { st.dropped.groups_full = (st.dropped.groups_full ?? 0) + l.length - GROUPS_MAX; l.splice(0, l.length - GROUPS_MAX); }
+      events.push({ type: 'group', from: c.did, name: c.name });
+    } else if (r.body.label === TRANSFER_LABEL) {
+      // A transfer message (transfer-node.mjs): kept for the engine, never for inbox() nor onEvent's readers.
+      const l = (st.transfers ??= []);
+      l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
+      if (l.length > TRANSFERS_MAX) { st.dropped.transfers_full = (st.dropped.transfers_full ?? 0) + l.length - TRANSFERS_MAX; l.splice(0, l.length - TRANSFERS_MAX); }
+      events.push({ type: 'transfer', from: c.did, name: c.name });
     } else if (r.body.label === DEVICE_LABEL) {
       // A device message (device.mjs): kept for the `device` verbs, never for inbox() nor onEvent's readers.
       const l = (st.devices ??= []);
@@ -1949,11 +2048,11 @@ export class Carrier {
   // message as refused (its epoch restarted, its prekey put back, its contact marked absent).
   // Nothing leaves before the state that sent it is committed (platform.flush): an envelope whose
   // ratchet step a crash lost would be sent again under the same key, a replay at the reader.
-  async #publish(link, t, bytes) {
+  async #publish(link, t, bytes, retain = false) {
     await this.platform.flush();
     link.collect = [];
     try {
-      const id = await link.request('PUBACK', (cb) => link.client.publish(t, bytes, { qos: 1 }, (err, packet) => (err ? cb(new MsgError('connect', err.message)) : cb(null, packet?.messageId))));
+      const id = await link.request('PUBACK', (cb) => link.client.publish(t, bytes, { qos: 1, retain }, (err, packet) => (err ? cb(new MsgError('connect', err.message)) : cb(null, packet?.messageId))));
       const mine = (n) => PUBLISH_CODES.has(n.code) && (n.id === undefined || n.id === id);
       for (const n of link.collect) if (!mine(n)) this.#emit({ type: 'notice', relay: link.relay, code: n.code, detail: n.detail });
       return link.collect.find(mine) ?? null;
@@ -2067,7 +2166,64 @@ export class Carrier {
     // have stopped: a relay keeping messages longer than this agent thinks (a Pro reader run with
     // the free tier's retention) has then delivered them. #session ends with such a round.
     if (stale.length > 0 && link.quiet) await this.#unsubscribe(link, stale);
+    if (!link.up) return;
+    await this.#presence(link);
     await this.#flush(link);
+  }
+
+  // Presence at one relay (the header's "Presence"): each contact's marker toward this agent read
+  // (QoS 0: a marker is never queued); this agent's published toward those who may see it, once
+  // per connection, by a started carrier only (its CONNECT set the will); cleared toward any other.
+  // A refusal stops the round: the next round tries again.
+  async #presence(link) {
+    const { want, out, clear } = this.#read(({ now, me, store, st }) => {
+      const cs = this.#liveContacts(store, link.relay).filter((c) => !c.re_pair);
+      // Read by a started carrier only: what a session reads is forgotten when it closes (#closed),
+      // so a short one (a CLI verb, an MCP call) would spend one subscribe per contact on the relay's
+      // brake (allowance.mjs RATE.subscribe, 256 at once) for nothing, and verbs in quick succession
+      // were refused rate.
+      const want = link.will ? cs.map((c) => presenceTopic(hexToBytes(c.pair_key), c.did, me.did)) : [];
+      const out = link.will ? cs.filter((c) => store.presenceOf(c, now) !== 'deny').map((c) => {
+        const K = hexToBytes(c.pair_key), t = presenceTopic(K, me.did, c.did);
+        return { did: c.did, topic: t, key: presenceKey(K, me.did, c.did) };
+      }) : [];
+      // Cleared: a marker toward a contact that may no longer see it, gone or denied (any session).
+      const sees = new Set(cs.filter((c) => store.presenceOf(c, now) !== 'deny').map((c) => c.did));
+      const clear = Object.entries(st.presence_out ?? {}).filter(([, x]) => x.relay === link.relay && !sees.has(x.did)).map(([t]) => t);
+      return { want, out, clear };
+    });
+    const fresh = want.filter((t) => !link.presenceIn.has(t));
+    for (let i = 0; i < fresh.length && link.up; i += MAX_TOPICS) {
+      const chunk = fresh.slice(i, i + MAX_TOPICS);
+      link.collect = [];
+      let granted, notes;
+      try {
+        granted = await link.request('SUBACK', (cb) => link.client.subscribe(chunk, { qos: 0 }, (err, _subs, packet) =>
+          (packet?.granted ? cb(null, packet.granted) : cb(new MsgError('connect', err?.message ?? 'no SUBACK')))));
+        notes = link.collect;
+      } finally { link.collect = null; }
+      chunk.forEach((t, j) => { if (granted[j] !== 128) link.presenceIn.add(t); });
+      for (const n of notes) this.#emit({ type: 'notice', relay: link.relay, ...n });
+      if (notes.some((n) => n.code === 'rate')) return;
+    }
+    const note = (topic, x) => this.#locked(({ st }) => { const o = (st.presence_out ??= {}); if (x) o[topic] = x; else delete o[topic]; });
+    for (const x of out) {
+      if (!link.up) return;
+      if (link.presenceOut.has(x.topic)) continue;
+      await this.#throttle(link);
+      const r = await this.#publish(link, x.topic, seal(KIND_PRESENCE, x.key, x.topic, { v: PRESENCE_V, state: 'online', since: link.onlineAt }), true);
+      if (r) { this.#emit({ type: 'notice', relay: link.relay, code: r.code, detail: r.detail }); return; }
+      link.presenceOut.set(x.topic, x.did);
+      note(x.topic, { relay: link.relay, did: x.did });
+    }
+    for (const t of clear) {
+      if (!link.up) return;
+      await this.#throttle(link);
+      const r = await this.#publish(link, t, new Uint8Array(0), true);
+      if (r && r.code !== 'presence_taken') { this.#emit({ type: 'notice', relay: link.relay, code: r.code, detail: r.detail }); return; }
+      link.presenceOut.delete(t);
+      note(t, null);
+    }
   }
 
   // Work runs one item at a time, after the delivery that queued it is acknowledged: a SUBACK or
@@ -2100,7 +2256,7 @@ export class Carrier {
 
   // ---- connections
 
-  async #credentials(relay, ep) {
+  async #credentials(relay, ep, started) {
     const { me, proven } = this.#read(({ me, st }) => ({ me, proven: st.relays[relay]?.proven === true }));
     const powMax = relay === this.relay ? POW_MAX : POW_MAX_OTHER;
     const r = await http(this.platform, `${ep.http}/challenge?did=${encodeURIComponent(me.current_did)}`);
@@ -2135,11 +2291,16 @@ export class Carrier {
       // A search of 0 bits costs nothing and is not counted.
       if (bits > 0) this.#locked(({ now, st }) => {
         const at = (st.relays[relay] ??= { proven: false, claims: {} }), recent = (at.searches ?? []).filter((t) => t > now - DAY);
-        if (recent.length >= POW_SEARCHES) {
-          // Permanent like the bits above: no backoff loop; the hourly round asks again (#retry).
-          const e = new MsgError('pow', `${recent.length} proof-of-work searches at ${relay} within 24 hours, the most this client spends: the next may begin after ${new Date((recent[0] + DAY) * 1000).toISOString()}; nothing is lost meanwhile, this client tries again then by itself (a search is spent once per identity, and again only when a login with it got no answer)`);
-          e.permanent = true;
-          throw e;
+        if (recent.length >= POW_SEARCHES && started !== 'confirmed') {
+          const next = recent[0] + DAY;
+          // The human started it: never refused, asked once (the page: "Go on?"), then `confirmed`.
+          if (started === 'user') {
+            const nth = ORDINAL[recent.length] ?? `${recent.length + 1}th`;
+            throw Object.assign(new MsgError('pow_confirm', `${nth[0].toUpperCase()}${nth.slice(1)} setup at this relay (${relay}) today, up to 2 minutes. Go on?`), { permanent: true, relay, next });
+          }
+          // Automatic: permanent like the bits above, no backoff loop; a timer tries again at `next` (#retry).
+          const e = new MsgError('pow', `setup paused at ${relay}: ${recent.length} proof-of-work searches today, the most this client spends by itself. Next automatic try at ${hhmmUtc(next)} UTC (${new Date(next * 1000).toISOString()}); nothing is lost meanwhile, and a try you start goes now (a search is spent once per identity, and again only when a login with it got no answer)`);
+          throw Object.assign(e, { permanent: true, relay, next });
         }
         at.searches = [...recent, now];
       });
@@ -2167,6 +2328,8 @@ export class Carrier {
   }
 
   get retentionDays() { return this.retention / DAY; }
+  /** The group tier this agent's relay told its last login ({tier, groups: {max, members}}), or null (group.mjs tierOf). */
+  get groupTier() { try { return this.#read(({ st }) => st.group_tier?.[this.relay] ?? null); } catch { return null; } }
 
   // The relay's clock less this agent's (this.clock), in seconds, from an answer r of relay: its
   // Date header (whole seconds, so +0.5) taken as of the middle of the round trip.
@@ -2188,10 +2351,12 @@ export class Carrier {
     return this.clockOffset();
   }
 
-  async #dial(relay) {
+  async #dial(relay, started) {
     const ep = endpointOf(relay, this.endpoints), link = new Link(relay, relay === this.relay);
     const info = link.own && this.#ask ? this.#relayInfo(ep) : null;
-    const creds = await this.#credentials(relay, ep);
+    const creds = await this.#credentials(relay, ep, started);
+    // A started carrier says it is online (the header's "Presence"): the relay says offline after.
+    if (this.#started) { creds.will = { topic: PRESENCE_WILL, payload: 'offline', qos: 0, retain: false }; link.will = true; }
     await info;
     // The transport (the header's "Transport"): auto tries ep.mqtt for PROBE_MS, then the WebSocket
     // endpoint, and keeps to it for the rest of the process (FELL_BACK). Only a dial that got no
@@ -2219,7 +2384,7 @@ export class Carrier {
     if (!link.client.connected) throw link.cut ?? new MsgError('connect', 'the relay closed the connection');
     // Deliveries are counted from here (quiet), not from before the login: a proof-of-work search
     // of seconds would read as a drained queue, and give up stale claims before what they hold came.
-    link.since = Date.now();
+    link.since = Date.now(); link.onlineAt = this.clock();
     if (creds.pow !== undefined) this.#locked(({ st }) => { (st.relays[relay] ??= { proven: false, claims: {} }).proven = true; });
     link.client.on('error', () => {});   // a close follows
     link.client.on('close', () => this.#closed(link));
@@ -2229,11 +2394,11 @@ export class Carrier {
     return link;
   }
 
-  async #connect(relay) {
+  async #connect(relay, started) {
     this.#connecting.add(relay);
     try {
       for (let attempt = 0; ; attempt++) {
-        const link = await this.#dial(relay);
+        const link = await this.#dial(relay, started);
         this.#refreshSoon(relay);
         await this.#drain();
         if (link.up) return link;
@@ -2246,18 +2411,25 @@ export class Carrier {
 
   #closed(link) {
     link.abort?.(new MsgError('connect', 'the connection to the relay closed'));
+    // What this connection read of the contacts' presence holds only while it is up.
+    if (link.presenceIn.size > 0) {
+      try {
+        this.#locked(({ st }) => { for (const [d, e] of Object.entries(st.presence ?? {})) if (e.relay === link.relay) delete st.presence[d]; });
+      } catch {}
+    }
     if (this.#links.get(link.relay) === link) this.#links.delete(link.relay);
     this.#emit({ type: 'disconnected', relay: link.relay });
     if (Date.now() - link.since >= STABLE_MS) this.#attempts.delete(link.relay);
     if (!this.#started || this.#connecting.has(link.relay) || (link.closing && !link.pow)) return;
     if (link.cut?.permanent) {
-      this.#emit({ type: 'error', relay: link.relay, check: link.cut.check, detail: link.cut.message });
+      this.#emit({ type: 'error', relay: link.relay, check: link.cut.check, detail: link.cut.message, ...(link.cut.next !== undefined && { next: link.cut.next }) });
       this.#abandon(link.relay, link.cut);
     } else this.#retry(link.relay);
   }
 
-  // Exponential backoff with jitter: first, 2 × first, … up to most.
-  #retry(relay, delay) {
+  // Exponential backoff with jitter: first, 2 × first, … up to most. started: the first try's only
+  // (start({ started })); every later one is automatic.
+  #retry(relay, delay, started) {
     if (this.#timers.has(relay)) return;
     const n = (this.#attempts.get(relay) ?? 0) + 1, [first, most] = this.backoff;
     this.#attempts.set(relay, n);
@@ -2266,11 +2438,11 @@ export class Carrier {
       this.#timers.delete(relay);
       if (!this.#started || this.#links.get(relay)?.up || this.#connecting.has(relay)) return;
       try {
-        const link = await this.#connect(relay);
+        const link = await this.#connect(relay, started);
         this.#powFails.delete(relay);
         if (!this.#started) await this.#hangUp(link);   // stop() came while this connected
       } catch (e) {
-        this.#emit({ type: 'error', relay, check: e.check ?? 'connect', detail: e.message });
+        this.#emit({ type: 'error', relay, check: e.check ?? 'connect', detail: e.message, ...(e.next !== undefined && { next: e.next }) });
         if (e.check === 'pow') this.#powFails.set(relay, (this.#powFails.get(relay) ?? 0) + 1);
         // A refusal no retry can fix, or proof of work failing twice (each try may cost POW_MS of
         // CPU), or POW_SEARCHES spent: no backoff loop here. The hourly round tries again while a
@@ -2278,8 +2450,19 @@ export class Carrier {
         // stranger's code sent there.
         if (PERMANENT.has(e.check) || e.permanent || this.#powFails.get(relay) >= 2) this.#abandon(relay, e);
         else this.#retry(relay);
+        // The day's searches spent: the next automatic try at the time the refusal named, not later.
+        if (e.check === 'pow' && e.next !== undefined && this.#started) this.#powWait(relay, e.next);
       }
     }, wait));
+  }
+
+  // A timer to `next` (unix seconds): the relay's next automatic try once the day's searches are
+  // spent. The hourly round leaves it be (it holds the relay's timer); sync() and tryNow() clear it.
+  #powWait(relay, next) {
+    if (this.#timers.has(relay)) return;
+    const ms = Math.min(2 ** 31 - 1, Math.max(1000, (next - this.clock()) * 1000 + 1000));
+    this.#timers.set(relay, setTimeout(() => { this.#timers.delete(relay); this.#powWaits.delete(relay); this.#retry(relay, 0); }, ms));
+    this.#powWaits.add(relay);
   }
 
   // A relay other than this agent's own refuses it for good: the answers still waiting to go to it
@@ -2316,13 +2499,13 @@ export class Carrier {
 
   // Connects (or refreshes) each relay, waits for the round to settle, and hangs up again unless
   // started.
-  async #session(relays, idle = {}) {
+  async #session(relays, idle = {}, started) {
     const opened = [];
     this.#locked((ctx) => this.#expireKeys(ctx));
     try {
       for (const r of relays) {
         if (this.#links.get(r)?.up) this.#refreshSoon(r);
-        else opened.push(await this.#connect(r));
+        else opened.push(await this.#connect(r, started));
       }
       await this.#idle(idle);
       // One more round now that deliveries have stopped: claims past their time are given up
@@ -2347,7 +2530,7 @@ export class Carrier {
   // the short code is parked there, and the pairing talks over it.
   // local: no session: the code is made and kept only; its answer topic is claimed at this
   // identity's next login (a device added offline, device.mjs), so connect once before it answers.
-  async invite({ name, ttl, short = false, relay, local = false } = {}) {
+  async invite({ name, ttl, short = false, relay, local = false, started } = {}) {
     const at = relay === undefined ? this.relay : relayArg(relay);
     const code = this.#locked(({ now, me, store }) => {
       const code = makeInvite({ did: me.current_did, relay: at, now, ...(ttl !== undefined && { ttl }) });
@@ -2361,7 +2544,7 @@ export class Carrier {
     // The answer topic is claimed before the code leaves: the relay drops what nobody reads.
     const t = inviteKeys(code.secret).answer_topic;
     try {
-      await this.#session([code.relay]);
+      await this.#session([code.relay], {}, started);
       if (!this.#claimed.has(t)) {
         const r = this.#refusedTopics.get(t);
         fail(r?.code ?? 'subscribe', `the relay did not let this agent claim the invite's topic${r ? ` (${relaySays(r.detail)})` : ''}`);
@@ -2369,7 +2552,7 @@ export class Carrier {
       if (!short) return { code: code.text, did: code.did, relay: code.relay, exp: code.exp };
       // Eight characters on the public relay; on any other, twelve: the last four its relay tag.
       const s = makeShort(undefined, code.relay === this.shortRelay ? null : relayTag(code.relay)), exp = Math.min(checkNow(this.clock()) + SHORT_TTL, code.exp), ep = endpointOf(code.relay, this.endpoints);
-      const creds = await this.#credentials(code.relay, ep);
+      const creds = await this.#credentials(code.relay, ep, started);
       const r = await http(this.platform, `${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: codeHash(s), invite: code.text, exp }) });
       const check = typeof r.body?.check === 'string' ? r.body.check : null;
       if (r.status === 429) refuse('rate', `the relay ${code.relay} parks no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to an hour')}, or use the long code (invite --long)`, r);
@@ -2491,7 +2674,7 @@ export class Carrier {
     try { return await this.#answer(long, how, { ...opts, relay: at }); } catch (e) { throw keepLong(e, long); }
   }
 
-  async #answer(text, how, { name, wait = 10, tier, relay } = {}) {
+  async #answer(text, how, { name, wait = 10, tier, relay, started } = {}) {
     if (tier !== undefined && !TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
     const named = relay === undefined ? undefined : relayArg(relay);
     const { code, id, entry } = this.#locked(({ now, me, store, st }) => {
@@ -2529,7 +2712,7 @@ export class Carrier {
     const reply = inviteKeys(code.secret).reply_topic;
     // And once the code expires (#lapse): the answer is dead, so --wait does not run out first.
     const settled = () => this.#handshakes.has(id) || this.#refusedTopics.has(reply) || Boolean(this.#results.get(entry)?.code) || this.clock() >= code.exp;
-    try { await this.#session([code.relay], { max: wait * 1000, until: settled }); } catch (e) {
+    try { await this.#session([code.relay], { max: wait * 1000, until: settled }, started); } catch (e) {
       // A relay other than this agent's own that refuses it for good would be dialled again at
       // every connection, until the code expires, for an answer it never takes: and a stranger's
       // code names it. Withdrawn only while it waits to go: an answer the relay holds keeps its
@@ -2598,7 +2781,9 @@ export class Carrier {
           const e = st.peers[c.did], pair = c.revoked || !c.pair_key ? null : pairId(hexToBytes(c.pair_key));
           return { name: c.name, did: c.did, current_did: c.current_did, chain: c.chain, revoked: c.revoked, relay: c.relay, queued: e?.outbox.length ?? 0,
             re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key), pair, ours: store.oursOf(c, now), tier: store.tierOf(c, now), tier_by: c.tier_by ?? null,
-            prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null, link: c.link ?? null };
+            prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null, link: c.link ?? null,
+            // Presence (the header's): what this contact sees of mine, and theirs as read now (null: not known).
+            presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
@@ -2626,6 +2811,8 @@ export class Carrier {
     if (typeof label !== 'string') fail('body', 'label must be a string');
     if (label === LABEL_PREKEYS || label === OPERATOR_LABEL) fail('body', `the label ${JSON.stringify(label)} is the carrier's own`);
     if (label.startsWith('sigelo-link/') && internal !== LINK_SEND) fail('body', `the label ${JSON.stringify(label)} is the link handler's own (sigelo-agent link)`);
+    if (label.startsWith('sigelo-group/') && internal !== GROUP_SEND) fail('body', `the label ${JSON.stringify(label)} is the group handler's own (sigelo-agent group send)`);
+    if (label.startsWith('sigelo-transfer/') && internal !== TRANSFER_SEND) fail('body', `the label ${JSON.stringify(label)} is the transfer engine's own (sigelo-agent transfer)`);
     if (label.startsWith('sigelo-device/') && internal !== DEVICE_SEND) fail('body', `the label ${JSON.stringify(label)} is the device verbs' own (sigelo-agent device)`);
     if (!Array.isArray(contents) || contents.length === 0) fail('body', 'at least one message');
     for (const content of contents) {
@@ -2705,7 +2892,7 @@ export class Carrier {
     const want = tiers === undefined ? null : new Set(tiers);
     if (want && ![...want].every((t) => TIERS.includes(t))) fail('tier', `tiers: some of ${TIERS.join(', ')}`);
     const picks = (store, now) => { const t = want && store.tiers(now); return (m) => !want || want.has(t.get(m.from) ?? 'friend'); };
-    const ready = () => this.#read(({ now, store, st }) => st.inbox.some(picks(store, now)) || (st.links?.length ?? 0) > 0 || (st.devices?.length ?? 0) > 0 || st.events.some((e) => e.type === 'pairing_failed' || (paired && e.type === 'paired')));
+    const ready = () => this.#read(({ now, store, st }) => st.inbox.some(picks(store, now)) || (st.links?.length ?? 0) > 0 || (st.groups?.length ?? 0) > 0 || (st.devices?.length ?? 0) > 0 || st.events.some((e) => e.type === 'pairing_failed' || (paired && e.type === 'paired')));
     let offline = null;
     if (local) {
       for (const end = Date.now() + wait * 1000; Date.now() < end && !ready();) await sleep(250);
@@ -2759,11 +2946,31 @@ export class Carrier {
   }
 
   setTier(who, tier) { return this.#locked(({ now, store }) => store.setTier(who, tier, now)); }
+  setPresence(who, allow) {
+    const r = this.#locked(({ now, store }) => { const x = store.setPresence(who, allow, now); return { ...x, relay: store.lookup(x.did)?.relay }; });
+    if (r.relay && this.#links.get(r.relay)?.up) this.#refreshSoon(r.relay);
+    return { did: r.did, name: r.name, presence: r.presence };
+  }
   // The owner's tier for an original DID before it is a contact (an enrolled worker): store.mjs presetTier.
   presetTier(did, tier) { return this.#locked(({ now, store }) => store.presetTier(did, tier, now)); }
   // Links (link.mjs): the link messages received, taken; a contact's link record set (null: dropped).
   takeLinks() { return this.#locked(({ st }) => { const l = st.links ?? []; st.links = []; return l; }); }
+  takeGroups() { return this.#locked(({ st }) => { const l = st.groups ?? []; st.groups = []; return l; }); }
   takeDevices() { return this.#locked(({ st }) => { const l = st.devices ?? []; st.devices = []; return l; }); }
+  // pick(message) → take it (default all); the rest stay for a later take (an engine's).
+  takeTransfers(pick = () => true) { return this.#locked(({ st }) => { const l = st.transfers ?? [], took = l.filter((m) => pick(m)); st.transfers = l.filter((m) => !took.includes(m)); return took; }); }
+  // A file a transfer saved whole (transfer-node.mjs): an inbox item as #onFile makes one, kept for
+  // inbox() (keep) and handed to onEvent. item: { type: 'file', from, contact, name, size, sha256, path, … }.
+  deliver(item) {
+    const it = { ...item, received: item.received ?? this.#read(({ now }) => now) };
+    this.#locked(({ st }) => {
+      if (!this.keep) return;
+      st.inbox.push(it);
+      if (st.inbox.length > INBOX_MAX) { const n = st.inbox.length - INBOX_MAX; st.inbox.splice(0, n); st.dropped.inbox_full = (st.dropped.inbox_full ?? 0) + n; }
+    });
+    this.#emit(it);
+    return it;
+  }
   // A copy of this state may have sent and received after it was taken (devices.md §4.3: the seat
   // moved, the state came in a snapshot). Every session with `only`'s contacts (default: all live)
   // starts afresh, as after a rotation: the outgoing epoch ends, the contact's one-time prekeys
@@ -2828,18 +3035,21 @@ export class Carrier {
 
   // ---- staying connected
 
-  async start() {
+  /** started: 'user' when the human opened this (the page's start): its first login asks past the cap (pow_confirm). */
+  async start({ started } = {}) {
     if (this.#started) return;
     this.#started = true;
-    for (const r of this.#relaysInUse()) this.#retry(r, 0);
+    for (const r of this.#relaysInUse()) this.#retry(r, 0, started);
     this.#tick = setInterval(() => this.#round(), this.tick);
     this.#tick.unref?.();
   }
 
-  #round() {
+  // force (sync, the caller's): a relay waiting for its next automatic try (#powWait) is tried now too.
+  #round(force = false) {
     this.#later(() => this.#locked((ctx) => this.#expireKeys(ctx)));
     for (const l of this.#links.values()) l.absent.clear();   // an absent contact may be back: try once more
     for (const r of this.#relaysInUse()) {
+      if (force) this.#unwait(r);
       if (this.#links.get(r)?.up) this.#refreshSoon(r);
       else if (!this.#timers.has(r) && !this.#connecting.has(r)) this.#retry(r, 0);
     }
@@ -2847,8 +3057,39 @@ export class Carrier {
 
   /** One round now (claims for a new week, queued messages), then wait as `inbox` does. */
   async sync({ wait = 0 } = {}) {
-    if (this.#started) { this.#round(); await this.#idle({ max: Math.max(DRAIN, wait * 1000) }); return; }
+    if (this.#started) { this.#round(true); await this.#idle({ max: Math.max(DRAIN, wait * 1000) }); return; }
     await this.#session(this.#relaysInUse(), { max: Math.max(DRAIN, wait * 1000) });
+  }
+
+  #unwait(relay) {
+    if (!this.#powWaits.delete(relay)) return;
+    clearTimeout(this.#timers.get(relay));
+    this.#timers.delete(relay);
+  }
+
+  /**
+   * The human's "Try now" (design/profiles.md §6): a login now at each relay in use that is not
+   * connected, as a search they started: past the day's POW_SEARCHES it throws pow_confirm, and
+   * { confirmed: true } goes on. → { tried: [relays] }; throws as the login does.
+   */
+  async tryNow({ confirmed = false } = {}) {
+    const started = confirmed ? 'confirmed' : 'user', todo = this.#relaysInUse().filter((r) => !this.#links.get(r)?.up && !this.#connecting.has(r));
+    for (const r of todo) {
+      this.#unwait(r);
+      clearTimeout(this.#timers.get(r));
+      this.#timers.delete(r);
+      this.#powFails.delete(r);
+      this.#attempts.delete(r);
+    }
+    if (!this.#started) { await this.#session(todo, {}, started); return { tried: todo }; }
+    for (const r of todo) {
+      try { await this.#connect(r, started); } catch (e) {
+        this.#emit({ type: 'error', relay: r, check: e.check ?? 'connect', detail: e.message, ...(e.next !== undefined && { next: e.next }) });
+        if (!(PERMANENT.has(e.check) || e.permanent)) this.#retry(r);
+        throw e;
+      }
+    }
+    return { tried: todo };
   }
 
   async stop() {
@@ -2856,6 +3097,7 @@ export class Carrier {
     clearInterval(this.#tick);
     for (const t of this.#timers.values()) clearTimeout(t);
     this.#timers.clear();
+    this.#powWaits.clear();
     await this.#drain();
     for (const link of [...this.#links.values()]) await this.#hangUp(link);
   }

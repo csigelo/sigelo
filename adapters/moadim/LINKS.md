@@ -16,6 +16,7 @@ shown to a model. **Inbox:** a linked contact's messages carry `link {id, purpos
 
 **Own.** B is yours too and accepts. `--tier-a`, `--tier-b`: how A files B, B files A (friend or
 quiet; else own). Already paired: the purpose is attached.
+**Names.** A files B under your name for it, or `--name-b <n>` (`peer_name`); B files A likewise (`--name-a`).
 
 **External.** B is your contact, not yours: A files it at friend (`--tier-a quiet`), 30 days, on
 your pairing's relay (`--relay`); `--tier-b` is refused. B takes its own operator's offers alone;

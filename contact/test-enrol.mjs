@@ -17,8 +17,9 @@ import { agentIdentitySeed, identitySeed, keeperRoot, recoveryCommitment } from 
 import { makeInvite } from './invite.mjs';
 import {
   DAY, ENROL_V, LABEL_ENROL, LABEL_IDENTITY, OPERATOR_CTX, OPERATOR_DAYS, PENDING_TTL, PINNED_CREATED, TYP_IDENTITY, TYP_REQUEST, accept as joinEnrol, checkIdentity, complete,
-  enrolKey, enrolPath, identityMessage, IDENTITY_PATH, issue, matches, operatorAttestation, operatorChain, operatorIdentity, pending, proofOf, request, workerChain, workerGenesis, workerIdentity,
+  enrolKey, enrolPath, identityMessage, IDENTITY_PATH, issue, matches, operatorAttestation, operatorChain, operatorIdentity, operatorLabel, pending, proofOf, request, workerChain, workerGenesis, workerIdentity,
 } from './enrol.mjs';
+import { fingerprint } from './short.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let count = 0;
@@ -105,6 +106,11 @@ const OPERATOR_0 = 'did:sigelo:z9VfjcNZXn1QfpRguA1uZTZYMDSffUZv4VAB69E5aYGDy';
   ok(checkOf(() => checkIdentity(identityMessage(id, makeInvite({ did: mallory.did, relay: 'relay.test', now }).text), opts)) === 'enrol_invite', 'an invite from another DID: enrol_invite');
   ok(checkOf(() => checkIdentity(identityMessage({ ...id, extra: 1 }, invite), opts)) === 'enrol_message' && checkOf(() => checkIdentity({ v: ENROL_V, typ: TYP_REQUEST }, opts)) === 'enrol_message',
     'another shape: enrol_message');
+  // How the worker files its operator: "operator", or the label the enrolment carries (never its own name).
+  ok(good.operator_name === 'operator' && checkIdentity(identityMessage(id, invite, 0, 'Ana'), opts).operator_name === 'Ana' && !('operator_name' in identityMessage(id, invite)),
+    'checkIdentity: the operator filed as "operator", or as the label the identity message carries (operator_name)');
+  ok(checkIdentity({ ...identityMessage(id, invite, 0), operator_name: 'a\u202eb' }, opts).operator_name === 'operator' && operatorLabel('x'.repeat(65)) === null && operatorLabel(' boss ') === 'boss',
+    'a label with control or bidi characters, or past 64: "operator" instead');
 
   // The pending file: 0600, entries gone after 24 hours.
   const d = mkdtempSync(join(tmpdir(), 'sigelo-enrol-unit-')), f = enrolPath(join(d, 'me.local.json'));
@@ -154,10 +160,13 @@ const failure = async (f) => { try { await f(); return { check: 'accepted', mess
 const workers = {};
 const placer = (label, wait = 20) => async (x, { operator }) => {
   const w = workers[label] = agent(label, x.identity);
+  w.operatorName = x.operator_name;
   return w.carrier.accept(x.invite, { name: operator.name, wait });
 };
 try {
   const owner = agent('owner'), vps = agent('vps-temp'), eve = agent('eve'), mallory = agent('mallory');
+  const { pairId: pid, unhex: uh } = await import('./kdf.mjs');
+  const pairWith0 = (a, d) => pid(uh(storeOf(a).contacts[d].pair_key, 32, 'k'));
   const co = owner.carrier;
 
   // Live: the operator issues and waits; the machine's temporary identity joins and waits.
@@ -174,6 +183,9 @@ try {
   ok(mc.placed.length === 1 && mc.placed[0].did === w0.did && mc.placed[0].status === 'connected' && mc.refused.length === 0, `the machine placed worker 0 and paired as it (${JSON.stringify(mc.placed)} ${JSON.stringify(mc.refused)})`);
   ok(op.delivered.length === 1 && op.delivered[0].temp === vps.did && op.placed.length === 1 && op.placed[0].did === w0.did && op.placed[0].tier === 'own' && op.refused.length === 0,
     `the operator sent worker 0 once to the temporary DID, then filed the worker own (${JSON.stringify(op.placed)} ${JSON.stringify(op.refused)})`);
+  ok(op.placed[0].verified === true && op.placed[0].words === fingerprint(pairWith0(owner, w0.did)) && op.held.length === 0,
+    'own enrolment: the worker that paired is the DID derived here (verified), its four words given only to show; no words gate asked');
+  ok(workers.vps?.operatorName === 'operator', 'the worker files its operator as "operator" by default');
   const w = workers.vps;
   ok(w.did === w0.did && w.s.secret === hex(agentIdentitySeed(K, 0, 0)), 'the machine runs as the derived DID, with the derived key');
   const vb = verify({ v: 'sigelo/0', typ: 'bundle', genesis: w.s.genesis, rotations: w.s.rotations, bindings: [], attestations: w.s.attestations, issuers: w.s.issuers }, Math.floor(Date.now() / 1000));
@@ -268,7 +280,29 @@ try {
   ok(pi.events.some((e) => e.type === 'paired' && e.did === pl.did && e.invite === inv5.id) && p2.sent.length === 1 && p3.delivered[0]?.temp === pl.did && p3.delivered[0].did === w4.did,
     `paired in a plain inbox (the event names the invite nonce only), then the request: answered (${JSON.stringify(p3.refused)})`);
   ok(!JSON.stringify(pi.events).includes(hex(readCode(inv5.code, Math.floor(Date.now() / 1000)).secret)), 'the paired event carries no invite secret');
-  for (const a of [alice, real, pl]) await a.carrier.stop();
+
+  // The optional words switch, and the operator's own label: worker 5, made with confirmWords and
+  // operatorName. The request waits (held) while confirm() says null; then yes: sent, placed, verified.
+  const inv6 = await issue({ carrier: co, file: fileOf(owner), i: 5, n: 0, name: 'held', keeper, operatorName: 'boss', confirmWords: true });
+  const hd = agent('held-temp'), w5 = workerChain(K, 5, 0, RECOVERY);
+  let asked = null, answer = null;
+  const gate = async (o) => { asked = o; return answer; };
+  await joinEnrol({ carrier: hd.carrier, file: fileOf(hd), code: inv6.short, name: 'owner', wait: 1, temp: 'held-temp' }).catch(() => {});
+  await complete({ carrier: co, file: fileOf(owner), keeper, confirm: gate });
+  await complete({ carrier: hd.carrier, file: fileOf(hd), temp: 'held-temp', place: placer('held', 1), wait: 10, until: (o) => o.sent.length > 0 });
+  const unasked = await complete({ carrier: co, file: fileOf(owner), keeper, wait: 10, until: (o) => o.held.length > 0 || o.delivered.length > 0 });
+  ok(unasked.held.length === 1 && unasked.delivered.length === 0, `the switch on and no confirm() at this run: the key waits, the request comes back held (${JSON.stringify(unasked.delivered)})`);
+  const feed = (msgs) => new Proxy(co, { get: (x, p) => (p === 'inbox' ? async () => ({ messages: msgs.splice(0), events: [], dropped: {} }) : typeof x[p] === 'function' ? x[p].bind(x) : x[p]) });
+  const h1 = await complete({ carrier: feed(unasked.held), file: fileOf(owner), keeper, confirm: gate });
+  ok(h1.held.length === 1 && h1.delivered.length === 0 && asked?.ask === true && asked.words === fingerprint(pairWith0(owner, hd.did)) && asked.i === 5,
+    `confirm() null (not yet): held again, nothing sent; it was asked with ask: true and the temporary pairing's words (${JSON.stringify(asked)})`);
+  answer = true;
+  const h2 = await complete({ carrier: feed(h1.held), file: fileOf(owner), keeper, confirm: gate });
+  const h3 = await complete({ carrier: hd.carrier, file: fileOf(hd), temp: 'held-temp', place: placer('held', 1), wait: 10, until: (o) => o.placed.length > 0 });
+  const h4 = await complete({ carrier: co, file: fileOf(owner), keeper, wait: 10, until: (o) => o.placed.length > 0 });
+  ok(h2.delivered[0]?.did === w5.did && h3.placed[0]?.did === w5.did && workers.held?.operatorName === 'boss' && h4.placed[0]?.did === w5.did && h4.placed[0].verified === true,
+    `yes: sent, placed (the worker files its operator as "boss", the label the enrolment carried), filed verified (${JSON.stringify(h4.placed)} ${JSON.stringify(h3.refused)})`);
+  for (const a of [alice, real, pl, hd]) await a.carrier.stop();
   for (const a of [owner, vps, eve, mallory, vps2, lz, ...Object.values(workers)]) await a.carrier.stop();
 } finally {
   await relay.close();

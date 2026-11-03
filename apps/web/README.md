@@ -19,7 +19,10 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | File | What |
 |---|---|
 | `index.html` | The page: `ui.js`, its CSS and icon, an import map (the one inline script), `app.mjs` |
-| `app.mjs` | Start: the platform, the identity, the router; sets `globalThis.sigeloLocal` for `ui.js` |
+| `app.mjs` | Start: `boot.mjs` with the page's globals; sets `globalThis.sigeloLocal` for `ui.js` |
+| `boot.mjs` | The start itself: the profiles, the picker, the active profile's platform, identity and router (or remote form, or first run); `sigeloLocal` with `profiles` |
+| `computers.mjs` | A remote profile's computers (design/profiles.md P2): the list, the migration of today's one as c1, keys and databases per computer, `other_operator` |
+| `profiles.mjs` | Profiles (design/profiles.md P1): the registry (`sigelo-app`, `profiles.json`), the migration of a single-profile install, per-profile storage names, the wipe |
 | `router.mjs` | The `local` backend: `call(method, path, body)` → `{status, body}`, `onChange`, `mode` |
 | `platform-web.mjs` | The browser platform of sigelo-contact (design/apps.md §4.2) |
 | `pow-worker.mjs` | The relay login's proof of work, in a module Worker |
@@ -31,6 +34,7 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `shell.mjs` | In the Android app: the remote form (a computer's page, on the LAN or over the relay), its pairing and `connectLan` |
 | `seed.mjs` | Restore from seed: `restoreInto` (derive with `contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
 | `create.mjs` | Create new identity: `createInto` (commit with `contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
+| `words.mjs` | The words password (design/apps-seed.md §8): the kept words (`contact/words-lock.mjs`, sealed as kind `words`), `sigeloLocal.words`, the guards of profile removal and the seat |
 | `copy.mjs` | The vendoring: walks the import graph, copies each file byte for byte, writes `vendor.json` |
 | `vendor.json` | Every vendored file, its source and SHA-256 (committed; `vendor/` is not) |
 | `test-web.mjs`, `test-shell.mjs` | The tests, in Node, through the same import map (`test-fakes.mjs`: IndexedDB, Worker) |
@@ -81,6 +85,26 @@ key from a script running in this origin (THREAT-MODEL §3.12). In the Android a
 sealer: the file is sealed under an AndroidKeyStore key instead (`identity.keystore`). Contacts, carrier state, history and the page's data are
 files of the platform under `app/me.local.*`, as `ui` keeps them beside `me.local.json`.
 
+## Profiles (profiles.mjs, boot.mjs)
+
+Up to 8, ids `p1`, `p2`, … never reused; the registry (IndexedDB `sigelo-app`: list, active id, no secret) is made at
+the first start from what is there (an identity: `words`; the WebView app's remote form: `remote`; nothing). Profile 1 keeps
+database `sigelo`, its localStorage keys and the keystore aliases of before; profile `<id>` has `sigelo-<id>`, keys
+`<id>:…` and its own aliases (platform-android.mjs `profileBridge`: every seal and open names it). Only the active
+profile is opened and connects. More than one at a start: the picker (welcome.mjs `pickProfile`), then the lock. A
+switch, an add and a removal ask the lock once; a removal is recorded first, then erased (database, storage keys,
+`forget-profile`), the active one at the next start. Me → Profiles in `ui.js` calls `sigeloLocal.profiles`.
+
+## Computers (computers.mjs, shell.mjs)
+
+A remote profile's computers (design/profiles.md P2), in its localStorage `sigelo-computers` (no secret): `c1` keeps the
+keys and database of before (`sigelo-control`, `sigelo-control-relay`, the profile's database); computer `<cid>` has
+`sigelo-control:<cid>`, `sigelo-control-relay:<cid>` and database `<profile database>-<cid>`, its blobs sealed naming it
+(platform-android.mjs `computerBridge`). `remoteBackend` opens the one in use; none, or one being added: the pairing
+screens (welcome.mjs `firstRun(…).connect()`, Cancel back). `pairComputer` refuses another operator (`other_operator`,
+LAN: `GET /api/me`; relay: the contact's chain), and the backend refuses the same at its first `GET /api/me`. Forget
+removes the material (a relay database at the next start); `sigeloLocal.computers` for ui.js.
+
 ## Restore from seed (seed.mjs)
 
 The welcome's second choice: one box checked as it is
@@ -109,8 +133,11 @@ the words shows the same), no Back (the Android shell swallows the system's, `se
 60 s. One button, "I have written them down". Then three words asked by number: wrong, the number named and
 asked again (the 25 again only on "Show the words again"); right, `commit` gives exactly a restore's files for those words (operator, K_1, this device
 FULL holding the seat, `created` and `restore_date` today, `made: "here"`), sealed as a restore,
-S zeroed, the page restarts. Nothing is stored before the check; there is no way to see the words
-again. Me: "Created on <day>; the 25 words are on your paper".
+S zeroed. Nothing is stored before the check. Then one screen, also at the end of a restore: "Want to be able to see
+your words again on this phone? Set a password." (a password, its repeat, Set, Skip). Skip: the words are never stored.
+Set: they are encrypted under the password (PBKDF2-SHA256, 1,000,000 rounds; `words.mjs`) and sealed as kind `words`;
+Me → Security shows them again after the lock and the password, changes or removes the password, and the same password
+guards removing the profile and taking the seat. Then the page restarts. Me: "Created on <day>; the 25 words are on your paper".
 
 ## Agents (pass A10b)
 
@@ -166,3 +193,8 @@ Restore from seed is tested in both files:
 - test-shell: the keystore seals of the identity and keeper under the FULL key; no word, key or
   K_1 in the clear in storage; nothing logged; the network refused during the restore;
   `FLAG_SECURE` and the clipboard; no "show seed".
+Profiles: test-shell (section 1d) migrates a single-profile install, adds, picks, switches (the bridge's unlock
+counted: once per switch, none at the new profile's start), renames, hits the limit, removes (words ticked, the
+name typed, the wipe of database, aliases and storage); test-web drives Me → Profiles in `ui.js`.
+Computers: test-shell (section 3b) runs three LAN pages (two of one operator, one of another): migration as c1, add,
+`other_operator`, Cancel, switch, forget; section 4 refuses a relay computer of another operator; test-web drives Me → Computers.

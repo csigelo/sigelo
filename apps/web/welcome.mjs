@@ -9,6 +9,8 @@
 //             number (wrong: which, try again; the 25 again only on "Show the words again")  4. setting up
 //   Restore   1. Your 25 words, checked as typed  2. When were they made? (optional) and the network;
 //             Advanced: name, another device keeps the seat, relay  3. setting up
+//   then      (create and restore, where the shell keeps words) Your words on this phone: a password and its
+//             repeat, Set or Skip (design/apps-seed.md §8); no Back: the identity is made
 //   Connect   1. The code the computer shows (8 characters; Advanced: its relay, a SIGELO:UI: or
 //             SIGELO:CTL: text, a QR)  2. Compare four words  then the computer's page
 // Back (the screen's button, the browser's, the system's: one history entry per screen) goes one screen
@@ -25,11 +27,15 @@
 //   discard()                          the drawn words dropped (the app stopped before the check)
 //   checkWords(text)                   → { count, ok, error }
 //   restore({ words, name, height, net, elsewhere, relay })  → { ok, message? }
+//   keepWords(words, password)         optional: the words kept encrypted under the password (after confirm or restore)
 //   connect(text)                      → { words } (over the relay: compare, then open()) | { opened: true }
 //   open()                             the computer's page, once the words match
 //   done(message?)                     the main screen (the shell loads it)
 //   scan(onText)                       optional: a node with the camera and image buttons
 //   secure(on, door), clipCopy(text, seconds), clipClear()   where the shell has them
+//   leave                              optional { label, run() }: a profile added and not set up yet, back to the others
+//   cancel                             optional { label, run() }: on the connect screen, a computer being added (connect())
+// pickProfile(box, o): the picker at a start with more than one profile (design/profiles.md §3), below.
 export const DEFAULT_RELAY = 'relay.sigelo.ai', CLIP_SECONDS = 60, NAME = /^[a-z0-9][a-z0-9_-]{0,19}$/;
 export const NAME_RULE = 'Lowercase letters, digits, _ and -, at most 20.';
 export const WORDS_ATTRS = Object.freeze({ autocomplete: 'off', autocorrect: 'off', autocapitalize: 'none', spellcheck: 'false', 'data-lpignore': 'true', 'data-1p-ignore': 'true' });
@@ -152,7 +158,7 @@ export function firstRun(box, api, { show = true } = {}) {
         button('Create a new identity', () => go(createName), true),
         button('Restore from 25 words', () => go(restoreWords)),
         button('Connect to my agent elsewhere', () => go(connectCode))),
-      adv));
+      adv, api.leave ? el('div', { className: 'bar' }, button(api.leave.label, () => api.leave.run())) : null));
     box.hidden = false;
   }
 
@@ -215,7 +221,9 @@ export function firstRun(box, api, { show = true } = {}) {
         return;
       }
       if (r?.wrong) { go(() => createCheck(`Word${r.wrong.length > 1 ? 's' : ''} ${r.wrong.join(', ')} did not match. Check your paper, then try again.`), { replace: true }); return; }
+      const made = C.words;
       C.words = null; C.vault = null; door = false; secure(false);
+      if (api.keepWords) { offerWords(made, () => api.done?.(r?.message)); return; }
       await api.done?.(r?.message);
     });
   }
@@ -264,10 +272,36 @@ export function firstRun(box, api, { show = true } = {}) {
       try { r = await api.restore({ words: R.words, name: R.name, height: R.height, net: R.net, elsewhere: R.elsewhere, relay: R.relay }); } catch (e) {
         current = restoreBirth; restoreBirth().say(`Not restored: ${e?.message ?? e}`); return;
       }
+      const typed = R.words;
       R.words = ''; secure(false);
+      if (api.keepWords) { offerWords(typed, () => api.done?.(r?.message)); return; }
       await api.done?.(r?.message);
     });
     return s;
+  }
+
+  // ---- the words password (design/apps-seed.md §8), optional: once, after a create's check or at the end of a
+  // restore. Set: the shell keeps the words encrypted under it (Me → Security shows them again); Skip: never stored.
+  const O = { words: null };
+  function offerWords(words, done) {
+    O.words = words; door = true;   // the identity is made: no way back to the check
+    const attrs = { autocomplete: 'new-password', autocapitalize: 'none', spellcheck: 'false' };
+    const pw = el('input', { type: 'password', attrs: { ...attrs, 'aria-label': 'Password' } }), again = el('input', { type: 'password', attrs: { ...attrs, 'aria-label': 'Repeat the password' } });
+    const set = button('Set', null, true), skip = button('Skip', null);
+    const s = screen({ title: 'Your words on this phone', lead: 'Want to be able to see your words again on this phone? Set a password.', back: false,
+      body: [el('label', { textContent: 'Password' }), pw, el('label', { textContent: 'Repeat it' }), again,
+        el('p', { className: 'muted', textContent: 'At least 8 characters. It guards your words, removing this identity and moving its seat. Skip: the words stay on your paper only.' })],
+      primary: set, secondary: skip });
+    const finish = async () => { O.words = null; door = false; pw.value = ''; again.value = ''; await done(); };
+    set.onclick = busy(set, s, async () => {
+      if ([...pw.value].length < 8) throw new Error('A password of at least 8 characters.');
+      if (pw.value !== again.value) throw new Error('The two passwords are not the same.');
+      skip.disabled = true; s.say('Encrypting your words…', false);
+      try { await api.keepWords(O.words, pw.value); } finally { skip.disabled = false; }
+      await finish();
+    });
+    skip.onclick = busy(skip, s, finish);
+    pw.focus?.();
   }
 
   // ---- connect: this phone controls an agent on another machine
@@ -283,7 +317,7 @@ export function firstRun(box, api, { show = true } = {}) {
     const s = screen({ title: 'Connect to my agent', lead: 'On the computer that runs your agent: sigelo-agent ui --remote --relay. Type the code it shows.',
       body: [code, fold('Advanced', el('label', { textContent: 'Its relay, if not the default' }), relay,
         el('label', { textContent: 'Or paste its SIGELO:UI: text (same network) or SIGELO:CTL: text' }), pasted, api.scan ? api.scan((t) => { pasted.value = t; void next.onclick(); }) : null)],
-      primary: next });
+      primary: next, secondary: api.cancel ? button(api.cancel.label, () => api.cancel.run()) : undefined });
     next.onclick = busy(next, s, async () => {
       const t = pasted.value.replace(/^\s+/, ''), c = code.value.trim().toUpperCase(), host = relay.value.trim().toLowerCase();
       let what;
@@ -316,6 +350,28 @@ export function firstRun(box, api, { show = true } = {}) {
   if (show) welcome();
   return {
     welcome: home, screen, go, button,
-    stop() { removeEventListener('popstate', onPop); if (C.words) quiet(api.discard); C.words = null; R.words = ''; secure(false); },
+    /** The connect screens alone, as the first screen (a remote profile adding a computer: design/profiles.md P2). */
+    connect() { stack.length = 0; current = connectCode; door = false; connectCode(); },
+    stop() { removeEventListener('popstate', onPop); if (C.words) quiet(api.discard); C.words = null; R.words = ''; O.words = null; secure(false); },
   };
+}
+
+// ---- profiles (design/profiles.md §3): the picker at a start with more than one
+export const KIND_LABEL = Object.freeze({ words: 'Your identity', remote: 'A computer\'s page' });
+/** A profile's second line: its four words (or not set up yet), what it holds. */
+export const profileSub = (p) => [p.words ?? (p.kind ? null : 'Not set up yet'), KIND_LABEL[p.kind] ?? null].filter(Boolean).join(' · ');
+/**
+ * The picker: the seal, a row per profile (name, four words, what it holds; the last used marked), one tap
+ * → resolves with its id. o: { profiles: [{id, name, kind, words}], active, seal }.
+ */
+export function pickProfile(box, { profiles, active, seal = 'icon.svg' }) {
+  return new Promise((resolve) => {
+    const rows = profiles.map((p) => el('button', { className: `row${p.id === active ? ' current' : ''}`, onclick: () => resolve(p.id), attrs: { 'data-profile': p.id } },
+      el('span', { className: 'main' }, el('div', { className: 'name', textContent: p.name }), el('div', { className: 'sub', textContent: profileSub(p) }),
+        p.id === active ? el('div', { className: 'sub', textContent: 'Last used' }) : null)));
+    box.replaceChildren(el('div', { className: 'welcome' }, el('header', {}, el('img', { className: 'seal small', src: seal, alt: '' }), el('h1', { textContent: 'Profiles' })),
+      el('p', { className: 'muted', textContent: 'Which one?' }), el('div', { className: 'list' }, rows)));
+    box.hidden = false;
+    globalThis.scrollTo?.(0, 0);
+  });
 }

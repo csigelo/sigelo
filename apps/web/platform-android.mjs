@@ -14,10 +14,16 @@
 //   → {op:"https", id, method, url, type?, body?}  ← {id, status, headers:{date, content-length, retry-after, content-type}, body}
 //   → {op:"tls", id, host, port}                   ← {id, stream}; then ← {s, data} … ← {s, end:true, error?}
 //   → {op:"write", id, s, data}                    ← {id} once written;   → {op:"close", s}
-//   → {op:"seal", id, kind, full?, data}           ← {id, data}   kind "identity" | "keeper" | "control" (AES-256-GCM, AndroidKeyStore;
-//                                                                 keeper: K_j of a restore from seed, under the FULL key)
-//   → {op:"open", id, kind, data}                  ← {id, data}
-//   → {op:"mode", id, mode}                        ← {id, mode}   the form at first start ("self" | "remote")
+//   → {op:"seal", id, kind, full?, profile?, computer?, data} ← {id, data}   kind "identity" | "keeper" | "words" | "control" (AES-256-GCM, AndroidKeyStore;
+//                                                                 keeper: K_j of a restore from seed, words: the kept words (words.mjs),
+//                                                                 both under the FULL key); profile
+//                                                                 (profiles.mjs, "p1" when absent): p1 under the three aliases of before,
+//                                                                 blob version 1; another under its own aliases, version 2 naming it;
+//                                                                 computer (computers.mjs, "c1" when absent): another computer's blob
+//                                                                 is version 2 naming profile and computer, under the profile's aliases
+//   → {op:"open", id, kind, profile?, computer?, data} ← {id, data} a blob of another profile or computer refused (sealed)
+//   → {op:"forget-profile", id, profile}           ← {id}         that profile's keystore aliases deleted (its blobs never open again)
+//   → {op:"mode", id, mode}                        ← {id, mode}   the active profile's form, once its first run commits ("self" | "remote")
 //   → {op:"wiped", id}                             ← {id}         the page has cleared its storage after a switch
 //   → {op:"secure", id, on, door?}                 ← {id}         FLAG_SECURE on the window (no screenshot, no recents
 //                                                                 thumbnail) while a seed screen is up; door: the system
@@ -42,7 +48,7 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share', 'unlock']);
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile']);
 export const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); };
 export const unb64 = (s) => { const t = atob(s), o = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) o[i] = t.charCodeAt(i); return o; };
 
@@ -112,8 +118,10 @@ function makeBridge(info, port) {
       return { status: r.status, headers: r.headers ?? {}, body: unb64(r.body ?? '') };
     },
     async tls(host, port) { checkNetwork(); const r = await request('tls', { host, port }); return stream(r.stream); },
-    async seal(bytes, { kind, full = false }) { return unb64((await request('seal', { kind, full, data: b64(bytes) })).data); },
-    async open(bytes, { kind }) { return unb64((await request('open', { kind, data: b64(bytes) })).data); },
+    async seal(bytes, { kind, full = false, profile = 'p1', computer }) { return unb64((await request('seal', { kind, full, profile, ...(computer && computer !== 'c1' && { computer }), data: b64(bytes) })).data); },
+    async open(bytes, { kind, profile = 'p1', computer }) { return unb64((await request('open', { kind, profile, ...(computer && computer !== 'c1' && { computer }), data: b64(bytes) })).data); },
+    /** A profile's keystore aliases deleted (profiles.mjs runWipes). */
+    async forgetProfile(profile) { await request('forget-profile', { profile }); },
     /** FLAG_SECURE on (a seed screen is up) or off; door: the system Back does nothing while on. */
     async secure(on, { door = false } = {}) { await request('secure', { on: on === true, door: on === true && door === true }); },
     /** The system clipboard emptied. */
@@ -125,6 +133,20 @@ function makeBridge(info, port) {
     async unlock() { await request('unlock'); },
   });
 }
+
+/** The bridge as profile <id> uses it: every seal and open names that profile (its aliases, its blobs only). */
+export const profileBridge = (bridge, profile) => Object.freeze({
+  ...bridge, profile,
+  seal: (bytes, o = {}) => bridge.seal(bytes, { ...o, profile }),
+  open: (bytes, o = {}) => bridge.open(bytes, { ...o, profile }),
+});
+
+/** The bridge as computer <cid> of a profile uses it (computers.mjs): its blobs name that computer too (c1: as before). */
+export const computerBridge = (bridge, computer) => (computer === 'c1' ? bridge : Object.freeze({
+  ...bridge, computer,
+  seal: (bytes, o = {}) => bridge.seal(bytes, { ...o, computer }),
+  open: (bytes, o = {}) => bridge.open(bytes, { ...o, computer }),
+}));
 
 /** The carrier's fetch (platform-node.mjs nodeFetch's shape) and remote-client.mjs's, through the shell. */
 export function bridgeFetch(bridge) {
