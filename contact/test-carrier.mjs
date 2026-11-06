@@ -1380,6 +1380,15 @@ try {
     const out = outOf();
     ok(refusals.join() === 'queued,queued,queued' && out.used.length === used0 && out.returned.length === 1 && stateOf(Pi).peers[O.original].outbox.length === 3,
       `three sends to a mailbox nobody holds: queued, kept unsealed; no prekey burned, the one the first began on put back (${refusals.join()}; used ${used0} → ${out.used.length}, returned ${out.returned.length})`);
+    // send's expires (a remote control's request or pushed state, contact/control.mjs TTL): past it the
+    // message leaves the outbox unsent, so a contact away does not come back to a backlog of them.
+    await refuses(() => piper.send('otto', 'x', { expires: 'soon' }), 'body', 'send expires not unix seconds → body');
+    const xr = await piper.send('otto', 'short-lived', { expires: t + 300 });
+    const four = stateOf(Pi).peers[O.original].outbox.length;
+    t += 600;
+    await piper.inbox();
+    ok(xr.status === 'queued' && four === 4 && stateOf(Pi).peers[O.original].outbox.length === 3 && !JSON.stringify(stateOf(Pi)).includes('short-lived'),
+      `a message sent with expires, queued (nobody holds the mailbox): past it, dropped from the outbox unsent (${xr.status}, ${four} → ${stateOf(Pi).peers[O.original].outbox.length})`);
     t += 600;
     await otto.inbox(); await piper.inbox();
     ok(stateOf(Pi).peers[O.original].outbox.length === 0, 'otto back: piper\'s next inbox sends the three');

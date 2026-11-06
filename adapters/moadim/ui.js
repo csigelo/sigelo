@@ -1634,8 +1634,11 @@
     polling = false;
     // A refusal with a reason (the four words not confirmed on the computer yet, say) is said as it is, and
     // the screen comes back once it passes; a bare 403 is a page opened without its key.
-    if (S.fatal?.status === 403) { put(app, h('p', { class: 'card err' }, SHELL || LOCAL || S.fatal.check ? S.fatal.message : 'This page has no key: open the link sigelo-agent ui printed.')); return; }
-    if (was?.status === 403) { show(S.view, undefined, true); return; }
+    // A remote control with no answer from its computer (contact/control.mjs: no lease) says so, and asks
+    // nothing more over the relay until it is due to try again.
+    const held = (e) => e?.status === 403 || e?.check === 'not_connected';
+    if (held(S.fatal)) { put(app, h('p', { class: 'card err' }, SHELL || LOCAL || S.fatal.check ? S.fatal.message : 'This page has no key: open the link sigelo-agent ui printed.')); return; }
+    if (held(was)) { show(S.view, undefined, true); return; }
     try { await S.update(); } catch {}
     tabCount();
   }

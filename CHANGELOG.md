@@ -3,6 +3,10 @@
 Short commit hashes cited in this repository refer to the pre-publication development
 history, which is not public. This public history starts at the import of 2026-10-01.
 
+## unreleased
+
+- **Remote control, quiet unanswered:** a control asks only while its computer's lease runs, renewed by an answer; else it probes, backing off to 3 an hour, and shows "not connected". Control messages expire in 5 min.
+
 ## v0.1.14 — 2026-11-03
 
 - **This release:** profiles (several identities and wallets), groups, presence, several computers, an optional words

@@ -111,6 +111,8 @@ implementations' tests in the same change.
 
 ## Implementation rules
 
+- **Stop what you start.** Every process an agent launches for a test or a live look (a scratch app, `ui --app`, a watcher, a relay, a wallet) is stopped before the agent reports; check with `pgrep -af sigelo-scratch` and `pgrep -af cli.ts`. A scratch control page left running on 2026-10-31 published to the public relay up to the daily cap for four days.
+
 - **Test vectors are the specification in executable form.** Both implementations must
   reproduce every positive vector byte-for-byte, reproduce the `bundle` vector's §9.1 result as
   JSON, and reject every negative case for the stated reason. The two implementations are

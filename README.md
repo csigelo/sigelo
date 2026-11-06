@@ -1,7 +1,5 @@
 # sigelo
 
-English | [简体中文](README.zh-CN.md)
-
 An ID card for AI agents, from a key the agent holds. The agent:
 
 - **proves who it is** to any site or agent offline, in one challenge: no server, no account;
@@ -24,6 +22,27 @@ Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). M
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/csigelo/sigelo) [![npm-provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/sigelo-mcp)
 
 Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhUkH7FebKRGj8rf96SdoLa`) under a human owner, `csigelo`. No third party has audited it yet.
+
+## Get it
+
+- **Phone app (Android):** the signed APK on the [latest release](https://github.com/csigelo/sigelo/releases/latest) (`sigelo-<version>.apk`; check it with `release/apk-check.sh`). F-Droid: coming.
+- **Agent on a computer or server:** `npm i -g sigelo-agent` ([QUICKSTART.md](QUICKSTART.md)).
+- **MCP server for Claude Code, Codex, Cursor, Open WebUI and others:** `npx -y sigelo-mcp` ([frameworks](https://sigelo.io/frameworks.html)).
+- **Linux phone or desktop (GTK):** [apps/gtk](apps/gtk).
+
+## What is where
+
+| Directory | What |
+|---|---|
+| `SPEC.md`, `test-vectors.json`, `schema/` | the protocol and its executable vectors |
+| `ts/`, `go/` | the two reference implementations (verifier, library) |
+| `contact/` | pairing, messages, groups, links, transfers (the library) |
+| `adapters/moadim/` | the agent CLI `sigelo-agent` and the computer page |
+| `integrations/mcp/`, `plugins/` | the MCP server and the Claude Code plugin |
+| `apps/` | the phone apps (Android, GTK) and the shared page |
+| `spend/`, `kit/` | the Monero keeper and the recovery kit |
+| `relay/` | the relay ([its own repository](https://github.com/csigelo/sigelo-relay)) |
+| `release/` | how releases are built, signed and checked |
 
 ## Use it
 

@@ -17,7 +17,9 @@
  * pushes `events` (GET /api/state?since=<last pushed seq>) when the state changed, at most one a
  * second, never asked for; past 64 KiB as a summary flagged `truncated` (the app pulls the rest).
  * A control holds a bucket of BURST requests refilled at RATE a second; one over it is answered
- * 429 rate once in ten seconds, then dropped. The seat elsewhere (DEVICES.md):
+ * 429 rate once in ten seconds, then dropped. Every message carries exp (contact/control.mjs TTL): a request
+ * past it is dropped unanswered (a dead control's backlog runs nothing), and each answer and push is sent with
+ * that expiry, so the carrier drops it unsent past it. The seat elsewhere (DEVICES.md):
  * 409 seat_elsewhere. Every request, answer and event is a relay message: requests count in the
  * control's day and sit in the operator's queue; answers and events in the operator's day (pooled
  * if Pro) and the control's queue.
@@ -32,15 +34,16 @@ import * as keychain from './sigelo-agent-keychain.ts';
 import type { Store } from './sigelo-agent.ts';
 
 interface Ctl {
-  ANSWER_MAX: number; LEASE: number; RATE: number; BURST: number;
+  ANSWER_MAX: number; LEASE: number; RATE: number; BURST: number; TTL: number;
+  stale(c: unknown, nowS: number): boolean;
   readControlText(t: string): { code: string; relay: string | null };
   newControlIdentity(): { secret: string; genesis: object } & Record<string, unknown>;
   makeControl(o: { operator: string; timeout?: number }): { attach(c: unknown): void; onEvent(e: unknown): void; call(m: string, p: string, b?: unknown): Promise<{ status: number; body: unknown }>; stop(): void };
   bucket(o: { now: () => number }): { take(): boolean };
   controlText(short: string, host?: string): string;
   readControl(c: unknown): Record<string, unknown>;
-  responseMessage(o: { id: string; status: number; body: unknown }): object;
-  eventsMessage(o: { seq: number; since: number; state: unknown }): object;
+  responseMessage(o: { id: string; status: number; body: unknown; exp?: number }): object;
+  eventsMessage(o: { seq: number; since: number; state: unknown; exp?: number }): object;
   capState(st: unknown): unknown;
 }
 export interface RelayCarrier {
@@ -49,7 +52,7 @@ export interface RelayCarrier {
   cancelInvite(code: string): Promise<unknown>;
   answeredBy(nonce: string): string | null;
   contacts(): { contacts: { did: string; revoked: boolean; fingerprint: string | null }[] };
-  send(to: string, content: object, o: { label: string; internal: symbol }): Promise<unknown>;
+  send(to: string, content: object, o: { label: string; internal: symbol; expires?: number }): Promise<unknown>;
   forget(did: string): Promise<unknown>;
 }
 export interface DevMessage { from: string; content: unknown }
@@ -79,7 +82,7 @@ export async function relayControls(o: {
   /** The seat's holder when it is elsewhere, else null. */
   seatElsewhere(): string | null;
   lib: { DEVICE_LABEL: string; DEVICE_SEND: symbol; DEFAULT_RELAY: string }; nonceOf(code: string): string;
-  note(s: string): void; now?: () => number;
+  note(s: string): void; now?: () => number; after?: (f: () => void, ms: number) => unknown; cancel?: (t: unknown) => void;
 }): Promise<Relays> {
   const C = await contactModule<Ctl>('control');
   const { carrier: c, controls, save, lib } = o, nowMs = o.now ?? Date.now, nowS = (): number => Math.floor(nowMs() / 1000);
@@ -88,15 +91,17 @@ export async function relayControls(o: {
   // In memory: the lease, what was pushed last, the bucket, when a refusal was told.
   const live = new Map<string, { lease: number; pushed: number; digest: string; bucket: { take(): boolean }; told: number }>();
   const liveOf = (d: string) => { let l = live.get(d); if (!l) { l = { lease: 0, pushed: 0, digest: '', bucket: C.bucket({ now: nowMs }), told: -Infinity }; live.set(d, l); } return l; };
-  const send = (to: string, content: object): Promise<unknown> => c.send(to, content, { label: lib.DEVICE_LABEL, internal: lib.DEVICE_SEND });
+  const after = o.after ?? ((f: () => void, ms: number): unknown => setTimeout(f, ms)), cancel = o.cancel ?? ((t: unknown): void => clearTimeout(t as ReturnType<typeof setTimeout>));
+  // Every answer and push lives TTL (contact/control.mjs): dropped unsent past it, unread when late.
+  const send = (to: string, content: object): Promise<unknown> => c.send(to, content, { label: lib.DEVICE_LABEL, internal: lib.DEVICE_SEND, expires: nowS() + C.TTL });
   const answer = async (to: string, id: string, status: number, body: unknown): Promise<void> => {
     let b = body;
     if (JSON.stringify(b).length > C.ANSWER_MAX) [status, b] = [413, { error: { check: 'too_large', message: `the answer is longer than ${C.ANSWER_MAX} bytes, more than one relay message: ask for less (since)` } }];
-    try { await send(to, C.responseMessage({ id, status, body: JSON.parse(JSON.stringify(b)) })); } catch (e) { o.note(`remote: an answer to a control not sent (${(e as Error).message})`); }
+    try { await send(to, C.responseMessage({ id, status, body: JSON.parse(JSON.stringify(b)), exp: nowS() + C.TTL })); } catch (e) { o.note(`remote: an answer to a control not sent (${(e as Error).message})`); }
   };
 
   // stopped: the page closed; nothing more is sent or saved from here (ui.json may be another's by now).
-  let timer: ReturnType<typeof setTimeout> | null = null, pushing = Promise.resolve(), stopped = false;
+  let timer: unknown = null, pushing = Promise.resolve(), stopped = false;
   // Volatile fields left out of the comparison: a state only "changes" when something in it did.
   const digestOf = (st: Record<string, unknown>): string => JSON.stringify({ ...st, now: 0, me: { ...(st['me'] as object), pow: (st['me'] as { pow?: unknown })?.pow ? 1 : 0 } });
   async function push(): Promise<void> {
@@ -113,12 +118,12 @@ export async function relayControls(o: {
       const s = scrub(x.scope, 'GET', '/api/state', st) as Record<string, unknown> & { seq: number }, d = digestOf(s);
       if (d === l.digest) continue;
       // Past PUSH_MAX a summary goes (contact/control.mjs capState): the app pulls the rest by a request.
-      try { await send(x.did, C.eventsMessage({ seq: s.seq, since: l.pushed, state: JSON.parse(JSON.stringify(C.capState(s))) })); l.pushed = s.seq; l.digest = d; } catch (e) { o.note(`remote: events to a control not sent (${(e as Error).message})`); }
+      try { await send(x.did, C.eventsMessage({ seq: s.seq, since: l.pushed, state: JSON.parse(JSON.stringify(C.capState(s))), exp: nowS() + C.TTL })); l.pushed = s.seq; l.digest = d; } catch (e) { o.note(`remote: events to a control not sent (${(e as Error).message})`); }
     }
   }
   const changed = (): void => {
     if (stopped || timer !== null || !relays().some(([, x]) => x.did !== null && (live.get(x.did)?.lease ?? 0) > nowS())) return;
-    timer = setTimeout(() => { timer = null; pushing = pushing.then(push).catch(() => {}); }, 1000);
+    timer = after(() => { timer = null; pushing = pushing.then(push).catch(() => {}); }, 1000);
   };
 
   async function revoke(name: string): Promise<boolean> {
@@ -196,6 +201,9 @@ export async function relayControls(o: {
         let q: { id: string; method: string; path: string; body?: Record<string, unknown> };
         try { q = C.readControl(m.content) as unknown as typeof q; } catch { continue; }
         if ((q as { typ?: string }).typ !== 'request') continue;
+        // Past its exp: a control's backlog, kept at the relay while this page was away, runs nothing
+        // and opens no lease (the app gave up on it long ago).
+        if (C.stale(q, nowS())) continue;
         const l = liveOf(m.from);
         if ((m as DevMessage & { over?: boolean }).over) { await answer(m.from, q.id, 429, { error: { check: 'rate', message: `more than ${C.BURST} requests at once, or more than ${C.RATE} a second: slow down` } }); continue; }
         if (!x.confirmed) { await answer(m.from, q.id, 403, { error: { check: 'words', message: `the four words of ${name} are not confirmed on the computer yet: compare them there` } }); continue; }
@@ -220,7 +228,7 @@ export async function relayControls(o: {
       }
     },
     changed,
-    stop() { stopped = true; if (timer !== null) clearTimeout(timer); timer = null; },
+    stop() { stopped = true; if (timer !== null) cancel(timer); timer = null; },
   };
 }
 

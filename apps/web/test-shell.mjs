@@ -1225,7 +1225,12 @@ try {
       const early = await be.call('GET', '/api/me');
       ok(early.status === 403 && early.body.error.check === 'words' && be.mode().kind === 'remote' && be.mode().via === 'relay', `relay: before the words are confirmed on the computer: 403 words (${early.status})`);
       await pg.relay.confirm('phone', true);
-      const me = await be.call('GET', '/api/me'), st = await be.call('GET', '/api/state');
+      // 403 words opened no lease (contact/control.mjs): not_connected, unsent, until the next probe (PROBE_MIN, 15 s).
+      const held2 = await be.call('GET', '/api/me');
+      ok(held2.status === 503 && held2.body.error.check === 'not_connected', `relay: after 403 words, no lease: not_connected here until the next probe (${held2.status})`);
+      let me = held2;
+      for (const end = Date.now() + 25_000; me.body?.error?.check === 'not_connected' && Date.now() < end;) { await new Promise((r) => setTimeout(r, 250)); me = await be.call('GET', '/api/me'); }
+      const st = await be.call('GET', '/api/state');
       ok(me.status === 200 && me.body.did === pr.operator && st.status === 200 && Array.isArray(st.body.groups.contacts), `relay: confirmed: GET /api/me and /api/state over the relay (${me.status} ${st.status})`);
       let sends = 0, pushes = 0;
       const send0 = be.carrier.send.bind(be.carrier);

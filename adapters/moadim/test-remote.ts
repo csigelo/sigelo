@@ -400,6 +400,141 @@ else {
   ctl.stop();
 }
 
+// ── quiet without a lease (2026-11: an app left open four days against a computer whose page was gone
+// published 3,000 a day, the free day's cap, none delivered): an hour of the page's 2 s poll on a fake clock.
+// busy(): real work the clock waits for between two timers (a real carrier's publish).
+const fakeClock = (busy: () => boolean = () => false) => {
+  let T = Date.now(), n = 0, q: { at: number; f: () => void; n: number; dead: boolean }[] = [];
+  const settle = async () => { for (let i = 0; i < 6 || busy(); i++) await new Promise((r) => (i < 6 ? setImmediate(r) : setTimeout(r, 10))); };
+  return {
+    now: () => T, defer: (f: () => void) => { q.push({ at: T, f, n: n++, dead: false }); },
+    after: (f: () => void, ms: number) => { const t = { at: T + ms, f, n: n++, dead: false }; q.push(t); return t; },
+    cancel: (t: { dead: boolean } | null) => { if (t) t.dead = true; },
+    async run(ms: number) {
+      const end = T + ms;
+      for (;;) {
+        await settle();
+        q = q.filter((t) => !t.dead).sort((a, b) => a.at - b.at || a.n - b.n);
+        if (q.length === 0 || q[0]!.at > end) break;
+        const t = q.shift()!; T = Math.max(T, t.at); t.f();
+      }
+      T = end;
+    },
+  };
+};
+const HOUR = 3600_000;
+// The page as ui.js polls it: every 2 s GET /api/state, then the Agents view's GET /api/agents/workers
+// (none while it is held: 403, not_connected).
+const pollPage = (k: ReturnType<typeof fakeClock>, ctl: any, workers = true) => {
+  let polling = false, on = true;
+  const poll = async () => {
+    if (polling) return;
+    polling = true;
+    const r = await ctl.call('GET', '/api/state?since=0');
+    polling = false;
+    if (r.status === 403 || r.body?.error?.check === 'not_connected') return;
+    if (workers) await ctl.call('GET', '/api/agents/workers');
+  };
+  const tick = () => { if (!on) return; void poll(); k.after(tick, 2000); };
+  tick();
+  return () => { on = false; };
+};
+{
+  const C = await import('sigelo-contact/control.mjs' as string) as any;
+  const op = 'did:sigelo:zOperator', page = pollPage;
+  const app = (answer: ((c: any) => object | null) | null) => {
+    const k = fakeClock(), inbox: { from: string; content: unknown }[] = [], sent: any[] = [];
+    let ctl: any = null;
+    const car = { takeDevices: () => inbox.splice(0), send: async (_to: string, c: any, o: { expires?: number }) => {
+      sent.push({ c, expires: o.expires });
+      const a = answer?.(c);
+      if (a) k.after(() => { inbox.push({ from: op, content: a }); ctl.onEvent({ type: 'device' }); }, 500);
+      return { status: 'sent' };
+    } };
+    ctl = C.makeControl({ operator: op, timeout: 30_000, now: k.now, after: k.after, cancel: k.cancel, defer: k.defer });
+    ctl.attach(car);
+    return { k, ctl, sent, inbox };
+  };
+  // Nobody answers (the computer's page gone): before the fix every poll was a request, 239 in the hour.
+  const gone = app(null);
+  page(gone.k, gone.ctl);
+  await gone.k.run(HOUR);
+  const h1 = gone.sent.length;
+  await gone.k.run(3 * HOUR);
+  const h4 = gone.sent.length, held = await gone.ctl.call('GET', '/api/me');
+  ok('control, nobody answering: an hour of the page\'s 2 s poll publishes ≤ 12 requests (the probes, backing off 15 s → 20 min), then ≤ 4 an hour; no lease',
+    h1 >= 1 && h1 <= 12 && h4 - h1 <= 12 && gone.ctl.connected === false, JSON.stringify([h1, h4]));
+  ok('control, nobody answering: a call between probes → 503 not_connected here (no relay message), the wait said', held.status === 503 && held.body.error.check === 'not_connected'
+    && /trying again in \d+ s/.test(held.body.error.message) && gone.sent.length === h4, JSON.stringify(held));
+  const t0 = Math.floor(gone.k.now() / 1000);
+  ok('control: each request carries exp, and the carrier is told to drop it unsent past it (now + TTL, minutes)', C.TTL === 300
+    && gone.sent.every((s: any) => Number.isSafeInteger(s.c.exp) && s.expires === s.c.exp && s.c.exp <= t0 + C.TTL), JSON.stringify(gone.sent.at(-1)));
+  // The computer answers again: the next probe takes the lease, and while open one request per RENEW (5 min).
+  let st = 0;
+  const back = app((c) => (c.typ === 'request' ? C.responseMessage({ id: c.id, status: 200, body: { seq: ++st, me: {}, groups: {}, events: [] } }) : null));
+  page(back.k, back.ctl, false);
+  await back.k.run(HOUR);
+  ok('control, the computer answering: the lease taken by its answer; the poll read locally, ≤ 13 requests an hour (one per RENEW)', back.ctl.connected === true && back.sent.length >= 12 && back.sent.length <= 13, String(back.sent.length));
+  // The Agents view open, the computer answering (its GET /api/agents/workers each 2 s poll was a request,
+  // ~1,800 an hour): the list kept KEEP_GET (30 s), asked again after a POST or a push whose seq moved.
+  const asks = (x: { sent: any[] }, p: string) => x.sent.filter((s: any) => s.c.typ === 'request' && s.c.path.startsWith(p)).length;
+  const live = app((c) => (c.typ !== 'request' ? null : C.responseMessage({ id: c.id, status: 200, body: c.path.startsWith('/api/state') ? { seq: 7, me: {}, groups: {}, events: [] } : c.path.startsWith('/api/agents/workers') ? { keeper: true, workers: [] } : {} })));
+  page(live.k, live.ctl);
+  await live.k.run(HOUR);
+  const perHour = live.sent.length, w1 = asks(live, '/api/agents/workers');
+  live.inbox.push({ from: op, content: C.eventsMessage({ seq: 8, since: 7, state: { seq: 8, me: {}, groups: {}, events: [] }, exp: Math.floor(live.k.now() / 1000) + C.TTL }) });
+  live.ctl.onEvent({ type: 'device' });
+  await live.k.run(3000);
+  const w2 = asks(live, '/api/agents/workers');
+  const renamed = live.ctl.call('POST', '/api/agents/rename', { worker: 1, name: 'x' });
+  await live.k.run(3000);
+  await renamed;
+  const w3 = asks(live, '/api/agents/workers');
+  ok('control, the Agents view open, the computer answering: ≤ 150 requests an hour (the list every 30 s, the 5-min renewals); a push whose seq moved, and a POST, ask the list again at once',
+    perHour <= 150 && w1 >= 100 && w1 <= 125 && asks(live, '/api/state') <= 13 && w2 === w1 + 1 && w3 === w2 + 1, JSON.stringify({ perHour, w1, w2, w3 }));
+  // Refused words (never confirmed on the computer): answered, but no lease: backed off as nobody answering.
+  const words = app((c) => C.responseMessage({ id: c.id, status: 403, body: { error: { check: 'words', message: 'not confirmed' } } }));
+  page(words.k, words.ctl);
+  await words.k.run(HOUR);
+  ok('control, its words never confirmed: 403 words opens no lease; ≤ 12 requests in the hour', words.sent.length >= 1 && words.sent.length <= 12 && words.ctl.connected === false, String(words.sent.length));
+  // A pushed state past its exp (kept at the relay while the app was away) is not taken.
+  const late = app(null);
+  late.inbox.push({ from: op, content: C.eventsMessage({ seq: 5, since: 0, state: { seq: 5 }, exp: Math.floor(late.k.now() / 1000) - 1 }) });
+  late.ctl.onEvent({ type: 'device' });
+  await late.k.run(1000);
+  ok('control: an events message past its exp is dropped unread', late.ctl.state === null);
+  for (const x of [gone, back, live, words, late]) x.ctl.stop();
+
+  // The computer's side: pushes to a control that stopped reading go only while the lease its last
+  // request opened runs (10 minutes, ≤ 1 a second), then none; a request past its exp opens none.
+  const { relayControls } = await import('./sigelo-agent-control.ts');
+  const k = fakeClock(), did = 'did:sigelo:zControl', out: { to: string; c: any; expires?: number }[] = [];
+  let seq = 0;
+  const controls: Record<string, any> = { phone: { relay: true, scope: 'read', created: 0, last_used: null, did, nonce: null, exp: null, words: 'a b c d', confirmed: true } };
+  const R = await relayControls({
+    carrier: { relay: 'relay.test', invite: async () => { throw new Error('no'); }, cancelInvite: async () => ({}), answeredBy: () => null, contacts: () => ({ contacts: [] }),
+      send: async (to: string, c: object, o: { expires?: number }) => { out.push({ to, c, expires: o.expires }); return { status: 'sent' }; }, forget: async () => ({}) },
+    controls, save: () => {}, routes: { 'GET /api/state': true }, dispatch: async () => [200, { seq: ++seq, now: 0, me: {}, pending: { invites: [] }, changed: seq }],
+    serial: (f) => f(), seatElsewhere: () => null, lib: { DEVICE_LABEL: 'sigelo-device/1', DEVICE_SEND: Symbol('x'), DEFAULT_RELAY: 'relay.test' }, nonceOf: () => 'n', note: () => {},
+    now: k.now, after: k.after, cancel: k.cancel as (t: unknown) => void,
+  });
+  const nowS = () => Math.floor(k.now() / 1000), rq = (exp: number) => ({ from: did, content: C.requestMessage({ id: '0123456789abcdef', method: 'GET', path: '/api/state', exp }) });
+  await R.handle([rq(nowS() - 1)]);
+  const tick = () => { R.changed(); k.after(tick, 1000); };
+  tick();
+  await k.run(120_000);
+  ok('computer: a request past its exp → no answer, no lease, nothing pushed', out.length === 0, String(out.length));
+  await R.handle([rq(nowS() + C.TTL)]);
+  await k.run(HOUR);
+  const answers = out.filter((x) => x.c.typ === 'response').length, pushes = out.filter((x) => x.c.typ === 'events'), lastAt = pushes.at(-1)?.c.exp - C.TTL;
+  ok('computer: a control that stopped reading after one request: one answer, then pushes only within its lease (≤ 600, the state changing every second), none after; each with exp',
+    answers === 1 && pushes.length > 0 && pushes.length <= C.LEASE && lastAt - (nowS() - 3600) <= C.LEASE + 2 && out.every((x) => x.expires === x.c.exp && Number.isSafeInteger(x.c.exp)), JSON.stringify([answers, pushes.length]));
+  const n = out.length;
+  await k.run(HOUR);
+  ok('computer: its lease over, the next hour publishes nothing to it', out.length === n, String(out.length - n));
+  R.stop();
+}
+
 // ── over the relay (design/apps.md §6.3): a control identity, SIGELO:CTL:, request/response/events
 if (!hasRelay()) console.log(`SKIP remote over the relay: ${NO_RELAY}`);
 else {
@@ -424,10 +559,12 @@ else {
     const opDid = r.contact?.did as string;
     ctl = C.makeControl({ operator: opDid, timeout });
     await car.start(); ctl.attach(car);
-    let sent = 0;
+    let sent = 0, flying = 0;
     const send = car.send.bind(car);
-    car.send = (...a: unknown[]) => { sent++; return send(...a); };
-    const x = { car, ctl, did: didOf(idf.genesis), words: car.contacts().contacts.find((c: { did: string }) => c.did === opDid)?.fingerprint as string, status: r.status, get sent() { return sent; } };
+    car.send = async (...a: unknown[]) => { sent++; flying++; try { return await send(...a); } finally { flying--; } };
+    const x = { car, ctl, did: didOf(idf.genesis), words: car.contacts().contacts.find((c: { did: string }) => c.did === opDid)?.fingerprint as string, status: r.status, get sent() { return sent; }, get flying() { return flying; },
+      // A client of its own on the same carrier (a fake clock's hooks): the one before stopped.
+      use(extra: object) { ctl.stop(); ctl = x.ctl = C.makeControl({ operator: opDid, timeout, ...extra }); ctl.attach(car); return ctl; } };
     apps.push(x);
     return x;
   };
@@ -454,7 +591,11 @@ else {
     ok('relay: Confirm on the page → confirmed (ui.json), nothing pending; a second answer → 404 control_unknown (the first stands)', cf.status === 200 && JSON.parse(cf.body).confirmed === true
       && uiJson2(Pd).controls['phone']?.confirmed === true && JSON.parse((await http(pr.port, 'GET', '/api/controls', T3(pr))).body).pending.length === 0 && cf2.status === 404, cf.body + cf2.body);
     ok('relay: /api/controls* in no remote scope (never answered over the LAN or the relay)', ![...rm.SCOPES.all].some((x) => x.includes('/api/controls')));
-    const me = await a.ctl.call('GET', '/api/me'), localMe = JSON.parse((await http(pr.port, 'GET', '/api/me', T3(pr))).body);
+    // 403 words opened no lease: until the next probe (PROBE_MIN after it) the app says not_connected, unsent.
+    const sentW = a.sent, wait = await a.ctl.call('GET', '/api/me');
+    ok('relay: after 403 words, no lease: the next call → 503 not_connected here, no relay message', wait.status === 503 && wait.body.error.check === 'not_connected' && a.sent === sentW, JSON.stringify(wait));
+    const me = (await until(async () => { const r = await a.ctl.call('GET', '/api/me'); return r.body?.error?.check === 'not_connected' ? undefined : r; }, (C.PROBE_MIN + 5) * 1000))!;
+    const localMe = JSON.parse((await http(pr.port, 'GET', '/api/me', T3(pr))).body);
     ok('relay: confirmed: GET /api/me over the relay → the local answer (JCS: the same value)', me.status === 200 && canonicalize(me.body) === canonicalize(localMe), JSON.stringify(me).slice(0, 200));
     const st = await a.ctl.call('GET', '/api/state');
     ok('relay: GET /api/state → 200; the control\'s own contact is not in the page (groups, contactOf)', st.status === 200 && !JSON.stringify(st.body.groups).includes(a.did)
@@ -511,6 +652,9 @@ else {
     unlinkSync(lp);
     ok('relay: the seat elsewhere → 409 seat_elsewhere naming the holder (the app shows the banner)', se.status === 409 && se.body.error.check === 'seat_elsewhere' && se.body.error.message.includes('other') && se2.status === 409, JSON.stringify([se, se2]));
     // The rate cap: a burst of 10, then one 429 told, the rest dropped.
+    // The 409 above opened no lease: the next probe (PROBE_MIN later) takes it again, then the burst.
+    await until(async () => ((await all.ctl.call('GET', '/api/me')).status === 200 ? true : undefined), (C.PROBE_MIN + 5) * 1000);
+    await new Promise((r) => setTimeout(r, 2000));   // its token back in the bucket
     const many = await Promise.all(Array.from({ length: 14 }, () => all.ctl.call('GET', '/api/me')));
     const n200 = many.filter((r) => r.status === 200).length, n429 = many.filter((r) => r.status === 429).length;
     ok('relay: rate cap: of 14 at once, about 10 answered, one 429 rate, the rest dropped (no answer)', n200 >= 9 && n200 <= 12 && n429 === 1 && many.find((r) => r.status === 429)?.body.error.check === 'rate', JSON.stringify(many.map((r) => r.status)));
@@ -550,6 +694,23 @@ else {
     pr = await ui.startUi({ identity: op, agents: join(Pd, 'agents'), carrier });
     const revoked = await chat.ctl.call('GET', '/api/me');
     ok('relay: ui --revoke-control tab (page stopped): forgotten; restarted, its requests unanswered', gone && revoked.status !== 200 && uiJson2(Pd).controls['tab'] === undefined, JSON.stringify(revoked));
+    // The four-day runaway, over the relay: a confirmed control, the computer's page then gone, an hour of
+    // the page's poll (fake clock; the carrier real). Before the fix each poll was a request: 239 in the hour.
+    // (desk, paired and confirmed above: one more short code would pass the relay's 10 an hour.)
+    const qx = all, qk = fakeClock(() => qx.flying > 0);
+    qx.use({ timeout: 30_000, now: qk.now, after: qk.after, cancel: qk.cancel });
+    const first = await qx.ctl.call('GET', '/api/me');
+    await pr.close();
+    const stored = (): number => { try { return (relay as any).db.raw.prepare('SELECT count(*) AS n FROM messages').get().n as number; } catch { return -1; } };
+    const s0 = qx.sent, m0 = stored();
+    const quit = pollPage(qk, qx.ctl);
+    await qk.run(HOUR);
+    quit();
+    const s1 = qx.sent - s0, m1 = stored() - m0;
+    ok('relay: a control whose computer\'s page is gone: an hour of its page\'s poll publishes ≤ 12 requests (probes, backing off), each stored at the relay; then "not connected" shown, unsent',
+      first.status === 200 && s1 >= 1 && s1 <= 12 && (m0 < 0 || m1 <= s1) && qx.ctl.connected === false && (await qx.ctl.call('GET', '/api/state')).body?.error?.check === 'not_connected' && qx.sent - s0 === s1,
+      JSON.stringify({ first: first.status, sent: s1, stored: m0 < 0 ? 'n/a' : m1 }));
+    pr = await ui.startUi({ identity: op, agents: join(Pd, 'agents'), carrier });
   } finally {
     for (const x of apps) { x.ctl.stop(); await x.car.stop(); }
     await pr.close(); await relay.close?.();

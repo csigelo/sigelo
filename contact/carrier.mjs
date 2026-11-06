@@ -1895,6 +1895,14 @@ export class Carrier {
     for (const c of this.#liveContacts(store, relay)) {
       const e = st.peers[c.did];
       if (!e) continue;
+      // Past its expires (send): dropped unsent, waiting (no reader, no prekeys) or not.
+      if (e.outbox.some((x) => x.exp !== undefined && x.exp <= now)) {
+        e.outbox = e.outbox.filter((x) => {
+          if (x.exp === undefined || x.exp > now) return true;
+          this.#results.set(x.id, { code: 'expired', detail: `not sent before it expired (${x.exp})`, local: true });
+          return false;
+        });
+      }
       if (absent(c.did)) {
         const detail = noReader(c.name);
         for (const item of e.outbox) this.#results.set(item.id, { code: null, queued: detail });
@@ -2793,8 +2801,11 @@ export class Carrier {
     });
   }
 
-  async send(to, content, { label = '', local = false, internal } = {}) {
-    const [r] = await this.#sendAll(to, [content], label, false, local, internal);
+  // expires (unix seconds, optional): past it the message is dropped from the outbox unsent (refused
+  // `expired`): a remote control's request or pushed state is worth minutes (contact/control.mjs TTL).
+  async send(to, content, { label = '', local = false, internal, expires } = {}) {
+    if (expires !== undefined && !Number.isSafeInteger(expires)) fail('body', 'expires: unix seconds');
+    const [r] = await this.#sendAll(to, [content], label, false, local, internal, expires);
     // side: whose quota a quota_storage is (relay/allowance.mjs), on the error too.
     if (r.status === 'refused') throw Object.assign(new MsgError(r.code, `refused (${r.detail})`), r.side && { side: r.side });
     return r;
@@ -2807,7 +2818,7 @@ export class Carrier {
 
   // spool: every content after the first waits on disk (#spool), as a file's chunks do. local: queued
   // only, for the started carrier of this identity in another process (inbox's local, for sending).
-  async #sendAll(to, contents, label, spool, local = false, internal = null) {
+  async #sendAll(to, contents, label, spool, local = false, internal = null, expires = undefined) {
     if (typeof label !== 'string') fail('body', 'label must be a string');
     if (label === LABEL_PREKEYS || label === OPERATOR_LABEL) fail('body', `the label ${JSON.stringify(label)} is the carrier's own`);
     if (label.startsWith('sigelo-link/') && internal !== LINK_SEND) fail('body', `the label ${JSON.stringify(label)} is the link handler's own (sigelo-agent link)`);
@@ -2839,7 +2850,7 @@ export class Carrier {
       const c = this.#resolve(store, to), outbox = this.#entry(st, c.did).outbox;
       const ids = contents.map((content, i) => {
         const id = randomId();
-        if (spool && i > 0) { this.#spool(id, content); outbox.push({ id, label, spool: true }); } else outbox.push({ id, label, content });
+        if (spool && i > 0) { this.#spool(id, content); outbox.push({ id, label, spool: true }); } else outbox.push({ id, label, content, ...(expires !== undefined && { exp: expires }) });
         return id;
       });
       return { ids, c };

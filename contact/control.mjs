@@ -23,6 +23,16 @@
 //   await ctl.call(method, path, body) → { status, body }: GET /api/state from the last pushed state
 //                                   while the lease runs (no relay message), anything else one request
 //   ctl.onChange(fn)               fn() after each pushed state
+//   ctl.connected                  whether the computer's lease runs (an answer to a request within LEASE)
+//
+// Quiet without a lease (2026-11: an app left open four days against a computer whose page was gone
+// published up to its relay day's cap, 3,000 a day, every poll a request nobody read): a request goes
+// only while the computer's lease runs, renewed by its ANSWER, never by the request itself. Without one
+// (never answered, an answer missed, refused words or seat) one call at a time is let through as a
+// probe, PROBE_MIN seconds after the last one failed, doubling to PROBE_MAX; every other call is
+// answered 503 not_connected here, no relay message. Each message carries exp (now + TTL, seconds):
+// the carrier drops it unsent past it, the reader drops it late, so a backlog left at the relay by a
+// control gone never runs on a computer that comes back.
 import { keygen } from 'sigelo';
 import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
 import { DEVICE_LABEL, DEVICE_SEND } from './carrier.mjs';
@@ -41,6 +51,15 @@ export const CALL_TIMEOUT = 30_000;
 export const PUSH_MAX = 64 * 1024, PUSH_KEEP = 20;
 // The computer's cap per control: a bucket of BURST requests, refilled at RATE a second.
 export const RATE = 1, BURST = 10;
+// Without a lease: the first probe PROBE_MIN seconds after a failed one, the gap doubling to PROBE_MAX
+// (an hour with nobody listening: 9 probes, then 3 an hour).
+export const PROBE_MIN = 15, PROBE_MAX = 1200;
+// A control message's life (seconds): past now + TTL it is dropped unsent (carrier) or unread.
+export const TTL = 300;
+// GETs the page polls every 2 s that the pushed state does not carry (the Agents view's list): answered
+// from the last answer for KEEP_GET seconds, asked again at once after any POST (Enrol, revoke) or when a
+// pushed state's seq moves. An open Agents view: 120 an hour, not 1,800 (LAN and local pages keep 2 s).
+export const KEEP_GET = 30, KEPT = new Set(['/api/agents/workers']);
 const ID = /^[0-9a-f]{16}$/;
 
 /** The QR text: SIGELO:CTL:K7F3-Q9ZP, with :HOST (upper case) when the relay is not the default. */
@@ -90,9 +109,12 @@ export function capState(st, max = PUSH_MAX, keep = PUSH_KEEP) {
   }
 }
 export const newId = () => bytesToHex(randomBytes(8));
-export const requestMessage = ({ id, method, path, body }) => ({ v: CONTROL_V, typ: 'request', id, method, path, ...(body !== undefined && { body }) });
-export const responseMessage = ({ id, status, body }) => ({ v: CONTROL_V, typ: 'response', id, status, body });
-export const eventsMessage = ({ seq, since, state }) => ({ v: CONTROL_V, typ: 'events', seq, since, state });
+const ttl = (exp) => (exp !== undefined && { exp });
+export const requestMessage = ({ id, method, path, body, exp }) => ({ v: CONTROL_V, typ: 'request', id, method, path, ...(body !== undefined && { body }), ...ttl(exp) });
+export const responseMessage = ({ id, status, body, exp }) => ({ v: CONTROL_V, typ: 'response', id, status, body, ...ttl(exp) });
+export const eventsMessage = ({ seq, since, state, exp }) => ({ v: CONTROL_V, typ: 'events', seq, since, state, ...ttl(exp) });
+/** A message's exp (unix seconds) passed: dropped, unanswered. None (an older sender): never stale. */
+export const stale = (c, nowS) => Number.isSafeInteger(c?.exp) && c.exp <= nowS;
 /** A control message checked (request, response, events) → it; else throws control_message. */
 export function readControl(c) {
   if (!isObject(c) || c.v !== CONTROL_V) fail('control_message', `not a ${CONTROL_V} message`);
@@ -104,6 +126,7 @@ export function readControl(c) {
   } else if (c.typ === 'events') {
     if (!Number.isSafeInteger(c.seq) || !Number.isSafeInteger(c.since) || !isObject(c.state)) fail('control_message', 'events: seq, since, state');
   } else fail('control_message', `typ ${JSON.stringify(c.typ)}: request, response or events`);
+  if (c.exp !== undefined && !Number.isSafeInteger(c.exp)) fail('control_message', 'exp: unix seconds');
   return c;
 }
 
@@ -116,9 +139,20 @@ export function bucket({ rate = RATE, burst = BURST, now = () => Date.now() } = 
 const err = (status, check, message) => ({ status, body: { error: { check, message } } });
 
 /** The app's side: requests out, responses matched by id, pushed states kept for GET /api/state. */
-export function makeControl({ operator, timeout = CALL_TIMEOUT, now = () => Date.now(), defer = (f) => setTimeout(f, 0) }) {
+export function makeControl({ operator, timeout = CALL_TIMEOUT, now = () => Date.now(), defer = (f) => setTimeout(f, 0), after = (f, ms) => setTimeout(f, ms), cancel = (t) => clearTimeout(t) }) {
   let carrier = null, state = null, asked = -Infinity, taking = false;
-  const waiting = new Map(), watchers = new Set(), events = new Map();
+  // lease: until when the computer's lease runs (ms), from the send time of the last request it answered
+  // (its answer renews it, never the request alone). Without one: probeAt, the earliest the next probe
+  // goes; gap, the back-off (s); probe, the one in flight, which the other calls wait for.
+  let lease = -Infinity, probeAt = -Infinity, gap = 0, probe = null;
+  const waiting = new Map(), watchers = new Set(), events = new Map(), kept = new Map();
+  const nowS = () => Math.floor(now() / 1000);
+  const quiet = () => {
+    lease = -Infinity;
+    if (now() < probeAt) return;   // already backing off (several calls that failed together count once)
+    gap = gap ? Math.min(gap * 2, PROBE_MAX) : PROBE_MIN;
+    probeAt = now() + gap * 1000;
+  };
   const keep = (st) => {
     for (const e of st.events ?? []) events.set(e.n, e);
     for (const n of [...events.keys()].sort((a, b) => a - b).slice(0, Math.max(0, events.size - 200))) events.delete(n);
@@ -133,31 +167,50 @@ export function makeControl({ operator, timeout = CALL_TIMEOUT, now = () => Date
       if (m.from !== operator) continue;
       let c;
       try { c = readControl(m.content); } catch { continue; }
-      if (c.typ === 'response') {
-        const w = waiting.get(c.id);
-        if (!w) continue;
-        waiting.delete(c.id); clearTimeout(w.timer);
-        w.ok({ status: c.status, body: c.body });
-      } else if (c.typ === 'events') { keep(c.state); changed = true; }
+      if (stale(c, nowS())) continue;
+      const w = c.typ === 'response' ? waiting.get(c.id) : undefined;
+      // The computer is there (an answer come late, a push): the next call probes at once.
+      if (!w && now() >= lease) { probeAt = -Infinity; gap = 0; }
+      if (w) { waiting.delete(c.id); cancel(w.timer); w.ok({ status: c.status, body: c.body }); }
+      else if (c.typ === 'events') { if (c.state.seq !== state?.seq) kept.clear(); keep(c.state); changed = true; }
     }
     if (changed) for (const f of watchers) { try { f(); } catch {} }
   }
   const soon = () => { if (!taking) { taking = true; defer(take); } };
   async function request(method, path, body) {
-    const id = newId();
-    const answer = new Promise((ok) => { waiting.set(id, { ok, timer: setTimeout(() => { waiting.delete(id); ok(err(504, 'remote', `no answer from your computer within ${Math.round(timeout / 1000)} s: is sigelo-agent ui running there, and online?`)); }, timeout) }); });
-    asked = now();
-    try { await carrier.send(operator, requestMessage({ id, method, path, ...(body !== undefined && { body }) }), { label: DEVICE_LABEL, internal: DEVICE_SEND }); } catch (e) {
+    const id = newId(), sent = now(), exp = Math.floor(sent / 1000) + TTL;
+    let answered = false;
+    const answer = new Promise((ok) => { waiting.set(id, { ok: (r) => { answered = true; ok(r); }, end: ok, timer: after(() => { waiting.delete(id); ok(err(504, 'remote', `no answer from your computer within ${Math.round(timeout / 1000)} s: is sigelo-agent ui running there, and online?`)); }, timeout) }); });
+    try { await carrier.send(operator, requestMessage({ id, method, path, ...(body !== undefined && { body }), exp }), { label: DEVICE_LABEL, internal: DEVICE_SEND, expires: exp }); } catch (e) {
       const w = waiting.get(id);
-      if (w) { waiting.delete(id); clearTimeout(w.timer); }
+      if (w) { waiting.delete(id); cancel(w.timer); }
+      quiet();
       return err(e.check === 'not_contact' ? 403 : 502, 'remote', e.check === 'not_contact' ? 'this app is no longer paired with your computer: pair it again' : `not sent to your computer (${e.message})`);
     }
     soon();
     const r = await answer;
-    // The seat moved, or this control is refused: what was pushed no longer stands.
-    if (r.status === 409 || r.status === 403) { const c = r.body?.error?.check; if (c === 'seat_elsewhere' || c === 'words') state = null; }
-    if (method === 'GET' && r.status === 200 && new URL(path, 'http://app').pathname === '/api/state' && isObject(r.body)) keep(r.body);
+    if (!answered) { quiet(); return r; }
+    const c = r.body?.error?.check;
+    // The seat moved, or this control is refused: what was pushed no longer stands, and no lease runs.
+    if ((r.status === 409 && c === 'seat_elsewhere') || (r.status === 403 && c === 'words')) { state = null; quiet(); }
+    // Over the computer's rate cap: answered, the lease as it was.
+    else if (!(r.status === 429 && c === 'rate')) { lease = Math.max(lease, sent + LEASE * 1000); asked = Math.max(asked, sent); probeAt = -Infinity; gap = 0; }
+    if (method === 'GET' && r.status === 200 && new URL(path, 'http://app').pathname === '/api/state' && isObject(r.body)) { if (r.body.seq !== state?.seq) kept.clear(); keep(r.body); }
     return r;
+  }
+  const notConnected = () => {
+    const s = Math.max(0, Math.ceil((probeAt - now()) / 1000));
+    return err(503, 'not_connected', `not connected to your computer: it has not answered (is sigelo-agent ui running there, and online?); trying again in ${s} s`);
+  };
+  // No lease: a call waits for the probe in flight; else it is the probe when one is due; else refused here.
+  async function ask(method, path, body) {
+    while (now() >= lease) {
+      if (probe !== null) { await probe; continue; }
+      if (now() < probeAt) return notConnected();
+      const p = probe = request(method, path, body);
+      try { return await p; } finally { if (probe === p) probe = null; }
+    }
+    return request(method, path, body);
   }
   return {
     attach(c) { carrier = c; soon(); },
@@ -173,10 +226,16 @@ export function makeControl({ operator, timeout = CALL_TIMEOUT, now = () => Date
       if (method === 'GET' && url.pathname === '/api/state' && state !== null && now() - asked < RENEW * 1000 && url.searchParams.get('full') !== '1') {
         return { status: 200, body: JSON.parse(JSON.stringify(local(Number(url.searchParams.get('since') ?? 0) || 0))) };
       }
-      return request(method, path, body);
+      if (method === 'POST') kept.clear();
+      const hit = method === 'GET' && KEPT.has(url.pathname) ? kept.get(path) : undefined;
+      if (hit && now() - hit.at < KEEP_GET * 1000 && now() < lease) return JSON.parse(JSON.stringify(hit.r));
+      const r = await ask(method, path, body);
+      if (method === 'GET' && KEPT.has(url.pathname) && r.status === 200) kept.set(path, { at: now(), r: JSON.parse(JSON.stringify(r)) });
+      return r;
     },
     onChange(fn) { watchers.add(fn); return () => watchers.delete(fn); },
     get state() { return state; },
-    stop() { for (const [, w] of waiting) { clearTimeout(w.timer); w.ok(err(503, 'remote', 'stopped')); } waiting.clear(); },
+    get connected() { return now() < lease; },
+    stop() { for (const [, w] of waiting) { cancel(w.timer); w.end(err(503, 'remote', 'stopped')); } waiting.clear(); },
   };
 }
