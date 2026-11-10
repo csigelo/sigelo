@@ -21,7 +21,7 @@ Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). M
 (`io.github.csigelo/sigelo`). Why: [`WHY.md`](WHY.md).
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/csigelo/sigelo) [![npm-provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/sigelo-mcp)
 
-Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhUkH7FebKRGj8rf96SdoLa`) under a human owner, `csigelo`. No third party has audited it yet.
+Built by a team of AI agents under a human owner. No outside review yet.
 
 ## Get it
 

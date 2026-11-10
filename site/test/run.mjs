@@ -286,7 +286,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
 // The reader pays per token. Words = whitespace-separated tokens holding a letter or digit;
 // inside fenced code and on link-list lines they count half. llms.txt counts every word in full.
 {
-  const PAGES = ['404', 'accept', 'adopt', 'changelog', 'contact', 'enrol', 'frameworks', 'index', 'keeper', 'pair', 'privacy', 'sandboxes', 'security', 'spec', 'verify'];
+  const PAGES = ['404', 'accept', 'adopt', 'changelog', 'contact', 'enrol', 'faq', 'frameworks', 'index', 'keeper', 'pair', 'privacy', 'sandboxes', 'security', 'spec', 'verify'];
   const got = htmlFiles.filter((f) => /^\/[\w-]+\.html$/.test(f)).map((f) => f.slice(1, -5)).sort();
   ok(got.join() === PAGES.join(), `pages: exactly ${PAGES.join(', ')} (${got.join(', ')})`);
   const words = (md, half = true) => {
@@ -299,7 +299,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     return w;
   };
   // 2026-10-25 (Owner): / may explain in place, +40 words (155 → 195).
-  const BUDGET = { '/index.md': 195, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150 };
+  const BUDGET = { '/index.md': 195, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150, '/faq.md': 420 };
   for (const [f, max] of Object.entries(BUDGET)) {
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);
@@ -527,14 +527,14 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     ok(home?.relatedLink?.includes('https://sigelo.ai/'), '/: JSON-LD WebPage relatedLink https://sigelo.ai/');
     // The why first (2026-10-24: "why does an agent need an identity when going online?"): one paragraph, ≤ 60 words, no jargon, before the two layers.
     const why = md('/index.md').split('\n').find((l) => /^[A-Za-z]/.test(l)) ?? '', whyWords = why.split(/\s+/).filter(Boolean).length;
-    ok(whyWords <= 60 && /stranger/.test(why) && !/\bDID\b|attestation|keeper|`/.test(why) && md('/index.md').indexOf(why) < md('/index.md').indexOf('sigelo is free, open source'),
+    ok(whyWords <= 60 && /stranger/.test(why) && !/\bDID\b|attestation|keeper|`/.test(why) && md('/index.md').indexOf(why) < md('/index.md').indexOf('sigelo is free, open source (MIT).'),
       `/: the why comes first, ${whyWords} words ≤ 60, no DID, attestation, keeper or code`);
     // Two layers under one name (2026-10-24), in plain words (2026-10-25, naive readers lost "protocol"
     // and "relay"): sigelo free and open, the relay at sigelo.ai said by what it does, anyone can run one;
     // the next step names what it needs (an agent that runs commands; the ChatGPT app cannot). Every footer links the relay.
     // Round 4 (2026-10-25): the relay as what the ID lets agents do, a post office; without a command-running agent, what one can still do.
     ok(md('/index.md').includes('sigelo is free, open source (MIT). With it, agents message each other and shops, no account needed. [sigelo.ai](https://sigelo.ai/) is the post office for those messages; only the two agents can read them. Anyone can [run one](https://github.com/csigelo/sigelo-relay).')
-      && md('/index.md').includes('(https://sigelo.ai/connect.html) It needs an agent that runs commands, like Claude Code; the ChatGPT app cannot. Without one: use [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/adapters/moadim/APPS.md), wait for Android, or hand this page to your developer.'),
+      && md('/index.md').includes('(https://sigelo.ai/connect.html) It needs an agent that runs commands, like Claude Code, not the ChatGPT app. Without one, [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/adapters/moadim/APPS.md) or your developer.'),
       '/: names the two layers in plain words (sigelo free and open; with the ID agents message each other and shops; the relay at sigelo.ai, the post office, only the two agents read; anyone can run one), what "Try it" needs and what to do without it');
     const noFoot = PAGE_LIST.filter((p) => !/<footer>[\s\S]*Relay: <a href="https:\/\/sigelo\.ai\/">sigelo\.ai<\/a>[\s\S]*<\/footer>/.test(md(`/${p.slug}.html`))).map((p) => p.slug);
     ok(noFoot.length === 0, `every page's footer links the relay at sigelo.ai${noFoot.length ? ` (not: ${noFoot.join(' ')})` : ''}`);
@@ -548,7 +548,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   // The motto is the project's (2026-10-25, Owner): on / right under the H1, with the disclosure
   // sub-line saying who answers; the why stays the first paragraph of prose.
   const lines = md('/index.md').split('\n').filter(Boolean);
-  ok(lines[0].startsWith('# sigelo: ') && lines[1] === '**By AI, for AI.** Built and operated by an AI agent under a human owner, `csigelo`, who answers for it.' && /^[A-Z]/.test(lines[2]) && /stranger/.test(lines[2]),
+  ok(lines[0].startsWith('# sigelo: ') && lines[1] === '**By AI, for AI.** Built by a team of AI agents under a human owner. Why trust it? For the reason Bitcoin is trusted: the code is public, nobody needs permission, every claim can be checked ([FAQ](/faq.md#why-trust-it)).' && /^[A-Z]/.test(lines[2]) && /stranger/.test(lines[2]),
     '/: the motto and the disclosure sub-line right under the H1, then the why');
   // Words never written: untrue of sigelo, or someone else's product. Over every page as HTML
   // (title, meta description, Open Graph, JSON-LD: what search snippets show) and as Markdown, the

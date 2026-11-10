@@ -5,6 +5,9 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Front pages:** the line under the motto says a team of AI agents built sigelo under a human owner, and why to trust it as Bitcoin is trusted, linking the FAQ; sigelo.ai in all 30 languages.
+- **sigelo.io FAQ:** `/faq.html`, seven answers: why trust it, a lost machine or key, cutting someone off, who may instruct an agent, stacks, a down or hostile relay, what sigelo is not.
+- **Spec §12.6, §12.7:** THREAT-MODEL.md and MONERO.md are links to their sigelo.io copies; each consideration is its own bullet. Wording and meaning unchanged.
 - **Remote control, quiet unanswered:** a control asks only while its computer's lease runs, renewed by an answer; else it probes, backing off to 3 an hour, and shows "not connected". Control messages expire in 5 min.
 
 ## v0.1.14 — 2026-11-03

@@ -777,25 +777,33 @@ deactivation is a question for v0.2.
 
 ### 12.6 Security considerations
 
-THREAT-MODEL.md is the analysis. **Man in the middle:** a bundle is self-certifying — the DID
-hashes the genesis and every element is signed (§3) — so an intermediary can drop items, not
-alter them; §5.2 binds proof of control to a world-chosen nonce and session. **Key compromise
-and recovery:** the identity key is assumed hot and eventually stolen; the cold recovery key
-is committed in the genesis and beats any rotation a thief makes (§7.1, THREAT-MODEL
-§2.4–§2.5b). **Stale presentation:** a bundle shows the chain as far as its presenter chose,
-and a thief can withhold a later recovery; a verifier that has seen a longer chain for the
-same `chain[0]` keeps it, and discounts attestations near a recovery (THREAT-MODEL §3.5).
-**Not defended:** Sybil, lying issuers, the operator behind the agent (THREAT-MODEL §3).
+[THREAT-MODEL.md](https://sigelo.io/raw/THREAT-MODEL.md) is the analysis.
+
+- **Man in the middle:** a bundle is self-certifying — the DID hashes the genesis and every
+  element is signed (§3) — so an intermediary can drop items, not alter them; §5.2 binds proof
+  of control to a world-chosen nonce and session.
+- **Key compromise and recovery:** the identity key is assumed hot and eventually stolen; the
+  cold recovery key is committed in the genesis and beats any rotation a thief makes (§7.1,
+  [THREAT-MODEL](https://sigelo.io/raw/THREAT-MODEL.md) §2.4–§2.5b).
+- **Stale presentation:** a bundle shows the chain as far as its presenter chose, and a thief
+  can withhold a later recovery; a verifier that has seen a longer chain for the same
+  `chain[0]` keeps it, and discounts attestations near a recovery
+  ([THREAT-MODEL](https://sigelo.io/raw/THREAT-MODEL.md) §3.5).
+- **Not defended:** Sybil, lying issuers, the operator behind the agent
+  ([THREAT-MODEL](https://sigelo.io/raw/THREAT-MODEL.md) §3).
 
 ### 12.7 Privacy considerations
 
-No registry, no ledger, no resolver: creating, rotating and resolving contact no one, so no
-party learns who resolves whom, or when (no phone-home). A DID is correlatable by design — it
-carries reputation between worlds — and so is a shared `recovery` commitment: unlinkable
-presences need separate identities with separate recovery keys (MONERO.md §2 links one Owner's
-agents this way on purpose). Keys and signatures are not personal data; `claims` may be, and
-that is the issuer's charge (THREAT-MODEL §6). Bindings travel only in bundles the subject
-presents, and the view key is never disclosed automatically (§6.3).
+- **No registry, no ledger, no resolver:** creating, rotating and resolving contact no one, so
+  no party learns who resolves whom, or when (no phone-home).
+- **A DID is correlatable** by design — it carries reputation between worlds — and
+  so is a shared `recovery` commitment: unlinkable presences need separate identities with
+  separate recovery keys ([MONERO.md](https://sigelo.io/raw/MONERO.md) §2 links one Owner's
+  agents this way on purpose).
+- **Keys and signatures** are not personal data; `claims` may be, and that is the
+  issuer's charge ([THREAT-MODEL](https://sigelo.io/raw/THREAT-MODEL.md) §6).
+- **Bindings** travel only in bundles the subject presents, and the view key is never
+  disclosed automatically (§6.3).
 
 ### 12.8 Conformance
 

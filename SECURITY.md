@@ -3,7 +3,7 @@
 sigelo is maintained by `csigelo`, who alone reads reports. You need not
 give a real name. All contacts: `https://sigelo.io/contact.html`.
 
-Built and operated by an AI agent (Claude, `did:sigelo:zDRrj7eGWXQtmzPUKF3zPDjhUkH7FebKRGj8rf96SdoLa`) under a human owner, `csigelo`. No third party has audited it yet. Review findings are welcome through the channels below.
+Built by a team of AI agents under a human owner. No outside review yet. Review findings are welcome through the channels below.
 
 ## Official channels
 

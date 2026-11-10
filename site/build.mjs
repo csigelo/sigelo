@@ -101,6 +101,7 @@ export const PAGES = [
   { slug: 'enrol', src: 'site/src/enrol.md', type: 'WebPage' },
   { slug: 'contact', src: 'site/src/contact.md', type: 'ContactPage' },
   { slug: 'privacy', src: 'site/src/privacy.md', type: 'WebPage' },
+  { slug: 'faq', src: 'site/src/faq.md', type: 'WebPage' },
   { slug: 'changelog', repo: 'CHANGELOG.md', type: 'WebPage', title: 'Changelog',
     description: 'Every change to sigelo, newest first, as recorded in the repository\'s CHANGELOG.md.' },
   // The not-found page: no canonical, no JSON-LD, noindex; not in the nav, the sitemap, llms.txt or
@@ -126,7 +127,7 @@ export function readDark(dir = DARK_DIR) {
     return { slug, src: rel.startsWith('..') || isAbsolute(rel) ? at : rel, type: 'WebPage', dark: true };
   });
 }
-const NAV = [['adopt', 'Adopt'], ['accept', 'Accept'], ['spec', 'Spec'], ['verify', 'Verify'], ['keeper', 'Keeper'], ['security', 'Security'],
+const NAV = [['adopt', 'Adopt'], ['faq', 'FAQ'], ['accept', 'Accept'], ['spec', 'Spec'], ['verify', 'Verify'], ['keeper', 'Keeper'], ['security', 'Security'],
   ['contact', 'Contact'], ['changelog', 'Changelog'], ['privacy', 'Privacy']];
 
 // Repository files published verbatim under /raw/<path>. OPTIONAL: listed in llms.txt.
@@ -346,7 +347,7 @@ const VALUES = {
   // The links to the relay (/, /adopt, /contact), only once it serves (RELAY_LIVE). A line that
   // holds only an empty value is dropped (fill).
   relay_layer: RELAY_LIVE ? ` With it, agents message each other and shops, no account needed. [sigelo.ai](${RELAY_ORIGIN}/) is the post office for those messages; only the two agents can read them. Anyone can [run one](https://github.com/csigelo/sigelo-relay).` : '',
-  relay_try: RELAY_LIVE ? `[Try it with two agents →](${RELAY_ORIGIN}/connect.html) It needs an agent that runs commands, like Claude Code; the ChatGPT app cannot. Without one: use [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/adapters/moadim/APPS.md), wait for Android, or hand this page to your developer.` : '',
+  relay_try: RELAY_LIVE ? `[Try it with two agents →](${RELAY_ORIGIN}/connect.html) It needs an agent that runs commands, like Claude Code, not the ChatGPT app. Without one, [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/adapters/moadim/APPS.md) or your developer.` : '',
   relay_link: RELAY_LIVE ? ` · [Message other agents: sigelo relay](${RELAY_ORIGIN}/)` : '',
   relay_contact: RELAY_LIVE ? `- Relay: [sigelo.ai](${RELAY_ORIGIN}/)` : '',
 };
@@ -588,7 +589,7 @@ How: the DID is a genesis hash; worlds sign attestations; bundles verify offline
 ## Docs
 
 ${L('Adopt', '/adopt.md', 'start here: commands, MCP')}
-${L('Accept', '/accept.md', 'log agents in')}
+${L('Accept', '/accept.md', 'agent login')}
 ${L('Spec', '/spec.md', 'the protocol')}
 ${L('Verify', '/verify.md', 'conformance')}
 ${L('Keeper', '/keeper.md', 'Monero payments')}
@@ -607,6 +608,7 @@ ${L('Index', '/index.json', 'sha256s')}
 ${L('Frameworks', '/frameworks.md')}
 ${L('Test vectors', '/test-vectors.json')}
 ${L('Privacy, terms', '/privacy.md')}
+${L('FAQ', '/faq.md')}
 ${OPTIONAL.map((p) => L(p, `/raw/${p}`)).join('\n')}
 ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS.reduce((n, s) => n + readBytes(s).length, 0))}`)}
 `);
