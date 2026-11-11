@@ -4,7 +4,7 @@
 //   const store = new Contacts('contacts.json')
 //   const c = store.issue(did, ctx, now, 'alice')   → send c; a null name refreshes a known contact
 //   pair(card, { body, sig }, store, now)            → { did, current_did, current_key, attestations, rejected }, or throws
-// Contract and fixtures: adapters/hermes/pairing/. One dependency: sigelo.
+// Contract and fixtures: apps/integrations/hermes/pairing/. One dependency: sigelo.
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { canonicalize, did as didOf, multibase, verify, verifySig } from 'sigelo';

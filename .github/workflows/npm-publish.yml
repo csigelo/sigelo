@@ -10,7 +10,8 @@
 # workflow_dispatch. A version already on the registry is skipped, so a re-run is harmless. When
 # every package of the tag is already there (the maintainer published the release tarballs with a
 # token, release/RELEASE.md step 8), the job stops green before building: nothing is left to do.
-# The packages of a tag: the five, and sigelo-contact from v0.1.2 (VERSIONING §4). Each must be at
+# The packages of a tag: the five, sigelo-contact from v0.1.2 (VERSIONING §4) and sigelo-key-agent
+# from v0.1.15 (after sigelo-agent, which it depends on). Each must be at
 # the tag's version and every tarball must exist before the first publish, so a slip stops the job
 # with nothing published rather than half a release.
 name: npm publish
@@ -46,7 +47,7 @@ jobs:
             const tok = await core.getIDToken('npm:registry.npmjs.org');
             const c = JSON.parse(Buffer.from(tok.split('.')[1], 'base64url').toString());
             for (const k of ['sub','repository','workflow_ref','job_workflow_ref','environment','ref','event_name','runner_environment']) core.info(`${k}: ${JSON.stringify(c[k])}`);
-            for (const p of ['sigelo','sigelo-contact','sigelo-agent','sigelo-spend','sigelo-mcp','sigelo-recovery-kit']) {
+            for (const p of ['sigelo','sigelo-contact','sigelo-agent','sigelo-spend','sigelo-mcp','sigelo-recovery-kit','sigelo-key-agent']) {
               const r = await fetch(`https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(p)}`, { method: 'POST', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json', 'npm-command': 'publish', 'user-agent': 'npm/11.21.1 node/v22 linux x64 workspaces/false ci/github-actions' }, body: '{}' });
               const body = (await r.text()).replace(/"token":"[^"]+"/, '"token":"<redacted>"').slice(0, 400);
               core.info(`${p}: ${r.status} ${body}`);
@@ -78,9 +79,10 @@ jobs:
           # sigelo first: the others depend on it. sigelo-contact from 0.1.2.
           pkgs="sigelo sigelo-agent sigelo-spend sigelo-mcp sigelo-recovery-kit"
           [ "$(printf '%s\n' 0.1.2 "$v" | sort -V | head -n 1)" = 0.1.2 ] && pkgs="sigelo sigelo-contact sigelo-agent sigelo-spend sigelo-mcp sigelo-recovery-kit"
+          [ "$(printf '%s\n' 0.1.15 "$v" | sort -V | head -n 1)" = 0.1.15 ] && pkgs="$pkgs sigelo-key-agent"
           node -e '
-            const dir = { sigelo: "ts", "sigelo-contact": "contact", "sigelo-agent": "adapters/moadim",
-              "sigelo-spend": "spend", "sigelo-mcp": "integrations/mcp", "sigelo-recovery-kit": "kit" };
+            const dir = { sigelo: "ts", "sigelo-contact": "apps/contact", "sigelo-agent": "apps/agent",
+              "sigelo-spend": "apps/keeper", "sigelo-mcp": "apps/integrations/mcp", "sigelo-recovery-kit": "apps/kit", "sigelo-key-agent": "apps/keyagent" };
             const [v, ...names] = process.argv.slice(1);
             let bad = 0;
             for (const n of names) {

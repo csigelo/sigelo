@@ -9,7 +9,7 @@
 //   connect  pair (SIGELO:CTL:, control pair: the four words), relay (control ui --app); connect (SIGELO:UI:)
 // then self (this phone's page). The words are dropped from this page once used; stored only when the human sets the
 // words password (design/apps-seed.md §8): encrypted here (words-lock.mjs), then words-keep (the app's keyring).
-// The scan (design/apps.md §9): camera (getUserMedia) or an image → pixels → jsQR (contact/qr-decode.mjs).
+// The scan (design/apps.md §9): camera (getUserMedia) or an image → pixels → jsQR (apps/contact/qr-decode.mjs).
 // Profiles (design/profiles.md P1): at the app's start with more than one, the picker first (welcome.mjs
 // pickProfile; profile-use, then this page again for that one); a profile added and not set up yet: its first
 // run with "Back to my profiles" (profile-remove of that empty one).

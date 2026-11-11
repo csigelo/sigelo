@@ -9,13 +9,13 @@
 # hash in the directory name is the whole truth about what the candidate saw.
 #
 #   lifecycle  (docs-only lifecycle, TASK-lifecycle.md): SPEC.md, QUICKSTART.md,
-#              examples/world.mjs, ts/README.md (identity part: the Monero and root-seed
+#              accept/examples/world.mjs (examples/world.mjs at a REV before it moved), ts/README.md (identity part: the Monero and root-seed
 #              sections are cut), test-vectors.json, schema/. QUICKSTART.md is read from
 #              docs/QUICKSTART.md at a REV that has it (it moved there) and kept at the top level,
 #              so every snapshot has one layout.
 #   verifier   (spec-only implementer, TASK-verifier.md): SPEC.md, test-vectors.json
 #
-# Never ts/src, go/, adapters/ or spend/. The sandbox adds what the lifecycle task needs to
+# Never ts/src, go/, apps/ (adapters/ or spend/ at older REVs). The sandbox adds what the lifecycle task needs to
 # RUN: ts/dist (sigelo.js, jcs.js, monero.js only: no .d.ts, no maps, no tests, no generator),
 # built from REV's ts/src in a temp dir, its two @noble dependencies, and node_modules/sigelo
 # pointing at it, so `import('sigelo')` resolves from DIR. Compiled JS is readable; TASK
@@ -38,7 +38,9 @@ full=$(git rev-parse --verify "$rev^{commit}")
 short=$(git rev-parse --short=7 "$full")
 out="$here/snapshot/$short"
 
-LIFECYCLE="SPEC.md QUICKSTART.md examples/world.mjs ts/README.md test-vectors.json"
+world=accept/examples/world.mjs
+git cat-file -e "$full:$world" 2>/dev/null || world=examples/world.mjs
+LIFECYCLE="SPEC.md QUICKSTART.md $world ts/README.md test-vectors.json"
 for f in $(git ls-tree --name-only "$full" schema/); do LIFECYCLE="$LIFECYCLE $f"; done
 VERIFIER="SPEC.md test-vectors.json"
 

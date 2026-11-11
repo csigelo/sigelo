@@ -1,0 +1,53 @@
+{
+  "name": "sigelo-key-agent",
+  "version": "0.1.14",
+  "private": false,
+  "description": "Local key agent for sigelo identities: holds the identity key and signs known sigelo bodies over a 0700 Unix socket (named pipe on Windows), as ssh-agent does",
+  "keywords": [
+    "sigelo",
+    "ssh-agent",
+    "key-agent",
+    "agent-identity",
+    "did",
+    "ed25519",
+    "ai-agents",
+    "docker",
+    "sidecar"
+  ],
+  "homepage": "https://sigelo.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csigelo/sigelo.git",
+    "directory": "apps/keyagent"
+  },
+  "bugs": {
+    "url": "https://github.com/csigelo/sigelo/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sigelo-key-agent": "agent.mjs"
+  },
+  "files": [
+    "agent.mjs",
+    "protocol.mjs",
+    "policy.mjs",
+    "store.mjs",
+    "units",
+    "fixtures/protocol-v0.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node test.mjs",
+    "prepack": "node ../../release/prepack.mjs pre",
+    "postpack": "node ../../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publishing is a release step (release/RELEASE.md); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+  },
+  "dependencies": {
+    "sigelo": "file:../../ts",
+    "sigelo-agent": "file:../agent"
+  }
+}

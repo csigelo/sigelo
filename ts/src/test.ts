@@ -366,7 +366,7 @@ for (const [cp, bad] of [
     for (const [where, bytes] of cases) {
       const f = join(tmp, 'b.json');
       writeFileSync(f, bytes, {});
-      const one = entry('tools/sim/verify-one.mjs', f), cli = entry('integrations/skills-cli/sigelo/verify.mjs', f);
+      const one = entry('tools/sim/verify-one.mjs', f), cli = entry('apps/integrations/skills-cli/sigelo/verify.mjs', f);
       t(`tools/sim/verify-one.mjs: invalid UTF-8 in the ${where} is REJECT: parse, as sigelo-verify says (${one.err})`,
         one.code === 1 && one.err === 'REJECT: parse: invalid UTF-8 in document');
       t(`skills-cli verify.mjs: the same (${cli.err})`, cli.code === 1 && cli.err === 'sigelo verify: parse: invalid UTF-8 in document');

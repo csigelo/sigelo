@@ -71,11 +71,11 @@ jobs:
           node tools/docs-test/grade-verifier.mjs -- /tmp/sv > /tmp/grade-go
           diff <(grep -E '^(PASS|FAIL) ' /tmp/grade-go) <(grep -E '^(PASS|FAIL) ' /tmp/impl-go)
       # the moadim sidecar's full flow, against the freshly built library, re-verified by the
-      # Go reference; the grep proves the cross-check ran rather than skipped. contact/'s
+      # Go reference; the grep proves the cross-check ran rather than skipped. apps/contact/'s
       # dependencies first: the contact verbs load sigelo-contact through the file: link
       - run: >-
-          (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm test | tee /tmp/moadim-out && grep -q '^ALL PASS sigelo-agent:' /tmp/moadim-out && grep -q '^ok   go: same current DID$' /tmp/moadim-out
-        working-directory: adapters/moadim
+          (cd ../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm test | tee /tmp/moadim-out && grep -q '^ALL PASS sigelo-agent:' /tmp/moadim-out && grep -q '^ok   go: same current DID$' /tmp/moadim-out
+        working-directory: apps/agent
       # sigelo.io's world (world/test.mjs): challenge, attestation, refusals and rotation on a
       # random loopback port against the freshly built library, judged by the Go verifier (go
       # run; it FAILs, not skips, without go), plus the nginx allowlist for /world/. A few seconds.
@@ -85,17 +85,17 @@ jobs:
             { grep '^FAIL ' /tmp/world-out | head -n 7; grep -E -m 4 'Error|cause|^node:' /tmp/world-out; tail -n 3 /tmp/world-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=world node world\/test.mjs::/'; exit 1; }
           grep -q '^ALL PASS' /tmp/world-out && grep -q '^ok go sigelo-verify: ACCEPT' /tmp/world-out || {
             { grep '^FAIL ' /tmp/world-out | head -n 7; grep -E -m 4 'Error|cause|^node:' /tmp/world-out; tail -n 3 /tmp/world-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=world node world\/test.mjs::/'; exit 1; }
-      # the Hermes pairing fixtures (adapters/hermes/pairing, SPEC §5.2 + §7 + §9): they must
+      # the Hermes pairing fixtures (apps/integrations/hermes/pairing, SPEC §5.2 + §7 + §9): they must
       # regenerate byte for byte from the seeds, and both acceptors must run the whole set; the
       # Python one needs `cryptography` (a venv) and builds sigelo-verify with go. Seconds.
       - run: |
-          node adapters/hermes/pairing/gen.mjs --check
+          node apps/integrations/hermes/pairing/gen.mjs --check
           (cd accept/node && npm install --ignore-scripts --omit=dev --no-audit --no-fund --no-package-lock --silent)   # drop-ins ship no lockfile (accept/.gitignore)
-          node adapters/hermes/pairing/test.mjs | tee /tmp/pairing-node && grep -q '^ALL PASS$' /tmp/pairing-node
+          node apps/integrations/hermes/pairing/test.mjs | tee /tmp/pairing-node && grep -q '^ALL PASS$' /tmp/pairing-node
           python3 -m venv /tmp/pyv && /tmp/pyv/bin/pip install -q --disable-pip-version-check cryptography
-          /tmp/pyv/bin/python adapters/hermes/pairing/test.py | tee /tmp/pairing-py && grep -q '^ALL PASS$' /tmp/pairing-py
+          /tmp/pyv/bin/python apps/integrations/hermes/pairing/test.py | tee /tmp/pairing-py && grep -q '^ALL PASS$' /tmp/pairing-py
       # the bounded-spending service (MONERO.md §4). Same job, after `npx tsc` above: it
-      # depends on `sigelo` as `file:../ts`, so it links dist/ and there must be a dist/ to link.
+      # depends on `sigelo` as `file:../../ts`, so it links dist/ and there must be a dist/ to link.
       # Its live-wallet section SKIPs on a runner with no monero-wallet-rpc on 127.0.0.1:38083.
       # A job's log needs a token to read, its annotations do not: on failure each FAIL line,
       # and the last lines (a crash prints no FAIL), become one ::error each.
@@ -104,7 +104,7 @@ jobs:
           npm test 2>&1 | tee /tmp/spend-out || {
             { grep '^FAIL ' /tmp/spend-out | head -n 7; grep -E -m 3 'Error|^node:' /tmp/spend-out; tail -n 3 /tmp/spend-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=spend npm test::/'; exit 1; }
           grep -q '^ALL PASS$' /tmp/spend-out
-        working-directory: spend
+        working-directory: apps/keeper
 
   # The same suites on every supported system: Linux and Windows here, macOS
   # (arm64) in macos.yml (dispatched by hand: its runners are rarely granted in time), Node 22 LTS and 24, plus current Node on Linux. bash on every runner
@@ -148,8 +148,8 @@ jobs:
           grep -q '^ALL PASS$' "$RUNNER_TEMP/ts-out"
         working-directory: ts
       - run: >-
-          (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS sigelo-agent:' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
-        working-directory: adapters/moadim
+          (cd ../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS sigelo-agent:' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
+        working-directory: apps/agent
       # OS-neutral: a random loopback port, `go run` for the judge, `sh` (Git Bash on Windows) for the allowlist
       - run: |
           node world/test.mjs 2>&1 | tee "$RUNNER_TEMP/world-out" || {
@@ -162,17 +162,17 @@ jobs:
           npm test 2>&1 | tee "$RUNNER_TEMP/spend-out" || {
             { grep '^FAIL ' "$RUNNER_TEMP/spend-out" | head -n 7; grep -E -m 3 'Error|^node:' "$RUNNER_TEMP/spend-out"; tail -n 3 "$RUNNER_TEMP/spend-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=spend npm test::/'; exit 1; }
           grep -q '^ALL PASS$' "$RUNNER_TEMP/spend-out"
-        working-directory: spend
+        working-directory: apps/keeper
       - run: npm test
-        working-directory: integrations/mcp
+        working-directory: apps/integrations/mcp
       - run: node schema/check.mjs | tee "$RUNNER_TEMP/schema-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/schema-out"
       - run: go vet ./... && go test ./... -v | tee "$RUNNER_TEMP/go-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/go-out"
         working-directory: go
 
-  # The key agent (keyagent/, design/key-providers.md §4): its byte-exact protocol fixture, the
-  # socket checks, the sidecar through it, and the contact (adapters/moadim test-contact.ts) and MCP
+  # The key agent (apps/keyagent/, design/key-providers.md §4): its byte-exact protocol fixture, the
+  # socket checks, the sidecar through it, and the contact (apps/agent test-contact.ts) and MCP
   # suites again with every key in an agent (SIGELO_TEST_KEY_AGENT=1). On Windows the named pipe runs
-  # as a socket does; its ACL check is manual (keyagent/README.md), not this job.
+  # as a socket does; its ACL check is manual (apps/keyagent/README.md), not this job.
   keyagent:
     permissions: { contents: read }
     strategy:
@@ -189,18 +189,18 @@ jobs:
         with: { node-version: '24' }
       - run: npm ci --ignore-scripts && npx tsc
         working-directory: ts
-      - run: (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts
-        working-directory: adapters/moadim
-      # the MCP suite's wallet tools load spend/dist
+      - run: (cd ../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts
+        working-directory: apps/agent
+      # the MCP suite's wallet tools load apps/keeper/dist
       - run: npm ci --ignore-scripts && npx tsc
-        working-directory: spend
+        working-directory: apps/keeper
       - run: |
           node test.mjs 2>&1 | tee "$RUNNER_TEMP/keyagent-out" || {
             { grep '^FAIL ' "$RUNNER_TEMP/keyagent-out" | head -n 7; grep -E -m 3 'Error|^node:' "$RUNNER_TEMP/keyagent-out"; tail -n 3 "$RUNNER_TEMP/keyagent-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=keyagent node test.mjs::/'; exit 1; }
           grep -q '^ALL PASS keyagent' "$RUNNER_TEMP/keyagent-out"
-        working-directory: keyagent
+        working-directory: apps/keyagent
 
-  # The protocol profiles (integrations/a2a, pap, web-bot-auth): each a zero-dependency package on the
+  # The protocol profiles (apps/integrations/a2a, pap, web-bot-auth): each a zero-dependency package on the
   # ts library (file dep), tests offline; the moadim sidecar for the CLI routes.
   integrations:
     permissions: { contents: read }
@@ -214,14 +214,14 @@ jobs:
         with: { node-version: '24' }
       - run: npm ci --ignore-scripts && npx tsc
         working-directory: ts
-      - run: (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm run build
-        working-directory: adapters/moadim
+      - run: (cd ../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm run build
+        working-directory: apps/agent
       - run: |
           for d in a2a pap web-bot-auth; do
             (cd "$d" && npm ci --ignore-scripts && node test.mjs 2>&1 | tee "$RUNNER_TEMP/int-$d" || true)
             grep -q '^ALL PASS' "$RUNNER_TEMP/int-$d" || { { grep '^FAIL ' "$RUNNER_TEMP/int-$d" | head -n 7; tail -n 3 "$RUNNER_TEMP/int-$d"; } | cut -c1-900 | sed "s/%/%25/g; s/^/::error title=integrations $d::/"; exit 1; }
           done
-        working-directory: integrations
+        working-directory: apps/integrations
 
   # The reference verifier.
   go:
@@ -236,7 +236,7 @@ jobs:
       - run: go vet ./...
         working-directory: go
       # every vector, the monero vectors and the 1f916 adapter's emitted bundle
-      # (adapters/1f916/sample-bundle.json must be ACCEPTED): same conformance target as ts/
+      # (accept/1f916/sample-bundle.json must be ACCEPTED): same conformance target as ts/
       - run: go test ./... -v | tee /tmp/go-out && grep -q '^ALL PASS$' /tmp/go-out
         working-directory: go
       - run: CGO_ENABLED=0 go build ./cmd/sigelo-verify
@@ -257,12 +257,12 @@ jobs:
       # schema/*.json (JSON Schema 2020-12) against the vectors: positives validate, structural
       # negatives do not, parity bundles split fatal/per-item as the verifiers do
       - run: node schema/check.mjs | tee /tmp/schema-out && grep -q '^ALL PASS$' /tmp/schema-out
-      # spend/openapi.yaml names exactly the routes spend/service.ts serves
+      # apps/keeper/openapi.yaml names exactly the routes apps/keeper/service.ts serves
       - run: |
           node -e '
             const fs = require("fs");
-            const code = [...fs.readFileSync("spend/service.ts", "utf8").matchAll(/["\x27](GET|POST) (\/[a-z]+)["\x27]/g)].map((m) => `${m[1]} ${m[2]}`);
-            const api = [...fs.readFileSync("spend/openapi.yaml", "utf8").matchAll(/^  (\/[a-z]+):\n    (get|post):/gm)].map((m) => `${m[2].toUpperCase()} ${m[1]}`);
+            const code = [...fs.readFileSync("apps/keeper/service.ts", "utf8").matchAll(/["\x27](GET|POST) (\/[a-z]+)["\x27]/g)].map((m) => `${m[1]} ${m[2]}`);
+            const api = [...fs.readFileSync("apps/keeper/openapi.yaml", "utf8").matchAll(/^  (\/[a-z]+):\n    (get|post):/gm)].map((m) => `${m[2].toUpperCase()} ${m[1]}`);
             const a = [...new Set(code)].sort(), b = [...new Set(api)].sort();
             console.log(`service.ts ${a.length} routes, openapi.yaml ${b.length}`);
             require("assert").deepStrictEqual(b, a);

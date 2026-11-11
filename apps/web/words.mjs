@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The words password in the Android app and a browser tab (design/apps-seed.md §8; the crypto: contact/words-lock.mjs).
+// The words password in the Android app and a browser tab (design/apps-seed.md §8; the crypto: apps/contact/words-lock.mjs).
 // Optional: offered once, right after the three-word check of a create and at the end of a restore (welcome.mjs
 // offerWords). Skipped: the words are never stored, as before. Set: the 25 words encrypted under a key made from
 // the password (PBKDF2-SHA256, 1,000,000 rounds), and that sealed like the identity (saveSealed kind "words": in

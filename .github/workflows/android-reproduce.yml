@@ -50,7 +50,8 @@ jobs:
         continue-on-error: true
         run: |
           (cd ts && npm ci --ignore-scripts && npx tsc)
-          (cd contact && npm ci --ignore-scripts)
+          c=apps/contact; [ -d "$c" ] || c=contact   # the ref may predate apps/contact (R0 step 4)
+          (cd "$c" && npm ci --ignore-scripts)
           node apps/android/assets.mjs
       - name: build the unsigned release APK
         continue-on-error: true

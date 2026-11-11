@@ -3,11 +3,11 @@
 Artefacts are built from the PUBLIC tree (Go module path rewritten), never the private one.
 `<v>` is the package version, the same in every package.json; `$S` a scratch directory.
 
-1. Private repo: every package.json, lockfile and `integrations/mcp/server.json` at `<v>`; go/go.mod
+1. Private repo: every package.json, lockfile and `apps/integrations/mcp/server.json` at `<v>`; go/go.mod
    `toolchain` at the latest Go patch (build.sh enforces it);
    CHANGELOG.md `## v<v> — <date>`; VERSIONING.md status line; ROADMAP §6 step 8; site
    footnotes; apps/android/app/build.gradle `versionName '<v>'`, `versionCode` + 1 (apps/android/FDROID.md).
-   `node site/build.mjs && node site/test/run.mjs`, `node plugins/build.mjs --check` and
+   `node site/build.mjs && node site/test/run.mjs`, `node apps/plugins/build.mjs --check` and
    `sh release/test-release.sh` pass. Commit.
 2. Sync and push (the commands under "Sync commands").
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;

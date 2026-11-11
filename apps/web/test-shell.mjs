@@ -66,8 +66,8 @@ const A = await import(pathToFileURL(join(HERE, 'platform-android.mjs')).href);
 const W = await import(pathToFileURL(join(HERE, 'platform-web.mjs')).href);
 const mqttEsm = (await import(pathToFileURL(join(HERE, 'vendor', 'mqtt.esm.js')).href)).default;
 const { FakeIDB, FakeWorker } = await import(pathToFileURL(join(HERE, 'test-fakes.mjs')).href);
-const { WebSocketServer } = await import(pathToFileURL(join(REPO, 'contact', 'node_modules', 'ws', 'wrapper.mjs')).href);
-const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node.mjs')).href)).pow;
+const { WebSocketServer } = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'node_modules', 'ws', 'wrapper.mjs')).href);
+const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platform-node.mjs')).href)).pow;
 
 // A Node socket as the shell's stream (write → Promise, close, ondata, onclose).
 const streamOf = (sock) => {
@@ -457,7 +457,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
     'welcome.mjs: the words\' boxes without autocomplete, autocorrect, capitals or spellcheck');
   // The code, not its comments: no way from a root to its 25 words anywhere; the words shown again only by Me → Security
   // (design/apps-seed.md §8), from what the words password opens (WORDS.reveal), nowhere else.
-  const uiSrc = readFileSync(join(REPO, 'adapters', 'moadim', 'ui.js'), 'utf8'), secAt = uiSrc.indexOf('// ---- SECURITY'), secEnd = uiSrc.indexOf('const WORDS_VIEWS');
+  const uiSrc = readFileSync(join(REPO, 'apps', 'agent', 'ui.js'), 'utf8'), secAt = uiSrc.indexOf('// ---- SECURITY'), secEnd = uiSrc.indexOf('const WORDS_VIEWS');
   const pages = ['app.mjs', 'boot.mjs', 'profiles.mjs', 'computers.mjs', 'shell.mjs', 'seed.mjs', 'router.mjs', 'create.mjs', 'setup.mjs', 'welcome.mjs', 'words.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8')).join('\n') + uiSrc.slice(0, secAt) + uiSrc.slice(secEnd);
   const code = pages.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), sec = uiSrc.slice(secAt, secEnd);
   ok(secAt > 0 && secEnd > secAt && !/show (the |your )?(seed|25 words)|show seed|mnemonicFromRoot|encodeMoneroWords|newRoot/i.test(code) && !/mnemonicFromRoot|encodeMoneroWords|newRoot|clipboard|copy\(/.test(sec)
@@ -658,7 +658,7 @@ class FakeEl {
   }
   restoreGlobals();
   const src = readFileSync(join(HERE, 'setup.mjs'), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  ok(!/mnemonicFromRoot|encodeMoneroWords|newRoot\b|localStorage\.setItem|sessionStorage|console\./.test(src) && /session\.words\(\)/.test(src), 'setup.mjs: the words only from the session (contact/create.mjs), never stored or logged');
+  ok(!/mnemonicFromRoot|encodeMoneroWords|newRoot\b|localStorage\.setItem|sessionStorage|console\./.test(src) && /session\.words\(\)/.test(src), 'setup.mjs: the words only from the session (apps/contact/create.mjs), never stored or logged');
 }
 
 // ================================================================ 1d. profiles (profiles.mjs, boot.mjs; design/profiles.md P1) over the fake shell:
@@ -974,7 +974,7 @@ try {
 
   // ---- two apps against the relay behind the stand-in nginx, and a Node agent
   const { keygen } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
-  const nodeLib = await import(pathToFileURL(join(REPO, 'contact', 'carrier.mjs')).href);
+  const nodeLib = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'carrier.mjs')).href);
   const { makeRouter } = await import(pathToFileURL(join(HERE, 'router.mjs')).href);
   const CREATED = '2026-10-01T00:00:00Z';
   const seed = (l) => new Uint8Array(createHash('sha256').update(`sigelo-shell-test/0 ${l}`).digest());
@@ -1033,7 +1033,7 @@ try {
   // ================================================================ 3. the remote form (shell.mjs)
   {
     const S = await import(pathToFileURL(join(HERE, 'shell.mjs')).href);
-    const CLI = join(REPO, 'adapters', 'moadim', 'cli.ts'), H = join(dir, 'home');
+    const CLI = join(REPO, 'apps', 'agent', 'cli.ts'), H = join(dir, 'home');
     mkdirSync(H, { recursive: true, mode: 0o700 });
     const { newRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
     const env = { PATH: process.env.PATH, HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_RELAY: HOST, SIGELO_RELAY_ENDPOINTS: JSON.stringify({ [HOST]: { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }) };
@@ -1075,7 +1075,7 @@ try {
   {
     const S = await import(pathToFileURL(join(HERE, 'shell.mjs')).href), B = await import(pathToFileURL(join(HERE, 'boot.mjs')).href);
     const CM = await import(pathToFileURL(join(HERE, 'computers.mjs')).href), PR = await import(pathToFileURL(join(HERE, 'profiles.mjs')).href);
-    const CLI = join(REPO, 'adapters', 'moadim', 'cli.ts'), H = join(dir, 'home-computers');
+    const CLI = join(REPO, 'apps', 'agent', 'cli.ts'), H = join(dir, 'home-computers');
     mkdirSync(join(H, 'a'), { recursive: true, mode: 0o700 }); mkdirSync(join(H, 'b'), { recursive: true, mode: 0o700 }); mkdirSync(join(H, 'other'), { recursive: true, mode: 0o700 });
     const { newRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
     const env = { PATH: process.env.PATH, HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_RELAY: HOST, SIGELO_RELAY_ENDPOINTS: JSON.stringify({ [HOST]: { mqtt: 'mqtt://127.0.0.1:1', http: 'http://127.0.0.1:1' } }) };
@@ -1180,7 +1180,7 @@ try {
       pg = page();
       ok(await checkOf(() => pg.app.ready) === 'connect' && title(pg.box) === 'Connect to my agent' && !btn(pg.box, 'Cancel') && !btn(pg.box, 'Back to my computers'), 'no computer left: the pairing screens, nothing to go back to');
       // ---- the computer keeps the control until revoked there: its text still opens its page (another phone that kept it)
-      const still = await (await import(pathToFileURL(join(REPO, 'adapters', 'moadim', 'remote-client.mjs')).href)).remoteClient(cb.line).then((c) => c.call('GET', '/api/me')).catch((e) => ({ status: e.status }));
+      const still = await (await import(pathToFileURL(join(REPO, 'apps', 'agent', 'remote-client.mjs')).href)).remoteClient(cb.line).then((c) => c.call('GET', '/api/me')).catch((e) => ({ status: e.status }));
       ok(still.status === 200, 'forgetting does not revoke: the computer answers that text until ui --revoke-control there (THREAT-MODEL)');
       // ---- list on a words profile: refused not_remote (Me shows no Computers)
       ok(await checkOf(() => CM.openComputers(memStore()).use('c1')) === 'computer' && CM.otherOperator(null, 'did:sigelo:zX') === null && CM.otherOperator('did:sigelo:zA', ['did:sigelo:zB', 'did:sigelo:zA']) === null
@@ -1191,11 +1191,11 @@ try {
       await Promise.all([ca.stop(), cb.stop(), co.stop()]);
     }
   }
-  // ================================================================ 4. the remote form over the relay (shell.mjs, contact/control.mjs)
+  // ================================================================ 4. the remote form over the relay (shell.mjs, apps/contact/control.mjs)
   {
     const S = await import(pathToFileURL(join(HERE, 'shell.mjs')).href);
-    const U = await import(pathToFileURL(join(REPO, 'adapters', 'moadim', 'sigelo-agent-ui.ts')).href);
-    const CLI = join(REPO, 'adapters', 'moadim', 'cli.ts'), H = join(dir, 'home-relay');
+    const U = await import(pathToFileURL(join(REPO, 'apps', 'agent', 'sigelo-agent-ui.ts')).href);
+    const CLI = join(REPO, 'apps', 'agent', 'cli.ts'), H = join(dir, 'home-relay');
     mkdirSync(join(H, 'agents'), { recursive: true, mode: 0o700 });
     const { newRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
     const human = join(H, 'me.local.json');
@@ -1225,7 +1225,7 @@ try {
       const early = await be.call('GET', '/api/me');
       ok(early.status === 403 && early.body.error.check === 'words' && be.mode().kind === 'remote' && be.mode().via === 'relay', `relay: before the words are confirmed on the computer: 403 words (${early.status})`);
       await pg.relay.confirm('phone', true);
-      // 403 words opened no lease (contact/control.mjs): not_connected, unsent, until the next probe (PROBE_MIN, 15 s).
+      // 403 words opened no lease (apps/contact/control.mjs): not_connected, unsent, until the next probe (PROBE_MIN, 15 s).
       const held2 = await be.call('GET', '/api/me');
       ok(held2.status === 503 && held2.body.error.check === 'not_connected', `relay: after 403 words, no lease: not_connected here until the next probe (${held2.status})`);
       let me = held2;

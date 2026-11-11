@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // A monero-wallet-rpc stand-in for tools/sim/keeper-swarm.mjs. It grew out of the mock in
-// spend/test.ts (same methods, same `sign` keys) but, unlike that one, it KEEPS BOOKS: every
+// apps/keeper/test.ts (same methods, same `sign` keys) but, unlike that one, it KEEPS BOOKS: every
 // account has a balance, `transfer` refuses what the account cannot afford, `relay_tx` debits
 // amount + fee and credits any destination that is one of this wallet's own (i, 0)
 // addresses, `sweep_all` empties an account. Everything that would have left the wallet is in

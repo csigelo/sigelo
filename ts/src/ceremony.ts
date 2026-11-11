@@ -303,7 +303,7 @@ export function recoverKeeper(o: { bundle: Bundle; S?: Uint8Array; recoverySecre
 /**
  * The vendor identity (keys.ts `vendorSeed`): the DID that signs licences, made from the 25 words
  * alone, so no secret exists that the words do not restore. Its genesis is pinned (SPEC §4 `nonce`:
- * `created` fixed, the nonce the first 16 bytes of SHA-256 of the raw key, as contact/enrol.mjs
+ * `created` fixed, the nonce the first 16 bytes of SHA-256 of the raw key, as apps/contact/enrol.mjs
  * pins the operator's) and commits to the vendor's own recovery key (`vendorRecoveryCommitment(S)`),
  * never the root's: the genesis is published, and the root's commitment would link the operator's
  * whole fleet to the company. Rotation m → m+1 is a RECOVERY rotation, signed with

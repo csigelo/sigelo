@@ -42,7 +42,7 @@ fdroidserver's source (`execute_sudo.py`, `common.py`, `build_local_run.py`, `bu
   "prebuilt FLOSS binaries from ... Node.js (current versions)"; Debian 13's own Node (20) is
   older than our `engines` (≥ 22).
 - `prebuild:` runs next; the source scan runs after it. Here: `npm ci --ignore-scripts` in `ts/` and
-  `contact/`, so the scan sees every package the page ships. npm at build time is the policy's route
+  `apps/contact/`, so the scan sees every package the page ships. npm at build time is the policy's route
   for JavaScript: the scanner wants a lockfile beside each `package.json` (ours pin every package by
   integrity hash) and scans what it fetched; no srclib, no vendored tarball. The scan of that tree is
   clean, so no `scanignore` and no `scandelete`.

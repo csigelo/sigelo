@@ -5,9 +5,9 @@ name: android
 on:
   push:
     branches: [main]
-    paths: ['apps/**', 'contact/**', 'ts/**', 'adapters/moadim/**', 'relay/**', '.github/workflows/android.yml']
+    paths: ['apps/android/**', 'apps/web/**', 'apps/gtk/**', 'apps/contact/**', 'apps/agent/**', 'ts/**', 'relay/**', '.github/workflows/android.yml']
   pull_request:
-    paths: ['apps/**', 'contact/**', 'ts/**', 'adapters/moadim/**', 'relay/**', '.github/workflows/android.yml']
+    paths: ['apps/android/**', 'apps/web/**', 'apps/gtk/**', 'apps/contact/**', 'apps/agent/**', 'ts/**', 'relay/**', '.github/workflows/android.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,7 +33,7 @@ jobs:
       - name: the page's sources (ts/dist; contact, relay and adapter dependencies)
         run: |
           (cd ts && npm ci --ignore-scripts && npx tsc)
-          (cd contact && npm ci --ignore-scripts)
+          (cd apps/contact && npm ci --ignore-scripts)
           # relay/ is its own public repository (csigelo/sigelo-relay, AGPL), not in this tree: the
           # page's tests run the in-process relay from that repository at a pinned commit.
           if [ ! -d relay ]; then
@@ -42,7 +42,7 @@ jobs:
             git -C relay checkout -q FETCH_HEAD
           fi
           (cd relay && npm ci --ignore-scripts)
-          (cd adapters/moadim && npm ci --ignore-scripts)
+          (cd apps/agent && npm ci --ignore-scripts)
       - name: the page's tests (the web app; the Android page side over a fake shell)
         run: |
           node apps/web/test-web.mjs

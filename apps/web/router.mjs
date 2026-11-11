@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-// The `local` backend of the page (design/apps.md §3): adapters/moadim/UI-API.md's route table in the
+// The `local` backend of the page (design/apps.md §3): apps/agent/UI-API.md's route table in the
 // page, over a carrier running in it on the browser platform (platform-web.mjs). The routes are
-// contact/page.mjs's, the ones `sigelo-agent ui` serves, so every answer is the same JSON; what this
+// apps/contact/page.mjs's, the ones `sigelo-agent ui` serves, so every answer is the same JSON; what this
 // app has not (an agents' directory, devices to add, a seat) answers as an empty list or a refusal.
 //
 //   const r = makeRouter({ platform, identity, mode, options })
@@ -23,7 +23,7 @@
 // is for `sigelo-agent ui`), else the page's setting (GET/POST /api/settings, in the page's data),
 // else relay.sigelo.ai. presetRelay(files, host): the first-start form's choice, before any router.
 // keeper: { load() → bytes | null, save(bytes) } (seed.mjs keeperOf: the sealed keeper of a restore or a create):
-// the Agents list and their enrolment (contact/page.mjs); without one (an imported SAFE or FULL file) the
+// the Agents list and their enrolment (apps/contact/page.mjs); without one (an imported SAFE or FULL file) the
 // list is empty and enrolling refuses `keeper`.
 import { did as didOf } from 'sigelo';
 import { Carrier, DEFAULT_RELAY, UNLOGGED, pathsFor } from './vendor/contact/carrier.mjs';

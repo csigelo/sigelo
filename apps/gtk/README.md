@@ -55,7 +55,7 @@ keyring item or `control forget`; revoke it on the computer too). Another operat
 
 ## Install (no root)
 
-From a checkout with `npm ci` done in `contact/` and `ts/` (and `npm run build` in `ts/`):
+From a checkout with `npm ci` done in `apps/contact/` and `ts/` (and `npm run build` in `ts/`):
 
 ```
 sh apps/gtk/install.sh            # into ~/.local; --prefix <dir>, --dry-run, --uninstall
@@ -69,7 +69,7 @@ It installs `~/.local/bin/sigelo-app`, `~/.local/share/sigelo-app/`, the desktop
 
 ## Scanning
 
-The decoder is `contact/qr-decode.mjs` (design/devices.md §6.4), installed when the checkout has it;
+The decoder is `apps/contact/qr-decode.mjs` (design/devices.md §6.4), installed when the checkout has it;
 without it, paste the text. Camera: WebKit's `getUserMedia`, the camera only, the start page and this phone's Devices view only.
 Where WebKitGTK finds no camera (0 devices): take a photo with the Camera app and use
 "From an image", or paste a screenshot. What is scanned is held in memory until it is used.

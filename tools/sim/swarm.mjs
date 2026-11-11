@@ -406,7 +406,7 @@ function simulateAgent(i, cfg, env) {
     } catch (e) { why = String(e.message ?? e); }
     count(`invoice:${variant}:${obsOk ? 'payable' : 'refused'}`);
     if (expOk !== obsOk) finding('invoice', r, `invoice ${variant}`, expOk ? 'payable' : 'refused', obsOk ? 'payable' : `refused (${why})`);
-    // The keeper's own policy library (spend/policy.js evaluate) must reach the same verdict.
+    // The keeper's own policy library (apps/keeper/policy.js evaluate) must reach the same verdict.
     if (env.evaluate && exp.attestations && Object.keys(exp.attestations).length) {
       const issuer = Object.keys(exp.attestations)[0];
       const policy = env.policyFor(issuer);
@@ -667,7 +667,7 @@ async function envFor(cfg) {
   const { worlds, known } = makeWorlds(cfg, simRoot);
   const e = { simRoot, K: keeperRoot(simRoot, 0), worlds, known };
   try {
-    const P = await import('../../spend/dist/policy.js');
+    const P = await import('../../apps/keeper/dist/policy.js');
     e.evaluate = P.evaluate;
     const cache = new Map();
     e.policyFor = (issuer) => {
@@ -699,7 +699,7 @@ async function runShard(cfg, agents) {
         repro: `node tools/sim/swarm.mjs --seed ${JSON.stringify(cfg.seed)} --agents ${cfg.agents} --worlds ${cfg.worlds} --rounds ${cfg.rounds} --only-agent ${i}` });
     }
   }
-  acc.evaluate = env.evaluate ? 'spend/dist/policy.js' : `unavailable: ${env.evaluateError}`;
+  acc.evaluate = env.evaluate ? 'apps/keeper/dist/policy.js' : `unavailable: ${env.evaluateError}`;
   return acc;
 }
 

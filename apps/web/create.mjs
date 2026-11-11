@@ -15,7 +15,7 @@ import { writeOperator } from './seed.mjs';
 
 const hostOf = (relay) => String(relay ?? '').trim().toLowerCase() || DEFAULT_RELAY;
 
-/** The checked session's files, sealed and written; S is zeroed by the commit (contact/create.mjs). */
+/** The checked session's files, sealed and written; S is zeroed by the commit (apps/contact/create.mjs). */
 export async function createInto(platform, session, { name, relay, now = Math.floor(Date.now() / 1000) }) {
   const release = holdNetwork();
   try {

@@ -16,7 +16,7 @@
 // each server block on its own); the links to the relay only from its launch (RELAY_LIVE); the
 // sitemap's lastmod; site/deploy/check.mjs --preflight refuses an off-origin target that does not
 // answer (against this server); site/deploy/indexnow.sh sends changed URLs only;
-// site/deploy/stats-agents.sh classifies a fixture log; integrations/mcp/server.json agrees with
+// site/deploy/stats-agents.sh classifies a fixture log; apps/integrations/mcp/server.json agrees with
 // its package.json. Prints `ok …` lines, then `ALL PASS (<n> checks)` and exits 0, or `FAIL …`
 // lines and exits 1.
 import { createServer } from 'node:http';
@@ -199,9 +199,9 @@ ok(new Set(titles).size === titles.length && new Set(descs).size === descs.lengt
   const css = readFileSync(join(DIST, 'style.css'), 'utf8');
   ok(/:root \{[^}]*--seal: #9b2226;/.test(css) && /prefers-color-scheme: dark\)[^@]*--seal: #c8423f;/.test(css) && /\.seal \{[^}]*fill: var\(--seal\)/.test(css),
     'style.css: the seal in wax, seal-dark\'s #c8423f under a dark scheme');
-  const pwa = ['icon.svg', 'icon-maskable.svg'].map((f) => readFileSync(join(ROOT, 'adapters', 'moadim', f)));
+  const pwa = ['icon.svg', 'icon-maskable.svg'].map((f) => readFileSync(join(ROOT, 'apps', 'agent', f)));
   ok(pwa[0].equals(readFileSync(join(BRAND, 'app-icon.svg'))) && pwa[1].equals(readFileSync(join(BRAND, 'icon-maskable.svg'))),
-    'adapters/moadim/icon.svg and icon-maskable.svg (the PWA\'s) = assets/brand/app-icon.svg and icon-maskable.svg');
+    'apps/agent/icon.svg and icon-maskable.svg (the PWA\'s) = assets/brand/app-icon.svg and icon-maskable.svg');
 }
 
 // ---- links: every internal href (and #fragment) resolves over HTTP ----------------------------
@@ -535,7 +535,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     // the next step names what it needs (an agent that runs commands; the ChatGPT app cannot). Every footer links the relay.
     // Round 4 (2026-10-25): the relay as what the ID lets agents do, a post office; without a command-running agent, what one can still do.
     ok(md('/index.md').includes('sigelo is free, open source (MIT). With it, agents message each other and shops, no account needed. [sigelo.ai](https://sigelo.ai/) is the post office for those messages; only the two agents can read them. Anyone can [run one](https://github.com/csigelo/sigelo-relay).')
-      && md('/index.md').includes('(https://sigelo.ai/connect.html) It needs an agent that runs commands, like Claude Code, not the ChatGPT app. Without one, [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/adapters/moadim/APPS.md) or your developer.'),
+      && md('/index.md').includes('(https://sigelo.ai/connect.html) It needs an agent that runs commands, like Claude Code, not the ChatGPT app. Without one, [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/apps/agent/APPS.md) or your developer.'),
       '/: names the two layers in plain words (sigelo free and open; with the ID agents message each other and shops; the relay at sigelo.ai, the post office, only the two agents read; anyone can run one), what "Try it" needs and what to do without it');
     const noFoot = PAGE_LIST.filter((p) => !/<footer>[\s\S]*Relay: <a href="https:\/\/sigelo\.ai\/">sigelo\.ai<\/a>[\s\S]*<\/footer>/.test(md(`/${p.slug}.html`))).map((p) => p.slug);
     ok(noFoot.length === 0, `every page's footer links the relay at sigelo.ai${noFoot.length ? ` (not: ${noFoot.join(' ')})` : ''}`);
@@ -822,10 +822,10 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     `/contact.html: JSON-LD ContactPage with ${cps.length} ContactPoints (SimpleX only when set)`);
 }
 
-// ---- integrations/mcp/server.json -------------------------------------------------------------
+// ---- apps/integrations/mcp/server.json -------------------------------------------------------------
 {
-  const sj = JSON.parse(readFileSync(join(ROOT, 'integrations/mcp/server.json'), 'utf8'));
-  const pj = JSON.parse(readFileSync(join(ROOT, 'integrations/mcp/package.json'), 'utf8'));
+  const sj = JSON.parse(readFileSync(join(ROOT, 'apps/integrations/mcp/server.json'), 'utf8'));
+  const pj = JSON.parse(readFileSync(join(ROOT, 'apps/integrations/mcp/package.json'), 'utf8'));
   const p = sj.packages?.[0];
   ok(/^[a-z0-9.-]+\/[a-z0-9._-]+$/i.test(sj.name) && sj.version === pj.version && sj.description.length <= 100, `server.json: name ${sj.name}, version = package.json (${pj.version}), description ≤ 100 chars`);
   ok(pj.mcpName === sj.name && sj.name.startsWith('io.github.') && sj.repository?.url === `https://github.com/${sj.name.split('/')[0].slice('io.github.'.length)}/sigelo`, `server.json: package.json mcpName = ${sj.name} (the registry's package-ownership check), its GitHub namespace = repository.url's account`);

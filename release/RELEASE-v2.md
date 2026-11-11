@@ -87,7 +87,7 @@ Without `gh` or `cosign` it prints "not checked", as for `apksigner`; `--strict`
 - **Cooldown 14 days.** Updates resolve with `npm install --before "$(date -u -d '14 days ago' +%FT%TZ)"`. `--before` does nothing to `npm ci` on a lockfile, so the `deps` job enforces it: per lockfile entry it reads the publish time (`registry.npmjs.org/<p>` `time[<v>]`; Go `proxy.golang.org/<m>/@v/<v>.info`) and fails below 14 days at the commit time. Exceptions: `release/cooldown-exceptions.json`, reason and expiry each (a security fix).
 - **sha512 only:** `lockfile_pinned` in the export gate (exists).
 - **`--ignore-scripts`:** on every `npm ci` (exists); plus `ignore-scripts=true` in each package's `.npmrc`.
-- **No install scripts:** `deps` fails on `"hasInstallScript": true`. One hit today: `esbuild` in `plugins/`, dev only, its binary from an optional dependency; listed as an exception.
+- **No install scripts:** `deps` fails on `"hasInstallScript": true`. One hit today: `esbuild` in `apps/plugins/`, dev only, its binary from an optional dependency; listed as an exception.
 - **Dependabot:** weekly, grouped. Its PRs are signals: `main` is an export, so the maintainer applies the bump in the source tree under the cooldown, exports through `ci-check` and closes the Dependabot PR. VERSIONING §6 changes to say so.
 - **Actions:** pinned by SHA (exists); first Monday of each month one PR bumps them to releases at least 14 days old, changes read.
 - **werift:** pinned at 0.26.0 on 2026-11-03, two days after its release (2026-11-01). It clears the cooldown on 2026-11-15; a release before then needs an exception or 0.25.2 (2026-10-24). 0.27.0 (2026-11-10) not before 2026-11-24. Its transitive packages get the same check.
@@ -156,7 +156,7 @@ Change:
 1. After `create_wallet`, `auto_refresh {"enable":false}`; the canary needs no sync.
 2. A readiness poll: `get_height`, `--max-time 10`, sleeping 1, 2, 4, 8, then 15 s, up to 180 s; print the seconds taken.
 3. Start loop 120 s, same backoff, instead of 60 × 1 s.
-4. `spend/canary.ts`: with `SIGELO_CANARY_RPC` set, retry `get_version` three times (5, 10, 20 s) before SKIP; 20 s per call stays.
+4. `apps/keeper/canary.ts`: with `SIGELO_CANARY_RPC` set, retry `get_version` three times (5, 10, 20 s) before SKIP; 20 s per call stays.
 
 Why safe: an upstream RPC change shows as a wrong shape or version, never as a timeout, so waiting loses no signal; a dead binary still fails at 180 s.
 

@@ -9,8 +9,8 @@
 //    must travel with the code; there is one, at the repository root. `pre` copies it in when
 //    the package has none, `post` removes the copy.
 // 2. No `file:` dependency in the published manifest.
-// In the repository, spend/, adapters/moadim and integrations/mcp depend on their siblings as
-// `file:../ts` etc., so a clone builds without a registry. A `file:` path means nothing inside
+// In the repository, apps/keeper/, apps/agent and apps/integrations/mcp depend on their siblings as
+// `file:../../ts` etc., so a clone builds without a registry. A `file:` path means nothing inside
 // a tarball, and npm has no manifest field that swaps it at pack time (publishConfig only takes
 // registry settings), so `pre` rewrites package.json in place — each `file:<dir>` dependency
 // becomes `^<version>` of the package.json in <dir> — and `post` puts the original back. npm

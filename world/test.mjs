@@ -199,7 +199,7 @@ ok(init.status === 200 && init.h.get('content-type') === 'application/json' && i
 const inited = await mcpPost({ jsonrpc: '2.0', method: 'notifications/initialized' }, { 'mcp-protocol-version': '2025-11-25' });
 ok(inited.status === 202 && inited.text === '', 'mcp notifications/initialized: 202, no body');
 const tl = await mcpPost({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { 'mcp-protocol-version': '2025-11-25' });
-const stdio = await exec(process.execPath, [join(ROOT, 'integrations/mcp/server.mjs')], { input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', env: { ...process.env, SIGELO_IDENTITY: join(dir, 'none.json'), SIGELO_WALLET_URL: '' } });
+const stdio = await exec(process.execPath, [join(ROOT, 'apps/integrations/mcp/server.mjs')], { input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', env: { ...process.env, SIGELO_IDENTITY: join(dir, 'none.json'), SIGELO_WALLET_URL: '' } });
 const stdioVerify = (() => { try { return JSON.parse(stdio.stdout.split('\n')[0]).result.tools.find((t) => t.name === 'sigelo_verify'); } catch { return undefined; } })();
 ok(tl.status === 200 && tl.json.result.tools.length === 1 && stdioVerify && same(tl.json.result.tools[0], stdioVerify), 'mcp tools/list: sigelo_verify alone, identical to the stdio server\'s definition');
 const call = await mcpPost({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'sigelo_verify', arguments: { bundle: vec.bundle, now: vec.now } } }, { 'mcp-protocol-version': '2025-11-25' });

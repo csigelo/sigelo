@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Stand-in for 1F916's src/checkpoint.ts `registrySigner`: REGISTRY_SEED is
-// "<b64url 32-byte seed>.<b64url raw public key>", the shape adapters/1f916/sigelo.test.ts uses;
+// "<b64url 32-byte seed>.<b64url raw public key>", the shape accept/1f916/sigelo.test.ts uses;
 // `key` is the public half (b64url), `sign` returns a b64url Ed25519 signature over the string.
 import { b64urlDecode, b64urlEncode } from "./keys.ts";
 const PKCS8 = Buffer.from("302e020100300506032b657004220420", "hex"); // RFC 8410 wrapper for a raw seed

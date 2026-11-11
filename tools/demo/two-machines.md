@@ -17,7 +17,7 @@ By hand on two machines, A (alice) and B (bob):
 Node 22.18 or newer (tested on 24), a clone of [csigelo/sigelo](https://github.com/csigelo/sigelo), then:
 
 ```sh
-(cd ts && npm ci && npx tsc) && (cd contact && npm ci) && (cd adapters/moadim && npm ci && npm run build && npm link)
+(cd ts && npm ci && npx tsc) && (cd apps/contact && npm ci) && (cd apps/agent && npm ci && npm run build && npm link)
 export SIGELO_RELAY=relay.sigelo.ai      # or your own: relay/README.md; both must use the code's relay
 sigelo-agent init --recovery "$(sigelo-agent recovery-key --out recovery.key)"
 sigelo-agent whoami                      # your DID

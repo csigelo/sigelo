@@ -60,7 +60,7 @@ Pass: exit 0 and `attestations` lists the world's DID. A statement's `claims` ar
 
 - Remote, verify only: `https://sigelo.io/mcp` (one tool, `sigelo_verify`).
 - Claude Code plugin, identity tools and skill: `claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo` ([plugins](https://github.com/csigelo/sigelo/tree/main/plugins)).
-- Hermes Agent: 9 lines of `config.yaml`, identity and wallet ([adapters/hermes](https://github.com/csigelo/sigelo/tree/main/adapters/hermes)).
+- Hermes Agent: 9 lines of `config.yaml`, identity and wallet ([apps/integrations/hermes](https://github.com/csigelo/sigelo/tree/main/apps/integrations/hermes)).
 
 [`sigelo-mcp`](https://www.npmjs.com/package/sigelo-mcp) exposes the same steps as tools; configs for 30 frameworks: [Works with](/frameworks.html).
 

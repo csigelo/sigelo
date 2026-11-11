@@ -16,7 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { did, parseBytes, structure, VERSION } from '../../../ts/dist/sigelo.js';
 // The key through its provider (design/key-providers.md): plain file today, keychain or key agent later.
-import { signer } from '../../../adapters/moadim/sigelo-agent-keys.ts';
+import { signer } from '../../../apps/agent/sigelo-agent-keys.ts';
 import { CTX, LINE, rtrim } from './gate.mjs';
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i < 0 ? undefined : process.argv[i + 1]; };

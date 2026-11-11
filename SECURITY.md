@@ -36,10 +36,10 @@ bundle or request beats prose. State what you did not verify.
 - `SPEC.md` and `test-vectors.json`: any bundle two conformant verifiers disagree on, a wrong
   vector, any rule that lets a stolen key or a malformed object win.
 - `ts/` (library, vector generator, `sigelo-offline`, ceremony) and `go/` (`sigelo-verify`, `keys.go`).
-- `spend/`, the keeper: account pinning, caps, delegation, approvals, the two-phase relay, tokens,
+- `apps/keeper/`, the keeper: account pinning, caps, delegation, approvals, the two-phase relay, tokens,
   `spend.log` integrity, `sigelo-wallet` output an attacker can shape.
-- `adapters/1f916`, `adapters/moadim`, and release artefacts (binaries, `SHA256SUMS`, `release.json`).
-- `contact/` (invite, envelope, prekeys, key schedule) and the relay (login, proof of work, quotas,
+- `accept/1f916`, `apps/agent`, and release artefacts (binaries, `SHA256SUMS`, `release.json`).
+- `apps/contact/` (invite, envelope, prekeys, key schedule) and the relay (login, proof of work, quotas,
   licences); relay denial of service is in scope as a report.
 
 Out of scope: Monero, `monero-wallet-rpc`, `monerod` and stock wallets (report upstream; sigelo
@@ -75,7 +75,7 @@ External review targets, in order:
 3. `go/monero.go`, `ts/src/monero.ts` — Keccak, base58, point decoding, SigV2, subaddresses.
 4. `ts/src/keys.ts`, `go/keys.go` — HKDF paths, `sc_reduce32`, the 25-word mnemonic.
 5. `ts/src/ceremony.ts`, `ts/src/offline.ts` — secret handling, age invocation.
-6. `spend/service.ts`, `approval.ts`, `tree.ts`, `policy.ts` — the keeper.
-7. `contact/kdf.mjs`, `envelope.mjs`, `prekeys.mjs` — key schedule, envelope, prekeys.
+6. `apps/keeper/service.ts`, `approval.ts`, `tree.ts`, `policy.ts` — the keeper.
+7. `apps/contact/kdf.mjs`, `envelope.mjs`, `prekeys.mjs` — key schedule, envelope, prekeys.
 
 The keeper is **experimental and stagenet-only** until this list is reviewed.

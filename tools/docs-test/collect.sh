@@ -3,7 +3,7 @@
 # Collect a lifecycle run for grading:  tools/docs-test/collect.sh <workspace> <dest>
 # Copies <workspace>/out/ to <dest>/ and the mock world's state (world.local.json, the world's
 # identity; challenge.local.json, its outstanding challenges) to <dest>/_world/, which grade.mjs uses
-# to check that issued.json and challenge-2.json came from examples/world.mjs. Refuses to
+# to check that issued.json and challenge-2.json came from accept/examples/world.mjs. Refuses to
 # overwrite. The transcript is collected separately (README.md).
 set -eu
 [ $# -eq 2 ] || { echo "usage: collect.sh <workspace> <dest>" >&2; exit 2; }

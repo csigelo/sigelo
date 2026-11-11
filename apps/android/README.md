@@ -118,7 +118,7 @@ store listing (`app/fastlane/`, its icon drawn by `icon.mjs`).
 On a computer with JDK 21 and the Android SDK, the same (another JDK major gives other bytes):
 
 ```
-cd ts && npm ci && npx tsc && cd ../contact && npm ci && cd ..
+cd ts && npm ci && npx tsc && cd ../apps/contact && npm ci && cd ../..
 node apps/android/assets.mjs              # the page into app/src/main/assets/web/
 cd apps/android && ./gradlew assembleDebug
 ```

@@ -48,7 +48,7 @@ export function newRoot(): string {
 
 /**
  * The same fresh root as bytes, for a caller that holds `S` and zeroes it itself (the phone apps'
- * create, contact/create.mjs): no words string is made until one is shown. Rejected draws are zeroed.
+ * create, apps/contact/create.mjs): no words string is made until one is shown. Rejected draws are zeroed.
  */
 export function newRootBytes(): Uint8Array {
   for (;;) {
@@ -98,10 +98,10 @@ export const agentIdentitySeed = (K: Uint8Array, i: number, n: number): Uint8Arr
 /**
  * Ed25519 seed for the delegate a keeper's `POST /delegate` mints at account `i`, rotation `n`,
  * under keeper root `K`. Its own label, not `agentIdentitySeed`'s: an enrolled worker `i` under
- * the same `K` (`sigelo-agent enrol`, contact/enrol.mjs) holds `agentIdentitySeed(K, i, n)`, and
+ * the same `K` (`sigelo-agent enrol`, apps/contact/enrol.mjs) holds `agentIdentitySeed(K, i, n)`, and
  * a delegating agent that receives its delegate's seed must not receive a worker's key. Spend
  * log lines carry `"kdf": "delegate/1"` for this; a line without it was minted before, with
- * `agentIdentitySeed` (spend/tree.ts `delegateSeed`).
+ * `agentIdentitySeed` (apps/keeper/tree.ts `delegateSeed`).
  */
 export const delegateIdentitySeed = (K: Uint8Array, i: number, n: number): Uint8Array =>
   k(K, `sigelo/v1/delegate/${index('delegate', i)}/ed25519/${index('delegate rotation', n)}`);

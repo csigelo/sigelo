@@ -3,15 +3,18 @@
 // start page's scripts, and the installed sigelo-app.js under gjs (SIGELO_APP_TEST): sealed calls to
 // a real `ui --remote` (scope, a revoked text), this phone's page through `ui --app`, and a computer's
 // page over the relay (SIGELO:CTL:, control pair, control ui --app; SKIP without the relay checkout).
-//   node apps/gtk/test-gtk.mjs     (needs gjs; a checkout with ts/dist, contact/ and adapters/moadim/ node_modules)
+//   node apps/gtk/test-gtk.mjs     (needs gjs; a checkout with ts/dist, apps/contact/ and apps/agent/ node_modules)
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { newRoot } from '../../ts/dist/keys.js';
+import { createRequire } from 'node:module';
+// sigelo by package name, through the agent's dependency on it (the seam: apps/ never reads ../../ts)
+const sigelo = createRequire(new URL('../agent/package.json', import.meta.url));
+const { newRoot } = await import(pathToFileURL(sigelo.resolve('sigelo/dist/keys.js')).href);
 
-const HERE = import.meta.dirname, ROOT = join(HERE, '..', '..'), CLI = join(ROOT, 'adapters', 'moadim', 'cli.ts');
+const HERE = import.meta.dirname, ROOT = join(HERE, '..', '..'), CLI = join(ROOT, 'apps', 'agent', 'cli.ts');
 let passed = 0, failed = 0;
 const ok = (name, cond, detail = '') => { if (cond) { passed++; console.log(`ok   ${name}`); } else { failed++; console.log(`FAIL ${name}${detail ? `\n     ${detail}` : ''}`); } };
 const T = mkdtempSync(join(tmpdir(), 'sigelo-gtk-')), P = join(T, 'prefix'), H = join(T, 'home');
@@ -19,7 +22,7 @@ mkdirSync(H, { recursive: true, mode: 0o700 });
 
 // ── scripts parse; install.sh dry run writes nothing; then a real install into the prefix
 ok('install.sh: sh -n', spawnSync('sh', ['-n', join(HERE, 'install.sh')]).status === 0);
-for (const f of ['web/start.js', 'web/seed-check.mjs', '../../adapters/moadim/shim-zlib.mjs', '../../adapters/moadim/shim-kdf.mjs']) ok(`${f}: node --check`, spawnSync(process.execPath, ['--check', join(HERE, f)]).status === 0);
+for (const f of ['web/start.js', 'web/seed-check.mjs', '../agent/shim-zlib.mjs', '../agent/shim-kdf.mjs']) ok(`${f}: node --check`, spawnSync(process.execPath, ['--check', join(HERE, f)]).status === 0);
 const dry = spawnSync('sh', [join(HERE, 'install.sh'), '--dry-run', '--prefix', P], { encoding: 'utf8' });
 ok('install.sh --dry-run: exit 0, every target under the prefix, nothing written', dry.status === 0 && !existsSync(P)
   && dry.stdout.split('\n').filter((l) => /^(cp|write) /.test(l)).every((l) => l.includes(` ${P}/`)), dry.stdout + dry.stderr);
@@ -30,7 +33,7 @@ const want = ['bin/sigelo-app', 'share/applications/io.sigelo.App.desktop', 'sha
   'share/sigelo-app/web/shim-zlib.mjs', 'share/sigelo-app/web/shim-kdf.mjs', 'share/sigelo-app/web/seed-check.mjs', 'share/sigelo-app/web/monero-words.js', 'share/sigelo-app/web/welcome.mjs',
   'share/sigelo-app/web/words-lock.mjs'];
 ok('install.sh --prefix: the launcher, desktop file, icon, app and page files', ins.status === 0 && want.every((f) => existsSync(join(P, f))), ins.stderr + want.filter((f) => !existsSync(join(P, f))).join(' '));
-ok('install.sh: QR reading installed beside the page (contact/qr-decode.mjs, qr.mjs), no "scanning off" warning', ['qr-decode.mjs', 'qr.mjs'].every((f) => existsSync(join(S, 'web', f))) && !/scanning off/.test(ins.stderr), ins.stderr);
+ok('install.sh: QR reading installed beside the page (apps/contact/qr-decode.mjs, qr.mjs), no "scanning off" warning', ['qr-decode.mjs', 'qr.mjs'].every((f) => existsSync(join(S, 'web', f))) && !/scanning off/.test(ins.stderr), ins.stderr);
 const desk = readFileSync(join(P, 'share/applications/io.sigelo.App.desktop'), 'utf8');
 ok('desktop file: Exec the installed launcher, icon io.sigelo.App, mobile form factor', desk.includes(`Exec=${P}/bin/sigelo-app\n`) && desk.includes('Icon=io.sigelo.App') && desk.includes('X-Purism-FormFactor=Workstation;Mobile;'));
 const v = spawnSync('desktop-file-validate', [join(HERE, 'io.sigelo.App.desktop')], { encoding: 'utf8' });
@@ -162,9 +165,9 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
   ok('start.js: the words go to the app once (restore), the clipboard emptied after a paste (clipclear), no word ever shown back or logged',
     js.includes("must('restore', { words: o.words") && js.includes("ask('clipclear')") && !/console\.|show (the |your )?(seed|25 words)/i.test(js));
   const { checkWords: gtkCheck } = await import(pathToFileURL(join(S, 'web', 'seed-check.mjs')).href);
-  const { checkWords: libCheck } = await import(pathToFileURL(join(ROOT, 'contact', 'restore.mjs')).href);
+  const { checkWords: libCheck } = await import(pathToFileURL(join(ROOT, 'apps', 'contact', 'restore.mjs')).href);
   const w = newRoot(), l = w.split(' '), cases = [w, l.slice(0, 7).join(' '), [l[1], l[0], ...l.slice(2)].join(' '), [...l.slice(0, 3), 'zzzq', ...l.slice(4)].join(' '), `${w} ${l[0]}`, l.map((x) => x.slice(0, 3)).join('\n'), w.toUpperCase()];
-  ok('seed-check.mjs (the page\'s live check) agrees with contact/restore.mjs on 25 words, partial, swapped, a bad word, 26, prefixes, capitals',
+  ok('seed-check.mjs (the page\'s live check) agrees with apps/contact/restore.mjs on 25 words, partial, swapped, a bad word, 26, prefixes, capitals',
     cases.every((c) => { const a = gtkCheck(c), b = libCheck(c); return a.ok === b.ok && a.count === b.count && (a.error === null) === (b.error === null); }) && gtkCheck(w).ok === true && gtkCheck(cases[2]).ok === false);
   const KB = join(T, 'kbin'); mkdirSync(KB, { recursive: true });
   writeFileSync(join(KB, 'secret-tool'), '#!/bin/sh\nd="$HOME/.fake-keyring"; mkdir -p "$d"\ncase "$1" in\n  lookup) [ -f "$d/$5" ] && cat "$d/$5" && exit 0; exit 1;;\n  store) cat > "$d/$6"; exit 0;;\n  clear) rm -f "$d/$5"; exit 0;;\nesac\nexit 2\n', { mode: 0o755 });
@@ -242,7 +245,7 @@ else {
   const relay = await startRelay({ host: 'relay.test', db: join(R, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, log: () => {},
     policy: (c) => relayPolicy(c, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: TIERS }) });
   const endpoints = { 'relay.test': { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
-  const U = await import(join(ROOT, 'adapters', 'moadim', 'sigelo-agent-ui.ts'));
+  const U = await import(join(ROOT, 'apps', 'agent', 'sigelo-agent-ui.ts'));
   const op = join(H, 'op.local.json');
   mkdirSync(join(H, 'op-agents'), { recursive: true });
   spawnSync(process.execPath, [CLI, 'keeper', '--from-words', '--identity', op], { env, input: newRoot(), encoding: 'utf8' });
@@ -269,13 +272,13 @@ else {
     await closed; clearTimeout(killer);
     let r = {};
     try { r = JSON.parse(so.trim().split('\n').at(-1)); } catch {}
-    const did = JSON.parse(readFileSync(op, 'utf8')).genesis ? (await import(join(ROOT, 'ts', 'dist', 'sigelo.js'))).did(JSON.parse(readFileSync(op, 'utf8')).genesis) : '';
+    const did = JSON.parse(readFileSync(op, 'utf8')).genesis ? (await import(pathToFileURL(sigelo.resolve('sigelo')).href)).did(JSON.parse(readFileSync(op, 'utf8')).genesis) : '';
     ok('gjs, over the relay: control ui --app serves the computer\'s page here: GET /api/me, /api/state → 200 (the operator\'s DID); the control kept; stopped with the app', r.ok === true && r.me === 200 && r.did === did && r.state === 200 && r.again === 200 && r.kept === true && r.exited === true,
       JSON.stringify(r).slice(0, 400) + se.slice(-400));
     const st = (await import('node:fs')).statSync(join(H, 'control.local.json'));
     const cf = JSON.parse(readFileSync(join(H, 'control.local.json'), 'utf8'));
     ok('control.local.json: 0600, a random key, recovery null, the operator\'s DID; not an attested identity', (st.mode & 0o777) === 0o600 && cf.genesis.recovery === null && cf.operator === r.did && cf.attestations.length === 0);
-    const { did: didOf } = await import(join(ROOT, 'ts', 'dist', 'sigelo.js'));
+    const { did: didOf } = await import(pathToFileURL(sigelo.resolve('sigelo')).href);
     ok('control.local.json: its key sealed in the keyring (provider keychain, sigelo-wrap/1, the item under the control\'s DID), no plain key in the file; control ui opened it',
       cf.provider === 'keychain' && cf.secret?.provider === 'keychain' && cf.secret.v === 'sigelo-wrap/1' && cf.secret.account === didOf(cf.genesis) && !/"secret":"[0-9a-f]{64}"/.test(readFileSync(join(H, 'control.local.json'), 'utf8'))
       && readdirSync(join(H, '.fake-keyring')).includes(cf.secret.account) && r.ok === true, JSON.stringify(cf.secret));

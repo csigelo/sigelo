@@ -2,7 +2,7 @@
 // world/mcp.mjs — https://sigelo.io/mcp: MCP over Streamable HTTP, by hand, verify only.
 //
 // Followed: MCP revision 2026-07-28 (basic/transports/streamable-http, basic/versioning,
-// server/discover), dual-era like integrations/mcp/server.mjs: a request carrying
+// server/discover), dual-era like apps/integrations/mcp/server.mjs: a request carrying
 // `_meta["io.modelcontextprotocol/protocolVersion"]` is served as 2026-07-28 (the
 // MCP-Protocol-Version, Mcp-Method and, for tools/call, Mcp-Name headers must mirror the body:
 // 400 HeaderMismatch -32020 otherwise; an unknown version is 400 -32022 with the supported list;
@@ -14,7 +14,7 @@
 // holds no session, cookie or user state, and its one tool is a pure function of its input, so a
 // DNS-rebinding page gains nothing a plain internet client does not already have.
 //
-// The tool is integrations/mcp/server.mjs's `sigelo_verify`, verbatim (name, description,
+// The tool is apps/integrations/mcp/server.mjs's `sigelo_verify`, verbatim (name, description,
 // schema, result and REFUSED text): no identity, no wallet, nothing that holds a key is here.
 // world/test.mjs checks the definition against the stdio server's tools/list.
 

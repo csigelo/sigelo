@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// tools/sim/1f916/world.mjs — adapters/1f916/sigelo.ts as a world of the simulation.
+// tools/sim/1f916/world.mjs — accept/1f916/sigelo.ts as a world of the simulation.
 //
 // The adapter is imported as it is shipped: copied beside four stand-ins for the 1F916 modules it
 // imports (society, keys, checkpoint, attestations — this directory) into tools/sim/out/1f916/, and
@@ -18,7 +18,7 @@ const ROOT = dirname(dirname(dirname(HERE)));
 export async function load1f916(out) {
   const dir = join(out, '1f916', 'src');
   mkdirSync(dir, { recursive: true });
-  copyFileSync(join(ROOT, 'adapters', '1f916', 'sigelo.ts'), join(dir, 'sigelo.ts'));
+  copyFileSync(join(ROOT, 'accept', '1f916', 'sigelo.ts'), join(dir, 'sigelo.ts'));
   for (const f of ['society.ts', 'keys.ts', 'checkpoint.ts', 'attestations.ts']) copyFileSync(join(HERE, f), join(dir, f));
   const w = process.emitWarning; process.emitWarning = () => {}; // the type-stripping notice
   try { return await import(pathToFileURL(join(dir, 'sigelo.ts')).href); } finally { process.emitWarning = w; }

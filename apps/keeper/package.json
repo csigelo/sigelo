@@ -1,0 +1,58 @@
+{
+  "name": "sigelo-spend",
+  "version": "0.1.14",
+  "description": "Monero keeper for AI agents: bounded per-agent spending and receiving, the agent never holds a key (sigelo)",
+  "keywords": [
+    "monero",
+    "xmr",
+    "ai-agents",
+    "agent-payments",
+    "wallet",
+    "spending-limits",
+    "monero-wallet-rpc",
+    "payments",
+    "sigelo",
+    "agent-wallet",
+    "agent-identity",
+    "did",
+    "mcp"
+  ],
+  "homepage": "https://sigelo.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csigelo/sigelo.git",
+    "directory": "apps/keeper"
+  },
+  "bugs": {
+    "url": "https://github.com/csigelo/sigelo/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sigelo-spend": "dist/cli.js",
+    "sigelo-wallet": "dist/wallet.js"
+  },
+  "files": [
+    "dist",
+    "!dist/test.*",
+    "!dist/canary.*",
+    "README.md",
+    "openapi.yaml"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node dist/test.js",
+    "prepack": "tsc && node ../../release/prepack.mjs pre",
+    "postpack": "node ../../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publishing is a release step (release/RELEASE.md); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
+  },
+  "dependencies": {
+    "sigelo": "file:../../ts"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

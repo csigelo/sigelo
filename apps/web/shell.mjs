@@ -6,7 +6,7 @@
 //           shell's HTTP, the text sealed under an AndroidKeyStore key (its blob naming the computer).
 //   relay:  SIGELO:CTL: (design/apps.md §6.3): a control identity per computer, made here (a random key,
 //           sealed as an identity is, never attested), paired with the operator by the code and four words
-//           checked on the computer; calls are sigelo-device/1 requests (contact/control.mjs), the state comes
+//           checked on the computer; calls are sigelo-device/1 requests (apps/contact/control.mjs), the state comes
 //           pushed (events), so the page's 2 s poll reads it here and sends nothing.
 // Pairing (code or scan: welcome.mjs's connect screens) refuses a computer whose page is another identity
 // than the profile's operator, other_operator, before anything of it is kept; a computer whose page changes

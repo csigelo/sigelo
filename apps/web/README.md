@@ -3,7 +3,7 @@
 
 The page of `sigelo-agent ui` running its own carrier: no computer, no Node. `ui.js` talks to an
 in-page router (the `local` backend) that implements the routes of
-[UI-API.md](../../adapters/moadim/UI-API.md) over a carrier on a browser platform, with the same JSON.
+[UI-API.md](../agent/UI-API.md) over a carrier on a browser platform, with the same JSON.
 The Android app (apps/android) loads these files with its own network and key; a plain browser tab can
 too, for testing.
 
@@ -26,15 +26,15 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `router.mjs` | The `local` backend: `call(method, path, body)` → `{status, body}`, `onChange`, `mode` |
 | `platform-web.mjs` | The browser platform of sigelo-contact (design/apps.md §4.2) |
 | `pow-worker.mjs` | The relay login's proof of work, in a module Worker |
-| `platform-stub.mjs` | Loaded instead of `contact/platform-node.mjs` (import map): no Node default in a page |
+| `platform-stub.mjs` | Loaded instead of `apps/contact/platform-node.mjs` (import map): no Node default in a page |
 | `platform-android.mjs` | In the Android app: the bridge (`sigelo-bridge/0`), the shell's fetch, MQTT and key |
 | `ws-over-stream.mjs` | RFC 6455 client framing over the shell's TLS stream (wss), and the stream as a socket (mqtts) |
 | `welcome.mjs` | The first run, shared with the GTK phone app: the welcome's three choices, then one decision per screen (create, restore, connect), Back one step |
 | `setup.mjs` | The first run's work in this page (welcome.mjs's api): create, restore, connect, and the import under Advanced; the shell's form set only when a path commits |
 | `shell.mjs` | In the Android app: the remote form (a computer's page, on the LAN or over the relay), its pairing and `connectLan` |
-| `seed.mjs` | Restore from seed: `restoreInto` (derive with `contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
-| `create.mjs` | Create new identity: `createInto` (commit with `contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
-| `words.mjs` | The words password (design/apps-seed.md §8): the kept words (`contact/words-lock.mjs`, sealed as kind `words`), `sigeloLocal.words`, the guards of profile removal and the seat |
+| `seed.mjs` | Restore from seed: `restoreInto` (derive with `apps/contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
+| `create.mjs` | Create new identity: `createInto` (commit with `apps/contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
+| `words.mjs` | The words password (design/apps-seed.md §8): the kept words (`apps/contact/words-lock.mjs`, sealed as kind `words`), `sigeloLocal.words`, the guards of profile removal and the seat |
 | `copy.mjs` | The vendoring: walks the import graph, copies each file byte for byte, writes `vendor.json` |
 | `vendor.json` | Every vendored file, its source and SHA-256 (committed; `vendor/` is not) |
 | `test-web.mjs`, `test-shell.mjs` | The tests, in Node, through the same import map (`test-fakes.mjs`: IndexedDB, Worker) |
@@ -43,12 +43,12 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 
 `ui.js` picks its backend at load: `shell` in the GTK phone app (remote control), `local` when
 `app.mjs` set `globalThis.sigeloLocal`, else `http` (the computer's `ui`). The router is
-`contact/page.mjs`, the module `sigelo-agent ui` serves its routes from, so a route answers the same
+`apps/contact/page.mjs`, the module `sigelo-agent ui` serves its routes from, so a route answers the same
 JSON here; what the app does not have answers as nothing: `GET /api/agents` (an agents' directory) is `[]`, enrolling or
 pairing a local agent `404 agent`, `GET /api/devices` an empty list, adding, scanning or revoking a device
 `409 not_here` (that is the operator's computer). Changes are pushed (`onChange`); the 2 s poll stays,
 with the same `since`. A banner says what the page holds: SAFE worker, FULL standby, or remote.
-Remote over the relay (`SIGELO:CTL:`, contact/control.mjs): the computer pushes the state (events), so
+Remote over the relay (`SIGELO:CTL:`, apps/contact/control.mjs): the computer pushes the state (events), so
 the poll reads it in the page and sends nothing; one request renews the push every 5 minutes.
 
 ## The platform (platform-web.mjs)
@@ -110,7 +110,7 @@ removes the material (a relay database at the next start); `sigeloLocal.computer
 The welcome's second choice: one box checked as it is
 typed (count, the first word not in the Monero list by position, the checksum), a restore height or
 date, the network, the device's name, and whether sigelo already runs as you on another device.
-`contact/restore.mjs` derives what `sigelo-agent keeper --from-words` writes: the operator identity
+`apps/contact/restore.mjs` derives what `sigelo-agent keeper --from-words` writes: the operator identity
 (`operatorIdentity(S, 0)`) and the keeper file (K_1, the recovery commitment, `created`, `net`,
 `restore_height` or `restore_date`; neither given → `restore_height: 0`), this device as worker 0 of
 K_1, FULL, attested 14 days. Both files are sealed at once (`identity`, `keeper`: the WebCrypto key,
@@ -125,7 +125,7 @@ with `seat_elsewhere`, and the banner offers "Take the seat here" (`POST /api/se
 ## Create new identity (create.mjs)
 
 The welcome's first choice. Name this phone (the network and the relay under Advanced). Create
-draws S in the page (`contact/create.mjs` `newSeed`: `newRoot`'s draw, `crypto.getRandomValues`,
+draws S in the page (`apps/contact/create.mjs` `newSeed`: `newRoot`'s draw, `crypto.getRandomValues`,
 redrawn until 0 < S < l) and holds the network until the end. The words screen is a one-way door: the
 25 words numbered in an ordered list, two columns, the address of their own Monero wallet (a wallet app restored from
 the words shows the same), no Back (the Android shell swallows the system's, `secure` with `door`),
@@ -146,7 +146,7 @@ DID, where, enrolled / pending code / revoked, last seen), this device among the
 Enrol, as Receive: a name and a tier (own; friend or quiet for an agent that reads the web), the relay (the picker:
 tap to use, hold to edit, a typed host tested before OK), then one code big with its ten minutes, copy and share,
 and `sigelo-agent init --enrol <code>` for the other machine; the four words once it pairs; then enrolled. The code
-is made on the app's own session (`contact/page.mjs`), worker i the next free, at the seat only (a standby refuses
+is made on the app's own session (`apps/contact/page.mjs`), worker i the next free, at the seat only (a standby refuses
 `seat_elsewhere`). The keeper is opened per use and resealed after a change (`seed.mjs` `keeperOf`). Tapping a row:
 details, Rename, Revoke (its contact forgotten; its attestation stays valid to its end, said before).
 Add a contact is a separate screen (someone else's identity, a person's or an agent's): make a code to
@@ -159,7 +159,7 @@ Without a keeper (an imported file) the list is empty and Enrol is off.
 
 The app runs only its own files: CSP `default-src 'self'`, scripts from this origin and the import
 map by its hash; `connect-src https: wss:` for the relays. No bundler, no transform: `copy.mjs`
-copies sigelo-contact's modules (`contact/`), sigelo's (`ts/dist/`), @noble's, `mqtt.esm.js`
+copies sigelo-contact's modules (`apps/contact/`), sigelo's (`ts/dist/`), @noble's, `mqtt.esm.js`
 (MQTT.js 5.16.0), `ui.js`, `ui.css`, the icon, `remote-client.mjs` and the page's `node:zlib` shim for
 the QR codec, as they are. 61 files, about 1.7 MiB, most of it MQTT.js and @noble/post-quantum.
 

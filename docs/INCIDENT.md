@@ -2,12 +2,12 @@
 
 For the keeper's owner. Keepers are hot (MONERO.md §4.6). Coins that leave do not come back; identities
 do, as the recovery key is on no keeper. **Rehearsed once** on the stagenet soak, 2026-10-01
-(spend/soak/README.md incident #5): detect → last sweep 15 min 26 s, after the freeze
+(apps/keeper/soak/README.md incident #5): detect → last sweep 15 min 26 s, after the freeze
 as written here failed. §2, §3 and §5 below carry that run's corrections. Next drill: quarterly.
 
-To run this on a schedule against your own installation: `kit/` (the recovery kit) binds it to your
-hosts, units and paths (`kit/procedure/RUNBOOK.md`, with T14's corrections to §2 and §3), prints it,
-and times and grades each drill (`kit/procedure/DRILL.md`).
+To run this on a schedule against your own installation: `apps/kit/` (the recovery kit) binds it to your
+hosts, units and paths (`apps/kit/procedure/RUNBOOK.md`, with T14's corrections to §2 and §3), prints it,
+and times and grades each drill (`apps/kit/procedure/DRILL.md`).
 
 **Which case?** (a) *one token leaked, host clean*: a root's token → `sigelo-spend token new
 policy.json <agent>` (the running keeper refuses the old token from its next request; no restart
@@ -29,18 +29,18 @@ or its wallet files*: everything below. (c) *anything that held the 25 words, `S
 **Not a compromise: the host is offline.** Every pay, fund and delegate answering TRY LATER,
 with the wallet height frozen, is what a host without a network looks like. In soak incident #4
 the test host lost its network for 32 h because its network manager stopped auto-connecting
-after a failed handshake and nothing could re-authorise it unattended (spend/soak/README.md). The keeper failed closed: no `intent`
+after a failed handshake and nothing could re-authorise it unattended (apps/keeper/soak/README.md). The keeper failed closed: no `intent`
 line, nothing sent, every line verifies. Since `0fc50f5` the keeper names the cause:
 wallet-rpc's "no connection to daemon" is `502 wallet_offline`, and `sigelo-wallet` prints
 "the wallet has no connection to the Monero network; nothing was sent". Before that it was the
 generic `wallet`, which looks like a wallet fault. Check the host's network and the wallet
-height before freezing anything. `spend/soak/check.mjs` now goes UNHEALTHY without a payment
+height before freezing anything. `apps/keeper/soak/check.mjs` now goes UNHEALTHY without a payment
 in 2 h or on a stuck height (`90de821`). If the host also booted without the time, expect
 `clock_behind` too (THREAT-MODEL §3.7a).
 
 ## 2. Freeze (on the compromised host, minutes count)
 
-In this order. On the soak, `spend/soak/freeze.sh --now` does steps 1–2 and checks them.
+In this order. On the soak, `apps/keeper/soak/freeze.sh --now` does steps 1–2 and checks them.
 
 1. **Copy first.** `spend.log`, `spend.lock`, `policy.json` to off-host media, and record the
    `sha256sum` of each, while the keeper still runs: any clean stop deletes `spend.lock`.
@@ -120,7 +120,7 @@ recovery secret never touches a keeper): `sigelo-offline recover --genesis <curr
 --backup backup.age --identity <file> --net <net> --agent i --keeper <j+1> --n 0 >
 recovery.local.json` (root identity: `--identity-n <n+1>` instead of `--agent/--keeper/--n`;
 same keeper: `--keeper j --n <n+1>`); the agent applies it with `sigelo-agent adopt --rotation
-recovery.local.json` (spend/soak/README.md steps 5–6 has the per-identity lines; the root must be
+recovery.local.json` (apps/keeper/soak/README.md steps 5–6 has the per-identity lines; the root must be
 a canonical scalar, which the ceremony's always is). `policy.json` `did` fields: by hand.
 
 **The keeper's own identity** (the DID that signs receipts, approvals and `spend.log`; `/health`

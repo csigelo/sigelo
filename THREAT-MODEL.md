@@ -105,7 +105,7 @@ gain standing by naming a world the verifier cannot check. The `issuers` array (
 is what makes a stranger's attestation checkable at all; a bundle that omits it presents
 attestations that count for nothing.
 
-### 2.10 Short invite codes (contact/short.mjs, relay/park.mjs)
+### 2.10 Short invite codes (apps/contact/short.mjs, relay/park.mjs)
 A short code (`K7F3-Q9ZP`) is 40 bits from a CSPRNG, good once for 10 minutes (the inviter may
 choose 60 s to an hour, `invite --ttl`, for a slow agent). The relay holds
 the long code under SHA-256("sigelo-park/0" ‖ code) and answers a lookup once; the hash stays
@@ -125,7 +125,7 @@ encapsulation: an elliptic-curve step of 1–2 µs a try finds one whose words m
 pairing's in months on one core, hours to days on GPUs. Against a relay that spends that, compare
 the 32-digit pair id (`pair` in the JSON, 128 bits) or the DID.
 
-### 2.11 Enrolment: worker i from the operator's seed (contact/enrol.mjs, adapters/moadim/ENROL.md)
+### 2.11 Enrolment: worker i from the operator's seed (apps/contact/enrol.mjs, apps/agent/ENROL.md)
 An enrolled agent is worker i of the operator's keeper root K (`agentIdentitySeed(K, i, n)`), so the
 25 words restore it. **K is hot, S is not:** K sits beside the operator identity (0600, outside the
 agents' directory); whoever reads it derives every worker under it, never the vault, other keepers
@@ -163,7 +163,7 @@ attestation do nothing against. `enrol --tier friend|quiet` keeps it ours with n
 
 A relay tag (the last four characters of a 12-character code) is 20 public bits that tell relays apart, not proof of one; the secret part of a short code is still its first 40 bits. A wrong host, from a collision or a stale registry, gets `park_unknown`, or a long code that must name the relay it came from and still passes the four words.
 
-### 2.12 Operator hints: own agents find each other (contact/carrier.mjs, `sigelo-operator/0`)
+### 2.12 Operator hints: own agents find each other (apps/contact/carrier.mjs, `sigelo-operator/0`)
 **Claim:** a contact becomes `own` only by an unexpired `sigelo-relay/operator` attestation, from me
 or my operator, on its own chain; own messages reach the operator in full (`watch --on-message`),
 so own is worth forging. **Hints** are HMAC(K, kind ‖ sender's original DID ‖ operator DID) inside
@@ -194,19 +194,19 @@ A closed relay (`RELAY_CLOSED_OPERATOR`) refuses every login that is neither an 
 
 Clients resolve a relay tag first from relays they already know (their own, their operator attestation's, their table's, then their contacts'), so a registry entry cannot redirect a colleague whose operator attestation or table names the company relay. A contact's relay came from that contact's code and its 20-bit tag is ground in seconds, so it resolves a tag only when the registry names no other host for it; otherwise the person is asked. The registry (`sigelo.ai/relays.json`) is first-come under the release identity's signature; two known hosts with one tag are never guessed between. Long-code pairing and verification never read the registry: offline stays offline; a lost or forged registry only costs a question to the person.
 
-### 2.15 Devices: the account on a phone or second computer (contact/device.mjs, `sigelo-device/1`)
+### 2.15 Devices: the account on a phone or second computer (apps/contact/device.mjs, `sigelo-device/1`)
 
 A device enrolled with `device add` is a SAFE worker: its own DID under the keeper root, tier own through the operator's attestation (14 days by default, 90 at most); it cannot sign as the operator or derive anything, and a lost one drops out of own when the attestation is not renewed. **Online,** the QR carries a short code (§2.10: single use, 10 minutes); the device's key goes only after the person confirms its four words on the giving terminal (no terminal: refused unless the caller passes `--yes-words-checked`, which compares nothing: the words are printed, to compare after and revoke on a mismatch), so a swapped or stolen code gets a temporary pairing and nothing else. **Offline,** the QR frames carry the device identity and a 7-day invite sealed under six generated words (66 bits) and argon2id (64 MiB, t = 3): a photographed QR alone costs about 2^65 argon2id runs; frames and words are never shown together. `exp` is advisory: image plus words open the material forever, so treat a leak of both as a stolen device. `sigelo-device/1` messages stay out of every log and history. **FULL** (`device add --full`, the word FULL typed): the device also gets the operator identity and the keeper root K_j. Online they go only after the words were confirmed, end to end over the device's own pairing, once, within 10 minutes of the confirmation, and the device takes them, and every device message, only from its operator: the issuer of an unexpired operator attestation on its chain (until 2026-10-28 the issuer of `issuers[0]`, so any world it took an attestation from and paired with: renew made it the operator, wipe deleted the agent; review 2026-10-28, HIGH 1); offline they ride in the frames, sealed as above, never plaintext in a QR or on the relay. On the device the key and K_j are sealed in the OS keychain where one answers. `sigelo-device/1` is sent only by the device verbs (a caller's label is refused) and kept apart from the inbox. **Device list:** signed by the operator, a device takes only a newer one (a replay or an older list is refused). **Revoke:** a reachable device deletes its keys and answers (trust-based: for an honest device sold or replaced); `--lost` revokes and forgets its DID at once and prints the steps that need the words. **A lost SAFE device** leaves own when its attestation lapses (14 days by default); past it the device takes no device message, renewal or wipe, from anyone: add it again (a FULL device still knows its operator by the identity it holds); with the words, recovering that worker at rotation n+1 supersedes the thief at once. **A lost FULL device** holds the operator key and K_j, so every worker under K_j at every rotation: `--lost` only contains it, and it can still sign as the operator and take the seat by force; take the seat back with `seat take --force` on a surviving FULL device. The rest needs the 25 words: recover the operator on a clean machine (§2.4; every contact pairs again), derive K_{j+1} (K_j cannot be rotated, only abandoned), recover each worker under K_j onto K_{j+1} or enrol it afresh, add the devices again, delete K_j's file everywhere. Until then the thief is the operator. **One seat:** the relay keeps one session and one queue per identity, so only the seat (the FULL device the signed list names, `seat: {holder, epoch}`, the epoch only rising) logs in as the operator; a standby refuses (`seat_elsewhere`: CLI, page and MCP server alike) after reading its device inbox first, so a newer seat record is seen before it could take messages, never a silent takeover. The apps hold FULL only from the 25 words, with a signed list naming the seat; an imported operator file is refused (until 2026-10-28 it ran a second session beside the seat; review 2026-10-28, MEDIUM 7). Signing as the operator works on every FULL holder. **Snapshots** of the operator's state (carrier state, contacts, page data, enrolments, the list; history only when asked) move the seat and rest on standby devices sealed under a key derived from K_j (HKDF-SHA256, XChaCha20-Poly1305); a standby's own earlier state is sealed away when the seat leaves it. `seat take --force` imports the newest snapshot and restarts every session with fresh prekeys, as after a rotation, since the old seat's copy may be a thief's; what the old seat took after that snapshot stays with it, sealed under its epoch's name (`<identity>.parked.<epoch>.sgs`), the plaintext deleted only once that copy opens (until 2026-10-28 a newer snapshot overwrote it and the plaintext was deleted regardless; review 2026-10-28, MEDIUM 6). Residual: a device's unlock and keystore protect its keys and K_j (§3.6), so a stolen FULL device opens the snapshots it holds; the seat's own files stay plaintext 0600 (§3.9).
 
-### 2.16 Links: the operator introduces two agents (contact/link.mjs, `sigelo-link/1`)
+### 2.16 Links: the operator introduces two agents (apps/contact/link.mjs, `sigelo-link/1`)
 
 Only an agent's operator (an unexpired operator attestation on its chain) can make it issue a link invite or accept one unasked (until 2026-10-28 any contact that was `issuers[0]` could file that attestation through a device renewal, §2.12); the handler is code, never the model, and `send` refuses the label from callers. The code is long, never parked or shown, consumed by its first answer, and bound at both ends (the inviter's DID in the code, the expected answerer's DID at the answer). A link writes a purpose and a tier, never `ours`; a linked contact that is not ours cannot be set own. Received from anyone else, an introduction is a notice to that agent's operator, accepted only by that operator (`links accept`, or its `allow` rule for that contact), never at own; a refusal is silent unless the operator tells. An end forgets the contact on both sides and is remembered: the two pair again only through a new link each side's operator asked for afresh (an ask, an offer, an accept; never an allow rule), under a new id; a contact forgotten by hand stays revoked. Link messages stay out of the log, history, `watch` output and MCP answers. Purpose and note are data; the inbox (CLI, page, MCP) shows each message from a linked contact with the link's id and purpose, as data, so an agent reads it knowing why that contact is there. Residual: an external peer learns the agent's DID and its operator (§3.10); conduct within the purpose is the model's; an agent before link.mjs shows the code to its model.
 
-### 2.17 Presence: who sees that an agent is online (contact/carrier.mjs "Presence", relay/presence.mjs)
+### 2.17 Presence: who sees that an agent is online (apps/contact/carrier.mjs "Presence", relay/presence.mjs)
 
 **A contact** learns when an agent is online, and since when it last was, only if the agent's operator allowed that contact (`presence allow`, `sigelo_presence`, the page; off by default), or if it is one of the operator's own agents, which always see each other. The marker is on a topic and under a key derived from the pair's key, sealed per reader, so no third party can read it or tell whose it is; a denied contact gets nothing (the marker toward it is cleared, at once by a started carrier or a session of its own), not "offline". The marker is not signed: a reader cannot prove to anyone else when the agent was online. **The relay** learns nothing it did not know: it already sees every session start and end (§3.10). It keeps the markers in memory only, never on disk, sees which identity writes which marker topic and which identity reads it (a pair it sees anyway from the mailboxes), and writes the `offline` time itself. Not defended: the relay can lie about presence, as it can about delivery: show an agent offline while it is connected, or replay an earlier `online` (its `since` then says how old it is). A presence topic costs a fixed size (512 bytes, 1,024 per identity), counted against no message quota.
 
-### 2.18 Transfers: big files direct or over Tor (contact/transfer.mjs, transfer-node.mjs, `sigelo-transfer/0`, adapters/moadim/TRANSFER.md)
+### 2.18 Transfers: big files direct or over Tor (apps/contact/transfer.mjs, transfer-node.mjs, `sigelo-transfer/0`, apps/agent/TRANSFER.md)
 
 The relay carries only the manifest, offer, answer, onion and end messages, inside the pairing's envelopes, kept out of the log, history, `watch` output and MCP answers, and refused from callers as a label (`send`). **Consent before any write:** a manifest (under 1 KiB) allocates nothing; only the receiver's operator (CLI, page) or its agent (MCP) accepts it, after a free-disk check; at most 8 wait per contact and 64 in all (more: `busy`); the receiver pulls, so a sender cannot push a byte. **Binding:** offer and answer are signed by the two identities and carry the ICE credentials and DTLS fingerprints, so the relay cannot sit in the middle and only the contact completes ICE and reaches werift's DTLS; the data channel must bear the label naming id and attempt. The onion address, its client key and a 32-byte token arrive signed; the service is ephemeral (key discarded), client-authorized where the peer has a control port, and serves one stream, the first to prove the token. **Malicious chunks:** the chunk hashes are checked against the manifest's list before any chunk counts, each chunk against its hash before it is written (once asked again, then `chunk_hash`), the whole file against the manifest at the end; the file is placed under `safeName`, never over another, never opened. **Address exposure is opt-in per contact:** direct gives the contact this agent's public and LAN addresses, which the relay otherwise hides; on for own contacts, asked once for every other (`direct_ask`); off means Tor or no path. Residual: §3.14–§3.16.
 
@@ -255,7 +255,7 @@ once a recovery rotation has moved the identity to a new key.
 
 What verifiers with memory now catch, with no wire change: the rotation that retired a key already
 says so (its `recovery_key` hashes to the old commitment, its `next_genesis` carries another or
-`null`). The relay (`relay/auth.mjs`) and the contact store (`contact/store.mjs`) keep the owner's
+`null`). The relay (`relay/auth.mjs`) and the contact store (`apps/contact/store.mjs`) keep the owner's
 chain, so any other recovery by that key, from any node and with any `iat`, is a fork by a retired
 key, refused `retired_recovery`; the owner keeps her relay account and her contacts keep her. What
 is still not caught: a verifier that sees only the thief's chain (every first-time offline reader),
@@ -274,8 +274,8 @@ A host that boots without the time (some boot at their build epoch until NTP ans
 with a clock set back. Lines signed then fall out of every window once the clock is corrected,
 so spends stop counting against the cap, in a log that cannot be amended. Guard: every signing route refuses `503 clock_behind` (a TRY LATER, nothing signed,
 logged or sent) when `now` is before the build floor or more than 300 s behind the newest `ts`
-the keeper signed (spend/README.md, "The clock guard"). Not covered: a clock set *ahead*, or a
-wrong clock on a keeper with no signed lines yet past the floor. `spend/soak/check.mjs` flags a
+the keeper signed (apps/keeper/README.md, "The clock guard"). Not covered: a clock set *ahead*, or a
+wrong clock on a keeper with no signed lines yet past the floor. `apps/keeper/soak/check.mjs` flags a
 log clock in the future or stepping back, but that is a monitor, not a refusal.
 
 ### 3.8 The relay sees who invites
@@ -291,11 +291,11 @@ Pro gift codes (relay/gifts.mjs) are trusted the same way: a compromised relay, 
 database or backup (40-bit codes hash in seconds), can grant Pro for nothing, which costs the relay
 storage and nothing else; online, a network gets 10 guesses an hour.
 
-### 3.9 The page's history at rest (adapters/moadim/sigelo-agent-ui.ts)
+### 3.9 The page's history at rest (apps/agent/sigelo-agent-ui.ts)
 `sigelo-agent ui` keeps every message and pairing event in `me.local.history.jsonl` and its tags,
 checked words and read marks in `me.local.ui.json`, in plaintext (0600) until §7's keychain unlock
 (K2): whoever reads the user's files reads them, and "clear" (`POST /api/history/clear`) is the only
-mitigation. The same holds for `<identity>.inbox.log` (contact/carrier.mjs `log`): the newest 500
+mitigation. The same holds for `<identity>.inbox.log` (apps/contact/carrier.mjs `log`): the newest 500
 messages and file items `inbox`, `watch`, `ui` and the MCP tools gave out, plaintext 0600, so `history`
 can print them again; deleting the file is the mitigation, and `log: false` keeps none.
 
@@ -335,7 +335,7 @@ S is never stored, but while the app is unlocked it holds what S gives the opera
 
 **Profiles (design/profiles.md P1).** An app holds up to 8 profiles, each its own identity (or a computer's page), storage and, in the WebView app, its own three keystore keys (p1 keeps those of before; a sealed blob names its profile and opens in no other). *All profiles are behind one lock:* the screen lock asked at a start, after a minute away, before sensitive screens and once per switch guards them all alike, so a stolen phone with its lock known exposes every profile; the GTK phone app has no lock of its own (the session's login). *A profile wipe is local and final:* its database (GTK: its files, its keyring items, this phone's device file of it) is deleted and its keystore keys erased, so a copy of its sealed blobs left anywhere no longer opens; only its 25 words restore it, and nothing at the relay or on its other devices changes (a computer it controlled keeps the pairing until revoked there). Only the active profile connects; the others' messages wait at the relay. The list itself (names, DIDs, four words; no key) shows which identities a phone holds. **Several computers (P2):** a remote profile holds a control for each of its computers, all of one operator (another identity's page is refused `other_operator` at pairing); on Android each is a blob under the profile's keys naming its computer, so it opens as that computer only. *Forgetting a computer does not revoke it:* the phone drops its control key, but the computer keeps answering that control (a copied text, or a copy of the phone's storage with its keys) until `ui --revoke-control <name>` is run there; the app says so at every forget. On Android a forgotten computer's blob is erased, not crypto-erased (one keystore key per profile, not per computer).
 
-### 3.13 Groups (contact/group.mjs, `sigelo-group/1`, adapters/moadim/GROUPS.md)
+### 3.13 Groups (apps/contact/group.mjs, `sigelo-group/1`, apps/agent/GROUPS.md)
 
 The creator is paired with every member; members need not be paired with each other. Each message is signed by its sender over JCS of its body, inside the envelope, so a copy the creator carries to an unpaired member is checked against the sender's own chain; rosters are taken only from the creator's pairing, signed by its current key, at a higher `ver`; a copy is dropped by `mid` once seen. Not defended:
 - **A removed member keeps every past message;** removal stops only later ones. A sender on a stale roster may send one more copy.

@@ -78,7 +78,7 @@ const mqttEsm = (await import(pathToFileURL(join(HERE, 'vendor', 'mqtt.esm.js'))
 
 // The in-memory IndexedDB and the Worker as a Node thread: test-fakes.mjs (test-shell.mjs uses them too).
 const { FakeIDB, FakeWorker } = await import(pathToFileURL(join(HERE, 'test-fakes.mjs')).href);
-const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node.mjs')).href)).pow;
+const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platform-node.mjs')).href)).pow;
 
 // ================================================================ 2. platform-web.mjs
 {
@@ -144,7 +144,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   ok((await checkOf(() => new Carrier({ identity: ident, store: 's', state: 't' }))).startsWith('platform:'), 'web: in the page a carrier without a platform is refused (no Node default)');
 }
 
-// ================================================================ 2b. the relay setting (router.mjs, contact/page.mjs), no relay needed
+// ================================================================ 2b. the relay setting (router.mjs, apps/contact/page.mjs), no relay needed
 {
   const { makeRouter: mk, presetRelay } = await import(pathToFileURL(join(HERE, 'router.mjs')).href);
   const { keygen: kg } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
@@ -183,7 +183,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
 }
 
 
-// ================================================================ 2c. restore from seed (seed.mjs, contact/restore.mjs), no relay needed
+// ================================================================ 2c. restore from seed (seed.mjs, apps/contact/restore.mjs), no relay needed
 {
   const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href);
   const { makeRouter: mk } = await import(pathToFileURL(join(HERE, 'router.mjs')).href);
@@ -192,7 +192,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   // A fixed test mnemonic (a canonical root, < l), and what `sigelo-agent keeper --from-words` makes of it.
   const S0 = new Uint8Array(32).fill(9); S0[31] = 0x0e;
   const words = mnemonicFromRoot(S0), H = mkdtempSync(join(tmpdir(), 'sigelo-seed-')), op = join(H, 'me.local.json');
-  const cli = spawnSync(process.execPath, [join(REPO, 'adapters', 'moadim', 'cli.ts'), 'keeper', '--from-words', '--identity', op], { env: { PATH: process.env.PATH, HOME: H, SIGELO_KEY_PROVIDER: 'file' }, input: words, encoding: 'utf8' });
+  const cli = spawnSync(process.execPath, [join(REPO, 'apps', 'agent', 'cli.ts'), 'keeper', '--from-words', '--identity', op], { env: { PATH: process.env.PATH, HOME: H, SIGELO_KEY_PROVIDER: 'file' }, input: words, encoding: 'utf8' });
   const cMe = JSON.parse(readFileSync(op, 'utf8')), cK = JSON.parse(readFileSync(join(H, 'me.local.keeper.json'), 'utf8'));
   rmSync(H, { recursive: true, force: true });
   const idb = new FakeIDB(), p = await W.webPlatform({ name: 'seed', indexedDB: idb, mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
@@ -269,7 +269,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   await r2.stop();
 }
 
-// ================================================================ 2d. create a new identity (create.mjs, contact/create.mjs), no relay needed
+// ================================================================ 2d. create a new identity (create.mjs, apps/contact/create.mjs), no relay needed
 {
   const CV = await import(pathToFileURL(join(HERE, 'create.mjs')).href);
   const CR = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'create.mjs')).href);
@@ -281,7 +281,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'contact', 'platform-node
   const leaks = (text) => { const t = String(text).toLowerCase(); for (let i = 0; i + 3 <= list.length; i++) if (t.includes(list.slice(i, i + 3).join(' '))) return true; return false; };
   // What the CLI writes for the same words: keeper --from-words --made-here, the birth today (as the GTK app runs it).
   const H = mkdtempSync(join(tmpdir(), 'sigelo-create-')), op = join(H, 'me.local.json');
-  const cli = spawnSync(process.execPath, [join(REPO, 'adapters', 'moadim', 'cli.ts'), 'keeper', '--from-words', '--made-here', '--net', 'stagenet', '--restore-date', today, '--identity', op],
+  const cli = spawnSync(process.execPath, [join(REPO, 'apps', 'agent', 'cli.ts'), 'keeper', '--from-words', '--made-here', '--net', 'stagenet', '--restore-date', today, '--identity', op],
     { env: { PATH: process.env.PATH, HOME: H, SIGELO_KEY_PROVIDER: 'file' }, input: words, encoding: 'utf8' });
   const cMe = JSON.parse(readFileSync(op, 'utf8')), cK = JSON.parse(readFileSync(join(H, 'me.local.keeper.json'), 'utf8'));
   rmSync(H, { recursive: true, force: true });
@@ -807,7 +807,7 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs'))) report(': parts 1 and 2; SKIP th
 const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
 const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
 const { keygen } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
-const nodeLib = await import(pathToFileURL(join(REPO, 'contact', 'carrier.mjs')).href);
+const nodeLib = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'carrier.mjs')).href);
 const { makeRouter, IDENTITY } = await import(pathToFileURL(join(HERE, 'router.mjs')).href);
 
 const HOST = 'relay.test', CREATED = '2026-10-01T00:00:00Z';
@@ -939,7 +939,7 @@ try {
   // Groups (GROUPS.md): the page's drain runs group.mjs handle(): a roster to the Node agent, its answer filed and
   // labelled in the page, the page's message read there.
   {
-    const NG = await import(pathToFileURL(join(REPO, 'contact', 'group.mjs')).href), nf = NG.groupsPath(join(dir, `${CY.label}.local.json`));
+    const NG = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'group.mjs')).href), nf = NG.groupsPath(join(dir, `${CY.label}.local.json`));
     const g0 = await call(A, 'GET', '/api/groups');
     ok(g0.status === 200 && g0.body.groups.length === 0 && g0.body.tier.members >= 8 && typeof g0.body.tier.told === 'boolean', `GET /api/groups: none yet, the tier (${JSON.stringify(g0.body.tier)})`);
     const mk = await call(A, 'POST', '/api/groups/create', { name: 'crew', members: [CY.did], humans: [CY.did] });
@@ -973,7 +973,7 @@ try {
   // session; a Node machine pairs through it as a temporary identity (enrol.mjs accept), is sent worker 1 and pairs
   // as it (complete, place); the app files it: the Agents list shows it enrolled.
   {
-    const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href), E = await import(pathToFileURL(join(REPO, 'contact', 'enrol.mjs')).href);
+    const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href), E = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'enrol.mjs')).href);
     const { mnemonicFromRoot, keeperRoot, agentIdentitySeed } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
     const S0 = new Uint8Array(32).fill(7); S0[31] = 0x0d;
     const ip = await W.webPlatform({ name: 'op', indexedDB: new FakeIDB(), mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()), env: { relay: HOST } });

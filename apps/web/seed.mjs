@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Restore from seed (design/apps-seed.md, pass A9; Monerujo's restore as the model): the first run's
 // second choice (its screens: welcome.mjs). The 25 words make this app's operator identity and keeper root K_1, the files
-// `sigelo-agent keeper --from-words` writes (contact/restore.mjs), sealed at once: in the Android app
+// `sigelo-agent keeper --from-words` writes (apps/contact/restore.mjs), sealed at once: in the Android app
 // under the FULL keystore key (the phone's screen lock or biometric), in a browser under a WebCrypto key
 // it cannot export. The words are never written anywhere and never shown again (no "show seed").
 //
@@ -45,7 +45,7 @@ export async function restoreInto(platform, { words, name, relay, net = 'mainnet
 }
 
 /**
- * The operator's files (contact/restore.mjs's, from the words or a new root) into the app: the identity
+ * The operator's files (apps/contact/restore.mjs's, from the words or a new root) into the app: the identity
  * and the keeper sealed under the FULL key, the list and the seat notes plain, the settings ({ created:
  * true } for a new identity made here, create.mjs), then one flush. The caller holds the network.
  */

@@ -29,13 +29,13 @@ node site/test/run.mjs --serve 8080    # just serve it (localhost, 127.0.0.1 and
   `/adopt`, `/frameworks`, `/verify`, `/keeper`, `/contact`. Nothing else: `test/run.mjs` fails on any other page
   and on a page over its word budget (index 120, adopt 250, frameworks 450 outside its one table of
   at most 40 rows, verify 150, keeper 200, contact 80, llms.txt 150).
-- **Verbatim** under `/raw/<repo path>`: those three, THREAT-MODEL, VERSIONING, kit/README.md,
-  spend/README.md, and docs/ QUICKSTART, WHY, INCIDENT, MONERO at their old `/raw/<NAME>.md`
+- **Verbatim** under `/raw/<repo path>`: those three, THREAT-MODEL, VERSIONING, apps/kit/README.md,
+  apps/keeper/README.md, and docs/ QUICKSTART, WHY, INCIDENT, MONERO at their old `/raw/<NAME>.md`
   (public text links them; `RAW_AT` in build.mjs) (listed with sizes in llms.txt), `test-vectors.json`,
-  `schema/*.json`, `spend/openapi.yaml` (its `../schema/` references resolve there). Also
+  `schema/*.json`, `apps/keeper/openapi.yaml` (its `../schema/` references resolve there). Also
   `/test-vectors.json`, and `/sha256/<hex>/SPEC.md` and `/sha256/<hex>/test-vectors.json`, which
   never change once published.
-- `/examples/world.mjs`: `examples/world.mjs` with its one import changed from
+- `/examples/world.mjs`: `accept/examples/world.mjs` with its one import changed from
   `../ts/dist/sigelo.js` to the npm package `sigelo` (a header says so), so an agent with the
   release tarballs can run the mock world without a clone.
 - From the tree at build time: vector counts and sha256s, package versions, the commit (in
@@ -55,7 +55,7 @@ executable script, inline style or event handler; nothing loaded from another or
 `llms.txt` has the llmstxt.org shape and all its links resolve; `robots.txt` names the crawlers
 of ROADMAP §3 and its sitemap resolves; every `sitemap.xml` URL resolves; `index.json`'s
 sha256s match the files served *and* the repository's own files; `security.txt` has Contact,
-one Expires about a year out, Canonical and Policy; `integrations/mcp/server.json` agrees
+one Expires about a year out, Canonical and Policy; `apps/integrations/mcp/server.json` agrees
 with its `package.json`. It makes no external request.
 
 ## Deploying
@@ -118,7 +118,7 @@ DID ceremony, prices and hours, hosting and DNS.
 
 1. **Repository** — done: `https://github.com/csigelo/sigelo`, `REPO` in `site/build.mjs` (it
    feeds JSON-LD `codeRepository`, `index.json` `repository`, every link to a repository file,
-   the security.txt comment) and `repository.url` in `integrations/mcp/server.json`; links use
+   the security.txt comment) and `repository.url` in `apps/integrations/mcp/server.json`; links use
    branch `main`. Nothing is pushed yet, so every repository link 404s until the first push.
 2. **Contact** — `security.txt` says `Contact: mailto:security@sigelo.io`, the mailbox
    SECURITY.md plans at the domain; the mailbox must exist before the site goes up. SECURITY.md
@@ -135,9 +135,9 @@ DID ceremony, prices and hours, hosting and DNS.
 5. **"After the first publish" / "Today"** — `src/adopt.md`, `src/index.md`, `src/verify.md`,
    `src/keeper.md`, `src/integrations.md` describe both; drop the tarball paths once npm and the
    release page exist, and re-run `test/run.mjs`.
-6. **MCP Registry** — `integrations/mcp/server.json` uses the GitHub namespace
+6. **MCP Registry** — `apps/integrations/mcp/server.json` uses the GitHub namespace
    `io.github.csigelo/sigelo`: `mcp-publisher login github` as csigelo proves it, so no domain
-   proof is needed. `integrations/mcp/package.json` carries `"mcpName": "io.github.csigelo/sigelo"`,
+   proof is needed. `apps/integrations/mcp/package.json` carries `"mcpName": "io.github.csigelo/sigelo"`,
    the registry's check that the npm package belongs to the server; `test/run.mjs` checks the two
    agree. Publish only after `sigelo-mcp` is on npm.
 

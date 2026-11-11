@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// accept/test.mjs — drives running accept servers with a real sigelo agent (adapters/moadim's
+// accept/test.mjs — drives running accept servers with a real sigelo agent (apps/agent's
 // sigelo-agent CLI) and, for the stolen-old-key case, the ts library. Run by test.sh.
 //   node accept/test.mjs <name>=<base url> ...
 import { execFileSync } from 'node:child_process';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { did, keygen, rotate, sign } from '../ts/dist/sigelo.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLI = join(HERE, '../adapters/moadim/dist/cli.js');
+const CLI = join(HERE, '../apps/agent/dist/cli.js');
 const tmp = mkdtempSync(join(tmpdir(), 'sigelo-accept-'));
 process.on('exit', () => rmSync(tmp, { recursive: true, force: true }));
 let fails = 0;
