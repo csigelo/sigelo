@@ -4,7 +4,8 @@
 // server/discover, resultType) and the legacy initialize handshake (2025-11-25 … 2024-11-05)
 // over the agent-side library in adapters/moadim and, when a keeper is configured, the
 // `sigelo-wallet` client in spend/. Zero dependencies of its own: no crypto here, only calls.
-// Transport: one JSON-RPC message per line on stdin/stdout; logs go to stderr only.
+// Transport: one JSON-RPC message per line on stdin/stdout; logs go to stderr only. With --http,
+// Streamable HTTP on 127.0.0.1 instead (http.mjs), the same tools and identity files.
 import { existsSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -200,23 +201,39 @@ async function handle(msg) {
   }
 }
 
-const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
-// Lines are split as BYTES and each decoded fatally (parseBytes): readline decodes lossily, so
-// invalid UTF-8 became U+FFFD and sank one signature, where the Go verifier rejects the
-// whole document (SPEC §3).
-const onLine = async (line) => {
-  if (line.every((b) => b === 0x20 || b === 0x09 || b === 0x0d)) return;
-  let msg;
-  try { msg = parseBytes(line); } catch (e) { return send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: `parse error: ${e.message}` } }); }
-  if (msg === null || typeof msg !== 'object' || Array.isArray(msg)) return send({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } });
-  if (msg.method === undefined) return;          // a response to us; we never send requests
-  if (msg.id === undefined) return;              // notifications (initialized, cancelled): nothing to answer
-  try { send({ jsonrpc: '2.0', id: msg.id, result: await handle(msg) }); }
-  catch (e) { send({ jsonrpc: '2.0', id: msg.id, error: { code: e.code ?? -32603, message: e.message, ...(e.data && { data: e.data }) } }); }
-};
-let rest = Buffer.alloc(0);
-process.stdin.on('data', (chunk) => {
-  rest = Buffer.concat([rest, chunk]);
-  for (let nl = rest.indexOf(0x0a); nl !== -1; nl = rest.indexOf(0x0a)) { onLine(rest.subarray(0, nl)); rest = rest.subarray(nl + 1); }
-});
-process.stdin.on('end', () => { if (rest.length) onLine(rest); rest = Buffer.alloc(0); });
+// One JSON-RPC message in, its answer out; null = nothing to answer. Both transports go through it.
+async function answer(msg) {
+  if (msg === null || typeof msg !== 'object' || Array.isArray(msg)) return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } };
+  if (msg.method === undefined) return null;     // a response to us; we never send requests
+  if (msg.id === undefined) return null;         // notifications (initialized, cancelled): nothing to answer
+  try { return { jsonrpc: '2.0', id: msg.id, result: await handle(msg) }; }
+  catch (e) { return { jsonrpc: '2.0', id: msg.id, error: { code: e.code ?? -32603, message: e.message, ...(e.data && { data: e.data }) } }; }
+}
+
+// --http: the same answer() behind Streamable HTTP on loopback (http.mjs); stdio otherwise.
+const argv = process.argv.slice(2);
+if (argv.includes('--http')) {
+  const { serveHttp } = await import('./http.mjs');
+  await serveHttp({ argv, answer, parseBytes, base, versions: [...MODERN, ...LEGACY], info: SERVER_INFO });
+} else if (argv.some((a) => /^--(port|listen|token)(=|$)/.test(a))) {
+  process.stderr.write('sigelo-mcp: --port, --listen and --token go with --http: sigelo-mcp --http [HOST:PORT] [--token T]\n');
+  process.exit(2);
+} else {
+  const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
+  // Lines are split as BYTES and each decoded fatally (parseBytes): readline decodes lossily, so
+  // invalid UTF-8 became U+FFFD and sank one signature, where the Go verifier rejects the
+  // whole document (SPEC §3).
+  const onLine = async (line) => {
+    if (line.every((b) => b === 0x20 || b === 0x09 || b === 0x0d)) return;
+    let msg;
+    try { msg = parseBytes(line); } catch (e) { return send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: `parse error: ${e.message}` } }); }
+    const r = await answer(msg);
+    if (r) send(r);
+  };
+  let rest = Buffer.alloc(0);
+  process.stdin.on('data', (chunk) => {
+    rest = Buffer.concat([rest, chunk]);
+    for (let nl = rest.indexOf(0x0a); nl !== -1; nl = rest.indexOf(0x0a)) { onLine(rest.subarray(0, nl)); rest = rest.subarray(nl + 1); }
+  });
+  process.stdin.on('end', () => { if (rest.length) onLine(rest); rest = Buffer.alloc(0); });
+}

@@ -58,6 +58,7 @@ config matched against the current docs (sources below), not run.
 | AgentScope 2.0 | MCP stdio | `MCPClient(name="sigelo", is_stateful=True, mcp_config=StdioMCPConfig(command="npx", args=["-y","sigelo-mcp"]))`; A2A: [a2a/](a2a/README.md) | doc-checked; A2A profile draft | 2026-10-14 |
 | Qwen-Agent | MCP stdio | `function_list=[S]` (remote needs `"type":"streamable-http"`) | doc-checked | 2026-10-14 |
 | DeepSeek Harness | MCP stdio (Cordis) | YAML below, in `$DSH_HOME/cordis.patch.yml` | doc-checked | 2026-10-14 |
+| Octomind | MCP stdio or Streamable HTTP | TOML below, as `~/.local/share/octomind/config/mcp-sigelo.toml` | doc-checked, untested | 2026-11-11 |
 | any MQTT client | HTTP + MQTT over TLS | [JOIN.md](JOIN.md#raw), [relay.json](https://relay.sigelo.ai/relay.json), [contact fixtures](../contact/README.md#contracts) | run here: `contact/test-carrier.mjs` against a loopback relay, ALL PASS (411) | 2026-10-14 |
 | anything that runs commands | CLI sidecar | [JOIN.md](JOIN.md) | `sigelo-agent` from npm run here | 2026-10-14 |
 
@@ -70,6 +71,22 @@ DeepSeek Harness strips credential-looking variables, so the identity path goes 
       config: { serverName: sigelo, transport: stdio, command: npx, args: ['-y', 'sigelo-mcp'],
                 env: { SIGELO_IDENTITY: /path/to/sigelo.local.json } }
 ```
+
+Octomind enables a server only for the roles in `auto_bind` (exact tags) or a role's `server_refs`:
+
+```toml
+[[mcp.servers]]
+name = "sigelo"
+type = "stdio"
+command = "npx"
+args = ["-y", "sigelo-mcp"]
+tools = []
+auto_bind = ["developer:general"]
+```
+
+With `SIGELO_MCP_TOKEN=… sigelo-mcp --http` running (next release), the same entry as
+`type = "http"`, `url = "http://127.0.0.1:7310/mcp"`,
+`headers = { Authorization = "Bearer {{ENV:SIGELO_MCP_TOKEN}}" }`, no `command`/`args`.
 
 Windows: some clients need `"command": "cmd", "args": ["/c", "npx", "-y", "sigelo-mcp"]`
 (unverified per client). From a checkout instead of npm: `node /abs/path/to/sigelo/integrations/mcp/server.mjs`.
@@ -94,6 +111,7 @@ MiniMax Code https://raw.githubusercontent.com/MiniMax-AI/minimax-code/main/pack
 ZCode https://raw.githubusercontent.com/zai-org/ZCode/main/docs/external-agent-mcp-import.md · iFlow https://github.com/iflow-ai/iflow-cli ·
 AgentScope https://docs.agentscope.io/versions/2.0.7/en/building-blocks/tool/mcp.md · Qwen-Agent https://github.com/QwenLM/Qwen-Agent ·
 DeepSeek Harness https://deepseek-harness.github.io/deepseek-harness/guide/mcp-memory.md ·
+Octomind https://github.com/Muvon/octomind/blob/main/doc/usage/07-mcp-tools.md (fetched 2026-11-11) ·
 A2A https://raw.githubusercontent.com/a2aproject/A2A/main/specification/a2a.proto
 
 ## Tools

@@ -1,5 +1,5 @@
 {
-  "README.md": 830,
+  "README.md": 420,
   "ts/README.md": 910,
   "go/README.md": 470,
   "adapters/moadim/README.md": 680,
@@ -12,7 +12,7 @@
   "adapters/hermes/INTEGRATION.md": 280,
   "adapters/hermes/pairing/README.md": 650,
   "accept/README.md": 480,
-  "integrations/mcp/README.md": 160,
+  "integrations/mcp/README.md": 230,
   "world/README.md": 730,
   "release/RELEASE.md": 650,
   "docs-test/README.md": 1140,

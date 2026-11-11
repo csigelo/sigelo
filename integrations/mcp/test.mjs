@@ -6,7 +6,8 @@
 // only takes its name's place, or one above sigelo-agent's tree, never runs. Against a loopback
 // relay (relay/ here, else SIGELO_RELAY_DIR; SKIP without one): pairing, parallel calls, an inbox
 // past one result (held across a restart), a nested message, wait bounds, a recovery after which
-// each side lists the other re_pair; the operator's seat (a standby refuses seat_elsewhere). `npm test` → ALL PASS or exit 1.
+// each side lists the other re_pair; the operator's seat (a standby refuses seat_elsewhere). --http: the same
+// tools over Streamable HTTP on loopback, the token, Origin and header checks. `npm test` → ALL PASS or exit 1.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -39,7 +40,7 @@ if (process.env.SIGELO_TEST_KEY_AGENT === '1') {
 }
 
 function client(env, server = join(here, 'server.mjs')) {
-  const p = spawn(process.execPath, [server], { env: { ...process.env, SIGELO_KEY_PROVIDER: keyAgent ? 'agent' : 'file', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const p = spawn(process.execPath, [server], { env: { ...process.env, SIGELO_MCP_TOKEN: '', SIGELO_KEY_PROVIDER: keyAgent ? 'agent' : 'file', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let buf = '', next = 1; const waiting = new Map(); let stderr = '';
   p.stderr.on('data', (d) => { stderr += d; });
   p.stdout.on('data', (d) => {
@@ -81,6 +82,7 @@ const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_forget_contac
 const sidecar = await import('../../adapters/moadim/sigelo-agent-contact.ts');
 const HAS_CONTACT = await sidecar.contactLib().then(() => true, (e) => { if (sidecar.absent(e)) return false; throw e; });
 if (!HAS_CONTACT) console.log('SKIP contact tools present: sigelo-contact does not resolve here (npm ci in adapters/moadim and contact/); the absent case still runs');
+const PVK = 'io.modelcontextprotocol/protocolVersion';
 const LISTED = [...IDENTITY_TOOLS, ...(HAS_CONTACT ? CONTACT_TOOLS : [])].sort();
 // The relay is its own AGPL package, absent from this one's export.
 const RELAY_DIR = process.env.SIGELO_RELAY_DIR ?? join(here, '..', '..', 'relay');
@@ -249,6 +251,92 @@ try {
   r = await c4.call('sigelo_wallet_balance');
   ok(r.isError && /^REFUSED/.test(r.text), 'wrong token → REFUSED line', r.text);
   c4.close();
+
+  // ---------------- Streamable HTTP (--http): the same tools and identity file behind loopback HTTP
+  const httpServer = (env, args = ['--http', '--port', '0']) => {
+    const p = spawn(process.execPath, [join(here, 'server.mjs'), ...args], { env: { ...process.env, SIGELO_KEY_PROVIDER: keyAgent ? 'agent' : 'file', ...env }, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    const exited = new Promise((res) => p.on('exit', (code) => res(code)));
+    const up = new Promise((res) => p.stderr.on('data', (d) => { stderr += d; const m = /listening on (http:\/\/\S+)/.exec(stderr); if (m && /bearer token \S+/.test(stderr)) res(m[1]); }));
+    return { p, exited, stderr: () => stderr, url: Promise.race([up, exited.then(() => null)]), stop: () => { p.kill('SIGTERM'); return exited; } };
+  };
+  const h1 = httpServer({ SIGELO_IDENTITY: idFile });
+  const mcpUrl = await h1.url;
+  ok(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(mcpUrl ?? ''), 'http: listens on 127.0.0.1 by default and prints the URL', h1.stderr());
+  const tokFile = join(dir, 'sigelo-mcp-http.token'), tok = readFileSync(tokFile, 'utf8').trim();
+  ok(/^[A-Za-z0-9_-]{43}$/.test(tok) && (process.platform === 'win32' || (statSync(tokFile).mode & 0o777) === 0o600) && h1.stderr().includes(`bearer token ${tok} (new)`),
+    'http: a 256-bit token made once beside the identity file (0600) and printed', h1.stderr());
+  const post = (body, headers = {}) => fetch(mcpUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${tok}`, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+  const rpcH = async (method, params, headers) => { const res = await post({ jsonrpc: '2.0', id: 7, method, ...(params && { params }) }, headers); return { status: res.status, type: res.headers.get('content-type'), cors: res.headers.get('access-control-allow-origin'), m: res.status === 200 ? await res.json() : await res.text() }; };
+  let hr = await rpcH('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
+  ok(hr.status === 200 && /^application\/json/.test(hr.type) && hr.m.result?.protocolVersion === '2025-06-18' && hr.m.result.serverInfo.name === 'sigelo' && hr.cors === null, 'http: initialize answers as on stdio, as JSON, no CORS header', JSON.stringify(hr));
+  hr = await rpcH('server/discover', { _meta: { [PVK]: '2026-07-28' } }, { 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'server/discover' });
+  ok(hr.status === 200 && hr.m.result?.resultType === 'complete' && hr.m.result.supportedVersions?.includes('2026-07-28'), 'http: server/discover (2026-07-28) with its routing headers', JSON.stringify(hr));
+  let res = await post({ jsonrpc: '2.0', method: 'notifications/initialized' });
+  ok(res.status === 202 && (await res.text()) === '', 'http: a notification → 202, no body');
+  hr = await rpcH('tools/list');
+  ok(hr.status === 200 && hr.m.result.tools.map((t) => t.name).sort().join() === LISTED.join(), 'http: tools/list = the stdio list', JSON.stringify(hr.m.result?.tools?.map((t) => t.name)));
+  hr = await rpcH('tools/call', { name: 'sigelo_whoami', arguments: {} });
+  const hw = JSON.parse(hr.m.result?.content?.[0]?.text ?? '{}');
+  ok(hr.status === 200 && hr.m.result.isError === false && hw.identity_file === idFile && hw.chain.length === 2, 'http: a tool call reads the same identity file as stdio', JSON.stringify(hr.m));
+  hr = await rpcH('tools/call', { name: 'sigelo_whoami', arguments: { identity: 'researcher-1' } });
+  ok(JSON.parse(hr.m.result.content[0].text).did === subDid, 'http: named profiles as on stdio');
+  const statusOf = async (headers, init = {}) => (await fetch(mcpUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}', ...init })).status;
+  ok(await statusOf({ Authorization: 'Bearer wrong' }) === 401 && await statusOf({}) === 401 && await statusOf({ Authorization: tok }) === 401, 'http: a wrong, missing or bare token → 401');
+  ok(await statusOf({ Authorization: `Bearer ${tok}`, Origin: 'http://evil.example' }) === 403 && await statusOf({ Authorization: `Bearer ${tok}`, Origin: 'null' }) === 403,
+    'http: a non-loopback Origin is refused (403), even with the token');
+  ok(await statusOf({ Authorization: `Bearer ${tok}`, Origin: new URL(mcpUrl).origin }) === 200, 'http: a loopback Origin passes');
+  res = await fetch(mcpUrl, { method: 'OPTIONS', headers: { Origin: 'http://evil.example', 'Access-Control-Request-Method': 'POST' } });
+  ok(res.status === 403 && res.headers.get('access-control-allow-origin') === null, 'http: no CORS preflight answer');
+  res = await fetch(mcpUrl, { headers: { Authorization: `Bearer ${tok}` } });
+  ok(res.status === 405 && res.headers.get('allow') === 'POST, DELETE', 'http: GET /mcp → 405 (no SSE stream)');
+  res = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '0' } } });
+  const sid = res.headers.get('mcp-session-id');
+  ok(res.status === 200 && /^[A-Za-z0-9_-]{32}$/.test(sid ?? '') && (await res.json()).result?.protocolVersion === '2025-03-26', 'http: initialize (2025-03-26) hands out an Mcp-Session-Id', sid);
+  hr = await rpcH('tools/list', undefined, { 'Mcp-Session-Id': sid });
+  ok(hr.status === 200 && hr.m.result.tools.length === LISTED.length, 'http: a request in that session is answered');
+  hr = await rpcH('tools/list', undefined, { 'Mcp-Session-Id': 'not-a-session' });
+  ok(hr.status === 404, 'http: an unknown Mcp-Session-Id → 404');
+  res = await fetch(mcpUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${tok}`, 'Mcp-Session-Id': sid } });
+  ok(res.status === 204 && (await rpcH('ping', undefined, { 'Mcp-Session-Id': sid })).status === 404, 'http: DELETE ends the session; its id → 404 after');
+  res = await post([{ jsonrpc: '2.0', id: 1, method: 'ping' }, { jsonrpc: '2.0', method: 'notifications/initialized' }, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'sigelo_whoami', arguments: {} } }]);
+  const batch = res.status === 200 ? await res.json() : [];
+  ok(batch.length === 2 && batch[0].id === 1 && JSON.parse(batch[1].result?.content?.[0]?.text ?? '{}').identity_file === idFile, 'http: a 2025-03-26 batch → one answer per request, none for the notification', JSON.stringify(batch).slice(0, 200));
+  hr = await rpcH('tools/list', undefined, { 'MCP-Protocol-Version': '1999-01-01' });
+  ok(hr.status === 400 && /unsupported MCP-Protocol-Version/.test(hr.m), 'http: an unsupported MCP-Protocol-Version → 400', JSON.stringify(hr));
+  hr = await rpcH('tools/list', { _meta: { [PVK]: '2026-07-28' } }, { 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call' });
+  ok(hr.status === 400 && /-32020/.test(hr.m), 'http: Mcp-Method disagreeing with the body → 400, -32020', JSON.stringify(hr));
+  res = await post('{"jsonrpc":"2.0","id":9,"id":9,"method":"ping"}');
+  ok(res.status === 400 && (await res.json()).error?.code === -32700, 'http: a duplicate key in the body → parse error (strict JSON)');
+  res = await post('{"jsonrpc":"2.0","id":1,"method":"ping"}', { 'Content-Type': 'text/plain' });
+  ok(res.status === 415, 'http: a body not declared application/json → 415');
+  res = await fetch(new URL('/', mcpUrl));
+  const pageText = await res.text();
+  ok(res.status === 200 && pageText.includes(mcpUrl) && /Open WebUI/.test(pageText) && /MCP Streamable HTTP/.test(pageText) && !pageText.includes(tok), 'http: GET / says what it is and how to add it, without the token', pageText.slice(0, 200));
+  const h1code = await h1.stop();
+  ok(process.platform === 'win32' ? h1code !== undefined : h1code === 0, 'http: SIGTERM stops it (exit 0 checked off Windows, where kill is forced)', String(h1code));
+  const h2 = httpServer({ SIGELO_IDENTITY: idFile });
+  await h2.url;
+  ok(h2.stderr().includes(`bearer token ${tok}, kept in`), 'http: a restart reuses the token', h2.stderr());
+  await h2.stop();
+  const h3 = httpServer({ SIGELO_IDENTITY: idFile }, ['--http', '--listen', 'example.com']);
+  ok(await h3.exited === 2 && /--listen example\.com: give an IP address/.test(h3.stderr()), 'http: --listen takes an IP address only', h3.stderr());
+  const h5 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: '' }, ['--http', '0.0.0.0:0']);
+  ok(await h5.exited === 2 && /0\.0\.0\.0 is not loopback: give a bearer token/.test(h5.stderr()), 'http: a non-loopback bind without a given token is refused (the token file does not count)', h5.stderr());
+  const given = 'g'.repeat(40);
+  const h6 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: given }, ['--http', '0.0.0.0:0']);
+  await h6.url;
+  const p6 = /listening on http:\/\/.*:(\d+)\/mcp/.exec(h6.stderr())?.[1];
+  const u6 = `http://127.0.0.1:${p6}/mcp`, list6 = (t) => fetch(u6, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' }).then((r) => r.status);
+  ok(/WARNING: 0\.0\.0\.0 is not loopback/.test(h6.stderr()) && !h6.stderr().includes(given) && await list6(given) === 200 && await list6(tok) === 401,
+    'http: with SIGELO_MCP_TOKEN it binds 0.0.0.0, warns, takes that token only, never prints it', h6.stderr());
+  await h6.stop();
+  const h7 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: '' }, ['--http', '127.0.0.1:0', '--token', 'short']);
+  ok(await h7.exited === 2 && /32 or more printable/.test(h7.stderr()), 'http: a short --token is refused', h7.stderr());
+  const h8 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: '' }, ['--http', '[::1]:0', '--listen', '127.0.0.1']);
+  ok(await h8.exited === 2 && /not with --listen/.test(h8.stderr()), 'http: HOST:PORT and --listen together is a usage error', h8.stderr());
+  const h4 = httpServer({ SIGELO_IDENTITY: idFile }, ['--port', '7310']);
+  ok(await h4.exited === 2 && /go with --http/.test(h4.stderr()), 'http: --port without --http is a usage error, not a silent stdio server', h4.stderr());
 
   // ---------------- contact tools, where sigelo-contact resolves
   if (HAS_CONTACT) {

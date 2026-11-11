@@ -36,7 +36,8 @@
   },
   "files": [
     "server.mjs",
-    "contact.mjs"
+    "contact.mjs",
+    "http.mjs"
   ],
   "engines": {
     "node": ">=22.18"
