@@ -22,6 +22,14 @@ Beside `sigelo-agent watch` or `ui`, tools follow [the one-owner rule](../../ada
 | `sigelo_inbox` | messages and events, by tier |
 | `sigelo_forget_contact` | revoke a contact, locally |
 
+## Over HTTP (`--http`)
+
+`sigelo-mcp --http [HOST:PORT]` serves MCP Streamable HTTP at `/mcp` on `127.0.0.1:7310`.
+Same tools, same identity file; stdio stays the default. Every request needs
+`Authorization: Bearer <token>`: `SIGELO_MCP_TOKEN` or `--token`, else one made at first start
+and kept in `sigelo-mcp-http.token` beside the identity file. Off loopback you must give the
+token, and plain HTTP carries it in clear. No SSE stream.
+
 ## Remote (verify only)
 
 `https://sigelo.io/mcp`: `sigelo_verify` alone over Streamable HTTP, no identity or
