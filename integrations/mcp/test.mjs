@@ -313,7 +313,8 @@ try {
   res = await fetch(new URL('/', mcpUrl));
   const pageText = await res.text();
   ok(res.status === 200 && pageText.includes(mcpUrl) && /Open WebUI/.test(pageText) && /MCP Streamable HTTP/.test(pageText) && !pageText.includes(tok), 'http: GET / says what it is and how to add it, without the token', pageText.slice(0, 200));
-  ok(await h1.stop() === 0, 'http: SIGTERM stops it');
+  const h1code = await h1.stop();
+  ok(process.platform === 'win32' ? h1code !== undefined : h1code === 0, 'http: SIGTERM stops it (exit 0 checked off Windows, where kill is forced)', String(h1code));
   const h2 = httpServer({ SIGELO_IDENTITY: idFile });
   await h2.url;
   ok(h2.stderr().includes(`bearer token ${tok}, kept in`), 'http: a restart reuses the token', h2.stderr());

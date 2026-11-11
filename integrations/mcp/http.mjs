@@ -44,7 +44,7 @@ function options(argv, env) {
   const given = value('--token') ?? (env.SIGELO_MCP_TOKEN || undefined);
   if (given !== undefined && !/^[\x21-\x7e]{32,}$/.test(given)) throw new Error('--token / SIGELO_MCP_TOKEN: 32 or more printable characters, no spaces');
   if (!/^\d{1,5}$/.test(p) || Number(p) > 65535) throw new Error(`--port ${p}: not a port number`);
-  if (host !== 'localhost' && !isIP(host)) throw new Error(`--listen ${host}: give an IP address of this machine, e.g. 192.168.1.20`);
+  if (host !== 'localhost' && !isIP(host)) throw new Error(`--listen ${host}: give an IP address this machine has on your network`);
   if (!loopback(host) && given === undefined) throw new Error(`${host} is not loopback: give a bearer token with SIGELO_MCP_TOKEN (or --token), 32 or more characters`);
   return { port: Number(p), host, given };
 }
