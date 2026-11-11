@@ -1,4 +1,4 @@
-# Audit — 2026-09-24, before the first public export
+# Self-review (September 2026)
 
 A code audit of the whole repository at the pre-export head, done by the model that
 orchestrated most of its construction (Claude Fable 5.1) after the pieces had been written

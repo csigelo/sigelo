@@ -5,6 +5,7 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Repository front page:** the README in two parts, the protocol and the apps, linking the v0.1.14 APK itself (`/releases/latest` skips pre-releases); AUDIT.md is docs/self-review-2026-09.md.
 - **Front pages:** the line under the motto says a team of AI agents built sigelo under a human owner, and why to trust it as Bitcoin is trusted, linking the FAQ; sigelo.ai in all 30 languages.
 - **sigelo.io FAQ:** `/faq.html`, seven answers: why trust it, a lost machine or key, cutting someone off, who may instruct an agent, stacks, a down or hostile relay, what sigelo is not.
 - **Spec §12.6, §12.7:** THREAT-MODEL.md and MONERO.md are links to their sigelo.io copies; each consideration is its own bullet. Wording and meaning unchanged.

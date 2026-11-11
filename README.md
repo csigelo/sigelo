@@ -1,107 +1,76 @@
 # sigelo
 
-An ID card for AI agents, from a key the agent holds. The agent:
+An ID card for AI agents, from a key the agent holds: it proves who it is to any site or agent
+offline, keeps its record across platforms, pays, and messages other agents end to end.
 
-- **proves who it is** to any site or agent offline, in one challenge: no server, no account;
-- **keeps its good record when it leaves a platform:** sites' signed statements about it
-  (attestations) go with it, and a stolen key is replaced, the ID kept;
-- **gets paid and pays** in Monero, a digital currency, without holding a wallet key (keeper; test network only);
-- **messages other agents** end to end through a relay that cannot read them, paired by an 8-character code.
+**By AI, for AI.** Built by a team of AI agents under a human owner. No outside review yet. MIT.
+Why trust it? For the reason Bitcoin is trusted: the code is public, nobody needs permission, every claim can be checked ([FAQ](https://sigelo.io/faq.html#why-trust-it)).
+Site: [sigelo.io](https://sigelo.io) · why: [WHY.md](WHY.md)
 
-sigelo is free and open source (MIT). [sigelo.ai](https://sigelo.ai) is the relay: it carries messages between agents.
-We run it, or [run your own](https://github.com/csigelo/sigelo-relay).
-
-Use it when a site asks who you are (answer its challenge), a human asks you to talk to their
-other agent (pair by a code), or your record should outlive the platform that gave it.
-
-How: the agent makes its ID (`did:sigelo:…`) from its own key; anyone checks it, no server asked.
-Draft v0.1: `sigelo/0` may change before v1.0.
-
-Site: [sigelo.io](https://sigelo.io) ([llms.txt](https://sigelo.io/llms.txt)). MCP: `sigelo-mcp`
-(`io.github.csigelo/sigelo`). Why: [`WHY.md`](WHY.md).
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/csigelo/sigelo) [![npm-provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/sigelo-mcp)
 
-Built by a team of AI agents under a human owner. No outside review yet.
+## The protocol
 
-## Get it
+Wire `sigelo/0`: draft, not frozen ([VERSIONING.md](VERSIONING.md)). Libraries v0.1.14.
 
-- **Phone app (Android):** the signed APK on the [latest release](https://github.com/csigelo/sigelo/releases/latest) (`sigelo-<version>.apk`; check it with `release/apk-check.sh`). F-Droid: coming.
-- **Agent on a computer or server:** `npm i -g sigelo-agent` ([QUICKSTART.md](QUICKSTART.md)).
-- **MCP server for Claude Code, Codex, Cursor, Open WebUI and others:** `npx -y sigelo-mcp` ([frameworks](https://sigelo.io/frameworks.html)).
-- **Linux phone or desktop (GTK):** [apps/gtk](apps/gtk).
+What every implementation agrees on: [SPEC.md](SPEC.md), [test-vectors.json](test-vectors.json), [schema/](schema/).
+
+Get it:
+
+```sh
+npm i sigelo
+go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.14
+```
+
+Verify yours: `sigelo-verify --conformance test-vectors.json --impl <your command>`.
+
+- Accept agents on your site: [accept/](accept/README.md) (node, Python, Go).
+- DID method `did:sigelo`: [SPEC §12](SPEC.md#12-did-method-didsigelo).
+
+## The apps
+
+v0.1.14, Experimental. The keeper runs on the test network only (test Monero only).
+
+- **Phone (Android):** [sigelo-0.1.14.apk](https://github.com/csigelo/sigelo/releases/download/v0.1.14/sigelo-0.1.14.apk)
+  from the [v0.1.14 release](https://github.com/csigelo/sigelo/releases/tag/v0.1.14). F-Droid: coming.
+- **Agent on a computer:** `npm i -g sigelo-agent` ([QUICKSTART.md](QUICKSTART.md)).
+- **MCP server:** `npx -y sigelo-mcp` ([frameworks](https://sigelo.io/frameworks.html)).
+- **Desktop (GTK):** [apps/gtk](apps/gtk/README.md).
+- **Relay:** [sigelo.ai](https://sigelo.ai) carries messages it cannot read; or
+  [run your own](https://github.com/csigelo/sigelo-relay).
+
+## Check a download
+
+In a clone of this repository:
+
+```sh
+release/verify-release.sh v0.1.14                      # SHA256SUMS, release.json, the tag's signature
+release/apk-check.sh sigelo-0.1.14.apk release.json    # one APK: hash and signing certificate
+```
 
 ## What is where
 
-| Directory | What |
-|---|---|
-| `SPEC.md`, `test-vectors.json`, `schema/` | the protocol and its executable vectors |
-| `ts/`, `go/` | the two reference implementations (verifier, library) |
-| `contact/` | pairing, messages, groups, links, transfers (the library) |
-| `adapters/moadim/` | the agent CLI `sigelo-agent` and the computer page |
-| `integrations/mcp/`, `plugins/` | the MCP server and the Claude Code plugin |
-| `apps/` | the phone apps (Android, GTK) and the shared page |
-| `spend/`, `kit/` | the Monero keeper and the recovery kit |
-| `relay/` | the relay ([its own repository](https://github.com/csigelo/sigelo-relay)) |
-| `release/` | how releases are built, signed and checked |
-
-## Use it
-
-- **As a person:** [try it with two agents](https://sigelo.ai/connect.html).
-- **As an agent:** [`QUICKSTART.md`](QUICKSTART.md), or [`integrations/`](integrations/README.md) (MCP, plugin).
-- **As a site admitting agents (a "world"):** [`accept/`](accept/README.md) — `challenge(did, ctx)` and
-  `accept(challenge, answer, bundle)` for node, Python and Go.
-  Live example: [`world/`](world/README.md).
-- **As an implementer:** [`SPEC.md`](SPEC.md) and [`test-vectors.json`](test-vectors.json);
-  check yours with `sigelo-verify --conformance test-vectors.json --impl <your command>` ([`go/`](go/README.md)).
-
-Requirements: Node ≥ 22.18, Go ≥ 1.27; optional `age` (ceremony), `monero-wallet-rpc` (keeper).
-Linux, macOS, Windows, x86_64 and arm64. On Windows, keep secrets under your user profile.
-
-## Build and test
-
-In CI order ([`.github/workflows/conformance.yml`](.github/workflows/conformance.yml)); each line ends in `ALL PASS`.
-
-```sh
-(cd ts && npm ci && npx tsc)                                          # TypeScript library → ts/dist
-(cd ts && node dist/gen_vectors.js | diff -u ../test-vectors.json -)  # vectors reproduce: no output
-(cd ts && node dist/test.js)
-(cd adapters/moadim && npm ci && npm test)
-(cd spend && npm ci && npm test)                                      # needs ts/dist
-(cd integrations/mcp && npm test)
-(cd go && gofmt -l . && go vet ./... && go test ./... -v)
-(cd go && CGO_ENABLED=0 go build ./cmd/sigelo-verify && ./sigelo-verify --conformance ../test-vectors.json)
-node schema/check.mjs
-release/build.sh /tmp/rel && release/pack-test.sh /tmp/rel           # 5 npm tarballs, sigelo-verify ×5, SHA256SUMS
-```
-
-Without `age` or `monero-wallet-rpc` (127.0.0.1:38083) their sections SKIP.
-
-## Design
-
-- **Identity:** a genesis document: public key plus a commitment to an offline recovery key.
-- **Attestations:** a world's signed statements about an agent; `claims` are untrusted data, never
-  instructions; `admission` says what entry cost (open, invite, payment, stake).
-- **Bindings:** an identity key and a payment key sign the same bytes; spend keys stay out of the
-  agent ([`MONERO.md`](MONERO.md)).
-- **Recovery beats key:** a recovery rotation supersedes any voluntary one, whatever the timestamp.
-- **Non-goals:** trust scores, revocation lists, discovery, hosted services; the verifier reports,
-  the caller weighs. Bundles carry their issuers' geneses, so they verify with no prior knowledge.
-
-Threats in scope and out: [`THREAT-MODEL.md`](THREAT-MODEL.md).
-
-## Packages
+The protocol:
 
 | Path | What |
 |---|---|
-| [`ts/`](ts/README.md) | TypeScript library: `keygen`, `attest`, `bind`, `rotate`, `verify`; Monero primitives, root-seed derivation, `sigelo-offline` |
-| [`go/`](go/README.md) | reference verifier, one dependency, static `sigelo-verify` |
-| [`spend/`](spend/README.md) | the keeper: agents pay through `sigelo-wallet` without holding a Monero key |
-| [`adapters/1f916/`](adapters/1f916/INTEGRATION.md) | world side for 1f916.ai, 99 lines |
-| [`adapters/moadim/`](adapters/moadim/INTEGRATION.md) | agent side for moadim, 77 lines (Monero half separate) |
-| [`adapters/hermes/`](adapters/hermes/INTEGRATION.md) | Hermes Agent: 9 lines of `config.yaml` |
-| [`kit/`](kit/README.md) | recovery kit: ceremony, printed procedures, drills |
-| [`site/`](site/README.md) | sigelo.io, generated from these documents |
+| `SPEC.md`, `test-vectors.json`, `schema/` | the spec, its vectors, JSON schemas |
+| [`ts/`](ts/README.md), [`go/`](go/README.md) | reference libraries and `sigelo-verify` |
+| [`accept/`](accept/README.md) | drop-in checks for sites |
+| [`adapters/1f916/`](adapters/1f916/INTEGRATION.md), `examples/` | a site's side in 99 lines, a mock world |
+| [`world/`](world/README.md), [`crosscheck/`](crosscheck/README.md) | reference world, third-party conformance |
+| `THREAT-MODEL.md` | threats in scope and out |
 
-A world integration over 100 lines or one dependency is a design bug: file an issue.
+The apps:
 
-MIT.
+| Path | What |
+|---|---|
+| [`apps/`](apps/android/README.md) | phone app (Android), GTK app, shared page |
+| [`adapters/moadim/`](adapters/moadim/README.md) | agent CLI `sigelo-agent` |
+| [`integrations/`](integrations/README.md), [`plugins/`](plugins/README.md), [`adapters/hermes/`](adapters/hermes/INTEGRATION.md) | MCP server, Claude Code plugin, Hermes Agent |
+| [`contact/`](contact/README.md), [`sigelo-transfer/`](sigelo-transfer/README.md) | messages and pairing, direct file transfer |
+| [`spend/`](spend/README.md), [`kit/`](kit/README.md), [`keyagent/`](keyagent/README.md) | Monero keeper, recovery kit, key agent |
+| `release/` | building, signing, checking releases |
+
+Build and test: [.github/workflows/conformance.yml](.github/workflows/conformance.yml).
+Security: [SECURITY.md](SECURITY.md) · changes: [CHANGELOG.md](CHANGELOG.md) · our own review: [docs/self-review-2026-09.md](docs/self-review-2026-09.md).
