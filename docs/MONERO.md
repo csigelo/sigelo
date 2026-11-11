@@ -257,7 +257,7 @@ and agents ask.
 ### 4.1 The keeper
 
 One design for every tier: `sigelo-spend` (`spend/`, documented in
-[`spend/README.md`](spend/README.md)), generalised from "one token, buckets" to "one token per
+[`spend/README.md`](../spend/README.md)), generalised from "one token, buckets" to "one token per
 agent, one account per agent" by G1–G6 (§8). Every check below is **built** and tested; the
 single-token predecessor has moved real stagenet coins, and the generalised keeper's live run
 is G8 (§8).
@@ -286,7 +286,7 @@ agent with its whole policy; delegation (§4.3), approvals (step 8), receipts ex
 keepers on a host need a licence, which is a sigelo attestation (SPEC §5) from the vendor DID
 to the keeper DID, verified offline; without one those verbs refuse `licence_required`, never
 silently, and a payment that would need an approval is refused, not paid. Details:
-[`spend/README.md`](spend/README.md) "Install".
+[`spend/README.md`](../spend/README.md) "Install".
 
 **Two users (the recommended layout).** The keeper and its wallet-rpc run as their own user;
 the agent runs as another and holds only its token, in its own 0600 file. An agent that runs as
@@ -510,7 +510,7 @@ Built for weak models (Haiku, Llama, Qwen): four verbs, one line of output each,
 no JSON-RPC, no atomic units, and a retry that cannot pay twice. `sigelo-wallet` (G3,
 `spend/wallet.ts`) is a thin client of the keeper's loopback HTTP; it reads
 `SIGELO_WALLET_URL` and `SIGELO_WALLET_TOKEN`. The exact lines and the full message table are
-in [`spend/README.md`](spend/README.md), each asserted verbatim by a test.
+in [`spend/README.md`](../spend/README.md), each asserted verbatim by a test.
 
 | CLI | HTTP | Answers |
 |---|---|---|

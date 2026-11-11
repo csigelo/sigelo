@@ -1,6 +1,6 @@
 # sigelo-spend
 
-The policy service of [MONERO.md](../MONERO.md) §4. An agent asks it to pay; it decides, pays
+The policy service of [MONERO.md](../docs/MONERO.md) §4. An agent asks it to pay; it decides, pays
 from the **allowance** wallet, and returns a signed receipt. Loopback HTTP, one dependency.
 
 ## What it bounds, and what it does not

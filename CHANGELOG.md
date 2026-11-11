@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **CI: wallet-rpc canary:** auto-refresh off after create_wallet, a readiness poll up to 180 s, three retries before SKIP; mcp-registry pinned by SHA; `permissions: {}` on top.
+- **docs/:** WHY, QUICKSTART, MONERO and INCIDENT moved there, under an index (docs/README.md); sigelo.io keeps their /raw/ URLs. CONTRIBUTING.md: how to file issues and pull requests.
 - **Repository front page:** the README in two parts, the protocol and the apps, linking the v0.1.14 APK itself (`/releases/latest` skips pre-releases); AUDIT.md is docs/self-review-2026-09.md.
 - **sigelo-mcp --http [HOST:PORT]:** MCP Streamable HTTP on 127.0.0.1, bearer token (a given one off loopback), web pages refused; stdio unchanged. Octomind: a frameworks row.
 - **Front pages:** the line under the motto says a team of AI agents built sigelo under a human owner, and why to trust it as Bitcoin is trusted, linking the FAQ; sigelo.ai in all 30 languages.

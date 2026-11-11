@@ -95,11 +95,23 @@ jobs:
           d="$RUNNER_TEMP/wallets"; mkdir -p "$d"
           monero-wallet-rpc --stagenet --daemon-address "$node" --untrusted-daemon --wallet-dir "$d" --rpc-bind-ip 127.0.0.1 --rpc-bind-port "$RPC_PORT" \
             --disable-rpc-login --log-file "$d/rpc.log" > /dev/null 2>&1 &
-          rpc() { curl -fsS --max-time 30 "http://127.0.0.1:$RPC_PORT/json_rpc" -H 'Content-Type: application/json' \
+          rpc() { curl -fsS --max-time "${3:-30}" "http://127.0.0.1:$RPC_PORT/json_rpc" -H 'Content-Type: application/json' \
             -d "{\"jsonrpc\":\"2.0\",\"id\":\"0\",\"method\":\"$1\",\"params\":$2}"; }
-          for i in $(seq 60); do rpc get_version '{}' > /dev/null 2>&1 && break; sleep 1; done
+          # poll METHOD for up to LIMIT s, 10 s per call, sleeping 1, 2, 4, 8, then 15 s; print the seconds taken
+          wait_for() {
+            t0=$(date +%s); s=1
+            until rpc "$1" '{}' 10 2>/dev/null | grep -q '"result"'; do
+              [ $(( $(date +%s) - t0 )) -lt "$2" ] || { echo "$1: no answer within $2 s"; return 1; }
+              sleep "$s"; s=$(( s < 8 ? s * 2 : 15 ))
+            done
+            echo "$1 answered after $(( $(date +%s) - t0 )) s"
+          }
+          wait_for get_version 120
           rpc get_version '{}'
           rpc create_wallet '{"filename":"canary","password":"","language":"English"}' | tee /dev/stderr | grep -q '"result"'
+          # the canary needs no sync; a fresh wallet's first refresh against the remote daemon can block the RPC
+          rpc auto_refresh '{"enable":false}' | tee /dev/stderr | grep -q '"result"'
+          wait_for get_height 180
       - name: canary (live half against the real wallet-rpc)
         working-directory: spend
         run: |

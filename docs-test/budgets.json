@@ -1,5 +1,7 @@
 {
   "README.md": 420,
+  "docs/README.md": 160,
+  "CONTRIBUTING.md": 120,
   "ts/README.md": 910,
   "go/README.md": 470,
   "adapters/moadim/README.md": 680,
@@ -17,8 +19,8 @@
   "release/RELEASE.md": 650,
   "docs-test/README.md": 1140,
   "crosscheck/README.md": 1310,
-  "QUICKSTART.md": 2050,
-  "WHY.md": 1530,
+  "docs/QUICKSTART.md": 2050,
+  "docs/WHY.md": 1530,
   "VERSIONING.md": 830,
   "SECURITY.md": 770,
   "kit/README.md": 710,

@@ -131,9 +131,13 @@ const NAV = [['adopt', 'Adopt'], ['faq', 'FAQ'], ['accept', 'Accept'], ['spec', 
   ['contact', 'Contact'], ['changelog', 'Changelog'], ['privacy', 'Privacy']];
 
 // Repository files published verbatim under /raw/<path>. OPTIONAL: listed in llms.txt.
+// RAW_AT: a document that moved keeps its published URL (public text links /raw/WHY.md):
+// repository path → path under /raw/.
 const SCHEMAS = readdirSync(join(ROOT, 'schema')).filter((f) => f.endsWith('.json')).sort().map((f) => `schema/${f}`);
-const OPTIONAL = ['QUICKSTART.md', 'WHY.md', 'THREAT-MODEL.md', 'INCIDENT.md', 'VERSIONING.md', 'MONERO.md', 'kit/README.md', 'spend/README.md'];
+const OPTIONAL = ['docs/QUICKSTART.md', 'docs/WHY.md', 'THREAT-MODEL.md', 'docs/INCIDENT.md', 'VERSIONING.md', 'docs/MONERO.md', 'kit/README.md', 'spend/README.md'];
 export const RAW = ['SPEC.md', 'SECURITY.md', 'CHANGELOG.md', ...OPTIONAL, 'test-vectors.json', ...SCHEMAS, 'spend/openapi.yaml'];
+export const RAW_AT = { 'docs/QUICKSTART.md': 'QUICKSTART.md', 'docs/WHY.md': 'WHY.md', 'docs/INCIDENT.md': 'INCIDENT.md', 'docs/MONERO.md': 'MONERO.md' };
+const rawPath = (p) => RAW_AT[p] ?? p;
 const repoToPage = Object.fromEntries(PAGES.filter((p) => p.repo).map((p) => [p.repo, p.slug]));
 
 const STATUS_MD = 'Status: experimental, wire `sigelo/0` not frozen yet; keeper stagenet-only, unaudited.';
@@ -313,7 +317,7 @@ function linker(srcPath, ext) {
     if (repoToPage[p]) return `/${repoToPage[p]}.${ext}${hash}`;
     if (p === 'test-vectors.json') return `/test-vectors.json${hash}`;
     if (p === 'examples/world.mjs') return '/examples/world.mjs';
-    if (RAW.includes(p)) return `/raw/${p}${hash}`;
+    if (RAW.includes(p)) return `/raw/${rawPath(p)}${hash}`;
     return `${REPO}/${isDir || !/\.[\w]+$/.test(p) ? 'tree' : 'blob'}/${BRANCH}/${p}${hash}`;
   };
 }
@@ -520,7 +524,8 @@ export function build({ out = DIST, disclosed = DISCLOSED, darkDir = DARK_DIR } 
   rmSync(darkOut(out), { recursive: true, force: true });
   const put = (p, data) => { const f = join(out, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, data); };
 
-  for (const r of RAW) put(`raw/${r}`, readBytes(r));
+  // a moved document (RAW_AT) keeps its old URL, so its `](../x)` links are lifted back to `](x)`: they resolve from /raw/ as before
+  for (const r of RAW) put(`raw/${rawPath(r)}`, RAW_AT[r] ? Buffer.from(readBytes(r).toString('utf8').replace(/\]\(\.\.\//g, '](')) : readBytes(r));
   put('test-vectors.json', vectorsBytes);
   put(`sha256/${VALUES.vectors_sha256}/test-vectors.json`, vectorsBytes);
   put(`sha256/${VALUES.spec_sha256}/SPEC.md`, specBytes);
@@ -609,7 +614,7 @@ ${L('Frameworks', '/frameworks.md')}
 ${L('Test vectors', '/test-vectors.json')}
 ${L('Privacy, terms', '/privacy.md')}
 ${L('FAQ', '/faq.md')}
-${OPTIONAL.map((p) => L(p, `/raw/${p}`)).join('\n')}
+${OPTIONAL.map((p) => L(rawPath(p), `/raw/${rawPath(p)}`)).join('\n')}
 ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS.reduce((n, s) => n + readBytes(s).length, 0))}`)}
 `);
 

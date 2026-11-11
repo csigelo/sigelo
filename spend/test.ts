@@ -3007,7 +3007,7 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
   const did1 = loadKeeper(k1, loadRoot(join(k1, 'policy.json'))).did;
   ok('init: prints the keeper DID a licence is issued to', i1.out.includes(`keeper DID    ${did1}`));
   ok('init: prints the agent\'s URL, token path and the prompt snippet of MONERO.md §4.2, verbatim (the README\'s and MONERO.md\'s, byte for byte)', i1.out.includes(`SIGELO_WALLET_URL=http://127.0.0.1:${port1}\nSIGELO_WALLET_TOKEN=$(cat ${tok1})\n\n${SNIPPET}\n`) && !i1.out.includes(`cat ${k1}`) &&
-    SNIPPET.split('\n').length === 10 && readFileSync(join(here, '..', 'README.md'), 'utf-8').includes(SNIPPET) && readFileSync(join(here, '..', '..', 'MONERO.md'), 'utf-8').includes(SNIPPET));
+    SNIPPET.split('\n').length === 10 && readFileSync(join(here, '..', 'README.md'), 'utf-8').includes(SNIPPET) && readFileSync(join(here, '..', '..', 'docs', 'MONERO.md'), 'utf-8').includes(SNIPPET));
   ok('init: says it runs on this host with your keys, nothing hosted', i1.out.includes('Runs on this host with your wallet and your keys; nothing is hosted'));
   const unit1 = readFileSync(join(k1, 'systemd', `sigelo-keeper-k1.service`), 'utf-8');
   ok('init: the frozen copy holds sigelo and sigelo-spend, without the compiled test', existsSync(join(k1, 'app', 'node_modules', 'sigelo', 'dist', 'sigelo.js')) &&
@@ -3996,6 +3996,29 @@ if (liveAddress !== null) {
   rmSync(walletDir, { recursive: true, force: true });
 }
 
+{ // the canary's retry: a wallet-rpc that answers only on its third get_version, then one that never answers
+  const { rpcRetry } = await import('./canary.js');
+  let calls = 0;
+  const srv = createServer((rq: IncomingMessage, rs: ServerResponse) => {
+    rq.on('data', () => {}); rq.on('end', () => {
+      calls++;
+      if (calls < 3) { rs.writeHead(503); rs.end('starting'); return; }
+      rs.writeHead(200, { 'Content-Type': 'application/json' }); rs.end(JSON.stringify({ jsonrpc: '2.0', id: '0', result: { version: (1 << 16) | 30, release: true } }));
+    });
+  });
+  await new Promise<void>((r) => { srv.listen(0, '127.0.0.1', r); });
+  const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/json_rpc`;
+  const slept: number[] = [];
+  const nap = async (ms: number): Promise<void> => { slept.push(ms); };
+  const got = await rpcRetry(url, 'get_version', {}, [5_000, 10_000, 20_000], nap);
+  ok('canary retry: get_version answered on the third attempt is used, after the 5 s and 10 s waits', got?.result?.['version'] === 65566 && calls === 3 && slept.join() === '5000,10000', JSON.stringify({ got, calls, slept }));
+  calls = -100; slept.length = 0;
+  ok('canary retry: no reply after three retries (5, 10, 20 s) gives null, four attempts', await rpcRetry(url, 'get_version', {}, [5_000, 10_000, 20_000], nap) === null && calls === -96 && slept.join() === '5000,10000,20000', JSON.stringify({ calls, slept }));
+  calls = 0; slept.length = 0;
+  const once = await rpcRetry(url, 'get_version', {}, [], nap);
+  ok('canary retry: no delays, one attempt (npm test does not wait for an absent wallet)', once === null && calls === 1 && slept.length === 0, JSON.stringify({ once, calls, slept }));
+  await new Promise<void>((r) => { srv.close(() => { r(); }); });
+}
 await (await import('./canary.js')).canary({ ok, skip, mockWallet, ...(NO_LIVE ? { live: 'http://127.0.0.1:1/json_rpc' } : {}) }); // the wallet-rpc canary (ROADMAP §5.5)
 rmSync(dir, { recursive: true, force: true });
 console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);

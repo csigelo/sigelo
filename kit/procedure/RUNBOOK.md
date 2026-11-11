@@ -1,6 +1,6 @@
 # Incident runbook — {{installation}}
 
-INCIDENT.md (sigelo repository root) bound to this installation by `kit/bind.mjs` from `kit.json`, with the corrections the stagenet rehearsal T14 found. Keepers are hot (MONERO.md §4.6): coins that leave do not come back; identities do, because the recovery key is on no keeper. Network: **{{net}}**. Keeper {{keeper.index}} on **{{keeper.host}}**, policy directory `{{keeper.policy_dir}}`, unit `{{keeper.unit}}` ({{supervisor}}).
+docs/INCIDENT.md (sigelo repository) bound to this installation by `kit/bind.mjs` from `kit.json`, with the corrections the stagenet rehearsal T14 found. Keepers are hot (MONERO.md §4.6): coins that leave do not come back; identities do, because the recovery key is on no keeper. Network: **{{net}}**. Keeper {{keeper.index}} on **{{keeper.host}}**, policy directory `{{keeper.policy_dir}}`, unit `{{keeper.unit}}` ({{supervisor}}).
 
 > **The vendor never receives, holds, escrows or sees any seed, key, backup.age, share or token of yours — not even "for recovery".** If you have a facilitation contract, call {{people.facilitator}}: they read this with you and keep the clock. They never take a key, a file or a host.
 

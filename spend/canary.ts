@@ -7,7 +7,8 @@
  * expected) must fail here before it fails a payment.
  *
  *   pure, always: the RPC version rule (`rpcVersionOk`) over the edges of its range;
- *   read-only, against the LIVE wallet on 127.0.0.1:38083 (SKIP if unreachable): get_version
+ *   read-only, against the LIVE wallet on 127.0.0.1:38083 (SKIP if unreachable; with SIGELO_CANARY_RPC,
+ *   after three retries, 5, 10 and 20 s apart): get_version
  *   (RPC 1.30 to 1.33 accepted, see RPC_RANGE), get_height, get_balance, get_address, validate_address, sign in both
  *   modes, verify, get_transfers, and the JSON-RPC error shape;
  *   mutating, against the mock wallet `test.ts` runs every keeper test on: create_account,
@@ -29,6 +30,8 @@ export interface CanaryCtx {
   ok: Ok; skip: Skip;
   mockWallet?: (mode: { balances?: Record<number, { balance: number; unlocked: number }> }) => Promise<Mock>;
   live?: string;
+  /** delays (ms) between get_version attempts before the live half SKIPs; none by default */
+  retry?: readonly number[];
 }
 
 /**
@@ -84,7 +87,22 @@ async function rpc(url: string, method: string, params: unknown): Promise<{ resu
   } catch { return null; }
 }
 
-export async function canary({ ok, skip, mockWallet, live = 'http://127.0.0.1:38083/json_rpc' }: CanaryCtx): Promise<void> {
+/** The CI canary's start (SIGELO_CANARY_RPC set): a wallet-rpc that does not answer yet is retried after each delay, then SKIPs. */
+export const CANARY_RETRY_MS = [5_000, 10_000, 20_000] as const;
+
+/** `rpc`, retried after each of `delays` (ms) while it gets no reply; null when none came. */
+export async function rpcRetry(url: string, method: string, params: unknown, delays: readonly number[], sleep = (ms: number) => new Promise<void>((r) => { setTimeout(r, ms); })): Promise<{ result?: R; error?: R } | null> {
+  let r = await rpc(url, method, params);
+  for (const ms of delays) {
+    if (r !== null) break;
+    console.log(`canary live: no reply to ${method}, retrying in ${ms / 1000} s`);
+    await sleep(ms);
+    r = await rpc(url, method, params);
+  }
+  return r;
+}
+
+export async function canary({ ok, skip, mockWallet, live = 'http://127.0.0.1:38083/json_rpc', retry = [] }: CanaryCtx): Promise<void> {
   const pinned = (where: string, method: string, r: { result?: R; error?: R } | null): R => {
     const res = r?.result;
     ok(`canary ${where}: ${method} result has the pinned shape`, plain(res) && SHAPES[method]!(res), JSON.stringify(r).slice(0, 400));
@@ -96,7 +114,7 @@ export async function canary({ ok, skip, mockWallet, live = 'http://127.0.0.1:38
   for (const [maj, min, want] of edges) ok(`canary: RPC ${maj}.${min} is ${want ? 'accepted' : 'refused'}`, rpcVersionOk(maj, min) === want);
 
   // ---------------------------------------------------------------- live, read-only
-  const version = await rpc(live, 'get_version', {});
+  const version = await rpcRetry(live, 'get_version', {}, retry);
   if (version === null) {
     skip(`canary live: wallet-rpc ${live}`, 'unreachable');
   } else {
@@ -161,7 +179,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   await canary({
     ok: (name, cond, detail = '') => { if (cond) passed++; else { failed++; console.error(`FAIL ${name}${detail === '' ? '' : ` — ${detail}`}`); } },
     skip: (name, reason) => { skipped++; console.log(`SKIP ${name} — ${reason}`); },
-    ...(process.env['SIGELO_CANARY_RPC'] !== undefined && { live: process.env['SIGELO_CANARY_RPC'] }),
+    ...(process.env['SIGELO_CANARY_RPC'] !== undefined && { live: process.env['SIGELO_CANARY_RPC'], retry: CANARY_RETRY_MS }),
   });
   console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);
   if (failed > 0) process.exit(1);

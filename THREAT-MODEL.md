@@ -464,5 +464,5 @@ The rival has first-mover adoption and a registry agents can already search.
 without becoming a registry: static machine-readable docs (`/llms.txt`, `/adopt.md`), an MCP
 server listed where agents look for tools, and a DID method registration. None of these is on the verification path; if all go down, every bundle still
 verifies. Advertising `did:sigelo` inside an ERC-8004 registration file would be an
-advertisement, not a dependency, but it touches the no-discovery rule (CLAUDE.md) and is
+advertisement, not a dependency, but it touches the no-discovery rule (SPEC §11) and is
 undecided.
