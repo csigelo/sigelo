@@ -238,6 +238,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(t.type === 'text/markdown; charset=utf-8', '/spec.md is text/markdown; charset=utf-8');
   ok(t.body.equals(readFileSync(join(ROOT, 'SPEC.md'))) || t.body.toString().includes('## 9. Verification algorithm'), '/spec.md carries SPEC.md');
   ok((await get('/raw/SPEC.md')).body.equals(readFileSync(join(ROOT, 'SPEC.md'))), '/raw/SPEC.md is SPEC.md byte for byte');
+  for (const d of ['WHY', 'QUICKSTART', 'MONERO', 'INCIDENT']) ok(!(await get(`/raw/${d}.md`)).body.toString().includes('](../'), `/raw/${d}.md (moved to docs/) has no ../ links`);
 }
 
 // ---- llms.txt ---------------------------------------------------------------------------------

@@ -95,7 +95,10 @@ console.log(`commands    ${st.commands}: payments ${st.payments}, already-paid $
 console.log(`delegates   created ${st.delegates_created}, closed ${st.delegates_closed}`);
 console.log(`mismatches  ${st.mismatches}   errors ${st.errors}   outage ticks ${st.outage_ticks ?? 0}   carol abandoned offline ${st.abandoned_offline ?? 0}`);
 for (const m of st.last_mismatches.slice(-5)) console.log(`  ${m.ts} tick ${m.tick} ${m.who}: ${m.cmd}\n      expected ${m.expect}, got ${m.got}: ${m.out}`);
-if (since > 3600 && !EVIDENCE) unhealthy.push(`no tick for ${dur(since)}`);
+// SIGELO_SOAK_TICK_S: the agent timer's interval in seconds (1800 for ticks at :10 and :40); a slower
+// cadence (fee saving) widens the no-tick and no-payment windows with it.
+const TICK = Number(process.env.SIGELO_SOAK_TICK_S) || 1800;
+if (since > Math.max(3600, 2 * TICK) && !EVIDENCE) unhealthy.push(`no tick for ${dur(since)} (tick every ${dur(TICK)})`);
 // UNCERTAIN is cumulative in soak-stats.json and, by the keeper's design, only an operator can
 // settle it (check the txid in the wallet). `uncertain-acked.json` {uncertain: n, note} records that
 // the first n were checked; only newer ones page.
@@ -111,7 +114,7 @@ const paidAt = log.filter((r) => /^sigelo-wallet (pay|fund) /.test(r.cmd ?? '') 
 const hs = log.filter((r) => r.kind === 'wallet' && Number.isSafeInteger(r.height)).slice(-2);
 console.log(`liveness    last payment ${paidAt ? `${paidAt} (${dur((Date.now() - Date.parse(paidAt)) / 1000)} ago)` : 'never'}; wallet height ${hs.map((h) => h.height).join(' → ') || 'no snapshot'}`);
 if (!EVIDENCE) {
-  if (up > 7200 && (!paidAt || Date.now() - Date.parse(paidAt) > 7200e3)) unhealthy.push(`no successful payment for ${paidAt ? dur((Date.now() - Date.parse(paidAt)) / 1000) : 'the whole soak'}`);
+  if (up > Math.max(7200, 4 * TICK) && (!paidAt || Date.now() - Date.parse(paidAt) > Math.max(7200, 4 * TICK) * 1e3)) unhealthy.push(`no successful payment for ${paidAt ? dur((Date.now() - Date.parse(paidAt)) / 1000) : 'the whole soak'}`);
   if (hs.length === 2 && hs[1].height <= hs[0].height) unhealthy.push(`wallet height stuck at ${hs[1].height} over the last two snapshots (no daemon? see incident #4)`);
 }
 /** Clock sanity for one log: its newest ts is not in the future, and not older than the line before it. */

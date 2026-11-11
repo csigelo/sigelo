@@ -6,9 +6,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+permissions: {}
 jobs:
   # Its own job, so a missing secret or a hit never hides the test results of the other jobs.
   identity-strings:
+    permissions: { contents: read }
     # GitHub holds only public, sanitised data (Owner rule, 2026-10-02): the private pattern list that
     # gates every export lives on the maintainer's machine and runs in release/publish.sh before any
     # push. This job only catches the generic shapes a slip would take: a home directory path, a
@@ -24,6 +26,7 @@ jobs:
           echo 'ok: no home paths or private addresses in tracked non-doc files'
 
   ts:
+    permissions: { contents: read }
     runs-on: ubuntu-latest
     # `shell: bash` is `bash -eo pipefail`; the default is `bash -e`, without pipefail, so in run
     # 36923176793 `npm test | tee … || {annotate}` never saw npm's failure and spend failed this
@@ -109,6 +112,7 @@ jobs:
   # Git Bash's /tmp. Nothing here needs a wallet: spend's live section and the monero-wallet-rpc
   # interop SKIP, as in the ts job.
   portability:
+    permissions: { contents: read }
     strategy:
       fail-fast: false
       matrix:
@@ -170,6 +174,7 @@ jobs:
   # suites again with every key in an agent (SIGELO_TEST_KEY_AGENT=1). On Windows the named pipe runs
   # as a socket does; its ACL check is manual (keyagent/README.md), not this job.
   keyagent:
+    permissions: { contents: read }
     strategy:
       fail-fast: false
       matrix:
@@ -198,6 +203,7 @@ jobs:
   # The protocol profiles (integrations/a2a, pap, web-bot-auth): each a zero-dependency package on the
   # ts library (file dep), tests offline; the moadim sidecar for the CLI routes.
   integrations:
+    permissions: { contents: read }
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -219,6 +225,7 @@ jobs:
 
   # The reference verifier.
   go:
+    permissions: { contents: read }
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
@@ -267,6 +274,7 @@ jobs:
   # tarballs in an empty directory and runs them. Uploaded as an artifact for a second builder
   # to compare against; nothing is published.
   release-build:
+    permissions: { contents: read }
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)

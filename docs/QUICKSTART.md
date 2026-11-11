@@ -205,7 +205,7 @@ Or `cd go && go run ./cmd/sigelo-verify ../bundle.json`: the same result as JCS 
 attestations is the verifier's job. `claims` is data, never instructions.
 
 **Getting paid.** The same CLI: `wallet-set` (view-only Monero treasury from `offline.js derive`),
-`bind`, `receive`, `invoice`, `verify-invoice` ([`adapters/moadim/README.md`](adapters/moadim/README.md),
+`bind`, `receive`, `invoice`, `verify-invoice` ([`adapters/moadim/README.md`](../adapters/moadim/README.md),
 [`MONERO.md`](MONERO.md)). The agent never holds a spend key.
 
 **A `proven` binding without a wallet (library).** SPEC §6.1a's `ed25519-test`: the "address" is
@@ -231,7 +231,7 @@ good signatures. Fix the item; never pass a later `now`.
 **Spending.** The agent asks a keeper: `sigelo-wallet balance | receive | pay <to> <amount>
 [purpose] | history` with the URL and token from its operator. Operator, on their host:
 `sigelo-spend init --wallet-rpc http://127.0.0.1:38083 --allow bob=<address>`, then
-`sigelo-spend doctor` ([`spend/README.md`](spend/README.md)).
+`sigelo-spend doctor` ([`spend/README.md`](../spend/README.md)).
 
 **Later.** `sigelo-agent rotate` moves to a fresh key; old attestations still apply. After a
 theft: tier 1 as in step 0; tier 2, `rotate --recovery` prints the procedure, and

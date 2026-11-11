@@ -10,7 +10,9 @@
 #
 #   lifecycle  (docs-only lifecycle, TASK-lifecycle.md): SPEC.md, QUICKSTART.md,
 #              examples/world.mjs, ts/README.md (identity part: the Monero and root-seed
-#              sections are cut), test-vectors.json, schema/
+#              sections are cut), test-vectors.json, schema/. QUICKSTART.md is read from
+#              docs/QUICKSTART.md at a REV that has it (it moved there) and kept at the top level,
+#              so every snapshot has one layout.
 #   verifier   (spec-only implementer, TASK-verifier.md): SPEC.md, test-vectors.json
 #
 # Never ts/src, go/, adapters/ or spend/. The sandbox adds what the lifecycle task needs to
@@ -26,7 +28,7 @@ sandbox=
 while [ $# -gt 0 ]; do
   case $1 in
     --sandbox) [ $# -ge 2 ] || { echo "--sandbox needs a directory" >&2; exit 2; }; sandbox=$2; shift 2 ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
     *) rev=$1; shift ;;
   esac
@@ -42,11 +44,13 @@ VERIFIER="SPEC.md test-vectors.json"
 
 put() { # put <condition-dir> <path>
   mkdir -p "$(dirname "$1/$2")"
+  src=$2
+  [ "$2" != QUICKSTART.md ] || ! git cat-file -e "$full:docs/QUICKSTART.md" 2>/dev/null || src=docs/QUICKSTART.md
   if [ "$2" = ts/README.md ]; then
     # identity part: drop "## Monero bindings" and "## Root seed", keep everything else
     git show "$full:$2" | awk '/^## /{skip = ($0 ~ /^## Monero bindings/ || $0 ~ /^## Root seed/)} !skip' > "$1/$2"
   else
-    git show "$full:$2" > "$1/$2"
+    git show "$full:$src" > "$1/$2"
   fi
 }
 rm -rf "$out"
@@ -66,7 +70,7 @@ const files = (cond) => walk(path.join(out, cond)).map((p) => {
 });
 const m = {
   commit, short, created: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
-  note: 'Files are exactly git show <commit>:<path>, except ts/README.md, cut to its identity part (sections "Monero bindings" and "Root seed" removed).',
+  note: 'Files are exactly git show <commit>:<path>, except ts/README.md, cut to its identity part (sections "Monero bindings" and "Root seed" removed), and QUICKSTART.md, which is docs/QUICKSTART.md at a commit that has it.',
   conditions: { lifecycle: files('lifecycle'), verifier: files('verifier') },
 };
 // one digest per condition, over "sha256  path\n" lines: the number to quote beside a score

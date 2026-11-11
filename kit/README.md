@@ -29,7 +29,7 @@ Requirements: node ≥ 22, `age` (or `rage`), a POSIX `sh` (busybox works), syst
 ## Parts
 
 The protocol tools (`sigelo-offline ceremony --human`, `restore --words`, `recover`, the keeper,
-`INCIDENT.md`) are free in the repository. The kit adds:
+`docs/INCIDENT.md`) are free in the repository. The kit adds:
 
 | Part | Where | What |
 |---|---|---|

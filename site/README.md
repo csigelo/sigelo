@@ -29,8 +29,9 @@ node site/test/run.mjs --serve 8080    # just serve it (localhost, 127.0.0.1 and
   `/adopt`, `/frameworks`, `/verify`, `/keeper`, `/contact`. Nothing else: `test/run.mjs` fails on any other page
   and on a page over its word budget (index 120, adopt 250, frameworks 450 outside its one table of
   at most 40 rows, verify 150, keeper 200, contact 80, llms.txt 150).
-- **Verbatim** under `/raw/<repo path>`: those three, QUICKSTART, WHY, THREAT-MODEL, VERSIONING,
-  MONERO, kit/README.md, spend/README.md (listed with sizes in llms.txt), `test-vectors.json`,
+- **Verbatim** under `/raw/<repo path>`: those three, THREAT-MODEL, VERSIONING, kit/README.md,
+  spend/README.md, and docs/ QUICKSTART, WHY, INCIDENT, MONERO at their old `/raw/<NAME>.md`
+  (public text links them; `RAW_AT` in build.mjs) (listed with sizes in llms.txt), `test-vectors.json`,
   `schema/*.json`, `spend/openapi.yaml` (its `../schema/` references resolve there). Also
   `/test-vectors.json`, and `/sha256/<hex>/SPEC.md` and `/sha256/<hex>/test-vectors.json`, which
   never change once published.

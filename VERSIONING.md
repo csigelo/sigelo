@@ -76,6 +76,6 @@ exit code is a major bump with one minor release of overlap that warns.
 - **Renovate and Dependabot are off.** Updates are manual: one dependency per commit, its
   changelog read, the full vector run in both implementations before and after. Security
   advisories are read by hand (GitHub advisory feed, `npm audit`, `govulncheck`).
-- Runtime dependencies stay as CLAUDE.md lists them: `@noble/ed25519` and `@noble/hashes` for
+- Runtime dependencies stay exactly these: `@noble/ed25519` and `@noble/hashes` for
   ts, `filippo.io/edwards25519` for Go. `monero-wallet-rpc` is pinned too (0.18.5.0, RPC
   1.30) by the canary in `spend/canary.ts`.
