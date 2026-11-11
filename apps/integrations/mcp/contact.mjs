@@ -15,7 +15,7 @@
 // other tools that log in, and all of them beside `sigelo-agent ui`, are refused (busy).
 // The operator's seat (DEVICES.md): on a standby FULL device, every tool that logs in refuses seat_elsewhere.
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -399,7 +399,11 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
       if (w === null) await seat(path, 'sigelo_reply');
       return queued(path, w, await carrier(path).reply(id, text(t, 'text'), { local: w !== null }));
     }),
-    sigelo_enrol: serial(async ({ code, wait }, path) => enrolCli(['init', '--enrol', text(code, 'code').replace(/\s+/g, ''), '--identity', path, '--wait', String(seconds(wait, 'wait', 30))], path, seconds(wait, 'wait', 30))),
+    sigelo_enrol: serial(async ({ code, wait }, path) => {
+      // the refusal `init --enrol` gives, before a child runs
+      if (existsSync(path)) throw new Error(`enrol: ${path} already holds an identity — refusing to overwrite it`);
+      return enrolCli(['init', '--enrol', text(code, 'code').replace(/\s+/g, ''), '--identity', path, '--wait', String(seconds(wait, 'wait', 30))], path, seconds(wait, 'wait', 30));
+    }),
     sigelo_enrol_finish: serial(async ({ wait }, path) => enrolCli(['enrol', '--finish', '--wait', String(seconds(wait, 'wait', 30))], path, seconds(wait, 'wait', 30))),
     sigelo_history: serial(({ since = 0 }, path) => carrier(path).history({ since })),
     sigelo_links: (_, path) => {

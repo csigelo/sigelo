@@ -22,7 +22,7 @@ import { randomBytes } from 'node:crypto';
 import { did, keygen, parseBytes, VERSION } from 'sigelo';
 import { keeperRoot, mnemonicFromRoot, newRootBytes, parseRoot, recoveryCommitment, vaultFromRoot } from 'sigelo/dist/keys.js';
 import { bundleOf, head, identityPath, load, save, type Store } from './sigelo-agent.ts';
-import { signer } from './sigelo-agent-keys.ts';
+import { main as keysMain, signer } from './sigelo-agent-keys.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import { absent, agentFileFor, agentsDirFor, contactLib, debug, duration, heldPath, lifeText, holderFor, humanPath, lockHolder, MISSING, operatorFile, putBack, safeJson, safeText, trustOf, unreadable, type Batch } from './sigelo-agent-contact.ts';
@@ -111,9 +111,12 @@ export async function libs(): Promise<Libs> {
     throw new Error(absent(e) ? `enrol ${MISSING}: ${why}` : why, { cause: e });
   }
 }
-export function carrierFor(lib: Libs['lib'], path: string): Carrier {
+export function carrierFor(lib: Libs['lib'], path: string, temp = false): Carrier {
+  // temp: the throwaway pairing identity, a file key whatever holds the real one: under SIGELO_KEY_AGENT
+  // it was key_agent_mismatch, and the enrolment never paired. It lives minutes and is dropped.
+  const env = temp ? { ...process.env, SIGELO_KEY_AGENT: undefined } : process.env;
   return new lib.Carrier({
-    identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: bundleOf(s) }; },
+    identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s, env).sign, bundle: bundleOf(s) }; },
     ...lib.pathsFor(path), ...lib.optionsFromEnv(), keep: true,
     onEvent: (e: { type?: string; ms?: number }) => {
       if (e.type === 'pow') note('proof of work for a new identity: 5–60 s');
@@ -485,11 +488,18 @@ export function dropTemp(temp: string): void {
 // The machine's place(): the worker's file written under its lock, then pairing as the worker.
 // The operator is filed as "operator", or as its own label when the enrolment carries one (operator_name).
 const placer = (l: Libs, path: string, wait: () => number) => async (x: { identity: Store; original: string; did: string; invite: string; operator_name?: string }) => {
-  withLock(path, () => {
-    if (!existsSync(path)) { save(path, x.identity); return; }
+  const made = withLock(path, () => {
+    if (!existsSync(path)) { save(path, x.identity); return true; }
     if (did(load(path).genesis) !== x.original) throw new l.kdf.MsgError('enrol_exists', `${path} holds another identity: moved it away? nothing replaced`);
+    return false;
   });
   note(`identity replaced: ${path} (0600) is now ${x.did}`);
+  // With a key agent the worker's key goes there, as init's does (SIGELO_KEY_PROVIDER=agent): a file key
+  // beside SIGELO_KEY_AGENT could not pair as the worker (key_agent_mismatch), and every later call failed.
+  if (made && (process.env['SIGELO_KEY_AGENT'] || process.env['SIGELO_KEY_PROVIDER'] === 'agent')) {
+    keysMain(['to-agent'], path, load(path));
+    note(`the worker's key is in the key agent; ${path} holds none`);
+  }
   const wc = carrierFor(l.lib, path);
   try { return await wc.accept(x.invite, { name: x.operator_name ?? 'operator', wait: Math.min(wait(), 60) }); } finally { await wc.stop(); }
 };
@@ -513,7 +523,7 @@ async function asMachine(l: Libs, path: string, temp: string, wait: number, said
 /** The machine's enrolment rounds as its temporary identity, until placed or `wait` s (also the page's device scan). */
 export async function runMachine(l: Libs, path: string, temp: string, wait: number): Promise<Out> {
   const end = Date.now() + wait * 1000, left = (): number => Math.max(0, Math.ceil((end - Date.now()) / 1000));
-  const c = carrierFor(l.lib, temp);
+  const c = carrierFor(l.lib, temp, true);
   try {
     return await l.enrol.complete({ carrier: c, file: l.enrol.enrolPath(path), temp, wait: left(), until: (o: Out) => o.placed.length > 0, place: placer(l, path, left) });
   } finally { await c.stop(); }
@@ -588,13 +598,13 @@ export async function initEnrol(path: string, code: string, rest: string[], o: {
     const temp = path.replace(/\.json$/, '') + `.enrol-${randomBytes(4).toString('hex')}.json`;
     // The short code is spent here (one fetch): from now on a refusal prints the long code.
     const relay = flag('--relay');
-    long = l.short.codeKind(code) === 'short' ? await carrierFor(l.lib, temp).unpark(code, ...(relay ? [{ relay }] : [])) : code.replace(/\s+/g, '');
+    long = l.short.codeKind(code) === 'short' ? await carrierFor(l.lib, temp, true).unpark(code, ...(relay ? [{ relay }] : [])) : code.replace(/\s+/g, '');
     l.lib.readCode(long, nowS());
     // Temporary: it only pairs. Its recovery commits to a random key nobody keeps; it lives minutes.
     const t = keygen({ recovery: 'sha256:' + randomBytes(32).toString('hex') });
     save(temp, { v: VERSION, secret: Buffer.from(t.secret).toString('hex'), genesis: t.genesis, rotations: [], attestations: [], issuers: [] });
     note(`a temporary identity (${t.did}) pairs with the operator like any contact; then it is replaced with theirs`);
-    const c = carrierFor(l.lib, temp);
+    const c = carrierFor(l.lib, temp, true);
     let j;
     try { j = await l.enrol.accept({ carrier: c, file: l.enrol.enrolPath(path), code: long, name: 'operator', wait: Math.min(wait, 30), temp }); } finally { await c.stop(); }
     note(`the code names ${j.did}: your operator's DID (sigelo-agent whoami there)`);

@@ -1522,11 +1522,11 @@ export async function devicePage(o: { op: string; agentsDir: string; carrier: un
     let long: string | undefined;
     try {
       mkdirSync(dirname(j.file), { recursive: true, mode: 0o700 });
-      long = await carrierFor(lib, temp).unpark(code, ...(relay ? [{ relay }] : []));
+      long = await carrierFor(lib, temp, true).unpark(code, ...(relay ? [{ relay }] : []));
       lib.readCode(long, nowS());
       const t = keygen({ recovery: 'sha256:' + randomBytes(32).toString('hex') });
       save(temp, { v: VERSION, secret: Buffer.from(t.secret).toString('hex'), genesis: t.genesis, rotations: [], attestations: [], issuers: [] } as never);
-      const tc = carrierFor(lib, temp);
+      const tc = carrierFor(lib, temp, true);
       let r;
       try { r = await enrol.accept({ carrier: tc, file: enrol.enrolPath(j.file), code: long, name: 'operator', wait: 30, temp }); } finally { await tc.stop(); }
       j.operator = r.did; j.words = r.contact?.fingerprint ?? null; j.state = 'words';

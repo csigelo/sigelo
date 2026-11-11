@@ -42,8 +42,8 @@
   },
   "scripts": {
     "test": "node test.mjs",
-    "prepack": "node ../release/prepack.mjs pre",
-    "postpack": "node ../release/prepack.mjs post",
+    "prepack": "node ../../release/prepack.mjs pre",
+    "postpack": "node ../../release/prepack.mjs post",
     "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publishing is a release step (release/RELEASE.md); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\""
   },
   "dependencies": {

@@ -675,7 +675,8 @@ ${code.slice(60)}
         const { newRoot } = await import(sigeloAt('sigelo/dist/keys.js'));
         const OPH = join(dir, 'operator-home'), CLI = join(here, '..', '..', 'agent', 'cli.ts');
         mkdirSync(OPH);
-        const opEnv = { ...process.env, ...env, HOME: OPH, XDG_CONFIG_HOME: join(OPH, '.config'), SIGELO_KEY_PROVIDER: 'file', SIGELO_IDENTITY: '', SIGELO_HUMAN: '' };
+        // The operator is another machine: its key in its own file, no key agent (key agent mode is the worker's).
+        const opEnv = { ...process.env, ...env, HOME: OPH, XDG_CONFIG_HOME: join(OPH, '.config'), SIGELO_KEY_PROVIDER: 'file', SIGELO_KEY_AGENT: '', SIGELO_IDENTITY: '', SIGELO_HUMAN: '' };
         const kf = spawnSync(process.execPath, [CLI, 'keeper', '--from-words'], { env: opEnv, input: `${newRoot()}\n`, encoding: 'utf8' });
         ok(kf.status === 0, 'task loop: the operator\'s keeper --from-words (CLI)', kf.stderr);
         let code = '';
@@ -696,6 +697,7 @@ ${code.slice(60)}
           'task loop: sigelo_enrol {code}: this machine is the operator\'s worker now (done, its DID, the notes)', r.text.slice(0, 1500));
         r = await wk.call('sigelo_whoami');
         ok(r.data?.did === placed?.result?.did, 'task loop: sigelo_whoami: the worker\'s DID', r.text);
+        if (keyAgent) ok(JSON.parse(readFileSync(join(dir, 'worker.local.json'), 'utf8')).provider === 'agent', 'task loop, key agent mode: the worker\'s key went to the agent, its file holds none');
         r = await wk.call('sigelo_enrol', { code });
         ok(r.isError && r.text.includes('already holds an identity'), 'task loop: sigelo_enrol again: refused, the identity exists', r.text);
         r = await wk.call('sigelo_enrol_finish', { wait: 5 });

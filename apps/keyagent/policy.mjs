@@ -16,6 +16,9 @@ export const RULES = [
   ['sigelo-msg/0', 'message', 'from', null],
   ['sigelo-msg/0', 'prekeys', 'did', null],
   ['sigelo-carrier/0', 'contact-notice', 'did', null],
+  ['sigelo-group/1', 'roster', 'from', null],          // groups (GROUPS.md): a roster, a message, a leave
+  ['sigelo-group/1', 'msg', 'from', null],
+  ['sigelo-group/1', 'leave', 'from', null],
   ['sigelo/0', 'binding', 'id', '--allow-payments'],   // the agent cannot see which subaddresses the wallet issued
   ['sigelo/0', 'invoice', 'did', '--allow-payments'],
   ['sigelo/0', 'attestation', 'iss', '--allow-attest'], // only for a ctx given with --allow-attest <ctx>

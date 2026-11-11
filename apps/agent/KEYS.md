@@ -23,7 +23,7 @@ or shows a key.
 | `keychain` | nothing: its key is in the OS store | the key, while the session is unlocked | the key |
 | agent, your user | nothing | signatures on known bodies, no rotation; the agent's store is still readable | the key |
 
-The agent signs only sigelo challenges, relay logins, invite proofs, messages, prekeys and notices
+The agent signs challenges, relay logins, invite proofs, messages, prekeys, notices and group bodies
 naming its DID; bindings and invoices with `--allow-payments`; attestations with `--allow-attest
 <ctx>`. Never a rotation through `sign` (`policy_rotation`): an injected model cannot move the
 identity to its own key.

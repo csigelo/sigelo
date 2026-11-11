@@ -193,7 +193,7 @@ const file = (name: string, s: object): string => { const p = join(HOME, name); 
   const warn = cli(p, {}, 'sign-challenge', JSON.stringify({ ...body, did: did(after.rotations[0]!.next_genesis) }));
   ok('a plain file: the plain-hex warning, once, naming the file and seal', warn.status === 0 && warn.stderr.split(`identity key in plain hex at ${p}; set SIGELO_KEY_PROVIDER=keychain|agent or seal it: sigelo-agent seal`).length === 2, warn.stderr);
   const se = cli(p, {}, 'seal', '--passphrase-file', PF, '--keep-plain'), resealed = load(p);
-  ok('seal --keep-plain: sealed in place, <file>.bak holds the plain key (0600)', se.status === 0 && keys.isSealed(resealed) && /^[0-9a-f]{64}$/.test((load(`${p}.bak`).secret as string)) && (statSync(`${p}.bak`).mode & 0o777) === 0o600, se.stderr);
+  ok('seal --keep-plain: sealed in place, <file>.bak holds the plain key (0600)', se.status === 0 && keys.isSealed(resealed) && /^[0-9a-f]{64}$/.test((load(`${p}.bak`).secret as string)) && (process.platform === 'win32' || (statSync(`${p}.bak`).mode & 0o777) === 0o600), se.stderr);
   const again = cli(p, {}, 'seal', '--passphrase-file', PF);
   ok('seal a sealed file: refused', again.status === 1 && again.stderr.includes('sealed already'), again.stderr);
   const pass2 = join(HOME, 'short.txt'); writeFileSync(pass2, 'short\n');

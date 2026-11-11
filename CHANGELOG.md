@@ -5,6 +5,7 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **init --enrol with a key agent:** works under `SIGELO_KEY_AGENT` (was `key_agent_mismatch`); the worker's key goes into the agent, its file holds none.
 - **apps/:** the installable packages moved there (agent, integrations, plugins, contact, transfer, keeper, kit, keyagent); `accept/` holds 1f916 and examples. Package names unchanged.
 - **tools/:** the test harnesses moved there: `sim`, `docs-test`, `demo`, `gate`; word budgets are `node tools/docs-test/check-budgets.mjs`.
 - **watch --hook-timeout:** seconds, 10m or 1h (`SIGELO_HOOK_TIMEOUT` too; default 120 s, 0 no limit). A stopped or failed hook's message stays unread and is offered again each round.
