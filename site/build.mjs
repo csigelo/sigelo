@@ -134,10 +134,13 @@ const NAV = [['adopt', 'Adopt'], ['faq', 'FAQ'], ['accept', 'Accept'], ['spec', 
 // RAW_AT: a document that moved keeps its published URL (public text links /raw/WHY.md):
 // repository path → path under /raw/.
 const SCHEMAS = readdirSync(join(ROOT, 'schema')).filter((f) => f.endsWith('.json')).sort().map((f) => `schema/${f}`);
-const OPTIONAL = ['docs/QUICKSTART.md', 'docs/WHY.md', 'THREAT-MODEL.md', 'docs/INCIDENT.md', 'VERSIONING.md', 'docs/MONERO.md', 'kit/README.md', 'spend/README.md'];
-export const RAW = ['SPEC.md', 'SECURITY.md', 'CHANGELOG.md', ...OPTIONAL, 'test-vectors.json', ...SCHEMAS, 'spend/openapi.yaml'];
-export const RAW_AT = { 'docs/QUICKSTART.md': 'QUICKSTART.md', 'docs/WHY.md': 'WHY.md', 'docs/INCIDENT.md': 'INCIDENT.md', 'docs/MONERO.md': 'MONERO.md' };
+const OPTIONAL = ['docs/QUICKSTART.md', 'docs/WHY.md', 'THREAT-MODEL.md', 'docs/INCIDENT.md', 'VERSIONING.md', 'docs/MONERO.md', 'apps/kit/README.md', 'apps/keeper/README.md'];
+export const RAW = ['SPEC.md', 'SECURITY.md', 'CHANGELOG.md', ...OPTIONAL, 'test-vectors.json', ...SCHEMAS, 'apps/keeper/openapi.yaml'];
+export const RAW_AT = { 'apps/kit/README.md': 'kit/README.md', 'apps/keeper/README.md': 'spend/README.md', 'apps/keeper/openapi.yaml': 'spend/openapi.yaml', 'docs/QUICKSTART.md': 'QUICKSTART.md', 'docs/WHY.md': 'WHY.md', 'docs/INCIDENT.md': 'INCIDENT.md', 'docs/MONERO.md': 'MONERO.md' };
 const rawPath = (p) => RAW_AT[p] ?? p;
+// a moved document (RAW_AT) keeps its old URL, so its `](../x)` links and `$ref: '../x'` are lifted
+// back one level: they resolve from /raw/ as before
+const rawBytes = (p) => RAW_AT[p] ? Buffer.from(readBytes(p).toString('utf8').replace(/\]\(\.\.\//g, '](').replace(/\$ref: '\.\.\//g, () => "$ref: '")) : readBytes(p);
 const repoToPage = Object.fromEntries(PAGES.filter((p) => p.repo).map((p) => [p.repo, p.slug]));
 
 const STATUS_MD = 'Status: experimental, wire `sigelo/0` not frozen yet; keeper stagenet-only, unaudited.';
@@ -316,7 +319,7 @@ function linker(srcPath, ext) {
     p = p.replace(/\/$/, '');
     if (repoToPage[p]) return `/${repoToPage[p]}.${ext}${hash}`;
     if (p === 'test-vectors.json') return `/test-vectors.json${hash}`;
-    if (p === 'examples/world.mjs') return '/examples/world.mjs';
+    if (p === 'accept/examples/world.mjs') return '/examples/world.mjs';
     if (RAW.includes(p)) return `/raw/${rawPath(p)}${hash}`;
     return `${REPO}/${isDir || !/\.[\w]+$/.test(p) ? 'tree' : 'blob'}/${BRANCH}/${p}${hash}`;
   };
@@ -351,7 +354,7 @@ const VALUES = {
   // The links to the relay (/, /adopt, /contact), only once it serves (RELAY_LIVE). A line that
   // holds only an empty value is dropped (fill).
   relay_layer: RELAY_LIVE ? ` With it, agents message each other and shops, no account needed. [sigelo.ai](${RELAY_ORIGIN}/) is the post office for those messages; only the two agents can read them. Anyone can [run one](https://github.com/csigelo/sigelo-relay).` : '',
-  relay_try: RELAY_LIVE ? `[Try it with two agents →](${RELAY_ORIGIN}/connect.html) It needs an agent that runs commands, like Claude Code, not the ChatGPT app. Without one, [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/adapters/moadim/APPS.md) or your developer.` : '',
+  relay_try: RELAY_LIVE ? `[Try it with two agents →](${RELAY_ORIGIN}/connect.html) It needs an agent that runs commands, like Claude Code, not the ChatGPT app. Without one, [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/apps/agent/APPS.md) or your developer.` : '',
   relay_link: RELAY_LIVE ? ` · [Message other agents: sigelo relay](${RELAY_ORIGIN}/)` : '',
   relay_contact: RELAY_LIVE ? `- Relay: [sigelo.ai](${RELAY_ORIGIN}/)` : '',
 };
@@ -524,15 +527,14 @@ export function build({ out = DIST, disclosed = DISCLOSED, darkDir = DARK_DIR } 
   rmSync(darkOut(out), { recursive: true, force: true });
   const put = (p, data) => { const f = join(out, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, data); };
 
-  // a moved document (RAW_AT) keeps its old URL, so its `](../x)` links are lifted back to `](x)`: they resolve from /raw/ as before
-  for (const r of RAW) put(`raw/${rawPath(r)}`, RAW_AT[r] ? Buffer.from(readBytes(r).toString('utf8').replace(/\]\(\.\.\//g, '](')) : readBytes(r));
+  for (const r of RAW) put(`raw/${rawPath(r)}`, rawBytes(r));
   put('test-vectors.json', vectorsBytes);
   put(`sha256/${VALUES.vectors_sha256}/test-vectors.json`, vectorsBytes);
   put(`sha256/${VALUES.spec_sha256}/SPEC.md`, specBytes);
   // The mock world, runnable next to an installed `sigelo` package (its one import rewritten).
-  const world = read('examples/world.mjs');
-  if (!world.includes("from '../ts/dist/sigelo.js'")) throw new Error('examples/world.mjs import changed; update build.mjs');
-  put('examples/world.mjs', world.replace("from '../ts/dist/sigelo.js'", "from 'sigelo'").replace('// SPDX-License-Identifier: MIT\n',
+  const world = read('accept/examples/world.mjs');
+  if (!world.includes("from '../../ts/dist/sigelo.js'")) throw new Error('accept/examples/world.mjs import changed; update build.mjs');
+  put('examples/world.mjs', world.replace("from '../../ts/dist/sigelo.js'", "from 'sigelo'").replace('// SPDX-License-Identifier: MIT\n',
     `// SPDX-License-Identifier: MIT\n// Import changed to the npm package 'sigelo': run it where \`sigelo\` is installed (\`node world.mjs challenge <genesis.json>\`).\n`));
   // The world (world/README.md): its issuer genesis and rotation chain are static files, so they
   // stay published when the service is down (attestations already issued verify offline anyway).
@@ -619,7 +621,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
 `);
 
   // index.json: the machine index. Data only.
-  const file = (p, url) => ({ url: `${ORIGIN}${url}`, sha256: sha256(readBytes(p)), bytes: readBytes(p).length });
+  const file = (p, url) => ({ url: `${ORIGIN}${url}`, sha256: sha256(rawBytes(p)), bytes: rawBytes(p).length });
   const impl = (dir) => { const j = pkg(`${dir}/package.json`); return { name: j.name, version: j.version, path: `${dir}/`, language: 'TypeScript',
     registry: 'npm', published: j.version === VERSION, bin: j.bin ? Object.keys(j.bin) : [] }; };
   const worldDid = worldDidEarly;
@@ -634,11 +636,11 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
       counts: { positive: Object.keys(vectors.vectors).length, negative: Object.keys(vectors.negative).filter((k) => k !== 'parity').length,
         parity: Object.keys(vectors.negative.parity.cases).length, seeds: Object.keys(vectors.seeds).length } },
     schemas: SCHEMAS.map((s) => file(s, `/raw/${s}`)),
-    openapi: file('spend/openapi.yaml', '/raw/spend/openapi.yaml'),
+    openapi: file('apps/keeper/openapi.yaml', '/raw/spend/openapi.yaml'),
     implementations: [
       impl('ts'),
       { name: 'sigelo-verify', version: VERSION, path: 'go/', language: 'Go', published: true, bin: ['sigelo-verify'] },
-      impl('adapters/moadim'), impl('spend'), impl('integrations/mcp'), impl('kit'),
+      impl('apps/agent'), impl('apps/keeper'), impl('apps/integrations/mcp'), impl('apps/kit'),
     ],
     release: { version: VERSION, published: true, artefacts: [
       ...packagesAt(VERSION).map((n) => `${n}-${VERSION}.tgz`),
@@ -681,7 +683,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     ...(worldDid && { world: { ctx: 'sigelo.io', issuer: worldDid, challenge: `${ORIGIN}/world/challenge?did={did}`, attest: `${ORIGIN}/world/attest`,
       conformance: `${ORIGIN}/world/conformance`, mcp: `${ORIGIN}/mcp`, verify: `${ORIGIN}/world/verify`, stats: `${ORIGIN}/world/stats`, genesis: `${ORIGIN}/world/genesis.json`, rotations: `${ORIGIN}/world/rotations.json` } }),
     contact: { email: CONTACT_EMAIL, simplex: SIMPLEX_SET ? SIMPLEX : null, security: SECURITY_EMAIL, security_policy: `${ORIGIN}/security.html` },
-    claude_plugin: { marketplace: 'csigelo/sigelo', install: 'sigelo@csigelo', path: 'plugins/sigelo/', wallet: false },
+    claude_plugin: { marketplace: 'csigelo/sigelo', install: 'sigelo@csigelo', path: 'apps/plugins/sigelo/', wallet: false },
     privacy: `${ORIGIN}/privacy.html`, terms: `${ORIGIN}/privacy.html#terms`,
     release_signing: { since: 'v0.1.1', release_json: 'release.json', ctx: 'sigelo.io/release',
       identity: genesisDid(JSON.parse(read('release/release-identity.json'))), identity_genesis: `${ORIGIN}/.well-known/sigelo-release-identity.json`,

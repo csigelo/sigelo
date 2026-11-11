@@ -23,17 +23,17 @@ const REPO = join(HERE, '..', '..');
 export const PAGE = 'https://app.invalid/';
 // Where each vendored path comes from in the repository.
 const SOURCES = [
-  ['vendor/contact/', 'contact/'],
+  ['vendor/contact/', 'apps/contact/'],
   ['vendor/sigelo/', 'ts/dist/'],
-  // sigelo's own (ts/package.json); contact/ does not depend on it, so a clean install has it only in ts/.
+  // sigelo's own (ts/package.json); apps/contact/ does not depend on it, so a clean install has it only in ts/.
   ['vendor/@noble/ed25519/', 'ts/node_modules/@noble/ed25519/'],
-  ['vendor/@noble/', 'contact/node_modules/@noble/'],
-  ['vendor/mqtt.esm.js', 'contact/node_modules/mqtt/dist/mqtt.esm.js'],
-  ['vendor/shim-zlib.mjs', 'adapters/moadim/shim-zlib.mjs'],
-  ['vendor/ui.js', 'adapters/moadim/ui.js'],
-  ['vendor/ui.css', 'adapters/moadim/ui.css'],
-  ['vendor/icon.svg', 'adapters/moadim/icon.svg'],
-  ['vendor/remote-client.mjs', 'adapters/moadim/remote-client.mjs'],
+  ['vendor/@noble/', 'apps/contact/node_modules/@noble/'],
+  ['vendor/mqtt.esm.js', 'apps/contact/node_modules/mqtt/dist/mqtt.esm.js'],
+  ['vendor/shim-zlib.mjs', 'apps/agent/shim-zlib.mjs'],
+  ['vendor/ui.js', 'apps/agent/ui.js'],
+  ['vendor/ui.css', 'apps/agent/ui.css'],
+  ['vendor/icon.svg', 'apps/agent/icon.svg'],
+  ['vendor/remote-client.mjs', 'apps/agent/remote-client.mjs'],
 ];
 // Imports a module makes only when run in Node, never in the page: remote-client.mjs finds its own
 // dependencies in Node (nodeDeps) and is given them in the page (shell.mjs). Not followed.

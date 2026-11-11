@@ -43,8 +43,8 @@ jobs:
           grep -q '^ALL PASS$' "$RUNNER_TEMP/ts-out"
         working-directory: ts
       - run: >-
-          (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS sigelo-agent:' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
-        working-directory: adapters/moadim
+          (cd ../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm test | tee "$RUNNER_TEMP/moadim-out" && grep -q '^ALL PASS sigelo-agent:' "$RUNNER_TEMP/moadim-out" && grep -q '^ok   go: same current DID$' "$RUNNER_TEMP/moadim-out"
+        working-directory: apps/agent
       # OS-neutral: a random loopback port, `go run` for the judge, `sh` (Git Bash on Windows) for the allowlist
       - run: |
           node world/test.mjs 2>&1 | tee "$RUNNER_TEMP/world-out" || {
@@ -57,9 +57,9 @@ jobs:
           npm test 2>&1 | tee "$RUNNER_TEMP/spend-out" || {
             { grep '^FAIL ' "$RUNNER_TEMP/spend-out" | head -n 7; grep -E -m 3 'Error|^node:' "$RUNNER_TEMP/spend-out"; tail -n 3 "$RUNNER_TEMP/spend-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=spend npm test::/'; exit 1; }
           grep -q '^ALL PASS$' "$RUNNER_TEMP/spend-out"
-        working-directory: spend
+        working-directory: apps/keeper
       - run: npm test
-        working-directory: integrations/mcp
+        working-directory: apps/integrations/mcp
       - run: node schema/check.mjs | tee "$RUNNER_TEMP/schema-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/schema-out"
       - run: go vet ./... && go test ./... -v | tee "$RUNNER_TEMP/go-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/go-out"
         working-directory: go
@@ -80,13 +80,13 @@ jobs:
         with: { node-version: '24' }
       - run: npm ci --ignore-scripts && npx tsc
         working-directory: ts
-      - run: (cd ../../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts
-        working-directory: adapters/moadim
-      # the MCP suite's wallet tools load spend/dist
+      - run: (cd ../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts
+        working-directory: apps/agent
+      # the MCP suite's wallet tools load apps/keeper/dist
       - run: npm ci --ignore-scripts && npx tsc
-        working-directory: spend
+        working-directory: apps/keeper
       - run: |
           node test.mjs 2>&1 | tee "$RUNNER_TEMP/keyagent-out" || {
             { grep '^FAIL ' "$RUNNER_TEMP/keyagent-out" | head -n 7; grep -E -m 3 'Error|^node:' "$RUNNER_TEMP/keyagent-out"; tail -n 3 "$RUNNER_TEMP/keyagent-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=keyagent node test.mjs::/'; exit 1; }
           grep -q '^ALL PASS keyagent' "$RUNNER_TEMP/keyagent-out"
-        working-directory: keyagent
+        working-directory: apps/keyagent

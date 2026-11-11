@@ -16,7 +16,8 @@
 #      `npx -p sigelo-spend sigelo-wallet balance`, the keeper installer (`sigelo-spend init`
 #      --no-systemd, then `doctor` and `licence show`), the MCP server over stdio (with the
 #      contact tools, and without them once sigelo-contact is gone),
-#      `sigelo-offline`, and `import … from 'sigelo'`.
+#      `sigelo-offline`, `import … from 'sigelo'`, and sigelo-key-agent: started on a temporary
+#      socket, an identity made in it (SIGELO_KEY_PROVIDER=agent) signs, then it is stopped.
 #   3. Go: `go build ./cmd/sigelo-verify` from the source archive, `--conformance` with it and
 #      with the prebuilt binary for this host, and `sha256sum -c SHA256SUMS`.
 # Every check prints `ok …`; the first failure prints `FAIL …` and exits 1. The last line is
@@ -47,7 +48,7 @@ case $(uname -m) in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) 
 (cd "$dist" && if command -v sha256sum >/dev/null 2>&1; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi) > "$work/sums.log" 2>&1 \
 	|| { cat "$work/sums.log" >&2; fail "sha256sum -c SHA256SUMS"; }
 ok "SHA256SUMS: $(wc -l < "$dist/SHA256SUMS" | tr -d ' ') files verified"
-for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
+for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do
 	m=$(tar -xzOf "$dist/$t-$v.tgz" package/package.json)
 	printf '%s' "$m" | grep -q '"file:' && fail "$t-$v.tgz: file: dependency in the packed manifest"
 	printf '%s' "$m" | grep -q '"private": *true' && fail "$t-$v.tgz: private"
@@ -72,16 +73,17 @@ unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME XDG_RUNTIME_DI
 cd "$c"
 printf '{ "name": "consumer", "private": true, "type": "module" }\n' > package.json
 retry npm install --no-audit --no-fund --silent \
-	"$dist/sigelo-$v.tgz" "$dist/sigelo-contact-$v.tgz" "$dist/sigelo-spend-$v.tgz" "$dist/sigelo-agent-$v.tgz" "$dist/sigelo-mcp-$v.tgz" "$dist/sigelo-recovery-kit-$v.tgz" \
-	> "$work/install.log" 2>&1 || { cat "$work/install.log" >&2; fail "npm install of the six tarballs"; }
-for p in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
+	"$dist/sigelo-$v.tgz" "$dist/sigelo-contact-$v.tgz" "$dist/sigelo-spend-$v.tgz" "$dist/sigelo-agent-$v.tgz" "$dist/sigelo-mcp-$v.tgz" "$dist/sigelo-recovery-kit-$v.tgz" "$dist/sigelo-key-agent-$v.tgz" \
+	> "$work/install.log" 2>&1 || { cat "$work/install.log" >&2; fail "npm install of the seven tarballs"; }
+for p in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do
 	[ -L "node_modules/$p" ] && fail "node_modules/$p is a link, not an install"
 	[ -f "node_modules/$p/package.json" ] || fail "node_modules/$p missing"
 done
 # one sigelo and one sigelo-contact, the tarballs', shared by their dependents (no nested copy from a registry)
 [ -z "$(find node_modules -mindepth 3 -path '*/node_modules/sigelo/package.json')" ] || fail "a nested second copy of sigelo"
 [ -z "$(find node_modules -mindepth 3 -path '*/node_modules/sigelo-contact/package.json')" ] || fail "a nested second copy of sigelo-contact"
-ok "npm install of the six tarballs in $c (one shared sigelo $v, one sigelo-contact)"
+[ -z "$(find node_modules -mindepth 3 -path '*/node_modules/sigelo-agent/package.json')" ] || fail "a nested second copy of sigelo-agent"
+ok "npm install of the seven tarballs in $c (one shared sigelo $v, one sigelo-contact, one sigelo-agent)"
 
 # 2a. sigelo-agent
 out=$(npx sigelo-agent init 2>&1) && fail "init without a recovery choice succeeded"
@@ -215,6 +217,20 @@ ok "import { verify } from 'sigelo': the agent's bundle verifies to $d"
 (cd "$c" && sh node_modules/sigelo-recovery-kit/test/run.sh) > "$work/kit.log" 2>&1 || { cat "$work/kit.log" >&2; fail "sigelo-recovery-kit test/run.sh from the installed copy"; }
 tail -1 "$work/kit.log" | grep -q 'ALL PASS' || { cat "$work/kit.log" >&2; fail "sigelo-recovery-kit test/run.sh: no ALL PASS"; }
 ok "sigelo-recovery-kit: test/run.sh from the installed copy → $(grep -c '^ok' "$work/kit.log") ok, $(grep -c '^SKIP' "$work/kit.log") skipped"
+
+# 2f. sigelo-key-agent from the install: it loads sigelo and sigelo-agent by package name. Started on a
+#     socket in a 0700 directory (--store-plain: no keychain here), an identity made in it signs, then stopped.
+ka=$work/ka; mkdir -m 700 "$ka"
+node_modules/.bin/sigelo-key-agent install-unit --print > "$ka/unit" 2>&1 && grep -q 'agent.mjs' "$ka/unit" || fail "sigelo-key-agent install-unit --print: $(cat "$ka/unit")"
+node_modules/.bin/sigelo-key-agent start --socket "$ka/agent.sock" --store "$ka/store" --store-plain 2> "$ka/log" &
+kapid=$!
+trap 'kill "$kapid" 2>/dev/null || true; chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
+i=0; until [ -S "$ka/agent.sock" ]; do i=$((i + 1)); [ $i -le 40 ] || { cat "$ka/log" >&2; fail "sigelo-key-agent start: no socket"; }; sleep 0.25; done
+out=$(SIGELO_KEY_AGENT=$ka/agent.sock SIGELO_KEY_PROVIDER=agent SIGELO_IDENTITY=$ka/id.json npx sigelo-agent init --no-recovery 2>/dev/null) || fail "sigelo-agent init into the key agent: $out"
+out=$(SIGELO_KEY_AGENT=$ka/agent.sock SIGELO_IDENTITY=$ka/id.json npx sigelo-agent keys status 2>&1) || fail "keys status through the key agent: $out"
+printf '%s' "$out" | grep -q '"signs": true' && grep -q '"provider": "agent"' "$ka/id.json" && ! grep -q '"secret": "[0-9a-f]' "$ka/id.json" || fail "keys status through the key agent: $out"
+kill "$kapid"; wait "$kapid" 2>/dev/null || true
+ok "sigelo-key-agent from the install: install-unit --print, start, init (provider agent, no key in the file), keys status signs, stopped"
 
 # 3. Go
 mkdir -p "$work/go"

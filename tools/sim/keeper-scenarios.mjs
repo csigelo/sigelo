@@ -2,14 +2,14 @@
 // tools/sim/keeper-scenarios.mjs — delegates of delegates, and policy.json edited under a running
 // keeper (tools/sim/README.md). A scripted companion to keeper-swarm.mjs: one real `sigelo-spend serve`
 // against tools/sim/mock-wallet.mjs (its own books, loopback, never the soak's wallet or ports), in a
-// fresh mkdtemp directory. Every step states the answer spend/README.md or MONERO.md promises;
+// fresh mkdtemp directory. Every step states the answer apps/keeper/README.md or MONERO.md promises;
 // any other answer is a finding and the exit code is 1.
 //
 //   node tools/sim/keeper-scenarios.mjs [--seed S] [--port P] [--keep]
-//   node tools/sim/keeper-scenarios.mjs --mutants        (plants 7 bugs in copies of spend/dist; each must be caught)
-//   env: SIM_SEED, SIM_PORT, SIM_SPEND_DIST (another build of spend/dist to run), SIM_OUT
+//   node tools/sim/keeper-scenarios.mjs --mutants        (plants 7 bugs in copies of apps/keeper/dist; each must be caught)
+//   env: SIM_SEED, SIM_PORT, SIM_SPEND_DIST (another build of apps/keeper/dist to run), SIM_OUT
 //
-// D — delegation chains (MONERO.md §4.3, spend/README "Delegation"): root → d1 → d2 → d3 → d4,
+// D — delegation chains (MONERO.md §4.3, apps/keeper/README "Delegation"): root → d1 → d2 → d3 → d4,
 //     each within its delegator (depth 4); a fifth level, a delegate above its delegator's caps,
 //     rate or allowlist, a count over the subtree's reservation, names reused (an ancestor's, a
 //     root's, a revoked one's: the only way a cycle could be written), revokes by non-ancestors;
@@ -17,7 +17,7 @@
 //     the delegator above it keeps paying and gets its reservation back.
 // P — policy.json edited while the keeper runs: caps tightened, a root removed, an approver
 //     added, a root's token rotated with `sigelo-spend token new`, a root added, then a malformed
-//     edit. The documented contract (spend/README "What a running keeper re-reads"; "The nesting
+//     edit. The documented contract (apps/keeper/README "What a running keeper re-reads"; "The nesting
 //     rule": "tightens a root in policy.json AND RESTARTS"; MONERO.md §6; cli.ts: SIGHUP, like
 //     SIGINT/SIGTERM, exits 0 and removes spend.lock) is that a running keeper re-reads the token
 //     of each root it already serves on every request, and everything else at start only.
@@ -29,7 +29,7 @@
 //     restart exactly once, and a root re-added on another account refuses the start.
 //
 // L — no licence.json: /delegate, /fund, /approve and a pay above approval_above refuse 403
-//     licence_required (spend/licence.ts) while a pay under the caps is paid; then a test vendor's
+//     licence_required (apps/keeper/licence.ts) while a pay under the caps is paid; then a test vendor's
 //     licence is installed under the running keeper and every later step runs as pro.
 //
 // Where a document says something else than the keeper does, the step is recorded under
@@ -53,10 +53,10 @@ const argv = process.argv.slice(2);
 const opt = (n, env, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 && argv[i + 1] !== undefined ? argv[i + 1] : process.env[env] ?? d; };
 const SEED = String(opt('seed', 'SIM_SEED', 'sigelo-keeper-scenarios'));
 const PORT = Number(opt('port', 'SIM_PORT', 39120));
-const SPEND = process.env.SIM_SPEND_DIST ?? join(ROOT, 'spend', 'dist');
+const SPEND = process.env.SIM_SPEND_DIST ?? join(ROOT, 'apps', 'keeper', 'dist');
 if (!(PORT >= 39000)) throw new Error('--port must be ≥ 39000 (38083 and 38200 belong to the live soak)');
 
-// ---------------------------------------------------------------- --mutants: plant bugs in copies of spend/dist
+// ---------------------------------------------------------------- --mutants: plant bugs in copies of apps/keeper/dist
 const MUTANTS = [
   ['clamp-skipped', 'a delegate is not clamped to its ancestors at spend time', 'tree.js', 'per_tx_max: min(d.caps.per_tx_max, p.per_tx_max)', 'per_tx_max: d.caps.per_tx_max'],
   ['revoke-not-cascading', "revoking a delegate leaves its subtree live", 'tree.js', 'if (c.some((n) => t.revoked.has(n)))', 'if (t.revoked.has(name))'],
@@ -79,9 +79,9 @@ if (argv.includes('--mutants')) {
       const [name, what, file, from, to] = MUTANTS[k];
       const dir = join(base, name);
       mkdirSync(dir, { recursive: true });
-      cpSync(join(ROOT, 'spend', 'dist'), join(dir, 'dist'), { recursive: true });
-      symlinkSync(join(ROOT, 'spend', 'node_modules'), join(dir, 'node_modules'));
-      symlinkSync(join(ROOT, 'spend', 'package.json'), join(dir, 'package.json'));
+      cpSync(join(ROOT, 'apps', 'keeper', 'dist'), join(dir, 'dist'), { recursive: true });
+      symlinkSync(join(ROOT, 'apps', 'keeper', 'node_modules'), join(dir, 'node_modules'));
+      symlinkSync(join(ROOT, 'apps', 'keeper', 'package.json'), join(dir, 'package.json'));
       const p = join(dir, 'dist', file);
       const src = readFileSync(p, 'utf8');
       if (!src.includes(from)) { results.push({ name, what, status: 'NOT APPLIED (pattern missing — update tools/sim/keeper-scenarios.mjs)' }); continue; }
@@ -294,11 +294,11 @@ const validEdited = readFileSync(policyPath, 'utf-8');
 step('P3', 'R1 pays 5 XMR after tightening, before a restart (old caps)', ['200:'], await pay(T('R1'), 5n * XMR, 'r1-edited-unrestarted'));
 step('P4', 'removed R2 pays before a restart', ['200:'], await pay(T('R2'), XMR, 'r2-removed-unrestarted'));
 const oldR3 = await pay(T('R3'), XMR, 'r3-old-token-unrestarted');
-// Root tokens are re-read on every request (spend/README "What a running keeper re-reads"): the
+// Root tokens are re-read on every request (apps/keeper/README "What a running keeper re-reads"): the
 // rotated token is dead and the new one pays at once. Nothing else in the file is live.
 step('P5', 'R3\'s OLD token after token new, before a restart', ['401:token'], oldR3);
 if (oldR3.status === 200) {
-  divergence('P5', `spend/cli.ts \`token new\` prints: "${tn.stderr.replace(/^.*?(agents\.)/, '… $1')}"`,
+  divergence('P5', `apps/keeper/cli.ts \`token new\` prints: "${tn.stderr.replace(/^.*?(agents\.)/, '… $1')}"`,
     'the old token still spends after token new under a running keeper',
     'sigelo-spend serve policy.json & ; sigelo-spend token new policy.json R3 ; SIGELO_SPEND_TOKEN=<old> sigelo-spend pay … → 200 (tools/sim/keeper-scenarios.mjs steps P5, P6)');
 }

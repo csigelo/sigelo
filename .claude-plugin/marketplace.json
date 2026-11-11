@@ -5,12 +5,12 @@
   "plugins": [
     {
       "name": "sigelo",
-      "source": "./plugins/sigelo",
+      "source": "./apps/plugins/sigelo",
       "description": "Identity tools (sigelo_* MCP server) and the skill that says when to use them"
     },
     {
       "name": "sigelo-gate",
-      "source": "./plugins/sigelo-gate",
+      "source": "./apps/plugins/sigelo-gate",
       "description": "PROTOTYPE provenance gate (hooks); off until you enable it and write its config",
       "defaultEnabled": false
     }

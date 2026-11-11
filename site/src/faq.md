@@ -44,7 +44,7 @@ Only its operator: paying, enrolling, revoking and sending files need the operat
 
 ## Does it work with my stack?
 
-Anything that speaks MCP, with one config line; without MCP, shell out to `sigelo-agent`. Web Bot Auth (signed HTTP requests) and draft profiles for other agent protocols: [integrations/](https://github.com/csigelo/sigelo/tree/main/integrations).
+Anything that speaks MCP, with one config line; without MCP, shell out to `sigelo-agent`. Web Bot Auth (signed HTTP requests) and draft profiles for other agent protocols: [apps/integrations/](https://github.com/csigelo/sigelo/tree/main/integrations).
 
 [Works with: 30 frameworks](/frameworks.html)
 

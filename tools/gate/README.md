@@ -17,11 +17,11 @@ doas sh tools/gate/claude-code/test-hardened.sh "$USER"       # 13 checks of the
 ## Keys (in a terminal outside any agent session; better on another user or device)
 
 ```sh
-export SIGELO_HOME=$PWD; (cd ts && npm ci && npx tsc) && (cd adapters/moadim && npm ci)
+export SIGELO_HOME=$PWD; (cd ts && npm ci && npx tsc) && (cd apps/agent && npm ci)
 OP=~/operator.local.json           # the operator key: never readable by the agent's user
-SIGELO_IDENTITY=$OP node adapters/moadim/cli.ts init --no-recovery && chmod 600 $OP
+SIGELO_IDENTITY=$OP node apps/agent/cli.ts init --no-recovery && chmod 600 $OP
 G=$(SIGELO_OPERATOR_IDENTITY=$OP node tools/gate/claude-code/sign.mjs --genesis)
-A=$(node adapters/moadim/cli.ts whoami | node -pe 'JSON.parse(require("fs").readFileSync(0)).did')  # the agent
+A=$(node apps/agent/cli.ts whoami | node -pe 'JSON.parse(require("fs").readFileSync(0)).did')  # the agent
 echo "{\"agent\":\"$A\",\"operators\":[$G]}" > gate.json
 ```
 

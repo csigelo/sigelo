@@ -4,7 +4,7 @@
 #   store = Contacts('contacts.json')
 #   c = store.issue(did, ctx, now, 'alice')   -> send c; name None refreshes a known contact
 #   pair(card, {'body': ..., 'sig': ...}, store, now) -> {did, current_did, current_key, attestations, rejected}, or raises
-# Contract and fixtures: adapters/hermes/pairing/. Reuses sigelo_accept.py (cryptography + sigelo-verify).
+# Contract and fixtures: apps/integrations/hermes/pairing/. Reuses sigelo_accept.py (cryptography + sigelo-verify).
 import json, os, secrets
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sigelo_accept import B58, did_of, jcs, unmb, verify_bundle

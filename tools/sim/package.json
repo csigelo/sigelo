@@ -5,7 +5,7 @@
   "engines": { "node": ">=22" },
   "description": "Seeded swarm simulation of sigelo agents, worlds and a keeper (see README.md)",
   "scripts": {
-    "build": "cd ../../ts && npm ci --ignore-scripts && npx tsc && cd ../spend && npm ci --ignore-scripts && npx tsc",
+    "build": "cd ../../ts && npm ci --ignore-scripts && npx tsc && cd ../apps/keeper && npm ci --ignore-scripts && npx tsc",
     "sim": "node swarm.mjs && node worlds.mjs && node keeper-swarm.mjs && node keeper-scenarios.mjs",
     "swarm": "node swarm.mjs",
     "worlds": "node worlds.mjs",

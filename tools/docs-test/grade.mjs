@@ -114,7 +114,7 @@ const d0 = () => S.did(need('genesis.json'));
 const rv = () => need('rotation-voluntary.json');
 const d1 = () => rv().body.next;
 // the world's own state, copied next to out/ by collect.sh: what proves issued.json and
-// challenge-2.json came from examples/world.mjs and not from the candidate
+// challenge-2.json came from accept/examples/world.mjs and not from the candidate
 const worldFile = (f) => {
   const p = path.join(outDir, '_world', f);
   if (!existsSync(p)) throw new Fail(`missing _world/${f} (collect with tools/docs-test/collect.sh)`);

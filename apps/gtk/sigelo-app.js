@@ -1,7 +1,7 @@
 #!/usr/bin/env -S gjs -m
 // SPDX-License-Identifier: MIT
 // sigelo on a Linux phone (design/apps.md §7): a GTK 4 + libadwaita window around a WebKitGTK 6.0 view
-// of the page of `sigelo-agent ui` (adapters/moadim/UI-API.md), in one of two forms:
+// of the page of `sigelo-agent ui` (apps/agent/UI-API.md), in one of two forms:
 //   this phone:  spawns `sigelo-agent ui --app [--identity <file>]` (no shell, stdin a pipe: the page
 //                stops when this app does), reads the URL and token from its stdout, shows that page.
 //   a computer:  the page's files from sigelo-app://app/ and every call sealed here to the computer's
@@ -279,7 +279,7 @@ async function pairRelay(text, control = controlPath(), operator = null) {
   }
   try { const j = JSON.parse(r.out); return { ok: true, words: j.words, operator: j.operator, original: j.original ?? j.operator }; } catch { return { ok: false, message: r.out.slice(0, 300) }; }
 }
-/** The page's relay setting (POST /api/settings, contact/page.mjs) on this phone's page → {status, body}. */
+/** The page's relay setting (POST /api/settings, apps/contact/page.mjs) on this phone's page → {status, body}. */
 async function setRelay(port, url, relay) {
   const token = /#t=(\w+)/.exec(url)[1], origin = `http://127.0.0.1:${port}`;
   const r = await soupFetch(`${origin}/api/settings`, { method: 'POST', headers: { 'X-Sigelo-Token': token, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ relay }) });
@@ -394,7 +394,7 @@ async function wipeProfile(id) {
   }
 }
 // ---- the words password (design/apps-seed.md §8): the 25 words, encrypted in the page under a key made from the
-// password (contact/words-lock.mjs: PBKDF2-SHA256, WebKit's WebCrypto; never here), kept as one keyring item per
+// password (apps/contact/words-lock.mjs: PBKDF2-SHA256, WebKit's WebCrypto; never here), kept as one keyring item per
 // profile ({kind: sigelo-words/0, file: its identity file}): {blob, check}. The check (HKDF of the password's key)
 // stays here: a guarded op (words-keep over kept words, words-drop, profile-remove, take) carries the page's proof,
 // which only a page that opened the words under the password has. words-get hands out the blob, never the check.

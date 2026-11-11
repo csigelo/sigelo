@@ -8,7 +8,7 @@
 // future or backdated, ship geneses whose `created` is odd or malformed, reuse challenge
 // nonces, attest to DIDs they never challenged, sign with a key they rotated away from, claim
 // another world's DID as issuer, replay other worlds' attestations, and collude to fabricate a
-// reputation ring. One world is adapters/1f916/sigelo.ts itself, imported as shipped
+// reputation ring. One world is accept/1f916/sigelo.ts itself, imported as shipped
 // (tools/sim/1f916/world.mjs), whose genesis/challenge/verify/attestation answers flow into bundles as
 // the BYTES its router would serve.
 //

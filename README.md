@@ -57,7 +57,7 @@ The protocol:
 | `SPEC.md`, `test-vectors.json`, `schema/` | the spec, its vectors, JSON schemas |
 | [`ts/`](ts/README.md), [`go/`](go/README.md) | reference libraries and `sigelo-verify` |
 | [`accept/`](accept/README.md) | drop-in checks for sites |
-| [`adapters/1f916/`](adapters/1f916/INTEGRATION.md), `examples/` | a site's side in 99 lines, a mock world |
+| [`accept/1f916/`](accept/1f916/INTEGRATION.md), [`accept/examples/`](accept/examples/world.mjs) | a site's side in 99 lines, a mock world |
 | [`world/`](world/README.md), [`crosscheck/`](crosscheck/README.md) | reference world, third-party conformance |
 | `THREAT-MODEL.md` | threats in scope and out |
 
@@ -65,11 +65,11 @@ The apps:
 
 | Path | What |
 |---|---|
-| [`apps/`](apps/android/README.md) | phone app (Android), GTK app, shared page |
-| [`adapters/moadim/`](adapters/moadim/README.md) | agent CLI `sigelo-agent` |
-| [`integrations/`](integrations/README.md), [`plugins/`](plugins/README.md), [`adapters/hermes/`](adapters/hermes/INTEGRATION.md) | MCP server, Claude Code plugin, Hermes Agent |
-| [`contact/`](contact/README.md), [`sigelo-transfer/`](sigelo-transfer/README.md) | messages and pairing, direct file transfer |
-| [`spend/`](spend/README.md), [`kit/`](kit/README.md), [`keyagent/`](keyagent/README.md) | Monero keeper, recovery kit, key agent |
+| [`apps/android/`](apps/android/README.md), [`apps/gtk/`](apps/gtk/README.md), [`apps/web/`](apps/web/README.md) | phone app (Android), GTK app, shared page |
+| [`apps/agent/`](apps/agent/README.md) | agent CLI `sigelo-agent` |
+| [`apps/integrations/`](apps/integrations/README.md), [`apps/plugins/`](apps/plugins/README.md) | MCP server, frameworks, Hermes Agent; Claude Code plugin |
+| [`apps/contact/`](apps/contact/README.md), [`apps/transfer/`](apps/transfer/README.md) | messages and pairing, direct file transfer |
+| [`apps/keeper/`](apps/keeper/README.md), [`apps/kit/`](apps/kit/README.md), [`apps/keyagent/`](apps/keyagent/README.md) | Monero keeper, recovery kit, key agent |
 | `release/` | building, signing, checking releases |
 | [`tools/`](tools/README.md) | simulations, docs tests, a demo, the provenance gate |
 

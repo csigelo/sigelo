@@ -67,7 +67,7 @@ On S — derived by the ceremony, which then forgets S:
 On a keeper root K — derived by that keeper, on demand, without S:
   keeper identity Ed25519 seed  k(K, "sigelo/v1/identity/ed25519/<n>")      = identitySeed(K, n)   built fn
   agent identity  Ed25519 seed  k(K, "sigelo/v1/identity/<i>/ed25519/<n>")  i = the agent's account  built (G4)
-                  = an enrolled worker i (`sigelo-agent enrol`, contact/enrol.mjs)
+                  = an enrolled worker i (`sigelo-agent enrol`, apps/contact/enrol.mjs)
   delegate        Ed25519 seed  k(K, "sigelo/v1/delegate/<i>/ed25519/<n>")  i = its account (POST /delegate)  built
                   spend.log `delegate` line `"kdf": "delegate/1"`; a line without `kdf` predates it: identity/<i>/… (compat)
   wallet(w)       b = sc_reduce32(k(K, "sigelo/v1/monero/<w>"))             = walletFromRoot(K, w)  built fn
@@ -126,7 +126,7 @@ On-chain privacy is the same as separate wallets: accounts and subaddresses are 
 an observer. Separate wallet files protect only against a shared view key or a stolen wallet
 file, and the keeper holds every view key anyway. So one keeper = one wallet file = one
 `monero-wallet-rpc`, and the per-agent boundary is the keeper's account pinning (§4.1), which
-`spend/` does: each policy entry **is** an account, and the request never names one.
+`apps/keeper/` does: each policy entry **is** an account, and the request never names one.
 
 The one exception is §1's: a relationship whose view key is to be **disclosed to a third
 party** gets its own wallet file, `walletFromRoot(K, "counterparty/<id>")`, behind its own
@@ -231,7 +231,7 @@ payment history is to be disclosed still takes the §2 exception, a wallet file 
 **Proof of payment received** for a counterparty: the payer's `get_tx_proof`, or the
 keeper's `get_reserve_proof` on the agent's account. Both are one RPC call and reveal only
 what they say. These are the "costly signal" primitive; the view key is not. Nothing in
-`spend/` calls either today; tx proofs are "not yet functional" on the FCMP++ stressnet
+`apps/keeper/` calls either today; tx proofs are "not yet functional" on the FCMP++ stressnet
 (seraphis-migration v0.19.0.0-beta.3.0 notes, 2026-09-25), so this paragraph must be
 re-verified against an FCMP++ wallet before v0.2 (§8, FCMP++/Carrot).
 
@@ -256,8 +256,8 @@ and agents ask.
 
 ### 4.1 The keeper
 
-One design for every tier: `sigelo-spend` (`spend/`, documented in
-[`spend/README.md`](../spend/README.md)), generalised from "one token, buckets" to "one token per
+One design for every tier: `sigelo-spend` (`apps/keeper/`, documented in
+[`apps/keeper/README.md`](../apps/keeper/README.md)), generalised from "one token, buckets" to "one token per
 agent, one account per agent" by G1–G6 (§8). Every check below is **built** and tested; the
 single-token predecessor has moved real stagenet coins, and the generalised keeper's live run
 is G8 (§8).
@@ -269,13 +269,13 @@ That login spends without the keeper's policy, so it lives in a 0600 `--config-f
 wallet-rpc's command line (`/proc/<pid>/cmdline` is readable by every local uid); `doctor` fails a unit with one there.
 Where several uids share the host, mount `/proc` with `hidepid=2`, also for a wallet-rpc the operator runs.
 
-**The wallet-rpc it accepts.** `spend/canary.ts` pins every method, parameter and result field
+**The wallet-rpc it accepts.** `apps/keeper/canary.ts` pins every method, parameter and result field
 the keeper uses; inside `npm test` and in the weekly CI job (the pinned v0.18.5.0 and the
 latest release) it also checks `get_version`: RPC **1.30 to 1.33** passes (`RPC_RANGE`,
 `rpcVersionOk`: major 1, 30 ≤ minor ≤ 33), anything else fails. Only 1.30 (v0.18.5.0) has been
 run; 1.31 (v0.18.5.1) and 1.33 (the FCMP++ stressnet beta) are accepted on a source diff that
 changes nothing the keeper sends or reads. A version outside the range means: re-run the
-stock-wallet oracle and the whole `spend/` suite against it, then move the ceiling.
+stock-wallet oracle and the whole `apps/keeper/` suite against it, then move the ceiling.
 
 **Installing it.** `sigelo-spend init` sets up one keeper on the operator's own host over the
 operator's own wallet-rpc and wallet (keys, token, policy from a template, systemd `--user`
@@ -286,7 +286,7 @@ agent with its whole policy; delegation (§4.3), approvals (step 8), receipts ex
 keepers on a host need a licence, which is a sigelo attestation (SPEC §5) from the vendor DID
 to the keeper DID, verified offline; without one those verbs refuse `licence_required`, never
 silently, and a payment that would need an approval is refused, not paid. Details:
-[`spend/README.md`](../spend/README.md) "Install".
+[`apps/keeper/README.md`](../apps/keeper/README.md) "Install".
 
 **Two users (the recommended layout).** The keeper and its wallet-rpc run as their own user;
 the agent runs as another and holds only its token, in its own 0600 file. An agent that runs as
@@ -427,7 +427,7 @@ computed refuses every spend.
 
 **Timeouts** (built). The keeper waits up to 180 s for a build — (a), and `sweep_all` with
 `do_not_relay` — and 60 s for every other wallet call, `relay_tx` included (`BUILD_TIMEOUT_MS`,
-`WALLET_TIMEOUT_MS` in `spend/service.ts`); build + relay (240 s) stays under the 300 s the
+`WALLET_TIMEOUT_MS` in `apps/keeper/service.ts`); build + relay (240 s) stays under the 300 s the
 `sigelo-wallet` CLI waits for the keeper. The two waits fail differently, on purpose. A build
 past its wait is `502 wallet_slow`, a TRY LATER: wallet-rpc may still finish it, but it was
 asked not to relay, its metadata never reached the keeper and nothing was written, so nothing
@@ -449,7 +449,7 @@ delegation, so nothing a dry run saw is paid by the next real keeper.
 every cap window once the clock is right — a spend that never counted. The keeper therefore
 signs nothing — no spend, wait, approval, tree line or binding — while `now` is before its
 build's floor or more than 300 s behind the newest `ts` it has signed in the log; the request
-is refused `clock_behind`, a TRY LATER with nothing signed, logged or sent (spend/README.md
+is refused `clock_behind`, a TRY LATER with nothing signed, logged or sent (apps/keeper/README.md
 "The clock guard"). It is a refusal, not a new object or field.
 
 **Daemons** (built). A keeper whose wallet-rpc knows one remote daemon is down whenever that
@@ -463,12 +463,12 @@ within a minute, and only from the lane after an answer, so a switch never delay
 one. A switch is a warning on stderr, never a log line: it signs nothing and spends nothing.
 Fail closed is unchanged — while the wallet has no daemon every pay is `wallet_offline`, a TRY
 LATER. It does not help a host with no network at all (soak incident #4); that is the host's
-to notice (spend/soak `check.mjs --notify`). An `https://` daemon is pinned (wallet-rpc checks no
+to notice (apps/keeper/soak `check.mjs --notify`). An `https://` daemon is pinned (wallet-rpc checks no
 CA): its certificate verified first, a renewed one that verifies re-pinned in place instead of a
 switch. Which daemons to list, TLS, Tor and what a node
-learns: spend/README.md "Choosing a daemon".
+learns: apps/keeper/README.md "Choosing a daemon".
 
-**The spend-approval** (G6, `spend/approval.ts`). One closed object, signed by an approver
+**The spend-approval** (G6, `apps/keeper/approval.ts`). One closed object, signed by an approver
 in `approvers` over `"sigelo\n" ‖ JCS(body)` (SPEC §3):
 
 ```json
@@ -508,9 +508,9 @@ budget pinned to one subaddress drains itself after one payment. Agents are **ac
 
 Built for weak models (Haiku, Llama, Qwen): four verbs, one line of output each, no keys,
 no JSON-RPC, no atomic units, and a retry that cannot pay twice. `sigelo-wallet` (G3,
-`spend/wallet.ts`) is a thin client of the keeper's loopback HTTP; it reads
+`apps/keeper/wallet.ts`) is a thin client of the keeper's loopback HTTP; it reads
 `SIGELO_WALLET_URL` and `SIGELO_WALLET_TOKEN`. The exact lines and the full message table are
-in [`spend/README.md`](../spend/README.md), each asserted verbatim by a test.
+in [`apps/keeper/README.md`](../apps/keeper/README.md), each asserted verbatim by a test.
 
 | CLI | HTTP | Answers |
 |---|---|---|
@@ -595,7 +595,7 @@ Exit codes: `0` done, `1` REFUSED, `2` TRY LATER, `3` WAITING FOR APPROVAL, `4` 
 
 ### 4.3 Delegation and budgets
 
-**Creating a delegate** (`POST /delegate {name, fund, caps?, allow?}`, G5, `spend/tree.ts`
+**Creating a delegate** (`POST /delegate {name, fund, caps?, allow?}`, G5, `apps/keeper/tree.ts`
 pure + `service.ts`; `caps` = `{per_tx_max?, per_period_max?, rate_per_minute?,
 max_delegates?, approval_above?}`, a cap left out being the caller's). The keeper, for an agent
 with `max_delegates` left, checks everything before the wallet is touched; then takes a new
@@ -896,7 +896,7 @@ relationship wallet's view key) sees "received", not "available".
 
 Installed on the test host: the distribution's `monero-0.18.5.0` (`monero-wallet-rpc`, `monero-wallet-cli`,
 `monerod`). Stagenet for everything below production; public nodes reachable from here
-(the test host's, stagenet; use your own node: spend/README.md "Choosing a daemon"):
+(the test host's, stagenet; use your own node: apps/keeper/README.md "Choosing a daemon"):
 `node.monerodevs.org:38089`, `stagenet.xmr-tw.org:38081`, `xmr-lux.boldsuck.org:38081`.
 Faucets: `stagenet-faucet.xmr-tw.org` works and needs no captcha — a plain
 `GET /send_tx/?addr=<stagenet address>` paid 0.1 XMR into the allowance wallet on
@@ -926,7 +926,7 @@ receive hook.
   keeper re-reads only the tokens of roots it already serves, so the new root is `401` until the
   restart. The same restart follows any other policy edit (caps, allowlist, `approvers`, a root
   removed). *Rotate a root's token:* `sigelo-spend token new <policy> <agent>` alone; the running
-  keeper refuses the old token from its next request (spend/README "What a running keeper
+  keeper refuses the old token from its next request (apps/keeper/README "What a running keeper
   re-reads"). *New delegate:* a delegating agent (a root agent, for the Owner) runs
   `sigelo-wallet delegate <name> <amount>`; the harness starts the agent with the printed
   `SIGELO_WALLET_URL`/`SIGELO_WALLET_TOKEN` and the §4.2 snippet.
@@ -986,11 +986,11 @@ built. What follows is what is there, where, and how far it has actually been ex
 | # | What | Where | Verified |
 |---|---|---|---|
 | 1 | Keccak, Monero base58, addresses, subaddresses, SigV2 sign/verify, wired into `verify()` for `method: "monero"` | `ts/src/monero.ts` | unit, against the monero-ts oracle vectors (§6) |
-| 2 | The same in the Go reference verifier, so both verifiers agree on Monero bindings (first written in Python, since replaced by Go) | `go/monero.go` | unit, same vectors; `adapters/moadim`'s test re-verifies a bundle the TypeScript side produced with `go/cmd/sigelo-verify` |
+| 2 | The same in the Go reference verifier, so both verifiers agree on Monero bindings (first written in Python, since replaced by Go) | `go/monero.go` | unit, same vectors; `apps/agent`'s test re-verifies a bundle the TypeScript side produced with `go/cmd/sigelo-verify` |
 | 3 | SPEC §6.2 rewritten to §1–§3 here, §6.3 added; README and CLAUDE.md corrected | `SPEC.md`, `README.md`, `CLAUDE.md` | prose |
 | 4 | Root-seed derivation (the *built* HKDF paths of §2), `S` as Monero's 25 words and its vault, the offline CLI | `ts/src/keys.ts`, `ts/src/monero-words.ts`, `ts/src/offline.ts` (`sigelo-offline`); `go/keys.go` | unit, **plus live**: the stock-wallet import and seed-restore checks below |
-| 5 | `sigelo-agent`: `wallet-set`, `bind` (view-mode `sig_addr`), `receive`, `invoice`, `verify-invoice` | `adapters/moadim/sigelo-agent-monero.ts` | unit, no wallet needed — the signature is computed locally |
-| 6 | `sigelo-spend`: the single-token keeper (buckets = accounts, two-phase relay, invoices) | `spend/` | unit, **plus live** against a stagenet `monero-wallet-rpc`, including real end-to-end spends (below) |
+| 5 | `sigelo-agent`: `wallet-set`, `bind` (view-mode `sig_addr`), `receive`, `invoice`, `verify-invoice` | `apps/agent/sigelo-agent-monero.ts` | unit, no wallet needed — the signature is computed locally |
+| 6 | `sigelo-spend`: the single-token keeper (buckets = accounts, two-phase relay, invoices) | `apps/keeper/` | unit, **plus live** against a stagenet `monero-wallet-rpc`, including real end-to-end spends (below) |
 
 `sigelo-agent`'s Monero half predates accounts: it holds a view-only wallet and binds and
 receives from it locally. Under §3 that fits the root identity binding a wallet it may see,
@@ -1010,7 +1010,7 @@ its keeper (G3), and its identity file never takes the shared view key.
   wallet that shows other words (why §2 requires `S < l`); the past-2³² triple and a wrong
   checksum word are refused by wallet2 as by us. Mainnet addresses of the vectors were checked
   once against a mainnet `--offline` instance (2026-09-23), not in the suite.
-- **The policy service talks to a real wallet** (`spend/test.ts`, section 3): `GET /health`
+- **The policy service talks to a real wallet** (`apps/keeper/test.ts`, section 3): `GET /health`
   returns a stagenet height, and a `--dry-run` `POST /pay` passes every policy check and is
   refused by the *wallet* with a 502, never by the policy with a 403.
 - **The stagenet end-to-end spend** (2026-09-23, a one-off script outside the repo; the suite
@@ -1028,9 +1028,9 @@ its keeper (G3), and its identity file never takes the shared view key.
   /budget` shows 530480000 spent — amount **plus fee** — and 1469520000 remaining. The wallet
   reports the tx pending with that amount and fee, `unlock_time` 0. A second request was
   refused by the wallet at the build step (`not enough unlocked money … nothing was relayed`).
-- **`monero-wallet-rpc` interop offline** (`spend/test.ts`, section 4): the service's own
+- **`monero-wallet-rpc` interop offline** (`apps/keeper/test.ts`, section 4): the service's own
   calls are exercised against a wallet-rpc started with `--offline`.
-- **The agent surface against the stagenet wallet** (`spend/test.ts`, G3, read-only):
+- **The agent surface against the stagenet wallet** (`apps/keeper/test.ts`, G3, read-only):
   `sigelo-wallet balance` and `history`, and a real `sign` at (0,0) in view mode whose
   `sig_addr` verifies and makes the binding `proven`.
 - **Subaddress bindings** (`c4821e9`): a live stagenet wallet-rpc's `verify` on the §6.2
@@ -1057,7 +1057,7 @@ use the real `age` binary; nothing it writes has been restored on another host).
 **Done: stagenet end-to-end spends with real coins**, above: two runs of the single-token
 service, both to the wallet's own subaddress, and one through the per-agent keeper by a Haiku
 agent. No top-up between keepers has run, and no delegate, sweep or approval has touched a
-real wallet (G8). Cold mode (§4.4) does not exist. `spend/test.ts` §3 dry-runs from whichever account holds the most
+real wallet (G8). Cold mode (§4.4) does not exist. `apps/keeper/test.ts` §3 dry-runs from whichever account holds the most
 unlocked funds and SKIPs, naming the balance, while the wallet's change is locked; with funds
 unlocked it passes (fee returned, no receipt).
 
@@ -1066,22 +1066,22 @@ unlocked it passes (fee returned, no receipt).
 reference verifier `go test ./... -v` `ALL PASS`, 278 checks, over every vector, the Monero
 vectors, `keys.go`'s derivation vectors and the 1f916 fixture; the vector generator is
 TypeScript (`ts/src/gen_vectors.ts`) and reproduces `test-vectors.json` byte-for-byte;
-`adapters/moadim` 67 checks `ALL PASS` (61 without the Go cross-check, which SKIPs when `go`
-is not on PATH); `spend/` 487 passed, 0 failed, 0 skipped at `12408e6` with the funded
+`apps/agent` 67 checks `ALL PASS` (61 without the Go cross-check, which SKIPs when `go`
+is not on PATH); `apps/keeper/` 487 passed, 0 failed, 0 skipped at `12408e6` with the funded
 stagenet wallet reachable.
 
-**Build order: `spend/` → the generalised keeper.** G1–G7 are built; G8 is in progress.
+**Build order: `apps/keeper/` → the generalised keeper.** G1–G7 are built; G8 is in progress.
 Each row is what the commit built; where it departs from the plan, the departure is the
 behaviour, and the sections above already describe it.
 
 | # | Built | Where | Commit | Checks after |
 |---|---|---|---|---|
-| G1 | Per-agent entries: `agents` (own token, account, caps, `allow`), token → agent over every hash with no early exit, `{label}` destinations, the `{issuer, ctx?}` rule; old single-bucket policies load as one agent; strict loader | `spend/policy.ts`, `service.ts` | `85b0e27` | spend 227 |
-| G2 | `ref` idempotency: explicit or derived, `dedupe_seconds` 600, stored outcome per status, `409` on a reused explicit ref; covers restart and a crash between intent and outcome | `spend/policy.ts`, `service.ts` | `85b0e27` | (with G1) |
-| G3 | Agent surface: `GET /balance`, `POST /receive`, `GET /history`, `POST /bind`; `sigelo-wallet` (BigInt XMR↔atomic, one line per verb, exit codes 0–4, the message table asserted verbatim); errors `{error, code, facts?}` | `spend/service.ts`, `spend/wallet.ts` | `fdaba3f` | spend 324, 5 of them live read-only against stagenet |
+| G1 | Per-agent entries: `agents` (own token, account, caps, `allow`), token → agent over every hash with no early exit, `{label}` destinations, the `{issuer, ctx?}` rule; old single-bucket policies load as one agent; strict loader | `apps/keeper/policy.ts`, `service.ts` | `85b0e27` | spend 227 |
+| G2 | `ref` idempotency: explicit or derived, `dedupe_seconds` 600, stored outcome per status, `409` on a reused explicit ref; covers restart and a crash between intent and outcome | `apps/keeper/policy.ts`, `service.ts` | `85b0e27` | (with G1) |
+| G3 | Agent surface: `GET /balance`, `POST /receive`, `GET /history`, `POST /bind`; `sigelo-wallet` (BigInt XMR↔atomic, one line per verb, exit codes 0–4, the message table asserted verbatim); errors `{error, code, facts?}` | `apps/keeper/service.ts`, `apps/keeper/wallet.ts` | `fdaba3f` | spend 324, 5 of them live read-only against stagenet |
 | G4 | `keeperRoot(S, j)`, `agentIdentitySeed(K, i, n)`; `deriveRoot` emits keeper roots; fixed vectors over the test root. Ported to Go (`KeeperRoot`, `AgentIdentitySeed`, the rest of §2), byte for byte | `ts/src/keys.ts`; `go/keys.go` | `846b7cd`; go `4f85df7` | ts 291; go 262 |
-| G5 | Delegation: `/delegate`, `/fund`, `/revoke`, `/delegates`; signed tree replayed from `spend.log`; caps clamped along ancestors; revoke cascades and sweeps one hop to the revoker; `spend.key` = keeper root `K` | `spend/tree.ts` (pure) + `service.ts` | `9e2756f` | spend 413 |
-| G6 | `approval_above`: `202 approval_needed` + signed `pending` line; `POST /approve` with an offline-verified spend-approval; single-use nonce consumed by the relay; `sigelo-spend approve-request` | `spend/approval.ts` (pure) + `service.ts` | `12408e6` | spend 487 |
+| G5 | Delegation: `/delegate`, `/fund`, `/revoke`, `/delegates`; signed tree replayed from `spend.log`; caps clamped along ancestors; revoke cascades and sweeps one hop to the revoker; `spend.key` = keeper root `K` | `apps/keeper/tree.ts` (pure) + `service.ts` | `9e2756f` | spend 413 |
+| G6 | `approval_above`: `202 approval_needed` + signed `pending` line; `POST /approve` with an offline-verified spend-approval; single-use nonce consumed by the relay; `sigelo-spend approve-request` | `apps/keeper/approval.ts` (pure) + `service.ts` | `12408e6` | spend 487 |
 | G7 | `sigelo-offline ceremony` and `restore`: `backup.age`, `fingerprint.txt`, `keeper-<j>.json`; `derive` in keeper vocabulary | `ts/src/offline.ts`, `ts/src/ceremony.ts` | `c2202d8` | ts 313 (4 with the real `age`) |
 | G8 | Stagenet end-to-end: create an agent, fund it, the agent pays via `sigelo-wallet`, a repeated `pay` returns `ALREADY PAID`, a delegate is created and revoked with its funds swept, an above-threshold `pay` waits for and uses an approval | script outside the suite | — | in progress |
 
@@ -1121,7 +1121,7 @@ integrated and SigV1 still refused; ts 329, go 278.
   root identity seed goes to keeper 0. `derive`'s `operator` is now `agents_keeper`,
   `air_gapped` now `owner_backup`.
 
-- **G8, the stagenet end to end** (2026-09-23, script outside the suite, keeper from `spend/dist`,
+- **G8, the stagenet end to end** (2026-09-23, script outside the suite, keeper from `apps/keeper/dist`,
   wallet-rpc 0.18.5, ~61 min wall clock, every wait under 25 min): root agent on account 0
   with `approval_above` 3e9, `per_tx_max` 5e9, `max_delegates` 2, one approver, allow = (0,1).
   - `sigelo-wallet delegate fin 0.0048` created account 1 (`create_account`, live) with the
@@ -1146,10 +1146,10 @@ integrated and SigV1 still refused; ts 329, go 278.
     121620000 atomic units.
   - Found and fixed on the way: `/delegate`'s `fund` object let the body's `status` string
     overwrite the HTTP status.
-  - Test status after G8: `spend/` 499 passed, 0 failed, 0 skipped with the stagenet wallet
+  - Test status after G8: `apps/keeper/` 499 passed, 0 failed, 0 skipped with the stagenet wallet
     reachable and holding an account above 0 (496 + 1 SKIP without one).
 
-Code size (non-blank, non-comment lines at `12408e6`, tests excluded): `spend/` is 1 698 —
+Code size (non-blank, non-comment lines at `12408e6`, tests excluded): `apps/keeper/` is 1 698 —
 `policy.ts` 390, `service.ts` 671, `tree.ts` 170, `approval.ts` 83, `wallet.ts` 286, `cli.ts`
 98 — against the plan's ~1 600 and the single-token service's 781. It stayed one package, with
 the pure parts (`policy.ts`, `tree.ts`, `approval.ts`) testable without a wallet.
@@ -1212,5 +1212,5 @@ default below. Each can change without touching the rest.
     to the largest routine top-up.
 12. **Treasury placement** — default: the same keeper software, hot, on its own host; cold
     mode later.
-13. **Packaging** — default, as built: stay in `spend/`, admin CLI `sigelo-spend`, agent CLI
+13. **Packaging** — default, as built: stay in `apps/keeper/`, admin CLI `sigelo-spend`, agent CLI
     `sigelo-wallet`; alternative: rename the package `keeper/`.

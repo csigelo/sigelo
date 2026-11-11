@@ -374,7 +374,7 @@ func TestEd25519Strict(t *testing.T) {
 // adapters/1f916/sample-bundle.json, is ACCEPTED, and the same bundle with one signature
 // character flipped is not.
 func Test1f916(t *testing.T) {
-	sample := load(t, "../adapters/1f916/sample-bundle.json")
+	sample := load(t, "../accept/1f916/sample-bundle.json")
 	bundle, now := at(sample, "bundle"), at(sample, "now").(int64)
 	r := mustVerify(t, bundle, now)
 	att := obj(at(bundle, "attestations").([]any)[0], "body")

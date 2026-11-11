@@ -1,23 +1,23 @@
 # tools/sim/ — swarms of agents in a simulated world
 
 Seeded simulations, scripted scenarios, and checks on the checkers. Nothing here is protocol
-code. It tests `ts/`, `go/`, `spend/` and `adapters/1f916/` by running them the way many agents
+code. It tests `ts/`, `go/`, `apps/keeper/` and `accept/1f916/` by running them the way many agents
 and worlds would, some of them dishonest.
 
 | file | what it does |
 |---|---|
 | `swarm.mjs` | N agents, M worlds, R rounds. Agents join worlds, migrate, rotate keys, bind Monero wallets, issue invoices, get robbed, fork, recover, and present tampered or fuzzed bundles. Each presentation's expected §9.1 result comes from the simulation's own event model and is compared (as JCS) with what `verify()` returns. A sample of bundles is also run through the Go verifier and compared byte for byte. Every presentation is BYTES read through `parseBytes`, as every real entry point reads them, so raw invalid UTF-8 (tamper and fuzz kind `invalid-utf8`) is exercised; a sim that handed `verify()` JS strings could not hold such a document at all. |
-| `worlds.mjs` | Dishonest worlds, and the 1f916 adapter as a world. Worlds sign attestations dated in the future or backdated, ship geneses with an odd or malformed `created` or a small-order key, reuse challenge nonces, attest DIDs they never challenged, sign with a key they rotated away from, claim another world's DID, replay other worlds' attestations and collude in a reputation ring: 36 case kinds, each with the SPEC section that decides it. `adapters/1f916/sigelo.ts` is imported as shipped (`1f916/`) and its four routes' answers, as the router's bytes, go into every agent's bundle. Each bundle is checked against the model (in-process, with and without pinned issuers), each artefact against its SPEC outcome, and each file through `verify-one.mjs` and the Go verifier, which must print the same. |
+| `worlds.mjs` | Dishonest worlds, and the 1f916 adapter as a world. Worlds sign attestations dated in the future or backdated, ship geneses with an odd or malformed `created` or a small-order key, reuse challenge nonces, attest DIDs they never challenged, sign with a key they rotated away from, claim another world's DID, replay other worlds' attestations and collude in a reputation ring: 36 case kinds, each with the SPEC section that decides it. `accept/1f916/sigelo.ts` is imported as shipped (`1f916/`) and its four routes' answers, as the router's bytes, go into every agent's bundle. Each bundle is checked against the model (in-process, with and without pinned issuers), each artefact against its SPEC outcome, and each file through `verify-one.mjs` and the Go verifier, which must print the same. |
 | `keeper-swarm.mjs` | K agents hammer one real `sigelo-spend serve` against `mock-wallet.mjs`. The keeper is killed and restarted during the run, and its log is checked against the wallet's books. A `503 busy` is sent again after `Retry-After`, up to 10 times or 30 s; still busy after that is a finding. |
-| `licence.mjs` | Keys each scratch keeper and makes it a pro customer of a throwaway TEST vendor, offline and the way `spend/soak/gen-keys.mjs licence` does (sigelo's `attest`, the `{attestation, issuer, rotations}` file, checked with the keeper's own `checkLicence`). It sets `SIGELO_VENDOR_DID` to that vendor and `SIGELO_SPEND_REGISTRY` to a scratch file, so the host's keeper registry is never touched. |
-| `keeper-scenarios.mjs` | Scripted, against its own keeper and mock wallet: first with no licence (`/delegate`, `/fund`, `/approve` and a pay above `approval_above` refuse 403 `licence_required`, a pay under the caps is paid), then with one installed under the running keeper; delegates of delegates (depth 4, a revoked middle delegate, caps/rate/allowlist/count/name/revoker refusals) and `policy.json` edited under a running keeper (caps tightened, a root removed and re-added, an approver added, a token rotated with `token new`, a root added, a malformed edit, SIGHUP). 84 steps, each the answer spend/README.md or MONERO.md promises. Where a document says otherwise the step is listed under `doc_divergences` without failing. `--mutants` plants 7 tree bugs in copies of `spend/dist`. |
+| `licence.mjs` | Keys each scratch keeper and makes it a pro customer of a throwaway TEST vendor, offline and the way `apps/keeper/soak/gen-keys.mjs licence` does (sigelo's `attest`, the `{attestation, issuer, rotations}` file, checked with the keeper's own `checkLicence`). It sets `SIGELO_VENDOR_DID` to that vendor and `SIGELO_SPEND_REGISTRY` to a scratch file, so the host's keeper registry is never touched. |
+| `keeper-scenarios.mjs` | Scripted, against its own keeper and mock wallet: first with no licence (`/delegate`, `/fund`, `/approve` and a pay above `approval_above` refuse 403 `licence_required`, a pay under the caps is paid), then with one installed under the running keeper; delegates of delegates (depth 4, a revoked middle delegate, caps/rate/allowlist/count/name/revoker refusals) and `policy.json` edited under a running keeper (caps tightened, a root removed and re-added, an approver added, a token rotated with `token new`, a root added, a malformed edit, SIGHUP). 84 steps, each the answer apps/keeper/README.md or MONERO.md promises. Where a document says otherwise the step is listed under `doc_divergences` without failing. `--mutants` plants 7 tree bugs in copies of `apps/keeper/dist`. |
 | `mutants.mjs` | Plants 13 known bugs, one at a time, in a copy of `ts/dist` and checks that `swarm.mjs` or `worlds.mjs` reports each one. A bug that goes unreported marks a blind spot. |
 | `1f916/` | `world.mjs` loads the adapter beside four stand-ins for the 1F916 modules it imports (`society`, `keys`, `checkpoint`, `attestations` — its JCS written from RFC 8785, not taken from `ts/`) and serves its routes nested, as since `1dfec57`, or bare (`--plant bare-genesis`). The stand-ins reproduce the adapter test's pinned world DID. |
 | `verify-one.mjs` | The ts side of one Go comparison: `node tools/sim/verify-one.mjs <bundle.json> <now>`. Reads the file's bytes (`parseBytes`, fatal UTF-8) and prints what `sigelo-verify` prints, `REJECT: parse: …` included. |
 
 ## Run
 
-Build first: `(cd ts && npm ci --ignore-scripts && npx tsc) && (cd spend && npm ci --ignore-scripts && npx tsc)`.
+Build first: `(cd ts && npm ci --ignore-scripts && npx tsc) && (cd apps/keeper && npm ci --ignore-scripts && npx tsc)`.
 Go must be on the PATH for the Go comparison. Without Go, pass `--no-go`.
 
 ```sh
@@ -36,7 +36,7 @@ exits 0 only if every plant was reported:
 |---|---|---|
 | `npm run mutants` | 13 bugs in a copy of `ts/dist` (10 for the swarm, 3 aimed at dishonest issuers) | swarm.mjs (120 × 30, no Go) and worlds.mjs (no Go) per bug |
 | `npm run worlds-plant` | the 1f916 router serving the genesis bare again (the bug `1dfec57` fixed) | worlds.mjs |
-| `npm run keeper-mutants` | 7 bugs in a copy of `spend/dist/tree.js` (clamp, cascade, caps at creation, count, revoker, orphans, names) | keeper-scenarios.mjs per bug |
+| `npm run keeper-mutants` | 7 bugs in a copy of `apps/keeper/dist/tree.js` (clamp, cascade, caps at creation, count, revoker, orphans, names) | keeper-scenarios.mjs per bug |
 | `node keeper-swarm.mjs --selftest` | 4 violations planted into the audited log | keeper-swarm.mjs |
 
 `swarm.mjs` settings, as a flag or an env var:
@@ -56,7 +56,7 @@ output directory. `worlds.mjs` takes `--seed` (default `sigelo-worlds-1`), `--ag
 `--cases` (9 per agent, a window rotating over the 36 kinds so each is presented equally
 often), `--no-go` and `SIM_TS_DIST` (in-process only). For `keeper-swarm.mjs` and
 `keeper-scenarios.mjs` settings, see the headers of those files (`SIM_SPEND_DIST` runs the
-scenarios against another build of `spend/dist`; ports ≥ 39000, never the soak's).
+scenarios against another build of `apps/keeper/dist`; ports ≥ 39000, never the soak's).
 
 **Reproducibility.** Each agent has its own random stream, seeded from (seed, agent index).
 Worlds are derived from the seed. The clock is simulated: round r is

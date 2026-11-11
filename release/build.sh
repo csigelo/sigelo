@@ -7,6 +7,7 @@
 #   sigelo-<v>.tgz sigelo-contact-<v>.tgz sigelo-spend-<v>.tgz sigelo-agent-<v>.tgz sigelo-mcp-<v>.tgz
 #   sigelo-recovery-kit-<v>.tgz        the six npm packages, as `npm publish` would upload them
 #                                      (sigelo-spend carries the keeper installer, `sigelo-spend init`)
+#   sigelo-key-agent-<v>.tgz           the seventh: the key agent (keyagent/), on npm from 0.1.15
 #   sigelo-verify-<os>-<arch>[.exe]    static verifier binaries: linux/darwin × amd64/arm64, windows/amd64
 #   sigelo-verify-src-<v>.tar.gz       go/ + test-vectors.json + LICENSE: `go build ./cmd/sigelo-verify`
 #   test-vectors.json                  the conformance target (`sigelo-verify --conformance`)
@@ -14,11 +15,11 @@
 # release/pack-test.sh installs all of it in an empty directory and runs it. At D1 (ROADMAP §7),
 # once the npm account and the repository exist, the maintainer publishes exactly these files:
 #
-#   for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do npm publish "$out/$t-<v>.tgz"; done
+#   for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do npm publish "$out/$t-<v>.tgz"; done
 #   gh release create v<v> "$out"/sigelo-verify-* "$out"/test-vectors.json "$out"/SHA256SUMS
 #
 # `sigelo` first: the others depend on it (^<v>); `sigelo-contact` before `sigelo-agent`, which
-# depends on it (^<v>), and `sigelo-mcp` on that. Publishing a tarball runs no scripts, so
+# depends on it (^<v>), and `sigelo-mcp` and `sigelo-key-agent` on that. Publishing a tarball runs no scripts, so
 # the prepublishOnly guard in each package.json (which refuses a publish from a directory
 # without SIGELO_PUBLISH=1) does not apply to it. `go install
 # github.com/csigelo/sigelo/go/cmd/sigelo-verify@v<v>` works once the export carries that module path
@@ -30,7 +31,7 @@
 # release/prepack.mjs pins the `file:` sibling dependencies to ^<v>). npm writes fixed mtimes
 # into the tar; release/normalize-tgz.mjs then replaces node's zlib output with stored deflate
 # blocks, so the same commit and typescript give the same bytes whatever node builds them.
-# All six packages carry one version; the build refuses otherwise.
+# All the packages carry one version; the build refuses otherwise.
 #
 # Same commit + same Go toolchain ⇒ byte-identical binaries on any host: CGO off (no libc, no
 # host C toolchain), -trimpath (no build paths), -buildid= and -s -w (no build ID, no symbol or
@@ -73,7 +74,7 @@ git -C "$src" -c advice.detachedHead=false checkout -q --detach "$commit"
 
 # The six packages share one version (VERSIONING.md: packages use semver, in lockstep in 0.x).
 v=$(node -p 'require(process.argv[1]).version' "$src/ts/package.json")
-for p in contact spend adapters/moadim integrations/mcp kit; do
+for p in apps/contact apps/keeper apps/agent apps/integrations/mcp apps/kit apps/keyagent; do
 	pv=$(node -p 'require(process.argv[1]).version' "$src/$p/package.json")
 	[ "$pv" = "$v" ] || { echo "build.sh: $p/package.json is $pv, ts/package.json is $v; the packages move together" >&2; exit 1; }
 done
@@ -97,14 +98,14 @@ cp "$src/test-vectors.json" "$out/test-vectors.json"
 
 # npm: flaky networks are the norm on some builders; npm ci is retried, never skipped.
 retry() { n=1; until "$@"; do [ $n -ge 3 ] && return 1; n=$((n + 1)); echo "build.sh: retry $n: $*" >&2; sleep 5; done; }
-for p in ts contact spend adapters/moadim integrations/mcp kit; do
-	# mcp and kit have no build step: their pack only reads their siblings' package.json, so no install.
+for p in ts apps/contact apps/keeper apps/agent apps/integrations/mcp apps/kit apps/keyagent; do
+	# mcp, kit and keyagent have no build step: their pack only reads their siblings' package.json, so no install.
 	# contact has none either, but runtime dependencies: npm ci checks its lockfile against them.
-	[ "$p" = integrations/mcp ] || [ "$p" = kit ] || (cd "$src/$p" && retry npm ci --ignore-scripts --no-audit --no-fund --silent)
+	case $p in apps/integrations/mcp|apps/kit|apps/keyagent) ;; *) (cd "$src/$p" && retry npm ci --ignore-scripts --no-audit --no-fund --silent) ;; esac
 	(cd "$src/$p" && npm pack --silent --pack-destination "$out" >/dev/null)
 done
 node "$src/release/normalize-tgz.mjs" "$out"/*.tgz
-for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit; do
+for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do
 	[ -f "$out/$t-$v.tgz" ] || { echo "build.sh: npm pack made no $t-$v.tgz" >&2; exit 1; }
 	# the published manifest must name no sibling directory
 	if tar -xzOf "$out/$t-$v.tgz" package/package.json | grep -q '"file:'; then
@@ -117,6 +118,12 @@ for f in cli daemontls init licence rpcrange service; do
 	printf '%s\n' "$listing" | grep -qx "package/dist/$f.js" || { echo "build.sh: sigelo-spend-$v.tgz has no dist/$f.js" >&2; exit 1; }
 done
 if printf '%s\n' "$listing" | grep -q 'package/dist/test\.'; then echo "build.sh: sigelo-spend-$v.tgz carries the tests (and the test vendor key)" >&2; exit 1; fi
+# The key agent: its modules, units and protocol fixture, never its tests.
+listing=$(tar -tzf "$out/sigelo-key-agent-$v.tgz")
+for f in agent.mjs protocol.mjs policy.mjs store.mjs units/sigelo-key-agent.service fixtures/protocol-v0.json LICENSE; do
+	printf '%s\n' "$listing" | grep -qx "package/$f" || { echo "build.sh: sigelo-key-agent-$v.tgz has no $f" >&2; exit 1; }
+done
+if printf '%s\n' "$listing" | grep -q 'package/test\.mjs'; then echo "build.sh: sigelo-key-agent-$v.tgz carries the tests" >&2; exit 1; fi
 cd "$out"
 TZ=UTC0 touch -t "$stamp" sigelo-* test-vectors.json
 # sha256sum's own format, sorted by name: `sha256sum -c SHA256SUMS` checks it.

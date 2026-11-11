@@ -4,7 +4,7 @@
 // schema edit cannot be silently ignored). Run: node schema/check.mjs  → ends ALL PASS or exits 1.
 //
 //   positives   every positive vector body, envelope and genesis validates; so do both
-//               bundles, their §9.1 `expect`, and adapters/1f916/sample-bundle.json
+//               bundles, their §9.1 `expect`, and accept/1f916/sample-bundle.json
 //   negatives   every negative that fails on STRUCTURE fails validation; every negative that
 //               fails on signature, chain, time or a method's own check still validates (the
 //               schemas are not stricter than the spec); the rest are listed as not expressible
@@ -129,8 +129,8 @@ for (const [name, x] of Object.entries(T.vectors)) {
       `${name} items: envelopes refuse ${badA}+${badB}, verify discards ${x.expect.rejected.attestations}+${x.expect.rejected.bindings}`);
   }
 }
-const sample = readJSON(path.join(root, 'adapters/1f916/sample-bundle.json'));
-mustPass('adapters/1f916/sample-bundle.json', 'bundle', sample.bundle); counts.positive++;
+const sample = readJSON(path.join(root, 'accept/1f916/sample-bundle.json'));
+mustPass('accept/1f916/sample-bundle.json', 'bundle', sample.bundle); counts.positive++;
 
 // negatives. Structural: the object that carries the fault, in the slot it is presented in.
 const N = T.negative;

@@ -3,7 +3,7 @@
 // The form (the shell's mode) is set only when a path commits: self just before a new or restored
 // identity is sealed, remote once a computer answered. Until then the welcome's three choices stay open
 // and Back can go anywhere among them.
-//   create   contact/create.mjs newSeed (S drawn here, the network held from the draw to the end),
+//   create   apps/contact/create.mjs newSeed (S drawn here, the network held from the draw to the end),
 //            the three words checked here, then createInto (create.mjs): sealed under the FULL key
 //   restore  restoreInto (seed.mjs), the same seal
 //   then     the words password, optional (keepWords: words.mjs, sealed as a third kind); skipped, nothing kept

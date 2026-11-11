@@ -4,7 +4,7 @@
 // echoed), then the checksum: the 25th word repeats word crc32(the first 3 letters of each of the 24,
 // joined) % 24, as ts/src/keys.ts (Monero's electrum-words.cpp). sigelo-agent keeper --from-words
 // checks the words again, with the canonical-root rule; test-gtk.mjs compares this with
-// contact/restore.mjs checkWords. monero-words.js: ts/dist's, copied beside it by install.sh.
+// apps/contact/restore.mjs checkWords. monero-words.js: ts/dist's, copied beside it by install.sh.
 import { MONERO_WORDS } from './monero-words.js';
 
 export const WORD_COUNT = 25;

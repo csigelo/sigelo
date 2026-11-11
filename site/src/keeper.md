@@ -38,4 +38,4 @@ The licence is a signed statement (an attestation) to your keeper's ID (a DID), 
 
 [Recovery ceremony kit](/raw/kit/README.md); price not set yet.
 
-Reference: [spend/README.md](/raw/spend/README.md) · [OpenAPI](/raw/spend/openapi.yaml)
+Reference: [apps/keeper/README.md](/raw/spend/README.md) · [OpenAPI](/raw/spend/openapi.yaml)

@@ -7,6 +7,14 @@ SPEC §3.1) and the **packages** (npm, the Go module). The wire moves rarely and
 is not frozen yet (§1): it last changed on 2026-10-19, so the earliest freeze is 2026-11-19; the page, `watch`, tiers, files and enrolment are experimental; the keeper is
 stagenet-only; nothing is audited. The six packages are on npm at 0.1.14; v0.1.0 was unsigned and never on npm.
 
+| Layer | Version |
+|---|---|
+| Wire: `SPEC.md`, `test-vectors.json`, `schema/` | `sigelo/0` |
+| Libraries: `ts/`, `go/`, `accept/` | semver |
+| Apps: `apps/` | semver |
+
+One version and tag for both until the app moves out.
+
 ## 1. The wire: `sigelo/0`
 
 `v` is `"sigelo/0"`. Verifiers reject any other value (invariant 7; SPEC §9 step 2). There is
@@ -31,7 +39,7 @@ is `sigelo/1` or it does not happen.
 **Not breaking, allowed after the freeze:** spec prose that changes no outcome; a new vector
 for a rule the spec already states, provided both shipped implementations pass it unchanged
 (if one fails, the rule was ambiguous and fixing it is breaking); anything below the wire
-(keys, ceremony, keeper, adapters, MONERO.md) — those follow package semver.
+(keys, ceremony, keeper, apps, MONERO.md) — those follow package semver.
 
 ## 2. Introducing `sigelo/1`
 
@@ -64,7 +72,7 @@ binaries and a signed `release.json`.
 
 A wire version is deprecated by a CHANGELOG entry and a date, never by code alone. Minimum
 12 months from deprecation to removal from the reference verifier. The keeper's HTTP surface
-and the `sigelo-wallet` lines (spend/README.md) are package API: a removed route, verb or
+and the `sigelo-wallet` lines (apps/keeper/README.md) are package API: a removed route, verb or
 exit code is a major bump with one minor release of overlap that warns.
 
 ## 6. Dependency pinning
@@ -78,4 +86,4 @@ exit code is a major bump with one minor release of overlap that warns.
   advisories are read by hand (GitHub advisory feed, `npm audit`, `govulncheck`).
 - Runtime dependencies stay exactly these: `@noble/ed25519` and `@noble/hashes` for
   ts, `filippo.io/edwards25519` for Go. `monero-wallet-rpc` is pinned too (0.18.5.0, RPC
-  1.30) by the canary in `spend/canary.ts`.
+  1.30) by the canary in `apps/keeper/canary.ts`.

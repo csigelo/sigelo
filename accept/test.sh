@@ -9,7 +9,7 @@ here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
 tmp=$(mktemp -d); pids=""
 trap 'for p in $pids; do kill "$p" 2>/dev/null || true; done; rm -rf "$tmp"' EXIT INT TERM
 [ -f "$root/ts/dist/sigelo.js" ] || (cd "$root/ts" && npm ci --silent && npx tsc)
-[ -f "$root/adapters/moadim/dist/cli.js" ] || (cd "$root/adapters/moadim" && npm ci --silent && npm run build --silent)
+[ -f "$root/apps/agent/dist/cli.js" ] || (cd "$root/apps/agent" && npm ci --silent && npm run build --silent)
 (cd "$here/node" && npm install --no-audit --no-fund --silent)
 (cd "$root/go" && go build -o "$tmp/sigelo-verify" ./cmd/sigelo-verify)
 (cd "$here/go" && go vet ./... && go build -o "$tmp/accept-example" ./example)

@@ -15,10 +15,10 @@
 
 - [QUICKSTART.md](QUICKSTART.md): one identity through its whole lifecycle.
 - [Phone app](../apps/android/README.md), [desktop](../apps/gtk/README.md), [web](../apps/web/README.md).
-- [Agent CLI](../adapters/moadim/README.md), [MCP and frameworks](../integrations/README.md).
-- [Keeper](../spend/README.md) and [MONERO.md](MONERO.md): payments.
-- [Recovery kit](../kit/README.md).
-- [Relay client](../contact/README.md); the relay: [csigelo/sigelo-relay](https://github.com/csigelo/sigelo-relay).
+- [Agent CLI](../apps/agent/README.md), [MCP and frameworks](../apps/integrations/README.md).
+- [Keeper](../apps/keeper/README.md) and [MONERO.md](MONERO.md): payments.
+- [Recovery kit](../apps/kit/README.md).
+- [Relay client](../apps/contact/README.md); the relay: [csigelo/sigelo-relay](https://github.com/csigelo/sigelo-relay).
 
 ## Project
 

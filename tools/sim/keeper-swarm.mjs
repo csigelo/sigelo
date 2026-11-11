@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// tools/sim/keeper-swarm.mjs — a swarm of agents hammering ONE spend/ keeper (MONERO.md §4) that runs
+// tools/sim/keeper-swarm.mjs — a swarm of agents hammering ONE apps/keeper/ keeper (MONERO.md §4) that runs
 // as a real `sigelo-spend serve` child process against tools/sim/mock-wallet.mjs, a wallet-rpc
 // stand-in that keeps books. The keeper is SIGKILLed and SIGTERMed mid-run and restarted on the
 // same directory. Every request records expected-vs-observed; afterwards the keeper's spend.log
@@ -8,7 +8,7 @@
 //   node tools/sim/keeper-swarm.mjs [--seed S] [--agents K] [--flows F] [--concurrency C] [--port P] [--no-chaos] [--keep]
 //   env: SIM_SEED, SIM_AGENTS, SIM_FLOWS, SIM_CONCURRENCY, SIM_PORT
 //
-// Needs ts/dist and spend/dist (`cd ts && npx tsc`, `cd spend && npx tsc`). Loopback only, ports
+// Needs ts/dist and apps/keeper/dist (`cd ts && npx tsc`, `cd apps/keeper && npx tsc`). Loopback only, ports
 // ≥ 39000 (default 39100 mock, 39101 keeper), state in a fresh mkdtemp directory. It never
 // touches a real monero-wallet-rpc. The keeper is licensed (pro) by a throwaway test vendor
 // (tools/sim/licence.mjs); keeper-scenarios.mjs checks the unlicensed refusals.
@@ -27,8 +27,8 @@ import { fileURLToPath } from 'node:url';
 import { attest, bind, keygen, multibase, sign, verify, verifySig } from '../../ts/dist/sigelo.js';
 import { deriveIdentity, recoveryCommitment, walletFromRoot } from '../../ts/dist/keys.js';
 import { sigeloMoneroSigAddr, subaddress } from '../../ts/dist/monero.js';
-import { readLog } from '../../spend/dist/service.js';
-import { tokenHash } from '../../spend/dist/policy.js';
+import { readLog } from '../../apps/keeper/dist/service.js';
+import { tokenHash } from '../../apps/keeper/dist/policy.js';
 import { startMockWallet } from './mock-wallet.mjs';
 import { installLicence, keyKeeper, testVendor } from './licence.mjs';
 
@@ -152,13 +152,13 @@ writeFileSync(policyPath, JSON.stringify({
   agents: Object.fromEntries([...agents, probe].map((a) => [a.name, agentJson(a)])),
 }, null, 2), { mode: 0o600 });
 // The policy uses delegates and approvals, paid verbs a keeper without a licence refuses 403
-// licence_required (spend/licence.ts): the scratch keeper is a pro customer of a throwaway TEST
+// licence_required (apps/keeper/licence.ts): the scratch keeper is a pro customer of a throwaway TEST
 // vendor (tools/sim/licence.mjs). Its own stream, so the seeded plan above is unchanged.
 const LR = prng('licence');
 const lbytes = (n) => Uint8Array.from({ length: n }, () => Math.floor(LR() * 256));
 const vendor = testVendor(lbytes);
-const licence = { status: await installLicence({ dir, spendDist: join(ROOT, 'spend', 'dist'), vendor,
-  keeper: await keyKeeper({ dir, spendDist: join(ROOT, 'spend', 'dist'), bytes: lbytes, vendor }) }) };
+const licence = { status: await installLicence({ dir, spendDist: join(ROOT, 'apps', 'keeper', 'dist'), vendor,
+  keeper: await keyKeeper({ dir, spendDist: join(ROOT, 'apps', 'keeper', 'dist'), bytes: lbytes, vendor }) }) };
 
 const events = [];
 const findings = [];
@@ -171,7 +171,7 @@ const keeper = { proc: null, up: false, ready: null, starts: 0, stderr: '', kill
 function startKeeper() {
   keeper.starts++;
   keeper.ready = new Promise((resolve, reject) => {
-    const p = spawn(process.execPath, [join(ROOT, 'spend/dist/cli.js'), 'serve', policyPath, '--port', String(KPORT)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, [join(ROOT, 'apps/keeper/dist/cli.js'), 'serve', policyPath, '--port', String(KPORT)], { stdio: ['ignore', 'pipe', 'pipe'] });
     keeper.proc = p;
     let out = '';
     p.stdout.setEncoding('utf-8'); p.stderr.setEncoding('utf-8');
@@ -193,7 +193,7 @@ async function stopKeeper(signal) {
   await new Promise((r) => { p.once('exit', r); p.kill(signal); });
 }
 
-// The keeper's one-at-a-time lane (spend/service.ts LANE_MAX): past its bound the keeper answers
+// The keeper's one-at-a-time lane (apps/keeper/service.ts LANE_MAX): past its bound the keeper answers
 // 503 busy with Retry-After, nothing done. A real client waits Retry-After and sends the same
 // request again; so does this one, up to BUSY_TRIES sends or BUSY_MS, then the busy answer stands
 // (and is a finding: no flow allows it).

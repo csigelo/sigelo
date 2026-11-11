@@ -1,6 +1,6 @@
 # Publish the sigelo entry to the MCP Registry (registry.modelcontextprotocol.io) with GitHub OIDC:
 # no device code, no stored token. The namespace io.github.csigelo/* is proven by this repository's
-# OIDC identity. Manual trigger only. integrations/mcp/server.json lists npm sigelo-mcp (the registry
+# OIDC identity. Manual trigger only. apps/integrations/mcp/server.json lists npm sigelo-mcp (the registry
 # checks its package.json mcpName) and the remote; bump it and publish the npm package first.
 name: mcp registry
 on:
@@ -21,4 +21,4 @@ jobs:
       - name: login (OIDC)
         run: ./mcp-publisher login github-oidc
       - name: publish
-        run: ./mcp-publisher publish integrations/mcp/server.json
+        run: ./mcp-publisher publish apps/integrations/mcp/server.json

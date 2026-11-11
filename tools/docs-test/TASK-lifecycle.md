@@ -8,13 +8,13 @@ person: names and formats below are exact.
 
 ## What you may use
 
-- **Read:** `SPEC.md`, `QUICKSTART.md`, `examples/world.mjs`, `ts/README.md`,
+- **Read:** `SPEC.md`, `QUICKSTART.md`, `accept/examples/world.mjs`, `ts/README.md`,
   `test-vectors.json`, `schema/`. Nothing else.
 - **Do not read** `ts/dist/`, `ts/node_modules/` or `node_modules/`. They are there to be
   imported and run, not read.
 - **Run:** `node` (≥ 22.18) and a shell. The library is `import('sigelo')` from `$W`
   (it is also `./ts/dist/sigelo.js`, the path QUICKSTART uses). The mock world is
-  `node examples/world.mjs …`, run from `$W`.
+  `node accept/examples/world.mjs …`, run from `$W`.
 - QUICKSTART's `sigelo-agent` commands are **not installed** here. Do what those steps do
   with the library instead.
 - No network, no other packages, no help. If the docs are unclear, decide, and say what you
@@ -30,7 +30,7 @@ below are what is graded.
    the agent's identity so that it commits to that recovery key.
    - `out/recovery.pub` — the recovery **public** key, as a multibase `z6Mk…` string on one line
    - `out/genesis.json` — the agent's genesis document
-2. **Get attested by the mock world** (`examples/world.mjs`): obtain its challenge, answer
+2. **Get attested by the mock world** (`accept/examples/world.mjs`): obtain its challenge, answer
    it, and receive its attestation.
    - `out/challenge-1.json` — the challenge body exactly as the world printed it
    - `out/challenge-1.signed.json` — your answer, `{ "did": …, "sig": … }`

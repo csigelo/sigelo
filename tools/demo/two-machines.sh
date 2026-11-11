@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # tools/demo/two-machines.sh: tools/demo/two-machines.md on one machine. Two agents, each with its own HOME and
 # identity file, and a relay on loopback at its default login rate; every node process reads one
-# injected clock. alice runs sigelo-agent from its source (adapters/moadim/cli.ts), bob as step 1 of
+# injected clock. alice runs sigelo-agent from its source (apps/agent/cli.ts), bob as step 1 of
 # tools/demo/two-machines.md installs it (npm run build: dist/cli.js); a copy laid out as npm installs it
 # loads sigelo-contact beside it, and refuses a package that only takes that name's place. They
 # make their recovery keys with sigelo-agent recovery-key, pair by the long code (both show the same
@@ -16,7 +16,7 @@
 # stays queued until the invitee's agent connects, the invitee's goes at once; the thief's message
 # that reaches bob with the recovery is refused (re_pair). Prints DEMO PASS, or FAIL and exits 1 at the
 # first failure.
-#   sh tools/demo/two-machines.sh        (needs ts/ built and npm ci in contact/, relay/, adapters/moadim/)
+#   sh tools/demo/two-machines.sh        (needs ts/ built and npm ci in apps/contact/, relay/, apps/agent/)
 # The relay: SIGELO_RELAY_DIR, else relay/ here (it is its own AGPL repository once exported).
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -64,13 +64,13 @@ on() { who=$1; shift; HOME="$W/$who" SIGELO_IDENTITY="$W/$who/.config/moadim/sig
 
 step "the install: sigelo-agent built as tools/demo/two-machines.md step 1 builds it"
 # npm run build (tsc -p tsconfig.build.json) into a copy of the package, so the tree here is
-# untouched: dist/ beside the package's node_modules, where npm ci linked sigelo-contact to contact/.
+# untouched: dist/ beside the package's node_modules, where npm ci linked sigelo-contact to apps/contact/.
 CLONE="$W/clone"
-mkdir -p "$CLONE/adapters/moadim"
-cp "$ROOT/adapters/moadim/package.json" "$CLONE/adapters/moadim/"
-ln -s "$ROOT/adapters/moadim/node_modules" "$CLONE/adapters/moadim/node_modules"
-"$ROOT/adapters/moadim/node_modules/.bin/tsc" -p "$ROOT/adapters/moadim/tsconfig.build.json" --outDir "$CLONE/adapters/moadim/dist" || die "npm run build"
-[ -f "$CLONE/adapters/moadim/dist/sigelo-agent-contact.js" ] || die "the build left out the contact verbs"
+mkdir -p "$CLONE/apps/agent"
+cp "$ROOT/apps/agent/package.json" "$CLONE/apps/agent/"
+ln -s "$ROOT/apps/agent/node_modules" "$CLONE/apps/agent/node_modules"
+"$ROOT/apps/agent/node_modules/.bin/tsc" -p "$ROOT/apps/agent/tsconfig.build.json" --outDir "$CLONE/apps/agent/dist" || die "npm run build"
+[ -f "$CLONE/apps/agent/dist/sigelo-agent-contact.js" ] || die "the build left out the contact verbs"
 echo "built: dist/cli.js and dist/sigelo-agent-contact.js"
 # The same build as npm installs it (node_modules/sigelo-agent) loads sigelo-contact, its dependency,
 # from its own install and hands it the identity secret: only sigelo-contact at a version within
@@ -79,7 +79,7 @@ echo "built: dist/cli.js and dist/sigelo-agent-contact.js"
 # right version above the install ($W/node_modules: Node's walk would reach it) is named, never run.
 NM="$W/npm/node_modules"
 mkdir -p "$NM/sigelo-agent" "$NM/sigelo-contact"
-cp -R "$CLONE/adapters/moadim/dist" "$CLONE/adapters/moadim/package.json" "$NM/sigelo-agent/"
+cp -R "$CLONE/apps/agent/dist" "$CLONE/apps/agent/package.json" "$NM/sigelo-agent/"
 ln -s "$ROOT/ts" "$NM/sigelo"
 echo '{"name":"sigelo-contact","type":"module"}' > "$NM/sigelo-contact/package.json"
 for f in carrier kdf invite short; do echo "import{writeFileSync}from'node:fs';writeFileSync('$W/squatter-ran','x');" > "$NM/sigelo-contact/$f.mjs"; done
@@ -88,13 +88,13 @@ rc=0; on npm node "$NM/sigelo-agent/dist/cli.js" contacts > /dev/null 2> "$W/npm
 cat "$W/npm.err"
 mkdir "$W/node_modules" && mv "$NM/sigelo-contact" "$W/node_modules/"
 node -e 'console.log(JSON.stringify({ name: "sigelo-contact", version: require(process.argv[1]).version, type: "module" }))' \
-  "$ROOT/adapters/moadim/package.json" > "$W/node_modules/sigelo-contact/package.json"
+  "$ROOT/apps/agent/package.json" > "$W/node_modules/sigelo-contact/package.json"
 rc=0; on npm node "$NM/sigelo-agent/dist/cli.js" contacts > /dev/null 2> "$W/npm.err" || rc=$?
 [ $rc = 1 ] && grep -q 'reinstall sigelo-agent' "$W/npm.err" && grep -q 'not loading .*/node_modules/sigelo-contact, outside this package' "$W/npm.err" && [ ! -e "$W/squatter-ran" ] \
   || die "no sigelo-contact, one above the install (exit $rc): $(cat "$W/npm.err")"
 cat "$W/npm.err"
 rm -r "$W/node_modules"
-ln -s "$ROOT/contact" "$NM/sigelo-contact"
+ln -s "$ROOT/apps/contact" "$NM/sigelo-contact"
 # The recovery key from the install alone, as the quick start makes it.
 on npm node "$NM/sigelo-agent/dist/cli.js" init --recovery "$(on npm node "$NM/sigelo-agent/dist/cli.js" recovery-key --out "$W/npm.recovery.key" 2> /dev/null)" > /dev/null 2> "$W/npm.err" \
   || die "the npm copy: init --recovery \"\$(sigelo-agent recovery-key)\": $(cat "$W/npm.err")"
@@ -107,7 +107,7 @@ echo "the npm copy, sigelo-contact beside it: accept reads the code ($(cat "$W/n
 # build above.
 agent() {
   who=$1; shift
-  if [ "$who" = bob ]; then on bob js "$CLONE/adapters/moadim/dist/cli.js" "$@"; else on "$who" js "$ROOT/adapters/moadim/cli.ts" "$@"; fi
+  if [ "$who" = bob ]; then on bob js "$CLONE/apps/agent/dist/cli.js" "$@"; else on "$who" js "$ROOT/apps/agent/cli.ts" "$@"; fi
 }
 # lines <prefix> <n>: "<prefix> 1" … "<prefix> n", one a line.
 lines() { n=1; while [ $n -le "$2" ]; do echo "$1 $n"; n=$((n + 1)); done; }
@@ -157,7 +157,7 @@ agent alice invite --name nobody --ttl 60 --json > "$W/invite.json" 2> /dev/null
 # agent: an assignment before a shell function may outlive the call.
 agent carol init --recovery "$(agent carol recovery-key --out "$W/carol.recovery.key" 2> /dev/null)" > /dev/null 2>&1
 rc=0; HOME="$W/carol" SIGELO_IDENTITY="$W/carol/.config/moadim/sigelo.local.json" SIGELO_RELAY_ENDPOINTS='{"relay.demo":{"mqtt":"mqtt://127.0.0.1:1","http":"http://127.0.0.1:1"}}' \
-  node --import "$CLOCK" "$ROOT/adapters/moadim/cli.ts" accept "$CODE" --wait 1 > /dev/null 2> "$W/carol.err" || rc=$?
+  node --import "$CLOCK" "$ROOT/apps/agent/cli.ts" accept "$CODE" --wait 1 > /dev/null 2> "$W/carol.err" || rc=$?
 [ $rc = 1 ] && grep -qF "the code names $A0" "$W/carol.err" || die "accept with the relay unreachable (exit $rc): $(cat "$W/carol.err")"
 # Pasted as a mail client wraps it: accept drops the whitespace, which no code contains.
 WRAPPED=$(printf '%s\n  %s' "$(echo "$CODE" | cut -c1-64)" "$(echo "$CODE" | cut -c65-)")
@@ -211,8 +211,8 @@ node -e 'process.stdout.write("hi \u009b2J\u009d0;all clear\u009c \u202eevil\n" 
 # A message's content is any JSON. Indented, 500 levels printed as half a megabyte; a few such
 # messages passed V8's string limit, and the inbox, already taken, was lost.
 on alice js --input-type=module -e "
-  import { Carrier, pathsFor, optionsFromEnv } from '$ROOT/contact/carrier.mjs';
-  import { load, secretOf, bundleOf } from '$ROOT/adapters/moadim/sigelo-agent.ts';
+  import { Carrier, pathsFor, optionsFromEnv } from '$ROOT/apps/contact/carrier.mjs';
+  import { load, secretOf, bundleOf } from '$ROOT/apps/agent/sigelo-agent.ts';
   const f = process.env.SIGELO_IDENTITY; let a = []; for (let i = 1; i < 500; i++) a = [a];
   const c = new Carrier({ identity: () => { const s = load(f); return { secret: secretOf(s), bundle: bundleOf(s) }; }, ...pathsFor(f), ...optionsFromEnv() });
   const [r] = await c.sendAll('bob', [a], { label: '' }); if (r.status !== 'sent') { console.error(JSON.stringify(r)); process.exit(1); }" || die "alice's nested message"

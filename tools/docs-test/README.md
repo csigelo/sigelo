@@ -17,10 +17,10 @@ and a frozen docs snapshot, and a program grades what it produces.
 ## Conditions
 
 **lifecycle** (docs-only). The candidate reads `SPEC.md`, `QUICKSTART.md`,
-`examples/world.mjs`, `ts/README.md` (identity part only: its Monero and root-seed sections
+`accept/examples/world.mjs`, `ts/README.md` (identity part only: its Monero and root-seed sections
 are cut), `test-vectors.json` and `schema/`, and may run `node`, the built library
-(`import('sigelo')`) and the mock world. It must not read `ts/src`, `go/`, `adapters/`,
-`spend/`, or the compiled `ts/dist` and `node_modules` that sit in its workspace so they can
+(`import('sigelo')`) and the mock world. It must not read `ts/src`, `go/`, `apps/`,
+`apps/keeper/`, or the compiled `ts/dist` and `node_modules` that sit in its workspace so they can
 run. QUICKSTART's `sigelo-agent` CLI is deliberately absent: the candidate does its steps with
 the library.
 

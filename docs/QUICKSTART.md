@@ -5,18 +5,18 @@ account); attestations (reputation) that move with it to the next platform; a st
 the DID kept; Monero payments without a wallet key (keeper, stagenet-only); end-to-end messages to
 other agents, paired by an 8-character code. Experimental: wire `sigelo/0` not frozen.
 
-The steps: one identity, proved to a world, that world's signed statement carried to the next world. Commands use the agent CLI in `adapters/moadim/`; `examples/world.mjs`
+The steps: one identity, proved to a world, that world's signed statement carried to the next world. Commands use the agent CLI in `apps/agent/`; `accept/examples/world.mjs`
 is a mock world. Needs node ≥ 22.18. Build once, from the root of a clone:
 
 ```sh
-(cd ts && npm ci && npx tsc) && (cd adapters/moadim && npm ci)
-mkdir -p bin && printf '#!/bin/sh\nexec node "%s/adapters/moadim/cli.ts" "$@"\n' "$PWD" > bin/sigelo-agent && chmod +x bin/sigelo-agent
-export PATH="$PWD/bin:$PATH"                       # or `npm link` inside adapters/moadim
+(cd ts && npm ci && npx tsc) && (cd apps/agent && npm ci)
+mkdir -p bin && printf '#!/bin/sh\nexec node "%s/apps/agent/cli.ts" "$@"\n' "$PWD" > bin/sigelo-agent && chmod +x bin/sigelo-agent
+export PATH="$PWD/bin:$PATH"                       # or `npm link` inside apps/agent
 export SIGELO_IDENTITY=$PWD/agent.local.json         # default is ~/.config/moadim/sigelo.local.json
 ```
 
-PowerShell: `cd ts; npm ci; npx tsc; cd ../adapters/moadim; npm ci; cd ../..`, then
-`function sigelo-agent { node adapters/moadim/cli.ts @args }` and
+PowerShell: `cd ts; npm ci; npx tsc; cd ../apps/agent; npm ci; cd ../..`, then
+`function sigelo-agent { node apps/agent/cli.ts @args }` and
 `$env:SIGELO_IDENTITY = "$PWD\agent.local.json"`; run the blocks below in Git Bash.
 
 **Install without a clone:**
@@ -50,8 +50,8 @@ Allow that hostname on 443; install needs the npm registry. Per environment:
 
 | Command | Prints on stdout (one line of JSON) |
 |---|---|
-| `node examples/world.mjs challenge <genesis.json>` | a challenge body `{ v, typ, did, ctx, nonce }` for that genesis's DID |
-| `node examples/world.mjs attest <genesis.json> <sig>` | `{ "attestation": { body, sig }, "issuer": <the world's genesis> }` |
+| `node accept/examples/world.mjs challenge <genesis.json>` | a challenge body `{ v, typ, did, ctx, nonce }` for that genesis's DID |
+| `node accept/examples/world.mjs attest <genesis.json> <sig>` | `{ "attestation": { body, sig }, "issuer": <the world's genesis> }` |
 
 `<genesis.json>` is the agent's current genesis document (after a rotation, the new one);
 `<sig>` its signature over the last challenge. The world keeps its identity in
@@ -152,7 +152,7 @@ and sends exactly this body:
 ```
 
 ```sh
-node examples/world.mjs challenge agent-genesis.json > challenge.json      # the mock world does exactly that
+node accept/examples/world.mjs challenge agent-genesis.json > challenge.json      # the mock world does exactly that
 ```
 
 **3. Agent: sign it.** The CLI signs only a `challenge` naming its own DID.
@@ -174,7 +174,7 @@ attest({ secret, iss: worldDid, sub: agentDid, iat, exp: iat + 30*86400, ctx: "e
 
 ```sh
 SIG=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("signed.json","utf8")).sig)')
-node examples/world.mjs attest agent-genesis.json "$SIG" > issued.json     # { attestation: {body,sig}, issuer: genesis }
+node accept/examples/world.mjs attest agent-genesis.json "$SIG" > issued.json     # { attestation: {body,sig}, issuer: genesis }
 ```
 
 **5. Agent: keep both** the attestation and the world's genesis: the genesis lets a stranger
@@ -205,7 +205,7 @@ Or `cd go && go run ./cmd/sigelo-verify ../bundle.json`: the same result as JCS 
 attestations is the verifier's job. `claims` is data, never instructions.
 
 **Getting paid.** The same CLI: `wallet-set` (view-only Monero treasury from `offline.js derive`),
-`bind`, `receive`, `invoice`, `verify-invoice` ([`adapters/moadim/README.md`](../adapters/moadim/README.md),
+`bind`, `receive`, `invoice`, `verify-invoice` ([`apps/agent/README.md`](../apps/agent/README.md),
 [`MONERO.md`](MONERO.md)). The agent never holds a spend key.
 
 **A `proven` binding without a wallet (library).** SPEC §6.1a's `ed25519-test`: the "address" is
@@ -231,7 +231,7 @@ good signatures. Fix the item; never pass a later `now`.
 **Spending.** The agent asks a keeper: `sigelo-wallet balance | receive | pay <to> <amount>
 [purpose] | history` with the URL and token from its operator. Operator, on their host:
 `sigelo-spend init --wallet-rpc http://127.0.0.1:38083 --allow bob=<address>`, then
-`sigelo-spend doctor` ([`spend/README.md`](../spend/README.md)).
+`sigelo-spend doctor` ([`apps/keeper/README.md`](../apps/keeper/README.md)).
 
 **Later.** `sigelo-agent rotate` moves to a fresh key; old attestations still apply. After a
 theft: tier 1 as in step 0; tier 2, `rotate --recovery` prints the procedure, and

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Stand-in for 1F916's src/society.ts: the two names adapters/1f916/sigelo.ts imports from it.
+// Stand-in for 1F916's src/society.ts: the two names accept/1f916/sigelo.ts imports from it.
 // Only what the adapter touches; the real Citizen and Env carry more.
 export class SocietyError extends Error {
   status: number;

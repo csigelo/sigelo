@@ -5,10 +5,15 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **apps/:** the installable packages moved there (agent, integrations, plugins, contact, transfer, keeper, kit, keyagent); `accept/` holds 1f916 and examples. Package names unchanged.
 - **tools/:** the test harnesses moved there: `sim`, `docs-test`, `demo`, `gate`; word budgets are `node tools/docs-test/check-budgets.mjs`.
 - **watch --hook-timeout:** seconds, 10m or 1h (`SIGELO_HOOK_TIMEOUT` too; default 120 s, 0 no limit). A stopped or failed hook's message stays unread and is offered again each round.
 - **Accept now, reply later:** `watch --spool <dir>` writes each own message to `<id>.json`; each message has an id (`SIGELO_MSG_ID`); `reply --to <id>` answers it, `--status` says how far it went.
 - **invite --ttl, enrol --ttl:** a short code for 60 s to 1 h (default 10 minutes) for slow agents; the relay keeps one up to an hour (PARK_TTL 3600, odds in park.mjs). Deploy the relay first.
+- **Sealed identity file:** `init --passphrase-file`, `seal`, `unseal`: key under scrypt + AES-256-GCM; read with `SIGELO_IDENTITY_PASSPHRASE_FILE` (a Docker secret) or `SIGELO_IDENTITY_PASSPHRASE`.
+- **Plain key warning:** a plain-hex identity key now says so on stderr at every start, naming the file and `sigelo-agent seal`.
+- **sigelo-key-agent on npm:** publishable from 0.1.15 (built, packed and tested with the others); its README has a Docker sidecar example and the policy in a few lines.
+- **SIGELO_PREKEY_DAYS:** 1 to 7 (default 7): prekeys replaced sooner, so a stolen state file reads incoming messages for less time. Local only, no wire change.
 - **MCP:** `sigelo_wait_for_message` (a long poll, up to 10 minutes, refused beside a watcher), `sigelo_reply` with its delivery status, `sigelo_enrol`, `sigelo_enrol_finish`.
 - **Docs:** a slow-agents section for pi and Hermes; pi 1.0's MCP config (doc-checked, untested); every `npx -y sigelo-mcp` example pinned to 0.1.14.
 - **CI: wallet-rpc canary:** auto-refresh off after create_wallet, a readiness poll up to 180 s, three retries before SKIP; mcp-registry pinned by SHA; `permissions: {}` on top.
@@ -17,6 +22,7 @@ history, which is not public. This public history starts at the import of 2026-1
 - **sigelo-mcp --http [HOST:PORT]:** MCP Streamable HTTP on 127.0.0.1, bearer token (a given one off loopback), web pages refused; stdio unchanged. Octomind: a frameworks row.
 - **Front pages:** the line under the motto says a team of AI agents built sigelo under a human owner, and why to trust it as Bitcoin is trusted, linking the FAQ; sigelo.ai in all 30 languages.
 - **sigelo.io FAQ:** `/faq.html`, seven answers: why trust it, a lost machine or key, cutting someone off, who may instruct an agent, stacks, a down or hostile relay, what sigelo is not.
+- **sigelo.ai FAQ:** `/faq.html`, six answers on the relay: what it sees, keeps and costs, outages, your own; linked from the footer and the home page.
 - **Spec §12.6, §12.7:** THREAT-MODEL.md and MONERO.md are links to their sigelo.io copies; each consideration is its own bullet. Wording and meaning unchanged.
 - **Remote control, quiet unanswered:** a control asks only while its computer's lease runs, renewed by an answer; else it probes, backing off to 3 an hour, and shows "not connected". Control messages expire in 5 min.
 
