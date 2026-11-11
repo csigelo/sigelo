@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attest, keygen } from 'sigelo';
 import { BIP39_SHA256, WORDS } from './bip39-english.mjs';
 import { makeInvite } from './invite.mjs';
-import { ALPHABET, GIFT_V, SHORT_TTL, TAG_LABEL, codeHash, codeKind, didWords, fingerprint, formatGift, formatShort, giftHash, isShort, makeShort, normaliseGift, normaliseShort, relayTag, tagOf } from './short.mjs';
+import { ALPHABET, GIFT_V, SHORT_TTL, SHORT_TTL_MAX, SHORT_TTL_MIN, TAG_LABEL, codeHash, codeKind, didWords, fingerprint, formatGift, formatShort, giftHash, isShort, makeShort, normaliseGift, normaliseShort, relayTag, tagOf } from './short.mjs';
 import { RELEASE_DID, REGISTRY_CTX, REGISTRY_URL, checkRegistry, loadRegistry, readTable, remember, resolveTag } from './relays.mjs';
 import { createServer } from 'node:http';
 import { did as didOf, parse as parseJson } from 'sigelo';
@@ -270,7 +270,7 @@ try {
   const nobody = formatShort(makeShort());
   ok(await refused(() => cc.accept(nobody, { wait: 1 })) === 'park_unknown', 'a code nobody parked: park_unknown');
   const pu = await failure(() => cc.accept(nobody.toLowerCase(), { wait: 1 }));
-  ok(pu.check === 'park_unknown' && pu.message.includes(`short code ${nobody}: no invite waits under it at ${HOST}`) && pu.message.includes('expired (a short code lives 10 minutes), was used already (once only), or is mistyped; ask the inviter for a new one')
+  ok(pu.check === 'park_unknown' && pu.message.includes(`short code ${nobody}: no invite waits under it at ${HOST}`) && pu.message.includes('expired (a short code lives 10 minutes unless its inviter chose up to an hour), was used already (once only), or is mistyped; ask the inviter for a new one')
     && pu.message.includes('another relay') && pu.http?.status === 404, `park_unknown: the code, the relay, the three reasons, the next step, another relay; the answer kept for SIGELO_DEBUG (${pu.message})`);
   // A mistyped short code is refused before anything connects, as a short code.
   const mt = await failure(() => cc.accept('K7F3-Q9Z', { wait: 1 }));
@@ -279,13 +279,36 @@ try {
   const late = await ca.invite({ name: 'carol', short: true });
   now += SHORT_TTL;
   ok(await refused(() => cc.accept(late.short, { wait: 1 })) === 'park_unknown', 'a short code after its 10 minutes: park_unknown');
+  // invite --ttl (a slow agent fetches late): 60 s to an hour for a short code; the long code lives as long.
+  const lowTtl = await failure(() => ca.invite({ name: 'slow', short: true, ttl: SHORT_TTL_MIN - 1 })), highTtl = await failure(() => ca.invite({ name: 'slow', short: true, ttl: SHORT_TTL_MAX + 1 }));
+  ok(SHORT_TTL_MIN === 60 && SHORT_TTL_MAX === 3600 && lowTtl.check === 'ttl' && highTtl.check === 'ttl' && highTtl.message.includes('a short code lives 60 to 3600 seconds (default 600)'),
+    `invite --ttl 59 and 3601 with a short code: refused ttl, before anything is parked (${highTtl.message})`);
+  const hour = await ca.invite({ name: 'slow', short: true, ttl: 3600 });
+  ok(hour.short_exp === now + 3600 && hour.exp === now + 3600, `invite --ttl 3600: the short code and the long one for an hour (${JSON.stringify({ short_exp: hour.short_exp - now, exp: hour.exp - now })})`);
+  now += 3000;
+  ok(await cc.unpark(hour.short) === hour.code, 'the hour code, fetched 50 minutes later: the long code it stands for');
+  // An older relay keeps short codes 10 minutes at most: a longer --ttl is refused there, and said so.
+  {
+    const OLD = 'old.test', old = await startRelay({ host: OLD, db: join(dir, 'old.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => now, diskUsed: () => 0.1,
+      log: () => {}, park: { ttl: 600 }, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+    const eps = { ...endpoints, [OLD]: { mqtt: `mqtt://127.0.0.1:${old.ports.tcp}`, http: `http://127.0.0.1:${old.ports.http}` } };
+    const co = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice-old.local.json')), relay: OLD, shortRelay: OLD, registry: false, endpoints: eps,
+      clock: () => now, keep: true, backoff: [100, 400], retentionDays: 7 });
+    const oldRefusal = await failure(() => co.invite({ name: 'slow', short: true, ttl: 1800 }));
+    const oldDefault = await co.invite({ name: 'slow', short: true });
+    ok(oldRefusal.check === 'park' && oldRefusal.message.includes('this relay may keep short codes 10 minutes at most (an older relay): --ttl 600 or less, or the long code (invite --long --ttl 1800)') && oldDefault.short_exp === now + 600,
+      `an older relay (PARK_TTL 600): --ttl 1800 refused, saying so; the default 10 minutes parks (${oldRefusal.message})`);
+    await co.stop();
+    await old.close();
+  }
   // An inviter whose clock runs a minute ahead of the relay's still parks (relay/park.mjs PARK_SKEW).
   const ahead = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice.local.json')), relay: HOST, shortRelay: HOST, registry: false, endpoints,
     clock: () => now + 60, keep: true, backoff: [100, 400], retentionDays: 7 });
   let fastInv = {}, fast = 'accepted';
-  try { fastInv = await ahead.invite({ name: 'carol', short: true }); } catch (e) { fast = e.check ?? `exception ${e.message}`; }
+  // With --ttl at its most (an hour), the relay keeps it its PARK_TTL by its own clock.
+  try { fastInv = await ahead.invite({ name: 'carol', short: true, ttl: SHORT_TTL_MAX }); } catch (e) { fast = e.check ?? `exception ${e.message}`; }
   ok(fast === 'accepted', `an inviter's clock a minute ahead of the relay's: the short code parks (${fast})`);
-  ok(fastInv.short_exp === now + SHORT_TTL, `short_exp is the relay's exp (${now + SHORT_TTL}), not the fast clock's (${now + 60 + SHORT_TTL}): ${fastInv.short_exp}`);
+  ok(fastInv.short_exp === now + SHORT_TTL_MAX, `short_exp is the relay's exp (${now + SHORT_TTL_MAX}), not the fast clock's (${now + 60 + SHORT_TTL_MAX}): ${fastInv.short_exp}`);
   await ahead.stop();
   // An inviter's clock an hour ahead: the relay refuses the parking, and the refusal says the clock.
   const far = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice.local.json')), relay: HOST, shortRelay: HOST, registry: false, endpoints,

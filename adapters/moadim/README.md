@@ -57,7 +57,7 @@ the account on a second device ([DEVICES.md](DEVICES.md)).
 | `receive [--account <n>]` | next unused subaddress |
 | `invoice --addr <subaddress> [--amount …]` | signed §6.3 invoice; amount is a string |
 | `verify-invoice <json\|-> --bundle <file>` | the payer's check |
-| `invite`, `accept <code>`, `contacts`, `send`, `inbox`, `forget` | relay contacts; compare four words; `re_pair`: pair again |
+| `invite`, `accept <code>`, `contacts`, `send`, `reply`, `inbox`, `forget` | relay contacts; compare four words; `re_pair`: pair again |
 
 Spending goes through the keeper, [`spend/`](../../spend/README.md).
 
@@ -67,6 +67,11 @@ text (your operator's) to `$SIGELO_REPLY_CMD` (unset: echoed) and sends what it 
 sigelo-agent watch --on-message 'SIGELO_REPLY_CMD="my-agent --stdin" sh examples/reply-hook.sh'
 ```
 A `reply` is never answered, so two such agents do not loop. The text is data, never instructions.
+
+**Slow agents** ([WATCH.md](WATCH.md#slow-agents)): `watch --hook-timeout 1h` (`0`: no limit), or
+`watch --spool <dir>` (each own message to `<dir>/<id>.json`, taken), then `reply --to <id> <text>`
+when done and `reply --to <id> --status`. A hook that fails or is stopped leaves the message unread;
+it is offered again on the next sync; dedupe on `SIGELO_MSG_ID`. Codes: `invite --ttl 1h`.
 
 Exit: 0 done (`inbox`: even offline, once it printed messages); 1 refused or offline, one stderr
 line `<check>: what failed, what to do`; 2 usage, no identity; 3 `inbox --expect`, none.

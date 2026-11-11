@@ -77,7 +77,7 @@ await new Promise((r) => keeper.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${keeper.address().port}`;
 
 const IDENTITY_TOOLS = ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'];
-const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_forget_contact', 'sigelo_group', 'sigelo_history', 'sigelo_inbox', 'sigelo_invite', 'sigelo_links', 'sigelo_presence', 'sigelo_send', 'sigelo_send_file', 'sigelo_set_tier', 'sigelo_transfer'];
+const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_enrol', 'sigelo_enrol_finish', 'sigelo_forget_contact', 'sigelo_group', 'sigelo_history', 'sigelo_inbox', 'sigelo_invite', 'sigelo_links', 'sigelo_presence', 'sigelo_reply', 'sigelo_send', 'sigelo_send_file', 'sigelo_set_tier', 'sigelo_transfer', 'sigelo_wait_for_message'];
 // Present here only if sigelo-contact resolves, as the server decides it (contact.mjs load).
 const sidecar = await import('../../adapters/moadim/sigelo-agent-contact.ts');
 const HAS_CONTACT = await sidecar.contactLib().then(() => true, (e) => { if (sidecar.absent(e)) return false; throw e; });
@@ -624,6 +624,85 @@ ${code.slice(60)}
       const got = [];
       for (let i = 0; i < 3 && got.length < 6; i++) got.push(...((await b.call('sigelo_inbox', { wait: 2 })).data?.messages ?? []).map((m) => m.content));
       ok(got.join() === 'p0a,p0b,p0c,p1a,p1b,p1c', 'relay: bob reads the 6 once each, in order', got.join());
+
+      // The agent task loop: sigelo_wait_for_message (a long poll), sigelo_reply by the message's id
+      // with its delivery status, sigelo_invite ttl. Beside a watcher, the wait is refused (watched).
+      for (const t of [-1, 601, 1.5, 'x']) {
+        r = await a.call('sigelo_wait_for_message', { timeout_s: t });
+        ok(r.isError && r.structured?.code === 'usage' && r.text.includes('timeout_s: whole seconds, 0 to 600'), `task loop: sigelo_wait_for_message refuses timeout_s ${JSON.stringify(t)}`, r.text);
+      }
+      r = await a.call('sigelo_wait_for_message', { timeout_s: 1, from: 'nobody' });
+      ok(r.isError && r.structured?.code === 'not_contact', 'task loop: sigelo_wait_for_message from no contact: not_contact', r.text);
+      writeFileSync(lockPath(join(dir, 'alice.local.json')), `${process.pid} watch`);
+      r = await a.call('sigelo_wait_for_message', { timeout_s: 5 });
+      ok(r.isError && r.structured?.code === 'watched' && r.text.includes(`is watched by sigelo-agent watch (pid ${process.pid})`) && r.text.includes('watch --on-message'),
+        'task loop: sigelo_wait_for_message beside a watcher: refused (watched), pointing to the watch hook; the lock not fought', r.text);
+      writeFileSync(lockPath(join(dir, 'alice.local.json')), `${process.pid}`);
+      r = await a.call('sigelo_wait_for_message', { timeout_s: 5 });
+      ok(r.isError && r.structured?.code === 'busy', 'task loop: sigelo_wait_for_message beside a page: busy', r.text);
+      rmSync(lockPath(join(dir, 'alice.local.json')));
+      let t1 = Date.now();
+      r = await a.call('sigelo_wait_for_message', { timeout_s: 2 });
+      ok(!r.isError && r.data.timed_out === true && r.data.messages.length === 0 && Date.now() - t1 >= 1900, `task loop: nothing comes: timed_out after timeout_s (${Date.now() - t1} ms)`, r.text);
+      t1 = Date.now();
+      const waited = a.call('sigelo_wait_for_message', { timeout_s: 60, from: 'bob' });
+      await new Promise((res) => setTimeout(res, 2500));
+      ok((await b.call('sigelo_send', { to: 'alice', text: 'a long task' })).data?.status === 'sent', 'task loop: bob sends while alice waits');
+      r = await waited;
+      const task = r.data?.messages?.[0];
+      ok(!r.isError && r.data.timed_out === false && r.data.messages.length === 1 && task.content === 'a long task' && /^[0-9a-f]{32}$/.test(task.id ?? '') && Date.now() - t1 < 45000,
+        `task loop: sigelo_wait_for_message {from: bob} returns when the message comes (${Date.now() - t1} ms), with its id`, r.text);
+      r = await a.call('sigelo_reply', { msg_id: task?.id, text: 'the long task, done' });
+      ok(!r.isError && r.data.status === 'sent' && r.data.msg_id === task?.id && r.data.delivery?.status === 'published' && typeof r.data.delivery.published_at === 'number',
+        'task loop: sigelo_reply {msg_id, text}: sent to the sender, delivery published (the relay holds it)', r.text);
+      r = await b.call('sigelo_inbox', { wait: 5 });
+      ok(r.data?.messages.some((m) => m.content === 'the long task, done' && m.label === 'reply'), 'task loop: bob gets the reply, labelled reply', r.text);
+      r = await a.call('sigelo_reply', { msg_id: task?.id });
+      ok(!r.isError && r.data.msg_id === task?.id && r.data.from === bDid && r.data.name === 'bob' && r.data.reply?.status === 'published' && r.data.fetched === null,
+        'task loop: sigelo_reply {msg_id} alone: the delivery status again; fetched null (no read receipt)', r.text);
+      r = await a.call('sigelo_reply', { msg_id: '0'.repeat(32), text: 'x' });
+      const r3 = await a.call('sigelo_reply', { msg_id: 'nope', text: 'x' });
+      ok(r.isError && r.structured?.code === 'msg_unknown' && r3.isError && r3.structured?.code === 'msg_id', 'task loop: sigelo_reply to an unknown id: msg_unknown; a malformed one: msg_id', r.text + r3.text);
+      const hour = (await a.call('sigelo_invite', { name: 'slow', ttl: 3600 })).data;
+      ok(Math.abs((hour?.short_exp ?? 0) - Date.now() / 1000 - 3600) < 60, 'task loop: sigelo_invite ttl 3600: a short code for an hour', JSON.stringify(hour));
+      r = await a.call('sigelo_invite', { name: 'slow', ttl: 30 });
+      ok(r.isError && r.structured?.code === 'ttl' && r.text.includes('a short code lives 60 to 3600 seconds'), 'task loop: sigelo_invite ttl 30 with a short code: refused ttl', r.text);
+      // sigelo_enrol: the machine's side of ENROL.md, as init --enrol runs it; the operator's side is the CLI's.
+      {
+        const { newRoot } = await import('../../ts/dist/keys.js');
+        const OPH = join(dir, 'operator-home'), CLI = join(here, '..', '..', 'adapters', 'moadim', 'cli.ts');
+        mkdirSync(OPH);
+        const opEnv = { ...process.env, ...env, HOME: OPH, XDG_CONFIG_HOME: join(OPH, '.config'), SIGELO_KEY_PROVIDER: 'file', SIGELO_IDENTITY: '', SIGELO_HUMAN: '' };
+        const kf = spawnSync(process.execPath, [CLI, 'keeper', '--from-words'], { env: opEnv, input: `${newRoot()}\n`, encoding: 'utf8' });
+        ok(kf.status === 0, 'task loop: the operator\'s keeper --from-words (CLI)', kf.stderr);
+        let code = '';
+        const op = spawn(process.execPath, [CLI, 'enrol', '--name', 'mcpworker', '--wait', '200', '--ttl', '30m'], { env: opEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+        let opErr = '';
+        op.stdout.on('data', (d) => { if (!code) code = String(d).split('\n')[0].trim(); });
+        op.stderr.on('data', (d) => { opErr += d; });
+        const opDone = new Promise((res) => op.on('close', res));
+        for (let i = 0; i < 1200 && !code; i++) await new Promise((res) => setTimeout(res, 100));
+        ok(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(code) && opErr.includes('good for 30 minutes'), `task loop: enrol --ttl 30m prints a code good for 30 minutes (${code})`, opErr);
+        const wk = client({ ...env, SIGELO_IDENTITY: join(dir, 'worker.local.json') });
+        await wk.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
+        r = await wk.call('sigelo_enrol', { code: 'K7F3-Q9Z' });
+        ok(r.isError && r.text.includes('7 characters, a short code has 8'), 'task loop: sigelo_enrol of a mistyped code: refused, as the CLI says it', r.text);
+        r = await wk.call('sigelo_enrol', { code, wait: 200 });
+        const placed = r.data;
+        ok(!r.isError && placed?.status === 'done' && /^did:sigelo:z/.test(placed.result?.did ?? '') && placed.notes.some((l) => l.includes('identity replaced')),
+          'task loop: sigelo_enrol {code}: this machine is the operator\'s worker now (done, its DID, the notes)', r.text.slice(0, 1500));
+        r = await wk.call('sigelo_whoami');
+        ok(r.data?.did === placed?.result?.did, 'task loop: sigelo_whoami: the worker\'s DID', r.text);
+        r = await wk.call('sigelo_enrol', { code });
+        ok(r.isError && r.text.includes('already holds an identity'), 'task loop: sigelo_enrol again: refused, the identity exists', r.text);
+        r = await wk.call('sigelo_enrol_finish', { wait: 5 });
+        ok(!r.isError && ['nothing', 'done'].includes(r.data?.status), 'task loop: sigelo_enrol_finish: nothing pending, or done', r.text);
+        const opCode = await opDone;
+        ok(opCode === 0 && JSON.parse(spawnSync(process.execPath, [CLI, 'contacts', '--operator'], { env: opEnv, encoding: 'utf8' }).stdout || '{"contacts":[]}').contacts.some((x) => x.did === placed?.result?.original || x.did === placed?.result?.did),
+          'task loop: the operator\'s enrol ends 0, the worker among its contacts', opErr.slice(-600));
+        wk.close();
+        await wk.exited;
+      }
 
       // A contact's nested message (content is any JSON; sigelo's parser allows 512 levels) beside
       // two short ones. The page is measured in the text the client gets: compact, so 500 levels

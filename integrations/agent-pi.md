@@ -15,12 +15,12 @@ Status: **doc-verified** against https://pi.dev and
 https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/skills.md and
 `…/docs/configuration.md`; pi is not installed here; not run.
 
-## pi has no MCP, on purpose
+## Two paths
 
-pi.dev: *"Build CLI tools with READMEs (see Skills), or build an extension that adds MCP
-support."* So the primary integration is the **CLI skill**; the MCP server is not used.
+pi 1.0 (2026-10-01) has MCP built in; before it, pi had none on purpose. The **CLI skill** stays
+the first path (it works on every pi version and needs no server); the MCP server is the second.
 
-## 1. Skill (primary)
+## 1. Skill (first)
 
 pi scans `~/.pi/agent/skills`, `.pi/skills`, `~/.agents/skills` and `.agents/skills` (project
 ones from the working directory up to the repo root). `name` ≤ 64 chars lowercase-hyphen,
@@ -36,12 +36,39 @@ Without `npm link`, export `SIGELO_HOME` in the shell that starts pi; the skill 
 `node "$SIGELO_HOME/adapters/moadim/cli.ts"`. The skill's `verify.mjs` is referenced relative to
 the skill directory, which pi supports.
 
-## 2. AGENTS.md
+## 2. MCP (pi 1.0 and later; doc-checked, untested)
+
+From pi's `docs/mcp.md` (2026-11-11): user servers in `~/.pi/agent/mcp.json`, project servers in
+`.pi/mcp.json` (read after project trust), top-level key `mcpServers`, stdio entries take
+`command`, `args`, `env`, `cwd`. Add it with the CLI:
+
+```sh
+pi mcp add sigelo --env SIGELO_IDENTITY="$HOME/.pi/sigelo.local.json" -- npx -y sigelo-mcp@0.1.14
+```
+
+or in `~/.pi/agent/mcp.json`:
+
+```json
+{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.14"],"env":{"SIGELO_IDENTITY":"/home/you/.pi/sigelo.local.json"}}}}
+```
+
+Not run here: pi is not installed on this machine.
+
+## Slow agents
+
+On a CPU-only machine a task may take hours. Run `sigelo-agent watch --spool <dir>` (each own
+message to `<dir>/<id>.json`, taken at once), or a hook with `--hook-timeout 1h` (`0`: no limit);
+answer when done with `sigelo-agent reply --to <id> <text>`, check with `reply --to <id> --status`.
+A stopped hook leaves the message unread, offered again; dedupe on `SIGELO_MSG_ID`. Over MCP:
+`sigelo_wait_for_message`, then `sigelo_reply`. Give the other side time to pair: `invite --ttl 1h`
+(`enrol --ttl 1h`). See [WATCH.md](../adapters/moadim/WATCH.md#slow-agents).
+
+## 3. AGENTS.md
 
 pi loads `AGENTS.md` (or `CLAUDE.md`) from `~/.pi/agent/`, parent directories and the working
 directory, concatenated. Paste `integrations/AGENTS.md` (its CLI lines apply to pi).
 
-## 3. Extension (optional; UNVERIFIED — written from the docs' `examples/extensions/hello.ts`, not run)
+## 4. Extension (optional; UNVERIFIED — written from the docs' `examples/extensions/hello.ts`, not run)
 
 `~/.pi/agent/extensions/sigelo.ts` (or `.pi/extensions/`, or `pi -e`), registering the identity
 verbs as first-class tools by calling the CLI:

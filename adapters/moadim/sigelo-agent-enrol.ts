@@ -25,7 +25,7 @@ import { bundleOf, head, identityPath, load, save, type Store } from './sigelo-a
 import { signer } from './sigelo-agent-keys.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
 import { withLock } from './sigelo-agent-monero.ts';
-import { absent, agentFileFor, agentsDirFor, contactLib, debug, heldPath, holderFor, humanPath, lockHolder, MISSING, operatorFile, putBack, safeJson, safeText, trustOf, unreadable, type Batch } from './sigelo-agent-contact.ts';
+import { absent, agentFileFor, agentsDirFor, contactLib, debug, duration, heldPath, lifeText, holderFor, humanPath, lockHolder, MISSING, operatorFile, putBack, safeJson, safeText, trustOf, unreadable, type Batch } from './sigelo-agent-contact.ts';
 
 export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of your keeper root, restorable from the 25 words
   keeper --from-words [--keeper <j>]       once: your identity (the root identity of the words, when absent) and
@@ -41,6 +41,7 @@ export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of
   enrol --name <n> [--index <i>]           worker i (next free): a one-time code (10 minutes) for the other machine;
        [--wait <s>] [--identity <file>]    it pairs, then takes on worker i's identity, run by you; checked here: its
                                            DID is derived from your words (no four words to compare)
+       [--ttl <s|10m|1h>]                  the code's life, 60 s to 1 h: a slow machine fetches it late
        [--tier friend|quiet]               --tier: yours but low trust (it reads the web): its messages wait in the
                                            inbox, never pushed (default own: pushed in full)
        [--confirm-words]                   ask the four words on this terminal before its key goes (default off)
@@ -412,6 +413,8 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
   checkOperator(opPath);
   const k = readKeeper(opPath), { K, recovery } = rootOf(k), { lib, enrol } = await libs();
   const restore = f.has('--restore'), here = f.has('--here'), wait = seconds(f.get('--wait'), 0), tier = f.get('--tier'), asked = f.has('--confirm-words');
+  const ttl = f.has('--ttl') ? duration(f.get('--ttl')!, '--ttl') : undefined;
+  if (ttl !== undefined && (here || ttl < 60 || ttl > 3600)) throw usageError(here ? 'enrol --here: no code, so no --ttl' : `enrol --ttl: the code lives 60 s to 1 h (default 10m), not ${lifeText(ttl)}`);
   const operatorName = f.get('--operator-name');
   if (asked && !(await import('./sigelo-agent-device.ts')).hasTty()) throw usageError('enrol --confirm-words: the four words are asked on this terminal (/dev/tty), and there is none');
   // By a code, the operator identity logs in: not beside its page or watcher (the page enrols too).
@@ -456,11 +459,11 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
   }
   const c = carrierFor(lib, opPath), file = enrol.enrolPath(opPath);
   try {
-    const r = await enrol.issue({ carrier: c, file, i, n, name, keeper: { K, recovery }, ...(operatorName !== undefined && { operatorName }), ...(asked && { confirmWords: true }) });
+    const r = await enrol.issue({ carrier: c, file, i, n, name, keeper: { K, recovery }, ...(operatorName !== undefined && { operatorName }), ...(asked && { confirmWords: true }), ...(ttl !== undefined && { ttl }) });
     roster('remote');
     tierFor(c, w.original, tier);
     console.log(r.short);
-    note(`enrolment code for worker ${i} (${name}), good for 10 minutes (until ${until(r.short_exp)}), once. On the other machine: sigelo-agent init --enrol ${r.short}. `
+    note(`enrolment code for worker ${i} (${name}), good for ${lifeText(ttl ?? 600)} (until ${until(r.short_exp)}), once. On the other machine: sigelo-agent init --enrol ${r.short}. `
       + `It pairs, then its identity is replaced with yours: worker ${i} (${w.did}), checked here by its DID${asked ? ' (and the four words, asked here before its key goes)' : ''}`
       + (wait > 0 ? `; waiting up to ${wait} s` : '; then here: sigelo-agent enrol --finish'));
     const res = await enrol.complete({ carrier: c, file, keeper: { K, recovery }, wait, until: (o: Out) => o.placed.some((p) => p.id === r.id), confirm: gate });
@@ -556,7 +559,7 @@ async function finish(opFlag: string | undefined, wait: number): Promise<number>
 /** sigelo-agent enrol …; → the exit code (0 done, 1 refused or offline, 2 usage, 3 still pending). */
 export async function main(rest: string[]): Promise<number> {
   try {
-    const f = flags(rest, ['--name', '--wait', '--identity', '--index', '--restore', '--tier', '--operator-name'], ['--finish', '--here', '--rotate', '--operator', '--confirm-words']);
+    const f = flags(rest, ['--name', '--wait', '--identity', '--index', '--restore', '--tier', '--operator-name', '--ttl'], ['--finish', '--here', '--rotate', '--operator', '--confirm-words']);
     if (f.has('--here') && (f.has('--confirm-words') || f.has('--operator-name'))) throw usageError('enrol --here: no code, no pairing: --confirm-words and --operator-name go with a code');
     if (f.has('--finish') && [...f.keys()].some((k) => !['--finish', '--wait', '--identity', '--operator'].includes(k))) throw usageError('enrol: --finish takes only --wait and --identity');
     if (f.has('--rotate') && !f.has('--restore')) throw usageError('enrol: --rotate goes with --restore <i>');

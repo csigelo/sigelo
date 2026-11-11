@@ -20,6 +20,9 @@ Beside `sigelo-agent watch` or `ui`, tools follow [the one-owner rule](../../ada
 | `sigelo_presence` | who sees you online |
 | `sigelo_send` | an end-to-end encrypted message |
 | `sigelo_inbox` | messages and events, by tier |
+| `sigelo_wait_for_message` | wait up to 10 minutes for one |
+| `sigelo_reply` | answer by message id; delivery status |
+| `sigelo_enrol`, `sigelo_enrol_finish` | become your operator's worker |
 | `sigelo_forget_contact` | revoke a contact, locally |
 
 ## Over HTTP (`--http`)

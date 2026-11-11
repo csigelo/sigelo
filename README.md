@@ -34,7 +34,7 @@ v0.1.14, Experimental. The keeper runs on the test network only (test Monero onl
 - **Phone (Android):** [sigelo-0.1.14.apk](https://github.com/csigelo/sigelo/releases/download/v0.1.14/sigelo-0.1.14.apk)
   from the [v0.1.14 release](https://github.com/csigelo/sigelo/releases/tag/v0.1.14). F-Droid: coming.
 - **Agent on a computer:** `npm i -g sigelo-agent` ([QUICKSTART.md](docs/QUICKSTART.md)).
-- **MCP server:** `npx -y sigelo-mcp` ([frameworks](https://sigelo.io/frameworks.html)).
+- **MCP server:** `npx -y sigelo-mcp@0.1.14` ([frameworks](https://sigelo.io/frameworks.html)).
 - **Desktop (GTK):** [apps/gtk](apps/gtk/README.md).
 - **Relay:** [sigelo.ai](https://sigelo.ai) carries messages it cannot read; or
   [run your own](https://github.com/csigelo/sigelo-relay).
@@ -71,6 +71,7 @@ The apps:
 | [`contact/`](contact/README.md), [`sigelo-transfer/`](sigelo-transfer/README.md) | messages and pairing, direct file transfer |
 | [`spend/`](spend/README.md), [`kit/`](kit/README.md), [`keyagent/`](keyagent/README.md) | Monero keeper, recovery kit, key agent |
 | `release/` | building, signing, checking releases |
+| [`tools/`](tools/README.md) | simulations, docs tests, a demo, the provenance gate |
 
 Build and test: [.github/workflows/conformance.yml](.github/workflows/conformance.yml).
 Security: [SECURITY.md](SECURITY.md) · changes: [CHANGELOG.md](CHANGELOG.md) · our own review: [docs/self-review-2026-09.md](docs/self-review-2026-09.md).

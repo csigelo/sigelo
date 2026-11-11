@@ -67,7 +67,7 @@ const banner = (from) => `// SPDX-License-Identifier: MIT
 // then \`node plugins/build.mjs\`. Node >= 22.18, no dependencies, no network.`;
 const TARGETS = [
   ['integrations/mcp/server.mjs', 'sigelo/server.mjs'],
-  ['gate/claude-code/gate.mjs', 'sigelo-gate/gate.mjs'],
+  ['tools/gate/claude-code/gate.mjs', 'sigelo-gate/gate.mjs'],
 ];
 let stale = 0;
 for (const [from, to] of TARGETS) {

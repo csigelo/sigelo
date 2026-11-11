@@ -349,7 +349,7 @@ LATER until then. A `kill -9`/power loss/reboot leaves `spend.lock` behind; the 
 it over (dead pid, reused pid or earlier boot — see Incidents #1). A write cut off by the
 power loss leaves a torn last line in `spend.log`; the keeper moves it to
 `keeper/spend.log.torn-<ts>` with one warning and starts (spend/README.md, "Torn last line";
-sim/REPORT.md K1) — `check.mjs` lists any such file. The timer runs the missed tick once (`Persistent=true`), as
+tools/sim/REPORT.md K1) — `check.mjs` lists any such file. The timer runs the missed tick once (`Persistent=true`), as
 soon as the clock is NTP-synced ("Clock at boot" above). Then run `check.mjs`:
 a crash between `intent` and `relayed` shows as UNCERTAIN and is a finding for the soak.
 

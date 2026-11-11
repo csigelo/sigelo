@@ -52,6 +52,7 @@ const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, numb
   tier: { flags: {}, args: [2, 2] },
   presence: { flags: {}, args: [2, 2] },
   send: { flags: { '--label': true, '--lines': false }, args: [2, Infinity] },
+  reply: { flags: { '--to': true, '--file': true, '--status': false, '--label': true }, args: [0, Infinity] },
   'send-file': { flags: {}, args: [2, 2] },
   inbox: { flags: { '--wait': true, '--expect': false, '--tier': true, '--quiet-too': false }, args: [0, 0] },
   history: { flags: { '--since': true }, args: [0, 0] },
@@ -71,8 +72,9 @@ export const VERBS = Object.keys(SPEC);
 export const USAGE = `sigelo-agent contacts — talk to other agents through a relay
 
   invite [--name <n>] [--json] [--long]    prints a short code (K7F3-Q9ZP, 10 minutes, once) to say or
-       [--ttl <s>] [--relay <host>]        send to another agent's operator; --long: the one-line code
-                                           (sgl1…; --ttl, default a day); --json: both, DID, relay, expiry;
+       [--ttl <s|10m|1h>] [--relay <host>] send to another agent's operator; --ttl: 60 s to 1 h for a slow
+                                           agent (both codes); --long: the one-line code (sgl1…; --ttl up
+                                           to 7 days, default a day); --json: both, DID, relay, expiry;
                                            --relay: the pairing's relay (default $SIGELO_RELAY)
   accept <code> [--name <n>] [--wait <s>]  become that agent's contact (wait 0 to 300 s, default 10);
        [--tier friend|quiet]               --tier: how its messages reach you (default friend; own is detected)
@@ -85,6 +87,10 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
                                            own agents always): a green dot, or "last seen"
   send <did|name> <text|-> [--label <l>]   an encrypted message; - reads it from stdin
        [--lines]                           with -: each line of stdin is a message, one login
+  reply --to <msg-id> <text|->             answer message <msg-id> (SIGELO_MSG_ID, an inbox item's id) later:
+       [--label <l>] | --file <path>       to its sender, label "reply" by default; --file: a file instead
+  reply --to <msg-id> --status             what is known: queued (here), published (the relay holds it in the
+                                           contact's mailbox) or refused; fetched: not known (no read receipt)
   send-file <did|name> <path>              a file, at most 8 MiB, end-to-end encrypted, one login;
                                            inbox saves one received to <identity>.files/<contact>-<id>/ (0600);
                                            larger (16 GiB), direct or over Tor: sigelo-agent transfer send
@@ -120,7 +126,7 @@ Exit: 0 done, and inbox offline once it printed messages (they are taken); 1 ref
 the reason on stderr, any JSON on stdout; 2 usage or no identity; 3 inbox --expect with no
 message. After -- every word is text. SIGELO_DEBUG=1: the identity file, the relay, the cause chain
 and the relay's answer on stderr.
-Beside a running watch on the identity: inbox reads what it received, send and send-file queue for it,
+Beside a running watch on the identity: inbox reads what it received, send, send-file and reply queue for it,
 the other relay verbs refuse (busy); beside ui, all of them refuse (WATCH.md).
 Each verb but recovery-key: --identity <file> acts on that file; --operator on yours ($SIGELO_HUMAN, else
 ~/.config/sigelo/me.local.json; ENROL.md). Without either: $SIGELO_IDENTITY, the agent's.
@@ -140,6 +146,9 @@ interface Carrier {
   setPresence(who: string, allow: boolean): { did: string; name: string; presence: string };
   sync(o?: { wait?: number }): Promise<void>;
   send(to: string, text: string, o: { label?: string; local?: boolean }): Promise<unknown>;
+  reply(id: string, text: string, o: { label?: string; local?: boolean }): Promise<{ status: string; detail?: string; name: string; delivery: Delivery | null }>;
+  replyFile(id: string, path: string, o?: { local?: boolean }): Promise<{ status: string; detail?: string; name: string; file: FileSent; delivery: Delivery | null }>;
+  replyStatus(id: string): ReplyStatus;
   sendAll(to: string, texts: string[], o: { label?: string; local?: boolean }): Promise<{ status: string }[]>;
   sendFile(to: string, path: string, o?: { local?: boolean }): Promise<{ status: string; name: string; detail?: string; file: FileSent }>;
   inbox(o: { wait?: number; tiers?: string[]; local?: boolean }): Promise<Batch>;
@@ -148,8 +157,30 @@ interface Carrier {
   redeemGift(code: string): Promise<{ exp: number; months: number }>;
   takeLinks(): unknown[];
 }
+/** A reply's state (carrier.mjs replyStatus). */
+export interface Delivery { status: 'queued' | 'published' | 'refused'; queued_at: number; published_at: number | null; code: string | null; detail: string | null; parts: number; label: string; file?: string | null }
+export interface ReplyStatus { msg_id: string; from: string; name: string | null; received: number; reply: Delivery | null; fetched: null; contact?: { online: boolean | null; last_seen: number | null } }
+/** One line for people: what is known of a reply. */
+export function deliveryText(r: ReplyStatus): string {
+  const iso = (t: number): string => new Date(t * 1000).toISOString().replace('.000', '');
+  const d = r.reply, who = r.name ?? r.from;
+  if (d === null) return `message ${r.msg_id} from ${who} (received ${iso(r.received)}): no reply yet`;
+  const what = d.status === 'published' ? `published ${iso(d.published_at!)}: the relay holds it in ${who}'s mailbox`
+    : d.status === 'queued' ? `queued ${iso(d.queued_at)}: here, not at the relay yet (it goes at the next connection)` : `refused: ${d.code}: ${d.detail}`;
+  return `reply to ${r.msg_id} (${who}): ${what}; fetched: not known (sigelo/0 has no read receipt)`;
+}
+/** A duration for people: whole seconds, or 90s, 10m, 1h. → seconds; else a usage refusal naming `name`. */
+export function duration(v: string, name: string): number {
+  const m = /^(\d+)([smh]?)$/.exec(v.trim());
+  const n = m ? Number(m[1]) * ({ '': 1, s: 1, m: 60, h: 3600 } as Record<string, number>)[m[2]!]! : NaN;
+  if (!Number.isSafeInteger(n)) throw Object.assign(new Error(`${name}: whole seconds, or 10m, 1h; not ${JSON.stringify(v)}`), { usage: true });
+  return n;
+}
+/** A life in words: 10 minutes, 1 hour, 90 s. */
+export const lifeText = (s: number): string => (s % 3600 === 0 ? `${s / 3600} hour${s === 3600 ? '' : 's'}` : s % 60 === 0 ? `${s / 60} minute${s === 60 ? '' : 's'}` : `${s} s`);
 interface CarrierLib {
   DEFAULT_RELAY: string;
+  messageId(m: unknown): string;
   Carrier: new (o: object) => Carrier;
   pathsFor(identityFile: string): { store: string; state: string; log?: string };
   optionsFromEnv(): object;
@@ -401,7 +432,7 @@ export function holderFor(identity: string, what: string, through = false): { pi
   throw Object.assign(new Error(busyText(identity, h, what)), { check: 'busy' });
 }
 // The contact verbs that log in, and those of them that go through a watcher.
-const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'inbox', 'forget', 'pro', 'link', 'unlink', 'presence'], THROUGH = ['send', 'send-file', 'inbox', 'presence'];
+const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'reply', 'inbox', 'forget', 'pro', 'link', 'unlink', 'presence'], THROUGH = ['send', 'send-file', 'reply', 'inbox', 'presence'];
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch (e) { return (e as { code?: string }).code === 'EPERM'; } };
 /** The live process holding the lock on this identity file, or null. */
 export function lockHolder(identity: string): { pid: number; kind: 'ui' | 'watch' } | null {
@@ -549,7 +580,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
   if (!existsSync(path)) { note(noIdentity(path, flags.has('--operator'))); return 2; }
   // A page or a watcher holds this file's relay session: no second login (lockPath).
   let w: { pid: number; kind: 'ui' | 'watch' } | null = null;
-  if (SESSION_VERBS.includes(cmd)) {
+  // reply --status reads the state only: no session, beside anything.
+  if (SESSION_VERBS.includes(cmd) && !(cmd === 'reply' && flags.has('--status'))) {
     try { w = holderFor(path, `a CLI ${cmd}`, THROUGH.includes(cmd)); } catch (e) { note((e as Error).message); return 1; }
     // The operator's seat (DEVICES.md): this machine's device inbox first; elsewhere, seat_elsewhere.
     if (w === null) { try { await (await import('./sigelo-agent-device.ts')).seatGate(path, `a CLI ${cmd}`); } catch (e) { note((e as Error).message); debug(e, { identity: path }); return 1; } }
@@ -592,11 +624,14 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         // --long, the one-line code to paste anywhere.
         const long = flags.has('--long');
         const relay = flags.get('--relay');
-        const r = await c.invite({ name, ttl: seconds(flags.get('--ttl'), '--ttl'), short: !long, ...(relay !== undefined && { relay }) }) as { code: string; exp: number; relay: string; short?: string; short_exp?: number };
+        // --ttl: seconds, 10m or 1h; a short code 60 s to an hour (a slow agent), the long one to 7 days.
+        const ttl = flags.has('--ttl') ? duration(flags.get('--ttl')!, '--ttl') : undefined;
+        if (!long && ttl !== undefined && (ttl < 60 || ttl > 3600)) throw misuse(`--ttl: a short code lives 60 s to 1 h (default 10m), not ${lifeText(ttl)}; longer: invite --long --ttl ${flags.get('--ttl')} (up to 7 days)`);
+        const r = await c.invite({ name, ttl, short: !long, ...(relay !== undefined && { relay }) }) as { code: string; exp: number; relay: string; short?: string; short_exp?: number };
         const until = (t: number): string => new Date(t * 1000).toISOString().replace('.000', '');
         if (flags.has('--json')) out(r); else console.log(r.short ?? r.code);
         note(r.short !== undefined
-          ? `say it, text it or write it down: good for 10 minutes (until ${until(r.short_exp!)}), once. Their agent runs sigelo-agent accept ${r.short} --name <your name>${r.short!.length > 9 ? ` (made on ${r.relay}: if it asks which relay, --relay ${r.relay})` : ''}`
+          ? `say it, text it or write it down: good for ${lifeText(ttl ?? 600)} (until ${until(r.short_exp!)}), once. Their agent runs sigelo-agent accept ${r.short} --name <your name>${r.short!.length > 9 ? ` (made on ${r.relay}: if it asks which relay, --relay ${r.relay})` : ''}`
           : `one-time code, good until ${until(r.exp)}: send it to the other operator; their agent runs sigelo-agent accept <code> --name <your name>`);
         break;
       }
@@ -684,6 +719,33 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         // Exit 0: kept here, it goes by itself at a later inbox or send. Said, so nobody sends twice.
         if (w) kicked();
         else if (r.status === 'queued') note(`send: queued, not delivered yet (exit 0; do not send it again): ${r.detail ?? ''}`);
+        break;
+      }
+      case 'reply': {
+        // Accept now, reply later (WATCH.md): to the sender of a message taken earlier, by its id.
+        const to = flags.get('--to'), file = flags.get('--file');
+        if (to === undefined) throw misuse('reply --to <msg-id> <text|-> | --file <path> | --status: --to is required');
+        if (flags.has('--status')) {
+          if (args.length > 0 || file !== undefined || flags.has('--label')) throw misuse('reply --to <msg-id> --status takes nothing else');
+          const r = c.replyStatus(to);
+          out(r);
+          note(deliveryText(r));
+          break;
+        }
+        if (file !== undefined) {
+          if (args.length > 0 || flags.has('--label')) throw misuse('reply --to <msg-id> --file <path>: no text and no --label beside a file');
+          const r = await c.replyFile(to, file, { ...queuedFor });
+          out(r);
+          note(`📎 ${r.file.name} ${sizeText(r.file.size)} → ${r.name}: ${r.status}${r.status === 'queued' && !w ? ` (exit 0; do not send it again): ${r.detail ?? ''}` : ''}`);
+          kicked();
+          break;
+        }
+        const text = args[0] === '-' && args.length === 1 ? readFileSync(0, 'utf8').replace(/\r?\n$/, '') : args.join(' ');
+        if (text === '') throw misuse('reply --to <msg-id> <text|->: the text is empty');
+        const r = await c.reply(to, text, { label: flags.get('--label') ?? 'reply', ...queuedFor });
+        out(r);
+        if (w) kicked();
+        else if (r.status === 'queued') note(`reply: queued, not delivered yet (exit 0; do not send it again): ${r.detail ?? ''}; reply --to ${to} --status tells when it went`);
         break;
       }
       case 'send-file': {

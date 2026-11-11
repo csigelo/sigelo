@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // world/conformance.mjs — what POST /world/conformance needs besides the §5.2 flow, kept pure:
-// how many cases `sigelo-verify --conformance --impl` (and docs-test/grade-verifier.mjs) build
+// how many cases `sigelo-verify --conformance --impl` (and tools/docs-test/grade-verifier.mjs) build
 // from a vectors file, and a strict reader of the summary that runner prints. See world/README.md.
 
 // The number of bundle cases grade-verifier.mjs builds from test-vectors.json, counted the way it

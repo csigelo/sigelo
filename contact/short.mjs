@@ -36,8 +36,10 @@ import { fail, unhex } from './kdf.mjs';
 
 export const PARK_V = 'sigelo-park/0', FINGERPRINT_LABEL = 'sigelo-fingerprint/0';
 export const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-// Seconds a parked code lives at the relay; it goes at its first fetch before that.
-export const SHORT_TTL = 600, SHORT_LENGTH = 8;
+// Seconds a parked code lives at the relay by default; it goes at its first fetch before that. The
+// inviter may choose SHORT_TTL_MIN to SHORT_TTL_MAX (invite --ttl: a slow agent fetches late); the
+// relay keeps it at most its PARK_TTL (relay/park.mjs: 3600; an older relay's, 600).
+export const SHORT_TTL = 600, SHORT_TTL_MIN = 60, SHORT_TTL_MAX = 3600, SHORT_LENGTH = 8;
 // A relay tag: 4 characters (20 bits) after the 8, on a code made on a relay that is not the public one.
 export const TAG_LABEL = 'sigelo-relay-tag/0', TAG_LENGTH = 4, TAGGED_LENGTH = SHORT_LENGTH + TAG_LENGTH;
 const FOLD = { I: '1', L: '1', O: '0' };

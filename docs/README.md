@@ -25,4 +25,4 @@
 - [CHANGELOG.md](../CHANGELOG.md), [VERSIONING.md](../VERSIONING.md), [SECURITY.md](../SECURITY.md).
 - [Self-review, 2026-09](self-review-2026-09.md).
 - [INCIDENT.md](INCIDENT.md): the runbook for a compromised keeper.
-- [Cutting a release](../release/RELEASE.md).
+- [Cutting a release](../release/RELEASE.md); [test harnesses](../tools/README.md).
