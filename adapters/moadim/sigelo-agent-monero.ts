@@ -141,7 +141,9 @@ export function withLock<T>(path: string, fn: () => T): T {
   const idle = new Int32Array(new SharedArrayBuffer(4));
   for (let i = 0; ; i++) {
     try { closeSync(openSync(lock, 'wx', 0o600)); break; } catch (e) {
-      if ((e as { code?: string }).code !== 'EEXIST') throw e;
+      // EEXIST: held. On Windows an open during the holder's delete can come back EPERM/EBUSY/EACCES
+      // (the file is marked for deletion but still there): held too, retry.
+      if (!['EEXIST', 'EPERM', 'EBUSY', 'EACCES'].includes((e as { code?: string }).code ?? '')) throw e;
       if (i === LOCK_TRIES) throw new SigeloError(`lock: ${lock} is still held after ${(LOCK_TRIES * LOCK_MS) / 1000}s — another sigelo-agent holds it, or one was killed holding it; delete the file to continue`);
       Atomics.wait(idle, 0, 0, LOCK_MS);
     }

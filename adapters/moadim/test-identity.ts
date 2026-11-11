@@ -156,13 +156,17 @@ ok('receive warns past the 200 lookahead but still hands out the address',
 // `load -> receive -> save` is a read-modify-write of one counter, and moadim runs its sidecar
 // as a CLI it may invoke more than once at a time. Two payers handed ONE subaddress can link
 // each other (MONERO.md §3), so the four racing runs below must get four different indices.
-const racing = await Promise.all([0, 1, 2, 3].map(() => new Promise<string>((resolve) => {
+const racing = await Promise.all([0, 1, 2, 3].map(() => new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
   const child = spawn('node', [CLI, 'receive', '--account', '2'], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME } });
-  let stdout = '';
+  let stdout = '', stderr = '';
   child.stdout.on('data', (c: Buffer) => { stdout += String(c); });
-  child.on('close', () => { resolve(stdout); });
+  child.stderr.on('data', (c: Buffer) => { stderr += String(c); });
+  child.on('close', (code) => { resolve({ stdout, stderr, code }); });
 })));
-const raced = racing.map((o) => (JSON.parse(o) as { index: number; address: string }));
+// a racer that died says why (exit code and stderr) instead of failing the JSON parse below
+ok('four concurrent receives all exit 0 with output', racing.every((r) => r.code === 0 && r.stdout.trim() !== ''),
+  racing.map((r) => `${r.code}: ${r.stderr.trim().split('\n').at(-1) ?? ''}`).join(' | '));
+const raced = racing.map((o) => (o.stdout.trim() ? JSON.parse(o.stdout) : { index: -1, address: '' }) as { index: number; address: string });
 ok('four concurrent receives hand out four distinct subaddresses',
   new Set(raced.map((r) => r.index)).size === 4 && new Set(raced.map((r) => r.address)).size === 4,
   JSON.stringify(raced.map((r) => r.index)));
