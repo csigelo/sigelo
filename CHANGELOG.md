@@ -5,6 +5,12 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **tools/:** the test harnesses moved there: `sim`, `docs-test`, `demo`, `gate`; word budgets are `node tools/docs-test/check-budgets.mjs`.
+- **watch --hook-timeout:** seconds, 10m or 1h (`SIGELO_HOOK_TIMEOUT` too; default 120 s, 0 no limit). A stopped or failed hook's message stays unread and is offered again each round.
+- **Accept now, reply later:** `watch --spool <dir>` writes each own message to `<id>.json`; each message has an id (`SIGELO_MSG_ID`); `reply --to <id>` answers it, `--status` says how far it went.
+- **invite --ttl, enrol --ttl:** a short code for 60 s to 1 h (default 10 minutes) for slow agents; the relay keeps one up to an hour (PARK_TTL 3600, odds in park.mjs). Deploy the relay first.
+- **MCP:** `sigelo_wait_for_message` (a long poll, up to 10 minutes, refused beside a watcher), `sigelo_reply` with its delivery status, `sigelo_enrol`, `sigelo_enrol_finish`.
+- **Docs:** a slow-agents section for pi and Hermes; pi 1.0's MCP config (doc-checked, untested); every `npx -y sigelo-mcp` example pinned to 0.1.14.
 - **CI: wallet-rpc canary:** auto-refresh off after create_wallet, a readiness poll up to 180 s, three retries before SKIP; mcp-registry pinned by SHA; `permissions: {}` on top.
 - **docs/:** WHY, QUICKSTART, MONERO and INCIDENT moved there, under an index (docs/README.md); sigelo.io keeps their /raw/ URLs. CONTRIBUTING.md: how to file issues and pull requests.
 - **Repository front page:** the README in two parts, the protocol and the apps, linking the v0.1.14 APK itself (`/releases/latest` skips pre-releases); AUDIT.md is docs/self-review-2026-09.md.

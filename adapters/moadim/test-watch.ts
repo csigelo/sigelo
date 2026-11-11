@@ -2,7 +2,7 @@
 // sigelo-agent watch and the tiers (WATCH.md, contact/store.mjs).
 //   node test-watch.ts   (SKIPs without relay/ and its node_modules)
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
@@ -135,6 +135,86 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
       w2.c.kill('SIGTERM');
       await w2.exit;
       w2 = null;
+
+      // The agent task loop (WATCH.md "Slow agents"): --hook-timeout, SIGELO_MSG_ID, the killed-hook
+      // rule, --spool (accept now), reply --to <id> later, reply --status.
+      const mineIn = async (want: string): Promise<{ content?: unknown; label?: string }[]> => {
+        const got: { content?: unknown; label?: string }[] = [], t = Date.now();
+        while (Date.now() - t < 40000 && !got.some((m) => m.content === want)) got.push(...(JSON.parse((await cli('mine', 'inbox', '--wait', '5')).stdout || '{"messages":[]}') as { messages: typeof got }).messages);
+        return got;
+      };
+      for (const [args, what] of [[['--hook-timeout', 'soon'], '--hook-timeout soon'], [['--hook-timeout', '-1'], '--hook-timeout -1'], [['--spool', join(H, 'sp'), '--on-message', 'true'], '--spool with --on-message']] as const) {
+        const u = await cli('alice', 'watch', ...args);
+        ok(`watch ${what} → exit 2`, u.status === 2, u.stderr);
+      }
+      const envBad = await cliIn({ ...envOf('alice'), SIGELO_HOOK_TIMEOUT: 'later' }, H)('watch');
+      ok('watch with SIGELO_HOOK_TIMEOUT=later → exit 2, naming the variable', envBad.status === 2 && envBad.stderr.includes('SIGELO_HOOK_TIMEOUT: whole seconds, or 10m, 1h'), envBad.stderr);
+      const slowHook = `echo "$SIGELO_MSG_ID" >> "$WOUT/ids.txt"; [ -f "$WOUT/go" ] || sleep 20; cat > "$WOUT/taken.json"`;
+      w2 = watcher('--hook-timeout', '2', '--on-message', slowHook);
+      await until(() => w2!.err.includes('connected to relay.test'));
+      ok('watch --hook-timeout 2: said at start', w2.err.includes('hooks stopped after 2 s'), w2.err);
+      await cli('mine', 'send', 'alice', 'a slow task');
+      const ids = (): string[] => (existsSync(join(OUT, 'ids.txt')) ? readFileSync(join(OUT, 'ids.txt'), 'utf8').split('\n').filter(Boolean) : []);
+      ok('a hook past --hook-timeout is stopped, saying the message stays unread and is offered again (dedupe on SIGELO_MSG_ID)',
+        await until(() => w2!.err.includes('no exit within 2 s (--hook-timeout), stopped; message ')) && /^[0-9a-f]{32}$/.test(ids()[0] ?? '') && w2.err.includes(`message ${ids()[0]} stays unread, offered again at the next round (dedupe on SIGELO_MSG_ID)`), w2.err.slice(-600));
+      w2.c.kill('SIGTERM');
+      await w2.exit;
+      writeFileSync(join(OUT, 'go'), '');
+      w2 = watcher('--hook-timeout', '0', '--on-message', slowHook);
+      ok('the stopped hook\'s message, offered again at the next start under the same SIGELO_MSG_ID, then taken', await until(() => existsSync(join(OUT, 'taken.json')))
+        && ids().length === 2 && ids()[0] === ids()[1] && (JSON.parse(readFileSync(join(OUT, 'taken.json'), 'utf8')) as { id: string; content: string }).id === ids()[0]
+        && (JSON.parse(readFileSync(join(OUT, 'taken.json'), 'utf8')) as { content: string }).content === 'a slow task' && w2.err.includes('hooks without a time limit'), JSON.stringify(ids()) + w2.err.slice(-400));
+      const slowId = ids()[0]!;
+      w2.c.kill('SIGTERM');
+      await w2.exit;
+      // Accept now: --spool, no hook; the task waits in a file named by its id; the answer goes later.
+      const SPOOL = join(H, 'spool');
+      w2 = watcher('--spool', SPOOL);
+      await until(() => w2!.err.includes('connected to relay.test'));
+      await cli('mine', 'send', 'alice', 'a task for later');
+      const spooled = (): string[] => (existsSync(SPOOL) ? readdirSync(SPOOL).filter((f) => f.endsWith('.json')) : []);
+      ok('watch --spool: the own message written to <dir>/<id>.json, a line saying how to answer', await until(() => spooled().length === 1) && await until(() => w2!.out.includes('(answer: sigelo-agent reply --to ')), w2.out + w2.err.slice(-300));
+      const task = JSON.parse(readFileSync(join(SPOOL, spooled()[0]!), 'utf8')) as { id: string; content: string; from: string };
+      ok('the spooled file: the message as inbox gives it, its id the file name', task.content === 'a task for later' && `${task.id}.json` === spooled()[0] && task.from === D.mine, JSON.stringify(task));
+      ok('spooled = taken: inbox beside the watcher has no own message left', (JSON.parse((await cli('alice', 'inbox', '--tier', 'own')).stdout) as { messages: unknown[] }).messages.length === 0);
+      const rq = await cli('alice', 'reply', '--to', task.id, 'done:', 'the task');
+      ok('reply --to <id> beside the watcher: queued for it (exit 0)', rq.status === 0 && (JSON.parse(rq.stdout) as { status: string; msg_id: string }).status === 'queued'
+        && (JSON.parse(rq.stdout) as { msg_id: string }).msg_id === task.id && rq.stderr.includes('reply: queued for sigelo-agent watch'), rq.stdout + rq.stderr);
+      const answer = await mineIn('done: the task');
+      ok('the reply reaches the sender, labelled reply', answer.some((m) => m.content === 'done: the task' && m.label === 'reply'), JSON.stringify(answer));
+      type St = { reply: { status: string; published_at: number | null; parts: number } | null; fetched: null; from: string; name: string };
+      let st: St = { reply: null, fetched: null, from: '', name: '' };
+      for (const t = Date.now(); Date.now() - t < 20000 && st.reply?.status !== 'published';) {
+        st = JSON.parse((await cli('alice', 'reply', '--to', task.id, '--status')).stdout || '{}') as St;
+        if (st.reply?.status !== 'published') await new Promise((r) => setTimeout(r, 500));
+      }
+      ok('reply --to <id> --status beside the watcher: published (the relay holds it), fetched null (no read receipt), the sender', st.reply?.status === 'published' && typeof st.reply.published_at === 'number'
+        && st.fetched === null && st.from === D.mine && st.name === 'mine', JSON.stringify(st));
+      w2.c.kill('SIGTERM');
+      await w2.exit;
+      w2 = null;
+      // Without a watcher: reply logs in and sends; the earlier hook's message is answered by its id too.
+      const r2 = await cli('alice', 'reply', '--to', slowId, 'the slow result', '--label', 'result');
+      ok('reply --to <id> alone: sent', r2.status === 0 && (JSON.parse(r2.stdout) as { status: string; delivery: { status: string } }).status === 'sent'
+        && (JSON.parse(r2.stdout) as { delivery: { status: string } }).delivery.status === 'published', r2.stdout + r2.stderr);
+      ok('the slow task\'s answer reaches it, with its label', (await mineIn('the slow result')).some((m) => m.content === 'the slow result' && m.label === 'result'));
+      const s2 = await cli('alice', 'reply', '--to', slowId, '--status');
+      ok('reply --status: one line for people too', s2.status === 0 && s2.stderr.includes(`reply to ${slowId} (mine): published `) && s2.stderr.includes('fetched: not known (sigelo/0 has no read receipt)'), s2.stderr);
+      writeFileSync(join(H, 'result.txt'), 'a result file\n');
+      const rf = await cli('alice', 'reply', '--to', slowId, '--file', join(H, 'result.txt'));
+      ok('reply --to <id> --file: the file to the sender', rf.status === 0 && (JSON.parse(rf.stdout) as { file: { name: string } }).file.name === 'result.txt', rf.stdout + rf.stderr);
+      const unknown = await cli('alice', 'reply', '--to', '0'.repeat(32), 'hello'), malformed = await cli('alice', 'reply', '--to', 'nope', 'hello'), noTo = await cli('alice', 'reply', 'hello');
+      ok('reply: an unknown id → exit 1, msg_unknown; a malformed one → msg_id; no --to → exit 2', unknown.status === 1 && unknown.stderr.includes('msg_unknown') && malformed.status === 1 && malformed.stderr.includes('a message id is 32 hex digits') && noTo.status === 2,
+        unknown.stderr + malformed.stderr + noTo.stderr);
+      const hist = (JSON.parse((await cli('alice', 'history')).stdout) as { messages: { id?: string; content?: unknown }[] }).messages;
+      ok('history: each message with its id, the same as the hook and the spool saw', hist.find((m) => m.content === 'a slow task')?.id === slowId && hist.find((m) => m.content === 'a task for later')?.id === task.id, JSON.stringify(hist.map((m) => m.id)));
+      // invite --ttl: 60 s to an hour for a short code (a slow agent), refused before any login otherwise.
+      for (const t of ['30', '2h', 'soon']) {
+        const iv = await cli('alice', 'invite', '--ttl', t);
+        ok(`invite --ttl ${t} → exit 2`, iv.status === 2 && iv.stderr.includes('--ttl'), iv.stderr);
+      }
+      const hourly = await cli('alice', 'invite', '--ttl', '1h', '--json'), hj = JSON.parse(hourly.stdout || '{}') as { short_exp?: number; exp?: number };
+      ok('invite --ttl 1h: a short code for an hour, said so', hourly.status === 0 && Math.abs((hj.short_exp ?? 0) - Date.now() / 1000 - 3600) < 30 && hourly.stderr.includes('good for 1 hour'), hourly.stdout + hourly.stderr);
       const fr = await cli('alice', 'inbox', '--tier', 'own,friend');
       const frm = (JSON.parse(fr.stdout) as { messages: { content: string }[] }).messages.map((m) => m.content);
       ok('inbox --tier own,friend: the friend\'s two messages; the quiet ones stay', frm.join() === 'hello from pal,again from pal', fr.stdout);

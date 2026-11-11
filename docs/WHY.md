@@ -102,7 +102,7 @@ sigelo-agent bundle > bundle.json
 (cd go && go run ./cmd/sigelo-verify ../bundle.json)
 ```
 
-Full lifecycle: [QUICKSTART.md](QUICKSTART.md). Docs-only comprehension results: docs-test/RESULTS.md.
+Full lifecycle: [QUICKSTART.md](QUICKSTART.md). Docs-only comprehension results: tools/docs-test/RESULTS.md.
 
 ## Capability card
 

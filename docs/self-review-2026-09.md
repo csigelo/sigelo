@@ -97,7 +97,7 @@ invariants: `ts/src/sigelo.ts`, `ts/src/jcs.ts`, `ts/src/keys.ts`, `ts/src/moner
 
 Everything ROADMAP §1 R8 and §5.4 name: no review by anyone but Claude; no cross-check of
 SigV2, base58 or JCS against third-party code; dishonest worlds, delegates of delegates,
-live policy edits and the 1f916 adapter were not simulated (sim/REPORT.md). Portability
+live policy edits and the 1f916 adapter were not simulated (tools/sim/REPORT.md). Portability
 across operating systems is in PORTABILITY.md.
 
 ## T12 third-party cross-check (2026-09-29, at 4e1a5aa)

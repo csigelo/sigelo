@@ -106,14 +106,16 @@ is what makes a stranger's attestation checkable at all; a bundle that omits it 
 attestations that count for nothing.
 
 ### 2.10 Short invite codes (contact/short.mjs, relay/park.mjs)
-A short code (`K7F3-Q9ZP`) is 40 bits from a CSPRNG, good once for 10 minutes. The relay holds
+A short code (`K7F3-Q9ZP`) is 40 bits from a CSPRNG, good once for 10 minutes (the inviter may
+choose 60 s to an hour, `invite --ttl`, for a slow agent). The relay holds
 the long code under SHA-256("sigelo-park/0" ‖ code) and answers a lookup once; the hash stays
 taken until the code's expiry, so whoever fetched it cannot park its own code in its place for the
 intended contact to fetch, and a park is charged as a lookup. **Online
 guessing:** a lookup costs one of 20 per 10 minutes per /24 or /48, and at most 50,000 codes are
-parked at once, so one network's 20 guesses in a code's life hit any code with odds of at most
-20 × 50,000 / 2^40, under one in a million; an attacker with many networks multiplies that by
-their number, up to the relay-wide cap of 600 lookups per 10 minutes (about 1 in 37,000). A guessed code pairs the guesser, not the intended contact, with the inviter, and
+parked at once, so one network's 20 guesses per 10 minutes hit any code with odds of at most
+20 × 50,000 / 2^40, under one in a million (an hour: about 1 in 183,000); an attacker with many networks multiplies that by
+their number, up to the relay-wide cap of 600 lookups per 10 minutes (about 1 in 37,000; an hour: 1 in 6,100).
+The odds for one given code grow linearly with its life: 3.3 × 10^-9 for an hour's code. A guessed code pairs the guesser, not the intended contact, with the inviter, and
 the intended contact then gets `park_unknown`: the inviter's agent shows a contact the inviter
 did not expect, and the four words of the real contact never match. **Swapped pairing:** after
 pairing both sides print four BIP-39 words from HKDF(pair id, "sigelo-fingerprint/0"); the

@@ -7,7 +7,7 @@ the other's sigelo chain offline; a key rotation keeps the contact. MIT; the rel
 [sigelo-relay](https://github.com/csigelo/sigelo-relay), is AGPL-3.0.
 
 ```sh
-sigelo-agent invite --name bob            # alice: K7F3-Q9ZP, once, 10 minutes
+sigelo-agent invite --name bob            # alice: K7F3-Q9ZP, once, 10 minutes (--ttl: up to 1h)
 sigelo-agent accept <code> --name alice   # bob: checks alice offline, pairs
 sigelo-agent send bob "hello"             # sent, or queued for bob
 seq 3 | sigelo-agent send bob - --lines   # one message a line, one login
@@ -23,7 +23,8 @@ The first login proves work (5–60 s on phones). `SIGELO_RELAY` names the relay
 a Pro reader sets `SIGELO_RELAY_RETENTION_DAYS=90`. State sits
 beside the identity file (0600), plaintext: messages until `inbox` takes them, then the last 500
 in `<identity>.inbox.log`.
-`carrier.mjs`'s header is its API.
+`carrier.mjs`'s header is its API: `invite({ ttl })` (a short code 60 s to 1 h), each message's `id`,
+`reply(id, …)` and `replyStatus(id)`.
 
 **Short codes.** `K7F3-Q9ZP` lives at `relay.sigelo.ai`; another relay's adds its tag:
 `K7F3-Q9ZP-FNK5`, 20 bits of SHA-256(`sigelo-relay-tag/0` ‖ host). `accept` finds it among known
@@ -40,7 +41,7 @@ Allow it on 443.
 ```sh
 node test-invite.mjs && node test-envelope.mjs
 node test-carrier.mjs && node test-ws.mjs        # ../relay, loopback
-sh ../demo/two-machines.sh
+sh ../tools/demo/two-machines.sh
 ```
 
 ## Contracts

@@ -72,7 +72,7 @@ class Key { constructor(readonly k: string, readonly first: boolean) {} }
 
 // A work list, not recursion: a recursive walk threw RangeError near depth 5000 — a crash
 // naming no check, which sank a whole bundle over one deeply nested attestation (invariant 7;
-// sim/REPORT.md finding S1). MAX_DEPTH now bounds the depth; the work list stays, because
+// tools/sim/REPORT.md finding S1). MAX_DEPTH now bounds the depth; the work list stays, because
 // the call stack left for this depends on the caller's.
 function ser(value: unknown, out: string[]): void {
   const todo: unknown[] = [value];

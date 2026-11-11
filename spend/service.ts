@@ -334,7 +334,7 @@ const blank = (b: number): boolean => b === 0x0a || b === 0x0d || b === 0x20 || 
 const parses = (text: string): boolean => { try { JSON.parse(text); return true; } catch { return false; } };
 
 /**
- * Soak finding K1 (sim/REPORT.md): a keeper killed, or a host losing power, in the middle of
+ * Soak finding K1 (tools/sim/REPORT.md): a keeper killed, or a host losing power, in the middle of
  * an append leaves a torn last line, and a keeper that refused to start on it turned every power
  * cut into an outage that needed a human (the class of soak incident #1). Run at start, under
  * spend.lock, before the log is read.

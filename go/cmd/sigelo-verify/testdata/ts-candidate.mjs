@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
-// ts/ as a candidate for `sigelo-verify --conformance --impl` (and docs-test/grade-verifier.mjs):
+// ts/ as a candidate for `sigelo-verify --conformance --impl` (and tools/docs-test/grade-verifier.mjs):
 // the TASK-verifier.md interface over ts/dist (run `npx tsc` in ts/ first).
 //
 //   node ts-candidate.mjs [--break] <bundle.json|-> --now <N>

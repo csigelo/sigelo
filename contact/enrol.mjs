@@ -10,8 +10,8 @@
 //             bytes at every call: `created` pinned, the nonce from the key (SPEC §4 `nonce`),
 //             rotations m → m+1 voluntary with iat 0. A second copy of a rotation is the same
 //             rotation, never a fork.
-//   operator: issue({ carrier, file, i, n, name, keeper, relay?, operatorName?, started? })  → a short
-//             code (short.mjs, 10 minutes, once) for a normal invite (at `relay`, else the carrier's), and
+//   operator: issue({ carrier, file, i, n, name, keeper, relay?, operatorName?, started?, ttl? })  → a short
+//             code (short.mjs, 10 minutes or ttl: 60 s to an hour, once) for a normal invite (at `relay`, else the carrier's), and
 //             a pending enrolment kept in `file` for 24 hours, with the operator attestation signed now
 //             (`days`, ≤ 90; a device's 14). operatorName: how the worker files its operator (default
 //             "operator"); started: the carrier's (a search the human started, carrier.mjs POW_SEARCHES);
@@ -254,12 +254,12 @@ const checkKeeper = (k) => {
  * stands for (24 hours). The operator attestation is signed here, at derivation time.
  * → { short, short_exp, code, id, did (the worker's current DID), original }.
  */
-export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR_DAYS, relay, operatorName, started, confirmWords = false }) {
+export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR_DAYS, relay, operatorName, started, confirmWords = false, ttl }) {
   checkKeeper(keeper);
   if (operatorName !== undefined && operatorName !== null && operatorLabel(operatorName) === null) fail('enrol', 'operatorName: 1 to 64 characters, no control characters');
   const w = workerChain(keeper.K, i, n, keeper.recovery);
   // The temporary identity's contact, named apart from the worker's (forgotten once it has paired).
-  const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true, ...(relay !== undefined && relay !== carrier.relay && { relay }), ...(started !== undefined && { started }) });
+  const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true, ...(relay !== undefined && relay !== carrier.relay && { relay }), ...(started !== undefined && { started }), ...(ttl !== undefined && { ttl }) });
   const now = nowOf(carrier), code = readCode(r.code, now), me = self(carrier, now);
   const attestation = operatorAttestation({ sign: me.sign, iss: me.did, sub: w.original, relay: code.relay, now, days });
   const old = liveHolding(carrier, w.original);

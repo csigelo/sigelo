@@ -486,7 +486,7 @@ keeper, check that no `sigelo-spend serve` is running on that directory and remo
 by hand. Limit: two keepers starting at the same instant on one stale lock can both take it over
 (check, unlink, `O_EXCL` create); a live lock has no such window.
 
-**Torn last line (sim/REPORT.md K1).** A keeper killed, or a host losing power, in the middle
+**Torn last line (tools/sim/REPORT.md K1).** A keeper killed, or a host losing power, in the middle
 of an append leaves a torn last line in `spend.log`. At start, holding `spend.lock` and before
 the log is read, if and only if the LAST non-blank line is not JSON (partial JSON, a cut
 signature, NUL bytes from an unflushed block) and every earlier line is, the keeper moves those

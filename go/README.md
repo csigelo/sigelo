@@ -23,7 +23,7 @@ stderr; exit 2 on usage errors. Without `--now` the CLI reads the clock; the lib
 ## Checking your implementation: `--impl`
 
 `--impl '<command>'` scores a candidate verifier on every bundle case, identically to
-`docs-test/grade-verifier.mjs`:
+`tools/docs-test/grade-verifier.mjs`:
 
 - The candidate runs as `<command> <case.json> --now <N>` (`--impl-stdin`: `-` and the bytes on stdin).
 - **Exit 0** + the §9.1 result as one JSON value on stdout = accept, compared by value on the six

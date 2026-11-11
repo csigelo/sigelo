@@ -193,9 +193,14 @@ try {
   // `enrol --finish` on each side in turn, each run doing its part, until both are done.
   const w2 = derived(2, 0);
   let lazyCode = '';
-  const lop = await cli(OP, ['enrol', '--name', 'lazy'], { onLine: (l) => { lazyCode = l.trim(); } });
+  // enrol --ttl: the code's life, 60 s to an hour (a slow machine fetches it late); else exit 2, nothing issued.
+  for (const [args, what] of [[['--ttl', '30'], '--ttl 30'], [['--ttl', '2h'], '--ttl 2h'], [['--here', '--ttl', '10m'], '--here --ttl 10m']] as const) {
+    const u = await cli(OP, ['enrol', '--name', 'lazy', ...args]);
+    ok(`enrol ${what}: refused, exit 2`, u.status === 2 && u.stderr.includes('--ttl'), u.stderr);
+  }
+  const lop = await cli(OP, ['enrol', '--name', 'lazy', '--ttl', '1h'], { onLine: (l) => { lazyCode = l.trim(); } });
   const lm = await cli(FIFTH, ['init', '--enrol', lazyCode, '--wait', '2']);
-  ok('lazy: enrol exits 0 with the code; init --enrol exits 3, pending', lop.status === 0 && lm.status === 3 && lm.stderr.includes('enrol --finish'), lm.stderr);
+  ok('lazy: enrol --ttl 1h exits 0 with the code, good for an hour; init --enrol exits 3, pending', lop.status === 0 && lop.stderr.includes('good for 1 hour') && lm.status === 3 && lm.stderr.includes('enrol --finish'), lop.stderr + lm.stderr);
   const runs: number[][] = [];
   for (let k = 0; k < 6; k++) {
     const a = await cli(OP, ['enrol', '--finish', '--wait', '4']), m = await cli(FIFTH, ['enrol', '--finish', '--wait', '4']);

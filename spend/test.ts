@@ -947,7 +947,7 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
   await s.close(); await w.close(); rmSync(d, { recursive: true, force: true });
 }
 
-// live root tokens: `token new` under a running keeper (sim/REPORT.md K2). Tokens are re-read on
+// live root tokens: `token new` under a running keeper (tools/sim/REPORT.md K2). Tokens are re-read on
 // every request; nothing else in policy.json is, and a file that does not load never opens the keeper.
 {
   const d = mkdtempSync(join(tmpdir(), 'sigelo-spend-tok-'));
@@ -2209,7 +2209,7 @@ const rawSend = (port: number, text: string) => {
   await w.close(); rmSync(d, { recursive: true, force: true });
 }
 {
-  // K1 (sim/REPORT.md): a write cut off by a crash or a power loss leaves a torn LAST line. The
+  // K1 (tools/sim/REPORT.md): a write cut off by a crash or a power loss leaves a torn LAST line. The
   // keeper moves its bytes to spend.log.torn-<ts>, warns once and starts; a torn line anywhere
   // else is still a refusal.
   const d = mkdtempSync(join(tmpdir(), 'sigelo-spend-torn-'));

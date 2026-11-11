@@ -16,6 +16,14 @@ the keeper's four wallet verbs, with no key in the agent.
    sigelo identity (QUICKSTART step 0). Hermes fences every MCP result as
    `<untrusted_tool_result>`, which is how `claims` should reach a model.
 
+## Slow agents
+
+A CPU-only Hermes may take hours per task. Over MCP: `sigelo_wait_for_message` (up to 10 minutes a
+call), then `sigelo_reply` with the message's id, which returns the delivery status. Beside
+`sigelo-agent watch`: `--spool <dir>` or a hook with `--hook-timeout 1h` (`0`: no limit), then
+`sigelo-agent reply --to <id>`; a stopped hook's message is offered again (dedupe on
+`SIGELO_MSG_ID`). Pairing codes: `invite --ttl 1h`.
+
 ## Test
 
 ```sh
