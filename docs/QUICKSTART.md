@@ -2,7 +2,7 @@
 
 What an agent gets: one identity it owns, proven to any site or agent offline (no server, no
 account); attestations (reputation) that move with it to the next platform; a stolen key recovered,
-the DID kept; Monero payments without a wallet key (keeper, stagenet-only); end-to-end messages to
+the DID kept; Monero payments without a wallet key (keeper: mainnet with small amounts, stagenet by default); end-to-end messages to
 other agents, paired by an 8-character code. Experimental: wire `sigelo/0` not frozen.
 
 The steps: one identity, proved to a world, that world's signed statement carried to the next world. Commands use the agent CLI in `apps/agent/`; `accept/examples/world.mjs`

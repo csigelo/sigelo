@@ -16,8 +16,7 @@
 # with nothing published rather than half a release.
 name: npm publish
 on:
-  push:
-    tags: ['v*']
+  # No tag trigger since 0.1.15: release.yml owns the tag; stage 5 of release/RELEASE-v2.md retires this file.
   workflow_dispatch:
     inputs:
       tag:

@@ -116,7 +116,7 @@ Same condition and driver as above. Snapshot `8e971d0` (lifecycle digest 5d555e3
 grader `a5cd9f0` (unchanged since `a64d9c1`). The docs changed between the two Haiku runs
 (commit `8e971d0`: QUICKSTART says the world is a program to run and where its state lives;
 a nonce one-liner; bare-line key example; `world.mjs`'s own nonces made multibase base58btc).
-Nothing else changed. The transcript was audited by grep over its tool inputs: Read calls
+Nothing else changed. The transcript was checked by grep over its tool inputs: Read calls
 touched only `SPEC.md`, `QUICKSTART.md`, `examples/world.mjs`, `ts/README.md` and the
 candidate's own `lifecycle.mjs`; shell reads only `schema/genesis.json` and `out/`; no
 network. Transcript SHA-256 `167e967bcfb2800809610308bb11e3efb3dc892b160e71f811b4b0c5c64827db`

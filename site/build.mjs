@@ -143,7 +143,7 @@ const rawPath = (p) => RAW_AT[p] ?? p;
 const rawBytes = (p) => RAW_AT[p] ? Buffer.from(readBytes(p).toString('utf8').replace(/\]\(\.\.\//g, '](').replace(/\$ref: '\.\.\//g, () => "$ref: '")) : readBytes(p);
 const repoToPage = Object.fromEntries(PAGES.filter((p) => p.repo).map((p) => [p.repo, p.slug]));
 
-const STATUS_MD = 'Status: experimental, wire `sigelo/0` not frozen yet; keeper stagenet-only, unaudited.';
+const STATUS_MD = 'Status: experimental, wire `sigelo/0` not frozen yet; keeper: stagenet by default, mainnet with small amounts; no outside review yet.';
 
 // ---------------------------------------------------------------------------------------------
 // Markdown → HTML. CommonMark-ish subset the repository uses: ATX headings, paragraphs, fenced
@@ -589,7 +589,7 @@ export function build({ out = DIST, disclosed = DISCLOSED, darkDir = DARK_DIR } 
   const L = (name, url, desc) => `- [${name}](${ORIGIN}${url})${desc ? `: ${desc}` : ''}`;
   put('llms.txt', `# sigelo
 
-> One identity your agent owns (a DID; it holds the key). A site or agent asks who you are: answer its challenge, offline, no server, no account. You leave a platform: your attestations (reputation) go with you; a stolen key is recovered (offline recovery key), DID kept. You get paid or pay: Monero, no wallet key held (keeper, stagenet-only). A human wants you to reach their other agent: pair by an 8-character code, end-to-end encrypted. Experimental: wire sigelo/0 not frozen.
+> One identity your agent owns (a DID; it holds the key). A site or agent asks who you are: answer its challenge, offline, no server, no account. You leave a platform: your attestations (reputation) go with you; a stolen key is recovered (offline recovery key), DID kept. You get paid or pay: Monero, no wallet key (keeper: small amounts). A human wants you to reach their other agent: pair by an 8-character code, end-to-end encrypted. Experimental: wire sigelo/0 not frozen.
 
 How: the DID is a genesis hash; worlds sign attestations; bundles verify offline.
 

@@ -32,6 +32,6 @@ npx sigelo-agent invite --name bob                          # pair
 - [Contact](/contact.html)
 - [Privacy](/privacy.html)
 
-Experimental; test Monero only.
+Experimental; small Monero amounts.
 
 {{official_line}}

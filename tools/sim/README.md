@@ -37,7 +37,7 @@ exits 0 only if every plant was reported:
 | `npm run mutants` | 13 bugs in a copy of `ts/dist` (10 for the swarm, 3 aimed at dishonest issuers) | swarm.mjs (120 × 30, no Go) and worlds.mjs (no Go) per bug |
 | `npm run worlds-plant` | the 1f916 router serving the genesis bare again (the bug `1dfec57` fixed) | worlds.mjs |
 | `npm run keeper-mutants` | 7 bugs in a copy of `apps/keeper/dist/tree.js` (clamp, cascade, caps at creation, count, revoker, orphans, names) | keeper-scenarios.mjs per bug |
-| `node keeper-swarm.mjs --selftest` | 4 violations planted into the audited log | keeper-swarm.mjs |
+| `node keeper-swarm.mjs --selftest` | 4 violations planted into the checked log | keeper-swarm.mjs |
 
 `swarm.mjs` settings, as a flag or an env var:
 

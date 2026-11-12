@@ -1,8 +1,8 @@
 # Self-review (September 2026)
 
-A code audit of the whole repository at the pre-export head, done by the model that
+A code review of the whole repository at the pre-export head, done by the model that
 orchestrated most of its construction (Claude Fable 5.1) after the pieces had been written
-by other model tiers. It is a self-audit and says so: it stands in for nothing in
+by other model tiers. It is a self-review and says so: it stands in for nothing in
 ROADMAP §5.4 (external review), and it is published so a reader can see what was checked
 and how, not as a certificate.
 

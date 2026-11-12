@@ -45,7 +45,8 @@
     "GROUPS.md",
     "DEVICES.md",
     "APPS.md",
-    "TRANSFER.md"
+    "TRANSFER.md",
+    "examples/reply-hook.sh"
   ],
   "engines": {
     "node": ">=22.18"

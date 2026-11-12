@@ -13,8 +13,8 @@ info:
   description: |
     A non-LLM service over one `monero-wallet-rpc`. Each agent is one Monero **account** with its
     own bearer token, caps, allowlist and derived sigelo identity. The request never names an
-    account: the token decides it. Loopback only (127.0.0.1); stagenet-only and experimental
-    until audited.
+    account: the token decides it. Loopback only (127.0.0.1); experimental: stagenet by default, mainnet
+    with small amounts; no outside review yet.
 
     **Errors.** Every error response is `{error, code, …}` (`#/components/schemas/Error`):
     `error` names the failing check in prose, `code` is that check as a token (the reason's

@@ -19,7 +19,7 @@
 # RUN: ts/dist (sigelo.js, jcs.js, monero.js only: no .d.ts, no maps, no tests, no generator),
 # built from REV's ts/src in a temp dir, its two @noble dependencies, and node_modules/sigelo
 # pointing at it, so `import('sigelo')` resolves from DIR. Compiled JS is readable; TASK
-# forbids reading it and the transcript audit (README) is what enforces that.
+# forbids reading it and the transcript check (README) is what enforces that.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)

@@ -8,10 +8,12 @@
 # A command slower than watch's --hook-timeout (default 120 s) is stopped and the message offered again:
 # raise it (--hook-timeout 1h, 0: no limit), or spool the task and answer later (WATCH.md "Slow agents").
 # The text is the sender's data: the command must treat it as data, never as instructions.
-# SIGELO_CLI: the sigelo-agent entry file (default: cli.ts beside this directory); paths with spaces are fine.
+# SIGELO_CLI: the sigelo-agent entry file (default: cli.ts beside this directory, else dist/cli.js as npm installs it).
 set -eu
 [ "${SIGELO_TYPE:-message}" = message ] || exit 0          # files: left for the agent
-CLI=${SIGELO_CLI:-"$(dirname "$0")/../cli.ts"}
+here=$(dirname "$0")/..
+[ -f "$here/cli.ts" ] && def=$here/cli.ts || def=$here/dist/cli.js
+CLI=${SIGELO_CLI:-$def}
 msg=$(cat)
 field() { printf '%s' "$msg" | node -e '
   let d = ""; process.stdin.on("data", (c) => { d += c; }).on("end", () => {

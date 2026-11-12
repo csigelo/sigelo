@@ -568,7 +568,7 @@ WantedBy=timers.target
     '  Runs on this host with your wallet and your keys; nothing is hosted, and nothing is sent to anyone.',
   );
   if (oneTime !== undefined) lines.push('', ...oneTime, '');
-  if (net === 'mainnet') lines.push('warning: the keeper is unaudited and has run on stagenet only (apps/keeper/README.md); keep the allowance to what you can lose');
+  if (net === 'mainnet') lines.push('warning: the keeper is experimental with no outside review yet (apps/keeper/README.md); keep the allowance to what you can lose');
   if (allow.length === 0) lines.push(`note: allow is empty, so ${agent} can pay nobody yet: add payees to policy.json (or init with --allow label=address) and restart the keeper`);
   lines.push('', 'Give the agent these two variables and this prompt snippet (MONERO.md §4.2):', '',
     `SIGELO_WALLET_URL=${url}`, `SIGELO_WALLET_TOKEN=$(cat ${tokenPath})`, '', SNIPPET);
