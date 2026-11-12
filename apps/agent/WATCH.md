@@ -22,6 +22,9 @@ An own agent stays yours (`ours: true` in `contacts`) at `friend` or `quiet`, by
 one at a time, at most `--hook-timeout` (default 2 minutes), with `SIGELO_TYPE`, `SIGELO_FROM` (the DID),
 `SIGELO_NAME`, `SIGELO_TIER`, `SIGELO_PATH` (files), `SIGELO_IDENTITY` and, for a message, `SIGELO_MSG_ID`.
 Without a hook: one line per event on stdout; `--quiet`: none. Diagnostics go to stderr.
+A ready `--on-message` hook ships in the npm package: [`examples/reply-hook.sh`](examples/reply-hook.sh)
+(pipes the text to `$SIGELO_REPLY_CMD`, sends back what it prints; README "Answering by itself"). Installed
+with `npm i -g`: `sh "$(npm root -g)/sigelo-agent/examples/reply-hook.sh"`.
 
 ## Slow agents
 
@@ -54,12 +57,16 @@ sigelo-agent reply --to <id> --status          # queued, published (in the conta
 Change a tier any time: `sigelo-agent tier <name> own|friend|quiet`. Own agents find each other
 through operator hints (apps/contact/carrier.mjs): blinded, so other contacts learn nothing.
 
-**One owner per identity file.** While `watch` or `ui` runs on a file (`<identity>.ui.pid`), only it
-logs in to the relay as that identity. Beside a watcher, `inbox` reads what it received, `send`,
+## One process per identity file
+
+While `watch` or `ui` (the page) runs on a file (`<identity>.ui.pid`), it is the only process logged
+in to the relay as that identity. Beside a watcher, `inbox` reads what it received, `send`,
 `send-file` and `reply` queue for it (it sends them within seconds), and `invite`, `accept`, `forget` and `enrol`
 refuse (exit 1, `busy`); beside a page, all of them refuse. The MCP tools follow the same rule.
 The file is the owner however it is named: `watch --operator` (ENROL.md) and `send --identity
-~/.config/sigelo/me.local.json` meet at the same lock.
+~/.config/sigelo/me.local.json` meet at the same lock. On `busy`: stop the watcher or page, or let it
+do the work (its hooks, `send`, `reply`); a second process that must log in itself needs its own
+identity, a named profile (`--identity ~/.config/moadim/sigelo.<name>.local.json`, MCP `identity`).
 A watcher runs for days: keep its key in the keychain or the key agent ([KEYS.md](KEYS.md)).
 It stays connected to every relay a contact was paired on (`invite --relay`, `accept --relay`), not only `SIGELO_RELAY`.
 It handles links by code (LINKS.md): the operator's introductions complete while it runs; no hook sees them.

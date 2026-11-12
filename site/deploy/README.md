@@ -50,7 +50,7 @@ this file" right would make the deploy key a root key (`error_log /etc/cron.d/â€
 `load_module`). It copies the uploaded file to a root-owned temp file, tokenizes it the way nginx
 does, and rejects any directive outside an allowlist and any root, log or certificate path but the
 fixed ones. A stolen deploy key can still rewrite the site, its headers and its redirects â€” that is
-the intended scope; the filter is reviewed, not audited. Test it anywhere:
+the intended scope; the filter is reviewed by us, no outside review yet. Test it anywhere:
 `sh site/deploy/sigelo-nginx-apply --check site/deploy/nginx.conf`.
 
 An identical upload is detected (`diff -r`) and discarded, so re-running a deploy of the same

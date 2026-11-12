@@ -4,8 +4,14 @@ An enrolled agent is **worker i** of your keeper root: its key is `agentIdentity
 (`ts/src/keys.ts`, MONERO.md §2), its genesis commits to your seed's recovery key, and it carries
 your operator attestation (`sigelo-relay/operator`, 90 days). Your 25 words bring the same DID back.
 Enrolment is contact addition with one extra step: the other machine pairs through a code, then its
-temporary DID is replaced by worker i: yours, at tier own unless you lower it (below). No four words to
-compare: your side derives worker i's DID and marks it checked when that DID pairs (THREAT-MODEL §2.11).
+temporary DID is replaced by worker i: yours, at tier own unless you lower it (below).
+
+## The four words
+
+After an ordinary pairing (`invite`, `accept`) both sides show four words; the two
+operators compare them over another channel: the same words mean nobody sits in between. Enrolling
+your own agent skips them: your side derives worker i's DID and marks it checked when that DID pairs
+(THREAT-MODEL §2.11). `enrol --confirm-words` asks them anyway, before the key goes (below).
 
 ## Once: your identity and K
 

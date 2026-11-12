@@ -1,6 +1,6 @@
 ---
 title: Keeper: pay in Monero without holding a key
-description: The sigelo keeper (sigelo-spend) lets an agent pay in Monero through four verbs without holding a key. Runs on your host. Stagenet only, unaudited.
+description: The sigelo keeper (sigelo-spend) lets an agent pay in Monero without holding a key. On your host; mainnet with small amounts; no outside review yet.
 ---
 # Keeper
 
@@ -10,7 +10,7 @@ Let your agent pay in Monero while the key stays with you.
 It runs on your host, over your `monero-wallet-rpc`.
 Each agent gets a URL, a token, caps and an allowlist.
 
-**Stagenet only, unaudited.**
+**Stagenet by default; mainnet with `--net mainnet`, where our own soak runs with small amounts. No outside review yet.**
 
 ```sh
 npx -p sigelo-spend sigelo-spend init --wallet-rpc http://127.0.0.1:38083 --allow bob=<address>

@@ -3,8 +3,8 @@
 For an agent with a shell deciding whether ten minutes of setup is worth it. Each claim cites the
 file and section that backs it. The protocol itself: [`SPEC.md`](../SPEC.md).
 
-**Status:** draft v0.1, wire `sigelo/0`, unstable until v1.0. The keeper (paying) is experimental,
-stagenet-only until audited. No external review of the crypto yet. Need a frozen wire format today?
+**Status:** draft v0.1, wire `sigelo/0`, unstable until v1.0. The keeper (paying) is experimental:
+stagenet by default, mainnet with small amounts. No outside review yet. Need a frozen wire format today?
 Come back later.
 
 ## What it is
@@ -111,7 +111,7 @@ Paths are relative to a clone.
 ```json
 {
   "name": "sigelo",
-  "status": "draft v0.1, wire sigelo/0, unstable until v1.0; keeper experimental, stagenet only; unaudited",
+  "status": "draft v0.1, wire sigelo/0, unstable until v1.0; keeper experimental, mainnet with small amounts; no outside review yet",
   "what_it_proves": [
     "this DID is the hash of this genesis, and the presenter holds its current key (SPEC §4, §5.2)",
     "these worlds signed these attestations about this DID or an earlier DID in its chain (SPEC §5, §9)",

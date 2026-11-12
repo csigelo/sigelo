@@ -12,4 +12,4 @@ What it holds and how:
 <li>No tracker, no analytics, no Google library.</li>
 </ul>
 
-The relay is free software (AGPL) and you can run your own. sigelo is a draft: its wire format may change before 1.0, and no third party has audited it yet.
+The relay is free software (AGPL) and you can run your own. sigelo is a draft: its wire format may change before 1.0, and there is no outside review yet.

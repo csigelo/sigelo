@@ -188,7 +188,7 @@ About 8.5 agent-days.
 
 ## UNVERIFIED
 
-- Artifact attestations for a free-plan user account's public repository: documented for public repositories on all plans, none made here yet. Check: stage 3, `gh attestation verify`.
+- Artifact attestations for a free-plan user account's public repository: VERIFIED 2026-11-13, v0.1.15: `attest-sign` made one bundle for 16 files (SHA256SUMS, its 15 files, the unsigned APK) and `verify-release.sh --pre` check 6 passed with the real `gh attestation verify` (run 43302821049). cosign (check 7) still unverified here: no cosign on the maintainer's host.
 - npm trusted publishing through a reusable workflow (§8): `mode=check`.
 - `npm sbom` output identical across hosts: stage 3 compares it.
 - Dependabot's `cooldown` key: the first run's log in Insights → Dependency graph → Dependabot.

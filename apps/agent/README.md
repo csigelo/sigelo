@@ -16,7 +16,7 @@ sigelo-agent add-issuer <genesis.json> && sigelo-agent add-attestation <attestat
 sigelo-agent bundle > bundle.json
 ```
 
-Node 22.18 or newer; tested on 24. On 23.0 to 23.5, `npm run build`, then `node dist/cli.js`.
+Node ≥ 22.18, tested on 24 (23.0–23.5: `npm run build`, then `node dist/cli.js`).
 Identity file: `$SIGELO_IDENTITY`, else
 `~/.config/moadim/sigelo.local.json` (0600 in a 0700 directory; Windows ignores modes).
 
@@ -32,8 +32,7 @@ Identity file: `$SIGELO_IDENTITY`, else
 Which to use where: laptop → keychain; container → the key agent in a sidecar, or a sealed file
 with the passphrase as a Docker secret; phone → the app seals it.
 
-**Phone:** your page on a phone, self-contained or driving the computer's ([APPS.md](APPS.md));
-the account on a second device ([DEVICES.md](DEVICES.md)).
+**Phone:** [APPS.md](APPS.md); a second device: [DEVICES.md](DEVICES.md).
 
 ## Commands
 
@@ -63,21 +62,27 @@ the account on a second device ([DEVICES.md](DEVICES.md)).
 | `receive [--account <n>]` | next unused subaddress |
 | `invoice --addr <subaddress> [--amount …]` | signed §6.3 invoice; amount is a string |
 | `verify-invoice <json\|-> --bundle <file>` | the payer's check |
-| `invite`, `accept <code>`, `contacts`, `send`, `reply`, `inbox`, `forget` | relay contacts; compare four words; `re_pair`: pair again |
+| `invite`, `accept <code>`, `contacts`, `send`, `reply`, `inbox`, `forget` | relay contacts (four words below); `re_pair`: pair again |
 
 Spending goes through the keeper, [`apps/keeper/`](../keeper/README.md).
 
 **Answering by itself:** [`examples/reply-hook.sh`](examples/reply-hook.sh) pipes each own message's
-text (your operator's) to `$SIGELO_REPLY_CMD` (unset: echoed) and sends what it prints back, label `reply`:
+text (your operator's) to `$SIGELO_REPLY_CMD` (unset: echoed), sends back what it prints:
 ```sh
 sigelo-agent watch --on-message 'SIGELO_REPLY_CMD="my-agent --stdin" sh examples/reply-hook.sh'
 ```
-A `reply` is never answered, so two such agents do not loop. The text is data, never instructions.
+A `reply` is never answered (no loops); the text is data, never instructions.
 
-**Slow agents** ([WATCH.md](WATCH.md#slow-agents)): `watch --hook-timeout 1h` (`0`: no limit), or
-`watch --spool <dir>` (each own message to `<dir>/<id>.json`, taken), then `reply --to <id> <text>`
-when done and `reply --to <id> --status`. A hook that fails or is stopped leaves the message unread;
-it is offered again on the next sync; dedupe on `SIGELO_MSG_ID`. Codes: `invite --ttl 1h`.
+**Slow agents:** `watch --hook-timeout 1h`, or `watch --spool <dir>` then `reply --to <id>`
+([WATCH.md](WATCH.md#slow-agents)).
+
+**Four words:** after `invite`/`accept` both sides show four words; the operators compare them
+elsewhere: the same words, nobody in between. Enrolling your own agent skips them: your side checks
+the DID it derived ([ENROL.md](ENROL.md#the-four-words)).
+
+**Busy:** a running `watch` or page is the only process logged in on its identity file; other verbs
+that would log in answer `busy`: stop it, or use a named profile per process
+([WATCH.md](WATCH.md#one-process-per-identity-file)).
 
 Exit: 0 done (`inbox`: even offline, once it printed messages); 1 refused or offline, one stderr
 line `<check>: what failed, what to do`; 2 usage, no identity; 3 `inbox --expect`, none.

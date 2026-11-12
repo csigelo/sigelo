@@ -20,7 +20,7 @@
 # the stats password file (auth_basic_user_file: nginx reads it at request time), and the one
 # loopback upstream of the world service (proxy_pass http://127.0.0.1:8790).
 # What a stolen deploy key can still do: change the site's content, headers and redirects. That
-# is the intended scope, not a proof (the filter is reviewed, not audited).
+# is the intended scope, not a proof (the filter is reviewed by us, no outside review yet).
 set -eu
 
 WEBROOT=/var/www/sigelo.io

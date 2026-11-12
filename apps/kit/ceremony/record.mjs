@@ -4,7 +4,7 @@
 //
 // Writes the record the operator keeps with the printed procedure: what was made, when, on which
 // host (a sha256 of machine-id/hostname and uname, not the name), with which tools, and the
-// sha256 of backup.age and fingerprint.txt so a later rerun or audit can tell it is the same root.
+// sha256 of backup.age and fingerprint.txt so a later rerun or check can tell it is the same root.
 // Every value is public: the age RECIPIENT (never the identity), addresses, identity public keys,
 // the fingerprint. It refuses to write anything that looks like key material, as a last guard.
 import { readFileSync, writeFileSync } from 'node:fs';

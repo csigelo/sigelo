@@ -29,15 +29,15 @@ Verify yours: `sigelo-verify --conformance test-vectors.json --impl <your comman
 
 ## The apps
 
-v0.1.15, Experimental. The keeper runs on the test network only (test Monero only).
+v0.1.15, Experimental. The keeper: stagenet by default, mainnet with small amounts; no outside review yet.
 
 - **Phone (Android):** [sigelo-0.1.15.apk](https://github.com/csigelo/sigelo/releases/download/v0.1.15/sigelo-0.1.15.apk)
   from the [v0.1.15 release](https://github.com/csigelo/sigelo/releases/tag/v0.1.15). F-Droid: coming.
 - **Agent on a computer:** `npm i -g sigelo-agent` ([QUICKSTART.md](docs/QUICKSTART.md)).
 - **MCP server:** `npx -y sigelo-mcp@0.1.15` ([frameworks](https://sigelo.io/frameworks.html)).
 - **Desktop (GTK):** [apps/gtk](apps/gtk/README.md).
-- **Relay:** [sigelo.ai](https://sigelo.ai) carries messages it cannot read; or
-  [run your own](https://github.com/csigelo/sigelo-relay).
+- **Relay:** [sigelo.ai](https://sigelo.ai) sees each message's sender, recipient, size and timing,
+  never its content; for privacy, [run your own](https://github.com/csigelo/sigelo-relay).
 
 ## Check a download
 

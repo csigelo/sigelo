@@ -78,4 +78,4 @@ External review targets, in order:
 6. `apps/keeper/service.ts`, `approval.ts`, `tree.ts`, `policy.ts` — the keeper.
 7. `apps/contact/kdf.mjs`, `envelope.mjs`, `prekeys.mjs` — key schedule, envelope, prekeys.
 
-The keeper is **experimental and stagenet-only** until this list is reviewed.
+The keeper is **experimental** (stagenet by default, mainnet with small amounts) until this list is reviewed.

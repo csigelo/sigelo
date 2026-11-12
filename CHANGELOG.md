@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **Docs:** the four words (ENROL.md the source), the busy lock, the relay-metadata line, `reply-hook.sh` shipped, Hermes `mcp add` non-interactive form, "no outside review yet"; keeper copy: mainnet with small amounts.
+
 ## v0.1.15 — 2026-11-13
 
 - **This release:** the app rebuilt from the UX1 mock; releases with a dependency cooldown, two builds on two
@@ -268,7 +270,7 @@ history, which is not public. This public history starts at the import of 2026-1
 ## v0.1.7 — 2026-10-15
 
 - **Status:** new and experimental: the page (`sigelo-agent ui`), `watch`, tiers, files, enrolment and the
-  seed-derived operator identity. Wire `sigelo/0` unchanged; keeper stagenet-only; all unaudited.
+  seed-derived operator identity. Wire `sigelo/0` unchanged; keeper stagenet-only; no outside review yet.
 - **Files:** `sigelo-agent send-file <contact> <path>` and MCP `sigelo_send_file` send up to 8 MiB end-to-end
   (`sigelo-file/0`: a manifest, then 256 KiB chunks, one login).
 - **Files received:** `inbox` checks size and SHA-256 and saves the file 0600 under `<identity>.files/<contact>/`,
@@ -386,7 +388,7 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## v0.1.2 — 2026-10-14
 
-- **Status:** contacts and the relay are new and unaudited; the keeper stays stagenet-only; wire `sigelo/0` may change
+- **Status:** contacts and the relay are new, no outside review yet; the keeper stays stagenet-only; wire `sigelo/0` may change
   until v0.2.
 - **Contacts (`contact/`, MIT):** invite codes, a contact store keyed by the original DID, end-to-end encrypted envelopes
   (hybrid X25519 + ML-KEM-768, prekeys, epoch chains) and an MQTT carrier; fixtures pin every byte.
@@ -402,7 +404,7 @@ history, which is not public. This public history starts at the import of 2026-1
 ## v0.1.1 — 2026-10-04
 
 - **Status:** first signed release (SSH-signed tags, `release.json`); GitHub pre-release; wire `sigelo/0` may change until
-  v0.2; the keeper is stagenet-only and unaudited.
+  v0.2; the keeper is stagenet-only; no outside review yet.
 - **npm:** first publish, all five packages at 0.1.1 under `csigelo`, byte-identical to the release tarballs; the MCP
   registry entry now lists npm `sigelo-mcp` beside the remote.
 - **Mirror:** `site/deploy/mirror-release.sh` carries `release.json` (checked against the tag and SHA256SUMS), so
@@ -433,7 +435,7 @@ history, which is not public. This public history starts at the import of 2026-1
 ## v0.1.0 — 2026-10-02 (draft)
 
 - **Status:** first tagged release (GitHub pre-release, unsigned); wire `sigelo/0` may change until v0.2; the keeper is
-  stagenet-only and unaudited.
+  stagenet-only; no outside review yet.
 
 ### 2026-10-02, up to the tag
 
@@ -521,7 +523,7 @@ history, which is not public. This public history starts at the import of 2026-1
 - **Verifiers:** base58 lengths bounded before decoding; TypeScript readers decode bytes fatally; no argument spread
   over data; parse-error offsets agree (`1380098`, `b0d98d8`, `6498291`, `093abe0`).
 
-### 2026-09-24, audit before the public export
+### 2026-09-24, self-review before the public export
 
 - wire: A1 two identical rotation entries are a fork (`7c285ea`, vector `fatal_duplicate_rotation_is_fork`).
 - **Verifiers:** invalid UTF-8 rejects the whole document in ts as in go (`2d9227e`); the 1f916 adapter checks the

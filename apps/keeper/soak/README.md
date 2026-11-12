@@ -1,8 +1,8 @@
-# Keeper soak (stagenet)
+# Keeper soak
 
 ROADMAP §6 step 10, items T6 (two or more weeks of scripted agents against a real keeper and
-wallet: restarts, lock waits, approval races) and T14 (incident rehearsal). Stagenet only. The
-coins are worthless, but everything else is real: the keeper, the wallet, the two-phase relay,
+wallet: restarts, lock waits, approval races) and T14 (incident rehearsal). Stagenet by default
+(`setup.sh --mainnet`: real coins, small amounts). On stagenet the coins are worthless; the rest is real: the keeper, the wallet, the two-phase relay,
 approvals, delegation and sweeps.
 
 ## What runs

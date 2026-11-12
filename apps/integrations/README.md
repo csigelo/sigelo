@@ -17,6 +17,12 @@ a PAP identity method draft (a DID as `client_id`, checked offline) in [`pap/`](
 signed HTTP requests, Cloudflare's scheme) in [`web-bot-auth/`](web-bot-auth/README.md).
 Env: `SIGELO_IDENTITY=<file>` in the client's env slot gives each agent its own identity.
 
+Pairing (`sigelo_invite`, `sigelo_accept`): both sides then show four words; the two operators compare
+them over another channel: the same words mean nobody sits in between. Enrolling your own agent
+(`sigelo_enrol`) skips them: your side checks the DID it derived ([ENROL.md](../agent/ENROL.md#the-four-words)).
+One process per identity file logs in to the relay; beside a running `sigelo-agent watch` or page the
+tools answer `busy` ([WATCH.md](../agent/WATCH.md#one-process-per-identity-file)).
+
 ## Compatibility
 
 `S` = `{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.15"]}}}`, the common
