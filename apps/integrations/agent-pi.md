@@ -43,13 +43,13 @@ From pi's `docs/mcp.md` (2026-11-11): user servers in `~/.pi/agent/mcp.json`, pr
 `command`, `args`, `env`, `cwd`. Add it with the CLI:
 
 ```sh
-pi mcp add sigelo --env SIGELO_IDENTITY="$HOME/.pi/sigelo.local.json" -- npx -y sigelo-mcp@0.1.14
+pi mcp add sigelo --env SIGELO_IDENTITY="$HOME/.pi/sigelo.local.json" -- npx -y sigelo-mcp@0.1.15
 ```
 
 or in `~/.pi/agent/mcp.json`:
 
 ```json
-{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.14"],"env":{"SIGELO_IDENTITY":"/home/you/.pi/sigelo.local.json"}}}}
+{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.15"],"env":{"SIGELO_IDENTITY":"/home/you/.pi/sigelo.local.json"}}}}
 ```
 
 Not run here: pi is not installed on this machine.

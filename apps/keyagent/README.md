@@ -5,7 +5,7 @@ Holds sigelo identity keys and signs known sigelo bodies over a local socket, as
 The model and the MCP server then hold a socket path, never the key.
 
 ```sh
-npm i -g sigelo-key-agent@0.1.14 sigelo-agent@0.1.14
+npm i -g sigelo-key-agent@0.1.15 sigelo-agent@0.1.15
 sigelo-key-agent start          # from a clone: node apps/keyagent/agent.mjs start; prints SIGELO_KEY_AGENT=<socket>
 export SIGELO_KEY_AGENT=<socket>
 sigelo-agent keys to-agent                        # the file now says {"provider":"agent"}
@@ -44,7 +44,7 @@ Both run as the same user (`node`), whose socket only that user opens.
 
 ```dockerfile
 FROM node:22-slim
-RUN npm i -g sigelo-key-agent@0.1.14 sigelo-agent@0.1.14
+RUN npm i -g sigelo-key-agent@0.1.15 sigelo-agent@0.1.15
 USER node
 ```
 

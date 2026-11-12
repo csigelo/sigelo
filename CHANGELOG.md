@@ -5,6 +5,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+## v0.1.15 — 2026-11-13
+
+- **This release:** the app rebuilt from the UX1 mock; releases with a dependency cooldown, two builds on two
+  architectures, SBOM, provenance; the keeper's live policy and refuse; the task loop, sealed identity files.
 - **verify-release.sh checks 5–8:** tag digest, provenance per file, cosign on SHA256SUMS, the unsigned APK; `--strict`, `--offline`, `--pre`, `--dry-run`. sign-release.sh compares with the draft (apk claim).
 - **CI: release.yml (dry run only so far):** a tag builds on two runners, compares SHA256SUMS and the tag's digest, attests, cosigns, drafts; `sigelo-<v>.cdx.json` SBOM (release/sbom.mjs) joins SHA256SUMS.
 - **app:** new frame from the UX1 mock (pass 1 of 6).
@@ -27,10 +31,10 @@ history, which is not public. This public history starts at the import of 2026-1
 - **sigelo-key-agent on npm:** publishable from 0.1.15 (built, packed and tested with the others); its README has a Docker sidecar example and the policy in a few lines.
 - **SIGELO_PREKEY_DAYS:** 1 to 7 (default 7): prekeys replaced sooner, so a stolen state file reads incoming messages for less time. Local only, no wire change.
 - **MCP:** `sigelo_wait_for_message` (a long poll, up to 10 minutes, refused beside a watcher), `sigelo_reply` with its delivery status, `sigelo_enrol`, `sigelo_enrol_finish`.
-- **Docs:** a slow-agents section for pi and Hermes; pi 1.0's MCP config (doc-checked, untested); every `npx -y sigelo-mcp` example pinned to 0.1.14.
+- **Docs:** a slow-agents section for pi and Hermes; pi 1.0's MCP config (doc-checked, untested); every `npx -y sigelo-mcp` example pinned to the release (0.1.15).
 - **CI: wallet-rpc canary:** auto-refresh off after create_wallet, a readiness poll up to 180 s, three retries before SKIP; mcp-registry pinned by SHA; `permissions: {}` on top.
 - **docs/:** WHY, QUICKSTART, MONERO and INCIDENT moved there, under an index (docs/README.md); sigelo.io keeps their /raw/ URLs. CONTRIBUTING.md: how to file issues and pull requests.
-- **Repository front page:** the README in two parts, the protocol and the apps, linking the v0.1.14 APK itself (`/releases/latest` skips pre-releases); AUDIT.md is docs/self-review-2026-09.md.
+- **Repository front page:** the README in two parts, the protocol and the apps, linking the release's APK itself (`/releases/latest` skips pre-releases); AUDIT.md is docs/self-review-2026-09.md.
 - **sigelo-mcp --http [HOST:PORT]:** MCP Streamable HTTP on 127.0.0.1, bearer token (a given one off loopback), web pages refused; stdio unchanged. Octomind: a frameworks row.
 - **Front pages:** the line under the motto says a team of AI agents built sigelo under a human owner, and why to trust it as Bitcoin is trusted, linking the FAQ; sigelo.ai in all 30 languages.
 - **sigelo.io FAQ:** `/faq.html`, seven answers: why trust it, a lost machine or key, cutting someone off, who may instruct an agent, stacks, a down or hostile relay, what sigelo is not.

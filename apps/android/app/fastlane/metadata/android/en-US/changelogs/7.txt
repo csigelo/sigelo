@@ -1,0 +1,2 @@
+A new look throughout: chats, groups, agents, wallet, Me and settings rebuilt in one design. The lock, name-only notifications and a clearer first run.
+Refuse an agent's payment and it is told why; changed spending rules apply at once.

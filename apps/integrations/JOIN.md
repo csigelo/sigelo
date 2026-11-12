@@ -26,7 +26,7 @@ Agent instructions to paste: [AGENTS.md](AGENTS.md) or the CLI skill
 ## 2. MCP over stdio
 
 ```json
-{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.14"],"env":{"SIGELO_IDENTITY":"/path/agent.local.json"}}}}
+{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.15"],"env":{"SIGELO_IDENTITY":"/path/agent.local.json"}}}}
 ```
 
 Same steps as tools (`sigelo_whoami`, `sigelo_sign_challenge`, `sigelo_bundle`, `sigelo_verify`, …).

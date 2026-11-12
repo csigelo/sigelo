@@ -1,6 +1,6 @@
 {
   "name": "sigelo-transfer",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": false,
   "description": "Direct file transfer for sigelo-contact: the WebRTC data channel (werift, pure TypeScript, no native code) behind sigelo-agent transfer. The relay carries only the introduction.",
   "keywords": [
