@@ -1,18 +1,28 @@
 name: android
 # The Android app (apps/android, design/apps.md §8), built from this commit. No secret is used:
-# the release APK is left unsigned (the operator signs it offline, design/apps.md §11); the debug
-# APK is signed with a key made in this job and gone with it. Both, and their SHA-256, are uploaded.
+# the release APK is left unsigned (the owner signs it offline, release/apk-ceremony.md); the debug
+# APK is signed with a key made in the job and gone with it. Built twice, in two jobs with the same
+# inputs; the `apk` job (a required check, release/RELEASE-v2.md §9) fails unless the two unsigned
+# APKs are byte-identical, then uploads `sigelo-android`: both APKs and their SHA-256. No `paths`
+# filter: a required check must run on every pull request. android-reproduce.yml is the wider
+# report (other JDKs, F-Droid's build), by hand.
 on:
   push:
     branches: [main]
-    paths: ['apps/android/**', 'apps/web/**', 'apps/gtk/**', 'apps/contact/**', 'apps/agent/**', 'ts/**', 'relay/**', '.github/workflows/android.yml']
   pull_request:
-    paths: ['apps/android/**', 'apps/web/**', 'apps/gtk/**', 'apps/contact/**', 'apps/agent/**', 'ts/**', 'relay/**', '.github/workflows/android.yml']
   workflow_dispatch:
-permissions:
-  contents: read
+  workflow_call:
+    outputs:
+      unsigned_sha256:
+        description: SHA-256 of the unsigned release APK both builds made
+        value: ${{ jobs.apk.outputs.unsigned_sha256 }}
+permissions: {}
 jobs:
-  apk:
+  build:
+    permissions: { contents: read }
+    strategy:
+      matrix:
+        builder: [1, 2]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     defaults:
@@ -72,6 +82,40 @@ jobs:
           "$tools/apksigner" verify --print-certs "out/sigelo-$short-debug.apk"
           if "$tools/apksigner" verify "out/sigelo-$short-release-unsigned.apk" 2>/dev/null; then echo '::error::the release APK is signed'; exit 1; fi
           (cd out && sha256sum *.apk > SHA256SUMS && cat SHA256SUMS)
+      # 14 days: on a mismatch both builds stay for the diff (release/RELEASE-v2.md §4)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (tag v7)
+        with:
+          name: apk-build-${{ matrix.builder }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  # The two unsigned APKs byte for byte; the debug APKs differ (each has its own ephemeral key).
+  apk:
+    needs: build
+    permissions: { contents: read }
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      unsigned_sha256: ${{ steps.cmp.outputs.unsigned_sha256 }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+        with: { pattern: 'apk-build-*', path: builds }
+      - id: cmp
+        name: the two unsigned APKs, byte for byte
+        run: |
+          short=${GITHUB_SHA::12}
+          a=builds/apk-build-1/sigelo-$short-release-unsigned.apk b=builds/apk-build-2/sigelo-$short-release-unsigned.apk
+          sha256sum "$a" "$b"
+          if ! cmp "$a" "$b"; then
+            echo '::error title=apk not reproducible::the two unsigned APKs differ; both builds are kept 14 days as apk-build-1 and apk-build-2'; exit 1
+          fi
+          echo "unsigned_sha256=$(sha256sum "$a" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "unsigned APK reproduced: $(sha256sum "$a" | cut -d' ' -f1)" | tee -a "$GITHUB_STEP_SUMMARY"
+          mkdir out && cp builds/apk-build-1/* out/ && (cd out && sha256sum -c SHA256SUMS)
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (tag v7)
         with:
           name: sigelo-android

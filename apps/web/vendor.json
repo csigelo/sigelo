@@ -135,11 +135,11 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "77bcd35b747bf1da4218e2663b61bc5f62e21969f6325153cc7fe4cca7a2e808"
+   "sha256": "ddc111b9e4edbb0e4f0d6af8ecf4b0e78843570ad679e4a9dd624869a58ce8ac"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
-   "sha256": "0f2c4b244cfed80add5297167abe68719b4999bf1e80d0e79755704ee60f25a1"
+   "sha256": "65cac054dd38bd39a93336646e97adfb9ca6e61e82a2dd3679486fba7713d77d"
   },
   "vendor/contact/create.mjs": {
    "from": "apps/contact/create.mjs",
@@ -147,11 +147,11 @@
   },
   "vendor/contact/device.mjs": {
    "from": "apps/contact/device.mjs",
-   "sha256": "87dea7fa578e7693983631143f66054f83e706593e22a078bdc6c3fa6ea4e1c9"
+   "sha256": "e8d2f6a234aeebccf7608c1fd8e5657ef70f4b49eccdfdb56351351adeed3fbe"
   },
   "vendor/contact/enrol.mjs": {
    "from": "apps/contact/enrol.mjs",
-   "sha256": "5ce31f5f26ddcf443113f34bd1302c415968a1bfa77ba4dd211410561be83025"
+   "sha256": "0897984b540f7f52881318f942629bd9d2889d98c2d61e076cb8d69e495a11ed"
   },
   "vendor/contact/envelope.mjs": {
    "from": "apps/contact/envelope.mjs",
@@ -163,27 +163,27 @@
   },
   "vendor/contact/group.mjs": {
    "from": "apps/contact/group.mjs",
-   "sha256": "a4e5f9aeed11d54a36ec640cb93fda442348d4c18efd58aa47df931ef95de2f2"
+   "sha256": "d79d89ba49e573b710410fd9c043b2868b1c16f48fb056698e6912ea6f051a19"
   },
   "vendor/contact/invite.mjs": {
    "from": "apps/contact/invite.mjs",
-   "sha256": "e100621734441f6b3567750b4490b92737a86fe7371a614e44e291e93d7dd4a0"
+   "sha256": "2f4412f2057c679f1e12ac1492368228f41b1ff9af673c356a78136ef47f6e9b"
   },
   "vendor/contact/kdf.mjs": {
    "from": "apps/contact/kdf.mjs",
-   "sha256": "1393072d33f1af8f036ad6523d649de3127354a353cc0c8334eaca634515860e"
+   "sha256": "7fc9a21636060e64fadd0d52b82830060485d965af05243a9d2d920220f643aa"
   },
   "vendor/contact/link.mjs": {
    "from": "apps/contact/link.mjs",
-   "sha256": "bdc244829b68ca8d4051470ec26983dc0076b7f2845ceeadfc27d3bddcfb895b"
+   "sha256": "cef84064e279d89ec95680f748cc433da70469eef85a0d63b6ea9f2b3866e7c5"
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "04b983d995296b4260b734ff5ad0bd4dde480cf08998a3676a76968e4a955ae8"
+   "sha256": "5bc9ed751bcce3af278e10f79c14ee4470592b4aabc171205de682285d4385bb"
   },
   "vendor/contact/prekeys.mjs": {
    "from": "apps/contact/prekeys.mjs",
-   "sha256": "1935a535d62bcdf23e0c2c181005b16a20b83d1d5cf3192032aadc51130938c4"
+   "sha256": "a38665d90ac65532aa44b9b5506279c579fc0e80d923c63b84131b54e4815b4a"
   },
   "vendor/contact/qr-decode.mjs": {
    "from": "apps/contact/qr-decode.mjs",
@@ -199,15 +199,15 @@
   },
   "vendor/contact/restore.mjs": {
    "from": "apps/contact/restore.mjs",
-   "sha256": "667651caf916da6514d5fc8ba01266f6a9b1de4d867d2cbc8a54eb11b93ddc9f"
+   "sha256": "503c297a9c5881e63a0a1da54c4a87f9f2f20a34dfaf3e04176ab94c5e3e95d3"
   },
   "vendor/contact/short.mjs": {
    "from": "apps/contact/short.mjs",
-   "sha256": "e122309aba7c0886f3fea0c3bc6b742f9b9f0f2d94ca68b5f32fbd0b43c92319"
+   "sha256": "2697d03c03fda4a8fa690b74b74048c8bb6d7bc7b08355435741540f22eeb2bd"
   },
   "vendor/contact/store.mjs": {
    "from": "apps/contact/store.mjs",
-   "sha256": "32bcb276c4882d2d6e2bf594fab535b3ca5f05317e60bc30033b0bd5e0034844"
+   "sha256": "dd30c652d94abc0354572667a0d2ef51408a326b1006763c56aed797a7cb5f07"
   },
   "vendor/contact/words-lock.mjs": {
    "from": "apps/contact/words-lock.mjs",
@@ -227,15 +227,15 @@
   },
   "vendor/shim-zlib.mjs": {
    "from": "apps/agent/shim-zlib.mjs",
-   "sha256": "a6d4c05a5ecf9b0734468f46d9bcc3db0336c48c31fcebc0eeda94e5f1bfa011"
+   "sha256": "75bdec3270a6392c704003cfb9bd3b6cf89b40a37d7b770bcf8790229dc06de3"
   },
   "vendor/sigelo/jcs.js": {
    "from": "ts/dist/jcs.js",
-   "sha256": "3baef3a8f3c032581b2d892ad4fa58e0eaa456dfb5302cbcbaab668bdbdeb9f9"
+   "sha256": "c7fa510b95d91cf9a12a6788e7c9d73b7c7b3cb456debdae083994d8a0b4a34a"
   },
   "vendor/sigelo/keys.js": {
    "from": "ts/dist/keys.js",
-   "sha256": "5ee83cb19d29d0778ac2fa556939e3a82a31c9730e3a21b3d77308946dffaa99"
+   "sha256": "ce61895d14add08816649f07415ed8c27c46308fd61c12cb0f6b52c6980f72c5"
   },
   "vendor/sigelo/monero-words.js": {
    "from": "ts/dist/monero-words.js",
@@ -255,7 +255,7 @@
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "f02cd02f5b2127b2c9a72813eb18f6ae692a0f41ad658c33d3632c94217c01d8"
+   "sha256": "8ea20ae71b7b24caee1da567542e27664a93aa424478b394b3794724483ad876"
   }
  }
 }

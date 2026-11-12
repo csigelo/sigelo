@@ -18,10 +18,10 @@ on:
       expect:
         description: "SHA-256 of CI's unsigned APK for that tree (the android workflow's SHA256SUMS)"
         default: '8670f3137f3d96619bd27e3359a5e40b7fd63b4914ea7d182283c51cff186faa'
-permissions:
-  contents: read
+permissions: {}
 jobs:
   build:
+    permissions: { contents: read }
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     continue-on-error: true
@@ -94,6 +94,7 @@ jobs:
 
   verdict:
     needs: build
+    permissions: { contents: read }
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 15

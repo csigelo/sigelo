@@ -29,11 +29,10 @@ on:
   schedule:
     - cron: '17 5 * * 1' # Mondays 05:17 UTC
   workflow_dispatch:
-permissions:
-  contents: read
-  issues: write
+permissions: {}
 jobs:
   canary:
+    permissions: { contents: read, issues: write }
     strategy:
       fail-fast: false
       matrix:

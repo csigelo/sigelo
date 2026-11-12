@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **CI: dependency cooldown:** job `deps` fails on an npm or Go version under 14 days old or an install script (dated exceptions file); dependency review, Scorecard, Dependabot.
+- **CI: required checks:** android runs on every PR, builds the APK twice and job `apk` compares the unsigned APKs byte for byte; `conformance-required` passes only when every conformance job does.
 - **init --enrol with a key agent:** works under `SIGELO_KEY_AGENT` (was `key_agent_mismatch`); the worker's key goes into the agent, its file holds none.
 - **apps/:** the installable packages moved there (agent, integrations, plugins, contact, transfer, keeper, kit, keyagent); `accept/` holds 1f916 and examples. Package names unchanged.
 - **tools/:** the test harnesses moved there: `sim`, `docs-test`, `demo`, `gate`; word budgets are `node tools/docs-test/check-budgets.mjs`.
