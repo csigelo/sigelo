@@ -11,7 +11,7 @@ Site: [sigelo.io](https://sigelo.io) · why: [WHY.md](docs/WHY.md)
 
 ## The protocol
 
-Wire `sigelo/0`: draft, not frozen ([VERSIONING.md](VERSIONING.md)). Libraries v0.1.14.
+Wire `sigelo/0`: draft, not frozen ([VERSIONING.md](VERSIONING.md)). Libraries v0.1.15.
 
 What every implementation agrees on: [SPEC.md](SPEC.md), [test-vectors.json](test-vectors.json), [schema/](schema/).
 
@@ -19,7 +19,7 @@ Get it:
 
 ```sh
 npm i sigelo
-go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.14
+go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.15
 ```
 
 Verify yours: `sigelo-verify --conformance test-vectors.json --impl <your command>`.
@@ -29,12 +29,12 @@ Verify yours: `sigelo-verify --conformance test-vectors.json --impl <your comman
 
 ## The apps
 
-v0.1.14, Experimental. The keeper runs on the test network only (test Monero only).
+v0.1.15, Experimental. The keeper runs on the test network only (test Monero only).
 
-- **Phone (Android):** [sigelo-0.1.14.apk](https://github.com/csigelo/sigelo/releases/download/v0.1.14/sigelo-0.1.14.apk)
-  from the [v0.1.14 release](https://github.com/csigelo/sigelo/releases/tag/v0.1.14). F-Droid: coming.
+- **Phone (Android):** [sigelo-0.1.15.apk](https://github.com/csigelo/sigelo/releases/download/v0.1.15/sigelo-0.1.15.apk)
+  from the [v0.1.15 release](https://github.com/csigelo/sigelo/releases/tag/v0.1.15). F-Droid: coming.
 - **Agent on a computer:** `npm i -g sigelo-agent` ([QUICKSTART.md](docs/QUICKSTART.md)).
-- **MCP server:** `npx -y sigelo-mcp@0.1.14` ([frameworks](https://sigelo.io/frameworks.html)).
+- **MCP server:** `npx -y sigelo-mcp@0.1.15` ([frameworks](https://sigelo.io/frameworks.html)).
 - **Desktop (GTK):** [apps/gtk](apps/gtk/README.md).
 - **Relay:** [sigelo.ai](https://sigelo.ai) carries messages it cannot read; or
   [run your own](https://github.com/csigelo/sigelo-relay).
@@ -44,8 +44,8 @@ v0.1.14, Experimental. The keeper runs on the test network only (test Monero onl
 In a clone of this repository:
 
 ```sh
-release/verify-release.sh v0.1.14                      # SHA256SUMS, release.json, the tag's signature
-release/apk-check.sh sigelo-0.1.14.apk release.json    # one APK: hash and signing certificate
+release/verify-release.sh v0.1.15                      # SHA256SUMS, release.json, the tag's signature
+release/apk-check.sh sigelo-0.1.15.apk release.json    # one APK: hash and signing certificate
 ```
 
 ## What is where

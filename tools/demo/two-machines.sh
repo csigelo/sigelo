@@ -22,6 +22,8 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 RELAY_DIR=${SIGELO_RELAY_DIR:-$ROOT/relay}
 [ -f "$RELAY_DIR/server.mjs" ] || { echo "FAIL no relay at $RELAY_DIR: clone the relay and set SIGELO_RELAY_DIR" >&2; exit 1; }
+# Step 0: bob runs the built CLI (apps/agent/dist/cli.js), so build it from the current source first.
+(cd "$ROOT/apps/agent" && npm run build >/dev/null) || { echo "FAIL npm run build in apps/agent" >&2; exit 1; }
 W=$(mktemp -d)
 RELAY_PID=
 cleanup() { if [ -n "$RELAY_PID" ]; then kill "$RELAY_PID" 2>/dev/null || true; fi; rm -rf "$W"; }

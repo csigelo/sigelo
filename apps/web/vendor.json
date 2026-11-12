@@ -223,7 +223,7 @@
   },
   "vendor/package.json": {
    "from": "apps/agent/package.json",
-   "sha256": "cc8aaf98fba0cbc775aef657a1f1272ec44c9e76dcc57ee009855b14b44826d3"
+   "sha256": "c5af2c099b1d16ed6767fadf0754cc56ac835194e1b839dc1d1f8f7b7a62e8f3"
   },
   "vendor/remote-client.mjs": {
    "from": "apps/agent/remote-client.mjs",
