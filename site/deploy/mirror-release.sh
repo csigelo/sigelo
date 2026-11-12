@@ -5,9 +5,10 @@
 #   site/deploy/mirror-release.sh <tag> [user@host] [--origin URL] [--no-verify] [--dry-run]
 #
 #   1. `gh release download <tag>` into a scratch directory; every file must be named in the
-#      release's SHA256SUMS (or be the APK release.json names, with its sha256) and every name
-#      there must have been downloaded, and `sha256sum -c` must pass: anything else and nothing
-#      is uploaded;
+#      release's SHA256SUMS (or be release.json, the APK it names with its sha256, or one of CI's
+#      two proofs, sigelo-<v>.intoto.jsonl and SHA256SUMS.sigstore.json) and every name there
+#      must have been downloaded, `sha256sum -c` must pass, and so must release/verify-release.sh
+#      on the download (--pre while there is no release.json): anything else and nothing is uploaded;
 #   2. writes site/src/releases/<tag>.SHA256SUMS in this tree (or checks it is the same): the
 #      site build reads the mirrored release from it (index.json release.files, /verify);
 #   3. uploads the files with a generated index.md listing to <webroot>/releases.incoming/<tag> on
@@ -83,7 +84,8 @@ if [ -f release.json ]; then
   [ -z "$apk" ] || echo "$apk: sha256 as release.json signs it"
 fi
 listed=$(sed -E 's/^[0-9a-f]{64} [ *]//' SHA256SUMS | LC_ALL=C sort)
-present=$(ls | grep -vx -e SHA256SUMS -e release.json ${apk:+-e "$apk"} | LC_ALL=C sort)
+# CI's proofs (release/RELEASE-v2.md §5) are made after SHA256SUMS; verify-release.sh checks them.
+present=$(ls | grep -vx -e SHA256SUMS -e release.json ${apk:+-e "$apk"} -e "sigelo-${tag#v}.intoto.jsonl" -e SHA256SUMS.sigstore.json | LC_ALL=C sort)
 grep -Evq '^[0-9a-f]{64} [ *][A-Za-z0-9][A-Za-z0-9._-]*$' SHA256SUMS && die "SHA256SUMS has a line that is not <sha256>  <file>"
 [ "$listed" = "$present" ] || die "SHA256SUMS and the downloaded files differ:
 listed:  $(echo $listed)
@@ -99,6 +101,8 @@ if [ -f release.json ]; then
     || die "release.json does not match this release"
   echo "release.json names $tag and sha256(SHA256SUMS)"
 fi
+pre=; [ -f release.json ] || pre=--pre
+sh "$root/release/verify-release.sh" $pre "$tag" "$tmp/$tag" || die "release/verify-release.sh${pre:+ $pre} $tag refuses the release"
 echo "$(echo "$present" | wc -l) files + SHA256SUMS: all OK"
 
 step "2/5 site/src/releases/$tag.SHA256SUMS (the site build's copy)"
@@ -122,9 +126,11 @@ const files = readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n').map((
 });
 const sums = { name: 'SHA256SUMS', bytes: statSync(`${dir}/SHA256SUMS`).size, url: `${MIRROR}${tag}/SHA256SUMS` };
 const signed = existsSync(`${dir}/release.json`) ? [{ name: 'release.json', bytes: statSync(`${dir}/release.json`).size, url: `${MIRROR}${tag}/release.json` }] : [];
+const proofs = [`sigelo-${tag.slice(1)}.intoto.jsonl`, 'SHA256SUMS.sigstore.json'].filter((f) => existsSync(`${dir}/${f}`))
+  .map((name) => ({ name, bytes: statSync(`${dir}/${name}`).size, url: `${MIRROR}${tag}/${name}` }));
 const claims = signed.length ? (JSON.parse(readFileSync(`${dir}/release.json`, 'utf8')).attestations || []).map((a) => a.body && a.body.claims).find((c) => c && c.tag === tag) : null;
 const apk = claims?.apk ? [{ name: claims.apk.file, bytes: statSync(`${dir}/${claims.apk.file}`).size, sha256: claims.apk.sha256, url: `${MIRROR}${tag}/${claims.apk.file}` }] : [];
-const entry = { tag, url: `${MIRROR}${tag}/`, github: `${GH}/releases/tag/${tag}`, sha256sums: sums.url, ...(signed.length && { release_json: signed[0].url }), ...(apk.length && { apk: { ...apk[0], cert_sha256: claims.apk.cert_sha256 } }), files };
+const entry = { tag, url: `${MIRROR}${tag}/`, github: `${GH}/releases/tag/${tag}`, sha256sums: sums.url, ...(signed.length && { release_json: signed[0].url }), ...(apk.length && { apk: { ...apk[0], cert_sha256: claims.apk.cert_sha256 } }), ...(proofs.length && { proofs }), files };
 // The tag's listing: deterministic (no dates), so a re-run produces the same bytes.
 writeFileSync(`${dir}/index.md`, `# sigelo ${tag}
 
@@ -134,7 +140,7 @@ All releases: [/releases/](/releases/) and [/releases/index.json](/releases/inde
 
 | File | Bytes | SHA-256 |
 |---|---:|---|
-${[...files, ...apk, sums, ...signed].map((f) => `| [${f.name}](${f.name}) | ${f.bytes} | ${f.sha256 ? `\`${f.sha256}\`` : ''} |`).join('\n')}
+${[...files, ...apk, sums, ...signed, ...proofs].map((f) => `| [${f.name}](${f.name}) | ${f.bytes} | ${f.sha256 ? `\`${f.sha256}\`` : ''} |`).join('\n')}
 `);
 let old = {}; try { old = JSON.parse(readFileSync(`${tmp}/old-index.json`, 'utf8') || '{}'); } catch { old = {}; }
 const v = (t) => t.slice(1).split(/[.-]/).slice(0, 3).map(Number);
@@ -178,17 +184,18 @@ else tar -C "$tmp/top" -cf - index.json index.md | $SSH "$target" "$remote2"; fi
 
 step "5/5 every file from $origin/releases/$tag/ against SHA256SUMS"
 if [ "$verify" = 0 ] || [ "$dry" = 1 ]; then echo "skipped"; exit 0; fi
-node - "$tmp/$tag" "$origin/releases/$tag/" "$apk" <<'EOF'
+node - "$tmp/$tag" "$origin/releases/$tag/" "$apk" "$tag" <<'EOF'
 const { readFileSync, existsSync } = require('node:fs');
 const { createHash } = require('node:crypto');
-const [dir, base] = process.argv.slice(2);
+const [dir, base, , tag] = process.argv.slice(2);
 const UA = 'sigelo-selfcheck/1 (+https://sigelo.io/privacy)';  // nginx.conf: logged to access-self.log
 const lines = readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n').map((l) => l.match(/^([0-9a-f]{64}) [ *](.+)$/).slice(1));
 (async () => {
   let bad = 0;
   const h = (f) => createHash('sha256').update(readFileSync(`${dir}/${f}`)).digest('hex');
   const apk = process.argv[4] ? [[h(process.argv[4]), process.argv[4]]] : [];
-  const all = [...lines, ...apk, [h('SHA256SUMS'), 'SHA256SUMS'], ...(existsSync(`${dir}/release.json`) ? [[h('release.json'), 'release.json']] : [])];
+  const after = ['release.json', `sigelo-${tag.slice(1)}.intoto.jsonl`, 'SHA256SUMS.sigstore.json'].filter((f) => existsSync(`${dir}/${f}`)).map((f) => [h(f), f]);
+  const all = [...lines, ...apk, [h('SHA256SUMS'), 'SHA256SUMS'], ...after];
   for (const [sha, name] of all) {
     const r = await fetch(base + name, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(120000) });
     const b = Buffer.from(await r.arrayBuffer());

@@ -5,6 +5,7 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **verify-release.sh checks 5–8:** the tag's `sha256sums:` line, build provenance per file, cosign on SHA256SUMS, the unsigned APK in the provenance; `--strict`, `--offline`, `--pre`, `--dry-run`. sign-release.sh compares SHA256SUMS with the draft and needs `--unsigned`.
 - **CI: release.yml (dry run only so far):** a tag builds on two runners, compares SHA256SUMS and the tag's digest, attests, cosigns, drafts; `sigelo-<v>.cdx.json` SBOM (release/sbom.mjs) joins SHA256SUMS.
 - **CI: dependency cooldown:** job `deps` fails on an npm or Go version under 14 days old or an install script (dated exceptions file); dependency review, Scorecard, Dependabot.
 - **CI: required checks:** android runs on every PR, builds the APK twice and job `apk` compares the unsigned APKs byte for byte; `conformance-required` passes only when every conformance job does.

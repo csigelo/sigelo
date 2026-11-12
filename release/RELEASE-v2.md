@@ -174,7 +174,7 @@ Each stage: exported to `ci-check`, run with `gh workflow run <file> -R csigelo/
 | 1 | `deps` job, exceptions file, dependency-review, Scorecard, Dependabot | 1.5 |
 | 2 | `android.yml` callable, double build; `conformance-required`; branch protection (after the owner's yes) | 1 |
 | 3 | `release.yml` build ×2, compare, tag digest, SBOM, attest, cosign, draft; on `ci-check` with `dry_run=true` (no attest, draft or publish). Built 2026-11-12: `release/sbom.mjs` (npm 10 and 11 give the same bytes), `release/notes-template.md`, jobs `check`, `build`, `compare`, `apk`, `attest-sign`, `draft`, `macos` (now `workflow_call`), `dry-run`. A real run runs at the tag: re-run is `gh workflow run release.yml --ref v<v> -f tag=v<v>` | 2.5 |
-| 4 | `verify-release.sh` checks 5–8 and `--strict`; `sign-release.sh` draft compare; `test-release.sh` fakes | 1.5 |
+| 4 | `verify-release.sh` checks 5–8 and `--strict`; `sign-release.sh` draft compare; `test-release.sh` fakes. Built 2026-11-12 on r1-stage4: also `--offline` (saved roots, `release/trusted-root.jsonl`: `gh attestation trusted-root > release/trusted-root.jsonl`, refreshed each release), `--pre` (no `release.json` yet) and `--dry-run` (no tag); check 6 uses the release's `intoto.jsonl`, not the API; `sign-release.sh --unsigned <apk>` checks the ceremony's prefix; the mirror accepts the two proofs and runs `verify-release.sh` | 1.5 |
 | 5 | npm and MCP jobs after the owner's npm steps; mirror pull timer; first v2 release; RELEASE.md replaced | 1.5 |
 
 About 8.5 agent-days.
@@ -194,3 +194,4 @@ About 8.5 agent-days.
 - Dependabot's `cooldown` key: the first run's log in Insights → Dependency graph → Dependabot.
 - `ubuntu-24.04-arm` for free public repositories: stage 3; fallback `ubuntu-22.04`.
 - The canary stall's cause (§11): proven only by 8 green weekly runs.
+- `gh attestation verify --bundle` on the real `intoto.jsonl`, and `cosign verify-blob --trusted-root --offline` (stage 4 tested both against fakes only). Check: the first v2 release, `verify-release.sh --strict` and `--offline --strict`.

@@ -12,18 +12,19 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never the p
 2. Sync and push (the commands under "Sync commands").
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a` must end
-   `ALL PASS (<n> checks)`. The artefacts hash the same on any host (same Go version; normalize-tgz.mjs
+   `ALL PASS (<n> checks)`. The artefacts hash the same on any host (normalize-tgz.mjs
    rewrites the gzip).
 4. Tag that commit twice, `v<v>` and `go/v<v>` (VERSIONING §4):
    `TZ=UTC GIT_COMMITTER_DATE="$(date -u +%s) +0000" git -c user.name=csigelo -c
-   user.email=contact@sigelo.io -c gpg.format=ssh -c user.signingkey=~/.ssh/sigelo_release_signing tag -s v<v> -m '…'`.
-   `git cat-file -p v<v>` must show `+0000`. `git push origin v<v> go/v<v>`.
-   The Android APK: CI on the tag, signed offline into `$S/a/sigelo-<v>.apk` (apk-ceremony.md,
-   "Each release"). Then `sh release/sign-release.sh v<v> $S/a --apk $S/a/sigelo-<v>.apk
-   <cert_sha256>` writes `$S/a/release.json` (without the APK: drop `--apk …`).
-5. `gh release create v<v> --repo csigelo/sigelo --prerelease --title 'sigelo v<v> (draft)'
-   --notes-file $S/notes.md $S/a/*` — all build.sh wrote, release.json, the APK. Notes (≤ 40 lines): status,
-   install lines, SHA256SUMS, CHANGELOG link. Drop `--prerelease` when final.
+   user.email=contact@sigelo.io -c gpg.format=ssh -c user.signingkey=~/.ssh/sigelo_release_signing tag -s v<v> -m '…'`,
+   the message's last line `sha256sums: <sha256 of $S/a/SHA256SUMS>`.
+   `git cat-file -p v<v>` must show `+0000`. `git push origin v<v> go/v<v>`: release.yml builds,
+   attests and makes the pre-release (no APK, no release.json).
+   The APK, signed offline into `$S/a/sigelo-<v>.apk` (apk-ceremony.md, "Each release"):
+   `sh release/sign-release.sh v<v> $S/a --apk $S/a/sigelo-<v>.apk <cert_sha256> --unsigned
+   <unsigned.apk>` writes `$S/a/release.json`; it refuses a SHA256SUMS other than the pre-release's.
+5. `gh release upload v<v> $S/a/sigelo-<v>.apk $S/a/release.json`, `sh release/verify-release.sh
+   --strict v<v>`, then `gh release edit v<v> --prerelease=false --latest`.
 6. Prove it from nothing: in a scratch GOPATH,
    `GOFLAGS=-mod=mod go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v<v>`
    (`GOPROXY=direct` if the proxy lags), `sigelo-verify --conformance test-vectors.json` on the
@@ -62,8 +63,8 @@ desktop notification a day, success none.
   `SIGELO_RELEASE_IDENTITY`) with one self-issued attestation, ctx `sigelo.io/release`, claims
   `{tag, commit, sha256sums_sha256, files}`. An attestation, not a new `typ`, so shipped verifiers
   check it with no wire change.
-- **Check**: `release/verify-release.sh <tag> [dir | url]`: SHA256SUMS, release.json at its `iat`,
-  the tag against allowed_signers, the APK if named. One APK: `release/apk-check.sh <apk> release.json`.
+- **Check**: `release/verify-release.sh [--strict] <tag> [dir | url]`: SHA256SUMS, release.json at its `iat`,
+  the tag, the APK; from v2 the tag digest, provenance, cosign (RELEASE-v2.md §5). One APK: `release/apk-check.sh`.
 - **APK**: its own RSA key (Android takes no Ed25519), made once offline; `release.json` signs
   `apk: {file, sha256, cert_sha256, version}` (release/apk-ceremony.md).
 - The long-term release key is to be derived as `k(S, "sigelo/v1/release/ed25519/<n>")` and enter
