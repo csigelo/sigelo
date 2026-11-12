@@ -57,14 +57,16 @@ Carry `sigelo-<v>.apk` back and sign the release with it:
 
 ```sh
 cp sigelo-<v>.apk $S/a/
-sh release/sign-release.sh v<v> $S/a --apk $S/a/sigelo-<v>.apk <cert_sha256>
+sh release/sign-release.sh v<v> $S/a --apk $S/a/sigelo-<v>.apk <cert_sha256> \
+  --unsigned $S/apk/sigelo-<commit>-release-unsigned.apk
 sh release/verify-release.sh v<v> $S/a
 ```
 
-`sign-release.sh` checks (`apksigner`) that the APK carries exactly that certificate, keeps the APK
-out of SHA256SUMS (npm-publish.yml compares SHA256SUMS with a rebuild that has none) and adds
-`apk: {file, sha256, cert_sha256, version}` to the release's signed claims. Attached to the
-GitHub release; `mirror-release.sh` mirrors it.
+`sign-release.sh` checks that the APK carries that one certificate (`apksigner`) and begins
+with the unsigned bytes, keeps it out of SHA256SUMS and adds
+`apk: {file, sha256, cert_sha256, version, unsigned_sha256}` to the signed claims;
+`verify-release.sh` finds `unsigned_sha256` in CI's provenance. Attached to the release;
+`mirror-release.sh` mirrors it.
 
 ## Check an APK
 

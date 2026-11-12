@@ -2,11 +2,15 @@
 # SPDX-License-Identifier: MIT
 # Signs a release (ROADMAP §5.5): writes <artefact-dir>/release.json.
 #
-#   release/sign-release.sh <tag> <artefact-dir> [--apk <signed.apk> <cert_sha256>]
+#   release/sign-release.sh <tag> <artefact-dir> [--apk <signed.apk> <cert_sha256> --unsigned <unsigned.apk>]
 #
 # <artefact-dir> is what release/build.sh wrote, SHA256SUMS included; <tag> must already exist in
 # this repository and carry an SSH signature that release/allowed_signers accepts (RELEASE.md
-# "Signing"), so the two signatures are made over the same commit.
+# "Signing"), so the two signatures are made over the same commit. Its SHA256SUMS must be the
+# draft release's byte for byte (`gh release download <tag> -p SHA256SUMS`; $SIGELO_GH overrides
+# gh, $SIGELO_REPO the repository): what CI built, attested and drafted is what gets signed.
+# Besides SHA256SUMS's files, <artefact-dir> may hold only the two proof files CI made after it
+# (sigelo-<v>.intoto.jsonl, SHA256SUMS.sigstore.json), release.json and the signed APK.
 #
 # release.json is a sigelo bundle (SPEC §8) of the RELEASE identity: its genesis and rotations, no
 # bindings, and one self-issued attestation (SPEC §5; iss = sub = the identity's current DID,
@@ -15,7 +19,11 @@
 # --apk (release/apk-ceremony.md): the Android APK the operator signed, inside <artefact-dir> and
 # not in SHA256SUMS (npm-publish.yml compares SHA256SUMS with a rebuild that has no APK), and the
 # SHA-256 of its signing certificate as the ceremony recorded it. apksigner must report exactly that
-# one certificate. Adds  apk: { file, sha256, cert_sha256, version }, version = <tag> without "v".
+# one certificate. --unsigned: the unsigned APK CI built (the sigelo-android artefact); the signed
+# one must begin with its bytes up to its central directory (the ceremony's check). Adds
+#   apk: { file, sha256, cert_sha256, version, unsigned_sha256 }, version = <tag> without "v";
+# verify-release.sh checks that unsigned_sha256 has build provenance. A claim, not a wire change:
+# release.json files without it still verify.
 # Any sigelo verifier checks it unchanged (`sigelo-verify release.json --now <iat>`); the release
 # meaning of the claims is checked by release/verify-release.sh. Not a new `typ`: SPEC §3.1's
 # table is closed and §9 step 2 rejects a `typ` outside its slot, so a "release" object would be
@@ -29,14 +37,16 @@
 # SIGELO_APKSIGNER         apksigner (Android SDK build-tools), default the one on PATH.
 set -eu
 
-usage() { echo "usage: release/sign-release.sh <tag> <artefact-dir> [--apk <signed.apk> <cert_sha256>]" >&2; exit 2; }
-[ $# -eq 2 ] || [ $# -eq 5 ] || usage
+usage() { echo "usage: release/sign-release.sh <tag> <artefact-dir> [--apk <signed.apk> <cert_sha256> --unsigned <unsigned.apk>]" >&2; exit 2; }
+[ $# -eq 2 ] || [ $# -eq 7 ] || usage
 root=$(cd "$(dirname "$0")/.." && pwd)
 tag=$1
 dir=$(cd "$2" && pwd)
-apk= cert=
-if [ $# -eq 5 ]; then
-	[ "$3" = --apk ] || usage
+apk= cert= unsigned=
+if [ $# -eq 7 ]; then
+	[ "$3" = --apk ] && [ "$6" = --unsigned ] || usage
+	unsigned=$7
+	[ -f "$unsigned" ] || { echo "sign-release.sh: no unsigned APK $unsigned" >&2; exit 1; }
 	apk=$4
 	cert=$(printf '%s' "$5" | tr -d ':' | tr 'A-F' 'a-f')
 	printf '%s' "$cert" | grep -Eqx '[0-9a-f]{64}' || { echo "sign-release.sh: cert_sha256 must be 64 hex digits (colons allowed)" >&2; exit 2; }
@@ -59,12 +69,22 @@ commit=$(git -C "$root" rev-parse --verify --quiet "refs/tags/$tag^{commit}") ||
 git -C "$root" -c gpg.ssh.allowedSignersFile="$signers" verify-tag "$tag" 2>/dev/null ||
 	{ echo "sign-release.sh: tag $tag has no SSH signature accepted by $signers" >&2; exit 1; }
 
-node --input-type=module - "$root" "$tag" "$commit" "$dir" "$id" "$pin" "$apk" "$cert" <<'EOF'
+# The draft's SHA256SUMS: CI built, compared, attested and drafted exactly these bytes.
+gh=${SIGELO_GH-$(command -v gh || true)}
+[ -n "$gh" ] || { echo "sign-release.sh: gh not found: it compares SHA256SUMS with the draft release's (SIGELO_GH)" >&2; exit 1; }
+draft=$(mktemp -d "${TMPDIR:-/tmp}/sigelo-draft.XXXXXX")
+trap 'rm -rf "$draft"' EXIT INT TERM
+"$gh" release download "$tag" -R "${SIGELO_REPO:-csigelo/sigelo}" -p SHA256SUMS -D "$draft" >/dev/null 2>&1 && [ -f "$draft/SHA256SUMS" ] ||
+	{ echo "sign-release.sh: no SHA256SUMS on the draft release $tag of ${SIGELO_REPO:-csigelo/sigelo}" >&2; exit 1; }
+cmp -s "$draft/SHA256SUMS" "$dir/SHA256SUMS" ||
+	{ echo "sign-release.sh: $dir/SHA256SUMS differs from the draft release's: sign what CI built, or find out why not" >&2; exit 1; }
+
+node --input-type=module - "$root" "$tag" "$commit" "$dir" "$id" "$pin" "$apk" "$cert" "$unsigned" <<'EOF'
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-const [root, tag, commit, dir, idPath, pinPath, apk, cert] = process.argv.slice(2);
+const [root, tag, commit, dir, idPath, pinPath, apk, cert, unsigned] = process.argv.slice(2);
 const { attest, did, verify, parse } = await import(pathToFileURL(join(root, 'ts/dist/sigelo.js')).href);
 const die = (m) => { console.error(`sign-release.sh: ${m}`); process.exit(1); };
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -77,9 +97,21 @@ for (const line of sums.toString('utf8').split('\n').filter(Boolean)) {
   files[m[2]] = m[1];
 }
 if (apk && apk in files) die(`${apk}: the signed APK must not be in SHA256SUMS (npm-publish.yml compares it with a rebuild)`);
-const extra = readdirSync(dir).filter((f) => !(f in files) && f !== 'SHA256SUMS' && f !== 'release.json' && f !== apk);
+// Made after SHA256SUMS, so never in it: CI's two proofs, release.json and the signed APK.
+const after = ['SHA256SUMS', 'release.json', `sigelo-${tag.replace(/^v/, '')}.intoto.jsonl`, 'SHA256SUMS.sigstore.json', apk].filter(Boolean);
+for (const f of after) if (f in files) die(`${f} must not be in SHA256SUMS`);
+const extra = readdirSync(dir).filter((f) => !(f in files) && !after.includes(f));
 if (extra.length) die(`not in SHA256SUMS: ${extra.join(' ')}`);
-const apkClaim = apk ? { apk: { file: apk, sha256: sha(readFileSync(join(dir, apk))), cert_sha256: cert, version: tag.replace(/^v/, '') } } : {};
+let apkClaim = {};
+if (apk) {
+  // apk-ceremony.md: the signed APK is the unsigned one up to its central directory, plus the signature.
+  const s = readFileSync(join(dir, apk)), u = readFileSync(unsigned);
+  const e = u.lastIndexOf(Buffer.from([0x50, 0x4b, 5, 6]));
+  const cd = e >= 0 && e + 20 <= u.length ? u.readUInt32LE(e + 16) : 0;
+  if (!(cd > 0 && cd <= e && s.length >= cd && s.subarray(0, cd).equals(u.subarray(0, cd))))
+    die(`${apk} does not begin with ${unsigned}'s bytes up to its central directory: not that build, signed (apk-ceremony.md)`);
+  apkClaim = { apk: { file: apk, sha256: sha(s), cert_sha256: cert, version: tag.replace(/^v/, ''), unsigned_sha256: sha(u) } };
+}
 
 const store = parse(readFileSync(idPath, 'utf8'));
 const pinned = did(parse(readFileSync(pinPath, 'utf8')));
@@ -93,5 +125,5 @@ const bundle = { v: 'sigelo/0', typ: 'bundle', genesis: store.genesis, rotations
 const r = verify(bundle, iat);
 if (r.attestations[iss]?.length !== 1 || r.rejected.attestations) die('self-check: the release attestation did not verify');
 writeFileSync(join(dir, 'release.json'), JSON.stringify(bundle, null, 2) + '\n');
-console.log(`release.json: ${tag} (${commit.slice(0, 12)}), ${Object.keys(files).length} files${apk ? ` + ${apk} (certificate ${cert})` : ''}, signed by ${iss}`);
+console.log(`release.json: ${tag} (${commit.slice(0, 12)}), ${Object.keys(files).length} files, SHA256SUMS as drafted${apk ? ` + ${apk} (certificate ${cert}, unsigned ${apkClaim.apk.unsigned_sha256.slice(0, 12)}…)` : ''}, signed by ${iss}`);
 EOF
