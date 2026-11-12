@@ -1,0 +1,247 @@
+# SPDX-License-Identifier: MIT
+# One signed tag starts a release (release/RELEASE-v2.md §2, steps 2-7). Two runners build it, their
+# SHA256SUMS must be byte-identical and equal the signed tag's `sha256sums:` line; the APK is built
+# twice by android.yml; then provenance and a Sigstore signature over SHA256SUMS, and a pre-release
+# with everything but the APK and release.json, which come after the offline signing.
+#
+# A real run is the tag push, or a re-run: `gh workflow run release.yml --ref v<v> -f tag=v<v>`
+# (the workflow must run AT the tag: provenance and cosign name refs/tags/v<v>).
+# dry_run=true on any branch: build, compare and apk only; no tag check, attestation or release.
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag, e.g. v0.1.15 (a real run must be dispatched on that tag)'
+        required: false
+        type: string
+      dry_run:
+        description: 'build, compare and apk only'
+        required: false
+        type: boolean
+        default: false
+permissions: {}
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  # What a real run needs before anything is built: a vX.Y.Z tag, the workflow run at it, the
+  # packages at its version.
+  check:
+    permissions: { contents: read }
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        with: { persist-credentials: false }
+      - id: v
+        shell: bash
+        run: |
+          v=$(node -p 'require("./ts/package.json").version')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$DRY_RUN ref=$GITHUB_REF sha=$GITHUB_SHA version=$v"
+          [ "$DRY_RUN" = true ] && exit 0
+          printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error title=tag::not a vX.Y.Z tag: $TAG"; exit 1; }
+          [ "$GITHUB_REF" = "refs/tags/$TAG" ] || { echo "::error title=ref::a real run runs at the tag: gh workflow run release.yml --ref $TAG -f tag=$TAG (this run is at $GITHUB_REF)"; exit 1; }
+          [ "$TAG" = "v$v" ] || { echo "::error title=tag/version::tag $TAG but ts/package.json is $v"; exit 1; }
+
+  # Two CPU architectures, the same bytes (§4).
+  build:
+    needs: check
+    permissions: { contents: read }
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
+        with: { node-version: '22', package-manager-cache: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
+        with: { go-version-file: go/go.mod, cache: false }
+      - run: sh release/build.sh "$RUNNER_TEMP/dist"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (tag v7)
+        with:
+          name: dist-${{ matrix.runner }}
+          path: ${{ runner.temp }}/dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  # Both SHA256SUMS byte for byte; on a real run also the signed tag's digest (§2 step 3).
+  compare:
+    needs: [check, build]
+    permissions: { contents: read }
+    runs-on: ubuntu-24.04
+    outputs:
+      sums_sha256: ${{ steps.cmp.outputs.sums_sha256 }}
+      sbom_sha256: ${{ steps.cmp.outputs.sbom_sha256 }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      V: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+        with: { pattern: 'dist-*', path: '${{ runner.temp }}/builds' }
+      - id: cmp
+        name: the two SHA256SUMS, byte for byte
+        shell: bash
+        run: |
+          a=$RUNNER_TEMP/builds/dist-ubuntu-24.04 b=$RUNNER_TEMP/builds/dist-ubuntu-24.04-arm
+          (cd "$a" && sha256sum -c --quiet SHA256SUMS) && (cd "$b" && sha256sum -c --quiet SHA256SUMS)
+          if ! cmp "$a/SHA256SUMS" "$b/SHA256SUMS"; then
+            diff "$a/SHA256SUMS" "$b/SHA256SUMS" || true
+            echo '::error title=not reproducible::the two SHA256SUMS differ (lines above); nothing is attested or released; both builds are kept 14 days'; exit 1
+          fi
+          sums=$(sha256sum "$a/SHA256SUMS" | cut -d' ' -f1)
+          sbom=$(awk -v f="sigelo-$V.cdx.json" '$2 == f { print $1 }' "$a/SHA256SUMS")
+          [ -n "$sbom" ] || { echo "::error title=sbom::SHA256SUMS lists no sigelo-$V.cdx.json"; exit 1; }
+          echo "sums_sha256=$sums" >> "$GITHUB_OUTPUT"
+          echo "sbom_sha256=$sbom" >> "$GITHUB_OUTPUT"
+          echo "SHA256SUMS reproduced on both runners: $sums"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        if: env.DRY_RUN != 'true'
+        with: { persist-credentials: false }
+      - name: the signed tag names this SHA256SUMS
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          SUMS: ${{ steps.cmp.outputs.sums_sha256 }}
+        run: |
+          git fetch -q --no-tags origin "+refs/tags/$TAG:refs/tags/$TAG"
+          [ "$(git cat-file -t "refs/tags/$TAG")" = tag ] || { echo "::error title=tag::$TAG is not an annotated, signed tag"; exit 1; }
+          [ "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA" ] || { echo "::error title=tag::$TAG does not point at this run's commit"; exit 1; }
+          git -c gpg.ssh.allowedSignersFile=release/allowed_signers verify-tag "$TAG" || { echo "::error title=tag signature::$TAG has no SSH signature release/allowed_signers accepts"; exit 1; }
+          line=$(git cat-file tag "$TAG" | sed '/^-----BEGIN SSH SIGNATURE-----$/,$d' | grep . | tail -n 1)
+          [ "$line" = "sha256sums: $SUMS" ] || { echo "::error title=tag digest::the tag's last line is '$line', the builds give 'sha256sums: $SUMS'"; exit 1; }
+          echo "tag $TAG: signed, and names this SHA256SUMS"
+
+  # The unsigned APK, built twice and compared (android.yml's apk job); a workflow artefact only.
+  apk:
+    needs: check
+    permissions: { contents: read }
+    uses: ./.github/workflows/android.yml
+
+  # Provenance for every file and the APK, and a Sigstore signature over SHA256SUMS (§5).
+  attest-sign:
+    needs: [check, compare, apk]
+    if: ${{ !inputs.dry_run }}
+    permissions: { id-token: write, attestations: write, contents: read }
+    runs-on: ubuntu-24.04
+    env:
+      V: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+        with: { name: dist-ubuntu-24.04, path: '${{ runner.temp }}/dist' }
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+        with: { name: sigelo-android, path: '${{ runner.temp }}/apk' }
+      - name: the subjects (SHA256SUMS, its files, the unsigned APK)
+        shell: bash
+        env:
+          SUMS: ${{ needs.compare.outputs.sums_sha256 }}
+          APK: ${{ needs.apk.outputs.unsigned_sha256 }}
+        run: |
+          cd "$RUNNER_TEMP/dist"
+          [ "$(sha256sum SHA256SUMS | cut -d' ' -f1)" = "$SUMS" ] || { echo '::error::SHA256SUMS is not the compared one'; exit 1; }
+          sha256sum -c --quiet SHA256SUMS
+          apk=$(ls "$RUNNER_TEMP"/apk/sigelo-*-release-unsigned.apk)
+          [ "$(sha256sum "$apk" | cut -d' ' -f1)" = "$APK" ] || { echo '::error::the unsigned APK is not the compared one'; exit 1; }
+          { cat SHA256SUMS; sha256sum SHA256SUMS; (cd "$RUNNER_TEMP/apk" && sha256sum "$(basename "$apk")"); } > "$RUNNER_TEMP/subjects"
+          cat "$RUNNER_TEMP/subjects"
+      - id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/subjects
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.4'
+      - name: the proofs
+        shell: bash
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          mkdir "$RUNNER_TEMP/proofs"
+          cp "$BUNDLE" "$RUNNER_TEMP/proofs/sigelo-$V.intoto.jsonl"
+          cosign sign-blob --yes --bundle "$RUNNER_TEMP/proofs/SHA256SUMS.sigstore.json" "$RUNNER_TEMP/dist/SHA256SUMS"
+          ls -l "$RUNNER_TEMP/proofs"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (tag v7)
+        with:
+          name: proofs
+          path: ${{ runner.temp }}/proofs/
+          if-no-files-found: error
+          retention-days: 14
+
+  # The pre-release: built files, SBOM and both proofs. No APK, no release.json (§2 step 6).
+  draft:
+    needs: [check, compare, attest-sign]
+    if: ${{ !inputs.dry_run }}
+    permissions: { contents: write }
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      V: ${{ needs.check.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+        with: { name: dist-ubuntu-24.04, path: '${{ runner.temp }}/dist' }
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+        with: { name: proofs, path: '${{ runner.temp }}/dist' }
+      - name: gh release create (pre-release)
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs"), [tpl, sums, out] = process.argv.slice(1);
+            const s = fs.readFileSync(tpl, "utf8").replaceAll("@TAG@", process.env.TAG).replaceAll("@V@", process.env.V)
+              .replaceAll("@COMMIT@", process.env.GITHUB_SHA).replaceAll("@SUMS@", fs.readFileSync(sums, "utf8").trimEnd());
+            fs.writeFileSync(out, s);' release/notes-template.md "$RUNNER_TEMP/dist/SHA256SUMS" "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            mkdir "$RUNNER_TEMP/rel"
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP/rel"
+            cmp "$RUNNER_TEMP/rel/SHA256SUMS" "$RUNNER_TEMP/dist/SHA256SUMS" || { echo "::error title=release exists::$TAG already has another SHA256SUMS"; exit 1; }
+            echo "::notice title=release exists::$TAG is already released with this SHA256SUMS"; exit 0
+          fi
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --prerelease --verify-tag \
+            --title "sigelo $TAG (pre-release)" --notes-file "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP"/dist/*
+
+  # publish-npm (environment npm, trusted publishing) and mcp-registry go here: stage 5 (§2 step 7).
+
+  # The macOS legs; nothing needs them (their runners often go unassigned, §2).
+  macos:
+    needs: check
+    permissions: { contents: read }
+    uses: ./.github/workflows/macos.yml
+
+  dry-run:
+    needs: [check, build, compare, apk]
+    if: ${{ inputs.dry_run }}
+    permissions: {}
+    runs-on: ubuntu-24.04
+    steps:
+      - shell: bash
+        env:
+          V: ${{ needs.check.outputs.version }}
+          SUMS: ${{ needs.compare.outputs.sums_sha256 }}
+          SBOM: ${{ needs.compare.outputs.sbom_sha256 }}
+          APK: ${{ needs.apk.outputs.unsigned_sha256 }}
+        run: |
+          {
+            echo "### release dry run, $V at ${GITHUB_SHA::12}"
+            echo
+            echo "| | sha256 |"
+            echo "|---|---|"
+            echo "| SHA256SUMS (both runners) | \`$SUMS\` |"
+            echo "| sigelo-$V.cdx.json | \`$SBOM\` |"
+            echo "| unsigned APK (both builds) | \`$APK\` |"
+            echo
+            echo "A tag for this commit ends with: \`sha256sums: $SUMS\`"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

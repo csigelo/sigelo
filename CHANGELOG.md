@@ -5,6 +5,7 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **CI: release.yml (dry run only so far):** a tag builds on two runners, compares SHA256SUMS and the tag's digest, attests, cosigns, drafts; `sigelo-<v>.cdx.json` SBOM (release/sbom.mjs) joins SHA256SUMS.
 - **CI: dependency cooldown:** job `deps` fails on an npm or Go version under 14 days old or an install script (dated exceptions file); dependency review, Scorecard, Dependabot.
 - **CI: required checks:** android runs on every PR, builds the APK twice and job `apk` compares the unsigned APKs byte for byte; `conformance-required` passes only when every conformance job does.
 - **init --enrol with a key agent:** works under `SIGELO_KEY_AGENT` (was `key_agent_mismatch`); the worker's key goes into the agent, its file holds none.
