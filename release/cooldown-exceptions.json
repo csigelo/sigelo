@@ -1,0 +1,20 @@
+[
+  {
+    "package": "esbuild",
+    "version": "0.28.2",
+    "reason": "apps/plugins, dev only: its install script fetches the binary that an optional @esbuild/* dependency already ships; never run (ignore-scripts)",
+    "expires": null
+  },
+  {
+    "package": "werift",
+    "version": "0.26.0",
+    "reason": "pinned 2026-11-03 for the relay transfer fix; clears the cooldown on 2026-11-15",
+    "expires": "2026-11-15"
+  },
+  {
+    "package": "mediabunny",
+    "version": "1.65.1",
+    "reason": "werift 0.26.0's dependency, pinned with it on 2026-11-03; clears the cooldown on 2026-11-17",
+    "expires": "2026-11-17"
+  }
+]

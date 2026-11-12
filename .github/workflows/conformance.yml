@@ -7,6 +7,10 @@ on:
   pull_request:
   workflow_dispatch:
 permissions: {}
+# One run per ref: a newer push cancels the older run, except on main, where every commit's run finishes.
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   # Its own job, so a missing secret or a hit never hides the test results of the other jobs.
   identity-strings:
@@ -292,3 +296,35 @@ jobs:
         with:
           name: sigelo-verify-SHA256SUMS
           path: /tmp/rel1/SHA256SUMS
+
+  # The dependency cooldown (release/RELEASE-v2.md §7): every locked npm and Go version at least 14 days
+  # old at the commit's author time, no lockfile entry with an install script; exceptions, each with
+  # a reason and an expiry, in release/cooldown-exceptions.json. Reads the public registries only.
+  deps:
+    permissions: { contents: read }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
+        with: { node-version: '22' }
+      # failures as annotations, as in the ts job
+      - run: |
+          node release/check-deps.mjs 2>&1 | tee "$RUNNER_TEMP/deps-out" || {
+            { grep '^FAIL ' "$RUNNER_TEMP/deps-out" | head -n 9; tail -n 2 "$RUNNER_TEMP/deps-out"; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=deps check-deps::/'; exit 1; }
+          grep -q '^ALL PASS$' "$RUNNER_TEMP/deps-out"
+        shell: bash
+
+  # The one required check for main (§9): green only when every job above is. A new job goes into
+  # `needs` here, or it does not gate a merge.
+  conformance-required:
+    needs: [identity-strings, ts, portability, keyagent, integrations, go, release-build, deps]
+    if: always()
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key) \(.value.result)"' | tee "$RUNNER_TEMP/needs"
+          if grep -v ' success$' "$RUNNER_TEMP/needs"; then echo '::error title=conformance-required::a job above did not succeed'; exit 1; fi

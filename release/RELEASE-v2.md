@@ -86,7 +86,7 @@ Without `gh` or `cosign` it prints "not checked", as for `apksigner`; `--strict`
 
 - **Cooldown 14 days.** Updates resolve with `npm install --before "$(date -u -d '14 days ago' +%FT%TZ)"`. `--before` does nothing to `npm ci` on a lockfile, so the `deps` job enforces it: per lockfile entry it reads the publish time (`registry.npmjs.org/<p>` `time[<v>]`; Go `proxy.golang.org/<m>/@v/<v>.info`) and fails below 14 days at the commit time. Exceptions: `release/cooldown-exceptions.json`, reason and expiry each (a security fix).
 - **sha512 only:** `lockfile_pinned` in the export gate (exists).
-- **`--ignore-scripts`:** on every `npm ci` (exists); plus `ignore-scripts=true` in each package's `.npmrc`.
+- **`--ignore-scripts`:** `--ignore-scripts` on every `npm ci` in CI and in `release/build.sh`; the `deps` job refuses lockfile entries with an install script, so nothing in the tree can run one.
 - **No install scripts:** `deps` fails on `"hasInstallScript": true`. One hit today: `esbuild` in `apps/plugins/`, dev only, its binary from an optional dependency; listed as an exception.
 - **Dependabot:** weekly, grouped. Its PRs are signals: `main` is an export, so the maintainer applies the bump in the source tree under the cooldown, exports through `ci-check` and closes the Dependabot PR. VERSIONING §6 changes to say so.
 - **Actions:** pinned by SHA (exists); first Monday of each month one PR bumps them to releases at least 14 days old, changes read.
@@ -171,7 +171,7 @@ Each stage: exported to `ci-check`, run with `gh workflow run <file> -R csigelo/
 | Stage | Content | Agent-days |
 |---|---|---|
 | 0 | canary fix; pin `mcp-registry.yml`; `permissions: {}`; close #3 | 0.5 |
-| 1 | `deps` job, exceptions file, `.npmrc`, dependency-review, Scorecard, Dependabot | 1.5 |
+| 1 | `deps` job, exceptions file, dependency-review, Scorecard, Dependabot | 1.5 |
 | 2 | `android.yml` callable, double build; `conformance-required`; branch protection (after the owner's yes) | 1 |
 | 3 | `release.yml` build ×2, compare, tag digest, SBOM, attest, cosign, draft; on `ci-check` with `dry_run=true` (no attest, draft or publish) | 2.5 |
 | 4 | `verify-release.sh` checks 5–8 and `--strict`; `sign-release.sh` draft compare; `test-release.sh` fakes | 1.5 |

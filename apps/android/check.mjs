@@ -336,7 +336,7 @@ d=yaml.safe_load(open(sys.argv[1]))
 print(json.dumps({'on': sorted(str(k) for k in d[True]), 'jobs': {k: {'coe': v.get('continue-on-error'), 'steps': [s.get('continue-on-error') for s in v['steps']]} for k, v in d['jobs'].items()}}))`, rp], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
   } catch (e) { y = e.code === 'ENOENT' || /No module named/.test(String(e.stderr)) ? 'skip' : null; }
   ok(r && ru.length >= 5 && ru.every((u) => /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/.test(u[1]) && /# v\d/.test(u[2])) && !/\bsecrets\./.test(r)
-    && /^permissions:\s*\n\s+contents: read\s*$/m.test(r) && !/\$\{\{\s*(github\.event|inputs)\.[^}]*\}\}/.test(r.split('\n').filter((l) => !/^\s*(ref|REF|EXPECT):/.test(l)).join('\n'))
+    && /^permissions:\s*\{\}\s*$/m.test(r) && [...r.matchAll(/^\s+permissions:(.*)$/gm)].every((m) => /^\s*\{\s*contents: read\s*\}\s*$/.test(m[1])) && !/\$\{\{\s*(github\.event|inputs)\.[^}]*\}\}/.test(r.split('\n').filter((l) => !/^\s*(ref|REF|EXPECT):/.test(l)).join('\n'))
     && (y === 'skip' || (y?.on?.join() === 'workflow_dispatch' && Object.values(y.jobs).every((j) => j.coe === true && j.steps.every((c) => c === true)))),
     'android-reproduce: dispatch only, every job and step continue-on-error (a report, never a red run); actions pinned; no secret; inputs only through env');
   ok(/exit 0\s*$/.test(r.trimEnd() + '\n') && /temurin-17, temurin-21, debian-21, debian-17/.test(r) && /apksigcopier"? compare --unsigned/.test(r) && /--alignment-preserved/.test(r),
@@ -348,7 +348,7 @@ print(json.dumps({'on': sorted(str(k) for k in d[True]), 'jobs': {k: {'coe': v.g
   const wf = read(REPO, '.github', 'workflows', 'android.yml');
   const uses = [...wf.matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)];
   ok(uses.length >= 4 && uses.every((u) => /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/.test(u[1]) && /# v\d/.test(u[2])), `workflow: every action pinned by a commit SHA, its version in a comment (${uses.map((u) => u[1].split('@')[0])})`);
-  ok(!/\bsecrets\./.test(wf) && !/pull_request_target|workflow_run/.test(wf) && /^permissions:\s*\n\s+contents: read\s*$/m.test(wf), 'workflow: no secret, no privileged trigger, contents: read only');
+  ok(!/\bsecrets\./.test(wf) && !/pull_request_target|workflow_run/.test(wf) && /^permissions:\s*\{\}\s*$/m.test(wf) && [...wf.matchAll(/^\s+permissions:(.*)$/gm)].every((m) => /^\s*\{\s*contents: read\s*\}\s*$/.test(m[1])), 'workflow: no secret, no privileged trigger, permissions {} on top, contents: read per job');
   ok(/runs-on: ubuntu-24\.04/.test(wf) && /gradle\/actions\/wrapper-validation@/.test(wf) && /java-version: '21'/.test(wf), 'workflow: ubuntu-24.04, JDK 21 (F-Droid\'s), the wrapper validated');
   ok(/keytool -genkeypair/.test(wf) && /assembleRelease/.test(wf) && /assembleDebug/.test(wf) && /sha256sum/.test(wf) && /SHA256SUMS/.test(wf) && /actions\/upload-artifact@/.test(wf) && /apksigner"? verify/.test(wf),
     'workflow: an ephemeral debug key (keytool), the unsigned release and the debug build, their SHA-256, uploaded');
@@ -365,10 +365,10 @@ def m(loader, node, deep=False):
     return yaml.SafeLoader.construct_mapping(loader, node, deep)
 L.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, m)
 d=yaml.load(open(sys.argv[1]), Loader=L)
-import json; print(json.dumps({'jobs': list(d['jobs']), 'steps': len(d['jobs']['apk']['steps']), 'on': sorted(str(k) for k in d[True])}))`, join(REPO, '.github', 'workflows', 'android.yml')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+import json; print(json.dumps({'jobs': list(d['jobs']), 'steps': len(d['jobs']['build']['steps']), 'builders': d['jobs']['build']['strategy']['matrix']['builder'], 'needs': d['jobs']['apk']['needs'], 'on': sorted(str(k) for k in d[True])}))`, join(REPO, '.github', 'workflows', 'android.yml')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) { parsed = e.code === 'ENOENT' || /No module named/.test(String(e.stderr)) ? 'skip' : String(e.stderr || e.message); }
   if (parsed === 'skip') console.log('note: no python3 with PyYAML here: the workflow\'s YAML not parsed');
-  else { let j = null; try { j = JSON.parse(parsed); } catch {} ok(j?.jobs?.join() === 'apk' && j.steps >= 8, `workflow: YAML parses strictly, one job (apk) (${typeof parsed === 'string' ? parsed.trim().slice(0, 200) : ''})`); }
+  else { let j = null; try { j = JSON.parse(parsed); } catch {} ok(j?.jobs?.join() === 'build,apk' && j.steps >= 8 && j.builders?.length === 2 && j.needs === 'build', `workflow: YAML parses strictly, build twice (matrix of 2) then apk compares (${typeof parsed === 'string' ? parsed.trim().slice(0, 200) : ''})`); }
 }
 
 // Where `java` runs a source file (JDK 11+, no Android SDK needed): SigeloBridge.java's keystore methods as they

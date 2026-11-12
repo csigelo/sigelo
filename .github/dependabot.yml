@@ -1,0 +1,41 @@
+# Dependabot (release/RELEASE-v2.md §7, VERSIONING.md §6): weekly, one group per ecosystem, no
+# version younger than 14 days. main is an export, so its pull requests are signals only: the
+# bump is made in the source tree and comes back through the next sync; the PR is then closed.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /ts
+      - /apps/agent
+      - /apps/contact
+      - /apps/integrations/a2a
+      - /apps/integrations/mcp
+      - /apps/integrations/pap
+      - /apps/integrations/web-bot-auth
+      - /apps/keeper
+      - /apps/keyagent
+      - /apps/plugins
+      - /apps/transfer
+      - /tools/sim
+    schedule: { interval: weekly }
+    cooldown: { default-days: 14 }
+    groups:
+      npm: { patterns: ['*'] }
+  - package-ecosystem: gomod
+    directory: /go
+    schedule: { interval: weekly }
+    cooldown: { default-days: 14 }
+    groups:
+      gomod: { patterns: ['*'] }
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule: { interval: weekly }
+    cooldown: { default-days: 14 }
+    groups:
+      gradle: { patterns: ['*'] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    cooldown: { default-days: 14 }
+    groups:
+      github-actions: { patterns: ['*'] }

@@ -1,0 +1,19 @@
+name: dependency-review
+# Every pull request: a dependency it adds or bumps fails this check if it has a known advisory of
+# moderate severity or above, or a licence outside the OSI-approved list below (release/RELEASE-v2.md
+# §7). An allow list, not a deny list: the non-OSI licences cannot be listed. GPL family left out on
+# purpose: this tree is MIT. A required check for main (§9).
+on:
+  pull_request:
+permissions: {}
+jobs:
+  dependency-review:
+    permissions: { contents: read }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+        with: { persist-credentials: false }
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          allow-licenses: 0BSD, Apache-2.0, BlueOak-1.0.0, BSD-2-Clause, BSD-3-Clause, EPL-2.0, ISC, MIT, MIT-0, MPL-2.0, Python-2.0, Unlicense, Zlib
