@@ -37,7 +37,7 @@ Builds:
     prebuild:
       - cd ../../../ts
       - npm ci --ignore-scripts
-      - cd ../contact
+      - cd ../apps/contact
       - npm ci --ignore-scripts
     build:
       - cd ../../../ts

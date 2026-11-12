@@ -190,6 +190,60 @@ paths:
         '500': { $ref: '#/components/responses/LogFailed' }
         '503': { $ref: '#/components/responses/ClockBehind' }
 
+  /refuse:
+    post:
+      tags: [approval]
+      operationId: refuse
+      summary: An approver's no to a pending spend-approval request.
+      description: |
+        The same body as /approve with `typ: spend-refusal`, signed the same way, and every check of
+        /approve. Writes a keeper-signed `refused` line; until the request's `exp` the agent's same pay
+        is `403 refused` with the reason. Free on every tier.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body, sig, bundle]
+              additionalProperties: false
+              properties:
+                body: { $ref: '#/components/schemas/SpendRefusal' }
+                sig: { $ref: '../../schema/common.json#/$defs/signature', description: "The approver's current identity key over \"sigelo\\n\" ‖ JCS(body)." }
+                bundle: { $ref: '../../schema/bundle.json', description: "The approver's own bundle." }
+                reason: { type: string, maxLength: 200, description: What the agent is told. Not signed. }
+      responses:
+        '200':
+          description: Refused; a keeper-signed `refused` line was written.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, ref, agent, approver, nonce, exp, reason]
+                properties:
+                  status: { const: refused }
+                  ref: { type: string }
+                  agent: { type: string }
+                  approver: { $ref: '../../schema/common.json#/$defs/did' }
+                  nonce: { type: string }
+                  exp: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+                  reason: { type: string }
+        '400':
+          description: 'The body is not strict JSON (`code: request`) or its stream broke (`code: body`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Refused; `code` is `approval` and `error` names the check, as for /approve.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '500': { $ref: '#/components/responses/LogFailed' }
+        '503': { $ref: '#/components/responses/ClockBehind' }
+
   /balance:
     get:
       tags: [agent]
@@ -925,6 +979,24 @@ components:
         agent: { $ref: '../../schema/common.json#/$defs/did' }
         ref: { type: string, minLength: 1 }
         to: { type: string, description: The resolved destination address. }
+        amount: { $ref: '#/components/schemas/Atomic' }
+        purpose: { type: string, minLength: 1 }
+        nonce: { type: string, pattern: '^[0-9a-f]{32}$' }
+        iat: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+        exp: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+    SpendRefusal:
+      type: object
+      description: The spend-approval body with `typ` spend-refusal (approval.ts `checkRefusal`), so a refusal never passes for an approval.
+      required: [v, typ, keeper, net, agent, ref, to, amount, purpose, nonce, iat, exp]
+      additionalProperties: false
+      properties:
+        v: { const: sigelo/0 }
+        typ: { const: spend-refusal }
+        keeper: { $ref: '../../schema/common.json#/$defs/did' }
+        net: { $ref: '#/components/schemas/Net' }
+        agent: { $ref: '../../schema/common.json#/$defs/did' }
+        ref: { type: string, minLength: 1 }
+        to: { type: string }
         amount: { $ref: '#/components/schemas/Atomic' }
         purpose: { type: string, minLength: 1 }
         nonce: { type: string, pattern: '^[0-9a-f]{32}$' }

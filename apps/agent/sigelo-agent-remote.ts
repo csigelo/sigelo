@@ -33,15 +33,23 @@ export interface Control { id: string; key: string; scope: Scope; ctr: number; c
 // Groups (GROUPS.md): the list and a chat are read; writing in one, making one, adding to it, renaming it,
 // joining an invitation, Share and a notice put away are chat; who leaves, a member removed, a role or the
 // brake set (who the agents talk to and how long they run) are all.
-const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages', 'GET /api/links', 'GET /api/agents/workers', 'GET /api/groups', 'GET /api/groups/history', 'GET /api/transfers'];
+// The keeper (sigelo-spend on this computer): its settings, approvers, Approve and Refuse are all, as a contact's kind is.
+// The wallet (sigelo-agent-wallet.ts): its state, history and the price are read (the balance is the computer's, shown to
+// whoever reads the chats); a sync, a receive address and its note are chat; Send (money leaves), the wallet service and
+// the node are all.
+const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages', 'GET /api/links', 'GET /api/agents/workers', 'GET /api/groups', 'GET /api/groups/history', 'GET /api/transfers',
+  'GET /api/wallet', 'GET /api/wallet/history', 'GET /api/wallet/tx', 'GET /api/price', 'GET /api/picture', 'GET /api/attestations', 'POST /api/statement/check'];
 const CHAT = [...READ, 'POST /api/send', 'POST /api/accept', 'POST /api/invite', 'POST /api/invite/cancel', 'POST /api/words', 'POST /api/rename', 'POST /api/tag', 'POST /api/sync',
-  'POST /api/links/answer', 'POST /api/pow/try', 'POST /api/groups/send', 'POST /api/groups/create', 'POST /api/groups/add', 'POST /api/groups/rename', 'POST /api/groups/join', 'POST /api/groups/share', 'POST /api/groups/dismiss'];
-const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/presence', 'POST /api/history/clear', 'GET /api/agents', 'POST /api/agents/enrol', 'POST /api/agents/pair',
+  'POST /api/links/answer', 'POST /api/pow/try', 'POST /api/wallet/sync', 'POST /api/wallet/receive', 'POST /api/wallet/label', 'POST /api/groups/send', 'POST /api/groups/create', 'POST /api/groups/add', 'POST /api/groups/rename', 'POST /api/groups/join', 'POST /api/groups/share', 'POST /api/groups/dismiss', 'POST /api/picture'];
+const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/presence', 'POST /api/notify', 'POST /api/history/clear', 'GET /api/agents', 'POST /api/agents/enrol', 'POST /api/agents/pair',
   'POST /api/groups/remove', 'POST /api/groups/leave', 'POST /api/groups/role', 'POST /api/groups/brake',
   'POST /api/link', 'POST /api/unlink', 'POST /api/links/allow', 'GET /api/settings', 'POST /api/settings', 'GET /api/relays', 'POST /api/relays/test',
   'POST /api/agents/enrol-code', 'POST /api/agents/enrol-words', 'POST /api/agents/revoke', 'POST /api/agents/rename',
   'POST /api/transfers/accept', 'POST /api/transfers/decline', 'POST /api/transfers/cancel', 'POST /api/transfers/resume', 'POST /api/transfers/forget', 'POST /api/transfers/direct',
-  'GET /api/transfers/settings', 'POST /api/transfers/settings'];
+  'GET /api/transfers/settings', 'POST /api/transfers/settings', 'POST /api/kind',
+  'GET /api/keeper', 'POST /api/keeper/agent', 'POST /api/keeper/approvers', 'POST /api/keeper/approve', 'POST /api/keeper/refuse', 'POST /api/keeper/restart',
+  'POST /api/wallet/review', 'POST /api/wallet/send', 'GET /api/wallet/services', 'POST /api/wallet/service', 'GET /api/wallet/nodes', 'POST /api/wallet/node',
+  'POST /api/statement/sign'];
 export const SCOPES: Record<Scope, ReadonlySet<string>> = { read: new Set(READ), chat: new Set(CHAT), all: new Set(ALL) };
 export const isScope = (s: unknown): s is Scope => s === 'read' || s === 'chat' || s === 'all';
 /** Moving keys needs a human at the computer: never remote, whatever the scope. */

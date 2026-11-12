@@ -4,11 +4,13 @@ package io.sigelo.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.KeyguardManager;
+import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.view.Menu;
@@ -33,6 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 /**
@@ -48,20 +51,27 @@ import java.util.regex.Pattern;
  * (apps/web/profiles.mjs): removing one erases its keys (SigeloBridge forget-profile). The menu: Reload.
  *
  * The app lock: once a form is set and the phone has a screen lock, the screen lock is asked at a
- * start, at a return after LOCK_AFTER_MS away, and by the page before a screen that shows or spends
- * the identity (SigeloBridge "unlock", within LOCK_AFTER_MS of the last confirmation: not again).
- * The page is hidden until it is confirmed; not confirmed, the app goes to the background, locked.
- * The FULL key's own window in AndroidKeyStore (SigeloBridge.AUTH_SECONDS) stays the inner guard.
+ * start and at a return after the set minutes away (SigeloBridge "lock": 1, 5, 15 or 60; off: neither),
+ * and by the page before a screen that shows or spends the identity (SigeloBridge "unlock": the 25
+ * words, a profile switch, a payment above the limit; asked whether the lock is on or off; within
+ * CONFIRMED_MS of the last confirmation not again, unless forced). The page is hidden until it is
+ * confirmed; not confirmed, the app goes to the background, locked. The FULL key's own window in
+ * AndroidKeyStore (SigeloBridge.AUTH_SECONDS) stays the inner guard.
+ *
+ * Notifications (SigeloBridge "notify"): a tap opens this activity with action io.sigelo.app.OPEN and
+ * the tag; the tag goes to the page as {ev:"open", tag} (onNewIntent; a start by the tap: once the
+ * page's port is open). POST_NOTIFICATIONS is asked when the page asks (Android 13+).
  */
 public final class MainActivity extends Activity {
     static final String HOST = "appassets.androidplatform.net";
     static final String ORIGIN = "https://" + HOST;
     static final String START = ORIGIN + "/index.html";
 
-    private static final int REQ_FILE = 1, REQ_CAMERA = 2, REQ_AUTH = 3;
+    private static final int REQ_FILE = 1, REQ_CAMERA = 2, REQ_AUTH = 3, REQ_NOTIFY = 4;
     private static final int M_RELOAD = 1;
-    /** Away from the screen this long (elapsed time, milliseconds): the screen lock again at the return. */
-    static final long LOCK_AFTER_MS = 60_000;
+    /** The page's asks (SigeloBridge "unlock"): not asked again within this long of the last confirmation (elapsed time, ms). */
+    static final long CONFIRMED_MS = 60_000;
+    private static final String POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS";   // Manifest.permission's, API 33
     /** The page's files by name: letters, digits and . _ @ - / only (vendor/@noble/...). */
     private static final Pattern SAFE_PATH = Pattern.compile("^/[A-Za-z0-9._@/-]{1,200}$");
     private static final Map<String, String> TYPES = new HashMap<>();
@@ -90,6 +100,7 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> pendingFiles;
     private PermissionRequest pendingCamera;
     private Runnable afterAuth, authCancelled;
+    private final List<Consumer<Boolean>> pendingNotify = new ArrayList<>();
     /** elapsedRealtime: when the app left the screen (-1: it has not), when the screen lock was last confirmed (-1: never). */
     private long awayAt = -1, unlockedAt = -1;
     /** The page hidden until the screen lock is confirmed. */
@@ -119,6 +130,23 @@ public final class MainActivity extends Activity {
         web.setWebViewClient(new Client());
         web.setWebChromeClient(new Chrome());
         web.loadUrl(START);
+        // Started by a tap on one of our notifications (not a restart that brings back the same intent).
+        if (saved == null) opened(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        setIntent(i);
+        opened(i);
+    }
+
+    /** A notification's tap: its tag (checked: this activity is the launcher's, any app can start it) to the page, once. */
+    private void opened(Intent i) {
+        if (i == null || !SigeloBridge.OPEN.equals(i.getAction()) || bridge == null) return;
+        String tag = i.getStringExtra(SigeloBridge.EXTRA_OPEN);
+        i.removeExtra(SigeloBridge.EXTRA_OPEN);
+        bridge.opened(tag);
     }
 
     /** Set by the bridge (secure, door) while a new identity's words are on screen: Back does nothing then. Else Back is the page's. */
@@ -140,7 +168,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
-        if (awayAt >= 0 && SystemClock.elapsedRealtime() - awayAt >= LOCK_AFTER_MS) locked = true;
+        if (awayAt >= 0 && bridge != null && SystemClock.elapsedRealtime() - awayAt >= bridge.lockAfter() * 60_000L) locked = true;
         awayAt = -1;
         // Our own prompt in front (afterAuth set) hid this activity: its answer comes in onActivityResult.
         if (locked && afterAuth == null) lockNow();
@@ -152,10 +180,10 @@ public final class MainActivity extends Activity {
         super.onStop();
     }
 
-    /** The page hidden and the screen lock asked. Nothing to ask (no form yet, no screen lock on this phone): open. */
+    /** The page hidden and the screen lock asked. Nothing to ask (the lock off, no form yet, no screen lock on this phone): open. */
     private void lockNow() {
         KeyguardManager km = getSystemService(KeyguardManager.class);
-        if (bridge == null || bridge.mode() == null || km == null || !km.isDeviceSecure()) {
+        if (bridge == null || !bridge.lockOn() || bridge.mode() == null || km == null || !km.isDeviceSecure()) {
             showPage();
             return;
         }
@@ -170,10 +198,13 @@ public final class MainActivity extends Activity {
         if (web != null) web.setVisibility(View.VISIBLE);
     }
 
-    /** The page's ask (SigeloBridge "unlock"), on this thread: ok at once when confirmed within LOCK_AFTER_MS or no screen lock is set. */
-    void unlock(Runnable ok, Runnable no) {
+    /**
+     * The page's ask (SigeloBridge "unlock"), on this thread: ok at once when confirmed within CONFIRMED_MS (not when
+     * forced: a payment above the pay limit) or no screen lock is set. Asked whether the app lock is on or off.
+     */
+    void unlock(Runnable ok, Runnable no, boolean force) {
         KeyguardManager km = getSystemService(KeyguardManager.class);
-        boolean recent = unlockedAt >= 0 && SystemClock.elapsedRealtime() - unlockedAt < LOCK_AFTER_MS;
+        boolean recent = !force && unlockedAt >= 0 && SystemClock.elapsedRealtime() - unlockedAt < CONFIRMED_MS;
         if (recent || km == null || !km.isDeviceSecure()) ok.run();
         else confirmCredential(ok, no);
     }
@@ -327,8 +358,33 @@ public final class MainActivity extends Activity {
         return out.toArray(new String[0]);
     }
 
+    /** Notifications may be shown: POST_NOTIFICATIONS granted (Android 13+) and not turned off in the system's settings. */
+    boolean notificationsAllowed() {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        boolean granted = Build.VERSION.SDK_INT < 33 || checkSelfPermission(POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+        return granted && nm != null && nm.areNotificationsEnabled();
+    }
+
+    /** The page's ask for notifications: POST_NOTIFICATIONS requested when not granted (Android 13+); answer(allowed), on this thread. */
+    void askNotifications(Consumer<Boolean> answer) {
+        if (Build.VERSION.SDK_INT < 33 || checkSelfPermission(POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            answer.accept(notificationsAllowed());
+            return;
+        }
+        pendingNotify.add(answer);
+        // One request up at a time: a second ask waits for its answer.
+        if (pendingNotify.size() == 1) requestPermissions(new String[] {POST_NOTIFICATIONS}, REQ_NOTIFY);
+    }
+
     @Override
     public void onRequestPermissionsResult(int req, String[] perms, int[] grants) {
+        if (req == REQ_NOTIFY) {
+            List<Consumer<Boolean>> waiting = new ArrayList<>(pendingNotify);
+            pendingNotify.clear();
+            boolean granted = grants.length == 1 && grants[0] == PackageManager.PERMISSION_GRANTED && notificationsAllowed();
+            for (Consumer<Boolean> a : waiting) a.accept(granted);
+            return;
+        }
         if (req != REQ_CAMERA) {
             super.onRequestPermissionsResult(req, perms, grants);
             return;

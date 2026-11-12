@@ -22,7 +22,9 @@
 //   await c.cancelInvite(code)             → { cancelled, name }: an unanswered invite of this agent's withdrawn
 //   c.rename(who, name)                    the owner's name for a contact (store.mjs rename) → { did, name }
 //   c.contacts()                           → { contacts, invites, answers, failed }   each contact with its four words (fingerprint),
-//                                            pair id, chain, ours (an operator attestation of mine marks it), tier
+//                                            pair id, chain, ours (an operator attestation of mine marks it), tier, seen_upto
+//                                            (their newest seen receipt: my messages sealed at or before it were shown; null: none) and
+//                                            seen_peer (a receipt came: they read receipts), tier
 //                                            (store.mjs: own, friend, quiet) and tier_by, prekeys: its
 //                                            bundle is here (false: messages wait for it), waiting: why they wait, or null;
 //                                            failed: pairing_failed events (code_expired: an answer that outlived its code) until inbox
@@ -54,6 +56,8 @@
 //   c.takeLinks(), c.setLink(who, link)   link.mjs's: the sigelo-link/1 messages received (never in inbox(), the log
 //                                            or onEvent: a `link` event without content says one came), taken; a
 //                                            contact's link record (store.mjs setLink)
+//   await c.seen(to, upto)                 a seen receipt (SEEN_LABEL, the header's "Seen receipts") to contact to: every message of
+//                                            theirs sealed at or before upto (their iat, unix seconds; 0: none yet) was shown → as send
 //   c.takeGroups()                         group.mjs's: the sigelo-group/1 messages received (never in inbox(), the
 //                                            log or onEvent: a `group` event without content says one came), taken
 //   c.groupTier                            what this agent's relay told its last login of its group tier ($sigelo/notice
@@ -209,6 +213,14 @@
 //     hinted and proved again; asks for the same operators go at most every RESYNC. A contact
 //     learns from the hints only which operator DIDs it guesses right (THREAT-MODEL §2.12). An
 //     agent on an older version gets the hints as messages with that label. send refuses the label.
+//   - Seen receipts (label SEEN_LABEL, a message like any other, inside the envelope): {seen: n}, n the
+//     iat of the newest message of the contact's that the reader's app has shown (0: none yet). The
+//     sender reads its own messages sealed at or before n as seen. Taken here, never an inbox message,
+//     never logged; kept as the contact's seen_upto (the highest) and seen_peer (contacts()), with an
+//     event `seen`. The relay sees one more envelope, never which. Sent only through seen() (SEEN_SEND):
+//     what to send and when is the app's (apps/contact/page.mjs: one first receipt to a contact not
+//     known to read them, further ones only once one came back). A contact on an earlier version takes
+//     the first as a message with that label, and never sends one: its messages stay at one tick.
 //   - Presence (design/transfer.md §8 T0): a started carrier sets the will $sigelo/presence on its
 //     CONNECT and publishes, to each contact that may see it (store.mjs presenceOf: own agents
 //     always, others when the owner allowed them), one marker on presenceTopic(K, own original DID,
@@ -327,6 +339,8 @@ const DEVICES_MAX = 16;
 // engine, never logged (an offer carries addresses, an onion message a client key); sent only with TRANSFER_SEND.
 export const TRANSFER_LABEL = 'sigelo-transfer/0', TRANSFER_SEND = Symbol('sigelo-transfer send');
 const TRANSFERS_MAX = 256;
+// Seen receipts (the header's): sent only with SEEN_SEND, never an inbox message.
+export const SEEN_LABEL = 'sigelo-seen/0', SEEN_SEND = Symbol('sigelo-seen send');
 // Received files of one name and hash prefix kept side by side, at most (#onFile).
 const FILE_COPIES = 64;
 // A contact's folder of received files: its name as safeName keeps it, and 16 hex digits of the
@@ -1440,6 +1454,15 @@ export class Carrier {
       l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
       if (l.length > TRANSFERS_MAX) { st.dropped.transfers_full = (st.dropped.transfers_full ?? 0) + l.length - TRANSFERS_MAX; l.splice(0, l.length - TRANSFERS_MAX); }
       events.push({ type: 'transfer', from: c.did, name: c.name });
+    } else if (r.body.label === SEEN_LABEL) {
+      // A seen receipt (the header's): the highest kept; one malformed is counted, never an inbox message.
+      const n = r.body.content?.seen;
+      if (!Number.isSafeInteger(n) || n < 0) { st.dropped.seen = (st.dropped.seen ?? 0) + 1; events.push({ type: 'dropped', check: 'seen', detail: 'a seen receipt without its time' }); } else {
+        const e = this.#entry(st, c.did);
+        e.seen_peer = true;
+        e.seen_upto = Math.max(e.seen_upto ?? 0, n);
+        events.push({ type: 'seen', from: c.did, name: c.name, upto: e.seen_upto });
+      }
     } else if (r.body.label === DEVICE_LABEL) {
       // A device message (device.mjs): kept for the `device` verbs, never for inbox() nor onEvent's readers.
       const l = (st.devices ??= []);
@@ -2134,8 +2157,9 @@ export class Carrier {
       // A message the relay had no reader for is back in its outbox (#refused): queued, not refused.
       const back = r?.code === 'no_reader' && e.kind === KIND.message && e.item !== undefined;
       if (e.control === undefined || e.control === 'answer') this.#results.set(e.id, back ? { code: null, queued: noReader(this.#nameOf(e.peer)) } : r ?? { code: null });   // what a verb waits for
-      this.#emit(back ? { type: 'queued', id: e.id, peer: e.peer, code: r.code, detail: r.detail }
-        : r ? { type: 'refused', id: e.id, peer: e.peer, control: e.control, code: r.code, ...(r.side && { side: r.side }), detail: r.detail } : { type: 'sent', id: e.id, peer: e.peer, control: e.control });
+      const receipt = e.item?.label === SEEN_LABEL ? { receipt: true } : {};
+      this.#emit(back ? { type: 'queued', id: e.id, peer: e.peer, code: r.code, detail: r.detail, ...receipt }
+        : r ? { type: 'refused', id: e.id, peer: e.peer, control: e.control, code: r.code, ...(r.side && { side: r.side }), detail: r.detail, ...receipt } : { type: 'sent', id: e.id, peer: e.peer, control: e.control, ...receipt });
       // A refusal stops this round: what follows would be refused alike (a quota, the rate brake),
       // and a control frame would be queued again at once. The next round retries. A mailbox
       // nobody holds stops only what goes to that contact (absent, #next).
@@ -2843,7 +2867,8 @@ export class Carrier {
             re_pair: c.re_pair ?? null, fingerprint: c.revoked ? null : wordsOf(c.pair_key), pair, ours: store.oursOf(c, now), tier: store.tierOf(c, now), tier_by: c.tier_by ?? null,
             prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null, link: c.link ?? null,
             // Presence (the header's): what this contact sees of mine, and theirs as read now (null: not known).
-            presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null };
+            presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null,
+            seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
@@ -2868,6 +2893,12 @@ export class Carrier {
   // the contact's claim on the topic; queued: it goes at the next connection.
   async sendAll(to, contents, { label = '', local = false } = {}) { return this.#sendAll(to, contents, label, false, local); }
 
+  // A seen receipt (the header's "Seen receipts"): every message of to's sealed at or before upto was shown.
+  async seen(to, upto, { local = false } = {}) {
+    if (!Number.isSafeInteger(upto) || upto < 0) fail('body', 'upto: unix seconds, 0 for none yet');
+    return this.send(to, { seen: upto }, { label: SEEN_LABEL, local, internal: SEEN_SEND });
+  }
+
   // spool: every content after the first waits on disk (#spool), as a file's chunks do. local: queued
   // only, for the started carrier of this identity in another process (inbox's local, for sending).
   // replyTo: the id of a message received (reply): its record keeps these ids, queued, in the same lock.
@@ -2877,6 +2908,7 @@ export class Carrier {
     if (label.startsWith('sigelo-link/') && internal !== LINK_SEND) fail('body', `the label ${JSON.stringify(label)} is the link handler's own (sigelo-agent link)`);
     if (label.startsWith('sigelo-group/') && internal !== GROUP_SEND) fail('body', `the label ${JSON.stringify(label)} is the group handler's own (sigelo-agent group send)`);
     if (label.startsWith('sigelo-transfer/') && internal !== TRANSFER_SEND) fail('body', `the label ${JSON.stringify(label)} is the transfer engine's own (sigelo-agent transfer)`);
+    if (label.startsWith('sigelo-seen/') && internal !== SEEN_SEND) fail('body', `the label ${JSON.stringify(label)} is the seen receipts' own`);
     if (label.startsWith('sigelo-device/') && internal !== DEVICE_SEND) fail('body', `the label ${JSON.stringify(label)} is the device verbs' own (sigelo-agent device)`);
     if (!Array.isArray(contents) || contents.length === 0) fail('body', 'at least one message');
     for (const content of contents) {

@@ -41,13 +41,17 @@ fdroidserver's source (`execute_sudo.py`, `common.py`, `build_local_run.py`, `bu
   SHA-256 (`xz-utils` too: the image purges it). The policy allows
   "prebuilt FLOSS binaries from ... Node.js (current versions)"; Debian 13's own Node (20) is
   older than our `engines` (≥ 22).
-- `prebuild:` runs next; the source scan runs after it. Here: `npm ci --ignore-scripts` in `ts/` and
-  `apps/contact/`, so the scan sees every package the page ships. npm at build time is the policy's route
+- `prebuild:` runs next; the source scan runs after it. Here, from `apps/android/app`: `cd ../../../ts`,
+  `npm ci --ignore-scripts`, `cd ../apps/contact`, `npm ci --ignore-scripts` (the 0.1.14 recipe said `cd ../contact`,
+  the layout of before the move to `apps/`: fixed; check.mjs now walks the steps over the tree), so the scan sees every package the page ships. npm at build time is the policy's route
   for JavaScript: the scanner wants a lockfile beside each `package.json` (ours pin every package by
   integrity hash) and scans what it fetched; no srclib, no vendored tarball. The scan of that tree is
   clean, so no `scanignore` and no `scandelete`.
-- `build:` runs after the scan, then `gradle assembleRelease` in `subdir`. Here: `npx tsc` and
-  `node apps/android/assets.mjs` (copy.mjs, then the page into the APK's assets). Both offline.
+- `build:` runs after the scan, then `gradle assembleRelease` in `subdir`. Here: `cd ../../../ts`, `npx tsc`, `cd ..`,
+  `node apps/android/assets.mjs` (copy.mjs, then the page into the APK's assets). Both offline. Every directory copy.mjs
+  reads from is made by a step: `ts/node_modules` and `apps/contact/node_modules` by `npm ci`, `ts/dist` by `tsc`.
+- Reproducible input: assets.mjs copies its sources byte for byte (copy.mjs's walk is its one list of them; the
+  version About shows is `apps/agent/package.json`, vendored as it is); nothing time- or path-dependent is added.
 - Gradle: F-Droid's own (`gradlew-fdroid`), 8.10.2 by the wrapper's version and SHA-256, with
   `LC_ALL=C.UTF-8`, `TZ=Etc/UTC`, `SOURCE_DATE_EPOCH` (unused here), no daemon. It first strips
   `signingConfigs` from `app/build.gradle` (tried: still valid; only the debug build had one).
@@ -57,7 +61,7 @@ fdroidserver's source (`execute_sudo.py`, `common.py`, `build_local_run.py`, `bu
 - `subdir: apps/android/app`, so the version check (`UpdateCheckMode: Tags`) finds
   `versionCode` in `app/build.gradle`; the listing must then sit in `<subdir>/fastlane/`.
 - F-Droid takes no icon from an APK whose launcher icon is XML only (ours, adaptive). So
-  `images/icon.png` is in the listing: `node apps/android/icon.mjs` draws it from the GTK app's SVG.
+  `images/icon.png` is in the listing: `node apps/android/icon.mjs` draws it from `assets/brand/app-icon.svg`.
 
 Checked here (fdroidserver 2.4.2): `fdroid lint`, `readmeta` and `rewritemeta` (no change) pass;
 `checkupdates --allow-dirty` finds v0.1.10, versionCode 2, in `apps/android/app`. The
@@ -120,7 +124,9 @@ v0.1.13, run 41247457205 (2026-10-31, `ref=v0.1.13`): `ref: the published sigelo
 MATCH`; Debian 21's unsigned build = CI's (d7370697b091); verdict REPRODUCIBLE, the recipe as written,
 `commit:` e747ebc (the v0.1.13 tag). Its merge request was never opened; v0.1.14 is the version to submit:
 the recipe names 0.1.14 / 6, its `commit:` (still e747ebc, v0.1.13's) moves to the v0.1.14 tag at the
-sync, and the merge request opens after its compare run (fdroid/MR.md).
+sync, and the merge request opens after its compare run (fdroid/MR.md). The next build entry (0.1.15)
+names the v0.1.15 tag's full commit hash; the release step sets it, with versionName, versionCode and
+CurrentVersion (none is changed before that release).
 
 ## Steps and who acts
 

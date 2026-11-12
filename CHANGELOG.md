@@ -5,8 +5,15 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
-- **verify-release.sh checks 5–8:** the tag's `sha256sums:` line, build provenance per file, cosign on SHA256SUMS, the unsigned APK in the provenance; `--strict`, `--offline`, `--pre`, `--dry-run`. sign-release.sh compares SHA256SUMS with the draft and needs `--unsigned`.
+- **verify-release.sh checks 5–8:** tag digest, provenance per file, cosign on SHA256SUMS, the unsigned APK; `--strict`, `--offline`, `--pre`, `--dry-run`. sign-release.sh compares with the draft (apk claim).
 - **CI: release.yml (dry run only so far):** a tag builds on two runners, compares SHA256SUMS and the tag's digest, attests, cosigns, drafts; `sigelo-<v>.cdx.json` SBOM (release/sbom.mjs) joins SHA256SUMS.
+- **app:** new frame from the UX1 mock (pass 1 of 6).
+- **app:** chats, groups, new chat and seen ticks from the UX1 mock (pass 2 of 6).
+- **app:** agents, enrol, keeper settings and approvals from the UX1 mock (pass 3 of 6).
+- **app:** wallet, sync state, receive, send, pay in chat, opt-in prices from the UX1 mock (pass 4 of 6).
+- **app:** Me, profiles, pictures, signed statements, public invite, proof of age, settings from the UX1 mock (pass 5 of 6).
+- **app:** lock, name-only notifications, first run, version wiring, F-Droid layout, mock sweep (pass 6 of 6).
+- **keeper:** policy.json is re-read on the next request (caps, allowlists, approvers; no restart); `POST /refuse` records an approver's no as a signed `refused` line and the agent's same pay is refused with the reason.
 - **CI: dependency cooldown:** job `deps` fails on an npm or Go version under 14 days old or an install script (dated exceptions file); dependency review, Scorecard, Dependabot.
 - **CI: required checks:** android runs on every PR, builds the APK twice and job `apk` compares the unsigned APKs byte for byte; `conformance-required` passes only when every conformance job does.
 - **init --enrol with a key agent:** works under `SIGELO_KEY_AGENT` (was `key_agent_mismatch`); the worker's key goes into the agent, its file holds none.

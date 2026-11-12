@@ -6,7 +6,8 @@
 //   create   apps/contact/create.mjs newSeed (S drawn here, the network held from the draw to the end),
 //            the three words checked here, then createInto (create.mjs): sealed under the FULL key
 //   restore  restoreInto (seed.mjs), the same seal
-//   then     the words password, optional (keepWords: words.mjs, sealed as a third kind); skipped, nothing kept
+//   or       Keep it safe → Set a password (keepWords: words.mjs, sealed as a third kind): the words kept, never shown
+//   then     the Lock step (the Android app: bridge.unlock, the screen lock once), then You're set (the four words)
 //   connect  pairComputer (shell.mjs): SIGELO:CTL: over the relay (the four words), SIGELO:UI: on the LAN; the profile's first computer
 //   import   Advanced: the file a computer wrote for this device (SAFE); the operator's is refused
 import { parseBytes } from 'sigelo';
@@ -20,11 +21,13 @@ import { restoreInto } from './seed.mjs';
 import { keepWords } from './words.mjs';
 import { pairComputer } from './shell.mjs';
 import { scanner } from './welcome.mjs';
+import { didWords } from './vendor/contact/short.mjs';
 
 export const SETTINGS = 'app/settings.json';
 let jsQR = null;   // the QR decoder, when this build has it (the import map's /qr-decode.mjs)
 if (globalThis.document) import('/qr-decode.mjs').then((m) => { jsQR = m.jsQR; }, () => {});
 const gone = (e) => Object.assign(e instanceof Error ? e : new Error(String(e)), { gone: true });
+const wordsOf = (did) => { try { return didWords(did); } catch { return null; } };
 
 /**
  * welcome.mjs's api over this page's platform. o: { bridge (Android) | null, mqtt, storage, reload, seal,
@@ -48,21 +51,22 @@ export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.l
       if (!session) throw gone(new Error('No words drawn: start again.'));
       const r = session.check(answers);
       if (!r.ok) return { wrong: r.wrong };
+      let made;
       try {
         await mode('self');
-        await createInto(platform, session, { name, relay });
+        made = await createInto(platform, session, { name, relay });
       } catch (e) { throw gone(e); } finally { session = null; release?.(); release = null; }
-      return { ok: true };
+      return { ok: true, words: wordsOf(made?.did) };
     },
     discard: drop,
-    // The offer after the check and after a restore (welcome.mjs offerWords): the words kept behind the password (words.mjs).
+    // Keep it safe → Set a password (welcome.mjs): the words kept behind the password (words.mjs).
     keepWords: (list, password) => keepWords(platform, list, password, words),
     checkWords,
     async restore({ words, name, height, net, elsewhere, relay }) {
       const restore = parseRestore(height, Math.floor(Date.now() / 1000));
       await mode('self');
-      await restoreInto(platform, { words, name, relay, net, restore, seat: elsewhere ? 'elsewhere' : 'here' });
-      return { ok: true };
+      const r = await restoreInto(platform, { words, name, relay, net, restore, seat: elsewhere ? 'elsewhere' : 'here' });
+      return { ok: true, words: wordsOf(r?.did) };
     },
     async connect(text) {
       if (!bridge) throw new Error('Connecting to a computer needs the app: a browser tab cannot reach the relay or the LAN.');
@@ -75,6 +79,8 @@ export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.l
     async open() { reload(); },
     async done() { reload(); },
     secure: (on, door) => bridge?.secure(on, { door }),
+    // The first run's Lock step (the Android app: the phone's screen lock, asked once); a browser tab has none.
+    ...(bridge && { lock: () => bridge.unlock() }),
     clipCopy: (text, clear) => (bridge ? bridge.clipCopy(text, { clear }) : navigator.clipboard.writeText(text)),
     clipClear: () => (bridge ? bridge.clipClear() : navigator.clipboard?.writeText?.('')),
     scan: bridge ? (onText) => scanner(onText, jsQR) : undefined,

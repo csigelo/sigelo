@@ -121,12 +121,12 @@ async function main(argv: string[]): Promise<void> {
     writeFileSync(path, JSON.stringify(policy, null, 2) + '\n', { mode: 0o600 });
     chmodSync(path, 0o600);
     // stdout is the token and nothing else, so `export SIGELO_SPEND_TOKEN=$(…)` is safe.
-    // A running keeper re-reads root tokens on its next request (service.ts `refreshTokens`), but
+    // A running keeper re-reads the policy on its next request (service.ts `refreshTokens`), but
     // only for roots it already serves: an entry added since it started exists after a restart.
     const who = name ?? 'the agent';
     console.error(`sigelo-spend: ${path} ${where} is now ${tokenHash(token)}. A running keeper switches on its next request: ` +
       `from then on only this token works for ${who} and the old one is refused, no restart needed. If ${who} was added to the policy ` +
-      'since the keeper started, or anything else in it changed, restart the keeper (systemctl --user restart <its unit>, or stop and start `sigelo-spend serve`): until then that entry and those edits do not exist for it.');
+      'since the keeper started (or an agent was removed or moved to another account), restart the keeper (systemctl --user restart <its unit>, or stop and start `sigelo-spend serve`): until then that entry does not exist for it. Caps, allowlists and approvers apply on its next request.');
     console.log(token);
     return;
   }
@@ -159,9 +159,9 @@ async function main(argv: string[]): Promise<void> {
     const ref = args[2] ?? die('approve-request: needs the ref the agent was told (WAITING FOR APPROVAL (ref …))');
     loadPolicy(policyPath);
     const now = Math.floor(Date.now() / 1000), log = readLog(policyPath);
-    const done = new Set(log.flatMap((r) => [r.entry.approval?.body.nonce, r.entry.request.approval]).filter((n) => n !== undefined));
+    const done = new Set(log.flatMap((r) => [r.entry.approval?.body.nonce, r.entry.refusal?.body.nonce, r.entry.request.approval]).filter((n) => n !== undefined));
     const waiting = log.map((r) => r.entry.approval_request).filter((b) => b !== undefined && b.ref === ref && now < b.exp && !done.has(b.nonce));
-    if (waiting.length === 0) die(`approve-request: no request is waiting for ref ${JSON.stringify(ref)} (unknown, expired, already approved or paid) — the agent's next pay asks again`);
+    if (waiting.length === 0) die(`approve-request: no request is waiting for ref ${JSON.stringify(ref)} (unknown, expired, already approved, refused or paid) — the agent's next pay asks again`);
     console.error(`sigelo-spend: ${waiting.length} request(s) for ref ${ref}. Check every field; sign one with your identity key over "sigelo\n" + JCS(body); ` +
       'POST {"body": <it>, "sig": <sig>, "bundle": <your bundle>} to the keeper\'s /approve. The approval pays that payment once and expires at exp.');
     for (const b of waiting) console.log(JSON.stringify(b));

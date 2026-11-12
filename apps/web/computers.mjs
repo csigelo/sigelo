@@ -31,7 +31,7 @@ export function otherOperator(expect, dids) {
   const list = (Array.isArray(dids) ? dids : [dids]).filter((d) => typeof d === 'string');
   if (!list.length || list.includes(expect)) return null;
   const theirs = wordsOf(list[0]), ours = wordsOf(expect);
-  return Object.assign(new Error(`This computer's page is another identity (${theirs ?? list[0]}), not this profile's (${ours ?? expect}): all the computers of a profile serve one operator. Add it in a profile of its own (Me → Profiles → Add a profile).`),
+  return Object.assign(new Error(`This computer's page is another identity (${theirs ?? list[0]}), not this profile's (${ours ?? expect}): all the computers of a profile serve one operator. Add it in a profile of its own (the profile chip at the top → Add).`),
     { check: 'other_operator', status: 409 });
 }
 

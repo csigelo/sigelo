@@ -14,7 +14,7 @@ import { canonicalize, decodeKey, did, keygen, sign, parse, structure, verify, v
 import { deriveIdentity, identitySeed as identitySeedOf, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { decodeAddress, verifySigeloMoneroSigAddr, type Net } from 'sigelo/dist/monero.js';
 import { affordable, agentOf, evaluate, invoiceKey, parseAllow, parsePolicy, plain, tokenHash, type Decision, type PayRequest, type Plan, type Policy, type Prior, type Spent, type Status } from './policy.js';
-import { approvalRequest, checkApproval, type ApprovalBody, type Approved } from './approval.js';
+import { approvalRequest, checkApproval, checkRefusal, type ApprovalBody, type Approved, type Refused } from './approval.js';
 import { describe as describeLicence, LICENCE_FILE, licenceRefusal, readLicence, type LicenceStatus } from './licence.js';
 import { confPins, pinnable, pinOf, probeTls, readPins, writeConfPins, writePins, type Pins, type TlsProbe } from './daemontls.js';
 import { asTreeEntry, chain, DELEGATE_KDF, delegateSeed, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry, type TreeEntry } from './tree.js';
@@ -38,7 +38,7 @@ export interface LogEntry {
     agent?: string; bucket?: string; ref?: string; fp?: string; approval?: string;
   };
   plan: Plan; txid: string; amount: string; fee: string;
-  approval_request?: ApprovalBody; approval?: Approved;
+  approval_request?: ApprovalBody; approval?: Approved; refusal?: Refused;
 }
 /** `error` is outside the signature: it is what the wallet said after the entry was signed. */
 export interface Receipt { entry: LogEntry; sig: string; error?: string }
@@ -202,7 +202,7 @@ const keyPath = (policyPath: string): string => join(dirname(policyPath), 'spend
 const lockPath = (policyPath: string): string => join(dirname(policyPath), 'spend.lock');
 
 const ATOMIC = /^(0|[1-9][0-9]*)$/;
-const STATUSES: (Status | undefined)[] = ['intent', 'relayed', 'relay_failed', 'pending', 'approved', undefined];
+const STATUSES: (Status | undefined)[] = ['intent', 'relayed', 'relay_failed', 'pending', 'approved', 'refused', undefined];
 /** The agent a line debits: `agent`, or `bucket` on a line written before G1. */
 const agentOfEntry = (e: LogEntry): string => (e.request.agent ?? e.request.bucket)!;
 
@@ -270,7 +270,7 @@ export function spentOf(log: Receipt[]): Spent[] {
     // An approval wait moved nothing and debits nothing (§4.1 step 8) — but each one is a line
     // the agent made the keeper write, so it ticks the rate like a dry run. An approval, which
     // the approver made the keeper write, does neither.
-    if (e.status === 'approved') continue;
+    if (e.status === 'approved' || e.status === 'refused') continue;
     if (e.status === 'pending') { out.push({ ts: e.ts, agent: agentOfEntry(e), amount: '0' }); continue; }
     const n = open.get(e.txid) ?? 0;
     if ((e.status === 'relayed' || e.status === 'relay_failed') && n > 0) { open.set(e.txid, n - 1); continue; }
@@ -294,12 +294,15 @@ export function priorOf(log: Receipt[], key?: string): Prior[] {
   return log.flatMap(({ entry: e, sig }, line) => {
     if (e.request.ref === undefined) return [];
     if (e.status === 'approved' && !(key !== undefined && plain(e.approval) && plain(e.approval.body) && verifySig(key, e, sig))) return [];
-    const nonce = e.status === 'pending' ? e.approval_request?.nonce : e.status === 'approved' ? e.approval!.body.nonce : e.request.approval;
-    const until = e.status === 'pending' ? e.approval_request?.exp : e.status === 'approved' ? e.approval!.body.exp : undefined;
+    // A refusal, like an approval, counts only when the keeper signed it: an appended one answers nothing.
+    if (e.status === 'refused' && !(key !== undefined && plain(e.refusal) && plain(e.refusal.body) && verifySig(key, e, sig))) return [];
+    const nonce = e.status === 'pending' ? e.approval_request?.nonce : e.status === 'approved' ? e.approval!.body.nonce : e.status === 'refused' ? e.refusal!.body.nonce : e.request.approval;
+    const until = e.status === 'pending' ? e.approval_request?.exp : e.status === 'approved' ? e.approval!.body.exp : e.status === 'refused' ? e.refusal!.body.exp : undefined;
     return [{
       ts: e.ts, agent: agentOfEntry(e), ref: e.request.ref, fp: e.request.fp ?? '', status: e.status ?? 'relayed', line, txid: e.txid,
       ...(typeof nonce === 'string' && { nonce }), ...(Number.isSafeInteger(until) && { until: until as number }),
       ...(e.status === 'approved' && { approval: e.approval! }),
+      ...(e.status === 'refused' && { refusal: { approver: String(e.refusal!.approver), reason: String(e.refusal!.reason ?? '') } }),
     }];
   });
 }
@@ -794,33 +797,43 @@ export async function serve(opts: ServeOptions): Promise<Service> {
   const treeLines = owned(() => readTree(opts.policyPath, policy.net, identity.key));
   let tree = owned(() => replayTree(treeLines.map((l) => l.entry), policy.agents));
   let eff = owned(() => effectivePolicy(policy, tree));
-  // Root tokens are read live (apps/keeper/README "What a running keeper re-reads"): `token new` says the
-  // old token stops, and after a leak it must stop now, not at the next restart. On every request
-  // a changed policy.json is loaded in full and ONLY the token_hash of each root this keeper
-  // already serves is taken from it; caps, accounts, allowlists, approvers and roots added or
-  // removed still take effect at the next start. A file that does not load (a typo, a write in
-  // progress) or that would give two roots one hash never opens the keeper: the last good tokens
-  // stay, with one warning per file state.
+  // The policy is read live (apps/keeper/README "What a running keeper re-reads"): on every request a
+  // changed policy.json is loaded in full, validated as at start, and taken for every root this keeper
+  // already serves on the same account: its token_hash (`token new`: after a leak the old token must stop
+  // now), caps, allowlist, approval_above, max_delegates, did and genesis, and the top-level approvers,
+  // max_approval_ttl, dedupe_seconds and priority. A root added or removed, a root moved to another
+  // account, net, wallet and unlock_time still take effect at the next start (accounts are bound to names
+  // in the log, and the tree was replayed on them). A file that does not load (a typo, a write in progress)
+  // or that would give two roots one hash changes nothing: the last good policy stays, with one warning
+  // per file state. The page's Save (apps/agent/sigelo-agent-spend.ts) relies on this: no restart.
   let tokensFrom = statKey(opts.policyPath), warnedAt = '';
   const refreshTokens = (): void => {
     const at = statKey(opts.policyPath);
     if (at === tokensFrom || at === warnedAt) return;
-    const keep = (reason: string): void => { warnedAt = at; console.warn(`sigelo-spend: policy.json changed but ${reason}; the running keeper keeps the tokens it had`); };
+    const keep = (reason: string): void => { warnedAt = at; console.warn(`sigelo-spend: policy.json changed but ${reason}; the running keeper keeps the policy it had`); };
     let next: Policy;
     try { next = loadPolicy(opts.policyPath); } catch (e) { return keep(`does not load (${why(e)})`); }
-    const agents = { ...policy.agents };
+    const agents = { ...policy.agents }, later: string[] = [];
     for (const [name, a] of Object.entries(agents)) {
       const n = Object.hasOwn(next.agents, name) ? next.agents[name]! : undefined;
-      if (n !== undefined && n.token_hash !== a.token_hash) agents[name] = { ...a, token_hash: n.token_hash };
+      if (n === undefined) { later.push(`${name} removed`); continue; }
+      if (n.account !== a.account) { later.push(`${name} moved to account ${n.account}`); if (n.token_hash !== a.token_hash) agents[name] = { ...a, token_hash: n.token_hash }; continue; }
+      if (JSON.stringify(n) !== JSON.stringify(a)) agents[name] = n;
     }
+    for (const name of Object.keys(next.agents)) if (!Object.hasOwn(agents, name)) later.push(`${name} added`);
     const hashes = Object.values(agents).map((a) => a.token_hash);
     if (new Set(hashes).size !== hashes.length) return keep('would give two running roots one token_hash (restart to load it)');
+    const tokens = Object.keys(agents).filter((n) => agents[n]!.token_hash !== policy.agents[n]!.token_hash);
     const changed = Object.keys(agents).filter((n) => agents[n] !== policy.agents[n]);
     policy.agents = agents;
+    if (next.approvers === undefined) delete policy.approvers; else policy.approvers = next.approvers;
+    policy.max_approval_ttl = next.max_approval_ttl; policy.dedupe_seconds = next.dedupe_seconds; policy.priority = next.priority;
     eff = effectivePolicy(policy, tree);
     tokensFrom = at; warnedAt = '';
     licence(); // a policy reload re-reads the licence too, and says so if the tier changed
-    if (changed.length > 0) console.warn(`sigelo-spend: policy.json: new token_hash for ${changed.join(', ')} — the old token(s) no longer work`);
+    if (tokens.length > 0) console.warn(`sigelo-spend: policy.json: new token_hash for ${tokens.join(', ')} — the old token(s) no longer work`);
+    if (changed.length > 0) console.warn(`sigelo-spend: policy.json: now in use for ${changed.join(', ')}`);
+    if (later.length > 0) console.warn(`sigelo-spend: policy.json: ${later.join(', ')} — that takes effect at the next start (restart the keeper)`);
   };
   // A name is bound to its account for as long as the log names it: every line an agent's
   // name is on counts toward that agent's /budget, /log, /history and refs. An agent in
@@ -1035,7 +1048,7 @@ export async function serve(opts: ServeOptions): Promise<Service> {
    */
   const lane = new Map<string, (req: IncomingMessage, res: ServerResponse, raw: string) => Promise<void>>([
     ['POST /pay', (q, r, b) => pay(q, r, b)], ['POST /delegate', (q, r, b) => delegate(q, r, b)], ['POST /fund', (q, r, b) => fund(q, r, b)],
-    ['POST /revoke', (q, r, b) => revoke(q, r, b)], ['POST /approve', (q, r, b) => approve(q, r, b)],
+    ['POST /revoke', (q, r, b) => revoke(q, r, b)], ['POST /approve', (q, r, b) => approve(q, r, b)], ['POST /refuse', (q, r, b) => refuse(q, r, b)],
   ]);
 
   /**
@@ -1073,7 +1086,8 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     const route = `${req.method} ${url.pathname}`;
     const job = lane.get(route);
     if (job !== undefined) {
-      const isApprove = route === 'POST /approve';
+      // /approve and /refuse hold no token (the approver's signature is the authorisation) and share APPROVE_MAX.
+      const isApprove = route === 'POST /approve' || route === 'POST /refuse';
       // The token BEFORE the body and the lane: a token-less post never waits in it, never reads
       // the log, and never delays an agent's pay (review 2026-10-19: 50 of them held a real pay
       // 10 s). agentOf is constant-time. The token is checked again in the lane (policy.ts):
@@ -1084,7 +1098,7 @@ export async function serve(opts: ServeOptions): Promise<Service> {
         const t = bearer(req.headers['authorization']);
         return fail(res, 401, t === undefined || t === '' ? 'token: no bearer token presented' : 'token: this wallet is not set up for you (unknown or revoked token). Tell your operator.');
       }
-      if (isApprove) { const lic = unlicensed('approvals (POST /approve)'); if (lic !== undefined) { res.setHeader('Connection', 'close'); return fail(res, 403, lic); } }
+      if (route === 'POST /approve') { const lic = unlicensed('approvals (POST /approve)'); if (lic !== undefined) { res.setHeader('Connection', 'close'); return fail(res, 403, lic); } }
       if (laneUsed >= laneMax || (isApprove && approvesUsed >= APPROVE_MAX)) {
         res.setHeader('Connection', 'close');
         res.setHeader('Retry-After', '1');
@@ -1311,31 +1325,55 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     if (no !== undefined) return fail(res, 403, no);
     let raw: unknown;
     try { raw = parse(text); } catch (e) { return fail(res, 400, `request: body is not strict JSON (${why(e)})`); }
-    const now = clock();
-    const pendings = new Map<string, Receipt>(), used = new Map<string, 'approved' | 'spent'>();
+    const now = clock(), { pendings, context } = answers(now);
+    const r = checkApproval(raw, context);
+    if (!r.ok) return fail(res, 403, r.reason);
+    const body = r.approved.body, entry: LogEntry = { ...pendings.get(body.nonce)!.entry, ts: now, status: 'approved', approval: r.approved };
+    try { write({ entry, sig: sign(secret, entry) }); } catch (e) { return fail(res, 500, `log: approved line not written (${why(e)}) — nothing was approved`); }
+    return json(res, 200, { status: 'approved', ref: body.ref, agent: agentOfEntry(entry), approver: r.approved.approver, nonce: body.nonce, exp: body.exp,
+      next: 'the agent runs the same pay again; this approval pays it once' });
+  };
+  /**
+   * POST /refuse {body, sig, bundle, reason?}: an approver's no to a pending request, checked as /approve
+   * checks a yes (approval.ts `checkRefusal`: the same body with typ "spend-refusal"), written as a
+   * keeper-signed `refused` line. Until the request's exp the agent's same pay is answered 403 `refused`
+   * with the reason (policy.ts step 4), never asked again and never paid; after it, the next pay asks anew.
+   * Free on every tier: saying no lets nothing through.
+   */
+  const refuse = async (_req: IncomingMessage, res: ServerResponse, text: string): Promise<void> => {
+    if (dryRun) return noDryRun(res, 'a refusal writes the log');
+    let raw: unknown;
+    try { raw = parse(text); } catch (e) { return fail(res, 400, `request: body is not strict JSON (${why(e)})`); }
+    const now = clock(), { pendings, context } = answers(now);
+    const r = checkRefusal(raw, context);
+    if (!r.ok) return fail(res, 403, r.reason);
+    const body = r.refused.body, entry: LogEntry = { ...pendings.get(body.nonce)!.entry, ts: now, status: 'refused', refusal: r.refused };
+    try { write({ entry, sig: sign(secret, entry) }); } catch (e) { return fail(res, 500, `log: refused line not written (${why(e)}) — nothing was refused`); }
+    return json(res, 200, { status: 'refused', ref: body.ref, agent: agentOfEntry(entry), approver: r.refused.approver, nonce: body.nonce, exp: body.exp, reason: r.refused.reason });
+  };
+  /** What /approve and /refuse check against: the keeper-signed pending lines by nonce, and which nonces are answered or spent. */
+  const answers = (now: number) => {
+    const pendings = new Map<string, Receipt>(), used = new Map<string, 'approved' | 'spent' | 'refused'>();
     for (const r of readLog(opts.policyPath)) {
       const e = r.entry;
       if (e.status === 'pending' && plain(e.approval_request) && verifySig(identity.key, e, r.sig)) pendings.set(e.approval_request.nonce, r);
-      // Only the keeper's own approved lines count: an appended one must not block a real approval.
+      // Only the keeper's own approved and refused lines count: an appended one must not block a real answer.
       if (e.status === 'approved' && plain(e.approval) && plain(e.approval.body) && verifySig(identity.key, e, r.sig)) used.set(e.approval.body.nonce, 'approved');
+      if (e.status === 'refused' && plain(e.refusal) && plain(e.refusal.body) && verifySig(identity.key, e, r.sig)) used.set(e.refusal.body.nonce, 'refused');
       if (e.status === 'intent' && e.request.approval !== undefined) used.set(e.request.approval, 'spent');
     }
-    const r = checkApproval(raw, {
+    const context = {
       keeper: identity.did, keeperKey: identity.key, net: policy.net, now, maxTtl: policy.max_approval_ttl,
-      approvers: (policy.approvers ?? []).map((a) => a.did), used: (n) => used.get(n),
-      pending: (n) => {
+      approvers: (policy.approvers ?? []).map((a) => a.did), used: (n: string) => used.get(n),
+      pending: (n: string) => {
         const line = pendings.get(n);
         // A pending line of an agent revoked (or removed) since is no request any more.
         const a = line === undefined ? undefined : eff.agents[agentOfEntry(line.entry)];
         if (line === undefined || a?.did === undefined) return undefined;
         return { request: line.entry.approval_request!, agent: { did: a.did, keys: a.genesis === undefined ? [] : [a.genesis.key] } };
       },
-    });
-    if (!r.ok) return fail(res, 403, r.reason);
-    const body = r.approved.body, entry: LogEntry = { ...pendings.get(body.nonce)!.entry, ts: now, status: 'approved', approval: r.approved };
-    try { write({ entry, sig: sign(secret, entry) }); } catch (e) { return fail(res, 500, `log: approved line not written (${why(e)}) — nothing was approved`); }
-    return json(res, 200, { status: 'approved', ref: body.ref, agent: agentOfEntry(entry), approver: r.approved.approver, nonce: body.nonce, exp: body.exp,
-      next: 'the agent runs the same pay again; this approval pays it once' });
+    };
+    return { pendings, context };
   };
 
   /** What the caller's policy still allows: shared by /budget and /balance. */

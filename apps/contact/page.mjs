@@ -52,17 +52,57 @@
 // 409 pow_confirm, and the same call with `pow_confirmed: true` goes on. The carrier's automatic
 // retries stay capped: state's me.pow_capped {relay, next} says when the next one is.
 //
+// Seen receipts (UI-API.md "Seen receipts", carrier.mjs's header): a message of mine is `seen` once the contact's
+// newest receipt (contacts' seen_upto) is at or after the time I sent it. A contact's messages shown (GET /api/messages)
+// send one receipt, the newest iat shown, unless data.settings.seen is false: to a contact that sent one (it reads
+// them), or a first one to a contact not known to (an earlier version takes it as a message once, then hears no more;
+// never to my own agents, which read none);
+// the first receipt from a contact is answered once (a 0 when receipts are off), so both sides know. data.seen: each
+// contact's {sent, told}. Chat defaults (data.settings): new_tier and new_presence, given to a contact at its pairing;
+// notify (all chats) and data.notify (a chat: contact DID or gid → false) for the notifications.
+//
+// The Wallet settings (UI-API.md "Wallet", design/ux1/notes.md "Decided"): per profile, in data.settings: wallet (the
+// switch, default off), prices (a local price, opt-in, default off) and currency (one of CURRENCIES). Read in state's
+// me.wallet by every form of the page. This page holds no wallet: GET /api/wallet answers where: "none", its other
+// wallet routes 409 wallet_none ("This phone has no wallet yet"); `sigelo-agent ui` answers them with the computer's.
+//
+// Pictures (UI-API.md "Pictures", design/ux1/notes.md "Decided"): store.readPicture(name) → bytes | null and
+// store.writePicture(name, bytes | null), the host's (beside the page's data, 0600, on a computer; the profile's storage
+// on the phone). data.pics: key → {type, rev, at} for 'me' (this identity's own), 'l:<did or gid>' (a local one for a
+// contact or a group: wins) and 't:<did>' (the one a contact sent). Mine travels as one more body inside the
+// end-to-end envelope (label PICTURE_LABEL: {type, data} or {remove: true}), never to the relay in the clear, and only to
+// a contact known to read it: its seen receipt came (seen_peer) or its own picture did (data.pic_peer). An earlier
+// version never gets one; data.pic_sent: what each contact has. A received one is checked (JPEG or WebP, at most
+// PICTURE_MAX bytes), kept as t:<did>, never in the history.
+//
+// Signed statements (UI-API.md "Signed statements"): a text signed with this identity's key, portable: the text, a line
+// naming the signer's four words, and `sigelo-statement/0 <base64url of JCS {body, sig, bundle}>`; body {v, typ:
+// "statement", did (the signing key's DID), iat, text}, sig over "sigelo\n" ‖ JCS(body) (SPEC §3), bundle the chain only
+// (genesis and rotations: no attestation, binding or issuer travels with it). Checked offline against that bundle
+// (SPEC §9): the chain, the DID in it, the signature. In a chat: a message labelled STATEMENT_LABEL whose text is the
+// portable form (an earlier version shows the text as it is). No protocol object: a chat-layer body.
+//
+// The public invite (UI-API.md "Public invite"): a long code (POST /api/invite long, ttl up to 7 days), once, kept in
+// data.public so it survives a restart; Stop is /api/invite/cancel.
+//
 // The relay setting (UI-API.md "Settings"): the relay new codes name, kept in data.settings.relay.
 // Precedence: relayFixed (the host's environment: SIGELO_RELAY, or a relay the host was given) wins,
 // then the setting, then relay.sigelo.ai. The carrier is made with the setting; a change applies at
 // once to new codes (invite names it) and becomes the carrier's own relay at the next start. Codes
 // to accept never read it: a 12-character code names its relay by its tag, an 8-character one is
 // relay.sigelo.ai's (the carrier's relayForShort).
-import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
+import { canonicalize, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
 import { DEFAULT_RELAY } from './carrier.mjs';
+import { signAs } from './kdf.mjs';
 import * as E from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
 import { didWords } from './short.mjs';
+
+// The tiers a new contact may be given at its pairing (Settings → Chats: new people's messages).
+const TIER_NEW = new Set(['own', 'friend', 'quiet']);
+export const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'BRL', 'INR'];
 
 const DAY = 86400, TAG_MAX = 20, NAME_MAX = 64, TEXT_MAX = 100_000;
 // An agent's name: a contact name and, placed here, a file name (sigelo.<name>.local.json), as `enrol --name` takes it.
@@ -73,6 +113,62 @@ const hexOf = (n) => bytesToHex(randomBytes(n));
 // A short change mark of a string (FNV-1a, 32 bits): not a check of anything, only "something changed".
 const hashOf = (t) => { let x = 0x811c9dc5; for (let i = 0; i < t.length; i++) { x ^= t.charCodeAt(i); x = Math.imul(x, 0x01000193) >>> 0; } return x.toString(36); };
 export const refuse = (status, check, message) => { throw Object.assign(new Error(message), { check, status }); };
+
+// ---- pictures and signed statements (the header's)
+export const PICTURE_LABEL = 'sigelo-picture/0', STATEMENT_LABEL = 'sigelo-statement/0', PICTURE_MAX = 64 * 1024, STATEMENT_MAX = 10_000;
+const PICTURE_TYPES = new Set(['image/jpeg', 'image/webp']);
+const b64 = (bytes) => { let t = ''; for (let i = 0; i < bytes.length; i += 0x8000) t += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(t); };
+const unb64 = (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
+const b64url = (bytes) => b64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = (t) => unb64(t.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (t.length % 4)) % 4));
+/** A picture as it comes (POST /api/picture, a contact's body): its bytes, or a refusal (400 picture). */
+export function pictureBytes(type, data) {
+  if (!PICTURE_TYPES.has(type)) refuse(400, 'picture', 'type: image/jpeg or image/webp');
+  if (typeof data !== 'string' || data.length > Math.ceil(PICTURE_MAX / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) refuse(400, 'picture', `data: base64 of at most ${PICTURE_MAX / 1024} KB`);
+  const b = unb64(data);
+  if (b.length === 0 || b.length > PICTURE_MAX) refuse(400, 'picture', `a picture of at most ${PICTURE_MAX / 1024} KB (256 pixels is plenty)`);
+  const jpeg = b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff, webp = b.length > 12 && String.fromCharCode(...b.subarray(0, 4)) === 'RIFF' && String.fromCharCode(...b.subarray(8, 12)) === 'WEBP';
+  if ((type === 'image/jpeg' && !jpeg) || (type === 'image/webp' && !webp)) refuse(400, 'picture', `not a ${type === 'image/jpeg' ? 'JPEG' : 'WebP'} picture`);
+  return b;
+}
+const chainOnly = (b) => ({ v: 'sigelo/0', typ: 'bundle', genesis: b.genesis, rotations: b.rotations ?? [], bindings: [], attestations: [], issuers: [] });
+const SIGNED_LINE = /\n-- Signed with sigelo by [a-z]+ [a-z]+ [a-z]+ [a-z]+\. Check it in the sigelo app\.\s*$/;
+/** A statement signed now by identity id ({sign | secret, bundle}, the carrier's): → its portable text. */
+export function signStatement(id, text, now) {
+  if (typeof text !== 'string' || text.trim() === '' || text.length > STATEMENT_MAX) refuse(400, 'body', `text: 1 to ${STATEMENT_MAX} characters`);
+  const bundle = chainOnly(id.bundle), r = verify(bundle, now);
+  const body = { v: STATEMENT_LABEL, typ: 'statement', did: r.did, iat: now, text: text.trim() };
+  const blob = { body, sig: signAs(id, body), bundle };
+  return `${body.text}\n-- Signed with sigelo by ${didWords(r.chain[0])}. Check it in the sigelo app.\n${STATEMENT_LABEL} ${b64url(utf8ToBytes(canonicalize(blob)))}`;
+}
+/**
+ * A statement's portable text checked offline (SPEC §9 on its bundle, then the signature by the key of the DID it names):
+ * → {valid: true, text, iat, did, original, chain, current, created, edited} or {valid: false, check, message}. edited: the
+ * text shown above the signature differs from the one signed (the signed one is what counts).
+ */
+export function checkStatement(portable, now) {
+  const no = (check, message) => ({ valid: false, check, message });
+  const t = String(portable ?? '').replace(/\r\n?/g, '\n');
+  const m = /(?:^|\n)sigelo-statement\/0\s+([A-Za-z0-9_\-\s]+?)\s*$/.exec(t);
+  if (!m) return no('statement_format', 'No sigelo signature in this text: paste all of it, the last line too.');
+  let blob;
+  try { blob = parseBytes(unb64url(m[1].replace(/\s+/g, ''))); } catch { return no('statement_format', 'The signature line is cut or changed: paste all of it.'); }
+  const keys = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o).sort().join() : '');
+  const { body, sig, bundle } = blob ?? {};
+  if (keys(blob) !== 'body,bundle,sig' || keys(body) !== 'did,iat,text,typ,v' || body.v !== STATEMENT_LABEL || body.typ !== 'statement' || typeof body.did !== 'string'
+    || !Number.isSafeInteger(body.iat) || body.iat < 0 || typeof body.text !== 'string' || body.text.length > STATEMENT_MAX || typeof sig !== 'string') {
+    return no('statement_format', 'Not a sigelo signed message.');
+  }
+  let r;
+  try { r = verify(bundle, now); } catch (e) { return no('statement_identity', `The identity it carries does not verify (${e.message}).`); }
+  const g = [bundle.genesis, ...bundle.rotations.map((x) => x.next_genesis)].find((x) => { try { return didOf(x) === body.did; } catch { return false; } });
+  if (!g || !r.chain.includes(body.did)) return no('statement_identity', 'The key that signed it is not in the identity it carries.');
+  if (!verifySig(g.key, body, sig)) return no('statement_sig', 'The text or its signature was changed after it was signed.');
+  if (body.iat > now + 300) return no('statement_time', 'It says it was signed in the future: the signer\'s clock is wrong, or it was changed.');
+  const shown = t.slice(0, m.index).replace(SIGNED_LINE, '').trim();
+  return { valid: true, text: body.text, iat: body.iat, did: body.did, original: r.chain[0], chain: r.chain, current: r.did === body.did, created: bundle.genesis.created ?? null,
+    edited: shown !== '' && shown !== body.text.trim() };
+}
 
 export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, groupsFile = null, enrolFile = null, codeKind, unlogged, store, hooks = {}, relayFixed = null }) {
   const defer = hooks.defer ?? ((f) => setTimeout(f, 0));
@@ -103,7 +199,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   };
   let data;
   try { data = JSON.parse(store.readData() ?? 'null') ?? {}; } catch { data = {}; }
-  for (const k of ['tags', 'checked', 'read', 'controls', 'settings', 'gread']) data[k] ??= {};
+  for (const k of ['tags', 'checked', 'read', 'controls', 'settings', 'gread', 'seen', 'notify', 'kind', 'pics', 'pic_sent', 'pic_peer']) data[k] ??= {};
   data.gnotices ??= [];
   delete data.waiting;   // kept by an earlier page; the carrier says it now (contacts: prekeys, waiting)
   const saveData = () => store.writeData(JSON.stringify(data));
@@ -117,6 +213,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   const gone = (fn) => () => (live.seatGone !== null ? refuse(409, 'seat_elsewhere', `the seat went to ${live.seatGone}: this page no longer logs in as you`) : fn());
   const serial = (f0) => { const fn = gone(f0); const p = chain.then(fn, fn); chain = p.catch(() => {}); return p; };
   const invites = new Map();
+  // The public invite (the header's): kept in data.public, so Stop still works after a restart.
+  if (data.public?.id) invites.set(data.public.id, { ...data.public });
   let devices = null;
   // Enrolments this page issued (agents, below): id (the code's nonce) → { id, worker, name, short, code, exp, relay, tier,
   // state: code | words | sending | enrolled | expired | failed, words, temp, did, original, check?, detail? }.
@@ -132,9 +230,13 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       // Enrolment and device messages carry keys or codes: never in the history (the device rounds take them).
       if (typeof m['label'] === 'string' && unlogged.test(m['label'])) { if (!holdAgent(m)) devices?.hold(m); continue; }
       if (hidden({ did: m['from'], name: m['name'] })) continue;
+      // A contact's own picture (the header's "Pictures"): kept apart, never in the history.
+      if (m['label'] === PICTURE_LABEL) { takePicture(m); continue; }
       const link = m['link'] ? { link: m['link'] } : {};
-      if (m['type'] === 'file') record({ kind: 'in', did: m['from'], name: m['contact'], label: m['label'], text: `file ${String(m['name'])} (${String(m['size'])} bytes), saved at ${String(m['path'])}`, ...link });
-      else record({ kind: 'in', did: m['from'], name: m['name'], text: m['content'], label: m['label'], ...link });
+      // iat: the sender's time of it, what a seen receipt names (Seen receipts, above).
+      const iat = Number.isSafeInteger(m['iat']) ? { iat: m['iat'] } : {};
+      if (m['type'] === 'file') record({ kind: 'in', did: m['from'], name: m['contact'], label: m['label'], text: `file ${String(m['name'])} (${String(m['size'])} bytes), saved at ${String(m['path'])}`, ...iat, ...link });
+      else record({ kind: 'in', did: m['from'], name: m['name'], text: m['content'], label: m['label'], ...iat, ...link });
     }
     const named = new Set();
     for (const e of b.events) {
@@ -144,7 +246,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         case 'paired': {
           const inv = [...invites.values()].find((x) => x.name === e['name'] && !x.paired);
           if (inv && d) inv.paired = d;
+          if (d && data.public?.name === e['name'] && !data.public.paired) { data.public.paired = d; saveData(); }
           record({ kind: 'event', type: 'paired', did: d, name: e['name'] });
+          if (d) newContact(d, inv);
           break;
         }
         // A refusal of one of my messages (it has an id) is its status, from onEvent.
@@ -191,7 +295,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       const d = e['did'] ?? e['from'] ?? e['peer'];
       switch (e.type) {
         case 'sent': case 'queued': case 'refused': {
-          if (e['control'] !== undefined) break;
+          if (e['control'] !== undefined || e['receipt'] === true) break;
           // Before send returns, its own result says the same: only later ones are recorded.
           const st = e.type, i = e['id'];
           if (i && outById.has(i)) { record({ kind: 'status', id: i, status: st, code: e['code'], detail: e['detail'] }); break; }
@@ -216,6 +320,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
           if (e['check'] === 'pow_confirm') live.powConfirm = { relay: String(e['relay']), detail: String(e['detail']).replace(/^pow_confirm: /, '') };
           break;
         case 'notice': case 'presence': case 'group_tier': break;   // presence, the group tier: the state says it, nothing to take
+        case 'seen': defer(() => { receipt(String(e['from']), true); picturesDue(); }); break;   // the contact's receipt: contacts() has it; answered once; it reads pictures
         default: soon();
       }
     } catch (err) { live.error = `history: ${err.message}`; }
@@ -236,6 +341,90 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   const settings = () => ({ relay: kept() ?? DEFAULT_RELAY, default: DEFAULT_RELAY, fixed: relayFixed, in_use: carrier.relay });
   async function checkClock() { try { await carrier.checkClock(); } catch {} }
   const seen = (d) => { let at = null; for (const r of recs) if (r.did === d && (r.kind === 'in' || r.kind === 'event')) at = r.at; return at; };
+  // ---- seen receipts and the chat defaults (the header's)
+  const receiptsOn = () => data.settings.seen !== false;
+  // The newest of a contact's messages shown (their iat), 0 when none.
+  const shownUpto = (d) => { let t = 0; const read = data.read[d] ?? 0; for (const r of recs) if (r.kind === 'in' && r.did === d && r.n <= read && Number.isSafeInteger(r.iat) && r.iat > t) t = r.iat; return t; };
+  // A receipt to contact d when one is due; answer: the contact's first receipt came (say that this side reads them too).
+  function receipt(d, answer = false) {
+    try {
+      const x = carrier.contacts().contacts.find((c) => c.did === d && !c.revoked);
+      // My own agents read none (no app shows them ticks): only once one sent a receipt.
+      if (!x || hidden(x) || (x.ours && !x.seen_peer)) return;
+      const s = (data.seen[d] ??= { sent: 0, told: false }), upto = receiptsOn() ? shownUpto(d) : 0;
+      const due = receiptsOn() && upto > s.sent && (x.seen_peer || !s.told);
+      if (!due && !(answer && !s.told)) return;
+      if (receiptsOn()) s.sent = Math.max(s.sent, upto);
+      s.told = true; saveData();
+      void serial(() => carrier.seen(d, upto)).catch(() => {});
+    } catch {}
+  }
+  // A message of mine: seen once the contact's newest receipt is at or after when it went (at: taken before the send).
+  const statusOf = (r, upto) => (r.kind === 'out' && r.status === 'sent' && Number.isSafeInteger(upto) && r.at <= upto ? 'seen' : r.status ?? null);
+  // A contact just paired: the chat defaults (a tier the human did not choose at accept, presence), and a group code's group.
+  function newContact(d, inv) {
+    try {
+      const x = carrier.contacts().contacts.find((c) => c.did === d && !c.revoked);
+      // An introduced contact (link.mjs) keeps the tier its introduction gave; my own agents theirs.
+      if (!x || x.link) return;
+      const t = data.settings.new_tier;
+      if (TIER_NEW.has(t) && t !== x.tier && !x.ours && x.tier_by !== 'owner') carrier.setTier(d, t);
+      if (data.settings.new_presence === true && x.presence === 'deny') carrier.setPresence(d, true);
+    } catch {}
+    if (inv?.group && G && groupsFile) {
+      const gid = inv.group;
+      defer(() => void serial(() => G.add({ carrier, file: groupsFile, group: gid, members: [d], humans: [d] })).then(() => changed(), (err) => { gnote({ type: 'group', why: 'refused', check: err.check ?? 'group', count: 1 }); saveData(); changed(); }));
+    }
+  }
+  const notifyOf = (chat) => data.notify[chat] !== false;
+  // The public invite as the state shows it: its code until it runs out; waiting (nobody used it yet) or the contact it paired.
+  function publicInvite(c) {
+    const p = data.public;
+    if (!p) return null;
+    if (p.exp <= nowS()) { delete data.public; invites.delete(p.id); saveData(); return null; }
+    return { id: p.id, name: p.name, code: p.code, exp: p.exp, relay: p.relay, waiting: c.invites.some((x) => x.name === p.name), paired: p.paired ?? null };
+  }
+  const walletSet = () => ({ wallet: data.settings.wallet === true, prices: data.settings.prices === true, currency: CURRENCIES.includes(data.settings.currency) ? data.settings.currency : null });
+  const settingsAll = () => ({ ...settings(), seen_receipts: receiptsOn(), notify: data.settings.notify !== false,
+    new_tier: TIER_NEW.has(data.settings.new_tier) ? data.settings.new_tier : 'friend', new_presence: data.settings.new_presence === true, ...walletSet() });
+
+  // ---- pictures (the header's): mine to the contacts that read them, theirs kept, a local one beside
+  const picFile = (key) => (key === 'me' ? 'me' : `${key[0]}-${bytesToHex(sha256(utf8ToBytes(key.slice(2)))).slice(0, 16)}`);
+  const picRev = (key) => data.pics[key]?.rev ?? null;
+  const picOf = (id) => (id === 'me' ? 'me' : data.pics[`l:${id}`] ? `l:${id}` : data.pics[`t:${id}`] ? `t:${id}` : null);
+  const picSave = (key, type, bytes) => {
+    store.writePicture(picFile(key), bytes);
+    data.pics[key] = { type, rev: `${hashOf(b64(bytes))}${bytes.length.toString(36)}`, at: nowS() };
+  };
+  const picDrop = (key) => { if (!data.pics[key]) return false; store.writePicture(picFile(key), null); delete data.pics[key]; return true; };
+  // Mine to each contact known to read pictures that does not have this one (or its removal) yet: one body each.
+  let picturing = false;
+  function picturesDue() {
+    if (picturing || !store.writePicture || live.seatGone !== null) return;
+    const rev = picRev('me') ?? '';
+    const due = carrier.contacts().contacts.filter((x) => !x.revoked && !hidden(x) && (x.seen_peer || data.pic_peer[x.did]) && (data.pic_sent[x.did] ?? '') !== rev);
+    if (!due.length) return;
+    picturing = true;
+    const bytes = rev ? store.readPicture(picFile('me')) : null;
+    const content = bytes ? { type: data.pics.me.type, data: b64(bytes) } : { remove: true };
+    void serial(async () => {
+      for (const x of due) {
+        try { const [r] = await carrier.sendAll(x.did, [content], { label: PICTURE_LABEL }); if (r.status !== 'refused') data.pic_sent[x.did] = rev; } catch (e) { if (/queued/.test(e.message)) data.pic_sent[x.did] = rev; }
+      }
+      saveData();
+    }).catch(() => {}).finally(() => { picturing = false; if ((picRev('me') ?? '') !== rev) picturesDue(); });
+  }
+  // A contact's picture (or its removal): checked, kept as t:<did>; it reads pictures, so mine goes too.
+  function takePicture(m) {
+    const d = String(m['from']), v = m['content'];
+    try {
+      if (v?.remove === true) picDrop(`t:${d}`);
+      else picSave(`t:${d}`, v?.type, pictureBytes(v?.type, v?.data));
+      data.pic_peer[d] = true; saveData();
+      defer(() => picturesDue());
+    } catch (e) { record({ kind: 'event', type: 'dropped', did: d, name: m['name'], code: 'picture', detail: e.message }); }
+  }
+
   let timers = [];
   async function start() {
     void checkClock();
@@ -243,6 +432,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     await carrier.start({ started: 'user' });
     await drain();
     void linkRound();
+    picturesDue();
     void transfers?.engine.kick();
   }
   async function halt() {
@@ -336,15 +526,29 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   };
   // The contact holding a worker's original DID, live, or null.
   const contactOfWorker = (w) => carrier.contacts().contacts.find((x) => !x.revoked && x.chain.includes(w.original)) ?? null;
+  // A contact's kind (UI-API.md "Kinds"): an agent when the page knows it is one (my agent: ours by its operator
+  // attestation, on this machine, or a worker of my keeper root; a member a group roster names an agent), else a
+  // person; the human's choice (POST /api/kind, data.kind) wins.
+  let workerDids = new Set();
+  const rosterAgents = () => {
+    try { return new Set(G && groupsFile && carrier.platform.files.read(groupsFile) !== null ? G.list({ carrier, file: groupsFile }).flatMap((g) => g.members.filter((m) => m.role === 'agent').map((m) => m.did)) : []); } catch { return new Set(); }
+  };
+  const kindOf = (x, mine, roles) => {
+    const set = data.kind[x.did];
+    if (set === 'agent' || set === 'person') return { kind: set, kind_set: true };
+    const agent = x.ours === true || mine !== null || x.chain.some((d) => workerDids.has(d) || roles.has(d));
+    return { kind: agent ? 'agent' : 'person', kind_set: false };
+  };
   async function workers() {
     const k = K ? await K.read() : null, st = hooks.seat?.() ?? null, seat = st ? (st.here ? 'here' : 'elsewhere') : null;
     if (!k) return { keeper: false, seat, workers: [] };
     await look();
     const local = hooks.agents?.() ?? [], waiting = enrolFile ? pend((x) => Object.values(x.issued).filter((e) => !e.done).map((e) => e.i)) : [];
+    workerDids = new Set(Object.values(k.workers).filter((w) => w.revoked === undefined).map((w) => w.original));
     const rows = Object.entries(k.workers).map(([i, w]) => {
       const n = Number(i), c = contactOfWorker(w), here = local.find((a) => a.did === w.original), e = [...enrolling.values()].filter((x) => x.worker === n).at(-1);
       const status = w.revoked !== undefined ? 'revoked' : c || here ? 'enrolled' : (e && LIVE.has(e.state)) || waiting.includes(n) ? 'pending' : 'unplaced';
-      return { worker: n, name: w.name, did: c?.current_did ?? w.did, original: w.original, rank: w.rank ?? null, placed: w.placed, at: w.at, status, revoked: w.revoked ?? null,
+      return { worker: n, name: w.name, did: c?.current_did ?? w.did, original: w.original, words: didWords(w.original), rank: w.rank ?? null, placed: w.placed, at: w.at, status, revoked: w.revoked ?? null,
         seen: c ? seen(c.did) : null, tier: c?.tier ?? null, contact: c?.did ?? null, local: here?.name ?? null,
         online: c?.online ?? null, last_seen: c?.last_seen ?? null,
         attested_until: here?.mine?.exp ?? w.until ?? w.attestation?.body?.exp ?? null, enrolling: e && e.state !== 'expired' ? pub(e) : null };
@@ -355,7 +559,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   // ---- reads
   const textOf = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
   function state(since) {
-    const t = nowS(), c = carrier.contacts(), local = hooks.agents?.() ?? [], clock = carrier.clockOffset();
+    const t = nowS(), c = carrier.contacts(), local = hooks.agents?.() ?? [], clock = carrier.clockOffset(), roles = rosterAgents();
     const live_ = c.contacts.filter((x) => !x.revoked && !hidden(x)).map((x) => {
       const pair = x.pair, agent = local.find((a) => a.did !== undefined && x.chain.includes(a.did));
       const mine = agent?.mine ?? null;
@@ -371,12 +575,15 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         did: x.did, name: x.name, current_did: x.current_did, relay: x.relay, re_pair: x.re_pair, words: x.fingerprint, pair,
         words_checked: pair !== null && data.checked[x.did] === pair, tags: data.tags[x.did] ?? [],
         local: agent?.name ?? null, mine, unread: msgs.filter((r) => r.kind === 'in' && r.n > read).length,
-        last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: last.status ?? null } : null,
+        last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: statusOf(last, x.seen_upto) } : null,
+        notify: notifyOf(x.did), seen_upto: x.seen_upto ?? null,
+        picture: picRev(picOf(x.did) ?? ''), picture_local: data.pics[`l:${x.did}`] !== undefined,
         waiting, not_collected: queued.length, queued: x.queued,
         status: x.re_pair ? 'pair_again' : waiting ? 'waiting' : queued.length ? 'not_collected' : 'ok', ours: x.ours === true || mine !== null, tier,
         link: x.link ? { id: x.link.id, purpose: x.link.purpose, linked_by: x.link.linked_by, expires: x.link.expires ?? null } : null,
         // Presence (carrier.mjs): theirs as read now (online true, false, null: not known), and what they see of mine.
         online: x.online ?? null, online_since: x.online_since ?? null, last_seen: x.last_seen ?? null, presence: x.presence ?? 'deny',
+        ...kindOf(x, mine, roles),
       };
     });
     // Mine: ours by key, whatever the tier (an own agent set to friend is still mine), or tier own.
@@ -384,7 +591,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     const mineGroup = live_.filter(isMine), rest = live_.filter((x) => !isMine(x));
     const pendingInvites = c.invites.filter((p) => !hidden(p)).map((p) => {
       const ours = [...invites.values()].find((x) => x.name === p.name);
-      return { name: p.name, exp: p.exp, relay: p.relay, ...(ours && { id: ours.id, short: ours.short ?? null, short_exp: ours.short_exp ?? null, code: ours.code }) };
+      return { name: p.name, exp: p.exp, relay: p.relay, ...(ours && { id: ours.id, short: ours.short ?? null, short_exp: ours.short_exp ?? null, code: ours.code, group: ours.group ?? null }) };
     });
     const paired = [...invites.values()].filter((x) => x.paired).map((x) => ({ id: x.id, name: x.name, paired: x.paired }));
     const failed = recs.filter((r) => r.kind === 'event' && r.type === 'pairing_failed' && r.at > t - DAY).slice(-5).map((r) => ({ name: r.name, did: r.did, code: r.code, detail: r.detail, at: r.at }));
@@ -398,11 +605,14 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         seat: hooks.seat?.() ?? null,
         pow: live.pow && { bits: live.pow.bits, elapsed_s: Math.round((Date.now() - live.pow.since) / 1000), expected_s: Math.ceil(2 ** live.pow.bits / 180000) },
         pow_capped: live.powCapped, pow_confirm: live.powConfirm,
+        // Wallet (Settings → Wallet): the switch and the price choice, for every scope of a control.
+        wallet: (({ wallet, prices, currency }) => ({ on: wallet, prices, currency }))(walletSet()),
+        picture: picRev('me'),
       },
       groups: { mine: mineGroup, contacts: rest },
       // Chat groups (GROUPS.md): the tab's badge and its notices; the list is GET /api/groups.
       chats: chatsState(),
-      pending: { invites: pendingInvites, paired, answers: c.answers, failed },
+      pending: { invites: pendingInvites, paired, answers: c.answers, failed, public: publicInvite(c) },
       introductions: introductions(c.contacts),
       transfers: transferCounts(),
       events: recs.filter((r) => r.kind === 'event' && r.n > since).slice(-50),
@@ -414,7 +624,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     if (carrier.platform.files.read(linksFile) === null) return [];
     try {
       return L.list({ carrier, file: linksFile }).received.filter((x) => !x.answer && cs.find((c) => c.did === x.from)?.tier !== 'quiet')
-        .map((x) => ({ id: x.id, from: x.from, name: x.name ?? x.from, purpose: x.purpose }));
+        .map((x) => ({ id: x.id, from: x.from, name: x.name ?? x.from, purpose: x.purpose, peer_name: x.peer_name ?? null }));
     } catch { return []; }
   }
 
@@ -460,7 +670,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     return gs.map((g) => {
       const items = ['member', 'frozen'].includes(g.status) ? G.history({ carrier, file: groupsFile, group: g.gid }) : [];
       const last = items.at(-1);
-      return { ...g, unread: unreadIn(g.gid, items), quiet: brakeQuiet(g),
+      return { ...g, unread: unreadIn(g.gid, items), quiet: brakeQuiet(g), notify: notifyOf(g.gid), picture: picRev(`l:${g.gid}`),
         last: last ? { name: last.mine ? null : last.name, text: textOf(last.content).slice(0, 200), at: last.received ?? last.iat, mine: last.mine === true } : null };
     });
   }
@@ -487,6 +697,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     }
   }
   const gid = (b) => (typeof b['group'] === 'string' && b['group'] !== '' ? b['group'] : refuse(400, 'body', 'group: its gid'));
+  const isGroup = (x) => { try { return typeof x === 'string' && /^[0-9a-f]{32}$/.test(x) && Boolean(G && groupsFile && carrier.platform.files.read(groupsFile) !== null && G.list({ carrier, file: groupsFile }).some((g) => g.gid === x)); } catch { return false; } };
   const dids = (v, what, need = true) => {
     if (v === undefined && !need) return [];
     if (!Array.isArray(v) || (need && v.length === 0) || v.length > 64 || v.some((x) => typeof x !== 'string' || x === '')) refuse(400, 'body', `${what}: a list of contact DIDs`);
@@ -552,8 +763,26 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   }
   async function forget(c) {
     const r = await carrier.forget(c.did);
-    delete data.tags[c.did]; delete data.checked[c.did]; saveData();
+    delete data.tags[c.did]; delete data.checked[c.did]; delete data.kind[c.did];
+    if (store.writePicture) { picDrop(`l:${c.did}`); picDrop(`t:${c.did}`); }
+    delete data.pic_sent[c.did]; delete data.pic_peer[c.did]; saveData();
     return { forgotten: c.did, offline: r.offline ?? null };
+  }
+  // Who signed a statement, as this page knows them: me, a contact (its chain holds the signing key), or nobody known.
+  function signerOf(v) {
+    const m = hooks.me();
+    if (v.original === m.original && m.chain.includes(v.did)) return { kind: 'me', did: m.original, name: null, words_checked: true };
+    const c = carrier.contacts().contacts.find((x) => !x.revoked && !hidden(x) && x.did === v.original && x.chain.includes(v.did));
+    return c ? { kind: 'contact', did: c.did, name: c.name, words_checked: c.pair !== null && data.checked[c.did] === c.pair } : { kind: 'unknown', did: v.original, name: null, words_checked: false };
+  }
+  const checked = (v) => (v.valid ? { ...v, words: didWords(v.original), by: signerOf(v) } : v);
+  // A statement in a chat (the bubble's "Signed by … · check"): checked once per message, kept for the page's life.
+  const statements = new Map();
+  function statementOf(r) {
+    let v = statements.get(r.n);
+    if (!v) { v = checkStatement(textOf(r.text), nowS()); statements.set(r.n, v); }
+    const w = checked(v);
+    return w.valid ? { valid: true, by: w.by, words: w.words, text: w.text, iat: w.iat } : { valid: false, check: w.check };
   }
   const routes = {
     'GET /api/state': async (_, q) => { if (draining) await draining; return state(Number(q.get('since') ?? 0) || 0); },
@@ -562,19 +791,75 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       return { did: m.did, original: m.original, words: didWords(m.original), chain: m.chain, identity_file: i.identity_file, recovery: i.recovery, key: i.key, relay: carrier.relay, retention_days: carrier.retentionDays, erase: i.erase,
         ...(i.restored && { restored: i.restored }) };
     },
+    // Pictures (the header's): of=me (mine), a contact's DID or a group's gid (the one shown: a local one, else theirs).
+    'GET /api/picture': (_, q) => {
+      const of = q.get('of') ?? '';
+      if (of !== 'me' && !isGroup(of)) contactOf(of);
+      const key = picOf(of), bytes = key && data.pics[key] ? store.readPicture?.(picFile(key)) ?? null : null;
+      if (!bytes) refuse(404, 'picture_none', 'no picture: the initial or the mark shows');
+      return { of, type: data.pics[key].type, data: b64(bytes), rev: data.pics[key].rev, local: key.startsWith('l:') };
+    },
+    'POST /api/picture': (b) => serial(async () => {
+      if (!store.writePicture) refuse(404, 'route', 'no pictures here');
+      const of = b['of'];
+      if (typeof of !== 'string' || of === '') refuse(400, 'body', 'of: me, a contact\'s DID or a group\'s gid');
+      const id = of === 'me' ? 'me' : isGroup(of) ? of : contactOf(of).did, key = id === 'me' ? 'me' : `l:${id}`;
+      if (b['remove'] === true) picDrop(key);
+      else picSave(key, b['type'], pictureBytes(b['type'], b['data']));
+      saveData();
+      if (id === 'me') picturesDue();
+      changed();
+      const now_ = picOf(id);
+      return { of: id, picture: now_ ? picRev(now_) : null, local: now_?.startsWith('l:') ?? false };
+    }),
+    // Signed statements (the header's): sign a text with this identity's key; check one, offline.
+    'POST /api/statement/sign': (b) => serial(async () => {
+      const statement = signStatement(carrier.identity(), b['text'], nowS());
+      return { statement, ...checked(checkStatement(statement, nowS())) };
+    }),
+    'POST /api/statement/check': async (b) => {
+      if (typeof b['statement'] !== 'string' || b['statement'].length > 4 * TEXT_MAX) refuse(400, 'body', 'statement: the signed text, as it was shared');
+      return checked(checkStatement(b['statement'], nowS()));
+    },
+    // Proof of age (Me → Proof of age): what this identity's own bundle shows of its age, checked (SPEC §9): the day its
+    // genesis names (its own word) and each attestation a world signed, with when.
+    'GET /api/attestations': () => {
+      const bundle = carrier.identity().bundle, r = verify(bundle, nowS());
+      const list = Object.entries(r.attestations ?? {}).flatMap(([iss, bodies]) => bodies.map((x) => ({ iss, ctx: x.ctx, iat: x.iat, exp: x.exp, admission: x.admission, claims: x.claims ?? {} })));
+      return { created: bundle.genesis.created ?? null, attestations: list.sort((a, c) => a.iat - c.iat), rejected: r.rejected?.attestations ?? 0 };
+    },
     'POST /api/invite': (b) => serial(async () => {
-      const name = b['name'] === undefined || b['name'] === '' ? `contact-${hexOf(2)}` : cleanName(b['name'], 'name');
-      const at = newCodes();
-      const r = await carrier.invite({ name, short: b['long'] !== true, ...(at !== carrier.relay && { relay: at }), started: startedBy(b) });
-      const inv = { id: hexOf(6), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp }) };
+      const pub = b['public'] === true, ttl = b['ttl'];
+      const name = b['name'] === undefined || b['name'] === '' ? `${pub ? 'public' : 'contact'}-${hexOf(2)}` : cleanName(b['name'], 'name');
+      const at = newCodes(), group = b['group'];
+      // A long code's life (the public invite): an hour to 7 days; the short code lives 10 minutes whatever.
+      if (ttl !== undefined && (b['long'] !== true || !Number.isSafeInteger(ttl) || ttl < 3600 || ttl > 7 * DAY)) refuse(400, 'body', 'ttl: with long, 3600 to 604800 seconds (an hour to 7 days)');
+      if (b['public'] !== undefined && (typeof b['public'] !== 'boolean' || (pub && (b['long'] !== true || group !== undefined)))) refuse(400, 'body', 'public: true, with long (and no group)');
+      // A group code (Add people): whoever pairs through it is added to that group of mine, as a person.
+      if (group !== undefined) {
+        const g = typeof group === 'string' && G && groupsFile ? G.list({ carrier, file: groupsFile }).find((x) => x.gid === group) : null;
+        if (!g) refuse(404, 'group_unknown', `no group ${String(group)} here`);
+        if (!g.mine || g.status !== 'member') refuse(409, 'group_creator', `only ${g.creator_name ?? 'its creator'} adds people to ${g.name}`);
+      }
+      const r = await carrier.invite({ name, short: b['long'] !== true, ...(ttl !== undefined && { ttl }), ...(at !== carrier.relay && { relay: at }), started: startedBy(b) });
+      const inv = { id: hexOf(6), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp }), ...(group !== undefined && { group }), ...(pub && { public: true }) };
+      // One public invite at a time: a new one stops the one before.
+      if (pub) {
+        const old = data.public;
+        if (old) { invites.delete(old.id); try { await carrier.cancelInvite(old.code); } catch {} }
+        data.public = { id: inv.id, name, code: r.code, exp: r.exp, relay: r.relay }; saveData();
+      }
       invites.set(inv.id, inv);
       changed();
       return { ...inv, relay: r.relay };
     }),
     'POST /api/invite/cancel': (b) => serial(async () => {
       const inv = invites.get(String(b['id'])) ?? refuse(404, 'invite', 'no such invite');
-      await carrier.cancelInvite(inv.code);
+      // A public invite used already is no invite at the carrier any more: stopped all the same.
+      try { await carrier.cancelInvite(inv.code); } catch (e) { if (data.public?.id !== inv.id) throw e; }
       invites.delete(inv.id);
+      if (data.public?.id === inv.id) { delete data.public; saveData(); }
+      changed();
       return { cancelled: true };
     }),
     'POST /api/accept': (b) => serial(async () => {
@@ -609,6 +894,23 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (typeof allow !== 'boolean') refuse(400, 'body', 'allow: true or false');
       try { return carrier.setPresence(c.did, allow); } catch (e) { if (e.check === 'presence_own') e.status = 409; throw e; }
     }),
+    // A contact's kind, the human's choice (Chat settings → This is an agent): agent, person, or null (the page decides again).
+    'POST /api/kind': (b) => serial(async () => {
+      const c = contactOf(b['contact']), k = b['kind'];
+      if (k !== 'agent' && k !== 'person' && k !== null) refuse(400, 'body', 'kind: agent, person, or null (automatic)');
+      if (k === null) delete data.kind[c.did]; else data.kind[c.did] = k;
+      saveData(); changed();
+      return { did: c.did, kind: kindOf(c, null, rosterAgents()).kind, kind_set: k !== null };
+    }),
+    // The keeper's settings and payment requests (UI-API.md "Keeper"): `sigelo-agent ui` answers them where the
+    // keeper runs; here (and on any host without one) they are on the computer that runs it.
+    'GET /api/keeper': () => ({ state: 'elsewhere' }),
+    ...Object.fromEntries(['agent', 'approvers', 'approve', 'refuse', 'restart'].map((r) => [`POST /api/keeper/${r}`, () => refuse(409, 'keeper_elsewhere', 'Set this on the computer that runs the keeper.')])),
+    // The wallet (UI-API.md "Wallet"): none in this page; `sigelo-agent ui` answers these with the computer's.
+    'GET /api/wallet': () => ({ on: data.settings.wallet === true, where: 'none' }),
+    'GET /api/price': () => ({ on: false, currency: walletSet().currency }),
+    ...Object.fromEntries(['GET /api/wallet/history', 'GET /api/wallet/tx', 'GET /api/wallet/services', 'GET /api/wallet/nodes', 'POST /api/wallet/sync', 'POST /api/wallet/receive', 'POST /api/wallet/label',
+      'POST /api/wallet/review', 'POST /api/wallet/send', 'POST /api/wallet/service', 'POST /api/wallet/node'].map((r) => [r, () => refuse(409, 'wallet_none', 'This phone has no wallet yet: use the computer\'s page.')])),
     'POST /api/tag': (b) => serial(async () => {
       const c = contactOf(b['contact']), tags = b['tags'];
       if (!Array.isArray(tags) || tags.length > 8) refuse(400, 'body', 'tags: a list of at most 8');
@@ -619,39 +921,77 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     }),
     'POST /api/forget': (b) => serial(async () => forget(contactOf(b['contact']))),
     'POST /api/send': (b) => serial(async () => {
-      const c = contactOf(b['to']), text = b['text'];
+      const c = contactOf(b['to']), st = b['statement'];
+      // A signed statement (the header's): its portable text, labelled, checked before it goes.
+      if (st !== undefined && (typeof st !== 'string' || !checkStatement(st, nowS()).valid)) refuse(400, 'statement', 'statement: the portable text of a valid signed statement (POST /api/statement/check)');
+      const text = st ?? b['text'], label = st !== undefined ? STATEMENT_LABEL : '';
       if (typeof text !== 'string' || text.trim() === '' || text.length > TEXT_MAX) refuse(400, 'body', `text: 1 to ${TEXT_MAX} characters`);
+      // at: before it is sealed, so a receipt naming its iat covers it (statusOf).
+      const at = nowS(), lab = label ? { label } : {};
       let r;
-      try { [r] = await carrier.sendAll(c.did, [text], { label: '' }); } catch (e) {
+      try { [r] = await carrier.sendAll(c.did, [text], { label }); } catch (e) {
         // The session failed: the message stays queued in the carrier and goes at a later connection.
         if (!/queued/.test(e.message)) throw e;
-        return record({ kind: 'out', did: c.did, id: null, text, status: 'queued', code: e.check, detail: e.message });
+        return record({ kind: 'out', did: c.did, id: null, text, status: 'queued', code: e.check, detail: e.message, at, ...lab });
       }
-      return record({ kind: 'out', did: c.did, id: r.id, text, status: r.status, code: r.code, detail: r.detail });
+      return record({ kind: 'out', did: c.did, id: r.id, text, status: r.status, code: r.code, detail: r.detail, at, ...lab });
     }),
     'GET /api/messages': (_, q) => {
-      const d = contactOf(q.get('contact')).did, since = Number(q.get('since') ?? 0) || 0;
+      const x = contactOf(q.get('contact')), d = x.did, since = Number(q.get('since') ?? 0) || 0;
       const msgs = recs.filter((r) => (r.kind === 'in' || r.kind === 'out') && r.did === d && r.n > since).slice(-200);
-      // Read: the page has shown them.
+      // Read: the page has shown them; a seen receipt when one is due (the header's).
       if ((data.read[d] ?? 0) < seq) { data.read[d] = seq; saveData(); }
-      return { seq, messages: msgs.map((r) => ({ n: r.n, dir: r.kind, at: r.at, text: textOf(r.text), label: r.label ?? '', status: r.status ?? null, code: r.code ?? null, detail: r.detail ?? null, link: r.link ?? null })) };
+      receipt(d);
+      return { seq, messages: msgs.map((r) => ({ n: r.n, dir: r.kind, at: r.at, iat: r.iat ?? null, text: textOf(r.text), label: r.label ?? '', status: statusOf(r, x.seen_upto), code: r.code ?? null, detail: r.detail ?? null, link: r.link ?? null,
+        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }) })) };
     },
     'POST /api/sync': () => serial(async () => { await carrier.sync(); return { synced: true }; }),
-    'POST /api/history/clear': () => serial(async () => {
+    'POST /api/history/clear': (b) => serial(async () => {
+      // One chat (contact: its messages go, the rest stays, written again), or all of it.
+      if (b['contact'] !== undefined) {
+        const d = contactOf(b['contact']).did, keep = recs.filter((r) => !((r.kind === 'in' || r.kind === 'out') && r.did === d));
+        store.clearHistory();
+        for (const r of keep) store.append(JSON.stringify(r) + '\n');
+        recs.length = 0; outById.clear();
+        for (const r of keep) { recs.push(r); if (r.kind === 'out' && r.id) outById.set(r.id, r); }
+        changed();
+        return { cleared: true, contact: d };
+      }
       store.clearHistory(); recs.length = 0; outById.clear(); data.read = {}; saveData();
       changed();
       return { cleared: true };
     }),
+    // Notifications for one chat (a contact's DID or a group's gid): on (the default) or off.
+    'POST /api/notify': (b) => serial(async () => {
+      const chat = b['chat'], on = b['on'];
+      if (typeof on !== 'boolean') refuse(400, 'body', 'on: true or false');
+      const isGroup = typeof chat === 'string' && G && groupsFile && G.list({ carrier, file: groupsFile }).some((g) => g.gid === chat);
+      const id = isGroup ? chat : contactOf(chat).did;
+      if (on) delete data.notify[id]; else data.notify[id] = false;
+      saveData(); changed();
+      return { chat: id, notify: on };
+    }),
     // Settings: the relay new codes name (above). relay: a host[:port], or "" / null for relay.sigelo.ai.
-    'GET /api/settings': () => settings(),
+    'GET /api/settings': () => settingsAll(),
+    // Any of: relay, seen_receipts, notify, new_tier, new_presence (Settings → Chats); wallet, prices, currency (Settings → Wallet); each checked before any is kept.
     'POST /api/settings': (b) => serial(async () => {
-      const v = b['relay'];
-      if (v === undefined) refuse(400, 'body', 'relay: a host[:port], or "" for the default');
-      if (v === null || v === '' || v === DEFAULT_RELAY) delete data.settings.relay;
+      const v = b['relay'], flags = ['seen_receipts', 'notify', 'new_presence', 'wallet', 'prices'].filter((k) => b[k] !== undefined), t = b['new_tier'], cur = b['currency'];
+      if (v === undefined && flags.length === 0 && t === undefined && cur === undefined) refuse(400, 'body', 'relay: a host[:port], or "" for the default (or seen_receipts, notify, new_tier, new_presence, wallet, prices, currency)');
+      for (const k of flags) if (typeof b[k] !== 'boolean') refuse(400, 'body', `${k}: true or false`);
+      if (t !== undefined && !TIER_NEW.has(t)) refuse(400, 'body', 'new_tier: own, friend or quiet');
+      if (cur !== undefined && cur !== null && !CURRENCIES.includes(cur)) refuse(400, 'body', `currency: one of ${CURRENCIES.join(', ')}`);
+      if (v === undefined) {} else if (v === null || v === '' || v === DEFAULT_RELAY) delete data.settings.relay;
       else if (typeof v === 'string' && goodRelay(v.trim().toLowerCase())) data.settings.relay = v.trim().toLowerCase();
       else refuse(400, 'body', `relay: a host name, as relay.example.org (a port after a colon if not the usual)`);
+      if (b['seen_receipts'] !== undefined) data.settings.seen = b['seen_receipts'];
+      if (b['notify'] !== undefined) data.settings.notify = b['notify'];
+      if (b['new_presence'] !== undefined) data.settings.new_presence = b['new_presence'];
+      if (t !== undefined) data.settings.new_tier = t;
+      if (b['wallet'] !== undefined) data.settings.wallet = b['wallet'];
+      if (b['prices'] !== undefined) data.settings.prices = b['prices'];
+      if (cur !== undefined) { if (cur === null) delete data.settings.currency; else data.settings.currency = cur; }
       saveData(); changed();
-      return settings();
+      return settingsAll();
     }),
     // The signed registry's relays (sigelo.ai/relays.json, verified; fetched at most once a day): the page's picker.
     'GET /api/relays': async () => ({ relays: await carrier.registryRelays() }),

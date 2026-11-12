@@ -36,6 +36,12 @@ export interface ApprovalBody {
 /** What `POST /approve` accepted, as the `approved` line stores it (the bundle is bulk; its result is kept). */
 export interface Approved { body: ApprovalBody; sig: string; approver: string; key: string }
 /**
+ * The answer no (`POST /refuse`): the same body with `typ: "spend-refusal"`, signed the same way, so it can
+ * never be taken for an approval, and a `reason` beside it (data, not signed: what the agent is told).
+ */
+export type RefusalBody = Omit<ApprovalBody, 'typ'> & { typ: 'spend-refusal' };
+export interface Refused { body: RefusalBody; sig: string; approver: string; key: string; reason: string }
+/**
  * The agent the pending line is for: its DID and every key the keeper knows it by — the genesis
  * key in policy.json or in its `delegate` line. Not its CURRENT key if it has rotated since:
  * neither `/pay` nor `/approve` carries the agent's bundle, and one the approver attached would
@@ -68,8 +74,8 @@ export interface ApproveContext {
   approvers: string[];
   /** The keeper-signed pending line's request for `nonce`, if one exists; `undefined` otherwise. */
   pending: (nonce: string) => { request: ApprovalBody; agent: Requester } | undefined;
-  /** Has an `approved` line for this nonce been written, or an intent line spent it? */
-  used: (nonce: string) => 'approved' | 'spent' | undefined;
+  /** Has an `approved` or `refused` line for this nonce been written, or an intent line spent it? */
+  used: (nonce: string) => 'approved' | 'spent' | 'refused' | undefined;
 }
 
 /**
@@ -77,19 +83,35 @@ export interface ApproveContext {
  * `approval:` and names what failed.
  */
 export function checkApproval(env: unknown, c: ApproveContext): { ok: true; approved: Approved; agent: Requester } | { ok: false; reason: string } {
+  const r = checkAnswer(env, c, 'spend-approval');
+  return r.ok ? { ok: true, approved: { body: r.body as ApprovalBody, sig: r.sig, approver: r.approver, key: r.key }, agent: r.agent } : r;
+}
+/** `POST /refuse {body, sig, bundle, reason?}`: every check of an approval, over a `spend-refusal` body. */
+export function checkRefusal(env: unknown, c: ApproveContext): { ok: true; refused: Refused; agent: Requester } | { ok: false; reason: string } {
+  if (plain(env) && Object.hasOwn(env, 'reason')) {
+    const why_ = env['reason'];
+    if (typeof why_ !== 'string' || why_.length > 200 || !/^[\x20-\x7e\u00a0-\u024f]*$/.test(why_)) return no('reason is at most 200 printable characters');
+  }
+  const reason = plain(env) && typeof env['reason'] === 'string' ? env['reason'] : '';
+  const rest = plain(env) ? Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'reason')) : env;
+  const r = checkAnswer(rest, c, 'spend-refusal');
+  return r.ok ? { ok: true, refused: { body: r.body as RefusalBody, sig: r.sig, approver: r.approver, key: r.key, reason }, agent: r.agent } : r;
+}
+function checkAnswer(env: unknown, c: ApproveContext, typ: 'spend-approval' | 'spend-refusal'):
+  { ok: true; body: ApprovalBody | RefusalBody; sig: string; approver: string; key: string; agent: Requester } | { ok: false; reason: string } {
   // shape: the envelope, then the body's closed field set
   if (!plain(env)) return no('the request is not an object');
-  if (Object.keys(env).sort().join() !== 'body,bundle,sig') return no('the request is { body, sig, bundle } and nothing else');
+  if (Object.keys(env).sort().join() !== 'body,bundle,sig') return no(`the request is { body, sig, bundle${typ === 'spend-refusal' ? ', reason?' : ''} } and nothing else`);
   const b = env['body'], sig = env['sig'];
   if (!plain(b)) return no('body is not an object');
   for (const k of Object.keys(b)) if (!(FIELDS as readonly string[]).includes(k)) return no(`body has unknown field ${JSON.stringify(k)}`);
   for (const k of FIELDS) if (!Object.hasOwn(b, k)) return no(`body is missing ${k}`);
   if (b['v'] !== 'sigelo/0') return no(`unknown v ${JSON.stringify(b['v'])}`);
-  if (b['typ'] !== 'spend-approval') return no(`typ is ${JSON.stringify(b['typ'])}, not "spend-approval"`);
+  if (b['typ'] !== typ) return no(`typ is ${JSON.stringify(b['typ'])}, not "${typ}"`);
   for (const k of STRINGS) if (typeof b[k] !== 'string' || b[k] === '') return no(`${k} is not a non-empty string`);
   if (!Number.isSafeInteger(b['iat']) || !Number.isSafeInteger(b['exp'])) return no('iat and exp must be integers (no floats in signed objects)');
   if (typeof sig !== 'string') return no('sig is not a string');
-  const body = b as unknown as ApprovalBody;
+  const body = b as unknown as ApprovalBody | RefusalBody;
 
   // this keeper, this network
   if (body.keeper !== c.keeper) return no(`keeper is ${body.keeper}, this keeper is ${c.keeper}`);
@@ -114,7 +136,7 @@ export function checkApproval(env: unknown, c: ApproveContext): { ok: true; appr
   const p = c.pending(body.nonce);
   if (p === undefined) return no(`no pending request with nonce ${JSON.stringify(body.nonce)} — ask the agent to run its pay again for a fresh one`);
   for (const k of FIELDS) {
-    if (body[k] !== p.request[k]) return no(`${k} is ${JSON.stringify(body[k])}, the pending request says ${JSON.stringify(p.request[k])} — sign the request exactly as the keeper built it`);
+    if (k !== 'typ' && body[k] !== p.request[k]) return no(`${k} is ${JSON.stringify(body[k])}, the pending request says ${JSON.stringify(p.request[k])} — sign the request exactly as the keeper built it`);
   }
 
   // distinct: not the agent, not the agent's key under another DID (one key mints many DIDs) —
@@ -127,7 +149,8 @@ export function checkApproval(env: unknown, c: ApproveContext): { ok: true; appr
   const u = c.used(body.nonce);
   if (u === 'approved') return no(`nonce ${body.nonce} is already approved — one approval per request`);
   if (u === 'spent') return no(`nonce ${body.nonce} was already used by a payment — an approval pays once`);
-  return { ok: true, approved: { body, sig, approver: current, key: genesis.key }, agent: p.agent };
+  if (u === 'refused') return no(`nonce ${body.nonce} is refused — that request is answered; after it expires the agent's next pay asks again`);
+  return { ok: true, body, sig, approver: current, key: genesis.key, agent: p.agent };
 }
 
 /** The approver is not the requester — by DID, by any DID of its chain, or by any key of its chain — and not the keeper. */

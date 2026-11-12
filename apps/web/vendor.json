@@ -135,7 +135,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "ddc111b9e4edbb0e4f0d6af8ecf4b0e78843570ad679e4a9dd624869a58ce8ac"
+   "sha256": "8969d45d35813cdbc9f15fcbbc15769a43069b62f3a9c3a9c10c4f52805d9d55"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
@@ -179,7 +179,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "5bc9ed751bcce3af278e10f79c14ee4470592b4aabc171205de682285d4385bb"
+   "sha256": "e5c987505b0358529705e02794fb1b7d57bb437ef3fff697dff710e614a18148"
   },
   "vendor/contact/prekeys.mjs": {
    "from": "apps/contact/prekeys.mjs",
@@ -221,6 +221,10 @@
    "from": "apps/contact/node_modules/mqtt/dist/mqtt.esm.js",
    "sha256": "6e009e77fc644cbf7b46ea37ba77fbdaf5780452389a57f2b4a676437c2defdd"
   },
+  "vendor/package.json": {
+   "from": "apps/agent/package.json",
+   "sha256": "cc8aaf98fba0cbc775aef657a1f1272ec44c9e76dcc57ee009855b14b44826d3"
+  },
   "vendor/remote-client.mjs": {
    "from": "apps/agent/remote-client.mjs",
    "sha256": "c0f00a280526d737bda10ab0c2ba55594cf968bd72cc0fa05474e86a33989724"
@@ -251,11 +255,11 @@
   },
   "vendor/ui.css": {
    "from": "apps/agent/ui.css",
-   "sha256": "bb5104dfe54963492b7453aec955b84fa0c6a09f21a26451e81809bf8b9742bd"
+   "sha256": "1ea9914a37738908f3703ae262a2a34bfa589696864cf34ec26c718214d273ba"
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "8ea20ae71b7b24caee1da567542e27664a93aa424478b394b3794724483ad876"
+   "sha256": "4ff76a1b4ff6fdb18d7edde6d2349ba10631908be9add96c340593558340c6d2"
   }
  }
 }

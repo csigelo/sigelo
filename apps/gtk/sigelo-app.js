@@ -29,7 +29,7 @@
 // keyring text under kind "sigelo-remote/0 <id>", standby.<id>; the list in profiles.json beside the identity
 // files (0600, no secret). Only the active profile's page runs (`ui --app --identity <its file>`, its verbs with
 // SIGELO_HUMAN and SIGELO_CONTROL naming its files). At a start with more than one: the picker (start page).
-// Me → Profiles (ui.js) asks the bridge too: from the start page, ui.html and this phone's own page, the
+// The Profiles sheet (the profile chip) and Settings → Profiles (ui.js) ask the bridge too: from the start page, ui.html and this phone's own page, the
 // profile operations only. No app lock here: the session's login is the lock (design/apps.md §5).
 // Computers (design/profiles.md P2): a remote profile keeps a list of computers in its registry entry
 // (computers: {active, next, adding, list: [{id, name, via, did, words, where, paired, last_used}]}), each paired
@@ -38,7 +38,10 @@
 // control[.<id>].<computer>.local.json (c1: the file of before). All of a profile's computers serve its operator:
 // another identity's page is refused other_operator at pairing (LAN: its GET /api/me; relay: control pair --operator).
 // Me → Connect → Computers (ui.js) asks the bridge: computers, computer-use, computer-add, computer-forget.
-// Headless checks (apps/gtk/test-gtk.mjs): SIGELO_APP_TEST=remote|self|relay|restore|create|profiles|computers|words, no window.
+// Notifications (design/ux1/build.md, pass 6): the page asks the bridge `notify` {tag, title, text} (the sender's, group's or
+// agent's name and a generic line, never a message's text) or {tag, cancel: true}; a tap opens the page there (sigeloOpen).
+// Raised only while the app runs: no background service.
+// Headless checks (apps/gtk/test-gtk.mjs): SIGELO_APP_TEST=remote|self|relay|restore|create|profiles|computers|words|notify, no window.
 // The words password (design/apps-seed.md §8): optional after a create or a restore; the words encrypted in the page,
 // kept in the keyring (words-keep, words-get, words-drop, words-status); the same password guards profile-remove and take.
 import GLib from 'gi://GLib';
@@ -125,7 +128,7 @@ async function connect(text) {
 function otherOperator(did, cid = null, words = null) {
   const p = byId(activeId()), mine = comps().list.find((x) => x.id !== cid && x.did)?.did ?? null, want = p?.did ?? mine;
   if (!want || !did || did === want) return null;
-  return no('other_operator', `This computer's page is another identity (${words ?? did}), not this profile's${p?.words ? ` (${p.words})` : ''}: all the computers of a profile serve one operator. Add it in a profile of its own (Me → Profiles → Add a profile).`);
+  return no('other_operator', `This computer's page is another identity (${words ?? did}), not this profile's${p?.words ? ` (${p.words})` : ''}: all the computers of a profile serve one operator. Add it in a profile of its own (tap the profile name at the top, then Add).`);
 }
 /** One sealed call → {status, body}; transport failures as a status and an error body. */
 async function call(c, method, path, body) {
@@ -616,6 +619,50 @@ const profileOps = {
   },
 };
 
+// ---- the bridge's rule: which page may ask what
+// The start page: all but call and notify; ui.html (a computer's page): call, the profile operations and notify; this phone's
+// own page (the local ui, or control ui over the relay): the profile operations (the Profiles sheet, Settings → Profiles,
+// the words' among them: Settings → Backup and recovery) and notify.
+const PROFILE_OPS = new Set(['profiles', 'profile-use', 'profile-rename', 'profile-add', 'profile-remove', 'computers', 'computer-use', 'computer-add', 'computer-forget', 'words-status', 'words-get', 'words-keep', 'words-drop']);
+function bridgeAllows(uri, op, selfOrigin) {
+  const page = PROFILE_OPS.has(op) || op === 'notify';
+  if (uri.startsWith('sigelo-app://app/start.html')) return op !== 'call' && op !== 'notify';
+  if (uri.startsWith('sigelo-app://app/ui.html')) return op === 'call' || page;
+  return selfOrigin !== null && uri.startsWith(selfOrigin) && page;
+}
+
+// ---- notifications: the name only (Decided: a new message or a payment request; never the text)
+const NOTE_TAG = /^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/, NOTE_KEYS = new Set(['op', 'tag', 'title', 'text', 'cancel']);
+const noteLine = (s, min) => typeof s === 'string' && s.length >= min && s.length <= 100 && !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(s);
+const noted = new Set();   // sent, not withdrawn: withdrawn when the app stops (a tap after that would find no app)
+/** {tag, title, text} → a Gio.Notification to sink.send(tag, n, what); {tag, cancel: true} → sink.withdraw(tag). */
+function notify(m, sink) {
+  const no = { ok: false, check: 'notify', message: 'Not a notification.' };
+  if (m === null || typeof m !== 'object' || Object.keys(m).some((k) => !NOTE_KEYS.has(k)) || typeof m.tag !== 'string' || !NOTE_TAG.test(m.tag)) return no;
+  if (m.cancel !== undefined) {
+    if (m.cancel !== true || m.title !== undefined || m.text !== undefined) return no;
+    sink.withdraw(m.tag); noted.delete(m.tag);
+    return { ok: true };
+  }
+  if (!noteLine(m.title, 1) || !noteLine(m.text ?? '', 0)) return no;
+  const n = new Gio.Notification();
+  n.set_title(m.title);
+  if (m.text) n.set_body(m.text);
+  n.set_priority(Gio.NotificationPriority.NORMAL);
+  n.set_default_action_and_target('app.open', new GLib.Variant('s', m.tag));
+  sink.send(m.tag, n, { title: m.title, body: m.text ?? '', priority: 'normal', action: 'app.open', target: m.tag });
+  noted.add(m.tag);
+  return { ok: true };
+}
+/** The page's open, for a tag checked again: a JSON string literal, nothing else of it reaches the script. */
+const openScript = (tag) => (typeof tag === 'string' && NOTE_TAG.test(tag) ? `globalThis.sigeloOpen?.(${JSON.stringify(tag)})` : null);
+/** app.open (a notification tapped): present the window, then the page opens the tag (run: the script into the page). */
+function openAction(present, run) {
+  const a = new Gio.SimpleAction({ name: 'open', parameter_type: new GLib.VariantType('s') });
+  a.connect('activate', (_a, v) => { present(); const s = openScript(v?.unpack()); if (s) run(s); });
+  return a;
+}
+
 // ---- headless checks
 const TEST = GLib.getenv('SIGELO_APP_TEST');
 if (TEST) {
@@ -763,6 +810,19 @@ if (TEST) {
       const f = await computerOps.forget('c1');
       out.relayForgot = { file: exists(controlPath('p1', 'c1')), count: comps().list.length, active: comps().active, revoke: f.revoke };
     }
+  } else if (TEST === 'notify') {
+    // The notify op as the page asks it (SIGELO_APP_NOTES: the messages), recorded instead of sent (no notification server);
+    // the bridge's rule for it; then app.open activated as a tap does, its script run here against a recording sigeloOpen.
+    const sent = [], gone = [], opened = [], ran = [];
+    let presented = 0;
+    const sink = { send: (id, n, what) => sent.push({ id, notification: n instanceof Gio.Notification, ...what }), withdraw: (id) => gone.push(id) };
+    out = { results: JSON.parse(GLib.getenv('SIGELO_APP_NOTES') ?? '[]').map((m) => notify(m, sink)), sent, gone, pending: [...noted] };
+    const so = 'http://127.0.0.1:5000/';
+    out.allows = ['sigelo-app://app/ui.html', `${so}#t=x`, 'sigelo-app://app/start.html', 'http://127.0.0.1:5001/'].map((u) => bridgeAllows(u, 'notify', so));
+    globalThis.sigeloOpen = (tag) => opened.push(tag);
+    const a = openAction(() => { presented++; }, (s) => { ran.push(s); (0, eval)(s); });
+    for (const t of JSON.parse(GLib.getenv('SIGELO_APP_TAPS') ?? '[]')) a.activate(new GLib.Variant('s', t));
+    out = { ...out, presented, opened, ran, param: a.get_parameter_type()?.dup_string() ?? null };
   } else if (TEST === 'self') {
     const r = await startSelf(GLib.getenv('SIGELO_APP_IDENTITY'));
     if (r.ok) {
@@ -787,7 +847,7 @@ const { default: Adw } = await import('gi://Adw?version=1');
 const { default: WebKit } = await import('gi://WebKit?version=6.0');
 const { default: JSC } = await import('gi://JavaScriptCore?version=6.0');
 
-const TYPES = { html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml' };
+const TYPES = { html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', json: 'application/json' };
 // sigelo-app://app/<file>: the files of web/ by name, nothing else (no directories, no dot files).
 function serve(req) {
   const name = req.get_path().replace(/^\//, ''), ext = /\.([a-z]+)$/.exec(name)?.[1];
@@ -813,9 +873,12 @@ function inlineHashes(html) {
   }).join('');
 }
 
-const app = new Adw.Application({ application_id: ID, flags: Gio.ApplicationFlags.NON_UNIQUE });
+// One instance (a second start presents the first): a notification's tap reaches the app by its name on the session bus.
+const app = new Adw.Application({ application_id: ID, flags: Gio.ApplicationFlags.DEFAULT_FLAGS ?? Gio.ApplicationFlags.FLAGS_NONE });
+let shown = null;
 
 app.connect('activate', () => {
+  if (shown) { shown.present(); return; }
   const DEV = GLib.getenv('SIGELO_APP_DEVTOOLS') === '1';   // the inspector, and the page's console on stdout
   const ctx = new WebKit.WebContext();
   ctx.register_uri_scheme('sigelo-app', serve);
@@ -830,8 +893,8 @@ app.connect('activate', () => {
   const ours = (uri) => uri.startsWith('sigelo-app://app/') || (selfOrigin !== null && uri.startsWith(selfOrigin));
   const startPage = (why) => { stopSelf(); selfOrigin = null; client = null; view.load_uri(`sigelo-app://app/start.html${why ? '#' + encodeURIComponent(why) : ''}`); };
 
-  // The bridge: pages of sigelo-app://app/ and this phone's own page (profile operations only).
-  const PROFILE_OPS = new Set(['profiles', 'profile-use', 'profile-rename', 'profile-add', 'profile-remove', 'computers', 'computer-use', 'computer-add', 'computer-forget', 'words-status', 'words-get', 'words-keep', 'words-drop']);
+  // The bridge: pages of sigelo-app://app/ and this phone's own page (bridgeAllows).
+  const sink = { send: (id, n) => app.send_notification(id, n), withdraw: (id) => app.withdraw_notification(id) };
   const reopen = (r) => { if (r?.ok && r.reload) GLib.idle_add(GLib.PRIORITY_DEFAULT, () => { startPage(); return GLib.SOURCE_REMOVE; }); return r; };
   const ops = {
     async self({ relay }) {
@@ -904,6 +967,8 @@ app.connect('activate', () => {
     async 'words-get'(m) { return wordsOps.get(m); },
     async 'words-keep'(m) { return wordsOps.keep(m); },
     async 'words-drop'(m) { return wordsOps.drop(m); },
+    // A new message or a payment request: the name only (notify above checks it).
+    async notify(m) { return notify(m, sink); },
     async call({ method, path, body }) {
       if (client === null) return { status: 403, body: { error: { check: 'remote', message: 'Not connected to a computer.' } } };
       return call(client, String(method), String(path), body);
@@ -913,10 +978,7 @@ app.connect('activate', () => {
     const uri = view.get_uri() ?? '';
     let msg = null;
     try { msg = JSON.parse(value.to_json(0)); } catch {}
-    // The start page: all but call; ui.html (a computer's page): call and the profile operations; this phone's own page
-    // (the local ui, or control ui over the relay): the profile operations only (Me → Profiles), the words' among them (Me → Security).
-    const op = msg?.op, prof = PROFILE_OPS.has(op);
-    const allowed = uri.startsWith('sigelo-app://app/start.html') ? op !== 'call' : uri.startsWith('sigelo-app://app/ui.html') ? op === 'call' || prof : selfOrigin !== null && uri.startsWith(selfOrigin) && prof;
+    const op = msg?.op, allowed = bridgeAllows(uri, op, selfOrigin);
     const p = allowed && Object.hasOwn(ops, op) ? ops[op](msg) : Promise.resolve({ ok: false, message: 'refused' });
     p.catch((e) => ({ ok: false, message: String(e?.message ?? e) }))
       .then((r) => reply.return_value(JSC.Value.new_from_json(value.get_context(), JSON.stringify(r ?? null))));
@@ -955,9 +1017,15 @@ app.connect('activate', () => {
     if (!cur) { startPage('No computer in use.'); return; }
     void computerOps.forget(cur.id).then(() => startPage(`This phone no longer keeps ${cur.name}'s control key. Revoke it there too: ${REVOKE}.`));
   });
-  win.connect('close-request', () => { stopSelf(); return false; });
+  // A notification tapped: the window, then the page (ours only) opens that chat, group or request.
+  app.add_action(openAction(() => win.present(), (s) => {
+    if (!ours(view.get_uri() ?? '')) return;
+    view.evaluate_javascript(s, -1, null, null, null, (v, res) => { try { v.evaluate_javascript_finish(res); } catch {} });
+  }));
+  win.connect('close-request', () => { stopSelf(); shown = null; return false; });
+  shown = win;
   startPage();
   win.present();
 });
-app.connect('shutdown', () => stopSelf());
+app.connect('shutdown', () => { stopSelf(); for (const id of noted) app.withdraw_notification(id); noted.clear(); });
 await app.runAsync([System.programInvocationName]);   // async: promises and imports keep running

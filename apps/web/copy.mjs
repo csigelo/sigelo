@@ -3,7 +3,8 @@
 // static import graph of the page (index.html's import map, the app's own modules, the QR codec ui.js
 // loads), and copies every file it reaches from where the repository has it into apps/web/vendor/,
 // byte for byte: sigelo-contact's modules, sigelo's dist (ts/: `npx tsc` first), @noble's, MQTT.js's
-// browser build (mqtt.esm.js), the page's shim for node:zlib, ui.js, ui.css and the icon. What ships
+// browser build (mqtt.esm.js), the page's shim for node:zlib, ui.js, ui.css, the icon and apps/agent's package.json (the
+// version About shows: one source, a release's bump reaches every form of the app). What ships
 // is what the tests ran.
 //
 //   node apps/web/copy.mjs           copy; write vendor.json (each file, its source, its SHA-256)
@@ -34,13 +35,15 @@ const SOURCES = [
   ['vendor/ui.css', 'apps/agent/ui.css'],
   ['vendor/icon.svg', 'apps/agent/icon.svg'],
   ['vendor/remote-client.mjs', 'apps/agent/remote-client.mjs'],
+  // The app's version, one source (apps/agent/package.json): ui.js reads it beside itself for About.
+  ['vendor/package.json', 'apps/agent/package.json'],
 ];
 // Imports a module makes only when run in Node, never in the page: remote-client.mjs finds its own
 // dependencies in Node (nodeDeps) and is given them in the page (shell.mjs). Not followed.
 export const NODE_ONLY = { 'vendor/remote-client.mjs': ['node:module', 'node:url'] };
 // The page's modules (not copied: they are the app), and the QR codec ui.js imports by name.
 const ENTRIES = ['./app.mjs', './boot.mjs', './profiles.mjs', './computers.mjs', './router.mjs', './platform-web.mjs', './platform-stub.mjs', './pow-worker.mjs', './platform-android.mjs', './ws-over-stream.mjs', './shell.mjs', './seed.mjs', './create.mjs', '/qr.mjs', '/qr-decode.mjs'];
-const ASSETS = ['vendor/ui.js', 'vendor/ui.css', 'vendor/icon.svg'];
+const ASSETS = ['vendor/ui.js', 'vendor/ui.css', 'vendor/icon.svg', 'vendor/package.json'];
 
 export const sourceOf = (rel) => {
   for (const [to, from] of SOURCES) if (to.endsWith('/') ? rel.startsWith(to) : rel === to) return join(REPO, from + rel.slice(to.length));

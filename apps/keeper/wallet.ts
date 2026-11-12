@@ -76,6 +76,7 @@ export const LINES = {
   confirming: 'TRY LATER: a payment is still confirming; your money is locked for about 20 minutes.',
   funds: (held: string) => `REFUSED: you hold ${held} XMR, not enough. Use ${CLI} receive to get paid, or ask your operator.`,
   approval: (ref: string) => `WAITING FOR APPROVAL (ref ${ref}): tell your operator, then run the same command again.`,
+  refused: (why: string) => `REFUSED: your operator refused this payment${why === '' ? '' : ` (${why})`}. It is not paid; do not ask for it again.`,
   uncertain: (txid: string) => `UNCERTAIN: the payment may have gone out (txid ${txid}). Do not pay again; tell your operator.`,
   unreachable: 'TRY LATER: the wallet service is not answering.',
   timeout: 'UNCERTAIN: the request timed out; the payment may have gone out. Run `sigelo-wallet history` before paying again.',
@@ -154,6 +155,7 @@ export function explain(status: number, b: Body, shown = '', label?: string, ver
     }
     case 'wallet_funds': return out('refused', code, LINES.funds(typeof b['balance'] === 'string' ? toXmr(b['balance']) : 'less than that'), b);
     case 'approval': return out('waiting', code, LINES.approval(prose(str(b['ref']))), b);
+    case 'refused': return out('refused', code, LINES.refused(prose(/refused this payment \((.*)\) — it is not paid/s.exec(str(b['error']))?.[1] ?? '')), b);
     case 'relay_failed': return out('uncertain', code, LINES.uncertain(prose(str(b['txid']))), b);
     case 'repeat': return out('refused', code, LINES.conflict(prose(str(b['ref']))), b);
     case 'wallet': return out('try_later', code, LINES.wallet, b);
@@ -255,7 +257,7 @@ async function pay(env: Env, args: string[], ref: string | undefined, atomic: bo
   return explain(r.status, b, d.shown, d.label);
 }
 
-const VERB: Record<string, string> = { relayed: 'paid', relay_failed: 'maybe paid (UNCERTAIN)', intent: 'maybe paid (UNCERTAIN)', pending: 'waiting for approval to pay', approved: 'approved, not yet paid (run the same pay again)' };
+const VERB: Record<string, string> = { relayed: 'paid', relay_failed: 'maybe paid (UNCERTAIN)', intent: 'maybe paid (UNCERTAIN)', pending: 'waiting for approval to pay', approved: 'approved, not yet paid (run the same pay again)', refused: 'refused by your operator, not paid' };
 async function history(env: Env, n: string | undefined): Promise<Outcome> {
   if (n !== undefined && !/^[1-9][0-9]?$|^100$/.test(n)) return out('refused', 'usage', LINES.usage);
   const r = await call(env, 'GET', `/history${n === undefined ? '' : `?n=${n}`}`);

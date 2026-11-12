@@ -521,11 +521,11 @@ in [`apps/keeper/README.md`](../apps/keeper/README.md), each asserted verbatim b
 | `sigelo-wallet delegate <name> <fund> [--per-tx X] [--per-day Y] [--allow label=addr ...] [--max-delegates N]` | `POST /delegate` | the delegate's `SIGELO_WALLET_URL` and `SIGELO_WALLET_TOKEN`, shown once (§4.3) |
 | `sigelo-wallet fund <name> <amount>` · `revoke <name>` · `delegates` | `POST /fund` · `POST /revoke` · `GET /delegates` | §4.3 |
 | — (the harness, once per agent and every 30 days) | `POST /bind {body}` → `{addr, account, mode, sig_addr}` | §3: the body must name this agent's registered `did` and its own account's `(i, 0)`, window ≤ 30 days; spend mode, or view mode at `(0, 0)` for account 0; the signature is verified before it is returned |
-| — (the approver) | `POST /approve {body, sig, bundle}` | §4.1 |
+| — (the approver) | `POST /approve {body, sig, bundle}` · `POST /refuse {body, sig, bundle, reason?}` | §4.1 |
 
 `GET /budget`, `GET /log` and `GET /health` answer for the caller's agent only (`/health`
 gives its account's balance, not the wallet's) — otherwise one agent would read another's
-payees and balance. Every route but `/approve` takes the agent's token. Delegation verbs
+payees and balance. Every route but `/approve` and `/refuse` takes the agent's token. Delegation verbs
 answer only for agents with `max_delegates > 0`, and the prompt below leaves them out.
 
 **`<to>`** is resolved by the CLI: a path (containing `/` or ending `.json`) to a file the
@@ -627,7 +627,7 @@ seed at any time; it does not use it.
   creation, not clamped — and `period_seconds` is always the root's; its `allow` keeps only
   rules every ancestor still covers (default: the delegator's, copied). At every spend the
   keeper takes the minimum along the ancestor chain, so an Owner who tightens a root in
-  `policy.json` and restarts tightens its whole subtree without editing it.
+  `policy.json` tightens its whole subtree without editing it, from the keeper's next request.
 - **The count is the subtree's.** `max_delegates` bounds the whole subtree, not the direct
   children: each live child reserves 1 + its own `max_delegates`, and a child's is at most its
   parent's − 1, so a chain of delegates cannot multiply past its root's number. Revoking frees
@@ -923,9 +923,10 @@ receive hook.
 
 - *New root agent:* the Owner adds an entry to `policy.json`, runs `sigelo-spend token new
   <policy> <agent>`, then restarts the keeper (`systemctl --user restart <its unit>`): a running
-  keeper re-reads only the tokens of roots it already serves, so the new root is `401` until the
-  restart. The same restart follows any other policy edit (caps, allowlist, `approvers`, a root
-  removed). *Rotate a root's token:* `sigelo-spend token new <policy> <agent>` alone; the running
+  keeper takes edits only for roots it already serves, so the new root is `401` until the
+  restart. The same restart follows a root removed or moved to another account; caps, allowlists
+  and `approvers` apply on the running keeper's next request, no restart (apps/keeper/README
+  "What a running keeper re-reads"). *Rotate a root's token:* `sigelo-spend token new <policy> <agent>` alone; the running
   keeper refuses the old token from its next request (apps/keeper/README "What a running keeper
   re-reads"). *New delegate:* a delegating agent (a root agent, for the Owner) runs
   `sigelo-wallet delegate <name> <amount>`; the harness starts the agent with the printed
@@ -934,7 +935,11 @@ receive hook.
   does it as an ordinary `pay`. Spendable ~20 minutes later.
 - *Approval:* the agent reports `WAITING FOR APPROVAL (ref …)`; on the keeper host
   `sigelo-spend approve-request <policy> <ref>` prints the body; the approver signs it with its
-  own key and `POST /approve`s `{body, sig, bundle}`; the agent re-runs its `pay`.
+  own key and `POST /approve`s `{body, sig, bundle}`; the agent re-runs its `pay`. To say no, the
+  approver signs the same body with `typ: "spend-refusal"` and posts it with a reason to `POST
+  /refuse`: a keeper-signed `refused` line, and the agent's same `pay` is `REFUSED` with the reason
+  until the request's `exp` (apps/keeper/README.md "Approvals"; the page's Refuse does both and
+  tells the agent in its chat).
 - *Revoke:* `sigelo-wallet revoke <name>`; run it again after ~20 minutes if `sigelo-wallet
   delegates` shows a locked remainder.
 - *Rebind:* `POST /bind` every 30 days per agent that receives by invoice.

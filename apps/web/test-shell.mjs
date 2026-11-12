@@ -250,11 +250,15 @@ const same = (a, b) => Buffer.from(a).equals(Buffer.from(b));
 // What SigeloBridge.java does, over a MessageChannel: https (https:// anywhere, http:// only to a
 // private or loopback IPv4 address, no redirect followed, no header but Content-Type), tls (the
 // certificate and name checked against `ca`), streams, the keystore (AES-256-GCM, a key per alias;
-// "full" can be locked: cancelled), the form and the wipe. hosts: name → { port: local port }.
+// "full" can be locked: cancelled), the form and the wipe, the app lock's settings, notifications (shown: state.notes) and
+// their open event (open(tag) now; pendingOpen: posted once right after the next connect, as a start by a tap).
+// hosts: name → { port: local port }.
 const PRIVATE = (h) => { const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h); if (!m) return false; const [a, b] = [Number(m[1]), Number(m[2])]; return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254); };
 function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const target = new EventTarget(), keys = new Map(), log = { ops: [], streams: [], seals: [] };
-  const state = { mode, wipe, locked: false, secure: false, door: false, secureLog: [], clipCleared: 0, clip: null };
+  const state = { mode, wipe, locked: false, secure: false, door: false, secureLog: [], clipCleared: 0, clip: null,
+    lock: { on: true, after: 1, secure: true }, granted: true, asked: 0, notes: new Map(), pendingOpen: null, forced: [] };
+  let current = null;
   const ALIASES = { 'identity:false': 0, 'identity:true': 1, control: 2 };
   // Per profile, as SigeloBridge.java: p1 the aliases and blob version 1 of before; another its own aliases,
   // blob version 2 naming it ([2][alias][n][id][IV][ct ‖ tag]), the AAD naming kind and profile.
@@ -270,6 +274,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
       const { port1, port2 } = new MessageChannel(), streams = new Map();
       let sid = 0;
       const post = (m) => port1.postMessage(JSON.stringify(m));
+      current = port1;
       port1.onmessage = async (ev) => {
         const m = JSON.parse(ev.data);
         log.ops.push(m.op);
@@ -345,14 +350,33 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
           else if (m.op === 'clip-clear') { state.clipCleared++; state.clip = null; post({ id: m.id }); }
           else if (m.op === 'clip-copy') { state.clip = { text: m.text, clear: m.clear }; post({ id: m.id }); }
           else if (m.op === 'share') { state.shared = m.text; post({ id: m.id }); }
-          else if (m.op === 'unlock') { state.unlocks = (state.unlocks ?? 0) + 1; if (state.locked) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); post({ id: m.id }); }
+          else if (m.op === 'lock') {
+            if ('on' in m && typeof m.on !== 'boolean') throw Object.assign(new Error('on'), { check: 'lock' });
+            if ('after' in m && ![1, 5, 15, 60].includes(m.after)) throw Object.assign(new Error('after'), { check: 'lock' });
+            if ('on' in m) state.lock.on = m.on;
+            if ('after' in m) state.lock.after = m.after;
+            post({ id: m.id, ...state.lock });
+          } else if (m.op === 'notify') {
+            if (m.ask === true) { state.asked++; post({ id: m.id, granted: state.granted }); return; }
+            if (typeof m.tag !== 'string' || !/^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/.test(m.tag)) throw Object.assign(new Error('tag'), { check: 'notify' });
+            if (m.cancel === true) { state.notes.delete(m.tag); post({ id: m.id }); return; }
+            if (![m.title, m.text].every((x) => typeof x === 'string' && x.length >= 1 && x.length <= 100)) throw Object.assign(new Error('title, text'), { check: 'notify' });
+            if (!state.granted) throw Object.assign(new Error('not allowed'), { check: 'notify_permission' });
+            state.notes.set(m.tag, { title: m.title, text: m.text, keys: Object.keys(m).sort().join() });
+            post({ id: m.id });
+          }
+          else if (m.op === 'unlock') { state.forced.push(m.force === true); state.unlocks = (state.unlocks ?? 0) + 1; if (state.locked) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); post({ id: m.id }); }
           else throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
         } catch (e) { if (m.id !== undefined) post({ id: m.id, error: { check: e.check ?? 'connect', message: e.message } }); }
       };
-      setTimeout(() => target.dispatchEvent(new MessageEvent('message', { data: 'sigelo-bridge/0', ports: [port2] })));
+      setTimeout(() => {
+        target.dispatchEvent(new MessageEvent('message', { data: 'sigelo-bridge/0', ports: [port2] }));
+        if (state.pendingOpen) { post({ ev: 'open', tag: state.pendingOpen }); state.pendingOpen = null; }
+      });
     },
   };
-  return { shell, target, state, log, keys, connect: () => A.connectBridge({ shell, target }) };
+  const open = (tag) => current?.postMessage(JSON.stringify({ ev: 'open', tag }));
+  return { shell, target, state, log, keys, open, connect: () => A.connectBridge({ shell, target }) };
 }
 
 
@@ -455,14 +479,15 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const WM = await import(pathToFileURL(join(HERE, 'welcome.mjs')).href);
   ok(WM.WORDS_ATTRS.autocomplete === 'off' && WM.WORDS_ATTRS.autocorrect === 'off' && WM.WORDS_ATTRS.autocapitalize === 'none' && WM.WORDS_ATTRS.spellcheck === 'false',
     'welcome.mjs: the words\' boxes without autocomplete, autocorrect, capitals or spellcheck');
-  // The code, not its comments: no way from a root to its 25 words anywhere; the words shown again only by Me → Security
+  // The code, not its comments: no way from a root to its 25 words anywhere; the words shown again only by Settings → Backup and recovery
   // (design/apps-seed.md §8), from what the words password opens (WORDS.reveal), nowhere else.
   const uiSrc = readFileSync(join(REPO, 'apps', 'agent', 'ui.js'), 'utf8'), secAt = uiSrc.indexOf('// ---- SECURITY'), secEnd = uiSrc.indexOf('const WORDS_VIEWS');
   const pages = ['app.mjs', 'boot.mjs', 'profiles.mjs', 'computers.mjs', 'shell.mjs', 'seed.mjs', 'router.mjs', 'create.mjs', 'setup.mjs', 'welcome.mjs', 'words.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8')).join('\n') + uiSrc.slice(0, secAt) + uiSrc.slice(secEnd);
-  const code = pages.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), sec = uiSrc.slice(secAt, secEnd);
+  // The lock rule's sentence (the mock's: "… pay above your limit or show your 25 words") names the words; it shows none.
+  const code = pages.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n').replace(/Asked only when you open the app[^']*'/g, "'"), sec = uiSrc.slice(secAt, secEnd);
   ok(secAt > 0 && secEnd > secAt && !/show (the |your )?(seed|25 words)|show seed|mnemonicFromRoot|encodeMoneroWords|newRoot/i.test(code) && !/mnemonicFromRoot|encodeMoneroWords|newRoot|clipboard|copy\(/.test(sec)
     && (sec.match(/WORDS\.reveal\(/g) ?? []).length === 1 && /const r = await WORDS\.reveal\(pw\.value\)/.test(sec),
-    'no "show seed" outside Me → Security; there, the words only from what the password opens (WORDS.reveal), nothing turns a root into words, nothing copied');
+    'no "show seed" outside Settings → Backup and recovery; there, the words only from what the password opens (WORDS.reveal), nothing turns a root into words, nothing copied');
   // Seat elsewhere: a standby; the seat taken later signs the list naming this phone.
   const F2 = fakeShell({ mode: 'self' }), b2 = await F2.connect(), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
   await SD.restoreInto(p2, { words, name: 'tab', relay: '', restore: { restore_date: '2024-02-29' }, seat: 'elsewhere', now: 1761400000 });
@@ -475,8 +500,8 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
 }
 
 // ================================================================ 1c. the first run in the Android app (welcome.mjs over setup.mjs), its
-// screens driven through a minimal DOM: the welcome's three choices, Back, create (the 25 words once, FLAG_SECURE,
-// Back swallowed, the check), restore, and the form set only when a path commits.
+// screens driven through a minimal DOM (the mock's words): the welcome, Back, create (Keep it safe: the 25 words once, FLAG_SECURE,
+// Back swallowed, the check; or a password), the lock, You're set, restore, connect, join, and the form set only when a path commits.
 class FakeEl {
   constructor(tag) { Object.assign(this, { tagName: tag.toUpperCase(), kids: [], attrs: {}, style: {}, on: {}, text: '', value: '', checked: false, disabled: false, hidden: false, className: '', parent: null }); }
   get textContent() { return this.text + this.kids.map((k) => (typeof k === 'string' ? k : k.textContent)).join(''); }
@@ -514,67 +539,69 @@ class FakeEl {
     const api = SU.setupApi(p, { bridge, mqtt: mqttEsm, storage: new Map(), reload: () => { reloaded++; } });
     const fr = WM.firstRun(box, api);
     const welcome = buttons().filter((b) => b.parent?.className === 'choices').map((b) => b.textContent);
-    ok(welcome.join('|') === 'Create a new identity|Restore from 25 words|Connect to my agent elsewhere' && !box.all().some((e) => ['INPUT', 'TEXTAREA'].includes(e.tagName))
-      && box.all().some((e) => e.tagName === 'IMG') && box.all().some((e) => e.tagName === 'DETAILS' && e.textContent.includes('Import a device file')) && F.state.mode === null,
-      'welcome: the seal and exactly three choices, no form or field on it; the import under Advanced; no form set yet');
-    button('Create a new identity').onclick();
-    ok(title() === 'Name this phone' && button('‹') && button('Make my 25 words') && box.all().some((e) => e.tagName === 'DETAILS' && /Monero network/.test(e.textContent) && /Relay/.test(e.textContent)),
-      'create 1: Name this phone, one primary button, Back; the network and the relay under Advanced');
+    ok(welcome.join('|') === 'Create my identity|Restore from 25 words|Use my computer instead' && !box.all().some((e) => ['INPUT', 'TEXTAREA'].includes(e.tagName))
+      && box.textContent.includes('One identity for you and your agents.') && box.textContent.includes('Chat with people and agents, privately. Let your agents act for you, within limits you set.')
+      && box.all().some((e) => e.tagName === 'DETAILS' && e.textContent.includes('Import a device file')) && F.state.mode === null,
+      'welcome (the mock\'s words): sigelo, what it is, Create my identity, Restore from 25 words, Use my computer instead (no invite code where the shell keeps none); no field; the import under Advanced; no form set yet');
+    button('Create my identity').onclick();
+    ok(title() === 'Name this phone' && button('‹') && button('Next') && box.textContent.includes('Step 1 of 3') && box.all().some((e) => e.tagName === 'DETAILS' && /More options/.test(e.textContent) && /Monero network/.test(e.textContent) && /Relay/.test(e.textContent)),
+      'create 1: Name this phone, Step 1 of 3, Next, Back; the network and the relay under More options');
     button('‹').onclick();
-    ok(title() === 'sigelo' && button('Create a new identity') && pushed.length === 1, 'Back: one step, to the welcome (one history entry per screen)');
-    button('Create a new identity').onclick();
-    const radios = box.all().filter((e) => e.type === 'radio');
-    radios.find((r) => r.value === 'stagenet').checked = true; radios.find((r) => r.value === 'mainnet').checked = false;
-    await button('Make my 25 words').onclick();
+    ok(title() === 'sigelo' && button('Create my identity') && pushed.length === 1, 'Back: one step, to the welcome (one history entry per screen)');
+    button('Create my identity').onclick();
+    box.all().find((e) => e.tagName === 'SELECT').value = 'stagenet';
+    await button('Next').onclick();
+    const card = (t) => buttons().find((e) => e.textContent.startsWith(t));
+    ok(title() === 'Keep it safe' && box.textContent.includes('Step 2 of 3') && box.textContent.includes('Choose how to protect your identity') && card('Write down 25 words') && card('Set a password')
+      && box.textContent.includes('On paper. They bring everything back on any phone. Safest.') && box.textContent.includes('The words stay on this phone, locked by it. Lose the phone and they are gone.') && W.network.held === 0,
+      'create 2: Keep it safe, the mock\'s two ways (25 words on paper, or a password); nothing drawn yet');
+    await card('Write down 25 words').onclick();
     await sleep(50);
     const ol = box.all().find((e) => e.tagName === 'OL'), list = ol?.kids.map((li) => li.textContent) ?? [];
     const leaks = (text) => { const t = String(text).toLowerCase(); for (let i = 0; i + 3 <= list.length; i++) if (t.includes(list.slice(i, i + 3).join(' '))) return true; return false; };
-    ok(list.length === 25 && /seed-list/.test(ol.className) && W.network.held >= 1 && title() === 'Your 25 words', 'create 2: the 25 words once, in an ordered list (numbered by the list); the network held');
+    ok(list.length === 25 && /seed-list/.test(ol.className) && W.network.held >= 1 && title() === 'Your 25 words' && box.textContent.includes('Write these words on paper, in order.'), 'create 2: the 25 words once, in an ordered list (numbered by the list); the network held');
     const before = pushed.length;
     pop();
-    ok(F.state.secure === true && F.state.door === true && !button('‹') && title() === 'Your 25 words' && pushed.length === before + 1 && button('I have written them down'),
+    ok(F.state.secure === true && F.state.door === true && !button('‹') && title() === 'Your 25 words' && pushed.length === before + 1 && button('I wrote them down'),
       'create 2: FLAG_SECURE on, the system Back swallowed (door), the page\'s Back held too; no Back button, one way on');
     const vault = box.all().find((e) => e.tagName === 'P' && /^5\w{94}$/.test(e.textContent))?.textContent;
-    await button('Copy (stagenet only)').onclick();
-    ok(typeof vault === 'string' && F.state.clip?.text === list.join(' ') && F.state.clip.clear === 60, 'create 2, stagenet: the wallet\'s address shown; copy through the shell, emptied by it after 60 s');
-    button('I have written them down').onclick();
+    await button('Copy (test network only)').onclick();
+    ok(typeof vault === 'string' && F.state.clip?.text === list.join(' ') && F.state.clip.clear === 60, 'create 2, test network: the wallet\'s address (folded); copy through the shell, emptied by it after 60 s');
+    button('I wrote them down').onclick();
     await sleep(50);
     const asked = () => box.all().filter((e) => e.tagName === 'LABEL').map((e) => Number(/^Word (\d+)$/.exec(e.textContent)?.[1])).filter(Boolean), inputs = () => box.all().filter((e) => e.tagName === 'INPUT');
     const q1 = asked();
     ok(F.state.clipCleared >= 1 && F.state.clip === null && !box.all().some((e) => e.tagName === 'OL') && title() === 'Check your paper' && q1.length === 3 && !button('‹')
-      && inputs().every((x) => x.attrs.autocomplete === 'off' && x.attrs.spellcheck === 'false'), `create 3: the clipboard emptied, the words gone, three asked by number (${q1}), no Back`);
+      && box.textContent.includes('Type these three words from your paper. You can\'t go on without them.')
+      && inputs().every((x) => x.attrs.autocomplete === 'off' && x.attrs.spellcheck === 'false'), `create 2, check: the clipboard emptied, the words gone, three asked by number (${q1}), no Back`);
     inputs().forEach((x, i) => { x.value = i === 0 ? (list[q1[0] % 25] === list[q1[0] - 1] ? 'zzz' : list[q1[0] % 25]) : list[q1[i] - 1]; });
     await button('Check').onclick();
     await sleep(50);
     ok(title() === 'Check your paper' && !box.all().some((e) => e.tagName === 'OL') && box.textContent.includes(`Word ${q1[0]} did not match`) && p.files.read('identity.keystore') === null && F.state.mode === null,
-      'create 3: a wrong word named by its number, asked again; the 25 not shown again unasked; nothing sealed, no form set');
+      'create 2, check: a wrong word named by its number, asked again; the 25 not shown again unasked; nothing sealed, no form set');
     button('Show the words again').onclick();
-    ok(box.all().some((e) => e.tagName === 'OL') && F.state.secure === true, 'create 3: "Show the words again" (asked for) shows them, still behind FLAG_SECURE');
-    button('I have written them down').onclick();
+    ok(box.all().some((e) => e.tagName === 'OL') && F.state.secure === true, 'create 2, check: "Show the words again" (asked for) shows them, still behind FLAG_SECURE');
+    button('I wrote them down').onclick();
     await sleep(50);
     const q2 = asked();
     inputs().forEach((x, i) => { x.value = list[q2[i] - 1]; });
     await button('Check').onclick();
-    // The words password, offered once: one screen, two fields, Set and Skip, no Back (the identity is made).
-    await until(() => title() === 'Your words on this phone', 5000);
+    // Step 3, the lock: the phone's screen lock asked once; no Back (the identity is made).
+    await until(() => title() === 'Lock', 5000);
     await until(() => F.state.secure === false, 2000);
-    const pwIns = box.all().filter((e) => e.tagName === 'INPUT');
-    const offerOk = pwIns.length === 2 && pwIns.every((x) => x.type === 'password' && x.attrs.autocomplete === 'new-password') && buttons().map((b) => b.textContent).join('|') === 'Set|Skip'
-      && /Want to be able to see your words again on this phone\? Set a password\./.test(box.textContent) && reloaded === 0 && F.state.secure === false;
-    pwIns[0].value = 'short'; pwIns[1].value = 'short';
-    await button('Set').onclick();
-    const tooShort = /at least 8 characters/.test(box.textContent) && title() === 'Your words on this phone';
-    pwIns[0].value = 'long enough'; pwIns[1].value = 'long enougj';
-    await button('Set').onclick();
-    const differ = /not the same/.test(box.textContent) && p.files.read('words.keystore') === null;
-    const back0 = pushed.length;
+    const u0 = F.log.ops.filter((o) => o === 'unlock').length, back0 = pushed.length;
     pop();
-    ok(offerOk && tooShort && differ && title() === 'Your words on this phone' && pushed.length === back0 + 1 && !button('‹'),
-      'create 4: "Your words on this phone": a password and its repeat, Set and Skip, nothing else; too short or not the same said under it; Back held (the identity is made)');
-    await button('Skip').onclick();
+    ok(box.textContent.includes('Step 3 of 3') && box.textContent.includes('Lock sigelo with your fingerprint or PIN') && box.textContent.includes('Asked only when you open the app, switch profile, pay above your limit or show your 25 words.')
+      && button('Use my phone\'s lock') && !button('‹') && pushed.length === back0 + 1 && reloaded === 0, 'create 3: Lock (the mock\'s words), Use my phone\'s lock; Back held (the identity is made)');
+    await button('Use my phone\'s lock').onclick();
+    await until(() => title() === 'You\'re set', 3000);
+    const chips = box.all().find((e) => e.className === 'words4');
+    ok(F.log.ops.filter((o) => o === 'unlock').length === u0 + 1 && chips?.kids.length === 4 && box.textContent.includes('Your four words') && button('Open sigelo') && button('×'),
+      'create 3 → You\'re set: the screen lock asked once (bridge unlock), the four words, Open sigelo, Close');
+    await button('Open sigelo').onclick();
     await until(() => reloaded === 1, 5000);
     await sleep(100);
-    ok(p.files.read('words.keystore') === null && p.files.read('words.sealed') === null && !F.log.seals.some((x) => x.kind === 'words'), 'create 4, Skip: nothing kept, no words sealed (as before)');
+    ok(p.files.read('words.keystore') === null && p.files.read('words.sealed') === null && !F.log.seals.some((x) => x.kind === 'words'), 'create, paper: no password asked, no words kept (the mock\'s gate: one or the other)');
     ok(reloaded === 1 && F.state.mode === 'self' && F.log.seals.length === 2 && F.log.seals.every((x) => x.full === true && x.alias === 1) && F.state.secure === false && F.state.door === false && W.network.held === 0,
       `create: the form set to self at the commit, identity and keeper sealed under the FULL key, FLAG_SECURE off, the network released, the page restarts (${F.state.secureLog})`);
     const files = idb.dbs.get('sigelo').stores.get('files'), stored = [...files.values()].map((v) => Buffer.from(v).toString('latin1')).join('\n');
@@ -589,20 +616,56 @@ class FakeEl {
   {
     const F2 = fakeShell({ mode: null }), b2 = await F2.connect(), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
     const box2 = new FakeEl('div'), fr2 = WM.firstRun(box2, SU.setupApi(p2, { bridge: b2, mqtt: mqttEsm, storage: new Map(), reload() {} }));
-    const b = (t) => box2.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t);
-    b('Create a new identity').onclick();
-    await b('Make my 25 words').onclick();
+    const b = (t) => box2.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith(t));
+    b('Create my identity').onclick();
+    await b('Next').onclick();
+    await b('Write down 25 words').onclick();
     const g = box2.all().find((e) => e.tagName === 'OL');
     let prevented = false;
     g.on.copy?.forEach((f) => f({ preventDefault: () => { prevented = true; } }));
-    ok(!box2.all().some((e) => e.tagName === 'BUTTON' && /Copy/.test(e.textContent)) && box2.textContent.includes('No copy on mainnet') && /nocopy/.test(g.className) && prevented,
-      'create 2, mainnet: no copy button, the words not selectable, a copy refused');
+    ok(!box2.all().some((e) => e.tagName === 'BUTTON' && /Copy/.test(e.textContent)) && box2.textContent.includes('No copy, no screenshot: write them by hand. Never type them into a website.') && /nocopy/.test(g.className) && prevented,
+      'create 2, main network: no copy button, the words not selectable, a copy refused, the mock\'s line');
     fr2.stop();
     await sleep(50);
     ok(W.network.held === 0 && F2.state.secure === false && F2.state.mode === null, 'leaving: the words dropped, the network released, FLAG_SECURE off, no form set');
   }
 
-  // Restore: the words checked as typed, Back keeps them one step, the network and the form set at the commit.
+  // Keep it safe → Set a password: the words drawn and kept here under it, never shown; the identity made; the lock; done.
+  {
+    const F6 = fakeShell({ mode: null }), b6 = await F6.connect(), p6 = await A.androidPlatform({ bridge: b6, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
+    let reloads = 0;
+    const box6 = new FakeEl('div'), fr6 = WM.firstRun(box6, SU.setupApi(p6, { bridge: b6, mqtt: mqttEsm, storage: new Map(), reload: () => { reloads++; } }));
+    const b = (t) => box6.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith(t)), t6 = () => box6.all().find((e) => e.tagName === 'H1')?.textContent;
+    b('Create my identity').onclick();
+    await b('Next').onclick();
+    b('Set a password').onclick();
+    const pws = box6.all().filter((e) => e.tagName === 'INPUT' && e.type === 'password');
+    ok(t6() === 'Set a password' && pws.length === 2 && pws.every((x) => x.attrs.autocomplete === 'new-password') && box6.textContent.includes('It locks your 25 words on this phone. You need it to see them again in Settings.')
+      && b('Set password') && b('‹'), 'Set a password (the mock\'s words): the password and its repeat, Set password, Back to the choice');
+    pws[0].value = 'short'; pws[1].value = 'short';
+    await b('Set password').onclick();
+    const tooShort = /at least 8 characters/.test(box6.textContent) && t6() === 'Set a password';
+    pws[0].value = 'long enough'; pws[1].value = 'long enougj';
+    await b('Set password').onclick();
+    const differ = /not the same/.test(box6.textContent) && p6.files.read('words.keystore') === null;
+    pws[0].value = 'correct horse'; pws[1].value = 'correct horse';
+    await b('Set password').onclick();
+    await until(() => t6() === 'Lock', 15000);
+    const wseal = F6.log.seals.find((x) => x.kind === 'words');
+    ok(tooShort && differ && wseal?.full === true && wseal.alias === 1 && F6.state.mode === 'self' && !box6.all().some((e) => e.tagName === 'OL'),
+      'Set password: too short or not the same said; then the identity made and its words kept as kind words under the FULL key, never on the screen; then the lock');
+    await b('Use my phone').onclick();
+    await until(() => t6() === 'You\'re set', 3000);
+    await b('Open sigelo').onclick();
+    await until(() => reloads === 1, 5000);
+    const WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href);
+    const kept = await W.loadSealed(p6, 'words');
+    ok(reloads === 1 && (await WL.openWords(kept, 'correct horse')).words.length === 25 && await checkOf(() => WL.openWords(kept, 'correct horsf')) === 'words_password' && W.network.held === 0,
+      'Set password: the 25 words kept, opened by that password only; the page restarts');
+    fr6.stop();
+  }
+
+  // Restore: one screen (the words checked as typed, when they were made, main or spare), the network and the form set at the commit.
   {
     const { mnemonicFromRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
     const S0 = new Uint8Array(32).fill(7); S0[31] = 0x0e;
@@ -610,51 +673,75 @@ class FakeEl {
     const F3 = fakeShell({ mode: null }), b3 = await F3.connect(), p3 = await A.androidPlatform({ bridge: b3, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
     let reloads = 0;
     const box3 = new FakeEl('div'), fr3 = WM.firstRun(box3, SU.setupApi(p3, { bridge: b3, mqtt: mqttEsm, storage: new Map(), reload: () => { reloads++; } }));
-    const b = (t) => box3.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t), t3 = () => box3.all().find((e) => e.tagName === 'H1')?.textContent;
+    const b = (t) => box3.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith(t)), t3 = () => box3.all().find((e) => e.tagName === 'H1')?.textContent;
     b('Restore from 25 words').onclick();
     const ta = box3.all().find((e) => e.tagName === 'TEXTAREA'), count = () => box3.all().find((e) => e.id === 'seed-count')?.textContent;
     const type = (v) => { ta.value = v; ta.on.input.forEach((f) => f()); };
     type(words.split(' ').slice(0, 24).join(' ') + ' zzzz');
-    const bad = count(), off = b('Next').disabled;
+    const bad = count(), off = b('Restore').disabled;
     type(words);
     await sleep(50);
-    ok(t3() === 'Restore from 25 words' && /word 25 is not in the Monero word list/.test(bad) && off && count() === '25 of 25, checksum ok' && !b('Next').disabled && F3.state.secure === true,
-      `restore 1: one box, the word count and the first bad word as typed (${bad}), Next only on a good checksum; FLAG_SECURE on`);
-    b('Next').onclick();
-    ok(t3() === 'When were the words made?' && box3.all().some((e) => e.tagName === 'DETAILS' && /standby/.test(e.textContent)), 'restore 2: the date or height, the network; name, the seat elsewhere and the relay under Advanced');
+    const seatRadios = box3.all().filter((e) => e.tagName === 'INPUT' && e.name === 'seed-seat');
+    ok(t3() === 'Restore' && /word 25 is not in the Monero word list/.test(bad) && off && count() === '25 words, checked' && !b('Restore').disabled && F3.state.secure === true
+      && box3.textContent.includes('Your 25 words, in order') && box3.textContent.includes('When were they made? (optional)') && box3.textContent.includes('Makes the wallet ready faster. Empty: it reads from the start.')
+      && box3.textContent.includes('Is this identity already in use on another device?') && box3.textContent.includes('No, make this phone the main one') && box3.textContent.includes('Yes, keep this phone as a spare')
+      && seatRadios.length === 2 && seatRadios.find((e) => e.value === 'here')?.checked === true && box3.all().some((e) => e.tagName === 'DETAILS' && /More options/.test(e.textContent) && /Relay/.test(e.textContent)),
+      `restore (one screen, the mock's words): the words checked as typed (${bad}), Restore only on a good checksum; when they were made; main or spare (main the default); More options; FLAG_SECURE on`);
     b('‹').onclick();
-    ok(t3() === 'Restore from 25 words' && box3.all().find((e) => e.tagName === 'TEXTAREA').value === words, 'Back from restore 2: one step, the words kept in their box');
-    b('Next').onclick();
-    box3.all().find((e) => e.attrs['aria-label'] === 'Restore date or height').value = '2024-02-29';
+    ok(box3.all().find((e) => e.tagName === 'H1')?.textContent === 'sigelo', 'Back from Restore: to the welcome');
+    await sleep(20);
+    ok(F3.state.secure === false, 'Back from Restore: the words dropped, FLAG_SECURE off');
+    b('Restore from 25 words').onclick();
+    const ta2 = box3.all().find((e) => e.tagName === 'TEXTAREA');
+    ok(ta2.value === '', 'Restore again: the box empty (the words were dropped at Back)');
+    ta2.value = words; ta2.on.input.forEach((f) => f());
+    box3.all().find((e) => e.tagName === 'INPUT' && e.type === 'month').value = '2024-02';
     await b('Restore').onclick();
-    // At the end of a restore: the same offer; Set keeps the words encrypted under the password, sealed as kind words.
-    await until(() => t3() === 'Your words on this phone', 5000);
-    const [w1, w2] = box3.all().filter((e) => e.tagName === 'INPUT');
-    w1.value = 'correct horse'; w2.value = 'correct horse';
-    const t0 = Date.now();
-    await b('Set').onclick();
+    await until(() => t3() === 'Lock', 10000);
+    await b('Use my phone').onclick();
+    await until(() => t3() === 'Restored', 3000);
+    ok(box3.all().find((e) => e.className === 'words4')?.kids.length === 4 && box3.textContent.includes('Your identity is back'), 'restore → the lock → done: the four words');
+    await b('Open sigelo').onclick();
     await until(() => reloads === 1, 10000);
-    const took = Date.now() - t0;
     await sleep(100);
     const kp = JSON.parse(new TextDecoder().decode(await W.loadSealed(p3, 'keeper')));
-    ok(reloads === 1 && F3.state.mode === 'self' && kp.restore_date === '2024-02-29' && F3.state.secure === false && W.network.held === 0, 'restore: sealed, the form set to self at the commit, FLAG_SECURE off, the page restarts');
-    const WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href);
-    const wseal = F3.log.seals.find((x) => x.kind === 'words'), kept = await W.loadSealed(p3, 'words'), meta = WL.wordsMeta(kept), plainKept = Buffer.from(p3.files.read('words.keystore')).toString('latin1');
-    ok(wseal?.full === true && wseal.alias === 1 && meta.iter === 1_000_000 && meta.kdf === 'PBKDF2-SHA256' && !plainKept.includes(words.split(' ')[0] + ' ') && !Buffer.from(kept).toString().includes(words.split(' ')[0] + ' ')
-      && (await WL.openWords(kept, 'correct horse')).words.join(' ') === words && await checkOf(() => WL.openWords(kept, 'correct horsf')) === 'words_password',
-      `restore, Set: the words kept as kind words under the FULL key, encrypted under PBKDF2-SHA256 (1,000,000 rounds; set in ${took} ms), opened by that password only`);
+    ok(reloads === 1 && F3.state.mode === 'self' && kp.restore_date === '2024-02-01' && F3.state.secure === false && W.network.held === 0 && !F3.log.seals.some((x) => x.kind === 'words'),
+      `restore: sealed, the month as its first day (${kp.restore_date}), the form set to self at the commit, FLAG_SECURE off, the page restarts; no words kept`);
     fr3.stop();
   }
   // Connect: an 8-character code is all the first screen asks; a plain tab says it needs the app.
   {
     const box4 = new FakeEl('div'), fr4 = WM.firstRun(box4, SU.setupApi(p, { bridge: null, mqtt: mqttEsm, storage: new Map(), reload() {} }));
     const b = (t) => box4.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t);
-    b('Connect to my agent elsewhere').onclick();
-    const code = box4.all().find((e) => e.attrs['aria-label'] === 'The code');
+    b('Use my computer instead').onclick();
+    const code = box4.all().find((e) => e.className === 'code-in');
     code.value = 'k7f3q9zp'; code.on.input.forEach((f) => f());
     await b('Connect').onclick();
-    ok(code.value === 'K7F3-Q9ZP' && box4.all().find((e) => e.tagName === 'H1')?.textContent === 'Connect to my agent' && /needs the app/.test(box4.textContent), 'connect 1: one big field, the code formatted as typed; without the shell, a message, not a blank');
+    ok(code.value === 'K7F3-Q9ZP' && box4.all().find((e) => e.tagName === 'H1')?.textContent === 'Use my computer' && box4.textContent.includes('Or type its code')
+      && box4.textContent.includes('Your identity stays on your computer. This phone becomes its remote: it holds no key of yours.') && /needs the app/.test(box4.textContent),
+      'Use my computer (the mock\'s words): its code formatted as typed; without the shell, a message, not a blank');
     fr4.stop();
+  }
+  // Join (I have an invite code; the Add sheet's way): the code first, kept (api.join), then the name and Join.
+  {
+    const box5 = new FakeEl('div'), joined = [], fr5 = WM.firstRun(box5, { ...SU.setupApi(p, { bridge: null, mqtt: mqttEsm, storage: new Map(), reload() {} }), join: (c) => joined.push(c) });
+    const t5 = () => box5.all().find((e) => e.tagName === 'H1')?.textContent, b = (t) => box5.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t);
+    ok(b('I have an invite code'), 'welcome: I have an invite code, where the shell keeps one (api.join)');
+    fr5.start('join');
+    const code = box5.all().find((e) => e.className === 'code-in');
+    ok(t5() === 'Join from an invite' && code && b('Next') && b('‹') && box5.textContent.includes('Invite code') && box5.textContent.includes('Enter it, and you\'ll be chatting with them in a minute.'),
+      'Join from an invite: its first screen, the code (Back to the welcome)');
+    code.value = 'nope'; await b('Next').onclick();
+    ok(t5() === 'Join from an invite' && /8 letters and digits/.test(box5.textContent) && joined.length === 0, 'Join: not a code → said, nothing kept');
+    code.value = 'k7f3-q9zp'; await b('Next').onclick();
+    ok(joined.join() === 'K7F3-Q9ZP' && t5() === 'Name this phone' && b('Join') && /Then you protect it with 25 words or a password/.test(box5.textContent), 'Join: the code kept for the new page (api.join), then Name this phone and Join');
+    fr5.stop();
+    for (const [path, want] of [['restore', 'Restore'], ['computer', 'Use my computer'], ['create', 'Name this phone']]) {
+      const bx = new FakeEl('div'), f = WM.firstRun(bx, SU.setupApi(p, { bridge: null, mqtt: mqttEsm, storage: new Map(), reload() {} }));
+      f.start(path);
+      ok(bx.all().find((e) => e.tagName === 'H1')?.textContent === want, `Add → ${path}: the first run opens at ${want}`);
+      f.stop();
+    }
   }
   restoreGlobals();
   const src = readFileSync(join(HERE, 'setup.mjs'), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
@@ -706,8 +793,8 @@ class FakeEl {
       `profiles: add → Profile 2 (not set up), active, the lock once, a reload (${JSON.stringify(regOf().profiles)})`);
     await stopApp();
     const s2 = pg.session; pg = page(s2);
-    ok(await checkOf(() => pg.app.ready) === 'identity' && title(pg.box) === 'sigelo' && pg.box.all().some((e) => e.tagName === 'BUTTON' && e.textContent === 'Back to my profiles') && pg.main.hidden === true,
-      'profiles: the new profile opens on its first run (the welcome\'s three choices) with "Back to my profiles"; no picker (just chosen)');
+    ok(await checkOf(() => pg.app.ready) === 'identity' && title(pg.box) === 'sigelo' && pg.box.all().some((e) => e.tagName === 'BUTTON' && e.attrs?.['aria-label'] === 'Back to my profiles') && pg.main.hidden === true,
+      'profiles: the new profile opens on its first run (the welcome) with its Close, "Back to my profiles"; no picker (just chosen)');
     // Its identity (restored here as the welcome would): sealed under its own aliases, blob version 2 naming p2.
     const b2 = A.profileBridge(await F.connect(), 'p2'), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: idb, pow, name: PR.dbName('p2') });
     await SD.restoreInto(p2, { words: wordsOf(6), name: 'tab', relay: 'relay.test', restore: {}, seat: 'here', now: 1761400000 });
@@ -774,10 +861,18 @@ class FakeEl {
       && storage.getItem('p2:sigelo-control-relay') === null && await checkOf(() => b2.open(new Uint8Array(blob2), { kind: 'identity' })) === 'sealed' && (await (await pg.app.ready).call('GET', '/api/me')).body.original === did1,
       'remove: at the next start p2 is wiped: its database deleted, its keystore aliases gone (its blob never opens again), its storage keys; p1 untouched, open');
     // ---- the welcome's way back: an added profile left before its first run → the one it was added from, no lock
-    await pr.add(); await stopApp(); pg = page(pg.session); await pg.app.ready.catch(() => {});
+    // Added by the Add sheet's "Join from an invite code" (ui.js addProfile): the first run opens there, the code kept for the new page.
+    ok(await checkOf(() => pr.add('nowhere')) === 'profile_path', 'add: an unknown way → profile_path');
+    await pr.add('join'); await stopApp(); pg = page(pg.session); await pg.app.ready.catch(() => {});
+    ok(title(pg.box) === 'Join from an invite' && pg.app.local.joinCode() === null, `add("join"): its first run opens at Join from an invite (${title(pg.box)}); no code kept yet`);
+    pg.box.all().find((e) => e.className === 'code-in').value = 'K7F3-Q9ZP';
+    await pg.box.all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Next').onclick();
+    ok(title(pg.box) === 'Name this phone' && pg.app.local.joinCode() === 'K7F3-Q9ZP' && pg.app.local.joinCode() === null, 'Join: the code kept for the new page once (local.joinCode), then Create');
+    // Started again (the way is asked once): the welcome, with its way back.
+    await stopApp(); pg = page(pg.session); await pg.app.ready.catch(() => {});
     const added = regOf().active;
     u = unlocks();
-    await pg.box.all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Back to my profiles').onclick();
+    await pg.box.all().find((e) => e.tagName === 'BUTTON' && e.attrs?.['aria-label'] === 'Back to my profiles').onclick();
     await until(() => regOf().active === 'p1', 3000);
     ok(regOf().active === 'p1' && !regOf().profiles.some((p) => p.id === added) && unlocks() === u, `welcome: "Back to my profiles" drops the empty ${added} and returns to p1, no lock`);
     await stopApp(); pg = page(pg.session); await pg.app.ready;
@@ -875,6 +970,111 @@ class FakeEl {
     const p2b = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: idb, pow, name: PR.dbName('p2') });
     ok(p2b.files.read('words.keystore') === null && p2b.files.read('identity.keystore') !== null, 'Remove the password: words.keystore gone from storage, the identity kept');
   } finally { for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } }
+}
+
+// ================================================================ 1f. notifications, the app lock's settings, unlock force (platform-android.mjs,
+// boot.mjs local.notify, local.onOpen, local.lock, local.unlock; words.mjs check) over the fake shell
+{
+  const B = await import(pathToFileURL(join(HERE, 'boot.mjs')).href), SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href);
+  const WD = await import(pathToFileURL(join(HERE, 'words.mjs')).href), WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href);
+  const { mnemonicFromRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
+  const memStore = () => { const m = new Map(); return { m, get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+  const pow = A.androidPow(W.workerPow(() => new FakeWorker()));
+  const apps = [];
+  const boot = (F) => { const a = B.boot({ shell: F?.shell ?? null, target: F?.target, mqtt: mqttEsm, indexedDB: new FakeIDB(), storage: memStore(), session: memStore(), reload() {}, pow }); a.ready.catch(() => {}); apps.push(a); return a.local; };
+  try {
+    // ---- notify over the bridge
+    const F = fakeShell({ mode: 'self' }), bridge = await F.connect(), ops = () => F.log.ops.length;
+    await bridge.notify({ tag: 'chat:did:sigelo:zAbc', title: 'Ana', text: 'New message' });
+    await bridge.notify({ tag: 'group:g_1.x', title: 'Team', text: 'New message' });
+    const n = F.state.notes.get('chat:did:sigelo:zAbc');
+    ok(n?.title === 'Ana' && n.text === 'New message' && n.keys === 'id,op,tag,text,title' && F.state.notes.get('group:g_1.x')?.title === 'Team', `notify: tag, title and text sent as given, nothing else (${n?.keys})`);
+    const o0 = ops();
+    const badTags = await Promise.all(['chat:', 'mail:x', 'chat:a b', 'chat:é', `chat:${'x'.repeat(201)}`, 42, undefined].map((tag) => checkOf(() => bridge.notify({ tag, title: 'A', text: 'B' }))));
+    const badLines = await Promise.all([['', 'x'], ['x'.repeat(101), 'x'], ['x', undefined], ['x', 7], ['x', 'y'.repeat(101)]].map(([title, text]) => checkOf(() => bridge.notify({ tag: 'group:g1', title, text }))));
+    const badCancel = await checkOf(() => bridge.notify({ tag: 'mail:x', cancel: true }));
+    ok(badTags.every((c) => c === 'notify') && badLines.every((c) => c === 'notify') && badCancel === 'notify' && ops() === o0, `notify: a bad tag, title or text refused "notify" before the shell sees it (${badTags} / ${badLines})`);
+    ok(await checkOf(() => bridge.notify({ tag: 'chat:did:sigelo:zAbc', cancel: true })) === 'accepted' && !F.state.notes.has('chat:did:sigelo:zAbc') && F.state.notes.has('group:g_1.x'), 'notify: cancel removes that tag\'s notification only');
+    F.state.granted = false;
+    const denied = await checkOf(() => bridge.notify({ tag: 'pay:k1:n1', title: 'Bot', text: 'Payment request' })), a1 = await bridge.notify({ ask: true });
+    F.state.granted = true;
+    const a2 = await bridge.notify({ ask: true });
+    ok(denied === 'notify_permission' && a1.granted === false && a2.granted === true && F.state.asked === 2 && !F.state.notes.has('pay:k1:n1'), 'notify: not allowed → notify_permission; ask → { granted } as the shell answers');
+    // ---- the open event: to its listeners, kept until there is one, never to a request waiting (same id or not)
+    {
+      const target = new EventTarget(), sent = [];
+      let p1 = null;
+      const shell = { info: () => JSON.stringify({ v: 'sigelo-shell/0', mode: 'self', wipe: false, version: 'test' }),
+        connect() { const { port1, port2 } = new MessageChannel(); p1 = port1; port1.onmessage = (e) => sent.push(JSON.parse(e.data)); setTimeout(() => target.dispatchEvent(new MessageEvent('message', { data: 'sigelo-bridge/0', ports: [port2] }))); } };
+      const br = await A.connectBridge({ shell, target });
+      let answered = null;
+      const req = br.lockGet().then((r) => { answered = r; }, (e) => { answered = e; });
+      await until(() => sent.length === 1, 2000);
+      p1.postMessage(JSON.stringify({ ev: 'open', tag: 'chat:did:sigelo:zEarly', id: sent[0].id }));
+      await sleep(50);
+      const got = [];
+      br.onEvent((m) => got.push(m.tag));
+      const early = got.join();
+      p1.postMessage(JSON.stringify({ ev: 'open', tag: 'group:g2', id: sent[0].id }));
+      await until(() => got.length === 2, 2000);
+      const stillWaiting = answered === null;
+      p1.postMessage(JSON.stringify({ id: sent[0].id, on: true, after: 5, secure: false }));
+      await req;
+      ok(early === 'chat:did:sigelo:zEarly' && got.join() === 'chat:did:sigelo:zEarly,group:g2' && stillWaiting && answered?.after === 5,
+        `open event: {ev:"open"} reaches the listener (one that came before it: when it is set), never the request waiting on that id (${got}; ${JSON.stringify(answered)})`);
+      p1.close();
+    }
+    // ---- local (boot.mjs): onOpen at a start by a tap (registered before and after the connect), a tap while running, a bad tag dropped
+    const F1 = fakeShell({ mode: 'self' }), F2 = fakeShell({ mode: 'self' });
+    F1.state.pendingOpen = 'pay:keeper1:nonce.7'; F2.state.pendingOpen = 'chat:did:sigelo:zCold';
+    const L1 = boot(F1), opened1 = [];
+    L1.onOpen((t) => opened1.push(t));
+    const L2 = boot(F2), opened2 = [];
+    await sleep(300);
+    L2.onOpen((t) => opened2.push(t));
+    await until(() => opened1.length && opened2.length, 3000);
+    F1.open('mail:not-ours'); F1.open('group:g9');
+    await until(() => opened1.length === 2, 3000);
+    await sleep(50);
+    ok(opened1.join() === 'pay:keeper1:nonce.7,group:g9' && opened2.join() === 'chat:did:sigelo:zCold',
+      `onOpen: a start by a tap gives its tag once the bridge is connected (fn set before or after), a tap while running at once, a tag not ours dropped (${opened1} / ${opened2})`);
+    // ---- local.notify, local.lock, local.unlock force
+    const o1 = F1.log.ops.length;
+    await L1.notify({ tag: 'chat:did:sigelo:zAbc', title: 'Ana', text: 'New message' });
+    ok(typeof L1.notify === 'function' && F1.state.notes.get('chat:did:sigelo:zAbc')?.title === 'Ana' && await checkOf(() => L1.notify({ tag: 'x', title: 'a', text: 'b' })) === 'notify' && F1.log.ops.length === o1 + 1
+      && (await L1.notify({ ask: true })).granted === true, 'local.notify: through the shell as given; a bad tag refused before it; ask');
+    const g0 = await L1.lock.get(), o2 = F1.log.ops.length;
+    const afters = [];
+    for (const after of [1, 5, 15, 60]) afters.push((await L1.lock.set({ after })).after);
+    const refused = await Promise.all([7, 0, '5', 5.5, null].map((after) => checkOf(() => L1.lock.set({ after })))), offR = await checkOf(() => L1.lock.set({ on: 'no' }));
+    const off = await L1.lock.set({ on: false }), g1 = await L1.lock.get();
+    ok(L1.lock.kind === 'screen' && g0.on === true && g0.after === 1 && g0.secure === true && afters.join() === '1,5,15,60' && refused.every((c) => c === 'lock') && offR === 'lock'
+      && F1.log.ops.length === o2 + 6 && off.on === false && g1.on === false && g1.after === 60 && typeof g1.secure === 'boolean',
+      `local.lock: get → { on, after, secure }; after 1, 5, 15, 60 accepted, 7 (and others) refused "lock" before the shell; on false kept (${refused})`);
+    const f0 = F1.state.forced.length;
+    await L1.unlock({ force: true }); await L1.unlock(); await L1.unlock({ force: 'yes' });
+    ok(F1.state.forced.slice(f0).join() === 'true,false,false', `local.unlock: { force: true } passed through, anything else not (${F1.state.forced.slice(f0)})`);
+    // ---- without the shell: no lock, no notify, onOpen a no-op, unlock at once
+    const L0 = boot(null);
+    let t0 = Date.now();
+    L0.onOpen(() => {});
+    await L0.unlock({ force: true });
+    ok(L0.lock === undefined && L0.notify === undefined && Date.now() - t0 < 500, 'local without the shell: lock and notify undefined, onOpen nothing, unlock resolves at once');
+    // ---- words check: the password through the gate, no screen lock
+    const S = new Uint8Array(32).fill(9); S[31] = 0x0d;
+    const pw = await A.androidPlatform({ bridge, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow });
+    await SD.restoreInto(pw, { words: mnemonicFromRoot(S), name: 'tab', relay: 'relay.test', restore: {}, seat: 'here', now: 1761400000 });
+    await WD.keepWords(pw, mnemonicFromRoot(S), 'correct horse', { iterations: 1000 });
+    const slept = [], gate = WL.wrongGate({ sleep: async (ms) => { slept.push(ms); } });
+    let unlocked = 0;
+    const api = WD.wordsApi(pw, { unlock: async () => { unlocked++; }, gate }), none = WD.wordsApi(await A.androidPlatform({ bridge, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow }), { gate });
+    const u0 = F.log.ops.filter((x) => x === 'unlock').length;
+    const right = await api.check('correct horse'), wrong = await checkOf(() => api.check('correct horsf')), empty = await checkOf(() => api.check(''));
+    ok(right === true && wrong === 'words_password' && empty === 'words_password' && slept.join() === '2000,4000' && unlocked === 0 && F.log.ops.filter((x) => x === 'unlock').length === u0
+      && await checkOf(() => none.check('correct horse')) === 'words_none', `words.check: the right password → true, a wrong one the same refusal and delay (${slept}); no screen lock asked; none kept → words_none`);
+  } finally {
+    for (const a of apps) { try { await (await a.ready).stop?.(); } catch {} }
+  }
 }
 
 // ================================================================ 2. platform-android.mjs
@@ -1099,7 +1299,7 @@ try {
     const page = () => { const box = new FakeEl('section'), main = new FakeEl('main'); app = B.boot({ shell: F.shell, target: F.target, box, main, mqtt: mqttEsm, indexedDB: idb, storage, session, reload: () => { reloads++; } }); return { box, main, app }; };
     const title = (box) => box.all().find((e) => e.tagName === 'H1')?.textContent;
     const btn = (box, t) => box.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t);
-    const pasteIn = async (box, text) => { box.all().find((e) => e.attrs?.['aria-label'] === 'A SIGELO:UI: or SIGELO:CTL: text').value = text; await btn(box, 'Connect').onclick(); };
+    const pasteIn = async (box, text) => { box.all().find((e) => e.tagName === 'TEXTAREA').value = text; await btn(box, 'Connect').onclick(); };
     const said = (box) => box.all().find((e) => /\bsay\b/.test(e.className))?.textContent ?? '';
     const listOf = () => JSON.parse(storage.getItem('sigelo-computers'));
     const regOf = () => JSON.parse(new TextDecoder().decode(idb.dbs.get(PR.REGISTRY_DB).stores.get('files').get(PR.REGISTRY)));
@@ -1121,7 +1321,7 @@ try {
       ok(r.reload === true && unlocks() === u + 1 && reloads === r0 + 1 && listOf().adding === true, 'add: the lock once, a reload into the pairing screens');
       await be.stop?.();
       pg = page();
-      ok(await checkOf(() => pg.app.ready) === 'connect' && title(pg.box) === 'Connect to my agent' && btn(pg.box, 'Cancel') && pg.main.hidden === true, 'add: the pairing screens (code, or a SIGELO:UI: / SIGELO:CTL: text pasted or scanned) with Cancel, the page hidden');
+      ok(await checkOf(() => pg.app.ready) === 'connect' && title(pg.box) === 'Use my computer' && btn(pg.box, 'Cancel') && pg.main.hidden === true, 'add: the pairing screens (code, or a SIGELO:UI: / SIGELO:CTL: text pasted or scanned) with Cancel, the page hidden');
       r0 = reloads;
       await pasteIn(pg.box, cb.line);
       const blob2 = Buffer.from(storage.getItem('sigelo-control:c2') ?? '', 'base64');
@@ -1138,7 +1338,7 @@ try {
       // ---- another operator: refused other_operator at pairing time, nothing kept; Cancel back
       await pg.app.local.computers.add(); pg = page(); await pg.app.ready.catch(() => {});
       await pasteIn(pg.box, co.line);
-      ok(/another identity/.test(said(pg.box)) && /Add it in a profile of its own/.test(said(pg.box)) && storage.getItem('sigelo-control:c3') === null && listOf().computers.length === 2 && listOf().next === 3 && title(pg.box) === 'Connect to my agent',
+      ok(/another identity/.test(said(pg.box)) && /Add it in a profile of its own/.test(said(pg.box)) && storage.getItem('sigelo-control:c3') === null && listOf().computers.length === 2 && listOf().next === 3 && title(pg.box) === 'Use my computer',
         `other_operator: a computer whose page is another identity refused at pairing, said, nothing kept (${said(pg.box)})`);
       const st0 = (await (await S.remoteBackend(rb, { storage: memStore() }).catch((e) => e)));
       ok(st0.check === 'connect', 'remote form: no computer → the pairing screens (connect)');
@@ -1178,7 +1378,7 @@ try {
       ok(shaped(r) && r.computers.length === 0 && r.reload === true && reloads === r0 + 1 && listOf().computers.length === 0 && listOf().active === null && storage.getItem('sigelo-control') === null, 'forget (in use): gone, a reload');
       await be.stop?.();
       pg = page();
-      ok(await checkOf(() => pg.app.ready) === 'connect' && title(pg.box) === 'Connect to my agent' && !btn(pg.box, 'Cancel') && !btn(pg.box, 'Back to my computers'), 'no computer left: the pairing screens, nothing to go back to');
+      ok(await checkOf(() => pg.app.ready) === 'connect' && title(pg.box) === 'Use my computer' && !btn(pg.box, 'Cancel') && !btn(pg.box, 'Back to my computers'), 'no computer left: the pairing screens, nothing to go back to');
       // ---- the computer keeps the control until revoked there: its text still opens its page (another phone that kept it)
       const still = await (await import(pathToFileURL(join(REPO, 'apps', 'agent', 'remote-client.mjs')).href)).remoteClient(cb.line).then((c) => c.call('GET', '/api/me')).catch((e) => ({ status: e.status }));
       ok(still.status === 200, 'forgetting does not revoke: the computer answers that text until ui --revoke-control there (THREAT-MODEL)');

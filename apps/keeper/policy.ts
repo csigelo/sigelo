@@ -96,7 +96,7 @@ export interface Spent { ts: number; agent: string; amount: string; invoice?: st
  * What a log line says happened. `pending` is an approval wait (§4.1 step 8) and `approved`
  * the keeper's record of a valid spend-approval for it: neither debits anything.
  */
-export type Status = 'intent' | 'relayed' | 'relay_failed' | 'pending' | 'approved';
+export type Status = 'intent' | 'relayed' | 'relay_failed' | 'pending' | 'approved' | 'refused';
 /**
  * A logged spend that carried a `ref`, for the repeat check. `fp` is the fingerprint of the
  * request that wrote it; `line` is its index in the log, so the service can hand back the line.
@@ -109,6 +109,8 @@ export interface Prior {
    * `approval` the keeper-verified approval an `approved` line carries.
    */
   nonce?: string; until?: number; approval?: Approved;
+  /** A `refused` line's approver and reason (POST /refuse): the answer to the ref until `until`. */
+  refusal?: { approver: string; reason: string };
   /** The line's transaction: an intent is settled by a relayed or relay_failed line of the same txid. */
   txid?: string;
 }
@@ -213,8 +215,8 @@ export function fingerprint(account: number, to: Record<string, unknown>, amount
  */
 export interface Seen { prior?: Prior[]; revoked?: ReadonlySet<string>; keeper?: string }
 /** Outcome over wait: a settled line is the answer, an intent without one is next, then pending. */
-const RANK: Record<Status, number> = { relayed: 2, relay_failed: 2, intent: 1, approved: 0, pending: 0 };
-const waiting = (s: Status): boolean => s === 'pending' || s === 'approved';
+const RANK: Record<Status, number> = { relayed: 2, relay_failed: 2, intent: 1, approved: 0, pending: 0, refused: 0 };
+const waiting = (s: Status): boolean => s === 'pending' || s === 'approved' || s === 'refused';
 
 /** MONERO.md §4.1, in order. Every refusal names the check that refused it. */
 export function evaluate(req: PayRequest, policy: Policy, state: Spent[], now: number, seen: Seen = {}): Decision {
@@ -297,6 +299,12 @@ export function evaluate(req: PayRequest, policy: Policy, state: Spent[], now: n
   // A settled line (or an intent without one) is the answer, whatever else is on file.
   const settled = used.filter((p) => !waiting(p.status));
   if (settled.length > 0) return repeat(settled.reduce((a, b) => (RANK[b.status] > RANK[a.status] ? b : a)));
+  // An approver said no to this very request (POST /refuse): that is the answer until the request's exp,
+  // whatever the threshold is now. Never asked again, never paid; after exp the next pay asks anew.
+  const no_ = used.find((p) => p.status === 'refused');
+  if (no_ !== undefined) {
+    return { ok: false, reason: `refused: your operator refused this payment${no_.refusal?.reason ? ` (${no_.refusal.reason})` : ''} — it is not paid. Do not ask for it again.` };
+  }
   // Only waits are left, and they are judged by the policy as it is NOW, not as it was when
   // they were written: the Owner may have turned the threshold off or raised it (then no
   // approval is needed and the ref pays like any other), or removed the approver who signed

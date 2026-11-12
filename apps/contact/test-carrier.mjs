@@ -47,7 +47,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { connect } from 'mqtt';
 import { canonicalize, keygen, rotate, sign, verify, verifySig } from 'sigelo';
-import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_SEARCHES, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, prekeysKey, retentionOf, seal, solvePow, unseal } from './carrier.mjs';
+import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_SEARCHES, SEEN_LABEL, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, prekeysKey, retentionOf, seal, solvePow, unseal } from './carrier.mjs';
 import { MAX_ENVELOPE, header, pad } from './envelope.mjs';
 import { V as STORE_V, answerId, buildAnswer, checkAnswer, checkReply, inviteKeys, makeInvite, parseInvite } from './invite.mjs';
 import { isoWeek, pairId, topic } from './kdf.mjs';
@@ -742,6 +742,21 @@ try {
   await refuses(() => alice.send('nobody', 'x'), 'not_contact', 'send to an unknown name');
   await refuses(() => alice.send('bob', 1.5), 'body', 'send a float');
   await refuses(() => alice.send('bob', 'x', { label: LABEL_PREKEYS }), 'body', 'send under the carrier\'s own label');
+
+  // ================================================================ seen receipts (the header's): inside the envelope, never an inbox message
+  {
+    const bobAt = () => alice.contacts().contacts.find((x) => x.did === B.original);
+    await refuses(() => alice.send('bob', { seen: 1 }, { label: SEEN_LABEL }), 'body', 'send under the seen receipts\' label (seen() only)');
+    ok(bobAt().seen_upto === null && bobAt().seen_peer === false, 'no receipt yet: seen_upto null, seen_peer false');
+    const r = await bob.seen(A.original, now);
+    const got = await alice.inbox();
+    ok(r.status === 'sent' && got.messages.length === 0 && bobAt().seen_upto === now && bobAt().seen_peer === true
+      && events.alice.some((e) => e.type === 'seen' && e.from === B.original && e.upto === now), 'seen(): a receipt goes; alice files it (seen_upto, seen_peer, event seen), no inbox message');
+    await bob.seen(A.original, now - 5);
+    await alice.inbox();
+    ok(bobAt().seen_upto === now && !alice.history({ since: 0 }).messages.some((m) => m.label === SEEN_LABEL), 'an older receipt keeps the highest; none in the log');
+    await refuses(() => bob.seen(A.original, 1.5), 'body', 'a receipt\'s time not whole seconds');
+  }
 
   // ================================================================ several messages, one login
   {
