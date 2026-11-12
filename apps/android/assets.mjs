@@ -7,7 +7,7 @@
 //   node apps/android/assets.mjs           vendor, then copy (run before ./gradlew; CI does)
 //   node apps/android/assets.mjs --check   copy nothing: assets/web/ holds exactly those files, byte for byte
 //
-// Also a module: files() → [[path under assets/web, source file]] for check.mjs.
+// Also a module: files(map?) → [[path under assets/web, source file]] for check.mjs.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
@@ -17,10 +17,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = join(HERE, '..', 'web');
 export const OUT = join(HERE, 'app', 'src', 'main', 'assets', 'web');
 
-/** The page's files: index.html and everything its import graph reaches, as [published path, source]. */
-export async function files() {
+/**
+ * The page's files: index.html and everything its import graph reaches, as [published path, source]. Every source is
+ * copy.mjs's (its walk): none is named here. map: an import map (copy.mjs importMap) in place of index.html's (check.mjs).
+ */
+export async function files(map) {
   const C = await import(pathToFileURL(join(WEB, 'copy.mjs')).href);
-  const { files: graph, missing } = C.walk(C.importMap());
+  const { files: graph, missing } = C.walk(map ?? C.importMap());
   if (missing.length) throw new Error(`the page's import graph does not resolve: ${missing.join('; ')}`);
   const out = [['index.html', join(WEB, 'index.html')]];
   for (const rel of [...graph.keys()].sort()) out.push([rel, join(WEB, ...rel.split('/'))]);

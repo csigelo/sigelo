@@ -27,13 +27,13 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `platform-web.mjs` | The browser platform of sigelo-contact (design/apps.md §4.2) |
 | `pow-worker.mjs` | The relay login's proof of work, in a module Worker |
 | `platform-stub.mjs` | Loaded instead of `apps/contact/platform-node.mjs` (import map): no Node default in a page |
-| `platform-android.mjs` | In the Android app: the bridge (`sigelo-bridge/0`), the shell's fetch, MQTT and key |
+| `platform-android.mjs` | In the Android app: the bridge (`sigelo-bridge/0`), the shell's fetch, MQTT and key, its lock settings, notifications and their open event |
 | `ws-over-stream.mjs` | RFC 6455 client framing over the shell's TLS stream (wss), and the stream as a socket (mqtts) |
-| `welcome.mjs` | The first run, shared with the GTK phone app: the welcome's three choices, then one decision per screen (create, restore, connect), Back one step |
+| `welcome.mjs` | The first run in the mock's words, shared with the GTK phone app: welcome, Name this phone, Keep it safe (25 words on paper or a password), the words and their check, Lock, You're set; restore, join, connect; Back one step |
 | `setup.mjs` | The first run's work in this page (welcome.mjs's api): create, restore, connect, and the import under Advanced; the shell's form set only when a path commits |
 | `shell.mjs` | In the Android app: the remote form (a computer's page, on the LAN or over the relay), its pairing and `connectLan` |
 | `seed.mjs` | Restore from seed: `restoreInto` (derive with `apps/contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
-| `create.mjs` | Create new identity: `createInto` (commit with `apps/contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
+| `create.mjs` | Create my identity: `createInto` (commit with `apps/contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
 | `words.mjs` | The words password (design/apps-seed.md §8): the kept words (`apps/contact/words-lock.mjs`, sealed as kind `words`), `sigeloLocal.words`, the guards of profile removal and the seat |
 | `copy.mjs` | The vendoring: walks the import graph, copies each file byte for byte, writes `vendor.json` |
 | `vendor.json` | Every vendored file, its source and SHA-256 (committed; `vendor/` is not) |
@@ -47,7 +47,7 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 JSON here; what the app does not have answers as nothing: `GET /api/agents` (an agents' directory) is `[]`, enrolling or
 pairing a local agent `404 agent`, `GET /api/devices` an empty list, adding, scanning or revoking a device
 `409 not_here` (that is the operator's computer). Changes are pushed (`onChange`); the 2 s poll stays,
-with the same `since`. A banner says what the page holds: SAFE worker, FULL standby, or remote.
+with the same `since`. Me → Devices and computers says what the page holds: your identity, a spare, an agent of yours, or a remote.
 Remote over the relay (`SIGELO:CTL:`, apps/contact/control.mjs): the computer pushes the state (events), so
 the poll reads it in the page and sends nothing; one request renews the push every 5 minutes.
 
@@ -93,7 +93,7 @@ database `sigelo`, its localStorage keys and the keystore aliases of before; pro
 `<id>:…` and its own aliases (platform-android.mjs `profileBridge`: every seal and open names it). Only the active
 profile is opened and connects. More than one at a start: the picker (welcome.mjs `pickProfile`), then the lock. A
 switch, an add and a removal ask the lock once; a removal is recorded first, then erased (database, storage keys,
-`forget-profile`), the active one at the next start. Me → Profiles in `ui.js` calls `sigeloLocal.profiles`.
+`forget-profile`), the active one at the next start. The Profiles sheet (the profile chip) and Settings → Profiles in `ui.js` call `sigeloLocal.profiles`.
 
 ## Computers (computers.mjs, shell.mjs)
 
@@ -107,9 +107,9 @@ removes the material (a relay database at the next start); `sigeloLocal.computer
 
 ## Restore from seed (seed.mjs)
 
-The welcome's second choice: one box checked as it is
-typed (count, the first word not in the Monero list by position, the checksum), a restore height or
-date, the network, the device's name, and whether sigelo already runs as you on another device.
+Restore from 25 words, one screen: the box checked as it is typed (count, the first word not in the
+Monero list by position, the checksum), the month they were made (a block height under More options),
+and whether this identity is in use on another device (main or spare); network, name and relay folded.
 `apps/contact/restore.mjs` derives what `sigelo-agent keeper --from-words` writes: the operator identity
 (`operatorIdentity(S, 0)`) and the keeper file (K_1, the recovery commitment, `created`, `net`,
 `restore_height` or `restore_date`; neither given → `restore_height: 0`), this device as worker 0 of
@@ -122,22 +122,17 @@ seat at epoch 1 (`seat init`). Elsewhere: a standby. `router.mjs` then never log
 with `seat_elsewhere`, and the banner offers "Take the seat here" (`POST /api/seat/take`). Me shows
 "Restored from seed on <day> · keeper j=1 · seat here".
 
-## Create new identity (create.mjs)
+## Create my identity (create.mjs)
 
-The welcome's first choice. Name this phone (the network and the relay under Advanced). Create
-draws S in the page (`apps/contact/create.mjs` `newSeed`: `newRoot`'s draw, `crypto.getRandomValues`,
-redrawn until 0 < S < l) and holds the network until the end. The words screen is a one-way door: the
-25 words numbered in an ordered list, two columns, the address of their own Monero wallet (a wallet app restored from
-the words shows the same), no Back (the Android shell swallows the system's, `secure` with `door`),
-`FLAG_SECURE`, no copy on mainnet (not selectable); on stagenet a copy, the clipboard emptied after
-60 s. One button, "I have written them down". Then three words asked by number: wrong, the number named and
-asked again (the 25 again only on "Show the words again"); right, `commit` gives exactly a restore's files for those words (operator, K_1, this device
-FULL holding the seat, `created` and `restore_date` today, `made: "here"`), sealed as a restore,
-S zeroed. Nothing is stored before the check. Then one screen, also at the end of a restore: "Want to be able to see
-your words again on this phone? Set a password." (a password, its repeat, Set, Skip). Skip: the words are never stored.
-Set: they are encrypted under the password (PBKDF2-SHA256, 1,000,000 rounds; `words.mjs`) and sealed as kind `words`;
-Me → Security shows them again after the lock and the password, changes or removes the password, and the same password
-guards removing the profile and taking the seat. Then the page restarts. Me: "Created on <day>; the 25 words are on your paper".
+The welcome's first choice: Name this phone (network and relay under More options), then Keep it safe.
+*Write down 25 words:* S drawn in the page (`apps/contact/create.mjs` `newSeed`, `crypto.getRandomValues`,
+redrawn until 0 < S < l), the network held until the end; the words screen is a one-way door (numbered,
+no Back, `FLAG_SECURE` with `door` in the Android app, no copy on the main network), then three words asked
+by number. *Set a password:* the words drawn, checked by the page, encrypted under the password
+(PBKDF2-SHA256, 1,000,000 rounds; `words.mjs`) and sealed as kind `words`, never shown. Either way `commit`
+gives a restore's files for those words (operator, K_1, this device FULL holding the seat, `created` and
+`restore_date` today, `made: "here"`), sealed as a restore, S zeroed; nothing stored before. Then Lock (the
+Android app's screen lock once), You're set (the four words), the page restarts.
 
 ## Agents (pass A10b)
 
@@ -171,6 +166,10 @@ the QR codec, as they are. 61 files, about 1.7 MiB, most of it MQTT.js and @nobl
   without that rule (the tests' in-process relay) a tab works as it is.
 - **Devices in the app:** scanning a device code into the app (the identity file is imported).
 - **Files:** sending one from the page (as in `ui`).
+- **A wallet:** the app holds none. Its Wallet switch is the profile's setting (`POST /api/settings {wallet}`), and with it on
+  the Wallet tab says "This phone has no wallet yet" (`GET /api/wallet` `where: "none"`, the other wallet routes `409 wallet_none`);
+  a computer's page, opened from Me → Devices and computers, shows that computer's wallet (UI-API.md "Wallet"). The vault the
+  25 words make is restored in a Monero wallet app (its address is shown at creation).
 
 ## Tests (test-web.mjs)
 
@@ -195,6 +194,9 @@ Restore from seed is tested in both files:
   `FLAG_SECURE` and the clipboard; no "show seed".
 Profiles: test-shell (section 1d) migrates a single-profile install, adds, picks, switches (the bridge's unlock
 counted: once per switch, none at the new profile's start), renames, hits the limit, removes (words ticked, the
-name typed, the wipe of database, aliases and storage); test-web drives Me → Profiles in `ui.js`.
+name typed, the wipe of database, aliases and storage); test-web drives the Profiles sheet and Settings → Profiles in `ui.js`.
 Computers: test-shell (section 3b) runs three LAN pages (two of one operator, one of another): migration as c1, add,
-`other_operator`, Cancel, switch, forget; section 4 refuses a relay computer of another operator; test-web drives Me → Computers.
+`other_operator`, Cancel, switch, forget; section 4 refuses a relay computer of another operator; test-web drives Me → Devices and computers.
+Notifications and the lock: test-shell (section 1f) sends notify as given (a bad tag, title or text refused before the shell), cancel,
+ask; the `{ev:"open"}` event to `onOpen` only (never a request's waiter), a start by a tap delivered once connected; `lock` get and
+set (after 1, 5, 15, 60; others refused); `unlock({ force })` passed through; `words.check` (the gate, no screen lock).

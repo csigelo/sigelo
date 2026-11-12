@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 package io.sigelo.app;
 
+import android.app.KeyguardManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
@@ -95,7 +100,19 @@ import javax.net.ssl.SSLSocketFactory;
  *   clip-copy     text on the clipboard marked sensitive (no preview; stagenet words only), emptied
  *          after `clear` seconds (1 to 300) unless something else was copied since.
  *   unlock        the screen lock, before a screen that shows or spends the identity (MainActivity.unlock:
- *          not again within a minute of the last confirmation; none set on the phone: ok).
+ *          not again within a minute of the last confirmation unless force, a payment above the pay limit;
+ *          none set on the phone: ok).
+ *   lock          the app lock's settings, kept here (SharedPreferences "lock_on", default true; "lock_after",
+ *          minutes, 1, 5, 15 or 60, default 1): MainActivity asks the screen lock at a start and at a return
+ *          after that long away, or not at all when off. A weaker setting asks the screen lock first. The
+ *          answer names them and secure (the phone has a screen lock).
+ *   notify        a system notification on one channel ("messages"): the title and text the page gives (a name
+ *          and a generic line, never a message's text), the lock screen's public version only "sigelo" and
+ *          "New message"; the tag (chat:, group: or pay:, TAG) is its notification tag and id, and comes back
+ *          when it is tapped. cancel: removed. ask: POST_NOTIFICATIONS asked (Android 13+) → granted.
+ *          Not allowed: refused "notify_permission".
+ *   The shell's own event, no id: {ev:"open", tag} when one of our notifications is tapped (MainActivity
+ *          onNewIntent; at a start by the tap, kept until the page's port is open, then posted once).
  */
 public final class SigeloBridge {
     static final String SHELL = "sigelo-shell/0", PORT_MESSAGE = "sigelo-bridge/0";
@@ -111,6 +128,12 @@ public final class SigeloBridge {
     private static final int HTTP_MAX = 1 << 20, CHUNK = 16384, TIMEOUT_MS = 20000, MAX_STREAMS = 16, AUTH_SECONDS = 300;
     private static final Pattern IPV4 = Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$");
     private static final Pattern HOSTNAME = Pattern.compile("^[A-Za-z0-9.-]{1,253}$");
+    /** A notification's tag: what it is about (a chat, a group, a payment request), given back when it is tapped. */
+    static final Pattern TAG = Pattern.compile("^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$");
+    static final String CHANNEL = "messages", OPEN = "io.sigelo.app.OPEN", EXTRA_OPEN = "open";
+    private static final int NOTE_MAX = 100;
+    /** The app lock's choices: minutes away before the screen lock is asked again at a return. */
+    static final int[] LOCK_AFTER = {1, 5, 15, 60};
 
     private final MainActivity activity;
     private final WebView web;
@@ -120,6 +143,7 @@ public final class SigeloBridge {
     private final Map<Integer, Conn> streams = new ConcurrentHashMap<>();
     private final AtomicInteger nextStream = new AtomicInteger();
     private WebMessagePort port;   // the main thread's: the page's current port
+    private String pendingOpen;    // the main thread's: a tapped notification's tag waiting for the page's port
 
     SigeloBridge(MainActivity activity, WebView web) {
         this.activity = activity;
@@ -187,6 +211,27 @@ public final class SigeloBridge {
             }
         }, main);
         web.postWebMessage(new WebMessage(PORT_MESSAGE, new WebMessagePort[] {ch[1]}), Uri.parse(MainActivity.ORIGIN));
+        // A start by a tap on a notification: its tag once the page's port is open, once.
+        if (pendingOpen != null) {
+            String tag = pendingOpen;
+            pendingOpen = null;
+            postOpen(mine, tag);
+        }
+    }
+
+    /** A notification of ours tapped (MainActivity, main thread): to the page now, or once its port is open. */
+    void opened(String tag) {
+        if (tag == null || !TAG.matcher(tag).matches()) return;
+        if (port != null) postOpen(port, tag);
+        else pendingOpen = tag;
+    }
+
+    private void postOpen(WebMessagePort to, String tag) {
+        try {
+            post(to, new JSONObject().put("ev", "open").put("tag", tag));
+        } catch (JSONException e) {
+            // nothing to say it with
+        }
     }
 
     private void closePort() {
@@ -352,11 +397,138 @@ public final class SigeloBridge {
                 break;
             }
             case "unlock":
-                activity.unlock(() -> post(to, ok(id)), () -> fail(to, id, "cancelled", "the screen lock was not confirmed"));
+                activity.unlock(() -> post(to, ok(id)), () -> fail(to, id, "cancelled", "the screen lock was not confirmed"), m.optBoolean("force", false));
+                break;
+            case "lock":
+                lock(to, id, m);
+                break;
+            case "notify":
+                notification(to, id, m);
                 break;
             default:
                 fail(to, id, "op", "no operation " + op);
         }
+    }
+
+    // ---------------------------------------------------------------- the app lock's settings
+
+    boolean lockOn() {
+        return prefs.getBoolean("lock_on", true);
+    }
+
+    /** Minutes away before the screen lock is asked again at a return (one of LOCK_AFTER; 1 when none is set). */
+    int lockAfter() {
+        int a = prefs.getInt("lock_after", 1);
+        for (int x : LOCK_AFTER) if (x == a) return a;
+        return 1;
+    }
+
+    private void lock(WebMessagePort to, int id, JSONObject m) {
+        boolean on = lockOn();
+        int after = lockAfter();
+        if (m.has("on")) {
+            Object v = m.opt("on");
+            if (!(v instanceof Boolean)) {
+                fail(to, id, "lock", "on: true or false");
+                return;
+            }
+            on = (Boolean) v;
+        }
+        if (m.has("after")) {
+            Object v = m.opt("after");
+            int a = v instanceof Integer ? (Integer) v : -1;
+            boolean known = false;
+            for (int x : LOCK_AFTER) known |= x == a;
+            if (!known) {
+                fail(to, id, "lock", "after: 1, 5, 15 or 60 minutes");
+                return;
+            }
+            after = a;
+        }
+        final boolean on1 = on;
+        final int after1 = after;
+        Runnable save = () -> {
+            prefs.edit().putBoolean("lock_on", on1).putInt("lock_after", after1).apply();
+            KeyguardManager km = activity.getSystemService(KeyguardManager.class);
+            try {
+                post(to, ok(id).put("on", on1).put("after", after1).put("secure", km != null && km.isDeviceSecure()));
+            } catch (JSONException e) {
+                fail(to, id, "lock", "no answer");
+            }
+        };
+        // Weaker (off, or longer away): the screen lock first.
+        boolean weaker = (lockOn() && !on1) || after1 > lockAfter();
+        if (weaker) activity.unlock(save, () -> fail(to, id, "cancelled", "the screen lock was not confirmed"), false);
+        else save.run();
+    }
+
+    // ---------------------------------------------------------------- notifications
+
+    /** A string field of 1 to NOTE_MAX characters, else null. */
+    private static String line(JSONObject m, String k) {
+        Object v = m.opt(k);
+        return v instanceof String && !((String) v).isEmpty() && ((String) v).length() <= NOTE_MAX ? (String) v : null;
+    }
+
+    private void notification(WebMessagePort to, int id, JSONObject m) {
+        NotificationManager nm = activity.getSystemService(NotificationManager.class);
+        if (nm == null) {
+            fail(to, id, "notify", "no notifications on this phone");
+            return;
+        }
+        if (m.optBoolean("ask", false)) {
+            activity.askNotifications(granted -> {
+                try {
+                    post(to, ok(id).put("granted", granted));
+                } catch (JSONException e) {
+                    fail(to, id, "notify", "no answer");
+                }
+            });
+            return;
+        }
+        Object t = m.opt("tag");
+        if (!(t instanceof String) || !TAG.matcher((String) t).matches()) {
+            fail(to, id, "notify", "tag: chat:, group: or pay: and up to 200 letters, digits or : . _ -");
+            return;
+        }
+        String tag = (String) t;
+        if (m.optBoolean("cancel", false)) {
+            nm.cancel(tag, tag.hashCode());
+            post(to, ok(id));
+            return;
+        }
+        String title = line(m, "title"), text = line(m, "text");
+        if (title == null || text == null) {
+            fail(to, id, "notify", "title and text: 1 to " + NOTE_MAX + " characters");
+            return;
+        }
+        if (!activity.notificationsAllowed()) {
+            fail(to, id, "notify_permission", "notifications are not allowed for this app");
+            return;
+        }
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL, activity.getString(R.string.notify_channel), NotificationManager.IMPORTANCE_DEFAULT));
+        // The lock screen's version: no name, no line of the page's.
+        Notification shown = new Notification.Builder(activity, CHANNEL)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(activity.getString(R.string.app_name))
+                .setContentText(activity.getString(R.string.notify_public))
+                .setCategory(Notification.CATEGORY_MESSAGE)
+                .build();
+        Intent open = new Intent(activity, MainActivity.class).setAction(OPEN).putExtra(EXTRA_OPEN, tag)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent tap = PendingIntent.getActivity(activity, tag.hashCode(), open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Notification n = new Notification.Builder(activity, CHANNEL)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setCategory(Notification.CATEGORY_MESSAGE)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(shown)
+                .setAutoCancel(true)
+                .setContentIntent(tap)
+                .build();
+        nm.notify(tag, tag.hashCode(), n);
+        post(to, ok(id));
     }
 
     // ---------------------------------------------------------------- https

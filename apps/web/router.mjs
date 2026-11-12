@@ -89,6 +89,9 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
       clearHistory: () => files.write(historyFile, new Uint8Array(0)),
       readData: () => text(files.read(dataFile)),
       writeData: (t) => files.write(dataFile, utf8(t)),
+      // Pictures (UI-API.md "Pictures"): one file each under app/me.local.pictures/, in this profile's storage.
+      readPicture: (name) => files.read(`${base}.pictures/${name}`),
+      writePicture: (name, bytes) => { if (bytes === null) files.remove(`${base}.pictures/${name}`); else files.write(`${base}.pictures/${name}`, bytes); },
     },
     hooks: {
       me,

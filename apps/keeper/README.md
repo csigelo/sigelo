@@ -64,8 +64,8 @@ keeper checks it, or pinned with `--daemon-ssl-fingerprint`), else from genesis 
 
 **Recommended: the keeper and wallet-rpc under their own user, the agent under another.** An
 agent that runs as the keeper's uid can read `policy.json` (the wallet login, which spends
-without any policy), `spend.key` and `spend.log`, and edit `policy.json` — systemd restarts the
-keeper with the new caps. A prompt injection with file access then has the wallet. Run `init` as
+without any policy), `spend.key` and `spend.log`, and edit `policy.json` — the keeper takes the new caps
+on its next request. A prompt injection with file access then has the wallet. Run `init` as
 root and it sets up the two-user layout:
 
 ```sh
@@ -365,6 +365,7 @@ of its txid) answers for the life of the log:
 | `intent` only (a crash before the outcome) | `502` UNCERTAIN, same `txid` — it may have been broadcast |
 | `pending` (approval wait, G6) | `202 approval_needed`, the same `approval_request` — until the request's `exp`, not `dedupe_seconds`, and only while the policy **as it is now** still asks for an approval of that amount; if the Owner turned `approval_above` off or raised it above the amount, the ref pays like any other |
 | `pending` + a valid `approved` line | not a repeat: the payment runs once through every check and the two-phase relay |
+| `pending` + a valid `refused` line (`POST /refuse`) | `403 refused`, the approver's reason — until the request's `exp`, whatever the threshold is now; never paid, never asked again; after `exp` the next run asks afresh |
 | `pending` + an `approved` line whose approver is no longer in `approvers` | not a repeat: a fresh `202` with a new nonce (the old request's nonce is used and cannot be approved again); the next run gets that new request back |
 
 Every replay carries `repeat: true`. An explicit `ref` reused with a different request is
@@ -389,21 +390,24 @@ Add an agent's entry (any placeholder `token_hash`), then run `token new <policy
 it before adding the next: the file is validated with the new hash before it is written. A
 buckets-style policy takes no agent name.
 
-**What a running keeper re-reads.** The policy is read at start, with one exception: the
-`token_hash` of each root agent the keeper already serves. On every request the keeper checks
-`policy.json`'s inode, size and times; when they changed it loads the whole file, validated as
-at start, and takes only those hashes from it. So `token new <policy> <agent>` for a running root
-takes effect on the keeper's next request: the new token pays and the old one is `401`, with no
-restart (after a leak, the leaked token is dead as soon as the command returns). Everything
-else — caps, accounts, allowlists, `approvers`, a root added or removed, a buckets-style file's
-single bucket — takes effect at the next start only: **after any other edit, restart the keeper**
-(`systemctl --user restart <its unit>`, or stop and start `sigelo-spend serve`; SIGHUP stops it
-like SIGINT/SIGTERM, which is a restart under `Restart=always` and a stop otherwise). A root
-added to the file is `401` until then, a removed root keeps paying until then (to cut one off at
-once, run `token new` for it and discard the token, then remove it and restart). A file that does
-not load (a typo, a write in progress), or one that would give two running roots one hash,
-changes no token: the keeper keeps the last good set and logs one warning per file state; the
-next start on that file is refused, naming the field.
+**What a running keeper re-reads.** On every request the keeper checks `policy.json`'s inode, size
+and times; when they changed it loads the whole file, validated as at start, and takes from it, for
+each root agent it already serves on the same account, the whole entry — `token_hash`, caps,
+`allow`, `approval_above`, `max_delegates`, `did`, `genesis` — and, at the top, `approvers`,
+`max_approval_ttl`, `dedupe_seconds` and `priority`. So `token new <policy> <agent>` for a running
+root takes effect on the keeper's next request (the new token pays and the old one is `401`; after a
+leak, the leaked token is dead as soon as the command returns), and so does a cap, an allowlist or
+an approver changed by hand or by the page (`sigelo-agent ui`, Agents → an agent → Allowance): no
+restart. A delegate's clamps follow its root's new caps at once. What still waits for the next
+start: a root added (`401` until then), a root removed (it keeps paying until then; to cut one off
+at once, run `token new` for it and discard the token, then remove it and restart), a root moved to
+another account, `net`, `wallet`, `unlock_time` and `recovery_commitment`, and a buckets-style
+file's single bucket — **after such an edit, restart the keeper** (`systemctl --user restart <its
+unit>`, or stop and start `sigelo-spend serve`; SIGHUP stops it like SIGINT/SIGTERM, which is a
+restart under `Restart=always` and a stop otherwise); the keeper prints one warning naming it. A
+file that does not load (a typo, a write in progress), or one that would give two running roots one
+hash, changes nothing: the keeper keeps the last good policy and logs one warning per file state;
+the next start on that file is refused, naming the field.
 
 `POST /pay` · `GET /budget` → `{agent, bucket, account, per_tx_max, per_period_max,
 period_seconds, window_start, spent, remaining, rate: {limit, used}}` (spent incl. fees;
@@ -414,11 +418,11 @@ reply without a height or balance is `502`, code `wallet`, with `net`, `dry_run`
 still in the body) · the agent surface below (`GET /balance`, `POST /receive`, `GET /history`,
 `POST /bind`) · delegation (`POST /delegate`, `POST /fund`, `POST /revoke`, `GET /delegates`).
 Every route takes the agent's bearer token and answers for that agent only — except `POST
-/approve`, which an approver's signature authorises (Approvals, below).
+/approve` and `POST /refuse`, which an approver's signature authorises (Approvals, below).
 
 **Every error is `{ error, code }`.** `code` is the check that refused — the §4.1 checks
 (`token`, `bucket`, `allowlist`, `invoice`, `to`, `to.addr`, `to.did`, `amount`, `purpose`,
-`ref`, `per_tx_max`, `per_period_max`, `rate_per_minute`, `repeat`, `approval`), the wallet's
+`ref`, `per_tx_max`, `per_period_max`, `rate_per_minute`, `repeat`, `approval`, `refused`), the wallet's
 (`wallet_locked`, `wallet_funds`, `wallet_offline`, `wallet_slow`, `wallet`, `relay_failed`), the route's own (`bind`,
 `delegate`, `fund`, `revoke`, `dry_run`), the tier's `licence_required` (`403`, Install above), the keeper's own `clock_behind` (`503`, below), and the transport's: `request` (a body that is not
 strict JSON or not the route's shape, `400`), `body` (not read in full: `408` too slow, `413`
@@ -452,7 +456,7 @@ Above `approval_above` it answers `202` with the body and `dry_run: true`, no `p
 
 State lives next to the policy file, both 0600 (on Windows the mode is not applied: the files
 take the directory's ACL, so keep the policy directory where only the keeper's account can read): `spend.log` (NDJSON, `{entry, sig}` per line,
-`entry.status` one of `intent`, `relayed`, `relay_failed`, `pending`, `approved`; `error` beside a failed one) and
+`entry.status` one of `intent`, `relayed`, `relay_failed`, `pending`, `approved`, `refused`; `error` beside a failed one) and
 `spend.key` (the service's root seed, created on first run), `identity.json` (its genesis and any
 recovery rotation, public; written by `init`), and, while the keeper runs,
 `spend.lock` (below). `entry.request` carries `agent`,
@@ -591,8 +595,8 @@ own identity and its own token, and is funded on-chain from its delegator's acco
 checked against its delegator's at creation (above → refused, not clamped) and clamped again
 at every spend to the minimum along its ancestors; `period_seconds` is always the root's; its
 `allow` keeps only rules every ancestor still covers (a literal by the same address; an
-issuer rule by one at least as broad). So an Owner who tightens a root in `policy.json` and
-restarts tightens the whole subtree. **Count:** `max_delegates` bounds the agent's whole
+issuer rule by one at least as broad). So an Owner who tightens a root in `policy.json`
+tightens the whole subtree, from the keeper's next request. **Count:** `max_delegates` bounds the agent's whole
 subtree — each live child reserves 1 + its own `max_delegates`, and a child's is at most its
 parent's minus one — so a chain of delegates cannot multiply past its root's number.
 Revoking frees the reservation; it never frees the account index or the name. A name is taken
@@ -736,6 +740,7 @@ checks the fixed ones against this table):
 | `clock_behind`: the keeper's clock is behind its own log, or before its build (a host booted without the time) | 2 | `TRY LATER: the wallet service's clock is not set yet; nothing was sent. Run the same command later.` |
 | `busy`: more than 64 requests already wait in the keeper's one-at-a-time lane (503, `Retry-After: 1`); nothing was done | 2 | `TRY LATER: the wallet service is busy with other requests; nothing was sent. Run the same command in a few seconds.` |
 | `approval`: approval needed | 3 | `WAITING FOR APPROVAL (ref <ref>): tell your operator, then run the same command again.` |
+| `refused`: an approver refused this payment (`POST /refuse`), until the request's `exp` | 1 | `REFUSED: your operator refused this payment (<reason>). It is not paid; do not ask for it again.` |
 | `relay_failed`, or an intent with no outcome | 4 | `UNCERTAIN: the payment may have gone out (txid <txid>). Do not pay again; tell your operator.` |
 | `timeout`: `pay` (or `fund`) got no answer in time — the keeper may have relayed it after the CLI stopped waiting | 4 | ``UNCERTAIN: the request timed out; the payment may have gone out. Run `sigelo-wallet history` before paying again.`` |
 | keeper unreachable, non-JSON reply, or a timeout of any other verb | 2 | `TRY LATER: the wallet service is not answering.` |
@@ -815,7 +820,17 @@ wallet call.
    answers nothing, and a further run is the ordinary `ALREADY PAID`. The keeper never pays on
    its own.
 
-An `approved` line counts only if it verifies under the keeper key; an unsigned one is
+4. **Or the approver says no**: the same body with `typ: "spend-refusal"`, signed the same way (so a
+   refusal can never pass for an approval), posted as `{body, sig, bundle, reason?}` to **`POST
+   /refuse`** (no token; `reason` at most 200 printable characters, what the agent is told). Every
+   check of `/approve` runs; then a keeper-signed `refused` line (the refusal, the approver, the
+   reason; no debit, no rate tick), `200 {status: "refused", ref, agent, approver, nonce, exp,
+   reason}`. Until the request's `exp` the agent's same pay is `403 refused` with the reason
+   (`sigelo-wallet`: `REFUSED: your operator refused this payment (…)`, exit 1), whatever the
+   threshold is now; that nonce can no longer be approved. After `exp` the next run asks afresh.
+   Free on every tier. The page (`sigelo-agent ui`, Refuse) posts it and tells the agent in its chat.
+
+An `approved` or `refused` line counts only if it verifies under the keeper key; an unsigned one is
 ignored (still waiting). A request that expired unapproved frees its ref: the next run of the
 same pay gets a fresh request with a new nonce. A payment refused at the build step leaves
 the approval on file until its `exp`.

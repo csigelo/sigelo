@@ -3,4 +3,6 @@
     <string name="app_name">sigelo</string>
     <string name="unlock_identity">Unlock the identity this phone holds</string>
     <string name="reload">Reload</string>
+    <string name="notify_channel">Messages and payment requests</string>
+    <string name="notify_public">New message</string>
 </resources>

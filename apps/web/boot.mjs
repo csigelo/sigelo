@@ -10,23 +10,34 @@
 //
 //   const app = boot(env)   env: { shell (SigeloShell) | null, target? (where its port arrives), box (the first run's element), main (ui.js's),
 //                           mqtt, indexedDB?, storage (localStorage), session (sessionStorage), reload(), seal? }
-//   app.local               what ui.js reads as globalThis.sigeloLocal: { call, onChange, mode, share, unlock, secure, profiles, computers, words }
+//   app.local               what ui.js reads as globalThis.sigeloLocal: { call, onChange, mode, share, unlock, secure, profiles, computers, words,
+//                           lock, notify, onOpen }
 //   app.ready               → the backend (rejects while there is none: the first run, the connect view)
 //
-// local.profiles (ui.js Me → Profiles): list() → { active, limit, profiles }; use(id) the switch: the lock
-// once (the shell's unlock), the active id kept, a reload; rename(id, name); add() a new profile, its
-// first run (the lock too: it leaves the profile open now); remove(id, { name, words }) a words profile
+// local.profiles (ui.js: the Profiles sheet, Settings → Profiles): list() → { active, limit, profiles }; use(id) the switch: the lock
+// once (the shell's unlock), the active id kept, a reload; rename(id, name); add(path?) a new profile, its
+// first run (the lock too: it leaves the profile open now), at path's step: create, join (an invite code first, kept for
+// local.joinCode() once the identity is made), restore, computer; remove(id, { name, words }) a words profile
 // needs words: true ("I have the 25 words") and its name typed, a remote one its name, one not set up
 // yet nothing; then the lock, the drop, the wipe (the active one: after the reload). Refusals throw an
 // Error with { check, status }. A words profile whose words are kept behind a password (words.mjs) needs
 // that password too ({ password }).
-// local.words (ui.js Me → Security): words.mjs wordsApi over the active profile; local.secure(on): FLAG_SECURE.
-// local.computers (ui.js Me → Computers, a remote profile in the Android app; design/profiles.md P2): list() → { active,
+// local.words (ui.js Settings → Backup and recovery): words.mjs wordsApi over the active profile; local.secure(on): FLAG_SECURE.
+// local.computers (ui.js Me → Devices and computers, a remote profile in the Android app; design/profiles.md P2): list() → { active,
 // limit, computers, profile }; use(id) the switch (the lock once, a reload), add() the pairing screens after a reload,
 // forget(id) its control key gone here (the lock), → { revoke }: what to run on the computer, which keeps it until then.
-import { parseBytes } from 'sigelo';
+// local.unlock(opts): the shell's screen lock (none: at once); { force: true } asks it even within a minute of the last (a payment
+// above the pay limit).
+// local.lock (the Android app only; else undefined): { kind: 'screen', get() → { on, after (minutes), secure (the phone has a screen
+// lock) }, set({ on?, after? }) → the same } (after 1, 5, 15 or 60, else refused check lock): the shell's lock at a start and at a
+// return after `after` minutes away; off, the page's own asks (the 25 words, a switch, a payment above the limit) still ask.
+// local.notify (the Android app only; else undefined): notify({ tag, title, text }) a system notification shown as given (the page
+// gives a name and a generic line, never a message's text; tag chat:… | group:… | pay:…), notify({ tag, cancel: true }) removes it,
+// notify({ ask: true }) → { granted } asks the permission. local.onOpen(fn): fn(tag) when one of them is tapped (a start by the tap:
+// once the bridge is connected); without the shell nothing.
+import { did as didOf, parseBytes } from 'sigelo';
 import { loadIdentity, memoryFiles, openDb, webPlatform } from './platform-web.mjs';
-import { androidPlatform, connectBridge, keystoreSealer, profileBridge } from './platform-android.mjs';
+import { TAG, androidPlatform, connectBridge, keystoreSealer, profileBridge } from './platform-android.mjs';
 import { makeRouter } from './router.mjs';
 import { addComputerView, remoteBackend, wipeIfAsked } from './shell.mjs';
 import { LIMIT as COMPUTERS_MAX, REVOKE, openComputers } from './computers.mjs';
@@ -36,16 +47,21 @@ import { setupApi } from './setup.mjs';
 import { LIMIT, dbName, deleteDb, openRegistry, prefixed, runWipes } from './profiles.mjs';
 import { guard, wordsApi } from './words.mjs';
 
-const SETTINGS = 'app/settings.json', PICKED = 'sigelo-picked', FROM = 'sigelo-from';
+const SETTINGS = 'app/settings.json', PICKED = 'sigelo-picked', FROM = 'sigelo-from', ADD = 'sigelo-add', JOIN = 'sigelo-join';
+const PATHS = new Set(['create', 'join', 'restore', 'computer']);
 const refuse = (status, check, message) => { throw Object.assign(new Error(message), { status, check }); };
 
 export function boot({ shell = null, target, box = null, main = null, mqtt, indexedDB = globalThis.indexedDB, storage = globalThis.localStorage, session = null, reload, seal = './vendor/icon.svg', pow, locks } = {}) {
-  let router = null, raw = null, bridge = null, prof = null, own = null, regOk, regNo, profOk;   // own: the active profile's platform, once it holds an identity
+  let router = null, raw = null, bridge = null, prof = null, own = null, ownDid = null, regOk, regNo, profOk;   // own: the active profile's platform, once it holds an identity
   const profP = new Promise((y) => { profOk = y; });
   const regP = new Promise((y, n) => { regOk = y; regNo = n; });
   regP.catch(() => {});
   const sess = { get: (k) => { try { return session?.getItem(k) ?? null; } catch { return null; } }, set: (k, v) => { try { session?.setItem(k, v); } catch {} } };
   const extra = { ...(indexedDB && { indexedDB }), ...(pow && { pow }), ...(locks && { locks }) };
+  // The shell's bridge, connected once (lock, notify and onOpen wait for it); none without the shell.
+  const rawP = shell ? connectBridge({ shell, ...(target && { target }) }) : Promise.resolve(null);
+  rawP.catch(() => {});
+  const shellOf = async () => raw ?? (await rawP);
 
   /** p1 before profiles: an identity sealed in `sigelo` → words; the shell's form remote → remote; else nothing yet. */
   async function migrate() {
@@ -65,7 +81,7 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
   const hideMain = (on) => { if (main) main.hidden = on; };
 
   const ready = (async () => {
-    if (shell) { raw = await connectBridge({ shell, ...(target && { target }) }); await wipeIfAsked(raw, { indexedDB, storage }); }
+    if (shell) { raw = await rawP; await wipeIfAsked(raw, { indexedDB, storage }); }
     let reg;
     try { reg = await openRegistry({ indexedDB, migrate }); } catch (e) { regNo(e); throw e; }
     regOk(reg);
@@ -105,6 +121,7 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     const s = platform.files.read(SETTINGS), settings = s === null ? {} : JSON.parse(new TextDecoder().decode(s));
     const identity = parseBytes(id);
     own = platform;
+    try { ownDid = didOf(identity.genesis); } catch {}
     router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' }, seat: seatOf(platform, () => identity), keeper: keeperOf(platform),
       words: { guard: (password) => guard(platform, password) } });
     await router.start();
@@ -120,7 +137,12 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     hideMain(true);
     const others = reg.list().some((p) => p.id !== prof.id);
     const leave = others ? { label: 'Back to my profiles', run: () => profiles.remove(prof.id, {}).catch(() => {}) } : undefined;
-    firstRun(box, setupApi(platform, { bridge, mqtt, storage: store, reload, profile: { name, kind: (k) => reg.set(prof.id, { kind: k }), leave } }));
+    // Added by one of the Add sheet's four ways: its first run opens at that step; Join keeps the code for the page (joinCode).
+    const path = sess.get(ADD);
+    sess.set(ADD, '');
+    const api = { ...setupApi(platform, { bridge, mqtt, storage: store, reload, profile: { name, kind: (k) => reg.set(prof.id, { kind: k }), leave } }), join: (code) => sess.set(JOIN, code) };
+    const fr = firstRun(box, api);
+    if (PATHS.has(path)) fr.start(path);
   }
 
   /** fn(profile id's store of kept words): the active one's platform, else its database opened (its keystore aliases) and closed again. */
@@ -145,13 +167,15 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
       return { active: id, reload: true };
     },
     async rename(id, name) { const reg = await regP; await reg.rename(id, name); return reg.full(); },
-    /** A new profile and its first run (the three choices); at the limit, refused profile_limit. */
-    async add() {
+    /** A new profile and its first run, at path's step when given (create, join, restore, computer: the Add sheet); at the limit, refused profile_limit. */
+    async add(path) {
       const reg = await regP, from = reg.active()?.id ?? null;
       if (reg.list().length >= LIMIT) refuse(400, 'profile_limit', `At most ${LIMIT} profiles on this phone: remove one first.`);
+      if (path !== undefined && !PATHS.has(path)) refuse(400, 'profile_path', 'path: create, join, restore or computer');
       await raw?.unlock();
       const p = await reg.add();
       sess.set(PICKED, p.id);
+      sess.set(ADD, path ?? '');
       if (from) sess.set(FROM, from);
       await stopNow();
       reload();
@@ -229,13 +253,25 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     mode: () => router?.mode() ?? null,
     // A ready-to-send message through the Android share sheet; without the shell, ui.js copies it.
     async share(text) { if (!raw) throw new Error('no share sheet'); await raw.share(text); },
-    // The screen lock before a screen that shows or spends the identity (ui.js GUARDED); a page has none.
-    async unlock() { if (raw) await raw.unlock(); },
-    // FLAG_SECURE while the kept words are on the screen (ui.js Me → Security → Show my 25 words).
+    // The screen lock before a screen that shows or spends the identity (ui.js: a screen declared guard); a page has none.
+    // force: asked even within a minute of the last confirmation (a payment above the pay limit).
+    async unlock({ force = false } = {}) { if (shell) await (await shellOf()).unlock({ force: force === true }); },
+    // The app lock's settings (Settings → Lock), the shell's; a page has none.
+    lock: shell ? Object.freeze({ kind: 'screen', get: async () => (await shellOf()).lockGet(), set: async (o) => (await shellOf()).lockSet(o ?? {}) }) : undefined,
+    // System notifications (the sender's or group's name only); a page has none.
+    notify: shell ? async (o) => (await shellOf()).notify(o ?? {}) : undefined,
+    // fn(tag) when one of our notifications is tapped.
+    onOpen(fn) {
+      if (!shell || typeof fn !== 'function') return;
+      rawP.then((r) => r.onEvent((m) => { if (m.ev === 'open' && typeof m.tag === 'string' && TAG.test(m.tag)) fn(m.tag); }), () => {});
+    },
+    // FLAG_SECURE while the kept words are on the screen (ui.js Settings → Backup and recovery → Show my 25 words).
     async secure(on) { if (raw) await raw.secure(on); },
     profiles,
     computers,
-    words: wordsApi(() => own, { unlock: async () => { if (raw) await raw.unlock(); }, withProfile }),
+    // The code a profile added by "Join from an invite code" was made for: once, then gone (ui.js opens Enter their code with it).
+    joinCode() { const c = sess.get(JOIN); if (!c) return null; sess.set(JOIN, ''); return c; },
+    words: wordsApi(() => own, { unlock: async () => { if (raw) await raw.unlock(); }, withProfile, original: () => ownDid }),
   });
   return { ready, local, registry: regP };
 }

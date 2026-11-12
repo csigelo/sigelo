@@ -45,6 +45,8 @@ run cp "$REPO/apps/web/welcome.mjs" "$REPO/apps/contact/words-lock.mjs" "$SHARE/
 # The Monero word list for the start page's live check of the 25 words (data only, from ts/dist).
 run cp "$REPO/ts/dist/monero-words.js" "$SHARE/web/"
 for f in ui.html ui.js ui.css icon.svg shim-zlib.mjs shim-kdf.mjs; do run cp "$REPO/apps/agent/$f" "$SHARE/web/"; done
+# The version About shows (ui.js reads package.json beside itself): apps/agent's, the one a release bumps.
+run cp "$REPO/apps/agent/package.json" "$SHARE/web/package.json"
 # QR reading (apps/contact/qr-decode.mjs, design/devices.md §6.4) where this checkout has it; else paste only.
 if [ -f "$REPO/apps/contact/qr-decode.mjs" ] && [ -f "$REPO/apps/contact/qr.mjs" ]; then
   run cp "$REPO/apps/contact/qr-decode.mjs" "$REPO/apps/contact/qr.mjs" "$SHARE/web/"

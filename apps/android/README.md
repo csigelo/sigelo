@@ -7,33 +7,26 @@ small bridge in Java for what a page cannot do. No AndroidX, no dependency but t
 
 ## The first run
 
-A welcome with three choices, then one decision per screen (`apps/web/welcome.mjs`, shared with the
-GTK phone app); Back goes one screen back (the page keeps one history entry per screen; the system
-Back follows it, and leaves the app only from the first screen). The form, this phone or a computer, is
-set only when a path commits.
+The mock's screens (`apps/web/welcome.mjs`, shared with the GTK phone app), one decision each; Back goes
+one screen back (one history entry per screen; the system Back follows it and leaves the app only from the
+first screen). The form, this phone or a computer, is set only when a path commits.
 
-- **Create new identity:** the phone makes 25 new words (as `newRoot`: the system's randomness, a
-  canonical Monero seed) and shows them once, numbered 1 to 25, with the address of their own Monero
-  wallet. That screen blocks screenshots, ignores Back and has one way on: "I have written down my 25
-  words". Copy is offered on stagenet only (the clipboard is marked sensitive and emptied after 60 s).
-  Then three words are asked by number; a wrong one goes back to the words. Right: the identity and
-  K_1 are made from them as a restore makes them, sealed under the FULL key, and the phone holds the
-  seat. Then, as at the end of a restore: "Want to be able to see your words again on this phone? Set a password."
-  Skip: the words are gone. Set: Me → Security → Show my 25 words, after the screen lock and that password
-  (`FLAG_SECURE`, nothing copied, Done hides them); the password also guards removing the profile and taking the seat.
-- **This phone:** the phone holds an identity, SAFE (the file `sigelo-agent device scan` wrote for it
-  on your computer). Import the file once (Advanced, on the welcome); the app runs its own carrier and talks to the relay
-  itself. The operator's file (FULL) is not imported: restore from seed (design/apps.md §18).
-- **Restore from seed:** your 25 words make the operator identity and your keeper root K_1 again on
-  the phone (FULL), as `sigelo-agent keeper --from-words` does on a computer. First "I have my 25
-  words on paper", then one box: the words are checked as you type (count, word list, checksum),
-  pasting is allowed and the clipboard is cleared after it, and screenshots are blocked while the
-  screen is up. Add a restore height or date, the network and the device's name. Both files are sealed under the FULL key
-  (your screen lock is asked); the words are kept nowhere unless you set the words password at the end. The phone takes the
-  seat, or, if sigelo already runs as you elsewhere, waits as a standby until "Take the seat here".
-- **A computer:** the phone drives the page of a computer running `sigelo-agent ui --remote` on the
-  same network. Scan its QR (camera), pick a screenshot of it, or paste its `SIGELO:UI:` text. The
-  phone holds no account key, only that computer's text.
+- **Create my identity:** Name this phone, then Keep it safe. *Write down 25 words:* drawn on the phone
+  (the system's randomness, a canonical Monero seed), shown once, numbered 1 to 25; that screen blocks
+  screenshots (`FLAG_SECURE`), ignores Back and has one way on, "I wrote them down"; copy on the test
+  network only (marked sensitive, emptied after 60 s). Three words asked back by number; wrong goes back
+  to the words. *Set a password:* the words are kept on the phone under it, never shown (Settings →
+  Backup and recovery shows them after the screen lock and the password). Either way the identity and K_1
+  are made as a restore makes them, sealed under the FULL key, this phone holding the seat. Then Lock (the
+  screen lock once) and You're set (the four words).
+- **I have an invite code:** the code first, then the name and Keep it safe; the app pairs with it once open.
+- **Restore from 25 words:** one screen: the words checked as you type (count, word list, checksum;
+  pasting allowed, the clipboard cleared after it, screenshots blocked), the month they were made, and
+  "Is this identity already in use on another device?" (main or spare). Sealed under the FULL key; the
+  words are kept nowhere. A spare waits until "Make this phone the main one".
+- **Use my computer instead:** the phone drives a computer's `sigelo-agent ui --remote`: scan its QR or
+  type its code, compare four words. The phone holds no account key, only that computer's control.
+- **Advanced:** import the SAFE file `sigelo-agent device scan` wrote for this phone.
 
 The relay is configurable: relay.sigelo.ai by default, set when importing and under Me (codes
 name it; a 12-character code always names its own relay).
@@ -67,9 +60,21 @@ version 2 naming it, the AAD naming kind and profile, so no blob opens in anothe
 | `sigelo-identity-full` | the FULL identity file and, after a restore from seed, the keeper root and the kept words (kind `words`, already encrypted under the words password), each its own AAD; usable 5 minutes after you confirm the screen lock (no screen lock, no FULL) |
 | `sigelo-control` | a computer's `SIGELO:UI:` text |
 
-The app lock: with a screen lock set, the app asks it at each start, at a return after a minute
-away, and before Enrol my agent, Add a contact, a code, Devices and Me (not again within a minute of
-the last); the page stays hidden until it is confirmed. The FULL key's 5 minutes stay the inner guard.
+## The lock
+
+With a screen lock set, the app asks it at each start and at a return after 1, 5, 15 or 60 minutes away
+(Settings → Lock; 1 by default), or at neither when the lock is off. The page stays hidden until it is
+confirmed; not confirmed, the app goes to the background, locked. Turning it off or lengthening it asks the
+screen lock first. Whether it is on or off, the screen lock is asked before the 25 words are shown, at a
+profile switch and before a payment above the pay limit (not again within a minute of the last
+confirmation, except that payment). The FULL key's 5 minutes stay the inner guard.
+
+## Notifications
+
+A new message, a group's message or a payment request: a system notification with the sender's, the
+group's or the agent's name and a generic line ("New message"), never the message's text. On the lock
+screen only "sigelo" and "New message". One channel, "Messages and payment requests". A tap opens that
+chat, group or request. Android 13 and later ask the permission when the page first asks.
 
 The sealed files are in the app's private storage, with the contacts, ratchets and history. The seed
 is opened at start and lives in the app's memory while it runs. Nothing is in a backup or moved to a
@@ -92,11 +97,13 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
   `clip-clear`: the clipboard emptied after the 25 words were pasted. `share`: the system's share
   sheet with a ready-to-send message (a code, until when, the instructions link). `clip-copy`: stagenet words on
   the clipboard, marked sensitive (no preview), emptied by the shell after 60 s.
+- `unlock` (the screen lock; `force` skips the minute's window), `lock` (the lock's settings, kept by the shell),
+  `notify` (show, cancel, ask the permission); the shell's event `{ev:"open", tag}` when a notification is tapped.
 
 The page comes from the APK at `https://appassets.androidplatform.net/` (served by the app, never
 fetched); nothing else loads, links open in the browser. JavaScript on, file access off, mixed content
 never. The camera: asked at the first scan, for this origin and video only. A file input opens the
-system picker. Permissions: INTERNET and CAMERA.
+system picker. Permissions: INTERNET, CAMERA and POST_NOTIFICATIONS.
 
 ## Build (on CI)
 
@@ -139,9 +146,11 @@ node apps/android/assets.mjs --check
 node apps/web/test-shell.mjs    # the page side over a fake shell in Node
 ```
 
-`check.mjs`: the manifest and resources (well-formed, two permissions, no backup, references, the
-icon as `apps/gtk`'s SVG), Gradle (versions, no dependency), the wrapper by SHA-256, the Java (the
-bridge's operations as the page sends them, the WebView's settings, every asset type served), the
+`check.mjs`: the manifest and resources (well-formed, three permissions, no backup, references, the
+icon as `assets/brand/app-icon.svg`), Gradle (versions, no dependency), the wrapper by SHA-256, the Java (the
+bridge's operations as the page sends them, the WebView's settings, every asset type served, the lock,
+notifications and their open event), the version (build.gradle's = `apps/agent/package.json`'s, shipped as
+`vendor/package.json`), the F-Droid recipe's steps walked over the tree, the
 workflow (actions pinned by SHA, no secret; strict YAML where PyYAML is). With
 `SIGELO_ANDROID_JAR=<a platform's android.jar>` and a JDK, it also compiles the Java against it
 (platform 35 clean; 28, the minSdk, only behind SDK_INT checks). Where `java` runs a source file (JDK 11+), it

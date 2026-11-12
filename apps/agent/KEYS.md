@@ -17,7 +17,7 @@ or shows a key.
 
 ## What each protects
 
-| Provider | A copied file (backup, sync, commit) | Code running as you | Root |
+| Provider | A copied file | Code running as you | Root |
 |---|---|---|---|
 | `file` | the key | the key | the key |
 | `keychain` | nothing: its key is in the OS store | the key, while the session is unlocked | the key |
@@ -26,7 +26,7 @@ or shows a key.
 The agent signs challenges, relay logins, invite proofs, messages, prekeys, notices and group bodies
 naming its DID; bindings and invoices with `--allow-payments`; attestations with `--allow-attest
 <ctx>`. Never a rotation through `sign` (`policy_rotation`): an injected model cannot move the
-identity to its own key.
+identity to its own key. Never a signed statement (UI-API.md).
 
 ## Choosing
 
@@ -37,11 +37,11 @@ identity to its own key.
   share the agent's uid (its socket directory is 0700), so that uid can read the plain store: an
   agent under a separate user is not supported yet.
 - **Plain file** (`"provider": "file"`, hex in a 0600 file): what `init` writes, with one warning
-  line, where no keychain answers. Fine for throwaway and test identities; wrap or move it
-  once a store or agent exists.
+  line, where no keychain answers. Fine for test identities; wrap or move it once a store or
+  agent exists.
 
-`keys wrap` and `to-agent` do not unleak: older copies still hold the key. Rotate after moving one
-that may have been copied.
+`keys wrap` and `to-agent` do not unleak: older copies still hold the key. Rotate after moving a
+copied one.
 
 ## Per OS
 

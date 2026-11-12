@@ -80,7 +80,7 @@ Key agreement: hybrid post-quantum (X25519 + ML-KEM-768).
 - Find anyone (codes travel out of band), hide who talks to whom, or deny.
 - Heal inside an epoch after a key theft (no double ratchet): a stolen state file reads what
   contacts write until the next prekey replacement.
-- Confirm delivery (the relay acknowledges, not the contact): a relay withholding an epoch's key
+- Confirm delivery (the relay acknowledges; seen receipts: `seen()`): a relay withholding an epoch's key
   agreement loses what follows until prekeys restart it.
 - Check where a stranger's relay resolves.
 - Push, groups, direct delivery, unsend.

@@ -2,11 +2,12 @@
 // The Android project checked without the SDK (design/apps.md §8): what can be known of it on a
 // machine with Node alone. The build itself runs on CI (.github/workflows/android.yml).
 //   node apps/android/check.mjs     → ALL PASS (n)
-// The manifest and resources (well-formed, two permissions, no backup, references resolve, the
+// The manifest and resources (well-formed, three permissions, no backup, references resolve, the
 // icon from assets/brand/app-icon.svg), the Gradle files (AGP pinned, minSdk 28, targetSdk 35, no
 // dependency, braces balanced), the wrapper (its jar by SHA-256, the distribution pinned), the Java
 // (the bridge's operations as platform-android.mjs sends them, the WebView's settings, every asset
-// type served), the F-Droid listing, icon and draft recipe (FDROID.md), the workflow (actions
+// type served; the app lock, notifications and their open event), the version (one source), the F-Droid
+// listing, icon and draft recipe (FDROID.md; its steps walked over this tree), the workflow (actions
 // pinned by SHA, no secret, the outputs), and assets/web/ as assets.mjs writes it when it is there.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -106,7 +107,7 @@ ok(Object.values(xml).every(Boolean), `XML: ${xmlFiles.length} files well-formed
 const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
 {
   const perms = all(man, 'uses-permission').map((p) => p.attrs['android:name']).sort();
-  ok(perms.join() === 'android.permission.CAMERA,android.permission.INTERNET', `manifest: INTERNET and CAMERA only (${perms})`);
+  ok(perms.join() === 'android.permission.CAMERA,android.permission.INTERNET,android.permission.POST_NOTIFICATIONS', `manifest: INTERNET, CAMERA and POST_NOTIFICATIONS only (${perms})`);
   ok(all(man, 'uses-sdk').length === 0 && man.attrs.package === undefined, 'manifest: no uses-sdk, no package (minSdk, targetSdk and the namespace are in app/build.gradle)');
   const app = all(man, 'application')[0]?.attrs ?? {};
   ok(app['android:allowBackup'] === 'false' && app['android:dataExtractionRules'] === '@xml/data_extraction_rules' && app['android:debuggable'] === undefined && app['android:usesCleartextTraffic'] === undefined,
@@ -197,10 +198,43 @@ ok(['setJavaScriptEnabled(true)', 'setAllowFileAccess(false)', 'MIXED_CONTENT_NE
 ok(/static final String HOST = "appassets\.androidplatform\.net"/.test(ma) && /shouldInterceptRequest[\s\S]*?return serve\(r\)/.test(ma) && /if \(!ours\(u\)\) return refuse\(404/.test(ma),
   'WebView: the page from https://appassets.androidplatform.net/ (intercepted), anything else refused, never fetched');
 ok(/RESOURCE_VIDEO_CAPTURE\.equals\(res\[0\]\)/.test(ma) && /!video \|\| !ours\(req\.getOrigin\(\)\)/.test(ma) && /requestPermissions\(new String\[\] \{Manifest\.permission\.CAMERA\}/.test(ma), 'camera: video only, our origin only, CAMERA asked at the first request');
-ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\s\S]*?LOCK_AFTER_MS\) locked = true;[\s\S]*?if \(locked && afterAuth == null\) lockNow\(\);/.test(ma)
-  && /protected void onStop\(\) \{\s*if \(afterAuth == null\) awayAt = SystemClock\.elapsedRealtime\(\);/.test(ma) && /isDeviceSecure\(\)/.test(ma) && /setVisibility\(View\.INVISIBLE\)/.test(ma)
-  && /if \(afterAuth != null\) \{/.test(ma) && !/authCancelled\.run\(\);/.test(ma) && /activity\.unlock\(/.test(java['SigeloBridge.java']),
-  'app lock: the screen lock at a start and after LOCK_AFTER_MS away, the page hidden until confirmed; asked by the page (unlock); a second ask joins the prompt up, never cancels it');
+const jbl = java['SigeloBridge.java'];
+ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\s\S]*?SystemClock\.elapsedRealtime\(\) - awayAt >= bridge\.lockAfter\(\) \* 60_000L\) locked = true;[\s\S]*?if \(locked && afterAuth == null\) lockNow\(\);/.test(ma)
+  && /protected void onStop\(\) \{\s*if \(afterAuth == null\) awayAt = SystemClock\.elapsedRealtime\(\);/.test(ma) && /if \(bridge == null \|\| !bridge\.lockOn\(\) \|\| bridge\.mode\(\) == null \|\| km == null \|\| !km\.isDeviceSecure\(\)\) \{\s*showPage\(\);/.test(ma)
+  && /setVisibility\(View\.INVISIBLE\)/.test(ma) && !/LOCK_AFTER_MS/.test(ma)
+  && /void unlock\(Runnable ok, Runnable no, boolean force\) \{[\s\S]*?boolean recent = !force && unlockedAt >= 0 && SystemClock\.elapsedRealtime\(\) - unlockedAt < CONFIRMED_MS;/.test(ma) && /static final long CONFIRMED_MS = 60_000;/.test(ma)
+  && /if \(afterAuth != null\) \{/.test(ma) && !/authCancelled\.run\(\);/.test(ma)
+  && /activity\.unlock\([^;]*m\.optBoolean\("force", false\)\);/.test(jbl) && /prefs\.getBoolean\("lock_on", true\)/.test(jbl) && /prefs\.getInt\("lock_after", 1\)/.test(jbl)
+  && /static final int\[\] LOCK_AFTER = \{1, 5, 15, 60\};/.test(jbl) && JSON.stringify(A?.LOCK_AFTER ?? [1, 5, 15, 60]) === '[1,5,15,60]'
+  && /boolean weaker = \(lockOn\(\) && !on1\) \|\| after1 > lockAfter\(\);\s*if \(weaker\) activity\.unlock\(save,/.test(jbl) && /\.put\("secure", km != null && km\.isDeviceSecure\(\)\)/.test(jbl),
+  'app lock: the screen lock at a start and at a return after the set minutes (1, 5, 15, 60; default 1), none when off (default on), the page hidden until confirmed; '
+  + 'the page\'s own asks always (a minute\'s window, force skips it); a weaker setting asks the lock first; a second ask joins the prompt up, never cancels it');
+{
+  // Notifications: only what the page gives, its name kept off the lock screen, the tap's intent immutable and ours, the tag checked.
+  const nb = /private void notification\(WebMessagePort to, int id, JSONObject m\) \{([\s\S]*?)\n    \}\n/.exec(jbl)?.[1] ?? '';
+  const strings = read(MAIN, 'res', 'values', 'strings.xml');
+  const tagJ = /static final Pattern TAG = Pattern\.compile\("([^"]+)"\);/.exec(jbl)?.[1]?.replace(/\\\\/g, '\\');
+  ok(nb && (nb.match(/setContentTitle\(/g) ?? []).length === 2 && (nb.match(/setContentText\(/g) ?? []).length === 2 && /\.setContentTitle\(title\)\s*\.setContentText\(text\)/.test(nb)
+    && /String title = line\(m, "title"\), text = line\(m, "text"\);/.test(nb) && !/setStyle|setTicker|setSubText|addAction|setLargeIcon|setContentInfo|MessagingStyle|BigTextStyle/.test(nb),
+    'notify: the title and text the page gives, nothing else (no style, ticker, subtext, action)');
+  ok(/\.setContentTitle\(activity\.getString\(R\.string\.app_name\)\)\s*\.setContentText\(activity\.getString\(R\.string\.notify_public\)\)/.test(nb) && /\.setVisibility\(Notification\.VISIBILITY_PRIVATE\)\s*\.setPublicVersion\(shown\)/.test(nb)
+    && strings.includes('<string name="app_name">sigelo</string>') && strings.includes('<string name="notify_public">New message</string>') && /<string name="notify_channel">[^<]+<\/string>/.test(strings),
+    'notify: private on the lock screen, its public version "sigelo" / "New message" (no name)');
+  ok(/PendingIntent\.getActivity\(activity, tag\.hashCode\(\), open, PendingIntent\.FLAG_IMMUTABLE \| PendingIntent\.FLAG_UPDATE_CURRENT\)/.test(nb) && !/FLAG_MUTABLE|getBroadcast|getService/.test(code(jbl))
+    && /new Intent\(activity, MainActivity\.class\)\.setAction\(OPEN\)\.putExtra\(EXTRA_OPEN, tag\)\s*\.addFlags\(Intent\.FLAG_ACTIVITY_SINGLE_TOP \| Intent\.FLAG_ACTIVITY_CLEAR_TOP\)/.test(nb)
+    && /\.setAutoCancel\(true\)/.test(nb) && /\.setCategory\(Notification\.CATEGORY_MESSAGE\)/.test(nb) && /nm\.notify\(tag, tag\.hashCode\(\), n\);/.test(nb) && /nm\.cancel\(tag, tag\.hashCode\(\)\);/.test(nb),
+    'notify: the tap an immutable PendingIntent to MainActivity (explicit, action io.sigelo.app.OPEN, the tag), auto-cancelled, category message, the tag its tag and id');
+  ok(tagJ && A?.TAG ? tagJ === A.TAG.source : tagJ === '^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$', `notify: the same tag pattern both sides (${tagJ})`);
+  ok(/if \(!\(t instanceof String\) \|\| !TAG\.matcher\(\(String\) t\)\.matches\(\)\) \{\s*fail\(to, id, "notify",/.test(nb) && nb.indexOf('TAG.matcher') < nb.indexOf('nm.cancel') && nb.indexOf('activity.notificationsAllowed()') < nb.indexOf('nm.notify')
+    && /fail\(to, id, "notify_permission",/.test(nb) && /void opened\(String tag\) \{\s*if \(tag == null \|\| !TAG\.matcher\(tag\)\.matches\(\)\) return;/.test(jbl) && /private static final int NOTE_MAX = 100;/.test(jbl),
+    'notify: the tag checked before a notification or its removal, title and text 1 to 100 characters, refused notify_permission when not allowed; a tapped tag checked again');
+  ok(/requestPermissions\(new String\[\] \{POST_NOTIFICATIONS\}, REQ_NOTIFY\)/.test(ma) && /if \(req == REQ_NOTIFY\) \{/.test(ma) && /if \(req != REQ_CAMERA\) \{\s*super\.onRequestPermissionsResult/.test(ma) && /Build\.VERSION\.SDK_INT < 33 \|\| checkSelfPermission\(POST_NOTIFICATIONS\)/.test(ma),
+    'notify: POST_NOTIFICATIONS asked when the page asks (Android 13+), its own request code; the camera\'s path as before');
+  ok(/protected void onNewIntent\(Intent i\) \{\s*super\.onNewIntent\(i\);\s*setIntent\(i\);\s*opened\(i\);/.test(ma) && /if \(saved == null\) opened\(getIntent\(\)\);/.test(ma) && /SigeloBridge\.OPEN\.equals\(i\.getAction\(\)\)/.test(ma)
+    && /if \(port != null\) postOpen\(port, tag\);\s*else pendingOpen = tag;/.test(jbl) && /if \(pendingOpen != null\) \{\s*String tag = pendingOpen;\s*pendingOpen = null;\s*postOpen\(mine, tag\);/.test(jbl) && /put\("ev", "open"\)\.put\("tag", tag\)/.test(jbl)
+    && /if \(typeof m\?\.ev === 'string'\) \{[^\n]*return; \}\n\s*const w = waiting\.get\(m\?\.id\);/.test(pa),
+    'open event: a tap (onNewIntent, or the start\'s intent) posts {ev:"open", tag}, kept until the page\'s port is open and posted once; the page routes ev messages to their listeners, never to a request waiting');
+}
 ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooserParams\.parseResult/.test(ma), 'files: a file input opens the system picker');
 ok(/r\.hasGesture\(\)/.test(ma) && /ACTION_VIEW/.test(ma) && /CATEGORY_BROWSABLE/.test(ma), 'links: elsewhere opens in the browser, on a tap');
 ok(/setEndpointIdentificationAlgorithm\("HTTPS"\)/.test(java['SigeloBridge.java']) && /getDefaultHostnameVerifier\(\)\.verify\(host/.test(java['SigeloBridge.java']) && /setInstanceFollowRedirects\(false\)/.test(java['SigeloBridge.java'])
@@ -229,6 +263,19 @@ ok(/setUserAuthenticationRequired\(true\)/.test(java['SigeloBridge.java']) && /B
   const AS = await import(pathToFileURL(join(HERE, 'assets.mjs')).href);
   const exts = [...new Set((await AS.files()).map(([p]) => p.split('.').at(-1)))];
   ok(exts.every((x) => types.includes(x)) && (await AS.files()).every(([p]) => /^[A-Za-z0-9._@/-]{1,200}$/.test(p) && !p.includes('..')), `assets: every file of the page has a type MainActivity serves, and a name it accepts (${exts})`);
+  // One source of every file: copy.mjs's walk (assets.mjs names no repository path of its own), and a graph that does not
+  // resolve stops the copy.
+  const asText = read(HERE, 'assets.mjs').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ' ');
+  ok(!/\bts\/|contact\/|node_modules|agent\//.test(asText) && /C\.walk\(map \?\? C\.importMap\(\)\)/.test(asText), 'assets.mjs: every source from copy.mjs\'s walk; no repository path of its own (ts/, contact/, agent/, node_modules)');
+  const C = await import(pathToFileURL(join(REPO, 'apps', 'web', 'copy.mjs')).href);
+  let thrown = '';
+  try { await AS.files(C.importMap('<script type="importmap">{"imports":{}}</script>')); } catch (e) { thrown = e.message; }
+  ok(/the page's import graph does not resolve: .*sigelo/.test(thrown), `assets.mjs: a file missing from the import graph stops it (${thrown.slice(0, 120)})`);
+  // The version (one source): apps/agent/package.json, vendored as vendor/package.json (About reads it), is build.gradle's versionName.
+  const agentPkg = join(REPO, 'apps', 'agent', 'package.json'), agentV = JSON.parse(read(agentPkg)).version, gradleV = /versionName '([^']+)'/.exec(read(HERE, 'app', 'build.gradle'))?.[1];
+  const shipped = (await AS.files()).find(([p]) => p === 'vendor/package.json');
+  ok(gradleV === agentV && shipped && C.sourceOf('vendor/package.json') === agentPkg && (!existsSync(shipped[1]) || readFileSync(shipped[1]).equals(readFileSync(agentPkg))),
+    `version: app/build.gradle's versionName is apps/agent/package.json's (${gradleV} / ${agentV}); the page ships vendor/package.json from it, byte for byte`);
   if (existsSync(AS.OUT)) {
     let out = '';
     try { out = execFileSync(process.execPath, [join(HERE, 'assets.mjs'), '--check'], { encoding: 'utf8' }); } catch (e) { out = String(e.stdout); }
@@ -247,7 +294,8 @@ if (process.env.SIGELO_ANDROID_JAR) {
   try {
     const names = [...read(MAIN, 'res', 'values', 'strings.xml').matchAll(/<string name="(\w+)"/g)].map((m) => m[1]);
     mkdirSync(join(t, 'src', 'java', 'lang', 'invoke'), { recursive: true });
-    writeFileSync(join(t, 'src', 'R.java'), `package io.sigelo.app;\npublic final class R { public static final class string {\n${names.map((n, i) => `public static final int ${n} = ${0x7f0f0000 + i};`).join('\n')}\n} }\n`);
+    const drawables = readdirSync(join(MAIN, 'res', 'drawable')).map((f) => f.replace(/\.xml$/, ''));
+    writeFileSync(join(t, 'src', 'R.java'), `package io.sigelo.app;\npublic final class R { public static final class string {\n${names.map((n, i) => `public static final int ${n} = ${0x7f0f0000 + i};`).join('\n')}\n}\npublic static final class drawable {\n${drawables.map((n, i) => `public static final int ${n} = ${0x7f080000 + i};`).join('\n')}\n} }\n`);
     writeFileSync(join(t, 'src', 'java', 'lang', 'invoke', 'LambdaMetafactory.java'), 'package java.lang.invoke;\npublic final class LambdaMetafactory { public static CallSite metafactory(MethodHandles.Lookup c, String n, MethodType t, MethodType s, MethodHandle i, MethodType r) { return null; } }\n');
     let out = '';
     try {
@@ -307,6 +355,31 @@ print(json.dumps(yaml.load(open(sys.argv[1]), Loader=L)))`, yml], { encoding: 'u
       && wf.includes(`node-version: '${node[1]}'`), `fdroid draft: Node pinned by SHA-256, the major CI uses (${node?.[1]})`);
     ok((b.prebuild ?? []).every((s) => /^(cd [./a-z]+|npm ci --ignore-scripts)$/.test(s)) && /npx tsc/.test(steps) && /node apps\/android\/assets\.mjs/.test(steps)
       && !/relay|adapters|test-|curl .*(npmjs|github)|git clone/.test(steps.replace(/nodejs\.org/, '')), 'fdroid draft: prebuild only fetches (npm ci, no script); build runs tsc and assets.mjs; no relay, adapter or test');
+    {
+      // The recipe's steps walked over this tree from the subdir (each block starts there, its commands joined):
+      // each cd lands on a directory, npm ci where a package.json and its lockfile are, tsc where a tsconfig.json is,
+      // assets.mjs the file it names; and every directory copy.mjs reads from (node_modules, dist) made by one of them.
+      const problems = [], made = new Set();
+      for (const block of [b.prebuild ?? [], b.build ?? []]) {
+        let cwd = join(REPO, b.subdir ?? '');
+        for (const step of block) {
+          let m;
+          if ((m = /^cd (\S+)$/.exec(step))) { cwd = join(cwd, m[1]); if (!existsSync(cwd) || !statSync(cwd).isDirectory()) problems.push(`${step}: ${rel(cwd)} is not a directory`); }
+          else if (step === 'npm ci --ignore-scripts') { if (!['package.json', 'package-lock.json'].every((f) => existsSync(join(cwd, f)))) problems.push(`${step} in ${rel(cwd)}: no package.json and package-lock.json`); made.add(rel(join(cwd, 'node_modules'))); }
+          else if (step === 'npx tsc') {
+            const tc = join(cwd, 'tsconfig.json');
+            if (!existsSync(tc)) problems.push(`${step} in ${rel(cwd)}: no tsconfig.json`);
+            else made.add(rel(join(cwd, /"outDir"\s*:\s*"([^"]+)"/.exec(read(tc))?.[1] ?? '.')));
+          } else if ((m = /^node (\S+\.mjs)$/.exec(step))) { if (join(cwd, m[1]) !== join(HERE, 'assets.mjs')) problems.push(`${step} in ${rel(cwd)}: not apps/android/assets.mjs`); }
+          else problems.push(`${step}: not a step this check knows`);
+        }
+      }
+      const froms = [...read(REPO, 'apps', 'web', 'copy.mjs').matchAll(/\['vendor\/[^']*', '([^']+)'\]/g)].map((x) => x[1]);
+      const roots = [...new Set(froms.map((f) => /^(.*?\/(?:node_modules|dist))\//.exec(f)?.[1]).filter(Boolean))];
+      for (const r of roots) if (!made.has(r)) problems.push(`${r}: copy.mjs reads it, no step of the recipe makes it`);
+      ok(problems.length === 0 && roots.length >= 3 && froms.length >= 8,
+        `fdroid draft: its prebuild and build steps walk this tree from ${b.subdir} (cd, npm ci, tsc, assets.mjs); copy.mjs's ${roots.join(', ')} each made by a step (${problems.join('; ')})`);
+    }
     const mr = existsSync(join(HERE, 'fdroid', 'MR.md')) ? read(HERE, 'fdroid', 'MR.md') : '';
     ok(/^## Title\n\nNew app: sigelo$/m.test(mr) && /\/label ~"New App"/.test(mr) && /fdroid build --on-server -v -l io\.sigelo\.app/.test(mr) && !/A2A|\bTODO\b/.test(mr),
       'fdroid MR.md: "New app: sigelo", the template\'s label, the local fdroid build step; no jargon, no placeholder left but the run URL');

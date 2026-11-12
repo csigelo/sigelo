@@ -947,8 +947,9 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
   await s.close(); await w.close(); rmSync(d, { recursive: true, force: true });
 }
 
-// live root tokens: `token new` under a running keeper (tools/sim/REPORT.md K2). Tokens are re-read on
-// every request; nothing else in policy.json is, and a file that does not load never opens the keeper.
+// live policy: `token new` under a running keeper (tools/sim/REPORT.md K2), and the rest of a root's entry.
+// policy.json is re-read on every request it changed; roots added, removed or moved wait for a restart, and a
+// file that does not load never opens the keeper.
 {
   const d = mkdtempSync(join(tmpdir(), 'sigelo-spend-tok-'));
   const w = await mockWallet();
@@ -979,11 +980,21 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
     await payAs(ALICE, 't1') === 401 && (await api(s.port, '/balance', { token: ALICE })).status === 401);
   ok('tokens live: …and her NEW token pays, without a restart', await payAs(A2, 't2') === 200);
   ok('tokens live: carol, untouched, still pays', await payAs(CAROL, 't3') === 200);
-  // Only tokens: a tightened cap and a root added under the running keeper wait for a restart.
+  // A tightened cap applies on the next request; a root added waits for a restart.
   const ERIN = 'e'.repeat(64);
-  edit((raw) => { raw['agents']!['alice']!['per_tx_max'] = '500'; raw['agents']!['erin'] = { account: 3, token_hash: tokenHash(ERIN), ...caps, rate_per_minute: 100, allow: [{ label: 'bob', addr: LITERAL }] }; });
-  ok('tokens live: a cap tightened in the file does not apply before a restart (1000 > 500 still pays)', await payAs(A2, 't4') === 200);
+  edit((raw) => { raw['agents']!['alice']!['per_tx_max'] = '40000000'; raw['agents']!['erin'] = { account: 3, token_hash: tokenHash(ERIN), ...caps, rate_per_minute: 100, allow: [{ label: 'bob', addr: LITERAL }] }; });
+  const capped = await api(s.port, '/pay', { method: 'POST', token: A2, body: { to: { label: 'bob' }, amount: '20000000', purpose: 't4' } });
+  const under = await api(s.port, '/pay', { method: 'POST', token: A2, body: { to: { label: 'bob' }, amount: '1000', purpose: 't4b' } });
+  ok('policy live: a cap tightened in the file applies on the next request, no restart (amount + fee over per_tx_max)',
+    capped.body['code'] === 'per_tx_max' && under.status === 200, JSON.stringify([capped.body, under.body]));
   ok('tokens live: a root added in the file is 401 until a restart', await payAs(ERIN, 't5') === 401);
+  // The allowlist and approvers too: bob dropped from alice's list is refused at once; given back, paid.
+  const allowBefore = JSON.parse(readFileSync(pp, 'utf-8'))['agents']['alice']['allow'];
+  edit((raw) => { raw['agents']!['alice']!['allow'] = []; });
+  ok('policy live: an allowlist emptied in the file refuses at once (allowlist)', (await api(s.port, '/pay', { method: 'POST', token: A2, body: { to: { label: 'bob' }, amount: '1000', purpose: 't4c' } })).body['code'] === 'allowlist');
+  edit((raw) => { raw['agents']!['alice']!['allow'] = allowBefore; raw['agents']!['alice']!['per_tx_max'] = caps.per_tx_max; });
+  const back_ = await api(s.port, '/pay', { method: 'POST', token: A2, body: { to: { label: 'bob' }, amount: '1000', purpose: 't4d' } });
+  ok('policy live: …and given back, pays again', back_.status === 200, JSON.stringify(back_.body));
   // Malformed (a write in progress, a typo): the last good tokens stay; nothing opens.
   const A3 = 'f'.repeat(64);
   const good = readFileSync(pp, 'utf-8');
@@ -998,10 +1009,16 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
     await payAs(A2, 't10') === 200 && (await api(s.port, '/budget', { token: CAROL })).body['agent'] === 'carol');
   writeFileSync(pp, good, { mode: 0o600 });
   ok('tokens live: the repaired file applies again (same tokens: alice\'s new pays)', await payAs(A2, 't11') === 200);
+  edit((raw) => { raw['agents']!['alice']!['per_tx_max'] = '500'; });
   await s.close();
   s = await serve({ policyPath: pp, port: 0 });
   ok('tokens live: after a restart the added root pays and the tightened cap applies',
     await payAs(ERIN, 't12') === 200 && await payAs(A2, 't13') === 403 && await payAs(ALICE, 't14') === 401);
+  // An approvers list written while the keeper runs is the one /approve and /pay read (no restart).
+  const appr = 'did:sigelo:z' + '7'.repeat(44);
+  edit((raw) => { (raw as Record<string, unknown>)['approvers'] = [{ did: appr }]; });
+  await payAs(A2, 't15', '1');
+  ok('policy live: approvers written while it runs are in the policy it serves', JSON.stringify(s.policy.approvers) === JSON.stringify([{ did: appr }]));
   await s.close(); await w.close(); rmSync(d, { recursive: true, force: true });
 }
 
@@ -1945,6 +1962,48 @@ loadRefuses('G6 load: max_approval_ttl 0 is refused', g6Raw(undefined, {}, { max
   const hist = await run(['history'], env());
   ok('G6 cli: history shows the waiting payment once, and the paid one as paid', hist.message.split('\n').filter((l) => l.includes('waiting for approval to pay')).length === 1 &&
     hist.message.split('\n').filter((l) => l.includes('(rent)')).every((l) => l.includes(' paid ')), hist.message);
+  await s.close(); await w.close(); rmSync(d, { recursive: true, force: true });
+}
+{
+  // POST /refuse: an approver's no, keeper-signed; the agent's same pay is REFUSED with the reason until exp
+  const d = mkdtempSync(join(tmpdir(), 'sigelo-spend-g6r-'));
+  const w = await mockWallet();
+  const pp = join(d, 'policy.json');
+  writeFileSync(pp, JSON.stringify(g6Raw(`http://127.0.0.1:${w.port}/json_rpc`), null, 2), { mode: 0o600 });
+  const s = await serve({ policyPath: pp, port: 0 });
+  const pay = (body: unknown): Promise<Api> => api(s.port, '/pay', { method: 'POST', token: ALICE, body });
+  const post = (route: string, body: unknown): Promise<Api> => api(s.port, route, { method: 'POST', body });
+  const lines = (): Receipt[] => readFileSync(join(d, 'spend.log'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l) as Receipt);
+  const env = { SIGELO_WALLET_URL: `http://127.0.0.1:${s.port}`, SIGELO_WALLET_TOKEN: ALICE };
+  const rent = { to: { label: 'bob' }, amount: '2000000000', purpose: 'rent' };
+  const q = (await pay(rent)).body['approval_request'] as ApprovalBody;
+  const no = { ...q, typ: 'spend-refusal' } as unknown as ApprovalBody;
+  const asApproval = await post('/approve', approvalOf(no, ownerId));
+  const asRefusal = await post('/refuse', approvalOf(q, ownerId));
+  const stranger = await post('/refuse', { ...approvalOf(no, strangerId), reason: 'no' });
+  const longWhy = await post('/refuse', { ...approvalOf(no, ownerId), reason: 'x'.repeat(201) });
+  ok('refuse: a refusal is not an approval and an approval is not a refusal (typ), a stranger cannot refuse, a reason over 200 is refused; nothing written',
+    [asApproval, asRefusal, stranger, longWhy].every((r) => r.status === 403 && r.body['code'] === 'approval') && lines().length === 1, JSON.stringify([asApproval.body, asRefusal.body, stranger.body, longWhy.body]));
+  const r = await post('/refuse', { ...approvalOf(no, ownerId), reason: 'not this month' });
+  const rl = lines().at(-1)!;
+  ok('refuse: an approver\'s refusal → 200 refused, a keeper-signed refused line with the reason, no debit',
+    r.status === 200 && r.body['status'] === 'refused' && r.body['reason'] === 'not this month' && rl.entry.status === 'refused' && verifySig(s.key, rl.entry, rl.sig)
+    && rl.entry.refusal?.approver === ownerId.did && (await api(s.port, '/budget', { token: ALICE })).body['spent'] === '0', JSON.stringify(r.body));
+  const after = await pay(rent);
+  const cli = await run(['pay', 'bob', '0.002', 'rent'], env);
+  ok('refuse: the agent\'s same pay → 403 refused with the reason; sigelo-wallet says REFUSED (exit 1), nothing built',
+    after.status === 403 && after.body['code'] === 'refused' && String(after.body['error']).includes('not this month') && cli.status === 'refused'
+    && cli.message === LINES.refused('not this month') && called(w, 'transfer').length === 0, JSON.stringify(after.body) + cli.message);
+  const late = await post('/approve', approvalOf(q, ownerId)), twice = await post('/refuse', approvalOf(no, ownerId));
+  ok('refuse: a refused request can no longer be approved, nor refused twice', late.status === 403 && String(late.body['error']).includes('refused') && twice.status === 403, JSON.stringify([late.body, twice.body]));
+  // A refused line nobody signed answers nothing: a new request elsewhere still waits.
+  const q2 = (await pay({ ...rent, purpose: 'rent 2' })).body['approval_request'] as ApprovalBody;
+  const p2 = lines().at(-1)!;
+  writeFileSync(join(d, 'spend.log'), readFileSync(join(d, 'spend.log'), 'utf-8') + JSON.stringify({ entry: { ...p2.entry, status: 'refused', refusal: { body: { ...q2, typ: 'spend-refusal' }, sig: '', approver: ownerId.did, key: ownerId.key, reason: 'forged' } }, sig: '' }) + '\n', { mode: 0o600 });
+  const still = await pay({ ...rent, purpose: 'rent 2' });
+  ok('refuse: a refused line not signed by the keeper is ignored — still waiting', still.status === 202 && still.body['repeat'] === true, JSON.stringify(still.body));
+  const hist = await run(['history'], env);
+  ok('refuse: history says refused, not paid', hist.message.includes('refused by your operator, not paid'), hist.message);
   await s.close(); await w.close(); rmSync(d, { recursive: true, force: true });
 }
 {

@@ -2,7 +2,7 @@
 // sigelo-agent ui (sigelo-agent-ui.ts, UI-API.md).
 //   node test-ui.ts   (the end-to-end part SKIPs without relay/ and its node_modules)
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { did } from 'sigelo';
@@ -64,9 +64,210 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   const ctlBad = await http(P, 'POST', '/api/controls/confirm', W, { name: 'phone', match: 'yes' }), ctlTok = await http(P, 'GET', '/api/controls', {});
   ok('ui controls: GET /api/controls → {pending: []}; confirm of no pending control → 404 control_unknown; match not a boolean → 400; no token → 403',
     ctl0.status === 200 && JSON.parse(ctl0.body).pending.length === 0 && ctlNo.status === 404 && JSON.parse(ctlNo.body).error.check === 'control_unknown' && ctlBad.status === 400 && ctlTok.status === 403, ctl0.body + ctlNo.body);
-  ok('ui.js: the Controls card (the four words, Confirm / Refuse → POST /api/controls/confirm), a pushed state cut short ("State truncated", "Pull the rest" → full=1), a linked contact\'s message badge',
-    js.body.includes("h('h2', null, 'Controls')") && js.body.includes('/api/controls/confirm') && js.body.includes("'Confirm'") && js.body.includes("'Refuse'")
-    && js.body.includes('State truncated') && js.body.includes('Pull the rest') && js.body.includes('full=1') && js.body.includes('m.link ? badge(`link ${m.link.id}: ${m.link.purpose}`'));
+  ok('ui.js: a control to confirm under Requests (the four words, Confirm / Refuse → POST /api/controls/confirm), a pushed state cut short ("The newest … are shown", "Show all" → full=1), a linked contact\'s message marked',
+    js.body.includes('wants to control this computer') && js.body.includes('/api/controls/confirm') && js.body.includes("btn('Confirm'") && js.body.includes("btn('Refuse'")
+    && js.body.includes('The newest ${cut.kept}') && js.body.includes("btn('Show all'") && js.body.includes('full=1') && js.body.includes('m.link ? h(\'span\', { class: \'help\' }, `Introduced: ${m.link.purpose}`)'));
+  // The keeper of this computer (UI-API.md "Keeper", sigelo-agent-spend.ts): a sigelo-spend directory registered on this host,
+  // its policy read and written field by field, a pending request (signed by the keeper) approved with the human's key at the
+  // keeper's own /approve (a stand-in that checks the signature as the keeper does), refused here, restart refused without systemd.
+  {
+    const { keygen, sign: sg, verifySig: vs, verify: vf, decodeKey } = await import('sigelo');
+    const { encodeAddress } = await import('sigelo/dist/monero.js');
+    const KD = join(H, 'keeper-dir'), REG = join(H, 'keepers.json');
+    mkdirSync(KD, { mode: 0o700 });
+    const kid = keygen({ recovery: 'sha256:' + '1'.repeat(64) }), agentId = keygen({ recovery: 'sha256:' + '2'.repeat(64) });
+    const pt = (): Uint8Array => decodeKey(keygen({ recovery: 'sha256:' + '3'.repeat(64) }).key);
+    const ADDR = encodeAddress({ net: 'stagenet', kind: 'standard', spend: pt(), view: pt() }), MAIN = encodeAddress({ net: 'mainnet', kind: 'standard', spend: pt(), view: pt() });
+    const meDid = (JSON.parse((await http(P, 'GET', '/api/me', T)).body) as { did: string }).did;
+    const policy = { net: 'stagenet', wallet: { rpc: 'http://127.0.0.1:38083/json_rpc', login: 'u:p' }, unlock_time: 0, priority: 1, approvers: [{ did: meDid }],
+      agents: { scout: { account: 1, token_hash: 'sha256:' + 'a'.repeat(64), did: agentId.did, genesis: agentId.genesis, per_tx_max: '100000000000', per_period_max: '500000000000', period_seconds: 2592000,
+        rate_per_minute: 3, approval_above: '20000000000', allow: [{ addr: ADDR, label: 'seat-hold' }] } } };
+    writeFileSync(join(KD, 'policy.json'), JSON.stringify(policy), { mode: 0o600 });
+    writeFileSync(join(KD, 'identity.json'), JSON.stringify({ v: 'sigelo/0', typ: 'bundle', genesis: kid.genesis, rotations: [], bindings: [], attestations: [], issuers: [] }));
+    const t0 = Math.floor(Date.now() / 1000), NONCE = 'ab'.repeat(16);
+    const body = { v: 'sigelo/0', typ: 'spend-approval', keeper: kid.did, net: 'stagenet', agent: agentId.did, ref: 'r1', to: ADDR, amount: '30000000000', purpose: 'seat-hold service', nonce: NONCE, iat: t0 - 60, exp: t0 + 3540 };
+    const line = (entry: object, secret = kid.secret) => JSON.stringify({ entry, sig: sg(secret, entry) }) + '\n';
+    const intent = { ts: t0 - 100, status: 'intent', request: { to: { addr: ADDR }, amount: '100000000000', agent: 'scout', purpose: 'x', ref: 'r0', fp: 'f' }, plan: {}, txid: 'aa', amount: '100000000000', fee: '20000000000' };
+    const pending = { ts: t0 - 60, status: 'pending', request: { to: { addr: ADDR }, amount: '30000000000', agent: 'scout', purpose: 'seat-hold service', ref: 'r1', fp: 'f' }, plan: {}, txid: '', amount: '30000000000', fee: '0', approval_request: body };
+    const forged = { ...pending, approval_request: { ...body, nonce: 'cd'.repeat(16) } };
+    // A second request, refused at the keeper through the page (pass 4).
+    const REFQ = { ...body, nonce: 'ef'.repeat(16), ref: 'r2', amount: '40000000000', purpose: 'a table' };
+    const pending2 = { ...pending, ts: t0 - 30, request: { ...pending.request, ref: 'r2', amount: '40000000000', purpose: 'a table' }, amount: '40000000000', approval_request: REFQ };
+    writeFileSync(join(KD, 'spend.log'), line(intent) + line({ ...intent, status: 'relayed' }) + line(pending) + line(forged, agentId.secret) + line(pending2), { mode: 0o600 });
+    // The keeper's /approve, as service.ts checks it: the body is the pending one, the bundle verifies, the sig is its head key's.
+    const got: { body?: Record<string, unknown>; ok?: boolean; url?: string; reason?: string }[] = [];
+    const { createServer } = await import('node:http');
+    const fake = createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => {
+      const x = JSON.parse(b) as { body: Record<string, unknown>; sig: string; bundle: { genesis: { key: string } } };
+      let good = false;
+      // /refuse (0.1.15): the same body with typ spend-refusal, signed the same way, and the reason beside it.
+      const want = req.url === '/refuse' ? { ...REFQ, typ: 'spend-refusal' } : body;
+      try { good = (req.url === '/approve' || req.url === '/refuse') && req.headers.origin === undefined && JSON.stringify(x.body) === JSON.stringify(want) && vf(x.bundle as never, t0).did === meDid && vs(x.bundle.genesis.key, x.body, x.sig); } catch {}
+      got.push({ body: x.body, ok: good, url: req.url, reason: (x as { reason?: string }).reason });
+      res.writeHead(good ? 200 : 403, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(good ? { status: 'approved' } : { error: 'approval: no', code: 'approval' }));
+    }); });
+    await new Promise<void>((r) => fake.listen(0, '127.0.0.1', () => r()));
+    const kport = (fake.address() as { port: number }).port;
+    writeFileSync(join(KD, 'install.json'), JSON.stringify({ v: 1, net: 'stagenet', port: kport, systemd: false, units: [] }));
+    const kj = async () => JSON.parse((await http(P, 'GET', '/api/keeper', T)).body) as Record<string, any>;
+    const post = async (route: string, b: unknown) => { const r = await http(P, 'POST', `/api/keeper/${route}`, W, b); return { status: r.status, body: JSON.parse(r.body) as Record<string, any> }; };
+    process.env['SIGELO_SPEND_REGISTRY'] = join(H, 'none.json');
+    ok('ui keeper: no keeper registered on this computer → {state: "none"}', (await kj()).state === 'none');
+    writeFileSync(REG, JSON.stringify({ keepers: [{ dir: KD, did: kid.did, genesis: kid.genesis }] }));
+    process.env['SIGELO_SPEND_REGISTRY'] = REG;
+    const k1 = await kj(), a1 = k1.agents?.[0], r1 = k1.requests ?? [];
+    ok('ui keeper: GET /api/keeper → here: the keeper (its DID, me an approver, restart by hand), scout\'s caps and allowlist, 0.12 spent (amount + fee, once per tx), one request (the forged one left out)',
+      k1.state === 'here' && k1.keepers[0].id === 'keeper-dir' && k1.keepers[0].did === kid.did && k1.keepers[0].me_approver === true && k1.keepers[0].restart.can === false
+      && a1.name === 'scout' && a1.worker === null && a1.per_tx_max === '100000000000' && a1.approval_above === '20000000000' && a1.allow[0].kind === 'addr' && a1.allow[0].label === 'seat-hold'
+      && a1.spent === '120000000000' && a1.remaining === '380000000000' && r1.length === 2 && r1.some((x: { nonce: string; amount: string; purpose: string }) => x.nonce === NONCE && x.amount === '30000000000' && x.purpose === 'seat-hold service'), JSON.stringify(k1).slice(0, 600));
+    ok('ui keeper: GET /api/keeper → seen: the addresses spend.log names (paid by scout), for Who it may pay; live/refuse not known without its frozen copy',
+      k1.keepers[0].seen?.[0]?.addr === ADDR && k1.keepers[0].seen[0].agent === 'scout' && k1.keepers[0].seen[0].paid === true && k1.keepers[0].live === null && k1.keepers[0].refuse === null, JSON.stringify(k1.keepers[0]).slice(0, 400));
+    const bad = [await post('agent', { keeper: 'keeper-dir', agent: 'scout', per_tx_max: '0.5' }), await post('agent', { keeper: 'keeper-dir', agent: 'nobody', per_tx_max: '1' }),
+      await post('agent', { keeper: 'keeper-dir', agent: 'scout', per_tx_max: '900000000000' }), await post('agent', { keeper: 'keeper-dir', agent: 'scout', allow: [{ addr: MAIN }] }),
+      await post('agent', { keeper: 'keeper-dir', agent: 'scout', period_seconds: 12345 }), await post('agent', { keeper: 'nope', agent: 'scout', per_tx_max: '1' })];
+    ok('ui keeper: writes checked as the keeper checks: not atomic → 400, unknown agent 404, per payment above the period 400 keeper_caps, a mainnet address 400 allow_addr, an odd period 400, unknown keeper 404; nothing written',
+      bad.map((x) => `${x.status}${x.body.error.check === 'body' ? '' : ' ' + x.body.error.check}`).join() === '400,404 keeper_agent,400 keeper_caps,400 allow_addr,400,404 keeper_unknown'
+      && readFileSync(join(KD, 'policy.json'), 'utf8') === JSON.stringify(policy), bad.map((x) => JSON.stringify(x.body)).join(' '));
+    const sv = await post('agent', { keeper: 'keeper-dir', agent: 'scout', per_tx_max: '50000000000', per_period_max: '600000000000', period_seconds: 604800, rate_per_minute: 5, max_delegates: 1, approval_above: null, allow: [{ addr: ADDR, label: 'seat-hold' }, { issuer: meDid, ctx: 'sigelo-relay/operator' }] });
+    const pol = JSON.parse(readFileSync(join(KD, 'policy.json'), 'utf8')) as typeof policy & { agents: { scout: Record<string, unknown> } };
+    ok('ui keeper: POST /api/keeper/agent → the fields written, every other kept (token_hash, account, the wallet login), 0600; the answer says how to restart it',
+      sv.status === 200 && sv.body.saved === true && /sigelo-spend serve .*policy\.json --port \d+/.test(sv.body.restart.command) && pol.agents.scout['per_tx_max'] === '50000000000' && pol.agents.scout['period_seconds'] === 604800
+      && pol.agents.scout['rate_per_minute'] === 5 && pol.agents.scout['max_delegates'] === 1 && !('approval_above' in pol.agents.scout) && pol.agents.scout['token_hash'] === 'sha256:' + 'a'.repeat(64)
+      && pol.wallet.login === 'u:p' && (pol.agents.scout['allow'] as unknown[]).length === 2 && (posixModes ? (statSync(join(KD, 'policy.json')).mode & 0o777) === 0o600 : true), JSON.stringify(sv.body));
+    await post('agent', { keeper: 'keeper-dir', agent: 'scout', approval_above: '20000000000' });
+    const noAppr = await post('approvers', { keeper: 'keeper-dir', me: false });
+    ok('ui keeper: approvers emptied while scout asks above a limit → 409 keeper_approvers', noAppr.status === 409 && noAppr.body.error.check === 'keeper_approvers', JSON.stringify(noAppr.body));
+    const ap = await post('approve', { keeper: 'keeper-dir', nonce: NONCE });
+    ok('ui keeper: Approve → the pending body, signed by this identity\'s key with its bundle, posted to the keeper\'s /approve (no Origin) → {approved}',
+      ap.status === 200 && ap.body.approved === true && got.length === 1 && got[0]!.ok === true, JSON.stringify(ap.body) + JSON.stringify(got));
+    const forgedAp = await post('approve', { keeper: 'keeper-dir', nonce: 'cd'.repeat(16) });
+    ok('ui keeper: a pending line the keeper did not sign is no request: 404 keeper_request, nothing signed', forgedAp.status === 404 && forgedAp.body.error.check === 'keeper_request' && got.length === 1);
+    const rf = await post('refuse', { keeper: 'keeper-dir', nonce: 'ef'.repeat(16), reason: 'not this month' }), k2 = await kj();
+    const sent = got.at(-1)!;
+    ok('ui keeper: Refuse → the spend-refusal (typ spend-refusal, signed with this identity\'s key, the reason) posted to the keeper\'s /refuse → logged; kept here too: the request leaves the list; no contact to tell',
+      rf.status === 200 && rf.body.refused === true && rf.body.logged === true && sent.url === '/refuse' && sent.ok === true && sent.reason === 'not this month' && rf.body.told === false
+      && (k2.requests as { nonce: string }[]).every((x) => x.nonce !== 'ef'.repeat(16)), JSON.stringify([rf.body, sent]));
+    const rs = await post('restart', { keeper: 'keeper-dir' });
+    ok('ui keeper: Restart without a systemd user unit → 409 keeper_restart naming the command', rs.status === 409 && rs.body.error.check === 'keeper_restart' && rs.body.error.message.includes('sigelo-spend serve'));
+    const kind = await http(P, 'POST', '/api/kind', W, { contact: 'did:sigelo:zNope', kind: 'agent' }), kindBad = await http(P, 'POST', '/api/kind', W, { contact: 'did:sigelo:zNope', kind: 'robot' });
+    ok('ui kind: POST /api/kind of no contact → 404 not_contact (the contact is checked first, any kind)', kind.status === 404 && JSON.parse(kind.body).error.check === 'not_contact' && kindBad.status === 404, kind.body + kindBad.body);
+    // ---- the Wallet (UI-API.md "Wallet", sigelo-agent-wallet.ts) over a fake monero-wallet-rpc (digest login, as the keeper's),
+    // a fake node and a fake price source: off asks nothing; the keeper's wallet, your account (never an agent's); every sync state;
+    // review, send; receive; history; the service and the node; the price, through this server, kept 10 minutes; the live keeper.
+    {
+      const { createHash: ch } = await import('node:crypto');
+      const md5 = (x: string) => ch('md5').update(x).digest('hex');
+      const RPC: { calls: { method: string; params: Record<string, unknown> }[]; height: number; down: boolean; accounts: number } = { calls: [], height: 3512160, down: false, accounts: 3 };
+      const MAINT = encodeAddress({ net: 'stagenet', kind: 'standard', spend: pt(), view: pt() }), SUB = encodeAddress({ net: 'stagenet', kind: 'subaddress', spend: pt(), view: pt() });
+      const TXA = 'a1'.repeat(32), TXB = 'b2'.repeat(32);
+      const answer = (method: string, q: Record<string, unknown>): unknown => {
+        switch (method) {
+          case 'get_height': return { height: RPC.height };
+          case 'get_balance': return { balance: '912000000000', unlocked_balance: '812000000000', blocks_to_unlock: 6 };
+          case 'get_address': return { address: q['account_index'] === 1 ? SUB : MAINT, addresses: [{ address: SUB, address_index: 7, label: 'Concert tickets', used: true }] };
+          case 'get_accounts': return { subaddress_accounts: [0, 1, 2].slice(0, RPC.accounts).map((i) => ({ account_index: i, base_address: MAINT, balance: String(i * 1e9), label: i === 1 ? 'scout' : '' })) };
+          case 'create_account': RPC.accounts++; return { account_index: RPC.accounts - 1, address: SUB };
+          case 'create_address': return { address: SUB, address_index: 8 };
+          case 'transfer': return { amount: (q['destinations'] as { amount: number }[])[0]!.amount, fee: 30000000, tx_hash: TXB, tx_metadata: 'cafe' };
+          case 'relay_tx': return { tx_hash: TXB };
+          case 'get_transfers': return { in: [{ txid: TXA, type: 'in', amount: 250000000000, fee: 0, timestamp: t0 - 3600, height: 3512100, confirmations: 60, locked: false, address: SUB, subaddr_index: { major: 0, minor: 7 }, note: '' }],
+            out: [{ txid: TXB, type: 'out', amount: 1000, fee: 30000000, timestamp: t0 - 60, height: 3512150, confirmations: 3, locked: false, destinations: [{ address: ADDR, amount: 1000 }], note: 'rent' }], pool: [] };
+          case 'get_transfer_by_txid': return { transfer: { txid: q['txid'], type: 'in', amount: 250000000000, fee: 0, timestamp: t0 - 3600, height: 3512100, confirmations: 60, address: SUB, subaddr_index: { major: 0, minor: 7 }, suggested_confirmations_threshold: 10 } };
+          default: return {};
+        }
+      };
+      const wsrv = createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => {
+        if (RPC.down) { res.destroy(); return; }
+        const auth = String(req.headers['authorization'] ?? ''), f = (k: string) => new RegExp(`${k}="?([^",]*)"?`).exec(auth)?.[1] ?? '';
+        const good = auth.startsWith('Digest ') && f('response') === md5([md5(`u:rpc:p`), 'n0nce', f('nc'), f('cnonce'), 'auth', md5(`POST:${f('uri')}`)].join(':'));
+        if (!good) { res.writeHead(401, { 'WWW-Authenticate': 'Digest qop="auth",algorithm=MD5,realm="rpc",nonce="n0nce",stale=false' }); res.end(); return; }
+        const x = JSON.parse(b) as { method: string; params: Record<string, unknown> };
+        RPC.calls.push({ method: x.method, params: x.params });
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: '0', result: answer(x.method, x.params ?? {}) }));
+      }); });
+      const NODE = { height: 3512160, down: false }, PRICE: { hits: string[] } = { hits: [] };
+      const nsrv = createServer((req, res) => { req.resume(); if (NODE.down) { res.writeHead(500); res.end(); return; } res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ height: NODE.height, status: 'OK' })); });
+      const psrv = createServer((req, res) => { PRICE.hits.push(req.url ?? ''); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ monero: { eur: 150.5, usd: 162.1, chf: 141.2, jpy: 24500 } })); });
+      const port = async (sv: ReturnType<typeof createServer>) => { await new Promise<void>((r) => sv.listen(0, '127.0.0.1', () => r())); return (sv.address() as { port: number }).port; };
+      const [wp, np, pp] = [await port(wsrv), await port(nsrv), await port(psrv)];
+      const pol2 = JSON.parse(readFileSync(join(KD, 'policy.json'), 'utf8')) as Record<string, any>;
+      pol2.wallet = { rpc: `http://127.0.0.1:${wp}/json_rpc`, login: 'u:p' };
+      writeFileSync(join(KD, 'policy.json'), JSON.stringify(pol2), { mode: 0o600 });
+      // The keeper's frozen copy (init.ts copies the package to <dir>/app): this one re-reads its policy and takes /refuse.
+      mkdirSync(join(KD, 'app', 'dist'), { recursive: true });
+      writeFileSync(join(KD, 'app', 'dist', 'service.js'), "// sigelo-spend: policy.json: now in use for\nconst lane = [['POST /refuse', 1]];\n");
+      writeFileSync(join(KD, 'install.json'), JSON.stringify({ v: 1, net: 'stagenet', port: kport, systemd: false, units: [], app: join(KD, 'app', 'dist', 'cli.js'), daemons: [`127.0.0.1:${np}`] }));
+      process.env['SIGELO_PRICE_URL'] = `http://127.0.0.1:${pp}/simple/price`;
+      const g = async (path: string) => { const r = await http(P, 'GET', path, T); return { status: r.status, body: JSON.parse(r.body) as Record<string, any> }; };
+      const w = async (path: string, b: unknown = {}) => { const r = await http(P, 'POST', path, W, b); return { status: r.status, body: JSON.parse(r.body) as Record<string, any> }; };
+      const off = await g('/api/wallet'), offPrice = await g('/api/price'), offRecv = await w('/api/wallet/receive');
+      ok('ui wallet: off (the default) → {on: false}; no price; Receive 409 wallet_off; nothing asked of the wallet, the node or the price source',
+        off.body.on === false && Object.keys(off.body).length === 1 && offPrice.body.on === false && offRecv.status === 409 && offRecv.body.error.check === 'wallet_off' && RPC.calls.length === 0 && PRICE.hits.length === 0, JSON.stringify([off.body, offPrice.body]));
+      await w('/api/settings', { wallet: true });
+      const on = await g('/api/wallet');
+      ok('ui wallet: on → the keeper\'s wallet-rpc (digest login), your account 0 (scout holds 1), synced with the keeper\'s node: the balance current',
+        on.body.ready === true && on.body.service.kind === 'keeper' && on.body.service.account === 0 && on.body.net === 'stagenet' && on.body.sync.state === 'synced' && on.body.balance.total === '912000000000'
+        && on.body.balance.current === true && on.body.node === `127.0.0.1:${np}` && RPC.calls.some((c) => c.method === 'get_balance' && c.params['account_index'] === 0), JSON.stringify(on.body));
+      RPC.height = 3510000;
+      const syn = await w('/api/wallet/sync');
+      ok('ui wallet: behind the node → syncing, 2160 blocks, 3 days, the balance not current (as of its last sync); a keeper\'s wallet is not asked to refresh',
+        syn.body.sync.state === 'syncing' && syn.body.sync.behind === 2160 && syn.body.sync.behind_s === 259200 && syn.body.balance.current === false && syn.body.balance.at === on.body.sync.synced_at
+        && !RPC.calls.some((c) => c.method === 'refresh'), JSON.stringify(syn.body.sync));
+      const unsynced = await w('/api/wallet/review', { to: { addr: ADDR }, amount: '1000' });
+      ok('ui wallet: Send while syncing → 409 wallet_unsynced, nothing built', unsynced.status === 409 && unsynced.body.error.check === 'wallet_unsynced' && !RPC.calls.some((c) => c.method === 'transfer'));
+      NODE.down = true;
+      const nd = await w('/api/wallet/sync');
+      RPC.down = true;
+      const wd = await w('/api/wallet/sync');
+      ok('ui wallet: the node down → state node; the wallet program down → state wallet, the last balance kept, not current',
+        nd.body.sync.state === 'node' && wd.body.sync.state === 'wallet' && wd.body.balance?.total === '912000000000' && wd.body.balance.current === false, JSON.stringify([nd.body.sync, wd.body]));
+      NODE.down = false; RPC.down = false; RPC.height = 3512160;
+      await w('/api/wallet/sync');
+      const bad = await w('/api/wallet/review', { to: { addr: MAIN }, amount: '1000' }), rv = await w('/api/wallet/review', { to: { addr: ADDR }, amount: '1000', note: 'rent' });
+      const tr = RPC.calls.find((c) => c.method === 'transfer');
+      ok('ui wallet: review → built with do_not_relay and its metadata, priced (fee), from your account; a mainnet address 400 address',
+        bad.status === 400 && bad.body.error.check === 'address' && rv.status === 200 && rv.body.fee === '30000000' && rv.body.amount === '1000' && tr?.params['do_not_relay'] === true && tr.params['get_tx_metadata'] === true
+        && tr.params['account_index'] === 0 && !RPC.calls.some((c) => c.method === 'relay_tx'), JSON.stringify([bad.body, rv.body]));
+      const gone = await w('/api/wallet/send', { id: 'nope' }), sent = await w('/api/wallet/send', { id: rv.body.id }), again = await w('/api/wallet/send', { id: rv.body.id });
+      ok('ui wallet: send {id} → relay_tx of that build, the note kept (set_tx_notes), stored; an unknown or used id 409 review_gone',
+        gone.status === 409 && gone.body.error.check === 'review_gone' && sent.status === 200 && sent.body.txids[0] === TXB && RPC.calls.some((c) => c.method === 'relay_tx' && c.params['hex'] === 'cafe')
+        && RPC.calls.some((c) => c.method === 'set_tx_notes' && (c.params['notes'] as string[])[0] === 'rent') && RPC.calls.some((c) => c.method === 'store') && again.status === 409, JSON.stringify(sent.body));
+      const topup = await w('/api/wallet/review', { to: { agent: 'scout', keeper: 'keeper-dir' }, amount: '5000' });
+      ok('ui wallet: Top up scout → its allowance account\'s address (1, 0) in the keeper\'s wallet', topup.status === 200 && topup.body.to === SUB && topup.body.agent === 'scout', JSON.stringify(topup.body));
+      const rc = await w('/api/wallet/receive', { note: 'Concert tickets' }), lb = await w('/api/wallet/label', { index: 8, note: 'tickets' });
+      ok('ui wallet: Receive → a new subaddress of your account, labelled with the note; label it again', rc.status === 200 && rc.body.address === SUB && rc.body.index === 8
+        && RPC.calls.some((c) => c.method === 'create_address' && c.params['account_index'] === 0 && c.params['label'] === 'Concert tickets') && lb.status === 200 && RPC.calls.some((c) => c.method === 'label_address'));
+      const hs = await g('/api/wallet/history'), one = await g(`/api/wallet/tx?txid=${TXA}`);
+      ok('ui wallet: History → in (confirmed, its address\'s label as the note) and out (confirming · 3, the note), newest first; a payment by txid',
+        hs.body.entries.length === 2 && hs.body.entries[0].txid === TXB && hs.body.entries[0].status === 'confirming' && hs.body.entries[0].note === 'rent' && hs.body.entries[1].status === 'confirmed'
+        && hs.body.entries[1].note === 'Concert tickets' && one.body.txid === TXA && one.body.suggested === 10, JSON.stringify(hs.body));
+      const sv0 = await g('/api/wallet/services'), held = await w('/api/wallet/service', { keeper: 'keeper-dir', account: 1 }), far = await w('/api/wallet/service', { url: 'http://wallet.example:18083/json_rpc' });
+      const mk = await w('/api/wallet/service', { keeper: 'keeper-dir', new_account: true }), now2 = await g('/api/wallet');
+      ok('ui wallet: services → the keeper\'s accounts (1 held by scout); scout\'s account refused 409 account_held; a wallet-rpc off this computer 400; Make an account → create_account, your account now',
+        sv0.body.keepers[0].accounts.find((a: { index: number }) => a.index === 1)?.held === 'scout' && held.status === 409 && held.body.error.check === 'account_held' && far.status === 400 && far.body.error.check === 'wallet_url'
+        && mk.status === 200 && RPC.calls.some((c) => c.method === 'create_account') && now2.body.service.account === 3, JSON.stringify([sv0.body.keepers, now2.body.service]));
+      const ns = await g('/api/wallet/nodes'), use = await w('/api/wallet/node', { use: `127.0.0.1:${np}` }), dead = await w('/api/wallet/node', { add: '127.0.0.1:1' });
+      ok('ui wallet: nodes → the keeper\'s daemon, its height, in use; use it → set_daemon (untrusted); a node that doesn\'t answer 409 node_down',
+        ns.body.nodes[0]?.url === `127.0.0.1:${np}` && ns.body.nodes[0].height === 3512160 && ns.body.nodes[0].in_use === true && use.status === 200
+        && RPC.calls.some((c) => c.method === 'set_daemon' && c.params['trusted'] === false) && dead.status === 409 && dead.body.error.check === 'node_down', JSON.stringify([ns.body, dead.body]));
+      const pOff = await g('/api/price');
+      await w('/api/settings', { prices: true, currency: 'CHF' });
+      const p1 = await g('/api/price'), p2 = await g('/api/price');
+      await w('/api/settings', { currency: 'JPY' });
+      const p3 = await g('/api/price');
+      ok('ui wallet: price off until asked; on → through this server from the source (CoinGecko\'s simple price, every currency at once), CHF 141.2; kept 10 minutes (one fetch for three answers, another currency included)',
+        pOff.body.on === false && p1.body.on === true && p1.body.rate === 141.2 && p1.body.source === 'CoinGecko' && p2.body.rate === 141.2 && p3.body.rate === 24500 && PRICE.hits.length === 1
+        && /ids=monero&vs_currencies=eur,usd,gbp,chf/.test(PRICE.hits[0]!), JSON.stringify([p1.body, PRICE.hits]));
+      // The keeper's frozen copy re-reads its policy: Save says so, and the keeper carries live and refuse.
+      const sv2 = await post('agent', { keeper: 'keeper-dir', agent: 'scout', rate_per_minute: 4 }), kk = await kj();
+      ok('ui keeper: a keeper that re-reads its policy (its frozen copy) → Save answers live: true; the keeper carries live and refuse', sv2.body.live === true && kk.keepers[0].live === true && kk.keepers[0].refuse === true, JSON.stringify([sv2.body, kk.keepers[0]]));
+      await w('/api/settings', { wallet: false, prices: false });
+      delete process.env['SIGELO_PRICE_URL'];
+      for (const x of [wsrv, nsrv, psrv]) x.close();
+    }
+    delete process.env['SIGELO_SPEND_REGISTRY'];
+    fake.close();
+  }
   // Links (LINKS.md): the same token and Origin rules; nothing yet; refusals by check.
   const lsNo = await http(P, 'GET', '/api/links', {}), ls0 = await http(P, 'GET', '/api/links', T);
   const l0 = JSON.parse(ls0.body) as Record<string, unknown[]>;
@@ -93,7 +294,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   const tSet = await tr('POST', '/api/transfers/settings', { tor: false, prefer: 'private' });
   ok('ui transfers: settings kept (tor off, prefer private), the tor daemon probed', tSet.status === 200 && tSet.j['tor'] === false && tSet.j['prefer'] === 'private' && typeof tSet.j['tor_daemon']?.serve === 'boolean', JSON.stringify(tSet.j));
   ok('ui.js: the Files view (Accept / Decline → /api/transfers/accept, decline; the direct question; progress; Tor checkbox off without a daemon)',
-    js.body.includes('function viewTransfers()') && js.body.includes('/api/transfers/accept') && js.body.includes('/api/transfers/decline') && js.body.includes("e?.check !== 'direct_ask'") && js.body.includes('no tor daemon found'));
+    js.body.includes('function viewTransfers(') && js.body.includes('/api/transfers/accept') && js.body.includes('/api/transfers/decline') && js.body.includes("e?.check !== 'direct_ask'") && js.body.includes('No tor daemon found'));
   // The relay setting (UI-API.md Settings): the same token and Origin rules; the caller's relay wins (fixed).
   type RelaySet = { relay: string; default: string; fixed: string | null; in_use: string; error?: { check: string } };
   const sj = async (method: string, body?: unknown, h: Record<string, string> = method === 'POST' ? W : T): Promise<{ status: number } & RelaySet> => { const r = await http(P, method, '/api/settings', h, body); return { status: r.status, ...(JSON.parse(r.body) as RelaySet) }; };
@@ -150,6 +351,9 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
     && String(page0.headers['content-security-policy']).startsWith(`default-src 'self'; script-src 'self' 'sha256-${hash}'`) && !/<script>(?!<)/.test(page0.body), String(page0.headers['content-security-policy']));
   ok('ui devices: qr.mjs and qr-decode.mjs (sigelo-contact\'s, byte for byte) and the shims served as JavaScript', served.every((r) => r.status === 200 && String(r.headers['content-type']).startsWith('text/javascript'))
     && served[1]!.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'qr-decode.mjs'), 'utf8'));
+  const pj = await http(P, 'GET', '/package.json', {});
+  ok('ui about: /package.json served as JSON with the package\'s own version', pj.status === 200 && String(pj.headers['content-type']).startsWith('application/json')
+    && JSON.parse(pj.body).version === JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8')).version);
   const wl = await http(P, 'GET', '/words-lock.mjs', {});
   ok('ui security: words-lock.mjs (sigelo-contact\'s, byte for byte) served as JavaScript, for Me → Security in the GTK phone app (design/apps-seed.md §8)', wl.status === 200 && String(wl.headers['content-type']).startsWith('text/javascript')
     && wl.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'words-lock.mjs'), 'utf8'));
@@ -279,10 +483,98 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       const msgs = await B.call('GET', `/api/messages?contact=${encodeURIComponent(acc['contact'].did)}`);
       ok('ui e2e: messages → the text, from them; read once shown', msgs['messages']?.[0]?.text === 'hello bob' && msgs['messages'][0].dir === 'in'
         && ((await B.call('GET', '/api/state'))['groups'].contacts as { unread: number }[])[0]?.unread === 0);
+      // Seen receipts (UI-API.md): bob's page showed it, so a receipt went inside the envelope; alice's message turns seen.
+      type Msg = { dir: string; text: string; status: string };
+      const msgsOf = async (P: typeof A, d: string): Promise<Msg[]> => ((await P.call('GET', `/api/messages?contact=${encodeURIComponent(d)}`))['messages'] ?? []) as Msg[];
+      const seenA = await until(async () => (await msgsOf(A, bob!.did)).find((m) => m.text === 'hello bob' && m.status === 'seen'));
+      ok('ui seen receipts: once bob\'s page shows it, alice\'s message is seen (✓✓); the receipt is no message on either side', seenA !== undefined
+        && !(await msgsOf(A, bob!.did)).some((m) => m.dir === 'in') && (await msgsOf(B, acc['contact'].did)).length === 1);
       await B.call('POST', '/api/send', { to: acc['contact'].did, text: 'hi alice ‮evil' });
       const back = await until(async () => ((await A.call('GET', `/api/messages?contact=${encodeURIComponent(bob!.did)}`))['messages'] as { dir: string; text: string }[]).find((m) => m.dir === 'in'));
       ok('ui e2e: and back; history keeps both, a bidi override as \\u escape in the JSON', back?.text === 'hi alice ‮evil'
         && readFileSync(join(A.dir, 'me.local.history.jsonl'), 'utf8').split('\n').filter(Boolean).length >= 3);
+      const seenB = await until(async () => (await msgsOf(B, acc['contact'].did)).find((m) => m.dir === 'out' && m.status === 'seen'));
+      ok('ui seen receipts: and back: bob\'s message seen once alice\'s page showed it', seenB !== undefined);
+      const s0 = await B.call('GET', '/api/settings'), off = await B.call('POST', '/api/settings', { seen_receipts: false }), badSet = await B.call('POST', '/api/settings', { seen_receipts: 'no' });
+      ok('ui settings: GET /api/settings has the chat defaults (seen_receipts on, notify on, new_tier friend, new_presence off); seen_receipts false kept; not a boolean → 400',
+        s0['seen_receipts'] === true && s0['notify'] === true && s0['new_tier'] === 'friend' && s0['new_presence'] === false && off['seen_receipts'] === false && badSet['http'] === 400, JSON.stringify([s0, off]));
+      await A.call('POST', '/api/send', { to: bob!.did, text: 'unseen' });
+      const got3 = await until(async () => (await msgsOf(B, acc['contact'].did)).find((m) => m.text === 'unseen'));
+      await new Promise((r) => setTimeout(r, 2500));
+      ok('ui seen receipts: off on bob\'s page: he reads it, alice keeps one tick (sent)', got3 !== undefined && (await msgsOf(A, bob!.did)).find((m) => m.text === 'unseen')?.status === 'sent');
+      await B.call('POST', '/api/settings', { seen_receipts: true });
+      // Pictures (UI-API.md "Pictures"): mine end to end to a contact that reads them (bob: his receipts came), a cap of 64 KiB,
+      // JPEG or WebP by their bytes; his own, a local one over it, removed; never in the history.
+      const aliceAtB0 = acc['contact'].did as string, b64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
+      const jpeg = (n: number) => { const b = new Uint8Array(n); b.set([0xff, 0xd8, 0xff, 0xe0]); for (let i = 4; i < n; i++) b[i] = (i * 7) & 255; return b; };
+      const webp = (n: number) => { const b = new Uint8Array(n); b.set([...Buffer.from('RIFF'), 0, 0, 0, 0, ...Buffer.from('WEBP')]); return b; };
+      const big = await A.call('POST', '/api/picture', { of: 'me', type: 'image/jpeg', data: b64(jpeg(64 * 1024 + 1)) });
+      const png = await A.call('POST', '/api/picture', { of: 'me', type: 'image/png', data: b64(jpeg(100)) });
+      const liar = await A.call('POST', '/api/picture', { of: 'me', type: 'image/jpeg', data: b64(webp(100)) });
+      const nobody = await A.call('POST', '/api/picture', { of: 'did:sigelo:zNope', type: 'image/jpeg', data: b64(jpeg(100)) });
+      ok('ui pictures: over 64 KiB, not JPEG or WebP, bytes that are not what the type says → 400 picture; no such contact → 404', big['http'] === 400 && big['error']?.check === 'picture'
+        && png['http'] === 400 && liar['http'] === 400 && nobody['http'] === 404, JSON.stringify([big['error'], png['error'], liar['error'], nobody['error']]));
+      const mine = await A.call('POST', '/api/picture', { of: 'me', type: 'image/jpeg', data: b64(jpeg(64 * 1024)) });
+      const meRev = (await A.call('GET', '/api/state'))['me'].picture;
+      ok('ui pictures: mine set (64 KiB exactly) → its rev in the state (me.picture)', mine['http'] === 200 && mine['of'] === 'me' && typeof meRev === 'string' && meRev === mine['picture'], JSON.stringify(mine));
+      const aliceAt = async () => ((await B.call('GET', '/api/state'))['groups'].contacts as { did: string; picture: string | null; picture_local: boolean }[]).find((c) => c.did === aliceAtB0);
+      const came = await until(async () => { const c = await aliceAt(); return c?.picture ? c : undefined; });
+      const gotPic = await B.call('GET', `/api/picture?of=${encodeURIComponent(aliceAtB0)}`);
+      const picDir = join(B.dir, 'me.local.pictures'), picFiles = existsSync(picDir) ? readdirSync(picDir) : [];
+      ok('ui pictures: it reaches bob end to end: alice\'s row has a picture, GET /api/picture the same bytes, kept in .pictures/ (0600), no message in the history',
+        came !== undefined && gotPic['data'] === b64(jpeg(64 * 1024)) && gotPic['type'] === 'image/jpeg' && gotPic['local'] === false && picFiles.length === 1
+        && (!posixModes || (statSync(join(picDir, picFiles[0]!)).mode & 0o777) === 0o600) && !(await msgsOf(B, aliceAtB0)).some((m) => (m as unknown as { label: string }).label === 'sigelo-picture/0')
+        && !readFileSync(join(B.dir, 'me.local.history.jsonl'), 'utf8').includes('sigelo-picture'), JSON.stringify([came, picFiles]));
+      const ov = await B.call('POST', '/api/picture', { of: aliceAtB0, type: 'image/webp', data: b64(webp(300)) });
+      const ovPic = await B.call('GET', `/api/picture?of=${encodeURIComponent(aliceAtB0)}`), ovRow = await aliceAt();
+      const unov = await B.call('POST', '/api/picture', { of: aliceAtB0, remove: true }), backPic = await B.call('GET', `/api/picture?of=${encodeURIComponent(aliceAtB0)}`);
+      ok('ui pictures: a local one for alice wins (local, WebP); removed, hers shows again', ov['local'] === true && ovPic['type'] === 'image/webp' && ovPic['local'] === true && ovRow?.picture_local === true
+        && unov['local'] === false && backPic['type'] === 'image/jpeg' && backPic['local'] === false && (await aliceAt())?.picture_local === false, JSON.stringify([ov, unov]));
+      await A.call('POST', '/api/picture', { of: 'me', remove: true });
+      const picGone = await until(async () => { const c = await aliceAt(); return c && c.picture === null ? c : undefined; });
+      ok('ui pictures: alice removes hers → gone at bob\'s too (the initial shows); GET /api/picture of hers → 404 picture_none', picGone !== undefined
+        && (await B.call('GET', `/api/picture?of=${encodeURIComponent(aliceAtB0)}`))['error']?.check === 'picture_none' && (await A.call('GET', '/api/state'))['me'].picture === null);
+      // Signed statements (UI-API.md "Signed statements"): sign, check offline, tamper refused; in a chat with "Signed by".
+      const sg = await A.call('POST', '/api/statement/sign', { text: 'I agree to share the flat costs, 4 ways.' });
+      const meA = await A.call('GET', '/api/me');
+      ok('ui statements: sign → the portable text (the text, the four words, the signature line), valid, by me', sg['http'] === 200 && sg['valid'] === true && sg['by']?.kind === 'me'
+        && String(sg['statement']).startsWith('I agree to share the flat costs, 4 ways.\n-- Signed with sigelo by ' + meA['words'] + '.') && /\nsigelo-statement\/0 [A-Za-z0-9_-]+$/.test(sg['statement'])
+        && sg['original'] === meA['original'] && sg['current'] === true, JSON.stringify(sg).slice(0, 400));
+      const ck = await B.call('POST', '/api/statement/check', { statement: sg['statement'] });
+      ok('ui statements: bob checks it: valid, by his contact alice (words not compared yet), the text, its time, her identity\'s date', ck['valid'] === true && ck['by']?.kind === 'contact' && ck['by'].did === aliceAtB0
+        && ck['text'] === 'I agree to share the flat costs, 4 ways.' && Math.abs(ck['iat'] - Date.now() / 1000) < 60 && typeof ck['created'] === 'string' && ck['edited'] === false, JSON.stringify(ck).slice(0, 400));
+      const stx = String(sg['statement']), line = stx.slice(stx.lastIndexOf('\n') + 1), blob = JSON.parse(Buffer.from(line.split(' ')[1]!, 'base64url').toString('utf8'));
+      const forged = `${stx.split('\n')[0]}\n${stx.split('\n')[1]}\nsigelo-statement/0 ${Buffer.from(JSON.stringify({ ...blob, body: { ...blob.body, text: 'I agree to pay it all.' } })).toString('base64url')}`;
+      const tampered = await B.call('POST', '/api/statement/check', { statement: forged });
+      const edited = await B.call('POST', '/api/statement/check', { statement: stx.replace('4 ways', '1 way') });
+      const cut = await B.call('POST', '/api/statement/check', { statement: stx.slice(0, -10) }), plain = await B.call('POST', '/api/statement/check', { statement: 'just text' });
+      ok('ui statements: the signed text changed → refused statement_sig; the shown text changed → valid, edited (the signed one shown); cut or none → statement_format', tampered['valid'] === false && tampered['check'] === 'statement_sig'
+        && edited['valid'] === true && edited['edited'] === true && edited['text'].includes('4 ways') && cut['valid'] === false && cut['check'] === 'statement_format' && plain['check'] === 'statement_format', JSON.stringify([tampered, edited['edited'], cut]));
+      const other = await B.call('POST', '/api/statement/sign', { text: 'bob says' }), notMine = await A.call('POST', '/api/statement/check', { statement: other['statement'] });
+      ok('ui statements: empty → 400; one by a contact checked at the other page: by that contact', (await A.call('POST', '/api/statement/sign', { text: '  ' }))['http'] === 400 && notMine['by']?.kind === 'contact' && notMine['by'].did === bob!.did && notMine['by'].name === 'bob', JSON.stringify(notMine['by']));
+      const sendSt = await A.call('POST', '/api/send', { to: bob!.did, statement: sg['statement'] }), badSt = await A.call('POST', '/api/send', { to: bob!.did, statement: forged });
+      const stMsg = await until(async () => ((await B.call('GET', `/api/messages?contact=${encodeURIComponent(aliceAtB0)}`))['messages'] as { label: string; statement?: { valid: boolean; by: { kind: string; name: string }; text: string } }[]).find((m) => m.label === 'sigelo-statement/0'));
+      ok('ui statements: sent in a chat (labelled sigelo-statement/0); a forged one refused 400 statement; bob\'s message carries statement {valid, by alice, the text}', sendSt['http'] === 200 && sendSt['label'] === 'sigelo-statement/0'
+        && badSt['http'] === 400 && badSt['error']?.check === 'statement' && stMsg?.statement?.valid === true && stMsg.statement.by.kind === 'contact' && stMsg.statement.text === 'I agree to share the flat costs, 4 ways.', JSON.stringify(stMsg).slice(0, 300));
+      // Proof of age: what the bundle shows (its genesis date; no attestation on a human root).
+      const age = await A.call('GET', '/api/attestations');
+      ok('ui proof of age: GET /api/attestations → the genesis date, the attestations verified (none here)', age['http'] === 200 && typeof age['created'] === 'string' && Array.isArray(age['attestations']) && age['rejected'] === 0, JSON.stringify(age));
+      // The public invite: a long code, 7 days, kept across restarts in .ui.json; Stop for good.
+      const pub = await A.call('POST', '/api/invite', { long: true, public: true, ttl: 7 * 86400 }), pubSt = (await A.call('GET', '/api/state'))['pending'].public;
+      const badTtl = await A.call('POST', '/api/invite', { ttl: 600 }), badPub = await A.call('POST', '/api/invite', { public: true });
+      ok('ui public invite: a long code for 7 days; the state\'s pending.public (waiting); ttl without long, or too short, and public without long → 400', pub['http'] === 200 && pub['public'] === true && String(pub['code']).startsWith('sgl1')
+        && Math.abs(pub['exp'] - Date.now() / 1000 - 7 * 86400) < 60 && pubSt?.id === pub['id'] && pubSt.waiting === true && pubSt.paired === null && badTtl['http'] === 400 && badPub['http'] === 400
+        && JSON.parse(readFileSync(join(A.dir, 'me.local.ui.json'), 'utf8')).public?.code === pub['code'], JSON.stringify([pub, pubSt]).slice(0, 400));
+      const stop = await A.call('POST', '/api/invite/cancel', { id: pub['id'] });
+      ok('ui public invite: Stop for good → cancelled; gone from the state and .ui.json', stop['cancelled'] === true && (await A.call('GET', '/api/state'))['pending'].public === null
+        && JSON.parse(readFileSync(join(A.dir, 'me.local.ui.json'), 'utf8')).public === undefined);
+      const nf = await A.call('POST', '/api/notify', { chat: bob!.did, on: false }), nfRow = ((await A.call('GET', '/api/state'))['groups'].contacts as { did: string; notify: boolean }[]).find((c) => c.did === bob!.did);
+      ok('ui notify: POST /api/notify {chat, on: false} → the contact\'s notify false; no such chat → 404', nf['notify'] === false && nfRow?.notify === false
+        && (await A.call('POST', '/api/notify', { chat: 'did:sigelo:zNope', on: false }))['http'] === 404, JSON.stringify(nf));
+      await A.call('POST', '/api/notify', { chat: bob!.did, on: true });
+      const cl = await B.call('POST', '/api/history/clear', { contact: acc['contact'].did });
+      ok('ui history: clear one chat ({contact}) → its messages gone, here and in the file', cl['cleared'] === true && (await msgsOf(B, acc['contact'].did)).length === 0
+        && !readFileSync(join(B.dir, 'me.local.history.jsonl'), 'utf8').includes('hello bob'), JSON.stringify(cl));
       const renamed = await A.call('POST', '/api/rename', { contact: bob!.did, name: 'Bob B' });
       const tagged = await A.call('POST', '/api/tag', { contact: bob!.did, tags: ['#work', 'family'] });
       const after = ((await A.call('GET', '/api/state'))['groups'].contacts as { did: string; name: string; tags: string[] }[]).find((c) => c.did === bob!.did);
@@ -349,6 +641,11 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       const group = (await A.call('GET', '/api/state'))['groups'] as { mine: { name: string; local: string; words_checked: boolean; mine: { days_left: number } }[] };
       ok('ui e2e: pair with my agent in-process → connected; it sits in Mine (tier own, detected), on this machine, words checked', pairBot['status'] === 'connected' && group.mine[0]?.local === 'bot'
         && group.mine[0].words_checked && group.mine[0].mine.days_left >= 89 && (group.mine[0] as unknown as { tier: string }).tier === 'own', JSON.stringify(group.mine));
+      // Pictures and an earlier version (or an agent): sent only to a contact known to read them; bot sent no receipt, so none goes to it.
+      await A.call('POST', '/api/picture', { of: 'me', type: 'image/jpeg', data: Buffer.from([0xff, 0xd8, 0xff, 0xdb, 1, 2, 3]).toString('base64') });
+      await until(async () => (JSON.parse(readFileSync(join(A.dir, 'me.local.ui.json'), 'utf8')).pic_sent?.[bob!.did] ? true : undefined));
+      const sentTo = JSON.parse(readFileSync(join(A.dir, 'me.local.ui.json'), 'utf8')).pic_sent as Record<string, string>;
+      ok('ui pictures: a contact not known to read pictures (my agent bot: no receipt from it) gets none; bob does', Boolean(sentTo[bob!.did]) && sentTo[(group.mine[0] as unknown as { did: string }).did] === undefined, JSON.stringify(sentTo));
       const botStore = JSON.parse(readFileSync(join(A.dir, 'me.local.contacts.json'), 'utf8')) as { contacts: Record<string, { name: string; tier: string; tier_by: string }> };
       ok('ui e2e: written to the store: own, auto', Object.values(botStore.contacts).some((c) => c.name === 'bot' && c.tier === 'own' && c.tier_by === 'auto'));
       const taken = await A.call('POST', '/api/rename', { contact: group.mine[0] && (group.mine[0] as unknown as { did: string }).did, name: 'Bob B' });

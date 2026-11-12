@@ -33,10 +33,26 @@
 //                                                                 by the shell after `clear` seconds (stagenet words only)
 //   → {op:"share", id, text}                       ← {id}         the system's share sheet with a ready-to-send message
 //                                                                 (a pairing or enrol code and its instructions link)
-//   → {op:"unlock", id}                            ← {id}         the screen lock confirmed, before a screen that shows or
+//   → {op:"unlock", id, force?}                    ← {id}         the screen lock confirmed, before a screen that shows or
 //                                                                 spends the identity (not asked again within a minute of
-//                                                                 the last; no screen lock set: at once), else cancelled
+//                                                                 the last unless force: a payment above the pay limit; no
+//                                                                 screen lock set: at once), else cancelled
+//   → {op:"lock", id, on?, after?}                 ← {id, on, after, secure}  the app lock's settings, kept by the shell: on (default
+//                                                                 true) the screen lock at a start and at a return after `after`
+//                                                                 minutes away (1, 5, 15 or 60; default 1); secure: the phone has a
+//                                                                 screen lock. A weaker setting (off, or longer) asks the screen lock
+//                                                                 first (cancelled). Anything else refused (check "lock")
+//   → {op:"notify", id, tag, title, text}          ← {id}         a system notification: title and text exactly as given (a name and a
+//                                                                 generic line: never a message's text), one channel "messages", the lock
+//                                                                 screen's version without them ("sigelo", "New message"); tag
+//                                                                 chat:… | group:… | pay:… (TAG) names it and comes back in "open";
+//                                                                 refused "notify" (a bad tag, title or text) or "notify_permission"
+//   → {op:"notify", id, tag, cancel:true}          ← {id}         that tag's notification removed
+//   → {op:"notify", id, ask:true}                  ← {id, granted} POST_NOTIFICATIONS asked when not granted (Android 13+)
 //   any ← {id, error:{check, message}}
+// Events, the shell's own (no id; never an answer): ← {ev:"open", tag} one of our notifications tapped (the app running: at
+// once; started by the tap: kept by the shell until the page's port is open, then posted once). Kept here until a listener
+// is set (bridge.onEvent).
 // https: https:// to any host; http:// only to a private IPv4 address (a computer's `ui --remote`
 // on the LAN, sealed in the page). tls: certificate and host name checked by the system's trust
 // store. Nothing is sent but what the request names: no Origin, no cookie, no redirect followed.
@@ -48,7 +64,14 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile']);
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify']);
+/** A notification's tag (SigeloBridge.TAG): what it is about, given back when it is tapped. */
+export const TAG = /^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/;
+/** The app lock's choices of minutes away (SigeloBridge.LOCK_AFTER). */
+export const LOCK_AFTER = Object.freeze([1, 5, 15, 60]);
+export const NOTE_MAX = 100;
+const line = (v, what) => { if (typeof v !== 'string' || v.length === 0 || v.length > NOTE_MAX) throw new MsgError('notify', `${what}: 1 to ${NOTE_MAX} characters`); return v; };
+const tagOf = (t) => { if (typeof t !== 'string' || !TAG.test(t)) throw new MsgError('notify', 'tag: chat:, group: or pay: and up to 200 letters, digits or : . _ -'); return t; };
 export const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); };
 export const unb64 = (s) => { const t = atob(s), o = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) o[i] = t.charCodeAt(i); return o; };
 
@@ -74,11 +97,13 @@ export function connectBridge({ shell = globalThis.SigeloShell, target = globalT
 
 function makeBridge(info, port) {
   let next = 1;
-  const waiting = new Map(), streams = new Map();
+  const waiting = new Map(), streams = new Map(), listeners = new Set(), early = [];
   port.onmessage = (e) => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
     if (typeof m?.s === 'number') { streams.get(m.s)?.got(m); return; }
+    // The shell's own events go to their listeners (kept until there is one), never to a request waiting.
+    if (typeof m?.ev === 'string') { if (listeners.size) for (const f of listeners) { try { f(m); } catch {} } else if (early.length < 16) early.push(m); return; }
     const w = waiting.get(m?.id);
     if (!w) return;
     waiting.delete(m.id);
@@ -129,8 +154,33 @@ function makeBridge(info, port) {
     /** Text on the clipboard, marked sensitive, emptied by the shell after `clear` seconds (1 to 300). */
     async clipCopy(text, { clear = 60 } = {}) { await request('clip-copy', { text: String(text), clear }); },
     async share(text) { await request('share', { text: String(text) }); },
-    /** The screen lock (MainActivity.unlock): resolves once confirmed; refused `cancelled`. */
-    async unlock() { await request('unlock'); },
+    /** The screen lock (MainActivity.unlock): resolves once confirmed; refused `cancelled`. force: asked even if confirmed a moment ago. */
+    async unlock({ force = false } = {}) { await request('unlock', force === true ? { force: true } : {}); },
+    /** The app lock's settings → { on, after (minutes), secure (the phone has a screen lock) }. */
+    async lockGet() { const r = await request('lock'); return { on: r.on === true, after: Number(r.after), secure: r.secure === true }; },
+    /** Change them (on: boolean, after: 1, 5, 15 or 60) → as lockGet. Anything else refused (check "lock"), here and in the shell. */
+    async lockSet({ on, after } = {}) {
+      if (on !== undefined && typeof on !== 'boolean') throw new MsgError('lock', 'on: true or false');
+      if (after !== undefined && !LOCK_AFTER.includes(after)) throw new MsgError('lock', `after: ${LOCK_AFTER.join(', ')} minutes`);
+      const r = await request('lock', { ...(on !== undefined && { on }), ...(after !== undefined && { after }) });
+      return { on: r.on === true, after: Number(r.after), secure: r.secure === true };
+    },
+    /**
+     * A system notification ({ tag, title, text }: shown as given), its removal ({ tag, cancel: true }) or the permission
+     * asked ({ ask: true } → { granted }). Checked here before the shell sees it: a bad tag, title or text refused "notify".
+     */
+    async notify({ tag, title, text, cancel = false, ask = false } = {}) {
+      if (ask === true) return { granted: (await request('notify', { ask: true })).granted === true };
+      if (cancel === true) { await request('notify', { tag: tagOf(tag), cancel: true }); return {}; }
+      await request('notify', { tag: tagOf(tag), title: line(title, 'title'), text: line(text, 'text') });
+      return {};
+    },
+    /** fn(event) for the shell's events ({ ev: "open", tag }); those that came before the first listener, at once. → stop(). */
+    onEvent(fn) {
+      listeners.add(fn);
+      while (early.length) { const m = early.shift(); try { fn(m); } catch {} }
+      return () => listeners.delete(fn);
+    },
   });
 }
 

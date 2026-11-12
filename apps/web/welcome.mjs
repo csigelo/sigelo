@@ -1,33 +1,40 @@
 // SPDX-License-Identifier: MIT
 // First run, shared by the shells (the Android app's page: app.mjs with setup.mjs; the GTK phone app's
-// start page: apps/gtk/web/start.js): one decision per screen, in the order of the reference wallet's screens.
+// start page: apps/gtk/web/start.js), in the words of design/ux1/mock.html: one decision per screen.
 //
-//   Welcome   the seal and three choices: Create a new identity, Restore from 25 words, Connect to my
-//             agent elsewhere. Advanced (folded, only where a shell adds something): an import.
-//   Create    1. Name this phone (Advanced: network, relay)  2. Your 25 words, once: a one-way door (no
-//             Back; FLAG_SECURE on Android; copy on stagenet only)  3. Check your paper: three words by
-//             number (wrong: which, try again; the 25 again only on "Show the words again")  4. setting up
-//   Restore   1. Your 25 words, checked as typed  2. When were they made? (optional) and the network;
-//             Advanced: name, another device keeps the seat, relay  3. setting up
-//   then      (create and restore, where the shell keeps words) Your words on this phone: a password and its
-//             repeat, Set or Skip (design/apps-seed.md §8); no Back: the identity is made
-//   Connect   1. The code the computer shows (8 characters; Advanced: its relay, a SIGELO:UI: or
-//             SIGELO:CTL: text, a QR)  2. Compare four words  then the computer's page
-// Back (the screen's button, the browser's, the system's: one history entry per screen) goes one screen
-// back, never past the welcome; the words and the check have none. The shell does the work (api) and
-// holds the words between the draw and the check; this page drops them once used.
+//   Welcome   sigelo, what it is, four ways: Create my identity, I have an invite code (where the shell keeps
+//             one: api.join), Restore from 25 words, Use my computer instead. Advanced (folded, only where a
+//             shell adds something): an import. Close: back to the other profiles (api.leave).
+//   Create    1. Name this phone (More options: network, relay)  2. Keep it safe: write down 25 words (the words
+//             once: a one-way door, no Back, FLAG_SECURE on Android, copy on the test network only; then Check
+//             your paper: three words by number, wrong: which, try again) or set a password (api.keepWords: the
+//             words stay on this phone, locked by it, never shown)  3. Lock (api.lock: the phone's screen lock);
+//             then You're set (the four words), Open sigelo. Without api.keepWords no choice: the words on paper.
+//   Restore   one screen: the 25 words checked as typed, when they were made (a month, optional), is this
+//             identity in use on another device (main or spare); More options: network, block height, name,
+//             relay; then Restoring, Lock, done
+//   Join      the code they gave (or a scan), kept (api.join), then Name this phone, Join, and Create's step 2;
+//             the app pairs with it once the identity is made (the four words are compared in that chat)
+//   Connect   Use my computer: scan its QR or type its code (Advanced: its relay, a SIGELO:UI: or SIGELO:CTL:
+//             text), then Compare four words, then the computer's page
+// Back (the screen's button, the browser's, the system's: one history entry per screen) goes one screen back,
+// never past the welcome; the words, the check and every screen once the identity is made have none. The shell
+// does the work (api) and holds the words between the draw and the check; this page drops them once used.
 //
 // api (a call may throw an Error; its message is shown under the button):
-//   seal                               the icon's URL
+//   seal                               the icon's URL (the profile picker)
 //   advanced                           [{ label, run(ui) }] on the welcome's fold (ui: { screen, go, button, el })
 //   newWords(net)                      → { words: [25], vault }
 //   quiz()                             → [three positions, 1 to 25]
-//   confirm(answers, { name, relay })  → { wrong: [positions] } | { ok, message? }: right → the identity made;
-//                                        a throw with e.gone: checked but not saved, the words dropped
+//   confirm(answers, { name, relay })  → { wrong: [positions] } | { ok, message?, words? }: right → the identity
+//                                        made (words: its four words, for You're set); a throw with e.gone:
+//                                        checked but not saved, the words dropped
 //   discard()                          the drawn words dropped (the app stopped before the check)
 //   checkWords(text)                   → { count, ok, error }
-//   restore({ words, name, height, net, elsewhere, relay })  → { ok, message? }
-//   keepWords(words, password)         optional: the words kept encrypted under the password (after confirm or restore)
+//   restore({ words, name, height, net, elsewhere, relay })  → { ok, message?, words? }
+//   join(code)                         optional: the invite code kept until the new identity's page opens
+//   keepWords(words, password)         optional: Keep it safe → Set a password: the words kept encrypted under it
+//   lock()                             optional: the phone's screen lock, asked once (Lock → Use my phone's lock)
 //   connect(text)                      → { words } (over the relay: compare, then open()) | { opened: true }
 //   open()                             the computer's page, once the words match
 //   done(message?)                     the main screen (the shell loads it)
@@ -107,6 +114,24 @@ export function scanner(onText, jsQR) {
   return box;
 }
 
+/** The mock's icons the first run draws (24 × 24, stroked); text where the page has no SVG. */
+const ICON = { back: ['M15 5l-7 7 7 7'], x: ['M6 6l12 12M18 6L6 18'], check: ['M5 12l5 5 9-10'], scan: ['M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M4 12h16'],
+  finger: ['M12 11v4M8.5 9a4 4 0 017 0v6M6 8.5a7 7 0 0112 0v5M9 13v3a3 3 0 006 0'] };
+function icon(name) {
+  if (!document.createElementNS) return null;
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  for (const [k, v] of [['class', 'ic'], ['viewBox', '0 0 24 24'], ['aria-hidden', 'true'], ['focusable', 'false']]) s.setAttribute(k, v);
+  for (const d of ICON[name]) { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); s.append(p); }
+  return s;
+}
+let fid = 0;
+/** A labelled control (the label tied to it by id), a help line under it. */
+function field(label, control, help) {
+  if (!control.id) control.id = `fr${++fid}`;
+  return el('div', { className: 'field' }, el('label', { textContent: label, htmlFor: control.id, attrs: { for: control.id } }), control, help ? el('p', { className: 'help', textContent: help }) : null);
+}
+const monthOk = (v) => /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+
 /** The first run in `box` (show false: nothing drawn until welcome()) → { welcome, screen, go, button, stop }. */
 export function firstRun(box, api, { show = true } = {}) {
   const stack = [];   // the screens behind this one, for Back
@@ -114,16 +139,24 @@ export function firstRun(box, api, { show = true } = {}) {
   const secure = (on, d = false) => { try { void Promise.resolve(api.secure?.(on, d)).catch(() => {}); } catch {} };
   const quiet = (p) => { try { void Promise.resolve(p?.()).catch(() => {}); } catch {} };
 
-  /** One screen: a title, a lead line, the body, one primary button and maybe a second; Back unless back: false. → { say(t, warn) } */
-  function screen({ title, lead, body = [], primary, secondary, back = true }) {
+  /**
+   * One screen: a title (the top bar's; hidden on a hero screen), a step line, a heading, a lead, the body, one
+   * primary button and maybe a second; Back unless back: false, or Close (close: fn). → { say(t, warn) }
+   */
+  function screen({ title, steps, h2, lead, body = [], primary, secondary, back = true, close, hero = false }) {
     const say = el('p', { className: 'muted say', attrs: { role: 'status', 'aria-live': 'polite' } });
-    const head = el('header', {}, back && stack.length ? el('button', { className: 'back', textContent: '‹', attrs: { 'aria-label': 'Back' }, onclick: () => history.back() }) : null, el('h1', { textContent: title }));
-    box.replaceChildren(el('div', { className: 'welcome' }, head, lead ? el('p', { textContent: lead }) : null, ...body, el('div', { className: 'bar' }, primary ?? null, secondary ?? null), say));
+    const nav = close ? el('button', { className: 'ib', attrs: { 'aria-label': 'Close', title: 'Close' }, onclick: close }, icon('x') ?? '×')
+      : back && stack.length ? el('button', { className: 'ib back', attrs: { 'aria-label': 'Back', title: 'Back' }, onclick: () => history.back() }, icon('back') ?? '‹') : null;
+    const head = el('header', { className: hero ? 'plain' : '' }, nav, el('h1', { className: hero ? 'sr' : '', textContent: title }));
+    box.replaceChildren(el('div', { className: `welcome${hero ? ' hero-run' : ''}` }, head,
+      steps ? el('p', { className: 'steps', textContent: steps }) : null, h2 ? el('h2', { className: 'big', textContent: h2 }) : null,
+      lead ? el('p', { className: 'lead', textContent: lead }) : null, ...body, el('div', { className: 'bar' }, primary ?? null, secondary ?? null), say));
     box.hidden = false;
     globalThis.scrollTo?.(0, 0);
     return { say: (t, warn = true) => { say.textContent = t ?? ''; say.className = `${warn && t ? 'warn' : 'muted'} say`; } };
   }
-  const button = (label, onclick, primary = false) => el('button', { className: primary ? 'primary' : '', textContent: label, onclick });
+  /** A button: primary (true), 'ghost', or plain; an icon before the label. */
+  const button = (label, onclick, kind = false, ic) => el('button', { className: kind === true ? 'primary' : kind || '', onclick }, ic ? icon(ic) : null, label);
   /** fn with the button off, its error under it. */
   const busy = (btn, s, fn) => async () => {
     btn.disabled = true; s.say('', false);
@@ -138,7 +171,7 @@ export function firstRun(box, api, { show = true } = {}) {
   }
   function home() { stack.length = 0; current = welcome; door = false; secure(false); welcome(); }
   const onPop = () => {
-    if (door) { history.pushState({ firstRun: stack.length }, ''); return; }   // the words and the check: no way back
+    if (door) { history.pushState({ firstRun: stack.length }, ''); return; }   // the words, the check, what follows the identity: no way back
     const prev = stack.pop();
     if (!prev) return;
     const l = leave; leave = null; l?.();
@@ -151,45 +184,120 @@ export function firstRun(box, api, { show = true } = {}) {
     const ui = { screen, go, button, el };
     const adv = api.advanced?.length ? fold('Advanced', ...api.advanced.map((a) => el('div', { className: 'bar' }, button(a.label, () => go(() => a.run(ui)))))) : null;
     box.replaceChildren(el('div', { className: 'welcome home' },
-      el('img', { className: 'seal', src: api.seal ?? 'icon.svg', alt: '' }),
-      el('h1', { textContent: 'sigelo' }),
-      el('p', { className: 'muted', textContent: 'One identity for you and your agents.' }),
+      api.leave ? el('header', { className: 'plain' }, el('button', { className: 'ib', attrs: { 'aria-label': api.leave.label, title: api.leave.label }, onclick: () => api.leave.run() }, icon('x') ?? '×')) : null,
+      el('h1', { className: 'wordmark', textContent: 'sigelo' }),
+      el('p', { className: 'lead strong', textContent: 'One identity for you and your agents.' }),
+      el('p', { className: 'lead', textContent: 'Chat with people and agents, privately. Let your agents act for you, within limits you set.' }),
       el('div', { className: 'choices' },
-        button('Create a new identity', () => go(createName), true),
+        button('Create my identity', () => { C.join = null; go(createName); }, true),
+        api.join ? button('I have an invite code', () => go(joinCode)) : null,
         button('Restore from 25 words', () => go(restoreWords)),
-        button('Connect to my agent elsewhere', () => go(connectCode))),
-      adv, api.leave ? el('div', { className: 'bar' }, button(api.leave.label, () => api.leave.run())) : null));
+        button('Use my computer instead', () => go(connectCode), 'ghost')),
+      adv));
     box.hidden = false;
   }
 
-  // ---- create
-  const C = { name: 'phone', net: 'mainnet', relay: DEFAULT_RELAY, words: null, vault: null };
+  // ---- join (I have an invite code; the Add sheet's "Join from an invite code"): the code first, then the name and Create's
+  // step 2; the page pairs with the code once the identity is made, and the four words are compared in that chat
+  const JOIN_CODE = /^([0-9A-Z]{4}-?[0-9A-Z]{4}(-?[0-9A-Z]{4})?|sgl1[1-9A-HJ-NP-Za-km-z]{20,})$/;
+  function joinCode() {
+    const code = el('input', { className: 'code-in', placeholder: 'K7F3-Q9ZP', attrs: { autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false' } });
+    const next = button('Next', null, true), scanBox = el('div');
+    const s = screen({ title: 'Join from an invite', lead: 'Someone gave you a code or a QR. Enter it, and you\'ll be chatting with them in a minute.',
+      body: [field('Invite code', code, '8 letters and digits. A shop\'s public code works too.'),
+        api.scan ? el('div', { className: 'bar' }, button('Scan a QR instead', () => { scanBox.replaceChildren(api.scan((t) => { code.value = t.trim(); void next.onclick(); })); }, false, 'scan')) : null, scanBox], primary: next });
+    next.onclick = busy(next, s, async () => {
+      const c = code.value.trim();
+      const v = /^sgl1/i.test(c) ? c.replace(/\s+/g, '') : c.toUpperCase();
+      if (!JOIN_CODE.test(v)) throw new Error('The code has 8 letters and digits, like K7F3-Q9ZP, or starts with sgl1.');
+      api.join?.(v);
+      C.join = v;
+      go(createName);
+    });
+    code.focus?.();
+  }
+
+  // ---- create: 1 the name, 2 keep it safe (the words on paper, or a password), 3 the lock; then You're set
+  const C = { name: 'phone', net: 'mainnet', relay: DEFAULT_RELAY, words: null, vault: null, join: null, made: null };
+  const total = () => (api.lock ? 3 : 2);
+  const step = (n) => `Step ${n} of ${total()}`;
+  /** The network select of More options: the mock's two choices. */
+  const netSelect = (v) => {
+    const sel = el('select', {}, el('option', { value: 'mainnet', textContent: 'Main network' }), el('option', { value: 'stagenet', textContent: 'Test network (coins worth nothing)' }));
+    sel.value = v;
+    return sel;
+  };
   function createName() {
-    const name = text({ value: C.name, attrs: { maxlength: '20', 'aria-label': 'Name for this phone' } });
-    const relay = text({ value: C.relay, attrs: { 'aria-label': 'Relay' } });
-    const nets = radios('create-net', [['mainnet', 'Mainnet'], ['stagenet', 'Stagenet (test coins, worth nothing)']], C.net);
-    const next = button('Make my 25 words', null, true);
-    const s = screen({ title: 'Name this phone', lead: 'Your agents see this name.', primary: next,
-      body: [name, el('p', { className: 'muted', textContent: NAME_RULE }), fold('Advanced', el('label', { textContent: 'Monero network' }), nets.node, el('label', { textContent: 'Relay' }), relay)] });
+    const name = text({ value: C.name, attrs: { maxlength: '20' } });
+    const relay = text({ value: C.relay }), net = netSelect(C.net);
+    const next = button(C.join ? 'Join' : 'Next', null, true);
+    const s = screen({ title: 'Name this phone', steps: C.join ? null : step(1), h2: C.join ? null : 'What should your agents call this phone?',
+      lead: C.join ? 'We make your identity on this phone now. Then you protect it with 25 words or a password.' : null, primary: next,
+      body: [field('Name', name, `${NAME_RULE} People you pair with name you themselves.`), fold('More options', field('Monero network', net), field('Relay', relay))] });
     next.onclick = busy(next, s, async () => {
       const n = name.value.trim();
       if (!NAME.test(n)) throw new Error(`Name: ${NAME_RULE}`);
-      C.name = n; C.relay = relay.value.trim().toLowerCase() || DEFAULT_RELAY; C.net = nets.value();
-      const w = await api.newWords(C.net);
-      C.words = w.words; C.vault = w.vault;
+      C.name = n; C.relay = relay.value.trim().toLowerCase() || DEFAULT_RELAY; C.net = net.value === 'stagenet' ? 'stagenet' : 'mainnet';
+      if (api.keepWords) { go(gate); return; }
+      await draw();
       go(createWords);
     });
+    name.focus?.();
   }
-  function createWords() {
+  const draw = async () => { const w = await api.newWords(C.net); C.words = w.words; C.vault = w.vault; };
+  /** Keep it safe (the mock's words gate): the words on paper, or a password; one before going on. */
+  function gate() {
+    const card = (title, sub, run) => el('button', { className: 'card tap', onclick: run }, el('b', { textContent: title }), el('span', { className: 'help', textContent: sub }));
+    let s = null;
+    const paper = card('Write down 25 words', 'On paper. They bring everything back on any phone. Safest.', async () => {
+      s.say('', false);
+      try { await draw(); go(createWords); } catch (e) { s.say(e?.message ?? String(e)); }
+    });
+    const pass = card('Set a password', 'The words stay on this phone, locked by it. Lose the phone and they are gone.', () => go(wordsPassword));
+    s = screen({ title: 'Keep it safe', steps: step(2), h2: 'Choose how to protect your identity', lead: 'Your identity and money come from 25 words. Pick one before you go on.', body: [el('div', { className: 'stack' }, paper, pass)] });
+  }
+  /** Set a password: the words drawn and kept here under it (never shown), checked by this page, the identity made. */
+  function wordsPassword() {
+    const attrs = { autocomplete: 'new-password', autocapitalize: 'none', spellcheck: 'false' };
+    const pw = el('input', { type: 'password', attrs }), again = el('input', { type: 'password', attrs });
+    const set = button('Set password', null, true);
+    const s = screen({ title: 'Set a password', steps: step(2), lead: 'It locks your 25 words on this phone. You need it to see them again in Settings.',
+      body: [field('Password', pw, 'At least 8 characters.'), field('Repeat it', again)], primary: set });
+    set.onclick = busy(set, s, async () => {
+      if ([...pw.value].length < 8) throw new Error('A password of at least 8 characters.');
+      if (pw.value !== again.value) throw new Error('The two passwords are not the same.');
+      const password = pw.value;
+      pw.value = ''; again.value = '';
+      await draw();
+      const words = C.words, asked = await api.quiz();
+      door = true;
+      settingUp('Making your identity');
+      let r;
+      try { r = await api.confirm(asked.map((n) => words[n - 1]), { name: C.name, relay: C.relay }); } catch (e) { return failed(e); }
+      if (r?.wrong) return failed(new Error('The words did not check: start again.'));
+      C.made = r;
+      try { await api.keepWords(words, password); } catch (e) {
+        // Made, but not kept: the words now, once, on paper (the only copy).
+        C.words = words;
+        go(() => createWords({ made: true, note: `Not kept on this phone (${e?.message ?? e}): write these words down now. They are the only copy.` }), { replace: true });
+        return undefined;
+      }
+      C.words = null; C.vault = null;
+      return afterMade();
+    });
+    pw.focus?.();
+  }
+  function createWords({ made = false, note = '' } = {}) {
     door = true; secure(true, true);
     const list = el('ol', { className: `seed-list${C.net === 'mainnet' ? ' nocopy' : ''}`, attrs: { 'aria-label': 'Your 25 words, in order' } }, C.words.map((w) => el('li', { textContent: w })));
     if (C.net === 'mainnet') list.addEventListener('copy', (e) => e.preventDefault());
-    const copy = C.net === 'stagenet' ? button('Copy (stagenet only)', null) : null;
-    const s = screen({ title: 'Your 25 words', back: false,
-      body: [el('p', { className: 'warn', textContent: 'Write them on paper, in order. They are shown once. Whoever has them owns this identity and its wallet.' }),
-        list, el('label', { textContent: 'Their wallet\'s address, to check your paper later' }), el('p', { className: 'mono', textContent: C.vault }),
-        C.net === 'mainnet' ? el('p', { className: 'muted', textContent: 'No copy on mainnet: write them by hand.' }) : null],
-      primary: button('I have written them down', () => go(() => createCheck(), { replace: true }), true), secondary: copy });
+    const copy = C.net === 'stagenet' ? button('Copy (test network only)', null) : null;
+    const s = screen({ title: 'Your 25 words', steps: made ? null : step(2), back: false,
+      lead: 'Write these words on paper, in order. They are the only way to get your identity and money back if you lose this phone.',
+      body: [list, el('p', { className: 'help', textContent: C.net === 'mainnet' ? 'No copy, no screenshot: write them by hand. Never type them into a website.' : 'Test network: Copy works. On the main network: no copy, no screenshot.' }),
+        C.vault ? fold('Their wallet\'s address', el('p', { className: 'help', textContent: 'To check your paper later: a Monero wallet restored from these words shows this address.' }), el('p', { className: 'mono', textContent: C.vault })) : null],
+      primary: button('I wrote them down', () => (made ? afterMade({ shown: true }) : go(() => createCheck(), { replace: true })), true), secondary: copy });
+    if (note) s.say(note);
     if (copy) copy.onclick = async () => {
       try { await api.clipCopy(C.words.join(' '), CLIP_SECONDS); s.say(`Copied. The clipboard is emptied in ${CLIP_SECONDS} s.`, false); } catch (e) { s.say(`Not copied: ${e.message}`); }
     };
@@ -199,11 +307,11 @@ export function firstRun(box, api, { show = true } = {}) {
     quiet(api.clipClear);
     let asked;
     try { asked = await api.quiz(); } catch (e) { screen({ title: 'Check your paper', back: false, primary: button('Back to the start', home, true) }).say(e.message); return; }
-    const inputs = asked.map((n) => el('input', { attrs: { ...WORDS_ATTRS, 'aria-label': `Word ${n}` } }));
+    const inputs = asked.map(() => el('input', { attrs: { ...WORDS_ATTRS } }));
     const ok = button('Check', null, true);
-    const s = screen({ title: 'Check your paper', lead: 'Type these words from your paper.', back: false,
-      body: asked.flatMap((n, i) => [el('label', { textContent: `Word ${n}` }), inputs[i]]),
-      primary: ok, secondary: button('Show the words again', () => go(createWords, { replace: true })) });
+    const s = screen({ title: 'Check your paper', steps: step(2), lead: 'Type these three words from your paper. You can\'t go on without them.', back: false,
+      body: [...asked.map((n, i) => field(`Word ${n}`, inputs[i])), el('div', { className: 'bar' }, button('Show the words again', () => go(createWords, { replace: true }), 'ghost'))],
+      primary: ok });
     if (note) s.say(note);
     inputs[0]?.focus?.();
     ok.onclick = busy(ok, s, async () => {
@@ -212,111 +320,109 @@ export function firstRun(box, api, { show = true } = {}) {
       for (const x of inputs) x.value = '';
       settingUp('Making your identity');
       let r;
-      try { r = await api.confirm(answers, { name: C.name, relay: C.relay }); } catch (e) {
-        const f = e?.gone
-          ? screen({ title: 'Not saved', back: false, lead: 'Your 25 words are on your paper: restore from them.', primary: button('Restore from 25 words', () => { home(); go(restoreWords); }, true), secondary: button('Back to the start', home) })
-          : screen({ title: 'Not made', back: false, lead: 'Nothing was kept.', primary: button('Try again', () => go(() => createCheck(), { replace: true }), true) });
-        if (e?.gone) { C.words = null; C.vault = null; door = false; secure(false); }
-        f.say(e?.message ?? String(e));
-        return;
-      }
-      if (r?.wrong) { go(() => createCheck(`Word${r.wrong.length > 1 ? 's' : ''} ${r.wrong.join(', ')} did not match. Check your paper, then try again.`), { replace: true }); return; }
-      const made = C.words;
-      C.words = null; C.vault = null; door = false; secure(false);
-      if (api.keepWords) { offerWords(made, () => api.done?.(r?.message)); return; }
-      await api.done?.(r?.message);
+      try { r = await api.confirm(answers, { name: C.name, relay: C.relay }); } catch (e) { return failed(e); }
+      if (r?.wrong) { go(() => createCheck(`Word${r.wrong.length > 1 ? 's' : ''} ${r.wrong.join(', ')} did not match. Check your paper, then try again.`), { replace: true }); return undefined; }
+      C.made = r;
+      return afterMade();
     });
   }
+  /** confirm refused: checked but not saved (gone: restore from the paper), or nothing made (try again). */
+  function failed(e) {
+    const f = e?.gone
+      ? screen({ title: 'Not saved', back: false, lead: 'Your 25 words are on your paper: restore from them.', primary: button('Restore from 25 words', () => { home(); go(restoreWords); }, true), secondary: button('Back to the start', home) })
+      : screen({ title: 'Not made', back: false, lead: 'Nothing was kept.', primary: button('Try again', () => go(() => createCheck(), { replace: true }), true) });
+    if (e?.gone) { C.words = null; C.vault = null; door = false; secure(false); }
+    f.say(e?.message ?? String(e));
+  }
+  /** The identity is made: the words leave this page; the lock (where the shell has one), then You're set. No way back. */
+  function afterMade() {
+    C.words = null; C.vault = null; door = true; secure(false);
+    if (api.lock) return go(newLock, { replace: true });
+    return go(newDone, { replace: true });
+  }
+  function newLock() {
+    const use = button('Use my phone\'s lock', null, true, 'finger');
+    const s = screen({ title: 'Lock', steps: C.restored ? null : step(3), back: false,
+      body: [el('div', { className: 'lockicon' }, icon('finger')), el('h2', { className: 'big center', textContent: 'Lock sigelo with your fingerprint or PIN' }),
+        el('p', { className: 'lead center', textContent: 'Asked only when you open the app, switch profile, pay above your limit or show your 25 words.' })], primary: use });
+    use.onclick = busy(use, s, async () => { await api.lock(); go(newDone, { replace: true }); });
+  }
+  function newDone() {
+    const finish = async () => { door = false; await api.done?.(C.made?.message); };
+    const words = String(C.made?.words ?? '').split(/\s+/).filter(Boolean).slice(0, 4);
+    screen({ title: C.restored ? 'Restored' : 'You\'re set', hero: true, back: false, close: () => void finish(),
+      body: [el('div', { className: 'center' }, el('div', { className: 'lockicon' }, icon('check')), el('h2', { className: 'big', textContent: C.restored ? 'Your identity is back' : 'You\'re set' }),
+        words.length ? [el('p', { className: 'lead', textContent: 'Your four words' }), el('div', { className: 'words4', attrs: { 'aria-label': `Four words: ${words.join(' ')}` } }, words.map((w) => el('span', { textContent: w })))] : null,
+        el('p', { className: 'lead', textContent: 'They are your identity\'s fingerprint. They never change, and people you pair with see them.' }))],
+      primary: button('Open sigelo', () => void finish(), true) });
+  }
 
-  // ---- restore
-  const R = { words: '', height: '', net: 'mainnet', name: 'phone', elsewhere: false, relay: DEFAULT_RELAY };
+  // ---- restore: one screen (the words, when they were made, main or spare), then Restoring, the lock, done
+  const R = { words: '', month: '', height: '', net: 'mainnet', name: 'phone', elsewhere: false, relay: DEFAULT_RELAY };
   function restoreWords() {
     secure(true);
-    const words = el('textarea', { rows: 6, value: R.words, attrs: { ...WORDS_ATTRS, 'aria-label': 'Your 25 words', 'aria-describedby': 'seed-count' } });
-    const count = el('p', { className: 'muted', id: 'seed-count', textContent: '0 of 25 words' });
-    const next = button('Next', null, true);
+    const words = el('textarea', { rows: 6, value: R.words, attrs: { ...WORDS_ATTRS, 'aria-describedby': 'seed-count' } });
+    const count = el('p', { className: 'help', id: 'seed-count', textContent: '0 of 25 words' });
+    const month = el('input', { type: 'month', value: R.month, attrs: { autocomplete: 'off' } });
+    const height = text({ value: R.height, placeholder: '3100000', attrs: { inputmode: 'numeric' } });
+    const net = netSelect(R.net), name = text({ value: R.name, attrs: { maxlength: '20' } }), relay = text({ value: R.relay });
+    const seat = radios('seed-seat', [['here', 'No, make this phone the main one'], ['elsewhere', 'Yes, keep this phone as a spare']], R.elsewhere ? 'elsewhere' : 'here');
+    const start = button('Restore', null, true);
     const live = () => {
       const c = api.checkWords(words.value);
-      count.textContent = c.error ? `${c.count} of 25: ${c.error}` : c.ok ? '25 of 25, checksum ok' : `${c.count} of 25 words`;
-      count.className = c.error ? 'warn' : c.ok ? 'good' : 'muted';
-      next.disabled = !c.ok;
+      count.textContent = c.error ? `${c.count} of 25: ${c.error}` : c.ok ? '25 words, checked' : `${c.count} of 25 words`;
+      count.className = `help ${c.error ? 'warn' : c.ok ? 'good' : ''}`.trim();
+      start.disabled = !c.ok;
+      return c.ok;
     };
     words.addEventListener('input', live);
     words.addEventListener('paste', () => setTimeout(() => { quiet(api.clipClear); live(); }, 0));
     leave = () => { R.words = ''; words.value = ''; secure(false); };   // Back to the welcome: the words dropped
-    screen({ title: 'Restore from 25 words', lead: 'Type or paste your 25 words, in order. They are checked as you type and kept nowhere.', body: [words, count], primary: next });
-    live();
-    next.onclick = () => { R.words = words.value; words.value = ''; leave = null; go(restoreBirth); };
-    words.focus?.();
-  }
-  function restoreBirth() {
-    const height = text({ value: R.height, placeholder: '2024-02-29 or 3100000', attrs: { 'aria-label': 'Restore date or height' } });
-    const nets = radios('seed-net', [['mainnet', 'Mainnet'], ['stagenet', 'Stagenet (test coins)']], R.net);
-    const name = text({ value: R.name, attrs: { maxlength: '20', 'aria-label': 'Name for this phone' } });
-    const elsewhere = el('input', { type: 'checkbox', checked: R.elsewhere });
-    const relay = text({ value: R.relay, attrs: { 'aria-label': 'Relay' } });
-    const start = button('Restore', null, true);
-    const s = screen({ title: 'When were the words made?', lead: 'The day or block height your wallet started. Empty: from the first block (slower).',
-      body: [height, el('label', { textContent: 'Monero network' }), nets.node,
-        fold('Advanced', el('label', { textContent: 'Name for this phone' }), name, el('p', { className: 'muted', textContent: NAME_RULE }),
-          el('label', { className: 'opt' }, elsewhere, el('span', { textContent: 'sigelo already runs as me on another device: this phone waits (standby)' })),
-          el('label', { textContent: 'Relay' }), relay)],
+    const s = screen({ title: 'Restore',
+      body: [el('div', { className: 'field' }, el('label', { textContent: 'Your 25 words, in order', htmlFor: 'seed-words', attrs: { for: 'seed-words' } }), Object.assign(words, { id: 'seed-words' }), count),
+        field('When were they made? (optional)', month, 'Makes the wallet ready faster. Empty: it reads from the start.'),
+        el('p', { className: 'flabel', textContent: 'Is this identity already in use on another device?' }), seat.node,
+        el('p', { className: 'help', textContent: 'Your identity acts from one device at a time. You can make the spare the main one later.' }),
+        fold('More options', field('Monero network', net), field('Or the block height it started', height, 'Digits; it wins over the month.'), field('Name this phone', name, NAME_RULE), field('Relay', relay))],
       primary: start });
+    live();
+    words.focus?.();
     start.onclick = busy(start, s, async () => {
-      const h = height.value.trim(), n = name.value.trim();
-      if (h !== '' && !/^\d{1,10}$/.test(h) && !/^\d{4}-\d{2}-\d{2}$/.test(h)) throw new Error('A date as YYYY-MM-DD, a block height (digits), or empty.');
+      if (!live()) throw new Error('Type all 25 words first.');
+      const m = month.value.trim(), hgt = height.value.trim(), n = name.value.trim();
+      if (m !== '' && !monthOk(m)) throw new Error('A month as YYYY-MM, or empty.');
+      if (hgt !== '' && !/^\d{1,10}$/.test(hgt)) throw new Error('A block height is digits only, or empty.');
       if (!NAME.test(n)) throw new Error(`Name: ${NAME_RULE}`);
-      Object.assign(R, { height: h, net: nets.value(), name: n, elsewhere: elsewhere.checked, relay: relay.value.trim().toLowerCase() || DEFAULT_RELAY });
+      Object.assign(R, { words: words.value, month: m, height: hgt, net: net.value === 'stagenet' ? 'stagenet' : 'mainnet', name: n, elsewhere: seat.value() === 'elsewhere', relay: relay.value.trim().toLowerCase() || DEFAULT_RELAY });
+      words.value = ''; leave = null;
+      const when = hgt || (m ? `${m}-01` : '');
       settingUp('Restoring your identity');
       let r;
-      try { r = await api.restore({ words: R.words, name: R.name, height: R.height, net: R.net, elsewhere: R.elsewhere, relay: R.relay }); } catch (e) {
-        current = restoreBirth; restoreBirth().say(`Not restored: ${e?.message ?? e}`); return;
+      try { r = await api.restore({ words: R.words, name: R.name, height: when, net: R.net, elsewhere: R.elsewhere, relay: R.relay }); } catch (e) {
+        current = restoreWords; restoreWords().say(`Not restored: ${e?.message ?? e}`);
+        return;
       }
-      const typed = R.words;
       R.words = ''; secure(false);
-      if (api.keepWords) { offerWords(typed, () => api.done?.(r?.message)); return; }
-      await api.done?.(r?.message);
+      C.made = r; C.restored = true;
+      afterMade();
     });
     return s;
   }
 
-  // ---- the words password (design/apps-seed.md §8), optional: once, after a create's check or at the end of a
-  // restore. Set: the shell keeps the words encrypted under it (Me → Security shows them again); Skip: never stored.
-  const O = { words: null };
-  function offerWords(words, done) {
-    O.words = words; door = true;   // the identity is made: no way back to the check
-    const attrs = { autocomplete: 'new-password', autocapitalize: 'none', spellcheck: 'false' };
-    const pw = el('input', { type: 'password', attrs: { ...attrs, 'aria-label': 'Password' } }), again = el('input', { type: 'password', attrs: { ...attrs, 'aria-label': 'Repeat the password' } });
-    const set = button('Set', null, true), skip = button('Skip', null);
-    const s = screen({ title: 'Your words on this phone', lead: 'Want to be able to see your words again on this phone? Set a password.', back: false,
-      body: [el('label', { textContent: 'Password' }), pw, el('label', { textContent: 'Repeat it' }), again,
-        el('p', { className: 'muted', textContent: 'At least 8 characters. It guards your words, removing this identity and moving its seat. Skip: the words stay on your paper only.' })],
-      primary: set, secondary: skip });
-    const finish = async () => { O.words = null; door = false; pw.value = ''; again.value = ''; await done(); };
-    set.onclick = busy(set, s, async () => {
-      if ([...pw.value].length < 8) throw new Error('A password of at least 8 characters.');
-      if (pw.value !== again.value) throw new Error('The two passwords are not the same.');
-      skip.disabled = true; s.say('Encrypting your words…', false);
-      try { await api.keepWords(O.words, pw.value); } finally { skip.disabled = false; }
-      await finish();
-    });
-    skip.onclick = busy(skip, s, finish);
-    pw.focus?.();
-  }
-
   // ---- connect: this phone controls an agent on another machine
   function connectCode() {
-    const code = el('input', { className: 'code-in', placeholder: 'K7F3-Q9ZP', attrs: { autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '9', 'aria-label': 'The code' } });
-    const relay = text({ placeholder: DEFAULT_RELAY, attrs: { 'aria-label': 'Its relay' } });
-    const pasted = el('textarea', { rows: 2, attrs: { autocomplete: 'off', spellcheck: 'false', 'aria-label': 'A SIGELO:UI: or SIGELO:CTL: text' } });
-    const next = button('Connect', null, true);
+    const code = el('input', { className: 'code-in', placeholder: 'K7F3-Q9ZP', attrs: { autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '9' } });
+    const relay = text({ placeholder: DEFAULT_RELAY });
+    const pasted = el('textarea', { rows: 2, attrs: { autocomplete: 'off', spellcheck: 'false' } });
+    const next = button('Connect', null), scanBox = el('div');
     code.addEventListener('input', () => {
       const v = code.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 8);
       code.value = v.length > 4 ? `${v.slice(0, 4)}-${v.slice(4)}` : v;
     });
-    const s = screen({ title: 'Connect to my agent', lead: 'On the computer that runs your agent: sigelo-agent ui --remote --relay. Type the code it shows.',
-      body: [code, fold('Advanced', el('label', { textContent: 'Its relay, if not the default' }), relay,
-        el('label', { textContent: 'Or paste its SIGELO:UI: text (same network) or SIGELO:CTL: text' }), pasted, api.scan ? api.scan((t) => { pasted.value = t; void next.onclick(); }) : null)],
+    const scan = api.scan ? button('Scan the computer\'s QR', () => { scanBox.replaceChildren(api.scan((t) => { pasted.value = t; void next.onclick(); })); }, true, 'scan') : null;
+    const s = screen({ title: 'Use my computer', lead: 'Your identity stays on your computer. This phone becomes its remote: it holds no key of yours.',
+      body: [el('p', { className: 'help', textContent: 'On the computer, run sigelo-agent ui --remote --relay. It shows a QR and a code.' }), scan ? el('div', { className: 'bar' }, scan) : null, scanBox,
+        field('Or type its code', code), fold('Advanced', field('Its relay, if not the default', relay), field('Or paste its SIGELO:UI: text (same network) or SIGELO:CTL: text', pasted))],
       primary: next, secondary: api.cancel ? button(api.cancel.label, () => api.cancel.run()) : undefined });
     next.onclick = busy(next, s, async () => {
       const t = pasted.value.replace(/^\s+/, ''), c = code.value.trim().toUpperCase(), host = relay.value.trim().toLowerCase();
@@ -332,18 +438,20 @@ export function firstRun(box, api, { show = true } = {}) {
     code.focus?.();
   }
   function connectWords(words) {
-    const open = button('They match: open', null, true);
-    const s = screen({ title: 'Compare four words', lead: 'The computer shows four words too. Answer y there only if they are the same, then open.',
-      body: [el('p', { className: 'words', textContent: words ?? '(none)' })], primary: open });
+    const open = button('They match', null, true);
+    const w = String(words ?? '').split(/\s+/).filter(Boolean);
+    const s = screen({ title: 'Compare four words', lead: 'The computer shows four words too. Same words: it\'s really yours. Answer yes there, then here.',
+      body: [el('div', { className: 'card center' }, w.length ? el('div', { className: 'words4', attrs: { 'aria-label': `Four words: ${w.join(' ')}` } }, w.map((x) => el('span', { textContent: x }))) : el('p', { textContent: '(none)' })),
+        el('p', { className: 'help', textContent: 'Different words? Someone else used the code. Choose "They don\'t match", answer no on the computer, and make a new code there.' })],
+      primary: open, secondary: button('They don\'t match', () => { history.back(); }) });
     open.onclick = busy(open, s, async () => { await api.open(); });
   }
 
-  // ---- the work after the last decision
+  // ---- the work after the last decision (the mock's restore-busy)
   function settingUp(what) {
-    const t0 = Date.now(), n = el('p', { className: 'muted', textContent: '0 s' });
-    screen({ title: `${what}…`, lead: 'The first connection to the relay does a one-time proof of work: up to 2 minutes. Keep the app open.',
-      body: [el('div', { className: 'progress indeterminate' }, el('div')), n], back: false });
-    const tick = setInterval(() => { if (!box.contains?.(n)) { clearInterval(tick); return; } n.textContent = `${Math.round((Date.now() - t0) / 1000)} s`; }, 1000);
+    screen({ title: what, hero: true, back: false,
+      body: [el('div', { className: 'center' }, el('h2', { className: 'big', textContent: what }), el('div', { className: 'progress indeterminate', attrs: { role: 'progressbar', 'aria-label': what } }, el('div')),
+        el('p', { className: 'lead', textContent: 'About 1 minute. The network stays off until it\'s done. Keep the app open.' }))] });
   }
 
   current = welcome;
@@ -352,7 +460,9 @@ export function firstRun(box, api, { show = true } = {}) {
     welcome: home, screen, go, button,
     /** The connect screens alone, as the first screen (a remote profile adding a computer: design/profiles.md P2). */
     connect() { stack.length = 0; current = connectCode; door = false; connectCode(); },
-    stop() { removeEventListener('popstate', onPop); if (C.words) quiet(api.discard); C.words = null; R.words = ''; O.words = null; secure(false); },
+    /** One of the Add sheet's ways as the first step, the welcome behind it (Back): create, join, restore, computer. */
+    start(path) { const f = { create: createName, join: joinCode, restore: restoreWords, computer: connectCode }[path]; if (f) go(f); },
+    stop() { removeEventListener('popstate', onPop); if (C.words) quiet(api.discard); C.words = null; R.words = ''; secure(false); },
   };
 }
 

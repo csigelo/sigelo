@@ -345,6 +345,16 @@ else {
       ok('remote e2e groups: list, create, history, send, add, role, brake, rename, share, remove, dismiss sealed (scope all) → 200; the other page\'s group an invitation here, joined and left',
         gs.every((x) => x.status === 200) && inv_ !== undefined && jn.status === 200 && lv.status === 200 && lv.body.told === true, JSON.stringify([...gs, jn, lv].map((x) => [x.status, x.body?.error?.check])));
     }
+    // Pictures, statements, proof of age (UI-API.md), sealed: set mine (scope chat), read it, sign (scope all) and check, the attestations.
+    const pic = await call('POST', '/api/picture', { of: 'me', type: 'image/jpeg', data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9, 9]).toString('base64') }), pg = await call('GET', '/api/picture?of=me');
+    const ss = await call('POST', '/api/statement/sign', { text: 'from the phone' }), sc = await call('POST', '/api/statement/check', { statement: ss.body.statement }), atts = await call('GET', '/api/attestations');
+    ok('remote e2e: picture set and read, a statement signed and checked, the attestations, sealed → 200', pic.status === 200 && pg.status === 200 && pg.body.type === 'image/jpeg' && ss.status === 200
+      && sc.status === 200 && sc.body.valid === true && sc.body.by.kind === 'me' && atts.status === 200 && Array.isArray(atts.body.attestations), JSON.stringify([pic, ss.status, sc.body.valid, atts.status]).slice(0, 400));
+    const ro = rm.SCOPES.read, ch = rm.SCOPES.chat;
+    ok('remote: scope read reads pictures, attestations and checks statements; setting a picture needs chat; signing as you needs all', ro.has('GET /api/picture') && ro.has('GET /api/attestations') && ro.has('POST /api/statement/check')
+      && !ro.has('POST /api/picture') && ch.has('POST /api/picture') && !ch.has('POST /api/statement/sign') && rm.SCOPES.all.has('POST /api/statement/sign'));
+    const nf = await call('POST', '/api/notify', { chat: bob!.did, on: false });
+    ok('remote e2e: a chat\'s notifications (scope all) → 200 sealed', nf.status === 200 && nf.body.notify === false, JSON.stringify(nf));
     const me2 = await call('GET', '/api/me'), fg = await call('POST', '/api/forget', { contact: bob!.did }), cl = await call('POST', '/api/history/clear');
     ok('remote e2e: me, forget, history/clear → 200', me2.status === 200 && fg.body.forgotten === bob!.did && cl.body.cleared === true);
     const se = await call('GET', '/api/settings'), sp = await call('POST', '/api/settings', { relay: 'corp.example.com' }), rl = await call('GET', '/api/relays');
@@ -365,6 +375,25 @@ else {
     ok('remote e2e transfers: the list and settings sealed → 200; accept, decline, cancel, resume, forget of an unknown id → 404 transfer_unknown; direct of no contact → 404', tl.status === 200 && ts.status === 200 && tp.body.prefer === 'private'
       && byId.every((x) => x.status === 404 && x.body.error.check === 'transfer_unknown') && td.status === 404, JSON.stringify([tl, tp, byId, td]).slice(0, 900));
     for (const x of [...BY_ID, 'POST /api/transfers/direct']) done_.set(x, 200);
+    // A contact's kind and the keeper (scope all): no such contact → 404; no keeper on this computer → none, its writes 409 keeper_none.
+    process.env['SIGELO_SPEND_REGISTRY'] = join(H, 'no-keepers.json');   // never this host's own keepers
+    const kd = await call('POST', '/api/kind', { contact: 'did:sigelo:zNope', kind: 'agent' }), kg = await call('GET', '/api/keeper');
+    const KW = ['agent', 'approvers', 'approve', 'refuse', 'restart'].map((v) => `POST /api/keeper/${v}`), kws = await Promise.all(KW.map((x) => call('POST', x.split(' ')[1]!, { keeper: 'k', nonce: 'ab'.repeat(16), agent: 'a', me: true })));
+    ok('remote e2e: kind of no contact → 404; keeper sealed (scope all): state none here, its writes 409 keeper_none', kd.status === 404 && kg.status === 200 && kg.body.state === 'none'
+      && kws.every((x) => x.status === 409 && String(x.body.error.check).startsWith('keeper_')), JSON.stringify([kd, kg, kws]).slice(0, 900));
+    for (const x of ['POST /api/kind', 'GET /api/keeper', ...KW]) done_.set(x, 200);
+    // The wallet (scope by route, UI-API.md "Wallet"): off, the state says so and nothing else runs; on with no wallet program
+    // on this computer, the state says why, and its writes are refused naming the setting.
+    const WR = ['GET /api/wallet/history', 'GET /api/wallet/tx', 'GET /api/wallet/services', 'GET /api/wallet/nodes', 'POST /api/wallet/sync', 'POST /api/wallet/receive', 'POST /api/wallet/label', 'POST /api/wallet/review', 'POST /api/wallet/send', 'POST /api/wallet/service', 'POST /api/wallet/node'];
+    const wcall = (x: string) => call(x.split(' ')[0] as 'GET', x.split(' ')[1]!, x.startsWith('POST') ? { id: 'x', index: 1, note: '', to: { addr: 'x' }, amount: '1', use: 'n:1' } : undefined);
+    const wOff = await call('GET', '/api/wallet'), pOff = await call('GET', '/api/price'), offs = await Promise.all(WR.filter((x) => x !== 'POST /api/wallet/sync').map(wcall));
+    await call('POST', '/api/settings', { wallet: true });
+    const wOn = await call('GET', '/api/wallet'), sync = await call('POST', '/api/wallet/sync'), recv = await call('POST', '/api/wallet/receive', {});
+    await call('POST', '/api/settings', { wallet: false });
+    ok('remote e2e wallet: off → {on: false}, no price, every other route 409 wallet_off; on with no wallet here → why no_service, Receive 409 wallet_setup',
+      wOff.status === 200 && wOff.body.on === false && pOff.status === 200 && pOff.body.on === false && offs.every((x) => x.status === 409 && x.body.error.check === 'wallet_off' || x.status === 400)
+      && wOn.status === 200 && wOn.body.ready === false && wOn.body.why === 'no_service' && sync.status === 200 && recv.status === 409 && recv.body.error.check === 'wallet_setup', JSON.stringify([wOff, pOff, offs, wOn, recv]).slice(0, 900));
+    for (const x of ['GET /api/wallet', 'GET /api/price', ...WR]) done_.set(x, 200);
     const all = [...rm.SCOPES.all], missed = all.filter((x) => done_.get(x) !== 200);
     ok(`remote e2e: every route in scope all answered 200 sealed (${all.length})`, missed.length === 0, JSON.stringify(missed));
   } finally {

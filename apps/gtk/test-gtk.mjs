@@ -34,6 +34,10 @@ const want = ['bin/sigelo-app', 'share/applications/io.sigelo.App.desktop', 'sha
   'share/sigelo-app/web/words-lock.mjs'];
 ok('install.sh --prefix: the launcher, desktop file, icon, app and page files', ins.status === 0 && want.every((f) => existsSync(join(P, f))), ins.stderr + want.filter((f) => !existsSync(join(P, f))).join(' '));
 ok('install.sh: QR reading installed beside the page (apps/contact/qr-decode.mjs, qr.mjs), no "scanning off" warning', ['qr-decode.mjs', 'qr.mjs'].every((f) => existsSync(join(S, 'web', f))) && !/scanning off/.test(ins.stderr), ins.stderr);
+const pkgSrc = readFileSync(join(ROOT, 'apps', 'agent', 'package.json'), 'utf8');
+ok('install.sh: apps/agent/package.json beside the page as web/package.json, byte for byte (About\'s version, one source); the dry run lists it',
+  existsSync(join(S, 'web', 'package.json')) && readFileSync(join(S, 'web', 'package.json'), 'utf8') === pkgSrc && dry.stdout.includes(`/apps/agent/package.json ${S}/web/package.json`), dry.stdout.split('\n').filter((l) => l.includes('package')).join(' '));
+ok('sigelo-app.js: sigelo-app://app/ serves .json as application/json (by name, as the other files)', /const TYPES = \{[^}]*json: 'application\/json'/.test(readFileSync(join(S, 'sigelo-app.js'), 'utf8')));
 const desk = readFileSync(join(P, 'share/applications/io.sigelo.App.desktop'), 'utf8');
 ok('desktop file: Exec the installed launcher, icon io.sigelo.App, mobile form factor', desk.includes(`Exec=${P}/bin/sigelo-app\n`) && desk.includes('Icon=io.sigelo.App') && desk.includes('X-Purism-FormFactor=Workstation;Mobile;'));
 const v = spawnSync('desktop-file-validate', [join(HERE, 'io.sigelo.App.desktop')], { encoding: 'utf8' });
@@ -118,8 +122,8 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
   ok('start page: the shared first run (welcome.mjs, installed beside it); an identity here opens this phone\'s page at once, a standby says so, a kept computer reconnects; else the welcome',
     start.includes('<script type="module" src="start.js"></script>') && !/<input|<textarea|<section/.test(start) && sj.includes("from './welcome.mjs'") && /else if \(saved\.identity\)/.test(sj)
     && sj.includes("ask('resume')") && sj.includes('standby()') && wel === readFileSync(join(ROOT, 'apps', 'web', 'welcome.mjs'), 'utf8'));
-  ok('welcome.mjs: three choices, nothing else; the relay only under Advanced, relay.sigelo.ai preset', wel.includes("button('Create a new identity'") && wel.includes("button('Restore from 25 words'") && wel.includes("button('Connect to my agent elsewhere'")
-    && wel.includes("DEFAULT_RELAY = 'relay.sigelo.ai'") && /fold\('Advanced'[^\n]*Relay/.test(wel));
+  ok('welcome.mjs: the mock\'s choices (Create my identity, an invite code where the shell keeps one, Restore from 25 words, Use my computer instead); the relay only under More options, relay.sigelo.ai preset', wel.includes("button('Create my identity'") && wel.includes("button('Restore from 25 words'") && wel.includes("button('Use my computer instead'")
+    && wel.includes("DEFAULT_RELAY = 'relay.sigelo.ai'") && /fold\('More options'[^\n]*'Relay'/.test(wel));
   const r = await gjs({ SIGELO_APP_TEST: 'self', SIGELO_APP_IDENTITY: human, SIGELO_AGENT: JSON.stringify([process.execPath, CLI]), SIGELO_APP_RELAY: 'corp.example.com' });
   ok('gjs, this phone: the relay set through the page (POST /api/settings) → 200, kept as corp.example.com', r.relay === 200 && r.setting === 'corp.example.com', JSON.stringify(r).slice(0, 400));
   ok('gjs, this phone: ui --app spawned, GET /api/me with its token → 200; stopped → exit 0', r.ok === true && r.me === 200 && r.exited === true && r.code === 0, JSON.stringify(r).slice(0, 400));
@@ -128,12 +132,43 @@ const gjs = (vars) => new Promise((resolve) => { vars = { SIGELO_APP_DEBUG: '1',
   ok('gjs, this phone: no identity → ui\'s own message (keeper --from-words)', n.ok === false && /keeper --from-words/.test(n.message ?? ''), JSON.stringify(n).slice(0, 400));
 }
 
+// ── notifications, the name only: the notify op recorded (no notification server, nothing raised), app.open as a tap
+{
+  const notes = [
+    { op: 'notify', tag: 'chat:did:sigelo:zAna1', title: 'Ana', text: 'New message' },
+    { op: 'notify', tag: 'pay:req-7.a_b', title: 'Scout', text: 'Payment request' },
+    { op: 'notify', tag: 'group:g1', title: 'Team' },
+    { op: 'notify', tag: 'chat:x"); alert(1)//', title: 'Ana', text: 'New message' },
+    { op: 'notify', tag: 'mail:x', title: 'Ana', text: 'New message' },
+    { op: 'notify', tag: 'chat:a', title: '', text: 'New message' },
+    { op: 'notify', tag: 'chat:a', title: 'A'.repeat(101), text: 'New message' },
+    { op: 'notify', tag: 'chat:a', title: 'Ana', text: 'x'.repeat(101) },
+    { op: 'notify', tag: 'chat:a', title: 'Ana\nhi', text: 'New message' },
+    { op: 'notify', tag: 'chat:a', title: 'Ana', text: 'New message', message: 'the text' },
+    { op: 'notify', tag: 'chat:did:sigelo:zAna1', cancel: true },
+    { op: 'notify', tag: 'chat:a', cancel: 'yes' },
+  ];
+  const taps = ['chat:did:sigelo:zAna1', 'pay:req-7.a_b', 'chat:x"); alert(1)//'];
+  const r = await gjs({ SIGELO_APP_TEST: 'notify', SIGELO_APP_NOTES: JSON.stringify(notes), SIGELO_APP_TAPS: JSON.stringify(taps) }), J = JSON.stringify(r).slice(0, 900);
+  const res = r.results ?? [];
+  ok('gjs, notify: a message, a payment request, a group (no text) sent: a Gio.Notification each, the name as title, the generic line as body, priority normal, app.open with the tag',
+    res.slice(0, 3).every((x) => x.ok === true) && r.sent?.length === 3 && r.sent.every((x) => x.notification === true && x.priority === 'normal' && x.action === 'app.open' && x.target === x.id)
+    && r.sent.map((x) => `${x.id}|${x.title}|${x.body}`).join() === 'chat:did:sigelo:zAna1|Ana|New message,pay:req-7.a_b|Scout|Payment request,group:g1|Team|', J);
+  ok('gjs, notify: refused check notify, nothing sent: a bad tag (quote, unknown kind), an empty or 101-char name, a 101-char line, a control character, any other field (a message\'s text)',
+    res.slice(3, 10).every((x) => x.ok === false && x.check === 'notify') && r.sent?.length === 3, J);
+  ok('gjs, notify: cancel withdraws by the tag (pending no more); cancel not true refused', res[10]?.ok === true && r.gone?.join() === 'chat:did:sigelo:zAna1' && res[11]?.check === 'notify'
+    && r.pending?.join() === 'pay:req-7.a_b,group:g1', J);
+  ok('gjs, notify: allowed from ui.html and this phone\'s own page; refused on the start page and another origin', r.allows?.join() === 'true,true,false,false', J);
+  ok('gjs, app.open (parameter s): each tap presents the window; a good tag → globalThis.sigeloOpen?.("<tag>") run in the page, the tag as given; a bad tag runs nothing',
+    r.param === 's' && r.presented === 3 && r.opened?.join() === 'chat:did:sigelo:zAna1,pay:req-7.a_b' && r.ran?.[0] === 'globalThis.sigeloOpen?.("chat:did:sigelo:zAna1")' && r.ran.length === 2, J);
+}
+
 // ── this phone's Agents: the page the app shows (ui --app, as it spawns it) enrols on the seat; the CLI's enrol
 // beside it refuses busy, so the page's route does it (UI-API.md /api/agents/*). No relay here: the code is refused connect.
 {
   const web = readFileSync(join(S, 'web', 'ui.js'), 'utf8');
-  ok('installed page: Agents first, the Enrol my agent and Add a contact bar, the code big, the relay picker\'s Test', /show\('agents'\);\s*poll\(\);/.test(web) && web.includes("'/api/agents/enrol-code'")
-    && web.includes("class: 'inner two'") && web.includes("'code big'") && web.includes("'/api/relays/test'"));
+  ok('installed page (design/ux1): Chats first, the New chat button, the enrol code big, the relay picker\'s Test', web.includes("stack: [{ view: 'chats' }]") && web.includes("'/api/agents/enrol-code'")
+    && web.includes("fabBtn('New chat'") && web.includes("h('p', { class: 'code' }, en.code)") && web.includes("'/api/relays/test'"));
   const { request } = await import('node:http');
   const c = spawn(process.execPath, [CLI, 'ui', '--app', '--identity', human], { env, stdio: ['pipe', 'pipe', 'pipe'] });
   let so = '';

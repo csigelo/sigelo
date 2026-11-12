@@ -17,7 +17,7 @@
  *
  * HTTP: 127.0.0.1, a random port, a 128-bit token in the URL fragment (never logged, never in a
  * Referer), sent back as X-Sigelo-Token: a custom header forces a CORS preflight this server never
- * grants. Host is checked (DNS rebinding), Origin on writes, no cookies; CSP default-src 'self'.
+ * grants. Host is checked (DNS rebinding), Origin on writes, no cookies; CSP default-src 'self' (pictures as blob: URLs).
  * The JSON API is UI-API.md. Key: the file key (decision 6; K1-K2 before a public release).
  * `--remote`: a second listener on the LAN, `POST /r` only, sealed per control (sigelo-agent-remote.ts),
  * into the same routes, within the control's scope; `/api/devices/*` never.
@@ -35,7 +35,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, existsSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isIPv4 } from 'node:net';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -51,6 +51,8 @@ import { relayControls, type RelayCarrier, type Relays } from './sigelo-agent-co
 import { devicePage, type DevicePage } from './sigelo-agent-device.ts';
 import { agentsDirFor, busyText, contactDir, contactLib, contactModule, humanPath, insideAgents, operatorFile, lockHolder, lockPath, safeJson, safeText, unreadable, type LinkLib } from './sigelo-agent-contact.ts';
 import type { GroupLib } from './sigelo-agent-group.ts';
+import * as spend from './sigelo-agent-spend.ts';
+import { makeWallet, CURRENCIES, type WalletData } from './sigelo-agent-wallet.ts';
 
 export const OPERATOR_CTX = 'sigelo-relay/operator';
 const DAY = 86400, OPERATOR_DAYS = 90, RENEW_DAYS = 14, BODY_MAX = 256 * 1024;
@@ -63,9 +65,13 @@ const STATIC: Record<string, [string, string]> = {
   '/qr.mjs': ['contact:qr.mjs', 'text/javascript'], '/qr-decode.mjs': ['contact:qr-decode.mjs', 'text/javascript'],
   // The words password's crypto (WebCrypto only), for Me → Security in the GTK phone app's page (design/apps-seed.md §8).
   '/words-lock.mjs': ['contact:words-lock.mjs', 'text/javascript'],
+  // The package's own package.json: About reads its version (a release bump reaches every form).
+  '/package.json': ['pkg:package.json', 'application/json'],
 };
 const HERE = dirname(fileURLToPath(import.meta.url));
-const staticFile = (f: string): string => (f.startsWith('contact:') ? join(contactDir(), f.slice(8)) : join(HERE, f));
+// pkg: the package root: HERE from source (apps/agent/), HERE/.. when built (dist/).
+const pkgDir = (): string => (basename(HERE) === 'dist' ? join(HERE, '..') : HERE);
+const staticFile = (f: string): string => (f.startsWith('contact:') ? join(contactDir(), f.slice(8)) : f.startsWith('pkg:') ? join(pkgDir(), f.slice(4)) : join(HERE, f));
 // The page's one inline script, its import map (node:zlib and kdf.mjs → the shims): allowed by its hash.
 const IMPORT_MAP = ((): string => {
   const m = /<script type="importmap">([\s\S]*?)<\/script>/.exec(readFileSync(join(HERE, 'ui.html'), 'utf8'));
@@ -138,7 +144,7 @@ interface Car {
   start(): Promise<void>; stop(): Promise<void>; sync(o?: { wait?: number }): Promise<void>;
 }
 interface StoreFile { contacts: Record<string, { revoked: boolean }> }
-interface UiData { tags: Record<string, string[]>; checked: Record<string, string>; read: Record<string, number>; controls: Record<string, AnyControl>; remote?: { port: number } }
+interface UiData { tags: Record<string, string[]>; checked: Record<string, string>; read: Record<string, number>; controls: Record<string, AnyControl>; remote?: { port: number }; refused?: Record<string, number> }
 interface Agent { name: string; file: string; did?: string; chain?: string[]; mine?: { exp: number; days_left: number } | null; error?: string; bundle?: object }
 type Fail = Error & { check?: string; long?: string; status?: number };
 type Route = (b: Record<string, unknown>, q: URLSearchParams) => unknown;
@@ -147,7 +153,8 @@ interface PageLib {
   makePage(o: {
     makeCarrier: (onEvent: (e: Ev) => void, kept: { relay?: string }) => unknown; link: LinkLib; relayFixed: string | null; linksFile: string; enrolFile: string; codeKind: (t: string) => string; unlogged: RegExp;
     groups: GroupLib; groupsFile: string;
-    store: { readHistory(): string | null; append(line: string): void; clearHistory(): void; readData(): string | null; writeData(text: string): void };
+    store: { readHistory(): string | null; append(line: string): void; clearHistory(): void; readData(): string | null; writeData(text: string): void;
+      readPicture(name: string): Uint8Array | null; writePicture(name: string, bytes: Uint8Array | null): void };
     hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string; restored?: unknown };
       agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean;
       transfers: { lib: unknown; identity: string; make(carrier: unknown, onEvent: (e: unknown) => void): unknown };
@@ -253,7 +260,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
   const linksFile = L.linksPath(path);
   const UNLOGGED = (lib as unknown as { UNLOGGED: RegExp }).UNLOGGED;
   let devices: DevicePage | null = null, relay: Relays | null = null, handling = Promise.resolve();
-  const base = path.replace(/\.json$/, ''), historyFile = `${base}.history.jsonl`, dataFile = `${base}.ui.json`;
+  const base = path.replace(/\.json$/, ''), historyFile = `${base}.history.jsonl`, dataFile = `${base}.ui.json`, picturesDir = `${base}.pictures`;
   // The relay new codes name: SIGELO_RELAY (or the caller's carrier.relay) wins over the page's setting (apps/contact/page.mjs).
   const paths = lib.pathsFor(path), opts = { ...lib.optionsFromEnv(), ...o.carrier } as { endpoints?: object; relay?: string };
   const me = (): { store: id.Store; did: string; original: string; chain: string[]; geneses: Record<string, Genesis> } => {
@@ -276,6 +283,14 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       clearHistory: () => writePrivate(historyFile, ''),
       readData: () => { try { return readFileSync(dataFile, 'utf8'); } catch { return null; } },
       writeData: (text) => writePrivate(dataFile, text),
+      // Pictures (UI-API.md "Pictures"): one file each in .pictures/ beside .ui.json, 0600 in a 0700 directory.
+      readPicture: (name) => { try { return new Uint8Array(readFileSync(join(picturesDir, name))); } catch { return null; } },
+      writePicture: (name, bytes) => {
+        if (bytes === null) { rmSync(join(picturesDir, name), { force: true }); return; }
+        mkdirSync(picturesDir, { recursive: true, mode: 0o700 });
+        const tmp = join(picturesDir, `.${name}.${randomBytes(8).toString('hex')}.tmp`);
+        writeFileSync(tmp, bytes, { mode: 0o600, flag: 'wx' }); renameSync(tmp, join(picturesDir, name));
+      },
     },
     hooks: {
       me: () => me(),
@@ -433,6 +448,73 @@ export async function startUi(o: UiOptions): Promise<Ui> {
       return { status: 'connected', contact: c ? { did: c.did, name: c.name } : null };
     }),
   });
+  // The keeper (sigelo-spend) of this computer (UI-API.md "Keeper", sigelo-agent-spend.ts): its settings per agent, its
+  // approvers, the payment requests waiting; Approve signed with this identity's key, Refuse kept here.
+  const workerRows = async (): Promise<spend.Worker[]> => ((await routes['GET /api/agents/workers']!({}, new URLSearchParams())) as { workers: spend.Worker[] }).workers;
+  const refusedNow = (): Record<string, number> => {
+    const r = (data.refused ??= {}), t = nowS();
+    for (const [k, exp] of Object.entries(r)) if (exp <= t) delete r[k];
+    return r;
+  };
+  const keeperOf = (b: Record<string, unknown>): spend.KeeperHere => spend.keeperBy(spend.findKeepers(), b['keeper']);
+  // An agent's genesis, where this machine has its file (the policy then names it, for approvals).
+  const genesisOf = (k: spend.KeeperHere) => (name: string): Genesis | null => {
+    const a = (k.policy['agents'] as Record<string, { did?: string }>)[name], ws = agents();
+    const x = ws.find((y) => y.did !== undefined && (y.did === a?.did || y.name === name));
+    return x?.bundle ? (x.bundle as { genesis: Genesis }).genesis : null;
+  };
+  Object.assign(routes, {
+    'GET /api/keeper': async () => spend.view(spend.findKeepers(), await workerRows(), { did: me().did }, refusedNow()),
+    'POST /api/keeper/agent': (b: Record<string, unknown>) => serial(async () => { const k = keeperOf(b); return spend.setAgent(k, b['agent'], b, genesisOf(k)); }),
+    'POST /api/keeper/approvers': (b: Record<string, unknown>) => serial(async () => {
+      const k = keeperOf(b), mine = me().did, list = Array.isArray(k.policy['approvers']) ? (k.policy['approvers'] as { did: string }[]).map((a) => a.did) : [];
+      // {me: true|false}: this identity in or out; {approvers: [...]}: the whole list.
+      const next = typeof b['me'] === 'boolean' ? (b['me'] ? [...list.filter((d) => d !== mine), mine] : list.filter((d) => d !== mine)) : b['approvers'];
+      return spend.setApprovers(k, next);
+    }),
+    'POST /api/keeper/approve': (b: Record<string, unknown>) => serial(async () => {
+      const k = keeperOf(b), m = me();
+      return spend.approve(k, b['nonce'], { did: m.did, sign: (body) => signer(path, m.store).sign(body), bundle: id.bundleOf(m.store) });
+    }),
+    // Refuse (pass 4): the keeper told (its POST /refuse: a signed refused line, the agent's same pay REFUSED until
+    // exp), the request put away here too, and the agent told in its chat: "Payment refused: <why>".
+    'POST /api/keeper/refuse': async (b: Record<string, unknown>) => {
+      const reason = typeof b['reason'] === 'string' ? b['reason'].trim().slice(0, 200) : '';
+      const out = await serial(async () => {
+        const k = keeperOf(b), n = b['nonce'];
+        if (typeof n !== 'string' || !/^[0-9a-f]{32}$/.test(n)) refuse(400, 'body', 'nonce: the request\'s nonce (32 hex digits)');
+        const ws = await workerRows();
+        const v = spend.view({ state: 'here', keepers: [k] }, ws, { did: me().did }, refusedNow()) as { requests: { nonce: string; exp: number; worker: number | null }[] };
+        const r = v.requests.find((x) => x.nonce === n) ?? refuse(404, 'keeper_request', 'This request isn\'t waiting any more: it was answered, paid or ran out.');
+        const m = me(), at = await spend.refuseAt(k, n, reason, { did: m.did, sign: (body) => signer(path, m.store).sign(body), bundle: id.bundleOf(m.store) });
+        refusedNow()[`${k.id}/${n}`] = r.exp; saveData();
+        const contact = (ws.find((w) => w.worker === r.worker) as { contact?: string | null } | undefined)?.contact ?? null;
+        return { ...at, refused: true, keeper: k.id, nonce: n, exp: r.exp, contact };
+      });
+      let told = false;
+      if (out.contact) { try { await routes['POST /api/send']!({ to: out.contact, text: reason ? `Payment refused: ${reason}` : 'Payment refused.' }, new URLSearchParams()); told = true; } catch {} }
+      return { ...out, told };
+    },
+    'POST /api/keeper/restart': (b: Record<string, unknown>) => serial(async () => spend.restart(keeperOf(b))),
+  });
+  // The Wallet (UI-API.md "Wallet", sigelo-agent-wallet.ts): this computer's wallet-rpc (a keeper's, or one given),
+  // only while Settings → Wallet is on for this identity; a payment to a contact told in their chat.
+  const settingsOf = (): Record<string, unknown> => (data as unknown as { settings: Record<string, unknown> }).settings ?? {};
+  const W = makeWallet({
+    data: () => ((data as unknown as { wallet?: WalletData }).wallet ??= {}), save: () => saveData(), on: () => settingsOf()['wallet'] === true,
+    prices: () => ({ on: settingsOf()['prices'] === true, currency: CURRENCIES.includes(settingsOf()['currency'] as string) ? settingsOf()['currency'] as string : 'EUR' }),
+    tell: async (to, text) => (await routes['POST /api/send']!({ to, text }, new URLSearchParams())) as { at: number },
+    contactName: (d) => carrier.contacts().contacts.find((c) => c.did === d)?.name ?? null,
+  });
+  Object.assign(routes, W.routes);
+  // A chat's messages: mine that told a payment carry it (`pay`: txid, amount, note), shown as the payment.
+  const messagesOf = routes['GET /api/messages']!;
+  routes['GET /api/messages'] = async (b, q) => {
+    const r = await messagesOf(b, q) as { messages?: { dir: string; at: number; pay?: unknown }[] };
+    const who = q.get('contact') ?? '';
+    for (const m of r.messages ?? []) if (m.dir === 'out') { const p = W.paymentOf(who, m.at); if (p) m.pay = p; }
+    return r;
+  };
   // Devices: the writes through this carrier one at a time; a scan runs its own (another identity file).
   for (const [k, f] of Object.entries(devices.routes)) routes[k] = k.startsWith('POST ') && k !== 'POST /api/devices/scan' ? (b) => serial(async () => f(b)) : (b) => f(b);
 
@@ -512,7 +594,7 @@ export function pageServer(o: { port(): number; has(key: string): boolean; dispa
   const token = randomBytes(16).toString('hex'), tokenBytes = Buffer.from(token);
   const hosts = (): Set<string> => new Set([`127.0.0.1:${o.port()}`, `localhost:${o.port()}`]);
   const secure = (res: ServerResponse): void => {
-    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'${IMPORT_MAP}; media-src 'self' mediastream: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
+    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'${IMPORT_MAP}; img-src 'self' blob:; media-src 'self' mediastream: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY'); res.setHeader('Cache-Control', 'no-store'); res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
