@@ -11,6 +11,7 @@
 #   sigelo-verify-<os>-<arch>[.exe]    static verifier binaries: linux/darwin × amd64/arm64, windows/amd64
 #   sigelo-verify-src-<v>.tar.gz       go/ + test-vectors.json + LICENSE: `go build ./cmd/sigelo-verify`
 #   test-vectors.json                  the conformance target (`sigelo-verify --conformance`)
+#   sigelo-<v>.cdx.json                the CycloneDX SBOM of all of it (release/sbom.mjs; same commit, same bytes)
 #
 # release/pack-test.sh installs all of it in an empty directory and runs it. At D1 (ROADMAP §7),
 # once the npm account and the repository exist, the maintainer publishes exactly these files:
@@ -124,6 +125,8 @@ for f in agent.mjs protocol.mjs policy.mjs store.mjs units/sigelo-key-agent.serv
 	printf '%s\n' "$listing" | grep -qx "package/$f" || { echo "build.sh: sigelo-key-agent-$v.tgz has no $f" >&2; exit 1; }
 done
 if printf '%s\n' "$listing" | grep -q 'package/test\.mjs'; then echo "build.sh: sigelo-key-agent-$v.tgz carries the tests" >&2; exit 1; fi
+# The SBOM: the npm lockfiles and the Go build list of this commit, nothing of this host (release/sbom.mjs).
+node "$src/release/sbom.mjs" "$src" > "$out/sigelo-$v.cdx.json"
 cd "$out"
 TZ=UTC0 touch -t "$stamp" sigelo-* test-vectors.json
 # sha256sum's own format, sorted by name: `sha256sum -c SHA256SUMS` checks it.

@@ -2,10 +2,12 @@
 # The macOS legs of conformance.yml's portability and keyagent jobs, on their own: GitHub's macOS
 # runners are often not granted within their 15-minute queue (the job is cancelled with no step run),
 # which made every sync red for no reason. Dispatched by hand before a release (release/RELEASE.md)
-# and otherwise on demand; the Linux and Windows legs stay in conformance.yml on every push.
+# and otherwise on demand, and called by release.yml (nothing there waits for it); the Linux and
+# Windows legs stay in conformance.yml on every push.
 name: macos
 on:
   workflow_dispatch:
+  workflow_call:
 permissions: {}
 jobs:
   portability:

@@ -173,7 +173,7 @@ Each stage: exported to `ci-check`, run with `gh workflow run <file> -R csigelo/
 | 0 | canary fix; pin `mcp-registry.yml`; `permissions: {}`; close #3 | 0.5 |
 | 1 | `deps` job, exceptions file, dependency-review, Scorecard, Dependabot | 1.5 |
 | 2 | `android.yml` callable, double build; `conformance-required`; branch protection (after the owner's yes) | 1 |
-| 3 | `release.yml` build ×2, compare, tag digest, SBOM, attest, cosign, draft; on `ci-check` with `dry_run=true` (no attest, draft or publish) | 2.5 |
+| 3 | `release.yml` build ×2, compare, tag digest, SBOM, attest, cosign, draft; on `ci-check` with `dry_run=true` (no attest, draft or publish). Built 2026-11-12: `release/sbom.mjs` (npm 10 and 11 give the same bytes), `release/notes-template.md`, jobs `check`, `build`, `compare`, `apk`, `attest-sign`, `draft`, `macos` (now `workflow_call`), `dry-run`. A real run runs at the tag: re-run is `gh workflow run release.yml --ref v<v> -f tag=v<v>` | 2.5 |
 | 4 | `verify-release.sh` checks 5–8 and `--strict`; `sign-release.sh` draft compare; `test-release.sh` fakes | 1.5 |
 | 5 | npm and MCP jobs after the owner's npm steps; mirror pull timer; first v2 release; RELEASE.md replaced | 1.5 |
 
