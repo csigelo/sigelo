@@ -129,13 +129,13 @@ interface Contact {
 type Ev = Record<string, unknown> & { type?: string };
 interface Car {
   relay: string; endpoints?: object; retentionDays: number;
-  invite(o: { name?: string; short?: boolean }): Promise<{ code: string; did: string; relay: string; exp: number; short?: string; short_exp?: number }>;
-  cancelInvite(code: string): Promise<{ cancelled: boolean; name: string }>;
+  invite(o: { name?: string; short?: boolean; renew?: boolean }): Promise<{ code: string; did: string; relay: string; exp: number; short?: string; short_exp?: number; renew?: string }>;
+  cancelInvite(code: string, o?: { relay?: string }): Promise<{ cancelled: boolean; name: string | null; short?: string; unparked?: boolean; detail?: string }>;
   accept(code: string, o: { name?: string; wait?: number; tier?: string }): Promise<{ status: string; did?: string; detail?: string; contact?: { did: string; name: string; fingerprint?: string | null } }>;
   rename(who: string, name: string): { did: string; name: string };
   setTier(who: string, tier: string): { did: string; name: string; tier: string };
   observe(bundle: object): { did: string; tier: string } | null;
-  contacts(): { contacts: Contact[]; invites: { name: string; exp: number; relay: string }[]; answers: { name: string; did: string; exp: number; relay: string }[] };
+  contacts(): { contacts: Contact[]; invites: { name: string; exp: number; relay: string; short?: string; short_exp?: number; renew?: string }[]; answers: { name: string; did: string; exp: number; relay: string }[] };
   sendAll(to: string, texts: unknown[], o: { label?: string }): Promise<{ status: string; id: string; code?: string; detail?: string }[]>;
   inbox(o: { local: boolean }): Promise<{ messages: Ev[]; events: Ev[]; dropped: Record<string, number> }>;
   clockOffset(): { offset: number; checked: number } | null;

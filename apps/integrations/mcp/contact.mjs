@@ -54,9 +54,11 @@ const GROUP = 'Group messages: group, mid, role, "not your operator"; foreign: a
 const TIER = 'Tier: own (your operator\'s agents, detected; messages pushed in full), friend (a notice only), quiet (nothing until asked).';
 
 const TOOLS = [
-  ['sigelo_invite', `Use when your operator wants you to talk to another agent, yours or someone else's. Make an invite for that agent to become your contact: a short code (short, e.g. K7F3-Q9ZP: a person can say it on the phone; 10 minutes unless ttl, once, at your relay) and the long one (code, sgl1…: for agent channels; default 24 h). Give one to its operator out of band. long: true makes the long code only. The pairing completes at your next sigelo_inbox after they accept. ${POW} ${RELAY_DATA}`,
+  ['sigelo_invite', `Use when your operator wants you to talk to another agent. Makes an invite: a short code (short, e.g. K7F3-Q9ZP, sayable on the phone; 10 minutes unless ttl, once, at your relay) and the long one (code, sgl1…, for agent channels; 24 h). Give one to its operator out of band. long: true, the long code only. renew: true, a fresh code once one is used. cancel: a code of yours, at the relay too. Pairing completes at your next sigelo_inbox after they accept. ${POW} ${RELAY_DATA}`,
     obj({ name: str('the name you will call the new contact'), ttl: int('seconds the codes live: with a short code 60 to 3600 (default 600; longer for a slow agent), with long: true up to 604800 (7 days)', 604800), long: { type: 'boolean', description: 'true: the long code only, no short code' },
-      relay: str('optional relay host for this pairing, e.g. your company relay for a colleague (default SIGELO_RELAY); a short code made there is accepted with that relay') })],
+      relay: str('optional relay host for this pairing, e.g. your company relay for a colleague (default SIGELO_RELAY); a short code made there is accepted with that relay'),
+      renew: { type: 'boolean', description: 'true: the short code renews itself (a fresh one once it is used), until cancelled' },
+      cancel: str('a code of yours to cancel instead (short, sgl1…, or its hash): nobody can use it after; a renewing one stops') })],
   ['sigelo_accept', `Accept an invite code from another agent's operator: sends your answer (whoever holds the code learns your DID); pairs once the inviter's reply verifies against the code. Returns connected with the pairing id, or waiting until the inviter's agent next connects (sigelo_inbox then reports the pairing). ${CONFIRM} ${POW} ${RELAY_DATA}`,
     obj({ code: str('the short code (K7F3-Q9ZP; case, I/L/O and dashes do not matter) or the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX),
       tier: { type: 'string', enum: ['friend', 'quiet'], description: 'how its messages reach your operator: friend (default) or quiet; own is detected' },
@@ -303,11 +305,16 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
     });
   });
   const handlers = {
-    sigelo_invite: serial(async ({ name, ttl, long, relay }, path) => {
+    sigelo_invite: serial(async ({ name, ttl, long, relay, renew, cancel }, path) => {
       if (long !== undefined && typeof long !== 'boolean') throw usage('long: true or false');
+      if (renew !== undefined && typeof renew !== 'boolean') throw usage('renew: true or false');
+      if (cancel !== undefined && (name !== undefined || ttl !== undefined || long !== undefined || renew !== undefined)) throw usage('cancel: alone (relay may name where the code was made)');
+      if (renew === true && long === true) throw usage('renew: a short code renews itself, not long: true');
       holder(path, 'sigelo_invite');
       await seat(path, 'sigelo_invite');
-      return carrier(path).invite({ name, ttl, short: long !== true, ...(relay !== undefined && { relay: text(relay, 'relay') }) });
+      // "Cancel this code" (apps/contact/carrier.mjs cancelInvite): gone here and at the relay (DELETE /park).
+      if (cancel !== undefined) return carrier(path).cancelInvite(text(cancel, 'cancel'), { ...(relay !== undefined && { relay: text(relay, 'relay') }) });
+      return carrier(path).invite({ name, ttl, short: long !== true, ...(relay !== undefined && { relay: text(relay, 'relay') }), ...(renew === true && { renew: true }) });
     }),
     // A code never contains whitespace; one pasted from a wrapped mail line may, and a short one
     // typed as heard ("k7f3 q9zp"). carrier.accept tells the two apart by shape.

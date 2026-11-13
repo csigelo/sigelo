@@ -62,7 +62,7 @@ with the passphrase as a Docker secret; phone → the app seals it.
 | `receive [--account <n>]` | next unused subaddress |
 | `invoice --addr <subaddress> [--amount …]` | signed §6.3 invoice; amount is a string |
 | `verify-invoice <json\|-> --bundle <file>` | the payer's check |
-| `invite`, `accept <code>`, `contacts`, `send`, `reply`, `inbox`, `forget` | relay contacts (four words below); `re_pair`: pair again |
+| `invite [--renew\|--cancel <code>]`, `accept <code>`, `contacts`, `send`, `reply`, `inbox`, `forget` | relay contacts (four words below); `re_pair`: pair again |
 
 Spending goes through the keeper, [`apps/keeper/`](../keeper/README.md).
 

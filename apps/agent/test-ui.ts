@@ -606,6 +606,33 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       const pend2 = (await A.call('GET', '/api/state'))['pending'].invites as { name: string }[];
       ok('ui e2e: cancel an invite → {cancelled: true}; no longer pending; again → 404', cancelled['cancelled'] === true && !pend2.some((x) => x.name === 'later')
         && (await A.call('POST', '/api/invite/cancel', { id: inv2['id'] }))['http'] === 404, JSON.stringify(cancelled));
+      // "Cancel this code": a short code cancelled from the page is gone at the relay too; by id or by the code.
+      const inv3 = await A.call('POST', '/api/invite', { name: 'gone' }), c3 = await A.call('POST', '/api/invite/cancel', { id: inv3['id'] });
+      const tried = await B.call('POST', '/api/accept', { code: inv3['short'], name: 'x' });
+      ok('ui e2e: cancel a short code → {cancelled, unparked: true}; accepting it now → park_unknown', c3['cancelled'] === true && c3['unparked'] === true && tried['error']?.check === 'park_unknown', JSON.stringify([c3, tried['error']]));
+      const inv4 = await A.call('POST', '/api/invite', { name: 'bycode' }), c4 = await A.call('POST', '/api/invite/cancel', { code: inv4['short'] });
+      ok('ui e2e: cancel by {code: <short>} → cancelled (again: still cancelled, the relay\'s tombstone); a code nobody made → 404', c4['cancelled'] === true && !((await A.call('GET', '/api/state'))['pending'].invites as { name: string }[]).some((x) => x.name === 'bycode')
+        && (await A.call('POST', '/api/invite/cancel', { code: inv4['short'] }))['cancelled'] === true && (await A.call('POST', '/api/invite/cancel', { code: 'K7F3-Q9ZP' }))['http'] === 404, JSON.stringify(c4));
+      const badRenew = await A.call('POST', '/api/invite', { long: true, renew: true });
+      ok('ui e2e: renew with a long code → 400', badRenew['http'] === 400, JSON.stringify(badRenew));
+      // A code that renews itself: carol uses it, the next one is in its place, under the same id; cancel ends it.
+      {
+        const C = await open('carol');
+        try {
+          const rn = await A.call('POST', '/api/invite', { name: 'friend', renew: true });
+          type Inv = { id: string; short: string | null; renew?: boolean; used?: { name: string; did: string }[] };
+          const cur = async () => ((await A.call('GET', '/api/state'))['pending'].invites as Inv[]).find((x) => x.id === rn['id']);
+          ok('ui renew: POST /api/invite {renew: true} → renew: true, an id "r…"; the state lists it with renew: true, nothing used', rn['renew'] === true && /^r[0-9a-f]{16}$/.test(String(rn['id'])) && (await cur())?.renew === true && (await cur())?.used?.length === 0, JSON.stringify(rn));
+          const ca = await C.call('POST', '/api/accept', { code: rn['short'], name: 'alice' });
+          const next = await until(async () => { const x = await cur(); return x?.short && x.short !== rn['short'] ? x : undefined; });
+          const carolDid = (await C.call('GET', '/api/state'))['me'].did;
+          ok('ui renew: once carol uses it, the next code is in its place (same id), the one used listed with carol', ca['status'] === 'connected' && next !== undefined && next.used?.length === 1 && next.used[0]!.did === carolDid
+            && !((await A.call('GET', '/api/state'))['pending'].paired as { id: string }[]).some((x) => x.id === rn['id']), JSON.stringify([ca['status'], next]));
+          const rr = await A.call('POST', '/api/invite/cancel', { id: rn['id'] });
+          ok('ui renew: cancel by its id → cancelled at the relay; no renewing code left', rr['cancelled'] === true && rr['unparked'] === true && (await cur()) === undefined
+            && (await C.call('POST', '/api/accept', { code: next!.short, name: 'x' }))['error']?.check === 'park_unknown', JSON.stringify(rr));
+        } finally { await C.u.close(); }
+      }
       const meState = (await A.call('GET', '/api/state'))['me'] as { clock_offset: number | null; clock_checked: number | null };
       ok('ui e2e: me.clock_offset from the carrier: about 0 against a relay on this machine', meState.clock_offset !== null && Math.abs(meState.clock_offset) <= 2 && meState.clock_checked !== null, JSON.stringify(meState));
       // An agent on A's machine with a random key and one contact: Enrol makes it worker 0 of A's

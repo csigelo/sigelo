@@ -805,7 +805,7 @@
         if (!live && !i.id) continue;
         const gname = i.group ? groupBy(i.group)?.name ?? 'a group' : null;
         cards.push(h('div', { class: 'card' }, h('p', null, h('b', null, `Your ${gname ? 'group ' : ''}code ${live ? i.short : ''}`.trim()), live ? ` is waiting for someone to use it${gname ? `: they join ${gname}` : ''}.` : ` for ${i.name} has run out.`),
-          live ? h('p', { class: 'help' }, minutesLeft(i.short_exp)) : h('p', { class: 'help' }, 'Its long code works until ', when(i.exp)),
+          live ? h('p', { class: 'help' }, minutesLeft(i.short_exp), i.renew ? '. A new code appears when this one is used.' : '') : h('p', { class: 'help' }, 'Its long code works until ', when(i.exp)),
           h('div', { class: 'btns' }, i.id ? btn('Show it', () => go('my-code', { id: i.id })) : null,
             i.id ? btn('Cancel it', () => act(() => backend.call('POST', '/api/invite/cancel', { id: i.id })), { kind: 'ghost' }) : null)));
       }
@@ -819,27 +819,36 @@
   // New chat (Telegram's button): make my code, or type theirs; scan; a group; or enrol my own agent instead.
   function openNewChat() {
     const mine = h('div', { class: 'card' }), theirs = input({ autocapitalize: 'characters', placeholder: 'M4QX-8T2B', class: 'big', 'aria-label': 'Their code' });
-    const M = { inv: null, busy: false, error: null };
+    const M = { inv: null, busy: false, error: null, renew: true };
     const draw = () => {
       if (M.inv) {
-        put(mine, h('div', { class: 'row' }, h('span', { class: 'mid' }, h('b', { class: 'code sm' }, M.inv.short ?? 'Long code made'), h('small', null, 'Works once, for ', countdown(M.inv.short_exp ?? M.inv.exp))),
-          btn('Share', () => share(pairMessage(M.inv.short ?? M.inv.code, M.inv.short_exp ?? M.inv.exp)), { kind: 'pri', auto: true })),
+        // A code that renews itself: the current one from the state (the next once this one is used).
+        const now = M.inv.renew ? S.snap?.pending.invites.find((x) => x.id === M.inv.id) ?? M.inv : M.inv;
+        put(mine, h('div', { class: 'row' }, h('span', { class: 'mid' }, h('b', { class: 'code sm' }, now.short ?? 'Long code made'), h('small', null, 'Works once, for ', countdown(now.short_exp ?? now.exp))),
+          btn('Share', () => share(pairMessage(now.short ?? now.code, now.short_exp ?? now.exp)), { kind: 'pri', auto: true })),
+        M.inv.renew ? h('p', { class: 'help' }, 'A new code appears when this one is used.') : null,
         tbtn('Show as QR', () => go('my-code', { id: M.inv.id })));
         return;
       }
       put(mine, h('div', { class: 'row' }, h('span', { class: 'mid' }, h('b', null, 'Your code'), h('small', { class: 'wrap' }, 'Works once, for 10 minutes')),
-        btn(M.busy ? 'Making…' : 'Make my code', make, { kind: 'pri', auto: true, disabled: M.busy })), inlineError(M.error));
+        btn(M.busy ? 'Making…' : 'Make my code', make, { kind: 'pri', auto: true, disabled: M.busy })),
+        toggle('Renews itself', 'A new code once this one is used', M.renew, (on) => { M.renew = on; }), inlineError(M.error));
     };
     const make = async () => {
       M.busy = true; M.error = null; draw();
-      try { M.inv = await started('POST', '/api/invite', {}); } catch (e) { M.error = e; }
+      try { M.inv = await started('POST', '/api/invite', M.renew ? { renew: true } : {}); } catch (e) { M.error = e; }
       M.busy = false; draw();
     };
     draw();
     const pair = () => { const code = theirs.value.trim(); if (code) void go('enter-code', { code }); };
     theirs.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') pair(); });
     // My code used while the sheet is open: the four words to compare, in place of it (My code shows them).
-    const update = () => { if (M.inv && S.snap?.pending.paired.some((x) => x.id === M.inv.id)) void go('my-code', { id: M.inv.id }); };
+    const update = () => {
+      if (!M.inv) return;
+      const cur = S.snap?.pending.invites.find((x) => x.id === M.inv.id);
+      if (S.snap?.pending.paired.some((x) => x.id === M.inv.id) || (M.inv.renew && cur?.used?.length)) void go('my-code', { id: M.inv.id });
+      else if (M.inv.renew) draw();
+    };
     sheet({ title: 'New chat', lead: 'Give them your code, or type theirs. Then compare four words.', update, body: [mine,
       h('div', { class: 'pad btns end' }, field('Their code', theirs), btn('Pair', pair, { auto: true })),
       list(row({ compact: true, start: icon('scan'), title: 'Scan their QR', onclick: () => go('scan') }),
@@ -875,7 +884,7 @@
 
   // My code: one person starts a chat with me; once, 10 minutes; then the four words (UI-API.md /api/invite).
   screen('my-code', {}, (arg) => {
-    const M = { id: arg?.id ?? null, inv: null, busy: false, error: null }, body = h('div', { class: 'pad stack' }), foot = h('div');
+    const M = { id: arg?.id ?? null, inv: null, busy: false, error: null, renew: true }, body = h('div', { class: 'pad stack' }), foot = h('div');
     const title = h('h1', null, 'My code');
     mount(page({ who: title, body: [body], foot: [foot] }));
     const make = async (o = {}) => {
@@ -887,20 +896,29 @@
       put(foot);
       if (!M.id) {
         put(body, h('p', { class: 'lead' }, 'A code lets one person start a chat with you. It works once, for 10 minutes. Then you both compare four words.'),
-          btn(M.busy ? 'Making a code…' : 'Make a code', () => make(), { kind: 'pri', disabled: M.busy }), btn('I have their code', () => go('enter-code'), { kind: 'ghost' }),
+          list(toggle('Renews itself', 'A new code appears when this one is used', M.renew, (on) => { M.renew = on; })),
+          btn(M.busy ? 'Making a code…' : 'Make a code', () => make(M.renew ? { renew: true } : {}), { kind: 'pri', disabled: M.busy }), btn('I have their code', () => go('enter-code'), { kind: 'ghost' }),
           M.error ? [inlineError(M.error), h('p', { class: 'help' }, 'Their agent on another relay? Make a long code instead.'), btn('Make a long code', () => make({ long: true }))] : null);
         return;
       }
       const pend = S.snap?.pending.invites.find((x) => x.id === M.id), paired = S.snap?.pending.paired.find((x) => x.id === M.id);
-      const inv = M.inv ?? (pend ? { id: pend.id, short: pend.short, short_exp: pend.short_exp, code: pend.code, exp: pend.exp, relay: pend.relay } : null);
+      // A code that renews itself: always the state's, the next code in place of the one used.
+      const fromPend = pend ? { id: pend.id, short: pend.short, short_exp: pend.short_exp, code: pend.code, exp: pend.exp, relay: pend.relay, renew: pend.renew === true } : null;
+      const inv = pend?.renew ? fromPend : M.inv ?? fromPend;
       if (paired) { title.textContent = 'Compare four words'; put(body, afterPairing(contactBy(paired.paired), body, foot)); return; }
       title.textContent = 'My code';
-      if (!pend || !inv) { put(body, empty('This code is gone', 'It was used or cancelled.', btn('Make a new code', () => { M.id = null; M.inv = null; return make(); }, { kind: 'pri' }))); return; }
+      const again = () => { M.id = null; M.inv = null; return make(M.renew ? { renew: true } : {}); };
+      if (!pend || !inv) { put(body, empty('This code is gone', 'It was used or cancelled.', btn('Make a new code', again, { kind: 'pri' }))); return; }
       const live = inv.short && inv.short_exp > relayNow();
-      if (inv.short && !live) { put(body, empty('This code has run out', 'Codes work for 10 minutes, once. Make a new one.', btn('Make a new code', () => { M.id = null; M.inv = null; return make(); }, { kind: 'pri' }))); return; }
+      if (inv.short && !live) { put(body, empty('This code has run out', 'Codes work for 10 minutes, once. Make a new one.', btn('Make a new code', again, { kind: 'pri' }))); return; }
       const shown = inv.short ?? inv.code;
-      put(body, h('div', { class: 'center stack' }, qrBox(shown), h('p', { class: inv.short ? 'code' : 'mono' }, shown),
+      // The last person who used a renewing code: compare four words with them.
+      const last = pend.renew ? pend.used?.at(-1) : null, lastC = last ? contactBy(last.did) : null;
+      put(body, last ? h('div', { class: 'card' }, h('p', null, h('b', null, lastC?.name ?? last.name), ' used your last code.'),
+        lastC && !lastC.words_checked && lastC.words ? h('div', { class: 'btns' }, btn('Compare four words', () => go('compare', last.did), { kind: 'pri' })) : null) : null,
+        h('div', { class: 'center stack' }, qrBox(shown), h('p', { class: inv.short ? 'code' : 'mono' }, shown),
         h('p', { class: 'lead' }, 'Works once, for ', countdown(inv.short ? inv.short_exp : inv.exp), '.'),
+        inv.renew ? h('p', { class: 'help' }, 'A new code appears when this one is used.') : null,
         h('div', { class: 'btns' }, btn('Share', () => share(pairMessage(shown, inv.short ? inv.short_exp : inv.exp)), { kind: 'pri' }), btn('Copy', (ev) => copy(shown, ev?.target))),
         inv.short && inv.code ? h('details', { class: 'more' }, h('summary', null, 'Their agent on another relay?'), h('p', { class: 'help' }, 'Give them the long code instead:'), h('p', { class: 'mono card' }, inv.code), btn('Copy the long code', () => copy(inv.code))) : null,
         btn('Cancel this code', () => act(() => backend.call('POST', '/api/invite/cancel', { id: inv.id }), () => back()), { kind: 'ghost' })));

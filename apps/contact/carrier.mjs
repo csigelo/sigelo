@@ -4,10 +4,12 @@
 // sees random topics and ciphertext; everything here that decides who someone is runs offline.
 //
 //   const c = new Carrier({ identity, store, state, relay, endpoints, retentionDays, clock, onEvent, keep, transport, platform })
-//   await c.invite({ name, ttl, short, relay, local })   → { code, did, relay, exp, short?, short_exp? }   the answer topic is claimed first
+//   await c.invite({ name, ttl, short, relay, local, renew })   → { code, did, relay, exp, short?, short_exp?, renew? }   the answer topic is claimed first
 //                                            (local: at the next login, no session now);
 //                                            short: the long code is also parked at the relay under a short one;
-//                                            relay: the relay the code names and the short code is parked at (default: this agent's)
+//                                            relay: the relay the code names and the short code is parked at (default: this agent's);
+//                                            renew (with short): a one-person code that renews itself: once it is used, a fresh
+//                                            short code with the same name (numbered), ttl and relay is parked (store.mjs renew)
 //   await c.unpark(short, { relay })       → the long code parked under a short one, taken from the relay (one use);
 //                                            relay: named, else relayForShort's (unparkFrom: { invite, relay })
 //   await c.relayForShort(short, { relay }) → { relay, from }: where a short code is parked: 8 characters, shortRelay
@@ -19,9 +21,16 @@
 //   await c.accept(code, { name, wait, relay })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
 //                                            (refused after a short code was fetched: .long, keepLong); relay: where a
 //                                            short code was parked, when not at this agent's relay (the inviter's --relay)
-//   await c.cancelInvite(code)             → { cancelled, name }: an unanswered invite of this agent's withdrawn
+//   await c.cancelInvite(code, { relay })  → { cancelled, name, short?, unparked?, detail? }: an unanswered invite of this agent's
+//                                            withdrawn, by its long code, its short code or the short code's hash; a short
+//                                            code parked is cancelled at the relay too (DELETE /park/<hash>, relay/park.mjs):
+//                                            unparked true once nobody can fetch it there, false with detail when the relay
+//                                            could not be told (an older relay, offline: it runs out there by itself, and an
+//                                            answer to it is refused here); a renewing code's series ends
 //   c.rename(who, name)                    the owner's name for a contact (store.mjs rename) → { did, name }
-//   c.contacts()                           → { contacts, invites, answers, failed }   each contact with its four words (fingerprint),
+//   c.contacts()                           → { contacts, invites, answers, failed, renewing }   invites: { name, exp, relay, short?, short_exp?, renew? },
+//                                            renewing: { id, name, used: [{ short, did, name, at }], error } per series;
+//                                            each contact with its four words (fingerprint),
 //                                            pair id, chain, ours (an operator attestation of mine marks it), tier, seen_upto
 //                                            (their newest seen receipt: my messages sealed at or before it were shown; null: none) and
 //                                            seen_peer (a receipt came: they read receipts), tier
@@ -283,6 +292,8 @@ export const OPERATOR_LABEL = 'sigelo-operator/0';
 export const LOGIN_V = 'sigelo-relay/0', TYP_LOGIN = 'relay-login';
 // RETENTION_DAYS: the relay's free tier (relay/allowance.mjs TIERS.free), when relay.json says nothing.
 export const RETENTION_DAYS = 14, RETENTION_MAX_DAYS = 90, DAY = 86400, SKEW = 300, AHEAD = 7 * DAY;
+// Seconds before a renewing code that failed to renew is tried again (#renewDue).
+export const RENEW_RETRY = 60;
 // The relay closes a connection whose SUBSCRIBE holds more topics (relay/mailbox.mjs MAX_TOPICS).
 const MAX_TOPICS = 128;
 // An invite topic holds 4 messages and 64 KB (relay/mailbox.mjs INVITE_BYTES); a bundle at most 64
@@ -990,6 +1001,7 @@ class Link {
 export class Carrier {
   #links = new Map(); #work = Promise.resolve(); #busy = 0; #lastWork = 0; #routes = new Map(); #results = new Map();
   #claimed = new Set(); #refusedTopics = new Map(); #handshakes = new Map(); #soon = new Set();
+  #renewing = false;
   #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #powWaits = new Set(); #ask = false;
   #mineMemo = null; #clocks = new Map();
 
@@ -1293,7 +1305,9 @@ export class Carrier {
         : route.type === 'presence' ? this.#onPresence(ctx, route.did, t, bytes)
         : route.type === 'answer' ? this.#onAnswer(ctx, t, bytes) : this.#onReply(ctx, t, bytes)));
       for (const e of events) this.#emit(e);
+      if (route.type === 'answer') this.#renewSoon();
     } catch (e) {
+      if (route?.type === 'answer') this.#renewSoon();
       if (e instanceof MsgError && !INTERNAL.has(e.check)) this.#drop(e.check, e.message, route);
       else if (!this.#undeliverable(t, bytes, e)) {
         this.#emit({ type: 'error', relay: link.relay, check: e.check ?? 'internal', detail: e.message });
@@ -1854,8 +1868,10 @@ export class Carrier {
     // Who answered this code (answeredBy): saved with the pairing, whoever reads the paired event.
     for (const [x, a] of Object.entries(st.answered)) if (!(a.exp > now)) delete st.answered[x];
     st.answered[nonce] = { did: c.did, exp: p.exp + DAY };
+    // A renewing code: who used it, for the state; the fresh one comes after this delivery (#renewDue).
+    if (p.renew) store.renewUsed(p.renew, { short: p.short ?? null, did: c.did, name: c.name, at: now });
     this.#routes = new Map();
-    return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key), invite: nonce })];
+    return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key), invite: nonce, ...(p.renew && { renew: p.renew }) })];
   }
 
   // Alice: her reply will never reach the answerer (refused, too large, or its code expired while
@@ -2608,14 +2624,18 @@ export class Carrier {
   // the short code is parked there, and the pairing talks over it.
   // local: no session: the code is made and kept only; its answer topic is claimed at this
   // identity's next login (a device added offline, device.mjs), so connect once before it answers.
-  async invite({ name, ttl, short = false, relay, local = false, started } = {}) {
+  // renew: true begins a series of renewing codes (store.mjs renew); a series id continues one (#renewDue).
+  async invite({ name, ttl, short = false, relay, local = false, started, renew = false } = {}) {
     const at = relay === undefined ? this.relay : relayArg(relay);
     if (short && ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < SHORT_TTL_MIN || ttl > SHORT_TTL_MAX)) {
       fail('ttl', `a short code lives ${SHORT_TTL_MIN} to ${SHORT_TTL_MAX} seconds (default ${SHORT_TTL}), not ${JSON.stringify(ttl)}; longer: the long code (invite --long --ttl)`);
     }
+    if (renew !== false && (!short || local)) fail('invite', 'a code that renews itself is a short one, parked at the relay: not with --long or local');
+    const series = renew === true ? randomId() : typeof renew === 'string' ? renew : null;
     const code = this.#locked(({ now, me, store }) => {
       const code = makeInvite({ did: me.current_did, relay: at, now, ...(ttl !== undefined && { ttl }) });
-      store.addInvite(code, name ?? `invite-${code.nonce.slice(1, 9)}`, now);
+      store.addInvite(code, name ?? `invite-${code.nonce.slice(1, 9)}`, now, null,
+        series === null ? null : { id: series, ...(renew === true && { start: { name: name ?? null, ttl: ttl ?? null, relay: relay === undefined ? null : at } }) });
       return code;
     });
     if (local) {
@@ -2648,11 +2668,40 @@ export class Carrier {
       // The relay keeps the code until its own exp (park.mjs: at most SHORT_TTL by its clock), not
       // this machine's: that is the one shown. This machine's only when the relay names none.
       const held = Number.isSafeInteger(r.body.exp) && r.body.exp > 0 ? r.body.exp : exp;
-      return { code: code.text, did: code.did, relay: code.relay, exp: code.exp, short: formatShort(s), short_exp: held };
+      // Kept with the invite: a cancel by the short code finds it; a renewing series has its fresh code.
+      this.#locked(({ store }) => { store.setShort(code.nonce, formatShort(s), held); if (series !== null && renew !== true) store.renewDone(series); });
+      return { code: code.text, did: code.did, relay: code.relay, exp: code.exp, short: formatShort(s), short_exp: held, ...(series !== null && { renew: series }) };
     } catch (e) {
-      try { this.#locked(({ store }) => store.cancelInvite(code.nonce)); } catch {}
+      // A renewal that failed leaves its series due (taken: store.mjs take), tried again (#renewDue).
+      try { this.#locked(({ now, store }) => (series !== null && renew !== true ? store.take('invites', code.nonce, now) : store.cancelInvite(code.nonce))); } catch {}
       throw e;
     }
+  }
+
+  // Renewing codes (store.mjs renew): a code of a series taken (answered) leaves it due, and a fresh
+  // short code is parked for it here, with the series' name (numbered), ttl and relay. Claimed under
+  // the lock, so two processes of one identity park one code; a failure is tried again RENEW_RETRY
+  // seconds later, its reason kept for the state. Run after a session that may have taken one
+  // (inbox, sync), at start, at a started carrier's answer and each round; never inside the work
+  // queue (#later), whose drain the invite's own session waits for.
+  async #renewDue(started) {
+    if (this.#renewing) return;
+    try { if (this.#read(({ now, store }) => store.renewClaim(now, true)).length === 0) return; } catch { return; }
+    this.#renewing = true;
+    try {
+      const due = this.#locked(({ now, store }) => store.renewClaim(now));
+      for (const x of due) {
+        try {
+          await this.invite({ name: x.name === null ? undefined : `${x.name}-${x.n + 1}`, short: true, renew: x.id, started,
+            ...(x.ttl !== null && { ttl: x.ttl }), ...(x.relay !== null && { relay: x.relay }) });
+        } catch (e) { try { this.#locked(({ now, store }) => store.renewFailed(x.id, reason(e), now + RENEW_RETRY)); } catch {} }
+      }
+    } finally { this.#renewing = false; }
+  }
+  #renewSoon() {
+    if (!this.#started || this.#renewing) return;
+    const t = setTimeout(() => { if (this.#started) void this.#renewDue().catch(() => {}); }, 0);
+    t.unref?.();
   }
 
   // Where a short code is parked → { relay, from }: `relay` when named (the inviter's --relay; a
@@ -2841,17 +2890,57 @@ export class Carrier {
   }
 
   // An invite this agent made and nobody has answered, withdrawn: code, its long code (invite's
-  // `code`). Its answer topic is given up at the next round; a short code parked for it leads to
-  // nothing. → { cancelled: true, name }.
-  async cancelInvite(code) {
-    const { relay, name } = this.#locked(({ now, store }) => {
-      const c = readCode(code, now), p = store.load().s.invites[c.nonce];
-      store.cancelInvite(c.nonce);
-      return { relay: c.relay, name: p.name };
+  // `code`), its short code, or the short code's hash (64 hex digits). Its answer topic is given up
+  // at the next round; the short code parked for it is cancelled at the relay (DELETE /park/<hash>,
+  // relay/park.mjs: a tombstone until its exp), at `relay` when named, else where it was parked. A
+  // relay that cannot be told (older, offline, rate) leaves it to run out there: it leads to nothing,
+  // the invite being gone here. A short code or hash this agent keeps no invite for (made on another
+  // device of this identity) is cancelled at the relay only. A renewing code's series ends with it.
+  // → { cancelled: true, name, short?, unparked?, detail? }.
+  async cancelInvite(code, { relay: named, started } = {}) {
+    const text = typeof code === 'string' ? code.trim() : '';
+    const hash = /^[0-9a-f]{64}$/.test(text) ? text : null, kind = hash !== null ? 'hash' : codeKind(text);
+    const short = kind === 'short' ? formatShort(normaliseShort(text)) : null;
+    const found = this.#locked(({ now, store }) => {
+      const inv = store.load().s.invites;
+      const nonce = kind === 'long' ? readCode(text, now).nonce
+        : Object.keys(inv).find((n) => typeof inv[n].short === 'string' && (short !== null ? inv[n].short === short : codeHash(inv[n].short) === hash));
+      if (nonce === undefined) return null;
+      const p = inv[nonce] ?? fail('challenge_unknown', 'no pending invite with this nonce');
+      store.cancelInvite(nonce);
+      return { name: p.name, relay: p.relay, short: p.short ?? null, short_exp: p.short_exp ?? 0, now };
     });
-    this.#routes = new Map();
-    if (this.#links.get(relay)?.up) this.#refreshSoon(relay);
-    return { cancelled: true, name };
+    if (found) {
+      this.#routes = new Map();
+      if (this.#links.get(found.relay)?.up) this.#refreshSoon(found.relay);
+    }
+    const shown = found?.short ?? short;
+    if (shown === null && hash === null) return { cancelled: true, name: found.name };
+    if (found && !(found.short_exp > found.now)) return { cancelled: true, name: found.name, short: found.short, unparked: true };
+    const at = named !== undefined ? relayArg(named) : found ? found.relay : short !== null ? (await this.relayForShort(short)).relay : this.relay;
+    const r = await this.#unparkCancel(at, hash ?? codeHash(shown), started);
+    if (!found && !r.unparked) throw new MsgError(r.check ?? 'challenge_unknown', r.detail);
+    if (!found && r.gone) fail('challenge_unknown', `${shown ?? 'that hash'}: no code of yours waits at ${at} (used, run out, or made elsewhere)`);
+    return { cancelled: true, name: found?.name ?? null, ...(shown !== null && { short: shown }), unparked: r.unparked, ...(r.detail && { detail: r.detail }) };
+  }
+
+  // DELETE /park/<hash> with a login of its own (as invite's POST /park). → { unparked, gone?, check?, detail? };
+  // never throws: the invite is gone here whatever the relay says.
+  async #unparkCancel(relay, hash, started) {
+    try {
+      const ep = endpointOf(relay, this.endpoints), creds = await this.#credentials(relay, ep, started);
+      const r = await http(this.platform, `${ep.http}/park/${hash}`, { method: 'DELETE', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password }) });
+      const check = typeof r.body?.check === 'string' ? r.body.check : null;
+      if (r.status === 200 && r.body?.ok === true) return { unparked: true };
+      // Nobody can fetch it there: run out, or used and run out.
+      if (r.status === 404 && check === 'park_unknown') return { unparked: true, gone: true };
+      const later = 'it runs out there by itself; any answer to it is refused here';
+      if ((r.status === 404 || r.status === 405) && check === null) return { unparked: false, check: 'park', detail: `the relay ${relay} cannot cancel a short code (an older relay): ${later}` };
+      if (r.status === 429) return { unparked: false, check: 'rate', detail: `the relay ${relay} takes no more short-code requests from this network for now (${relaySays(r.body?.detail)}): ${later}` };
+      return { unparked: false, check: check ?? 'connect', detail: `the relay ${relay} did not cancel the short code (${r.status === 200 ? relaySays(`${check}: ${r.body?.detail}`) : statusWhy(r, 'DELETE /park')}): ${later}` };
+    } catch (e) {
+      return { unparked: false, check: e.check ?? 'connect', detail: `${reason(e)}: the short code runs out at the relay by itself; any answer to it is refused here` };
+    }
   }
 
   /** The owner renames a contact (a name or any DID of its chain; store.mjs rename) → { did, name }. */
@@ -2870,7 +2959,10 @@ export class Carrier {
             presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null,
             seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true };
         }),
-        invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay })),
+        invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay,
+          ...(typeof p.short === 'string' && { short: p.short, short_exp: p.short_exp }), ...(p.renew && { renew: p.renew }) })),
+        // Renewing codes (store.mjs renew): each series, its codes used, and why its last renewal failed (null: none).
+        renewing: Object.entries(s.renew ?? {}).map(([id, x]) => ({ id, name: x.name, used: x.used, error: x.error ?? null })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
         // Pairings that failed since the last inbox, which takes them as events.
         failed: st.events.filter((e) => e.type === 'pairing_failed').map(({ name, did, code, detail, at }) => ({ name, did, code, detail, at })),
@@ -3070,6 +3162,8 @@ export class Carrier {
       try {
         await this.#session(relays, wait > 0 ? { max: wait * 1000, until: ready } : {});
       } catch (e) { this.lastError = e; offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
+      // A renewing code this session took: its fresh one now, before the events go out.
+      if (offline === null) await this.#renewDue();
     }
     return this.#locked(({ now, store, st }) => {
       this.#sweepFiles(st, now);
@@ -3209,11 +3303,13 @@ export class Carrier {
     for (const r of this.#relaysInUse()) this.#retry(r, 0, started);
     this.#tick = setInterval(() => this.#round(), this.tick);
     this.#tick.unref?.();
+    this.#renewSoon();
   }
 
   // force (sync, the caller's): a relay waiting for its next automatic try (#powWait) is tried now too.
   #round(force = false) {
     this.#later(() => this.#locked((ctx) => this.#expireKeys(ctx)));
+    this.#renewSoon();
     for (const l of this.#links.values()) l.absent.clear();   // an absent contact may be back: try once more
     for (const r of this.#relaysInUse()) {
       if (force) this.#unwait(r);
@@ -3224,8 +3320,9 @@ export class Carrier {
 
   /** One round now (claims for a new week, queued messages), then wait as `inbox` does. */
   async sync({ wait = 0 } = {}) {
-    if (this.#started) { this.#round(true); await this.#idle({ max: Math.max(DRAIN, wait * 1000) }); return; }
+    if (this.#started) { this.#round(true); await this.#idle({ max: Math.max(DRAIN, wait * 1000) }); await this.#renewDue(); return; }
     await this.#session(this.#relaysInUse(), { max: Math.max(DRAIN, wait * 1000) });
+    await this.#renewDue();
   }
 
   #unwait(relay) {

@@ -13,7 +13,7 @@ Beside `sigelo-agent watch` or `ui`, they answer [`busy`](../../agent/WATCH.md#o
 
 | Tool | Does |
 |---|---|
-| `sigelo_invite` | a short code for another operator |
+| `sigelo_invite` | a short code; `renew`, `cancel` it |
 | `sigelo_accept` | answer a code; compare the [four words](../../agent/ENROL.md#the-four-words) |
 | `sigelo_contacts` | contacts, words, tiers, `re_pair`, codes |
 | `sigelo_set_tier` | own, friend or quiet |

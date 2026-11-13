@@ -107,7 +107,7 @@ export function scrub(scope: Scope, method: string, pathname: string, body: unkn
   const invites = pathname === '/api/state' && scope === 'read', enrol = (pathname === '/api/agents/workers' || pathname === '/api/agents') && scope !== 'all';
   if (!invites && !enrol) return body;
   const x = JSON.parse(JSON.stringify(body)) as { pending?: { invites?: Record<string, unknown>[] }; workers?: { enrolling?: Record<string, unknown> | null }[] };
-  if (invites) for (const i of x.pending?.invites ?? []) { delete i['code']; delete i['short']; }
+  if (invites) for (const i of x.pending?.invites ?? []) { delete i['code']; delete i['short']; for (const u of (i['used'] as Record<string, unknown>[] | undefined) ?? []) delete u['short']; }
   if (enrol && Array.isArray(x.workers)) for (const w of x.workers) if (w.enrolling) { delete w.enrolling['code']; delete w.enrolling['command']; }
   return x;
 }

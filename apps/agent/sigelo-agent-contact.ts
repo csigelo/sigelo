@@ -46,7 +46,7 @@ import { eraseRequest, pubPath, recoverWith, recoveryKey } from './sigelo-agent-
 // refused before anything connects: `inbox --wiat 30` ran at once without the wait, and
 // `invite --help` minted a code.
 const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, number] }> = {
-  invite: { flags: { '--name': true, '--ttl': true, '--json': false, '--long': false, '--relay': true }, args: [0, 0] },
+  invite: { flags: { '--name': true, '--ttl': true, '--json': false, '--long': false, '--relay': true, '--renew': false, '--cancel': true }, args: [0, 0] },
   accept: { flags: { '--name': true, '--wait': true, '--tier': true, '--relay': true }, args: [1, Infinity] },
   contacts: { flags: {}, args: [0, 0] },
   tier: { flags: {}, args: [2, 2] },
@@ -76,6 +76,8 @@ export const USAGE = `sigelo-agent contacts — talk to other agents through a r
                                            agent (both codes); --long: the one-line code (sgl1…; --ttl up
                                            to 7 days, default a day); --json: both, DID, relay, expiry;
                                            --relay: the pairing's relay (default $SIGELO_RELAY)
+       [--renew]                           --renew: a fresh short code once this one is used (inbox prints it)
+  invite --cancel <code>                   cancel a code of yours (short, long, or its hash), at the relay too
   accept <code> [--name <n>] [--wait <s>]  become that agent's contact (wait 0 to 300 s, default 10);
        [--tier friend|quiet]               --tier: how its messages reach you (default friend; own is detected)
        [--relay <host>]                    --relay: the inviter's relay, when asked (relay_tag)
@@ -137,11 +139,12 @@ export interface Batch { messages: unknown[]; events: unknown[]; dropped: Record
 interface Carrier {
   relay: string;
   lastError?: unknown;
-  invite(o: { name?: string; ttl?: number; short?: boolean; relay?: string }): Promise<unknown>;
+  invite(o: { name?: string; ttl?: number; short?: boolean; relay?: string; renew?: boolean }): Promise<unknown>;
+  cancelInvite(code: string, o?: { relay?: string }): Promise<unknown>;
   unpark(code: string, o?: { relay?: string }): Promise<string>;
   unparkFrom(code: string, o?: { relay?: string }): Promise<{ invite: string; relay: string }>;
   accept(code: string, o: { name?: string; wait?: number; tier?: string; relay?: string }): Promise<{ status?: string; did?: string; contact?: Contact }>;
-  contacts(): { contacts: Contact[]; failed?: Failed[] };
+  contacts(): { contacts: Contact[]; failed?: Failed[]; invites?: { name: string; short?: string; renew?: string }[] };
   setTier(who: string, tier: string): { did: string; name: string; tier: string; ours?: boolean };
   setPresence(who: string, allow: boolean): { did: string; name: string; presence: string };
   sync(o?: { wait?: number }): Promise<void>;
@@ -624,15 +627,25 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         // --long, the one-line code to paste anywhere.
         const long = flags.has('--long');
         const relay = flags.get('--relay');
+        // --cancel <code>: "Cancel this code": the invite gone here, the short code at the relay too (DELETE /park).
+        if (flags.has('--cancel')) {
+          if (long || flags.has('--renew') || flags.has('--ttl') || name !== undefined) throw misuse('invite --cancel <code> takes no other flag but --relay and --json');
+          const r = await c.cancelInvite(flags.get('--cancel')!, { ...(relay !== undefined && { relay }) }) as { cancelled: boolean; name: string | null; short?: string; unparked?: boolean; detail?: string };
+          if (flags.has('--json')) out(r); else console.log('cancelled');
+          note(r.unparked === false ? `cancelled here; ${r.detail}` : r.short !== undefined ? `${r.short} cancelled: nobody can use it now` : `${r.name ?? 'the code'} cancelled`);
+          break;
+        }
+        if (flags.has('--renew') && long) throw misuse('--renew: a short code renews itself, not the long one (leave --long out)');
         // --ttl: seconds, 10m or 1h; a short code 60 s to an hour (a slow agent), the long one to 7 days.
         const ttl = flags.has('--ttl') ? duration(flags.get('--ttl')!, '--ttl') : undefined;
         if (!long && ttl !== undefined && (ttl < 60 || ttl > 3600)) throw misuse(`--ttl: a short code lives 60 s to 1 h (default 10m), not ${lifeText(ttl)}; longer: invite --long --ttl ${flags.get('--ttl')} (up to 7 days)`);
-        const r = await c.invite({ name, ttl, short: !long, ...(relay !== undefined && { relay }) }) as { code: string; exp: number; relay: string; short?: string; short_exp?: number };
+        const r = await c.invite({ name, ttl, short: !long, ...(relay !== undefined && { relay }), ...(flags.has('--renew') && { renew: true }) }) as { code: string; exp: number; relay: string; short?: string; short_exp?: number; renew?: string };
         const until = (t: number): string => new Date(t * 1000).toISOString().replace('.000', '');
         if (flags.has('--json')) out(r); else console.log(r.short ?? r.code);
         note(r.short !== undefined
           ? `say it, text it or write it down: good for ${lifeText(ttl ?? 600)} (until ${until(r.short_exp!)}), once. Their agent runs sigelo-agent accept ${r.short} --name <your name>${r.short!.length > 9 ? ` (made on ${r.relay}: if it asks which relay, --relay ${r.relay})` : ''}`
           : `one-time code, good until ${until(r.exp)}: send it to the other operator; their agent runs sigelo-agent accept <code> --name <your name>`);
+        if (r.renew !== undefined) note('renews itself: once it is used, the next inbox (or a running watch) parks a fresh one; contacts lists it; invite --cancel <code> stops it');
         break;
       }
       case 'accept': {
@@ -794,8 +807,11 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         // Files received: saved, never opened; where each is.
         for (const f of r.messages as FileItem[]) if (f?.type === 'file') note(`📎 ${f.name} ${sizeText(f.size)} → ${f.path} (from ${f.contact ?? f.from})`);
         // A pairing done since the last inbox: the four words to compare. One that failed: why.
-        for (const e of r.events as { type?: string; name?: string; did?: string; fingerprint?: string | null }[]) {
+        for (const e of r.events as { type?: string; name?: string; did?: string; fingerprint?: string | null; renew?: string }[]) {
           if (e.type === 'paired' && e.fingerprint) note(`paired with ${e.name ?? e.did}. Check with them: ${e.fingerprint}`);
+          // A code that renews itself was used: its fresh one (invite --renew).
+          const next = e.type === 'paired' && e.renew ? (c.contacts().invites ?? []).find((x) => x.renew === e.renew && x.short) : undefined;
+          if (next) note(`your next code: ${next.short} (the last one was used; invite --cancel ${next.short} stops it)`);
         }
         failed((r.events as Failed[]).filter((e) => e.type === 'pairing_failed'));
         // A contact's messages refused after its recovery (carrier.mjs "Recovery beats key").

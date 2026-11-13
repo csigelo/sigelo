@@ -384,6 +384,7 @@ try {
     // relay: optional on sigelo_invite and sigelo_accept (invite --relay, accept --relay); a malformed one refused before anything connects.
     const schemas = Object.fromEntries((await c5.rpc('tools/list')).result.tools.map((t) => [t.name, t.inputSchema]));
     ok(['sigelo_invite', 'sigelo_accept'].every((t) => schemas[t]?.properties?.relay?.type === 'string' && !schemas[t].required?.includes('relay')), 'contact: sigelo_invite and sigelo_accept take an optional relay');
+    ok(schemas.sigelo_invite?.properties?.cancel?.type === 'string' && schemas.sigelo_invite.properties.renew?.type === 'boolean' && !(schemas.sigelo_invite.required ?? []).length, 'contact: sigelo_invite takes an optional cancel (a code) and renew, nothing required');
     r = await c5.call('sigelo_invite', { relay: 'Corp Relay' });
     const r2 = await c5.call('sigelo_accept', { code: 'K7F3-Q9ZP', relay: 'Corp Relay' });
     ok(r.isError && r.structured?.code === 'relay' && r2.isError && r2.structured?.code === 'relay' && r2.text.includes('want a lowercase host[:port]'), 'contact: a malformed relay: refused relay, before anything connects', r.text + r2.text);
@@ -438,6 +439,18 @@ ${code.slice(60)}
       ok(/^sgl1/.test(longOnly?.code ?? '') && longOnly.short === undefined, 'relay: sigelo_invite long: true: the long code only, nothing parked');
       r = await a.call('sigelo_invite', { long: 'yes' });
       ok(r.isError && /^REFUSED: long: true or false$/.test(r.text), 'relay: sigelo_invite refuses long: "yes"', r.text);
+      // cancel: "<code>": the code gone here and at the relay; renew: true, a code that renews itself.
+      const tmp = (await a.call('sigelo_invite', { name: 'tmp' })).data;
+      r = await a.call('sigelo_invite', { cancel: tmp.short });
+      const gone = await b.call('sigelo_accept', { code: tmp.short, wait: 1 });
+      ok(!r.isError && r.data.cancelled === true && r.data.unparked === true && gone.isError && gone.structured?.code === 'park_unknown', 'relay: sigelo_invite cancel: "<short code>": cancelled, at the relay too (the code is park_unknown)', r.text + gone.text);
+      r = await a.call('sigelo_invite', { cancel: tmp.short, name: 'x' });
+      ok(r.isError && /^REFUSED: cancel: alone/.test(r.text), 'relay: sigelo_invite cancel with other arguments: refused', r.text);
+      const rn = (await a.call('sigelo_invite', { name: 'rn', renew: true })).data;
+      const listed = (await a.call('sigelo_contacts')).data;
+      r = await a.call('sigelo_invite', { cancel: rn.short });
+      ok(typeof rn?.renew === 'string' && listed.invites.some((x) => x.renew === rn.renew && x.short === rn.short) && listed.renewing.some((x) => x.id === rn.renew) && !r.isError
+        && (await a.call('sigelo_contacts')).data.renewing.length === 0, 'relay: sigelo_invite renew: true: a renewing code, listed by sigelo_contacts; cancel ends it', JSON.stringify([rn, listed.renewing]));
       const t0 = Date.now();
       r = await b.call('sigelo_accept', { code, wait: 1e12 });
       ok(r.isError && /^REFUSED: wait:/.test(r.text) && Date.now() - t0 < 5000, 'relay: sigelo_accept refuses wait 1e12 at once', r.text);

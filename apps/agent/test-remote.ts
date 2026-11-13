@@ -669,7 +669,8 @@ else {
     ok('relay: words refused on the computer\'s page (Refuse) → the control forgotten (not in ui.json), its request never answered 200', bq.status !== 200 && uiJson2(Pd).controls['bad'] === undefined, JSON.stringify(bq));
     // Review 2026-10-28 (LOW): a code made again withdraws the one before; answering the old one pairs nothing.
     const old = await pr.relay.issue('re', 'chat'), fresh = await pr.relay.issue('re', 'chat');
-    const late = await app(old!.line, 're-old', 4000);
+    // Its short code is cancelled at the relay too now (DELETE /park): the old code's accept is park_unknown, or pairs nothing.
+    const late = await app(old!.line, 're-old', 4000).catch((e: { check?: string }) => ({ status: e.check ?? 'refused', did: 'did:sigelo:zNone' }));
     const held = (): string => { try { return readFileSync(op.replace(/\.json$/, '.contacts.json'), 'utf8'); } catch { return ''; } };
     await new Promise((r) => setTimeout(r, 3000));
     ok('relay: a control\'s code made again: the first code pairs nobody on the computer (no hidden, unconfirmed contact); the new one stands', fresh !== null && fresh.line !== old!.line && late.status !== 'connected'
