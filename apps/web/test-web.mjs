@@ -616,6 +616,25 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       && calls.some(([, p, b]) => p === '/api/accept' && b.code === 'M4QX-8T2B'), 'task 2, their code, 3 taps: New chat, Pair (POST /api/accept), the four words both sides see, They match');
     await back();
     ok(h1() === 'Chats', 'Back from the pairing: Chats');
+    // A public code (PUB-…): its four words asked beside it; the answer waits for the owner's OK.
+    const acceptWas = routes['POST /api/accept'];
+    routes['POST /api/accept'] = (b) => (/^PUB/.test(b.code) ? { status: 'waiting_approval', did: 'did:sigelo:zShop', relay: 'relay.sigelo.ai', exp: now() + 7 * 86400 } : acceptWas(b));
+    await sandbox.ui.go('enter-code'); await settle();
+    ok(!kit(root).field('Their four words'), 'Enter their code: no words field for a person\'s code');
+    const pc = kit(root).field('Their code'); pc.value = 'PUB-7Q4K-M2XD'; fire(pc, 'input'); await settle();
+    const wf = kit(root).field('Their four words');
+    ok(wf !== undefined && wf !== null, 'a PUB code: the field for the four words printed beside it');
+    wf.value = 'amber otter violin harbor';
+    await btn('Pair').click(); await settle(); await poll(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/accept' && b.code === 'PUB-7Q4K-M2XD' && b.words === 'amber otter violin harbor') && root.all().some((e) => e.attrs['data-approval'] !== undefined) && has('They accept each new chat'),
+      'Pair with a PUB code → POST /api/accept {code, words}; Sent: they accept each new chat');
+    routes['POST /api/accept'] = acceptWas;
+    // A contact that came by my public code: marked, not compared.
+    G_.contacts.push(person('pubby', { words: 'copper lantern meadow seven', pair: 'pp', words_checked: false, via: { public: 'pub1' } }));
+    await poll(); await sandbox.ui.go('chat-info', G_.contacts.at(-1).did); await settle(); await poll();
+    ok(has('Came by your public code · not compared') && root.all().some((e) => e.attrs['data-via'] === 'mine'), 'chat info: a contact by my public code says so, not compared');
+    G_.contacts.pop();
+    await sandbox.ui.go('chats'); await settle();
     G_.contacts.splice(G_.contacts.findIndex((c) => c.name === 'dee'), 2);
   }
 
@@ -1105,10 +1124,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const inviteWas = routes['POST /api/invite'];
     routes['POST /api/invite'] = (b) => {
       if (!b.public) return inviteWas(b);
-      const pub = { id: 'pub1', name: 'public-1a2b', code: 'sgl1' + 'Q'.repeat(90), exp: now() + b.ttl, relay: 'relay.sigelo.ai', waiting: true, paired: null };
+      const pub = { id: 'pub1', name: 'public-1a2b', short: 'PUB-7Q4K-M2XD', words: 'amber otter violin harbor', link: 'https://sigelo.io/join#PUB-7Q4K-M2XD.amber-otter-violin-harbor', exp: now() + b.months * 30 * 86400, relay: 'relay.sigelo.ai',
+        cap: b.cap, open: b.open, paused: false, today: 1, chats: 3, requests: [{ id: 'zReq1', did: 'did:sigelo:zJoiner', words: 'copper lantern meadow seven', received: now(), exp: now() + 86400 }] };
       sandbox.pending = { ...(sandbox.pending ?? {}), public: pub };
-      return { id: pub.id, name: pub.name, code: pub.code, exp: pub.exp, relay: pub.relay, public: true };
+      return { ...pub, code: 'sgl2' + 'Q'.repeat(90), public: true };
     };
+    routes['POST /api/public/approve'] = (b) => { sandbox.pending.public = { ...sandbox.pending.public, requests: [], chats: 4 }; return { approved: true, did: 'did:sigelo:zJoiner', name: 'public-1a2b-4', fingerprint: 'a b c d', id: b.id }; };
+    routes['POST /api/public/set'] = (b) => { sandbox.pending.public = { ...sandbox.pending.public, paused: b.paused }; return sandbox.pending.public; };
     await sandbox.ui.go('chats'); await settle(); await poll();
     // Task 12 from Me (3 taps): Me, My code and QR, Make a code: the code with its QR, Share and Copy.
     let taps = 0;
@@ -1182,18 +1204,25 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     kit(root).field('Paste a signed message').value = 'changed\nsigelo-statement/0 eyJiIjoyfQ';
     await btn('Check').click(); await settle(); await poll();
     ok(h1() === 'Signed message' && has('✗ Not a valid signature') && has('changed after it was signed') && has('Do not trust what it says.'), 'Check: a tampered one → Not a valid signature, why, do not trust it');
-    // Public invite: off → Make a public invite → Valid for → Make it → the code, until, Share, Copy, Stop for good (confirmed) → cancel.
+    // Public invite (mock: off, new, on): off says Pro → Make → Valid for, I approve each, per day → Make it → the PUB code, its words,
+    // Share, Copy, Waiting for your OK (Approve), the counts, Pause, Stop for good (confirmed) → cancel.
     await sandbox.ui.go('invite'); await settle(); await poll();
-    ok(h1() === 'Public invite' && has('One code to post') && has('It lasts up to 7 days') && btn('Make a public invite'), 'Public invite, off: what it is (up to 7 days, once), Make a public invite');
+    ok(h1() === 'Public invite' && has('One code for everyone') && has('It lasts for months') && has('comes with Pro') && btn('Make a public invite'), 'Public invite, off: one code for everyone, for months, with Pro; Make a public invite');
     await btn('Make a public invite').click(); await settle(); await poll();
-    ok(kit(root).field('Valid for')?.value === '604800' && has('Who answers') && btn('Make it'), 'Make a public invite: Valid for (7 days), who answers, Make it');
+    ok(kit(root).field('Valid for')?.value === '6' && kit(root).field('New chats per day at most')?.value === '50' && has('I approve each new chat') && has('Who answers') && btn('Make it'),
+      'Make a public invite: Valid for (6 months), I approve each new chat, at most 50 a day, who answers, Make it');
     await btn('Make it').click(); await settle(); await poll(); await poll();
-    ok(calls.some(([, p, b]) => p === '/api/invite' && b.public === true && b.long === true && b.ttl === 604800) && h1() === 'Public invite' && root.all().some((e) => e.attrs['data-public'] !== undefined)
-      && has('Answered by you · until') && btn('Share') && btn('Copy') && has('not yet') && btn('Stop for good'), 'Make it → POST /api/invite {long, public, ttl}: the code, answered by you until, Share, Copy, used: not yet, Stop for good');
+    ok(calls.some(([, p, b]) => p === '/api/invite' && b.public === true && b.months === 6 && b.cap === 50 && b.open === false) && h1() === 'Public invite' && root.all().some((e) => e.attrs['data-public'] !== undefined)
+      && has('PUB-7Q4K-M2XD') && has('Answered by you · until') && btn('Share') && btn('Copy') && has('Waiting for your OK (1)') && has('1 of at most 50') && btn('Pause') && btn('Stop for good'),
+      'Make it → POST /api/invite {public, months, cap, open}: the PUB code, its words, Share, Copy, one waiting, the day\'s count, Pause, Stop for good');
+    await btn('Approve').click(); await settle(); await poll();
+    ok(calls.some(([, p, b]) => p === '/api/public/approve' && b.id === 'zReq1') && has('No new chat is waiting'), 'Approve → POST /api/public/approve {id}; none waiting');
+    await btn('Pause').click(); await settle(); await poll();
+    ok(calls.some(([, p, b]) => p === '/api/public/set' && b.paused === true) && btn('Resume'), 'Pause → POST /api/public/set {paused: true}; Resume offered');
     void btn('Stop for good').click(); await settle();
     ok(sh1() === 'Stop this public invite?' && has('The code stops working everywhere it is posted. Chats already started stay.') && btn('Keep it'), 'Stop for good: a sheet naming it, what it does, Keep it');
     await btn('Stop it').click(); await settle(); await poll();
-    ok(calls.some(([, p, b]) => p === '/api/invite/cancel' && b.id === 'pub1') && has('One code to post'), 'Stop it → POST /api/invite/cancel; off again');
+    ok(calls.some(([, p, b]) => p === '/api/invite/cancel' && b.id === 'pub1') && has('One code for everyone'), 'Stop it → POST /api/invite/cancel; off again');
     // Proof of age: what shows its age today (GET /api/attestations), the Monero record said to be not in this version.
     await sandbox.ui.go('age'); await settle(); await poll();
     ok(h1() === 'Proof of age' && has('1f916.ai') && has('vouched for it on') && has('invited by a member') && has('its own date, not proven') && has('not in this version') && !btn('Record it'),
@@ -1715,7 +1744,7 @@ try {
   const paired = await until(async () => (await call(A, 'GET', '/api/state')).body.groups.contacts.some((c) => c.did === CY.did));
   const cyRow = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
   ok(paired && cyRow.name === 'cy' && cyRow.words === node.contacts().contacts[0].fingerprint, `pair: the Node agent accepted the app's short code; both hold the same four words (${acc.status})`);
-  ok(Object.keys(cyRow).sort().join() === 'current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,waiting,words,words_checked',
+  ok(Object.keys(cyRow).sort().join() === 'current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
     `a contact in groups: UI-API.md's keys (${Object.keys(cyRow).sort()})`);
   ok(await until(async () => (await call(A, 'GET', '/api/state')).body.me.online), 'GET /api/state: online once paired, the session up (MQTT.js over WebSocket, proof of work in the worker)');
   ok((await call(A, 'GET', '/api/state')).body.pending.paired.some((x) => x.id === inv.body.id && x.paired === CY.did), 'GET /api/state: pending.paired names the invite that paired');

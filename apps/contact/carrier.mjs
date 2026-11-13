@@ -10,6 +10,11 @@
 //                                            relay: the relay the code names and the short code is parked at (default: this agent's);
 //                                            renew (with short): a one-person code that renews itself: once it is used, a fresh
 //                                            short code with the same name (numbered), ttl and relay is parked (store.mjs renew)
+//   await c.invitePublic({ name, ttl, cap, open, relay }) → { id, name, code: sgl2…, short: PUB-…, words, link, exp, relay, cap, open, did }:
+//                                            a public code (public.mjs, Pro only at the relay): many may use it, each a request
+//                                            (event public_request) approved by approvePublic(id) or refusePublic(id), or at
+//                                            once with open; setPublic(id|PUB code, { paused, cap }); cancelInvite(it): Revoke
+//                                            for all; publics() and contacts().publics: each with its requests waiting
 //   await c.unpark(short, { relay })       → the long code parked under a short one, taken from the relay (one use);
 //                                            relay: named, else relayForShort's (unparkFrom: { invite, relay })
 //   await c.relayForShort(short, { relay }) → { relay, from }: where a short code is parked: 8 characters, shortRelay
@@ -18,7 +23,8 @@
 //   await c.probeRelay(host)               → { relay, ok, ms, retention_days, detail? }: does it answer (GET /relay.json, else /challenge)
 //   await c.redeemGift(code)               → { exp, months }: a gift code (PRO-K7F3-Q9ZP) redeemed at this agent's relay;
 //                                            this identity is the operator whose pool is Pro until exp (relay/gifts.mjs)
-//   await c.accept(code, { name, wait, relay })   → { status: 'connected' | 'waiting' | 'pending', … }   a long code or a short one
+//   await c.accept(code, { name, wait, relay, words })   → { status: 'connected' | 'waiting' | 'waiting_approval' | 'pending', … }   a long code, a short one,
+//                                            or a public one (PUB-…, its link, sgl2…; words: its page's four words, checked on the reply)
 //                                            (refused after a short code was fetched: .long, keepLong); relay: where a
 //                                            short code was parked, when not at this agent's relay (the inviter's --relay)
 //   await c.cancelInvite(code, { relay })  → { cancelled, name, short?, unparked?, detail? }: an unanswered invite of this agent's
@@ -271,11 +277,12 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize, commitmentOf, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
 import { KIND, acceptPrekeys, expire, header, open, pad, prekeysMissing, restartEpoch, send, session, unpad } from './envelope.mjs';
-import { answerId, buildAnswer, buildReply, checkAnswer, checkReply, checkRelay, inviteKeys, keyOf, makeInvite, parseInvite } from './invite.mjs';
+import { PUBLIC_VERSION, admitAnswer, answerId, buildAnswer, buildReply, checkAnswer, checkReply, checkRelay, inviteKeys, keyOf, makeInvite, parseInvite, parsePublicCode, screenAnswer } from './invite.mjs';
+import { PUBLIC_CAP, PUBLIC_TTL_MAX, REQUEST_TTL, SEEN_KEEP, checkCap, formatPub, isPub, joinerKeys, normalisePub, normaliseWords, publicHash, publicKeys, publicLink, readLink } from './public.mjs';
 import { MsgError, checkNow, fail, hex, isoWeek, pairId, signAs, topic } from './kdf.mjs';
 import { Prekeys, exact, kemDecapsulate, kemEncapsulate, kemKey } from './prekeys.mjs';
 import { Contacts, OPERATOR_CTX, TIERS } from './store.mjs';
-import { SHORT_TTL, SHORT_TTL_MAX, SHORT_TTL_MIN, codeHash, codeKind, fingerprint, formatShort, giftHash, makeShort, normaliseShort, relayTag, tagOf } from './short.mjs';
+import { SHORT_TTL, SHORT_TTL_MAX, SHORT_TTL_MIN, codeHash, codeKind, didWords, fingerprint, formatShort, giftHash, makeShort, normaliseShort, relayTag, tagOf } from './short.mjs';
 import { REGISTRY_URL, RELEASE_DID, loadRegistry, readTable, remember, resolveTag } from './relays.mjs';
 import { FILE_LABEL, MAX_FILE, assemble, checkChunk, checkManifest, chunkHead, isManifest, safeName, splitFile } from './file.mjs';
 // Every file, lock, network and CPU call goes through a platform (design/apps.md §4.2): Node's by default.
@@ -392,7 +399,7 @@ const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challeng
 // Refusals of an invite reply that a later round may get past: the reply stays queued.
 const REPLY_RETRY = new Set(['rate', 'relay_full', 'quota_messages']);
 // $sigelo/notice codes that refuse the publish, or the SUBSCRIBE, in flight (relay-plan §3 "Errors").
-const PUBLISH_CODES = new Set(['too_large', 'quota_storage', 'quota_messages', 'rate', 'relay_full', 'pow', 'no_reader', 'presence_taken', 'presence_will', 'presence_full']);
+const PUBLISH_CODES = new Set(['too_large', 'quota_storage', 'quota_messages', 'rate', 'relay_full', 'pow', 'no_reader', 'presence_taken', 'presence_will', 'presence_full', 'public_cap', 'public_paused', 'public_revoked', 'public_once']);
 // A contact's envelope this agent cannot open for want of its epoch asks the writer for a new epoch
 // by a fresh prekey bundle (RESYNC_CHECKS), at most once in this many seconds per contact after
 // the last such bundle: the check comes before any decryption, so a relay can make one up. A
@@ -486,7 +493,15 @@ const theirPrekeys = (c, d, pair, now) => {
 // The four words of a pairing (short.mjs), from its pairing key as the store holds it (hex), or null.
 const wordsOf = (pairKey) => (typeof pairKey === 'string' ? fingerprint(pairId(hexToBytes(pairKey))) : null);
 // The refusals of POST /park this client names (relay/park.mjs, and the login's: auth.mjs).
-const PARK_CHECKS = new Set(['park', 'park_taken', 'park_full', 'pow', ...LOGIN_CHECKS]);
+const PARK_CHECKS = new Set(['park', 'park_taken', 'park_full', 'pow', 'public_pro', 'public_full', 'public_topic', ...LOGIN_CHECKS]);
+// An accept's reply topic and key: a public code's are the joiner's own (public.mjs joinerKeys), else the code's.
+const replyOf = (id, p) => (p.public ? joinerKeys(hexToBytes(p.secret), id) : inviteKeys(hexToBytes(p.secret)));
+// An accept's answer topic: a public code's mailbox, else the code's invite topic.
+const answerTopicOf = (p) => (p.public ? publicKeys(hexToBytes(p.secret)).answer_topic : inviteKeys(hexToBytes(p.secret)).answer_topic);
+// A public code's state as contacts() and the page show it (requests without the answers they hold).
+const publicView = (nonce, p, now) => ({ id: nonce, name: p.name, short: p.short, words: p.words, link: p.short ? publicLink(p.short, p.words) : null, exp: p.exp, relay: p.relay,
+  cap: p.cap, open: p.open, paused: p.paused, today: p.day === Math.floor(now / DAY) ? p.n : 0, chats: p.chats,
+  requests: Object.values(p.requests).map(({ id, did, current_did, words, received, exp }) => ({ id, did, current_did, words, received, exp })) });
 // The refusals of POST /gift this client names (relay/gifts.mjs, allowance.mjs, operator.mjs, and the login's).
 const GIFT_CHECKS = new Set(['gift', 'gift_member', 'gift_term', 'pow', ...LOGIN_CHECKS]);
 
@@ -807,7 +822,7 @@ const statusWhy = (r, what) => `the relay answered ${r.status} to ${what}${r.sta
  *  is refused saying how the input was read, so a mistyped short code never reads "does not
  *  start with sgl1". */
 export function readCode(text, now, how = 'long') {
-  try { return parseInvite(text, now); } catch (e) {
+  try { return typeof text === 'string' && text.startsWith('sgl2') ? parsePublicCode(text, now) : parseInvite(text, now); } catch (e) {
     if (!(e instanceof MsgError) || !['code_checksum', 'code_length', 'code_version'].includes(e.check)) throw e;
     const as = how === 'parked' ? 'the long code the relay holds for this short code does not parse; ask the inviter for a new one'
       : `read as a long code (it starts sgl1, or has more than 12 characters; a short code has 8, like K7F3-Q9ZP, or 12): ${reason(e)}`;
@@ -1128,7 +1143,7 @@ export class Carrier {
     const gone = store.lapsed(now);
     for (const p of gone) {
       this.#emit(this.#note(st, now, { type: 'pairing_failed', did: p.code_did, name: p.name, code: 'code_expired',
-        detail: `the code from ${p.name} expired at ${new Date(p.exp * 1000).toISOString().replace('.000', '')} before the inviter's agent replied: ask the inviter for a new code` }));
+        detail: p.public ? `${p.name} did not approve the request by ${new Date(p.exp * 1000).toISOString().replace('.000', '')} (a public code, 7 days): it has ended; try the code again later` : `the code from ${p.name} expired at ${new Date(p.exp * 1000).toISOString().replace('.000', '')} before the inviter's agent replied: ask the inviter for a new code` }));
     }
     return gone.length > 0;
   }
@@ -1238,8 +1253,9 @@ export class Carrier {
   #want({ now, me, store }, relay) {
     const out = [], seen = new Set();
     const add = (x) => { if (!seen.has(x.topic)) { seen.add(x.topic); out.push(x); } };
+    for (const p of Object.values(store.s.publics ?? {})) if (p.relay === relay && p.exp > now) add({ topic: publicKeys(hexToBytes(p.secret)).answer_topic });
     for (const p of Object.values(store.s.invites)) if (p.relay === relay && p.exp > now) add({ topic: inviteKeys(hexToBytes(p.secret)).answer_topic });
-    for (const p of Object.values(store.s.accepts)) if (p.relay === relay && p.exp > now) add({ topic: inviteKeys(hexToBytes(p.secret)).reply_topic });
+    for (const [id, p] of Object.entries(store.s.accepts)) if (p.relay === relay && p.exp > now) add({ topic: replyOf(id, p).reply_topic });
     // No new mailbox under a burned K (re_pair): those held run out at their time (#refresh).
     const contacts = this.#liveContacts(store, relay).filter((c) => !c.re_pair).map((c) => ({ did: c.did, K: hexToBytes(c.pair_key) }));
     const weeks = this.#weeks(now), at = Math.max(0, weeks.findIndex((w) => w.week === isoWeek(now)));
@@ -1256,7 +1272,8 @@ export class Carrier {
       for (const c of this.#liveContacts(store)) for (const w of this.#weeks(now, wide, wide)) m.set(topic(hexToBytes(c.pair_key), c.did, me.did, w.week), { type: 'peer', did: c.did });
       for (const c of this.#liveContacts(store)) m.set(presenceTopic(hexToBytes(c.pair_key), c.did, me.did), { type: 'presence', did: c.did });
       for (const [nonce, p] of Object.entries(store.s.invites)) m.set(inviteKeys(hexToBytes(p.secret)).answer_topic, { type: 'answer', nonce });
-      for (const [id, p] of Object.entries(store.s.accepts)) m.set(inviteKeys(hexToBytes(p.secret)).reply_topic, { type: 'reply', id });
+      for (const [id, p] of Object.entries(store.s.accepts)) m.set(replyOf(id, p).reply_topic, { type: 'reply', id });
+      for (const [nonce, p] of Object.entries(store.s.publics ?? {})) m.set(publicKeys(hexToBytes(p.secret)).answer_topic, { type: 'public', nonce });
       return m;
     });
   }
@@ -1265,7 +1282,7 @@ export class Carrier {
     return this.#read(({ now, store, st }) => {
       const s = store.load().s, r = new Set();
       for (const c of Object.values(s.contacts)) if (!c.revoked) r.add(c.relay);
-      for (const p of [...Object.values(s.invites), ...Object.values(s.accepts)]) if (p.exp > now) r.add(p.relay);
+      for (const p of [...Object.values(s.invites), ...Object.values(s.accepts), ...Object.values(s.publics ?? {})]) if (p.exp > now) r.add(p.relay);
       for (const p of st.pending) r.add(p.relay);
       for (const [name, x] of Object.entries(st.relays)) if (Object.keys(x.claims ?? {}).length > 0) r.add(name);
       return [...r];
@@ -1303,7 +1320,7 @@ export class Carrier {
       route = this.#routes.get(t) ?? fail('route', 'a message on a topic this agent does not read');
       const events = this.#locked((ctx) => (route.type === 'peer' ? this.#onPeer(ctx, route.did, t, bytes)
         : route.type === 'presence' ? this.#onPresence(ctx, route.did, t, bytes)
-        : route.type === 'answer' ? this.#onAnswer(ctx, t, bytes) : this.#onReply(ctx, t, bytes)));
+        : route.type === 'answer' ? this.#onAnswer(ctx, t, bytes) : route.type === 'public' ? this.#onPublic(ctx, route.nonce, t, bytes) : this.#onReply(ctx, t, bytes)));
       for (const e of events) this.#emit(e);
       if (route.type === 'answer') this.#renewSoon();
     } catch (e) {
@@ -1874,6 +1891,59 @@ export class Carrier {
     return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key), invite: nonce, ...(p.renew && { renew: p.renew }) })];
   }
 
+  // Alice: an answer to a public code of hers (public.mjs). Screened (invite.mjs screenAnswer), an
+  // answer id seen before dropped (replay), the day's own cap kept, one waiting request per original
+  // DID (a newer replaces it); then a request waiting for the owner's approval, or, with open (let
+  // anyone in), approved at once. Nothing is written for an answer refused.
+  #onPublic(ctx, nonce, t, bytes) {
+    const { now, store, st } = ctx;
+    store.hold();
+    const p = store.load().s.publics?.[nonce];
+    if (!p || p.exp <= now) fail('challenge_unknown', 'no public code of this agent reads this topic');
+    const answer = unseal(KIND.invite_answer, publicKeys(hexToBytes(p.secret)).key, t, bytes);
+    const sc = screenAnswer(answer, { nonce, exp: p.exp }, store, now);
+    if (Object.hasOwn(p.seen, sc.answer_id)) fail('replay', 'an answer to the public code seen before: dropped');
+    const today = Math.floor(now / DAY);
+    if (p.day === today && p.n >= p.cap) fail('public_cap', `the public code took its ${p.cap} new chats today: dropped`);
+    if (p.day !== today) { p.day = today; p.n = 0; }
+    p.n++;
+    p.seen[sc.answer_id] = now + SEEN_KEEP;
+    for (const [id, q] of Object.entries(p.requests)) if (q.did === sc.did) delete p.requests[id];
+    const req = { id: sc.answer_id, did: sc.did, current_did: sc.current_did, words: didWords(sc.did), received: now, exp: Math.min(p.exp, answer.iat + REQUEST_TTL), answer };
+    if (p.open) { store.save(); return this.#approve(ctx, nonce, req); }
+    p.requests[req.id] = req;
+    store.save();
+    return [this.#note(st, now, { type: 'public_request', public: nonce, id: req.id, did: req.did, words: req.words, name: p.name })];
+  }
+
+  // Alice approves a request (or open approves it at once): the rest of the handshake, as
+  // #onAnswer, the reply on the joiner's own topic (public.mjs joinerKeys). The contact is named
+  // after the code (name-1, name-2, …) and marked via {public: nonce}: unchecked, nobody compared.
+  #approve(ctx, nonce, req) {
+    const { now, me, store, st } = ctx;
+    store.hold();
+    const p = store.load().s.publics[nonce], rk = joinerKeys(hexToBytes(p.secret), req.id);
+    const before = structuredClone(store.load().s.contacts);
+    let ct = null;
+    const name = `${p.name ?? 'public'}-${p.chats + 1}`;
+    const res = admitAnswer(req.answer, { nonce, exp: p.exp, secret: p.secret, name, relay: p.relay }, store, now, (pk) => { const k = kemEncapsulate(pk); ct = k.ct; return k.shared; }, { via: { public: nonce } });
+    const c = store.lookup(res.did), K = hexToBytes(res.pair_key);
+    const undo = { contact: before[c.did] ?? null, peer: st.peers[c.did] ?? null };
+    const s = session({ me: { did: me.did, current_did: me.current_did, sign: me.sign }, peer: c, K });
+    const prekeys = s.in.prekeys.issue({ current_did: me.current_did, sign: me.sign }, s.pair, now);
+    const reply = buildReply({ answer_id: res.answer_id, identity: { sign: me.sign, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_ct: ct, prekeys });
+    const frame = seal(KIND.invite_reply, rk.key, rk.reply_topic, reply);
+    const entry = { relay: p.relay, topic: rk.reply_topic, kind: KIND.invite_reply, control: 'reply', peer: c.did, undo, needs: [topic(K, c.did, me.did, isoWeek(now))], exp: req.exp };
+    delete p.requests[req.id];
+    if (frame.length > INVITE_BYTES) return [this.#unpair(ctx, entry, { code: 'too_large', detail: `the reply is ${frame.length} bytes, more than an invite topic holds (${INVITE_BYTES}): this agent's chain is too long` })];
+    p.chats++;
+    store.save();
+    st.peers[c.did] = { session: dumpSession(s), announced: me.current_did, known: me.current_did, outbox: st.peers[c.did]?.outbox ?? [], prekeys_resend: false, prekeys_iat: now };
+    this.#queue(st, { ...entry, bytes: frame });
+    this.#routes = new Map();
+    return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key), public: nonce })];
+  }
+
   // Alice: her reply will never reach the answerer (refused, too large, or its code expired while
   // it waited). What checkAnswer stored is put back as it was, so she keeps no contact that does
   // not know her, and the next inbox() says why. The store has no verb for this: the record is
@@ -1911,9 +1981,9 @@ export class Carrier {
   // kem_ct to the same K.
   #onReply({ now, me, store, st }, t, bytes) {
     store.hold();
-    const waiting = Object.entries(store.load().s.accepts).filter(([, x]) => inviteKeys(hexToBytes(x.secret)).reply_topic === t);
+    const waiting = Object.entries(store.load().s.accepts).filter(([x, p]) => replyOf(x, p).reply_topic === t);
     if (waiting.length === 0) fail('challenge_unknown', 'no answer of this agent waits on this topic');
-    const keys = inviteKeys(hexToBytes(waiting[0][1].secret)), spend = (except) => {
+    const keys = replyOf(waiting[0][0], waiting[0][1]), spend = (except) => {
       for (const [x] of waiting) if (x !== except) { try { store.take('accepts', x, now); } catch {} }
     };
     let reply, res, id = waiting[0][0];
@@ -1925,7 +1995,16 @@ export class Carrier {
         if (!waiting.some(([x]) => x === named)) fail('challenge_unknown', 'the reply names another answer than those whose topic it came on');
         id = named;
       }
+      // A public code's inviter, checked against the four words its page published (accept --words).
+      const p0 = waiting.find(([x]) => x === id)?.[1];
+      if (p0?.words) {
+        let original = null;
+        try { original = verify(reply?.bundle, now).chain[0]; } catch {}
+        if (original !== null && didWords(original) !== p0.words) fail('words', `the inviter's four words are "${didWords(original)}", not "${p0.words}" as given: this is not the code its page published; nothing was paired`);
+      }
       res = checkReply(reply, store, now, (kemCt, sk) => kemDecapsulate(kemCt, hexToBytes(sk)));
+      // Came by a public code: marked, checked when the words matched.
+      if (p0?.public) { const rec = store.load().s.contacts[res.did]; if (rec) { rec.via = { public: true, words: p0.words ? 'checked' : null }; store.save(); } }
     } catch (e) {
       spend(null);
       store.commit();
@@ -1937,13 +2016,14 @@ export class Carrier {
     const answered = waiting.find(([x]) => x === id)[1], held = answered.as ?? null;
     const c = renamed(store, store.lookup(res.did), answered);
     const s = session({ me: { did: me.did, current_did: me.current_did, sign: me.sign }, peer: c, K: hexToBytes(res.pair_key) });
-    const events = [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key) })];
+    const pub = answered.public ? { public: true, words_checked: Boolean(answered.words) } : {};
+    const events = [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key), ...pub })];
     try { acceptPrekeys(s, reply.prekeys, now); } catch (e) {
       if (!(e instanceof MsgError)) throw e;
       events.push({ type: 'dropped', check: e.check, detail: `the reply's prekeys: ${e.message}` });
     }
     st.peers[c.did] = { session: dumpSession(s), announced: held, known: held, outbox: st.peers[c.did]?.outbox ?? [], prekeys_resend: false, prekeys_iat: 0 };
-    for (const [x] of waiting) this.#handshakes.set(x, { contact: { name: c.name, did: c.did, current_did: c.current_did, fingerprint: wordsOf(res.pair_key) } });
+    for (const [x] of waiting) this.#handshakes.set(x, { contact: { name: c.name, did: c.did, current_did: c.current_did, fingerprint: wordsOf(res.pair_key), ...pub } });
     this.#routes = new Map();
     return events;
   }
@@ -2569,7 +2649,7 @@ export class Carrier {
       this.#locked(({ now, store, st }) => {
         const waiting = new Set(st.pending.filter((x) => x.relay === relay && x.control === 'answer').map((x) => x.topic));
         for (const [id, p] of Object.entries(store.load().s.accepts)) {
-          if (p.relay !== relay || !waiting.has(inviteKeys(hexToBytes(p.secret)).answer_topic)) continue;
+          if (p.relay !== relay || !waiting.has(answerTopicOf(p))) continue;
           store.take('accepts', id, now);
           this.#emit(this.#note(st, now, { type: 'pairing_failed', did: p.code_did, name: p.name, code: e.check ?? 'connect', detail: `the code's relay refused this agent: ${e.message}` }));
         }
@@ -2777,6 +2857,18 @@ export class Carrier {
     return { invite: r.body.invite, relay: at };
   }
 
+  // A public code's long code: GET /park/<public hash> (relay/park.mjs), not spent there. → { invite, relay }.
+  async #unparkPublic(text, relay) {
+    const norm = normalisePub(text), shown = formatPub(norm);
+    const { relay: at } = await this.relayForShort(norm, { relay });
+    const r = await http(this.platform, `${endpointOf(at, this.endpoints).http}/park/${publicHash(text)}`);
+    if (r.status === 429) refuse('rate', `the relay ${at} looks up no more public codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to 10 minutes')}, or use its sgl2 code`, r);
+    if (r.status === 409 && r.body?.check === 'public_paused') refuse('public_paused', `${shown} is paused by its owner: try again later`, r);
+    if (r.status === 404 && r.body?.check === 'park_unknown') refuse('park_unknown', `${shown}: no public code under it at ${at}: revoked, ended, or mistyped`, r);
+    if (r.status !== 200 || r.body?.ok !== true || typeof r.body.invite !== 'string' || !r.body.invite.startsWith('sgl2')) refuse(r.status === 200 ? 'park' : 'connect', `${at}: ${r.status === 200 ? 'GET /park answered without a public code' : statusWhy(r, 'GET /park')}`, r);
+    return { invite: r.body.invite, relay: at };
+  }
+
   // A gift code redeemed at this agent's own relay (POST /gift, relay/gifts.mjs): the relay gets the
   // code's hash (short.mjs giftHash), never the code, with a login of its own; the identity logged
   // in becomes the operator whose pool is Pro. A malformed code is refused here, before any login.
@@ -2799,6 +2891,13 @@ export class Carrier {
   // relay: the relay a short code was parked at (unpark), and the one a code must name (a long
   // code names its own: one naming another is refused code_relay).
   async accept(text, opts = {}) {
+    // A public code's link carries its code and the four words to check (public.mjs readLink).
+    const link = readLink(typeof text === 'string' ? text.trim() : text);
+    if (link) { text = link.code; opts = { ...opts, words: opts.words ?? link.words ?? undefined }; }
+    if (isPub(text)) {
+      const { invite, relay: at } = await this.#unparkPublic(text, opts.relay);
+      return this.#answer(invite, 'parked', { ...opts, relay: at });
+    }
     // Short or long by the input's shape, before either parser runs (short.mjs codeKind).
     const how = codeKind(text) === 'short' ? 'parked' : 'long';
     if (how !== 'parked') return this.#answer(text, how, opts);
@@ -2807,11 +2906,15 @@ export class Carrier {
     try { return await this.#answer(long, how, { ...opts, relay: at }); } catch (e) { throw keepLong(e, long); }
   }
 
-  async #answer(text, how, { name, wait = 10, tier, relay, started } = {}) {
+  // words (a public code's): the inviter's four words as its page published them, checked on the reply.
+  async #answer(text, how, { name, wait = 10, tier, relay, started, words } = {}) {
     if (tier !== undefined && !TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
     const named = relay === undefined ? undefined : relayArg(relay);
-    const { code, id, entry } = this.#locked(({ now, me, store, st }) => {
+    const given = words === undefined || words === null ? null : normaliseWords(words);
+    const { code, id, entry, reply, until } = this.#locked(({ now, me, store, st }) => {
       const code = readCode(text, now, how);
+      const pub = code.version === PUBLIC_VERSION;
+      if (given !== null && !pub) fail('words', 'four words are checked with a public code (PUB-…) only; compare a one-time code\'s words after pairing');
       if (named !== undefined && code.relay !== named) fail('code_relay', `the code names ${code.relay}, not ${named} (--relay): leave --relay out, or ask the inviter which relay it used`);
       // This agent's own relay, those its operator configured, and one it named (--relay) are the operator's choice.
       if (code.relay !== this.relay && code.relay !== named && !Object.hasOwn(this.endpoints ?? {}, code.relay) && !publicRelay(code.relay)) {
@@ -2823,16 +2926,19 @@ export class Carrier {
       if (known?.revoked && !(known.relink?.until > now)) fail('revoked', `${known.did} was revoked by this owner${known.ended ? ` (link ${known.ended.id} ended): a new link needs both operators to ask again` : ''}`);
       const k = kemKey();
       try {
-        const answer = buildAnswer({ code, identity: { sign: me.sign, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_pk: k.pk, prekeys: null });
-        const keys = inviteKeys(code.secret), frame = seal(KIND.invite_answer, keys.key, keys.answer_topic, answer);
+        const answer = buildAnswer({ code, identity: { sign: me.sign, genesis: me.genesis }, bundle: chainOf(me.bundle), kem_pk: k.pk, prekeys: null, ...(pub && { iat: now }) });
+        const keys = pub ? publicKeys(code.secret) : inviteKeys(code.secret), frame = seal(KIND.invite_answer, keys.key, keys.answer_topic, answer);
         // Checked before anything is stored: the relay would refuse it (quota_storage).
         if (frame.length > INVITE_BYTES) fail('too_large', `the answer is ${frame.length} bytes, more than an invite topic holds (${INVITE_BYTES}): this agent's chain is too long`);
         const id = answerId(answer);
         // Unnamed: the code's DID's first digits ("z5esAbCd"), as operators shorten a DID. Named, the
         // name also replaces a known contact's on a re-pair (#onReply).
-        store.addAccept(code, id, name ?? code.did.slice('did:sigelo:'.length, 'did:sigelo:'.length + 8), now, hex(k.secretKey), me.current_did, name !== undefined, tier ?? null);
-        const entry = this.#queue(st, { relay: code.relay, topic: keys.answer_topic, bytes: frame, kind: KIND.invite_answer, control: 'answer', needs: [keys.reply_topic], exp: code.exp });
-        return { code, id, entry: entry.id };
+        // A public code's request lives REQUEST_TTL at most (its reply topic's life), on its own topic.
+        const until = pub ? Math.min(code.exp, now + REQUEST_TTL) : code.exp, reply = pub ? joinerKeys(code.secret, id).reply_topic : keys.reply_topic;
+        store.addAccept(pub ? { ...code, exp: until } : code, id, name ?? code.did.slice('did:sigelo:'.length, 'did:sigelo:'.length + 8), now, hex(k.secretKey), me.current_did, name !== undefined, tier ?? null,
+          pub ? { public: true, ...(given !== null && { words: given }) } : {});
+        const entry = this.#queue(st, { relay: code.relay, topic: keys.answer_topic, bytes: frame, kind: KIND.invite_answer, control: 'answer', needs: [reply], exp: until });
+        return { code, id, entry: entry.id, reply, until };
       } finally { k.secretKey.fill(0); }
     });
     // Refused: the answer and the pending entry go, so no later connection sends or waits for them.
@@ -2842,9 +2948,8 @@ export class Carrier {
     };
     // Done early too once the reply topic or the answer is refused (a code answered before:
     // mailbox_taken), not after the whole wait.
-    const reply = inviteKeys(code.secret).reply_topic;
     // And once the code expires (#lapse): the answer is dead, so --wait does not run out first.
-    const settled = () => this.#handshakes.has(id) || this.#refusedTopics.has(reply) || Boolean(this.#results.get(entry)?.code) || this.clock() >= code.exp;
+    const settled = () => this.#handshakes.has(id) || this.#refusedTopics.has(reply) || Boolean(this.#results.get(entry)?.code) || this.clock() >= until;
     try { await this.#session([code.relay], { max: wait * 1000, until: settled }, started); } catch (e) {
       // A relay other than this agent's own that refuses it for good would be dialled again at
       // every connection, until the code expires, for an answer it never takes: and a stranger's
@@ -2878,15 +2983,117 @@ export class Carrier {
     // The code expired during the wait: #lapse emitted pairing_failed (onEvent); the refusal says
     // it here, so the next inbox does not say it again. No long code to keep (keepLong): it is dead.
     const lapsed = this.#locked(({ now, store, st }) => {
-      if (now < code.exp) return null;
+      if (now < until) return null;
       st.pending = st.pending.filter((p) => p.id !== entry); store.take('accepts', id, now);
-      const at = new Date(code.exp * 1000).toISOString().replace('.000', '');
+      const at = new Date(until * 1000).toISOString().replace('.000', '');
       const i = st.events.findIndex((e) => e.type === 'pairing_failed' && e.code === 'code_expired' && e.did === code.did && e.detail?.includes(at));
       return i >= 0 ? st.events.splice(i, 1)[0].detail : `the code expired at ${at} before the inviter's agent replied: ask the inviter for a new code`;
     });
     if (lapsed) throw Object.assign(new MsgError('code_expired', lapsed), { lapsed: true });
+    if (sent && code.version === PUBLIC_VERSION) return { status: 'waiting_approval', did: code.did, relay: code.relay, exp: until, words_given: given,
+      detail: 'sent: the inviter accepts each new chat; if not within 7 days, this request ends (inbox then says so)' };
     if (!sent) return { status: 'pending', did: code.did, relay: code.relay, detail: 'the answer has not reached the relay yet: it goes at the next connection' };
     return { status: 'waiting', did: code.did, relay: code.relay, detail: 'answer delivered; the pairing completes when the inviter\'s agent next connects' };
+  }
+
+  // A public code (sigelo-public/0, design/public-invite.md): a version 2 long code parked at the
+  // relay under a PUB code, for months (ttl up to PUBLIC_TTL_MAX), by an identity on Pro (the relay
+  // refuses public_pro otherwise). Its answer topic is claimed first. cap: new chats a day (the
+  // relay's and this agent's: PUBLIC_CAP); open: approved at once, no request (an agent service
+  // with its own doorman). → { id, name, code, short, words, link, exp, relay, cap, open, did }.
+  async invitePublic({ name, ttl = 183 * DAY, cap = PUBLIC_CAP, open = false, relay, started } = {}) {
+    const at = relay === undefined ? this.relay : relayArg(relay);
+    checkCap(cap);
+    if (!Number.isSafeInteger(ttl) || ttl < DAY || ttl > PUBLIC_TTL_MAX) fail('ttl', `a public code lives a day to a year (${PUBLIC_TTL_MAX} s), not ${JSON.stringify(ttl)}`);
+    if (name !== undefined && typeof name !== 'string') fail('name', 'a string');
+    const { code, words } = this.#locked(({ now, me, store }) => {
+      const code = makeInvite({ did: me.current_did, relay: at, now, ttl, version: PUBLIC_VERSION }), words = didWords(me.did);
+      store.addPublic(code, { name: name ?? `public-${code.nonce.slice(1, 7)}`, cap, open, words }, now);
+      return { code, words };
+    });
+    const drop = () => { try { this.#locked(({ store }) => store.dropPublic(code.nonce)); } catch {} this.#routes = new Map(); };
+    const t = publicKeys(code.secret).answer_topic;
+    try {
+      this.#routes = new Map();
+      await this.#session([at], {}, started);
+      if (!this.#claimed.has(t)) {
+        const r = this.#refusedTopics.get(t);
+        fail(r?.code ?? 'subscribe', `the relay did not let this agent claim the public code's answer topic${r ? ` (${relaySays(r.detail)})` : ''}`);
+      }
+      const pub = formatPub(makeShort(undefined, at === this.shortRelay ? null : relayTag(at))), ep = endpointOf(at, this.endpoints);
+      const creds = await this.#credentials(at, ep, started);
+      const r = await http(this.platform, `${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: publicHash(pub), invite: code.text, exp: code.exp, cap }) });
+      const check = typeof r.body?.check === 'string' ? r.body.check : null;
+      if (r.status === 429) refuse('rate', `the relay ${at} parks no more codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to an hour')}`, r);
+      if ((r.status === 404 || r.status === 405) && check === null) refuse('park', `the relay ${at} takes no public codes`, r);
+      if (r.status !== 200) refuse('connect', `${at}: ${statusWhy(r, 'POST /park')}`, r);
+      if (check === 'public_pro') refuse('public_pro', `a public code comes with Pro: one allowance for all your agents (sigelo.io/pro.html; relay: ${relaySays(r.body?.detail)})`, r);
+      if (r.body?.ok !== true) refuse(PARK_CHECKS.has(check) ? check : 'park', `the relay refused the public code (${relaySays(`${check}: ${r.body?.detail}`)})${check === 'park' ? ': an older relay takes no public codes' : ''}`, r);
+      const held = Number.isSafeInteger(r.body.exp) && r.body.exp > 0 ? r.body.exp : code.exp;
+      this.#locked(({ store }) => { const p = store.load().s.publics[code.nonce]; p.short = pub; store.save(); });
+      const n = this.#read(({ store }) => store.load().s.publics[code.nonce].name);
+      return { id: code.nonce, name: n, code: code.text, short: pub, words, link: publicLink(pub, words), exp: held, relay: at, cap, open: open === true, did: code.did };
+    } catch (e) { drop(); throw e; }
+  }
+
+  /** This agent's public codes, with their requests waiting: contacts().publics. */
+  publics() { return this.#read(({ now, store }) => Object.entries(store.load().s.publics ?? {}).map(([n, p]) => publicView(n, p, now))); }
+
+  // The owner approves a request (by its id: the answer id), at once: the reply goes at this
+  // session (queued if the relay cannot be reached). → { approved: true, did, name, fingerprint, queued? }.
+  async approvePublic(id, { started } = {}) {
+    let out;
+    try {
+      out = this.#locked((ctx) => {
+        const f = ctx.store.findRequest(id) ?? fail('challenge_unknown', `no request waits with id ${JSON.stringify(id)}: approved, refused or ended`);
+        if (f[2].exp <= ctx.now) fail('challenge_expired', 'this request is older than 7 days: the joiner\'s agent has given it up');
+        return { relay: f[1].relay, events: this.#approve(ctx, f[0], f[2]) };
+      });
+    } catch (e) {
+      // A request that cannot be approved (revoked since, too old) goes.
+      if (e instanceof MsgError && e.check !== 'challenge_unknown' && !INTERNAL.has(e.check)) {
+        try { this.#locked(({ store }) => { const f = store.findRequest(id); if (f) { delete f[1].requests[id]; store.save(); } }); } catch {}
+      }
+      throw e;
+    }
+    for (const e of out.events) this.#emit(e);
+    const paired = out.events.find((e) => e.type === 'paired');
+    if (!paired) { const f = out.events[0]; fail(f?.code ?? 'pairing', f?.detail ?? 'not paired'); }
+    const base = { approved: true, did: paired.did, name: paired.name, fingerprint: paired.fingerprint };
+    try { await this.#session([out.relay], {}, started); } catch (e) { return { ...base, queued: true, detail: `${reason(e)}: the reply goes at the next connection` }; }
+    return base;
+  }
+
+  /** The owner refuses a request: dropped, the joiner told nothing (its request ends after 7 days). */
+  refusePublic(id) {
+    return this.#locked(({ store }) => {
+      const f = store.findRequest(id) ?? fail('challenge_unknown', `no request waits with id ${JSON.stringify(id)}`);
+      delete f[1].requests[id];
+      store.save();
+      return { refused: true, did: f[2].did };
+    });
+  }
+
+  // Pause, Resume and the cap of a public code (its id, or its PUB code), at the relay (POST
+  // /park/<hash>) and here. → the code's view.
+  async setPublic(key, { paused, cap } = {}, { started } = {}) {
+    if (paused !== undefined && typeof paused !== 'boolean') fail('paused', 'true or false');
+    if (cap !== undefined) checkCap(cap);
+    if (paused === undefined && cap === undefined) fail('public', 'paused or cap');
+    const k = typeof key === 'string' && isPub(key) ? formatPub(normalisePub(key)) : key;
+    const [nonce, p] = this.#read(({ store }) => store.findPublic(k)) ?? fail('challenge_unknown', 'no public code of this agent with this id or code');
+    if (p.short === null) fail('challenge_unknown', 'this public code was never parked');
+    const ep = endpointOf(p.relay, this.endpoints), creds = await this.#credentials(p.relay, ep, started);
+    const r = await http(this.platform, `${ep.http}/park/${publicHash(p.short)}`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, ...(paused !== undefined && { paused }), ...(cap !== undefined && { cap }) }) });
+    if (r.status === 429) refuse('rate', `the relay ${p.relay} takes no more requests from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to 10 minutes')}`, r);
+    if (r.status === 404 && r.body?.check === 'park_unknown') refuse('park_unknown', `the relay ${p.relay} holds no such public code of yours (revoked or ended)`, r);
+    if (r.status !== 200 || r.body?.ok !== true) refuse(typeof r.body?.check === 'string' ? r.body.check : 'connect', `${p.relay}: ${r.status === 200 ? relaySays(`${r.body?.check}: ${r.body?.detail}`) : statusWhy(r, 'POST /park/<hash>')}`, r);
+    return this.#locked(({ now, store }) => {
+      const q = store.load().s.publics[nonce];
+      q.paused = r.body.paused === true; q.cap = r.body.cap ?? q.cap;
+      store.save();
+      return publicView(nonce, q, now);
+    });
   }
 
   // An invite this agent made and nobody has answered, withdrawn: code, its long code (invite's
@@ -2899,6 +3106,10 @@ export class Carrier {
   // → { cancelled: true, name, short?, unparked?, detail? }.
   async cancelInvite(code, { relay: named, started } = {}) {
     const text = typeof code === 'string' ? code.trim() : '';
+    // A public code (its id, PUB code, sgl2 code or hash): Revoke for all (public.mjs).
+    const pkey = isPub(text) ? formatPub(normalisePub(text)) : text.startsWith('sgl2') ? (() => { try { return parsePublicCode(text, checkNow(this.clock())).nonce; } catch { return null; } })() : text;
+    const pub = pkey ? this.#read(({ store }) => store.findPublic(pkey, (sh) => publicHash(sh))) : null;
+    if (pub) return this.#revokePublic(pub[0], pub[1], started);
     const hash = /^[0-9a-f]{64}$/.test(text) ? text : null, kind = hash !== null ? 'hash' : codeKind(text);
     const short = kind === 'short' ? formatShort(normaliseShort(text)) : null;
     const found = this.#locked(({ now, store }) => {
@@ -2922,6 +3133,16 @@ export class Carrier {
     if (!found && !r.unparked) throw new MsgError(r.check ?? 'challenge_unknown', r.detail);
     if (!found && r.gone) fail('challenge_unknown', `${shown ?? 'that hash'}: no code of yours waits at ${at} (used, run out, or made elsewhere)`);
     return { cancelled: true, name: found?.name ?? null, ...(shown !== null && { short: shown }), unparked: r.unparked, ...(r.detail && { detail: r.detail }) };
+  }
+
+  // Revoke for all: the relay's tombstone (DELETE /park/<hash>), then the code goes here with its
+  // waiting requests, and its answer topic is given up at the next round. Pairings made stay.
+  async #revokePublic(nonce, p, started) {
+    const r = p.short !== null ? await this.#unparkCancel(p.relay, publicHash(p.short), started) : { unparked: true };
+    this.#locked(({ store }) => store.dropPublic(nonce));
+    this.#routes = new Map();
+    if (this.#links.get(p.relay)?.up) this.#refreshSoon(p.relay);
+    return { cancelled: true, name: p.name, public: true, ...(p.short && { short: p.short }), unparked: r.unparked, ...(r.detail && { detail: r.detail }) };
   }
 
   // DELETE /park/<hash> with a login of its own (as invite's POST /park). → { unparked, gone?, check?, detail? };
@@ -2957,13 +3178,15 @@ export class Carrier {
             prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null, link: c.link ?? null,
             // Presence (the header's): what this contact sees of mine, and theirs as read now (null: not known).
             presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null,
-            seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true };
+            seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true, via: c.via ?? null };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay,
           ...(typeof p.short === 'string' && { short: p.short, short_exp: p.short_exp }), ...(p.renew && { renew: p.renew }) })),
         // Renewing codes (store.mjs renew): each series, its codes used, and why its last renewal failed (null: none).
         renewing: Object.entries(s.renew ?? {}).map(([id, x]) => ({ id, name: x.name, used: x.used, error: x.error ?? null })),
         answers: Object.values(s.accepts).filter((p) => p.exp > now).map((p) => ({ name: p.name, did: p.code_did, exp: p.exp, relay: p.relay })),
+        // Public codes of mine (public.mjs), with the requests waiting for approval.
+        publics: Object.entries(s.publics ?? {}).filter(([, p]) => p.exp > now).map(([n, p]) => publicView(n, p, now)),
         // Pairings that failed since the last inbox, which takes them as events.
         failed: st.events.filter((e) => e.type === 'pairing_failed').map(({ name, did, code, detail, at }) => ({ name, did, code, detail, at })),
       };

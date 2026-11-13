@@ -99,6 +99,10 @@ export const PAGES = [
     description: 'How to report a vulnerability in sigelo: channels, scope, response times, safe harbour, and the areas not yet reviewed.' },
   { slug: 'pair', src: 'site/src/pair.md', type: 'WebPage' },
   { slug: 'enrol', src: 'site/src/enrol.md', type: 'WebPage' },
+  // The page a public code's link opens (apps/contact/public.mjs LINK_BASE): not in the nav, reached by
+  // the link. Its one script, site/src/join.mjs (same origin, so CSP default-src 'self' admits it),
+  // shows the code and words of the fragment, which never leaves the browser; no other page has one.
+  { slug: 'join', src: 'site/src/join.md', type: 'WebPage', script: 'join.mjs' },
   { slug: 'contact', src: 'site/src/contact.md', type: 'ContactPage' },
   { slug: 'privacy', src: 'site/src/privacy.md', type: 'WebPage' },
   { slug: 'faq', src: 'site/src/faq.md', type: 'WebPage' },
@@ -501,7 +505,7 @@ ${indexed}<link rel="alternate" type="text/markdown" href="/${page.slug}.md" tit
 <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="stylesheet" href="/style.css">
-${ld}</head>
+${page.script ? `<script type="module" src="/${page.script}"></script>\n` : ''}${ld}</head>
 <body>
 <header>
 <p class="site"><a href="/">${SEAL_INLINE}sigelo</a></p>
@@ -541,6 +545,7 @@ export function build({ out = DIST, disclosed = DISCLOSED, darkDir = DARK_DIR } 
   // Absent until server-setup.sh --world made the issuer key (a fresh server): no world block then.
   for (const f of ['genesis.json', 'rotations.json']) if (existsSync(join(ROOT, 'world', f))) put(`world/${f}`, readBytes(`world/${f}`));
   put('style.css', readFileSync(join(SITE, 'src', 'style.css')));
+  for (const p of pages.filter((x) => x.script)) put(p.script, readFileSync(join(SITE, 'src', p.script)));
   // The brand (assets/brand/): every file under /brand/; favicon.svg and the PNG icons at the root too.
   for (const f of BRAND_FILES) put(`brand/${f}`, readFileSync(join(BRAND, f)));
   for (const f of ['favicon.svg', 'icon-192.png', 'icon-512.png']) put(f, readFileSync(join(BRAND, f)));

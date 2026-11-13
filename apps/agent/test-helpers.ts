@@ -53,7 +53,8 @@ export async function startTestRelay(dir: string, host = 'relay.test'): Promise<
   const relay = await startRelay({ host, db: join(dir, host === 'relay.test' ? 'relay.db' : `${host}.db`), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, log: () => {},
     // Every test is one network (loopback): the short-code brakes are relay/test/run.mjs's, not these
     // (a cancel and a park each count as a lookup, and the tests' codes ran past 20 in 10 minutes).
-    park: { lookups: { n: 1000, window: 600 }, parks: { n: 1000, window: 3600 }, lookupsAll: { n: 8000, window: 600 } },
+    // Public codes are Pro's (relay/park.mjs): every test identity is, here.
+    park: { lookups: { n: 1000, window: 600 }, parks: { n: 1000, window: 3600 }, lookupsAll: { n: 8000, window: 600 }, publicFetches: { n: 1000, window: 600 }, pro: () => true },
     policy: (c: unknown) => relayPolicy(c, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: TIERS }) });
   return Object.assign(relay, { endpoints: { [host]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } } });
 }

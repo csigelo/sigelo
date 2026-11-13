@@ -714,12 +714,18 @@
   const isTeam = (g) => g.members.some((m) => m.role === 'agent') && g.members.some((m) => m.role !== 'agent' && !m.me);
   const liveGroup = (g) => g.status !== 'left' && g.status !== 'removed';
 
+  /** A contact that came by a public code (UI-API.md "Public invite"): mine, nobody compared; theirs, checked against their page or not. */
+  function viaLine(c) {
+    if (!c.via?.public) return null;
+    if (typeof c.via.public === 'string') return h('p', { class: 'help', 'data-via': 'mine' }, 'Came by your public code · not compared');
+    return h('p', { class: c.via.words === 'checked' ? 'ok' : 'help', 'data-via': 'theirs' }, c.via.words === 'checked' ? '✓ By their public code · words match their page' : 'By their public code · not checked against their page');
+  }
   /** What a chat's row says under its name: the tier decides (own: the text; friend: a count; quiet: nothing). */
   function contactLine(c) {
     const unread = unreadOf(c), agent = kindOf(c) === 'agent';
     const lead = agent ? [h('span', { class: 'kind' }, 'Agent'), ' · '] : [];
     if (c.status === 'pair_again') return [lead, h('span', { class: 'warn' }, 'Pair again')];
-    if (!c.words_checked && c.words && !c.local) return [lead, h('span', { class: 'warn' }, 'Compare four words')];
+    if (!c.words_checked && c.words && !c.local) return [lead, h('span', { class: 'warn' }, typeof c.via?.public === 'string' ? 'Public code · not compared' : 'Compare four words')];
     if (c.status === 'waiting') return [lead, 'Waiting for their side'];
     if (c.not_collected) return [lead, 'Not collected yet'];
     if (c.tier === 'quiet') return agent ? h('span', { class: 'kind' }, 'Agent') : '';
@@ -931,11 +937,17 @@
     const code = input({ autocapitalize: 'characters', class: 'big', value: arg?.code ?? '', placeholder: 'M4QX-8T2B' }), name = input({ autocomplete: 'off', placeholder: 'Optional' });
     const title = h('h1', null, 'Enter their code');
     mount(page({ who: title, body: [body], foot: [foot] }));
-    const form = [field('Their code', code, 'Upper or lower case, with or without the dash.'), field('Their name, as you\'ll see it', name)];
+    // A public code (PUB-…, or its link): the four words printed beside it, to check (UI-API.md "Public invite").
+    const words = input({ autocomplete: 'off', placeholder: 'Optional: as printed beside the code' });
+    const isPub = () => /^\s*(pub|https:\/\/sigelo\.io\/join#)/i.test(code.value);
+    code.addEventListener('input', () => void refresh());
+    const wordsField = field('Their four words', words, 'For a public code: the words beside it. Another code\'s words pair nothing.');
+    const form = () => [field('Their code', code, 'Upper or lower case, with or without the dash.'), isPub() ? wordsField : null, field('Their name, as you\'ll see it', name)];
     const enter = async (c = code.value) => {
       if (!c.trim() || P.busy) return;
       P.busy = true; P.error = null; P.result = null; await refresh();
-      try { P.result = await started('POST', '/api/accept', { code: c.trim(), name: name.value.trim() }); } catch (e) { P.error = e; }
+      const w = isPub() && words.value.trim() ? { words: words.value.trim() } : {};
+      try { P.result = await started('POST', '/api/accept', { code: c.trim(), name: name.value.trim(), ...w }); } catch (e) { P.error = e; }
       P.busy = false; await poll();
     };
     if (arg?.code) setTimeout(() => enter(), 0);
@@ -945,6 +957,7 @@
       title.textContent = 'Enter their code';
       put(foot, btn(P.busy ? 'Pairing…' : 'Pair', () => enter(), { kind: 'pri', disabled: P.busy }));
       const out = [];
+      if (r?.status === 'waiting_approval') out.push(h('div', { class: 'card', 'data-approval': '' }, h('p', null, 'Sent. They accept each new chat; you show in Chats once they do. If not within 7 days, this request ends.')));
       if (r?.status === 'waiting') out.push(h('div', { class: 'card' }, h('p', null, 'Your answer is at the relay. It waits for their side to come online once', r.exp ? [', until ', when(r.exp)] : '', '. They show in Chats, with the four words, once they answer.')));
       else if (r?.status === 'pending') out.push(h('div', { class: 'card' }, h('p', null, 'Your answer has not reached the relay yet: it goes at the next connection.')));
       const e = P.error;
@@ -960,12 +973,15 @@
           code_expired: 'This code has run out. Codes work for 10 minutes, once. Ask for a new one.',
           mailbox_taken: 'This code was answered already, by someone else. Ask for a new one.',
           short_code: 'Not a code sigelo knows. Check it with whoever gave it to you.',
+          public_paused: 'This public code is paused by its owner. Try again later.',
+          public_cap: 'This public code took all its new chats for today. Try again tomorrow.',
+          words: 'The four words are not the ones of this code\'s owner: not the code their page published. Nothing was paired.',
         }[e.check];
         out.push(h('div', { class: 'card warn' }, why ? h('p', null, why) : inlineError(e)));
         if (e.long) out.push(h('div', { class: 'card' }, h('p', null, 'The short code is used up. Its long code:'), h('p', { class: 'mono' }, e.long), h('div', { class: 'btns' }, btn('Use the long code', () => { code.value = e.long; return enter(e.long); }, { kind: 'pri' }))));
       }
       if (P.busy && me?.pow) out.push(...statusCards().filter((x) => x));
-      put(body, form, out);
+      put(body, form(), out);
     };
   });
 
@@ -1160,7 +1176,8 @@
       };
       put(body, noteCard(),
         h('div', { class: 'pad ident' }, picButton(kindOf(c), c.name, did, `Picture for ${c.name}`), h('h3', null, c.name), c.words ? fourWords(c.words) : null,
-          c.words_checked ? h('p', { class: 'ok' }, '✓ Words compared') : c.words && !c.local ? btn('Compare four words', () => go('compare', did), { auto: true }) : null),
+          c.words_checked ? h('p', { class: 'ok' }, '✓ Words compared') : c.words && !c.local ? btn('Compare four words', () => go('compare', did), { auto: true }) : null,
+          viaLine(c)),
         list(row({ compact: true, start: icon('chat'), title: 'Message', onclick: () => back() }),
           walletOn() ? row({ compact: true, start: icon('coin'), title: 'Pay', onclick: () => pay(did) }) : null,
           // Their agents (People and teams): the ones they introduced to you, paired or waiting for your answer.
@@ -2368,9 +2385,9 @@
     };
   });
 
-  // ---- Public invite (the mock's invite, invite-new, invite-on): a long code anyone can use, up to 7 days; it works once
-  // (pairing is one to one: a code that pairs many is not in sigelo yet). UI-API.md "Public invite".
-  const publicMessage = (code, exp) => `Start a chat with me on sigelo: ${code} (works once, until ${day(exp)}). How: ${PAIR_HOW}`;
+  // ---- Public invite (the mock's invite, invite-new, invite-on; design/public-invite.md, UI-API.md "Public invite"): one code
+  // many use for months (Pro only), each new chat waiting for your OK unless you let anyone in; a daily cap, Pause, Stop for good.
+  const publicMessage = (p) => `Start a chat with me on sigelo: ${p.short}. My four words: ${p.words}. Or open ${p.link}`;
   screen('invite', {}, () => {
     const body = h('div');
     mount(page({ title: 'Public invite', body: [body] }));
@@ -2379,39 +2396,49 @@
         void act(() => backend.call('POST', '/api/invite/cancel', { id: p.id }), () => toast('Public invite stopped.'));
       }
     };
+    const kv = (k, v) => h('div', { class: 'kv' }, h('span', null, k), h('span', null, v));
     return () => {
       const p = S.snap?.pending?.public;
       if (!p) {
-        put(body, noteCard(), h('div', { class: 'empty left' }, h('h3', null, 'One code to post'),
-          h('p', null, 'Put it on your website, shop window or card. Whoever uses it first starts a chat with you. It lasts up to 7 days, and you can stop it any time.'),
+        put(body, noteCard(), h('div', { class: 'empty left' }, h('h3', null, 'One code for everyone'),
+          h('p', null, 'Put it on your website, shop window or card. Anyone can start a chat with you. Each new chat waits for your OK, unless you let anyone in. It lasts for months and you can stop it any time.'),
+          h('p', { class: 'help', 'data-pro': '' }, 'A public code comes with Pro: one allowance for all your agents.'),
           btn('Make a public invite', () => go('invite-new'), { kind: 'pri' }),
-          h('p', { class: 'help' }, 'For one person, use My code instead: it works once, for 10 minutes.')));
+          h('p', { class: 'help' }, 'For one person, use My code instead: it works once.')));
         return;
       }
-      const c = p.paired ? contactBy(p.paired) : null, kv = (k, v) => h('div', { class: 'kv' }, h('span', null, k), h('span', null, v));
-      put(body, noteCard(), h('div', { class: 'pad stack center' }, p.waiting ? qrBox(p.code) : null, h('p', { class: 'mono code-long', 'data-public': '' }, p.code),
-        h('p', { class: 'lead' }, `Answered by you · until ${day(p.exp)}`),
-        p.waiting ? h('div', { class: 'btns' }, btn('Share', () => share(publicMessage(p.code, p.exp)), { kind: 'pri' }), btn('Copy', () => copy(p.code))) : null),
-        h('div', { class: 'list' }, kv('Used', c ? `by ${c.name}` : p.waiting ? 'not yet' : 'once: it works no more'),
-          c ? row({ compact: true, title: `Open the chat with ${c.name}`, chev: true, onclick: () => go('chat', c.did) }) : null),
-        h('p', { class: 'help pad' }, 'A code works for one person. Once it is used, make a new one.'),
-        h('div', { class: 'pad stack' }, p.waiting ? null : btn('Make a new one', () => go('invite-new'), { kind: 'pri' }), btn('Stop for good', () => stop(p), { kind: 'danger' })));
+      const reqs = p.requests ?? [];
+      put(body, noteCard(), h('div', { class: 'pad stack center' }, p.link ? qrBox(p.link) : null, h('p', { class: 'mono big', 'data-public': '' }, p.short),
+        h('p', { class: 'wline' }, wordsLine(p.words)),
+        h('p', { class: 'lead' }, `Answered by you · until ${day(p.exp)}${p.paused ? ' · paused' : ''}`),
+        h('div', { class: 'btns' }, btn('Share', () => share(publicMessage(p)), { kind: 'pri' }), btn('Copy', () => copy(`${p.short} ${p.words}`)))),
+        h('p', { class: 'help pad' }, 'Post the four words beside the code: whoever uses it can check it is yours.'),
+        p.open ? null : sec(`Waiting for your OK${reqs.length ? ` (${reqs.length})` : ''}`),
+        p.open ? null : reqs.length ? h('div', { class: 'list', 'data-requests': '' }, reqs.map((q) => h('div', { class: 'row' }, h('span', { class: 'mid' }, h('b', null, q.words), h('small', { class: 'wrap mono' }, q.did)),
+          h('span', { class: 'btns' }, btn('Approve', () => act(() => backend.call('POST', '/api/public/approve', { id: q.id }), () => toast('Chat started.')), { kind: 'pri' }),
+            btn('Refuse', () => act(() => backend.call('POST', '/api/public/refuse', { id: q.id }), () => toast('Refused.'))))))) : h('p', { class: 'help pad' }, 'No new chat is waiting.'),
+        h('div', { class: 'list' }, kv('New chats today', `${p.today} of at most ${p.cap}`), kv('Chats started', String(p.chats)), kv('New chats', p.open ? 'anyone with the code, at once' : 'each waits for your OK')),
+        h('div', { class: 'pad stack' }, btn(p.paused ? 'Resume' : 'Pause', () => act(() => backend.call('POST', '/api/public/set', { id: p.id, paused: !p.paused }), () => toast(p.paused ? 'New chats are on again.' : 'Paused: nobody can start a chat by it.'))),
+          btn('Stop for good', () => stop(p), { kind: 'danger' })));
     };
   });
   screen('invite-new', {}, () => {
-    const body = h('div', { class: 'pad stack' }), V = { busy: false, say: null };
-    const valid = select('Valid for', [['604800', '7 days'], ['259200', '3 days'], ['86400', '1 day']], '604800');
+    const body = h('div', { class: 'pad stack' }), V = { busy: false, say: null, approve: true };
+    const valid = select('Valid for', [['6', '6 months'], ['1', '1 month'], ['12', '1 year']], '6');
+    const cap = select('New chats per day at most', [['50', '50'], ['20', '20'], ['10', '10'], ['100', '100'], ['500', '500']], '50');
     const make = async () => {
       if (V.busy) return;
       V.busy = true; V.say = null; await refresh();
-      try { await started('POST', '/api/invite', { long: true, public: true, ttl: Number(valid.value) }); await poll(); V.busy = false; await swap('invite'); return; } catch (e) { V.say = e; }
+      try { await started('POST', '/api/invite', { public: true, months: Number(valid.value), cap: Number(cap.value), open: !V.approve }); await poll(); V.busy = false; await swap('invite'); return; } catch (e) { V.say = e; }
       V.busy = false; await refresh();
     };
     const kv = (k, v) => h('div', { class: 'kv' }, h('span', null, k), h('span', null, v));
     const makeBtn = btn('Make it', make, { kind: 'pri' });
     mount(page({ title: 'Public invite', body: [body], foot: [makeBtn] }));
-    const form = [field('Valid for', valid), h('div', { class: 'list' }, kv('Who answers', 'You'), kv('New chats', 'one: the first person who uses it'))];
-    return () => { makeBtn.textContent = V.busy ? 'Making it…' : 'Make it'; put(body, form, inlineError(V.say), S.snap?.pending?.public ? h('p', { class: 'help' }, 'Your public invite now stops: the new code replaces it.') : null); };
+    const form = [h('div', { class: 'list' }, kv('Who answers', 'You')), field('Valid for', valid),
+      h('div', { class: 'list' }, toggle('I approve each new chat', 'Off: anyone with the code is paired at once.', V.approve, (on) => { V.approve = on; })), field('New chats per day at most', cap)];
+    const pro = (e) => (e?.check === 'public_pro' ? h('div', { class: 'card warn' }, h('p', null, 'A public code comes with Pro: one allowance for all your agents. This identity has no Pro yet.')) : inlineError(e));
+    return () => { makeBtn.textContent = V.busy ? 'Making it…' : 'Make it'; put(body, form, V.say ? pro(V.say) : null); };
   });
 
   // ---- Sign or check a message (notes.md S2; UI-API.md "Signed statements"): a text signed with your key, portable (copy,

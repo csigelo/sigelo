@@ -42,6 +42,11 @@
 // when a process began a renewal (two processes of one identity park one code); retry, error: a
 // renewal that failed, tried again from retry. Cancelling the current code (cancelInvite) ends the
 // series; so does its code running out unused (purged with it, as nothing is due).
+// publics: { code nonce: { secret, exp, name, relay, short, cap, open, paused, words, day, n, chats,
+// requests: { answer id: { id, did, current_did, words, received, exp, answer } }, seen: { answer id: exp } } }:
+// this owner's public codes (sigelo-public/0, public.mjs), with the pairing requests waiting for
+// approval and the answer ids seen (replays dropped). An accept of a public code has public: true,
+// and words when the joiner was given the inviter's four words; its exp is the request's (7 days).
 // The file holds one-time secrets, Bob's one-time key and
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
 import { utf8ToBytes } from '@noble/hashes/utils.js';
@@ -270,9 +275,15 @@ export class Contacts {
     for (const k of ['invites', 'accepts']) {
       for (const [nonce, p] of Object.entries(this.s[k])) {
         if (p.exp > now) continue;
-        if (k === 'accepts') (this.gone ??= []).push({ id: nonce, code_did: p.code_did, name: p.name, exp: p.exp, relay: p.relay });
+        if (k === 'accepts') (this.gone ??= []).push({ id: nonce, code_did: p.code_did, name: p.name, exp: p.exp, relay: p.relay, ...(p.public && { public: true }) });
         delete this.s[k][nonce]; n++;
       }
+    }
+    // Public codes past their exp go; requests and seen answer ids past theirs.
+    for (const [nonce, p] of Object.entries(this.s.publics ?? {})) {
+      if (p.exp <= now) { delete this.s.publics[nonce]; n++; continue; }
+      for (const [id, q] of Object.entries(p.requests)) if (q.exp <= now) { delete p.requests[id]; n++; }
+      for (const [id, exp] of Object.entries(p.seen)) if (exp <= now) { delete p.seen[id]; n++; }
     }
     // A series with no current code and nothing due is over (its code ran out unused).
     for (const id of Object.keys(this.s.renew ?? {})) {
@@ -372,9 +383,37 @@ export class Contacts {
    * named: he chose the name (accept --name), so a re-pair renames the known contact (the carrier).
    * tier: he chose the tier (accept --tier): the contact is filed with it (invite.mjs checkReply).
    */
-  addAccept(code, id, name, now, kem_sk = null, as = null, named = false, tier = null) {
+  addAccept(code, id, name, now, kem_sk = null, as = null, named = false, tier = null, extra = {}) {
     if (tier !== null && !TIERS.includes(tier)) fail('tier', `a tier is ${TIERS.join(', ')}; not ${JSON.stringify(tier)}`);
-    return this.#add('accepts', id, { secret: hex(code.secret), code_did: code.did, exp: code.exp, name, relay: code.relay, kem_sk, as, ...(named && { named: true }), ...(tier && { tier }) }, now, TTL_MAX + SKEW);
+    return this.#add('accepts', id, { secret: hex(code.secret), code_did: code.did, exp: code.exp, name, relay: code.relay, kem_sk, as, ...(named && { named: true }), ...(tier && { tier }), ...extra }, now, TTL_MAX + SKEW);
+  }
+
+  /** A public code of mine (makeInvite version 2): kept until its exp or Revoke. → its nonce. */
+  addPublic(code, { name, cap, open, words }, now) {
+    checkTime(now);
+    if (name !== null && typeof name !== 'string') fail('name', 'a string, or null');
+    this.load(); this.#purge(now);
+    (this.s.publics ??= {})[code.nonce] = { secret: hex(code.secret), exp: code.exp, name, relay: code.relay, short: null, cap, open: open === true, paused: false, words, day: 0, n: 0, chats: 0, requests: {}, seen: {} };
+    this.save();
+    return code.nonce;
+  }
+  /** The public code with this nonce, its PUB code, its id (nonce) or the hash its PUB code is parked under, or null. → [nonce, entry]. */
+  findPublic(key, hashOf = () => null) {
+    for (const [nonce, p] of Object.entries(this.load().s.publics ?? {})) {
+      if (nonce === key || (p.short !== null && (p.short === key || hashOf(p.short) === key))) return [nonce, p];
+    }
+    return null;
+  }
+  /** The public code a request waits under → [nonce, entry, request] or null. */
+  findRequest(id) {
+    for (const [nonce, p] of Object.entries(this.load().s.publics ?? {})) if (typeof id === 'string' && Object.hasOwn(p.requests, id)) return [nonce, p, p.requests[id]];
+    return null;
+  }
+  /** The owner's Revoke: the code goes here (the relay's tombstone is the carrier's). */
+  dropPublic(nonce) {
+    if (!Object.hasOwn(this.load().s.publics ?? {}, nonce)) fail('challenge_unknown', 'no public code of this owner with this id');
+    delete this.s.publics[nonce];
+    this.save();
   }
 
   /** Single use: the entry is deleted, and the file saved, before any check runs on the message naming it. */

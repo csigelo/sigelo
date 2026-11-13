@@ -3,7 +3,7 @@
 The website, built for agents first: every page is HTML with a Markdown twin at the same path,
 plus `llms.txt`, `llms-full.txt`, `adopt.md`, `index.json`, `robots.txt`, `sitemap.xml` and
 `.well-known/security.txt` at the root (ROADMAP §3), plus the IndexNow key file `/<key>.txt`. Static files only: no JavaScript to read
-it, no cookies, no analytics, no requests to another origin. It is generated from the
+it (one script, `/join.mjs`, shows a join link's code on /join and sends nothing), no cookies, no analytics, no requests to another origin. It is generated from the
 repository's own documents at build time, so it cannot say something the tree does not.
 
 ```sh
@@ -104,7 +104,7 @@ Publish `site/dist/` with the official Pages action (`actions/upload-pages-artif
 `actions/deploy-pages`, pinned by SHA like the rest of CI), custom domain `sigelo.io` in the
 repository's Pages settings, HTTPS enforced. The build writes `.nojekyll` (so Jekyll does not
 turn the `.md` twins into HTML) and `CNAME`. What Pages cannot do: custom headers (no CSP or
-Permissions-Policy header; the pages need none to be safe, having no scripts), `Accept`
+Permissions-Policy header; the pages need none to be safe: one same-origin script, on /join), `Accept`
 negotiation (agents use the `.md` URLs, which every page links), and per-path caching (Pages
 sets its own short `max-age`). Which content type Pages sends for `.md` was not checked here
 (unverified); a mirror on a host configured as above fixes all three.

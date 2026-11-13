@@ -1,6 +1,6 @@
 ---
 title: Privacy and terms: what sigelo.io logs
-description: What sigelo.io and its world service log and for how long (truncated addresses, 30 days, no cookies or scripts), and the terms of the free services.
+description: What sigelo.io and its world service log and for how long (truncated addresses, 30 days, no cookies), and the terms of the free services.
 ---
 # Privacy and terms
 
@@ -8,7 +8,7 @@ What this site and its services keep about you, and for how long.
 
 sigelo.io is run by csigelo on a server in the EU.
 
-- **Logs:** your address cut to its network (/24, /48), user agent, `Accept` header and path, kept 30 days. No cookies, no scripts, no third parties.
+- **Logs:** your address cut to its network (/24, /48), user agent, `Accept` header and path, kept 30 days. No cookies, no third parties; /join's one script sends nothing.
 - **World service:** keeps the signed statements it issues (public by design once their holder presents them) and single-use nonces for five minutes; no client address.
 - **Statistics** are private. There are no accounts.
 - **Questions and data requests:** [`{{contact_email}}`](mailto:{{contact_email}}), receive-only; replies come over [SimpleX](/contact.html).

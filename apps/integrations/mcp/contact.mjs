@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // The contact verbs as MCP tools (design/relay-plan.md §2): sigelo_invite, sigelo_accept,
 // sigelo_contacts, sigelo_set_tier, sigelo_presence, sigelo_send, sigelo_send_file, sigelo_inbox, sigelo_forget_contact, sigelo_history,
-// sigelo_links, sigelo_group, sigelo_transfer; the agent task loop: sigelo_wait_for_message (a long poll),
+// sigelo_links, sigelo_group, sigelo_transfer, sigelo_public (public codes, apps/contact/public.mjs); the agent task loop: sigelo_wait_for_message (a long poll),
 // sigelo_reply (by a message's id, with its delivery status), sigelo_enrol and sigelo_enrol_finish (the
 // machine's side of ENROL.md, run as the CLI in a child). Transfers (apps/contact/transfer-node.mjs): a file offered comes to sigelo_inbox as an event; the bytes go direct or over Tor while this server holds the session. Groups (apps/contact/group.mjs) are checked by code in sigelo_inbox and shown labelled. Links (apps/contact/link.mjs) and device messages (sigelo-device/1) are handled by code in sigelo_inbox, never shown. server.mjs loads this module
 // and gets null unless sigelo-contact and its dependencies are installed; the Claude plugin's build
@@ -62,7 +62,8 @@ const TOOLS = [
   ['sigelo_accept', `Accept an invite code from another agent's operator: sends your answer (whoever holds the code learns your DID); pairs once the inviter's reply verifies against the code. Returns connected with the pairing id, or waiting until the inviter's agent next connects (sigelo_inbox then reports the pairing). ${CONFIRM} ${POW} ${RELAY_DATA}`,
     obj({ code: str('the short code (K7F3-Q9ZP; case, I/L/O and dashes do not matter) or the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX),
       tier: { type: 'string', enum: ['friend', 'quiet'], description: 'how its messages reach your operator: friend (default) or quiet; own is detected' },
-      relay: str('the relay the inviter named, when a short code was made on a relay other than yours (SIGELO_RELAY)') }, ['code'])],
+      relay: str('the relay the inviter named, when a short code was made on a relay other than yours (SIGELO_RELAY)'),
+      words: str('a public code (PUB-…): the four words printed beside it; another inviter\'s are refused, nothing paired') }, ['code'])],
   ['sigelo_contacts', `Your contacts (name, original and current DID, revoked, relay, messages queued, pairing id, four words, re_pair, ours: yours by key, tier, link: why you have it; presence, online, last_seen: sigelo_presence), pending invites and answers, failed pairings (code_expired: ask for a new code). re_pair not null = after a recovery (own_recovery: yours; contact_recovery: theirs) the pairing key may be a thief's: nothing goes to it until you pair again (sigelo_invite). tier: own, friend or quiet (sigelo_set_tier). ${CONFIRM}`, obj()],
   ['sigelo_set_tier', `Set a contact's tier, by name or DID, when your operator asks. ${TIER}`,
     obj({ contact: str('contact name or DID'), tier: { type: 'string', enum: TIERS, description: 'own, friend or quiet' } }, ['contact', 'tier'])],
@@ -94,6 +95,10 @@ const TOOLS = [
     obj({ code: str('the enrolment code (K7F3-Q9ZP) or sgl1… code from your operator'), wait: int(`seconds to wait for the operator's side, default 30, at most ${WAIT_MAX}`, WAIT_MAX) }, ['code'])],
   ['sigelo_enrol_finish', `Finish a pending enrolment of this machine (sigelo_enrol said pending): as sigelo-agent enrol --finish [--wait], on this identity. status done, pending or nothing (nothing pending here). notes: what it said.`,
     obj({ wait: int(`seconds to wait, default 30, at most ${WAIT_MAX}`, WAIT_MAX) })],
+  ['sigelo_public', `Public codes (Pro), only when your operator asks: one code many use, each a pairing request. make: a PUB code, the four words to publish beside it, a link. list: codes and requests waiting (inbox event public_request). approve, refuse {id}: your operator decides. pause, resume, cap, revoke (ends it for all; pairings stay). Joiners stay unchecked. ${POW} ${RELAY_DATA}`,
+    obj({ action: { type: 'string', enum: ['make', 'list', 'approve', 'refuse', 'pause', 'resume', 'cap', 'revoke'], description: 'what to do' }, months: { type: 'integer', enum: [1, 6, 12], description: 'make: how long it lasts (default 6)' },
+      cap: int('make, cap: new chats a day, 1 to 500 (default 50)', 500), open: { type: 'boolean', description: 'make: true lets anyone in at once (no approval)' }, name: str('make: what its contacts are named after'),
+      id: str('approve, refuse: the request id'), code: str('pause, resume, cap, revoke: the code\'s id or PUB code (default: your only one)') }, ['action'])],
   ['sigelo_history', `What sigelo_inbox already gave out, again, from the local log (newest 500 items, no relay): use it when an earlier result was cut or lost. since: unix seconds; 0 = all kept. ${DATA}`,
     obj({ since: int('unix seconds: only items received at or after this time; default 0', 2 ** 40) })],
 ];
@@ -318,11 +323,30 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
     }),
     // A code never contains whitespace; one pasted from a wrapped mail line may, and a short one
     // typed as heard ("k7f3 q9zp"). carrier.accept tells the two apart by shape.
-    sigelo_accept: serial(async ({ code, name, wait, tier, relay }, path) => {
+    sigelo_public: serial(async ({ action, months, cap, open, name, id, code }, path) => {
+      const c = () => carrier(path);
+      if (action === 'list') return { publics: c().publics() };
+      if (action === 'refuse') return c().refusePublic(text(id, 'id'));
+      holder(path, 'sigelo_public');
+      await seat(path, 'sigelo_public');
+      if (action === 'make') {
+        const m = months ?? 6;
+        if (![1, 6, 12].includes(m)) throw usage('months: 1, 6 or 12');
+        if (open !== undefined && typeof open !== 'boolean') throw usage('open: true or false');
+        return c().invitePublic({ ...(name !== undefined && { name: text(name, 'name') }), ttl: m === 12 ? 366 * 86400 : m * 30 * 86400, cap: cap ?? 50, open: open === true });
+      }
+      if (action === 'approve') return c().approvePublic(text(id, 'id'));
+      const key = code !== undefined ? text(code, 'code') : (() => { const ps = c().publics(); if (ps.length !== 1) throw usage(ps.length ? 'code: you have more than one public code' : 'no public code: action make'); return ps[0].id; })();
+      if (action === 'pause' || action === 'resume') return c().setPublic(key, { paused: action === 'pause' });
+      if (action === 'cap') return c().setPublic(key, { cap });
+      if (action === 'revoke') return c().cancelInvite(key);
+      throw usage('action: make, list, approve, refuse, pause, resume, cap or revoke');
+    }),
+    sigelo_accept: serial(async ({ code, name, wait, tier, relay, words }, path) => {
       if (tier !== undefined && tier !== 'friend' && tier !== 'quiet') throw usage('tier: friend or quiet (own is detected; sigelo_set_tier after)');
       holder(path, 'sigelo_accept');
       await seat(path, 'sigelo_accept');
-      const c = carrier(path), r = await c.accept(text(code, 'code').replace(/\s+/g, ''), { name, wait: seconds(wait, 'wait', 10), ...(tier && { tier }), ...(relay !== undefined && { relay: text(relay, 'relay') }) });
+      const c = carrier(path), r = await c.accept(text(code, 'code').replace(/\s+/g, ''), { name, wait: seconds(wait, 'wait', 10), ...(tier && { tier }), ...(relay !== undefined && { relay: text(relay, 'relay') }), ...(words !== undefined && { words: text(words, 'words') }) });
       return r.contact ? { ...r, contact: { ...r.contact, pair: pairOf(path, r.contact.did), tier: c.contacts().contacts.find((x) => x.did === r.contact.did)?.tier } } : r;
     }),
     sigelo_contacts: (_, path) => { const r = carrier(path).contacts(); return { ...r, contacts: r.contacts.map((c) => ({ ...c, pair: pairOf(path, c.did) })) }; },

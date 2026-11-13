@@ -82,8 +82,10 @@
 // (SPEC §9): the chain, the DID in it, the signature. In a chat: a message labelled STATEMENT_LABEL whose text is the
 // portable form (an earlier version shows the text as it is). No protocol object: a chat-layer body.
 //
-// The public invite (UI-API.md "Public invite"): a long code (POST /api/invite long, ttl up to 7 days), once, kept in
-// data.public so it survives a restart; Stop is /api/invite/cancel.
+// The public invite (UI-API.md "Public invite"): a public code (sigelo-public/0, carrier.mjs invitePublic), PUB-…
+// with the four words and a link, for 1, 6 or 12 months, Pro only, kept in the contact store; each use a request to
+// approve (/api/public/approve, /refuse) unless open; Pause and the cap: /api/public/set; Stop for good (Revoke for
+// all): /api/invite/cancel {id}. An earlier version's 7-day long code (data.public) runs out as an ordinary invite.
 //
 // Codes that renew themselves (UI-API.md "Renewing codes"): POST /api/invite renew, a short person code that the
 // carrier replaces with a fresh one once it is used (store.mjs renew, in the contact store). Its id here is "r" + the
@@ -219,8 +221,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   const gone = (fn) => () => (live.seatGone !== null ? refuse(409, 'seat_elsewhere', `the seat went to ${live.seatGone}: this page no longer logs in as you`) : fn());
   const serial = (f0) => { const fn = gone(f0); const p = chain.then(fn, fn); chain = p.catch(() => {}); return p; };
   const invites = new Map();
-  // The public invite (the header's): kept in data.public, so Stop still works after a restart.
-  if (data.public?.id) invites.set(data.public.id, { ...data.public });
+  // An earlier version's public invite (the header's): an ordinary long invite now, until it runs out.
+  if (data.public?.id) { invites.set(data.public.id, { ...data.public }); delete data.public; }
   let devices = null;
   // Enrolments this page issued (agents, below): id (the code's nonce) → { id, worker, name, short, code, exp, relay, tier,
   // state: code | words | sending | enrolled | expired | failed, words, temp, did, original, check?, detail? }.
@@ -253,13 +255,16 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
           // A renewing code stays current (its next code shows in its place): never "paired" itself.
           const inv = e['renew'] ? invites.get(`r${String(e['renew'])}`) : [...invites.values()].find((x) => x.name === e['name'] && !x.paired && !x.renew);
           if (inv && d && !inv.renew) inv.paired = d;
-          if (d && data.public?.name === e['name'] && !data.public.paired) { data.public.paired = d; saveData(); }
           record({ kind: 'event', type: 'paired', did: d, name: e['name'] });
           if (d) newContact(d, inv);
           break;
         }
         // A refusal of one of my messages (it has an id) is its status, from onEvent.
         case 'refused': if (e['id'] === undefined) record({ kind: 'event', type: 'refused', did: d, name: e['name'], code: e['code'], detail: e['detail'] }); break;
+        // A pairing request to a public code of mine (carrier.mjs #onPublic): its words, to approve or refuse.
+        case 'public_request':
+          record({ kind: 'event', type: 'public_request', did: d, name: e['name'], detail: `a new chat asks to start by your public code (${String(e['words'])})` });
+          break;
         case 'pairing_failed': case 're_pair': case 'rotated': case 'dropped':
           if (e.type === 'dropped') named.add(String(e['check']));
           record({ kind: 'event', type: e.type, did: d, name: e['name'], code: e['code'] ?? e['check'], detail: e['detail'] });
@@ -384,13 +389,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     }
   }
   const notifyOf = (chat) => data.notify[chat] !== false;
-  // The public invite as the state shows it: its code until it runs out; waiting (nobody used it yet) or the contact it paired.
-  function publicInvite(c) {
-    const p = data.public;
-    if (!p) return null;
-    if (p.exp <= nowS()) { delete data.public; invites.delete(p.id); saveData(); return null; }
-    return { id: p.id, name: p.name, code: p.code, exp: p.exp, relay: p.relay, waiting: c.invites.some((x) => x.name === p.name), paired: p.paired ?? null };
-  }
+  // The public invite as the state shows it (carrier.mjs publicView): the first public code of mine, or null.
+  const publicInvite = (c) => c.publics?.[0] ?? null;
   const walletSet = () => ({ wallet: data.settings.wallet === true, prices: data.settings.prices === true, currency: CURRENCIES.includes(data.settings.currency) ? data.settings.currency : null });
   const settingsAll = () => ({ ...settings(), seen_receipts: receiptsOn(), notify: data.settings.notify !== false,
     new_tier: TIER_NEW.has(data.settings.new_tier) ? data.settings.new_tier : 'friend', new_presence: data.settings.new_presence === true, ...walletSet() });
@@ -581,6 +581,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       return {
         did: x.did, name: x.name, current_did: x.current_did, relay: x.relay, re_pair: x.re_pair, words: x.fingerprint, pair,
         words_checked: pair !== null && data.checked[x.did] === pair, tags: data.tags[x.did] ?? [],
+        // Came by a public code (carrier.mjs via): mine ({public: id}, nobody compared) or theirs ({public: true, words}).
+        via: x.via ?? null,
         local: agent?.name ?? null, mine, unread: msgs.filter((r) => r.kind === 'in' && r.n > read).length,
         last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: statusOf(last, x.seen_upto) } : null,
         notify: notifyOf(x.did), seen_upto: x.seen_upto ?? null,
@@ -625,7 +627,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       groups: { mine: mineGroup, contacts: rest },
       // Chat groups (GROUPS.md): the tab's badge and its notices; the list is GET /api/groups.
       chats: chatsState(),
-      pending: { invites: pendingInvites, paired, answers: c.answers, failed, public: publicInvite(c) },
+      pending: { invites: pendingInvites, paired, answers: c.answers, failed, public: publicInvite(c), publics: c.publics ?? [] },
       introductions: introductions(c.contacts),
       transfers: transferCounts(),
       events: recs.filter((r) => r.kind === 'event' && r.n > since).slice(-50),
@@ -797,6 +799,19 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     const w = checked(v);
     return w.valid ? { valid: true, by: w.by, words: w.words, text: w.text, iat: w.iat } : { valid: false, check: w.check };
   }
+  // POST /api/invite {public: true, months?, cap?, open?, name?}: a public code (the header's), Pro only (public_pro → 402).
+  async function publicRoute(b) {
+    const months = b['months'] ?? 6, cap = b['cap'] ?? 50;
+    if (![1, 6, 12].includes(months)) refuse(400, 'body', 'months: 1, 6 or 12');
+    if (!Number.isSafeInteger(cap) || cap < 1 || cap > 500) refuse(400, 'body', 'cap: new chats a day, 1 to 500');
+    if (b['open'] !== undefined && typeof b['open'] !== 'boolean') refuse(400, 'body', 'open: true (let anyone in) or false (approve each, the default)');
+    if (b['long'] !== undefined || b['group'] !== undefined || b['renew'] !== undefined || b['ttl'] !== undefined) refuse(400, 'body', 'public: with months, cap, open and name only');
+    const name = b['name'] === undefined || b['name'] === '' ? undefined : cleanName(b['name'], 'name'), at = newCodes();
+    const r = await carrier.invitePublic({ ...(name !== undefined && { name }), ttl: months === 12 ? 366 * DAY : months * 30 * DAY, cap, open: b['open'] === true, ...(at !== carrier.relay && { relay: at }), started: startedBy(b) })
+      .catch((e) => { if (e.check === 'public_pro') e.status = 402; return Promise.reject(e); });
+    changed();
+    return { ...r, public: true };
+  }
   const routes = {
     'GET /api/state': async (_, q) => { if (draining) await draining; return state(Number(q.get('since') ?? 0) || 0); },
     'GET /api/me': () => {
@@ -842,12 +857,13 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       return { created: bundle.genesis.created ?? null, attestations: list.sort((a, c) => a.iat - c.iat), rejected: r.rejected?.attestations ?? 0 };
     },
     'POST /api/invite': (b) => serial(async () => {
-      const pub = b['public'] === true, ttl = b['ttl'];
+      if (b['public'] === true) return publicRoute(b);
+      const pub = false, ttl = b['ttl'];
       const name = b['name'] === undefined || b['name'] === '' ? `${pub ? 'public' : 'contact'}-${hexOf(2)}` : cleanName(b['name'], 'name');
       const at = newCodes(), group = b['group'];
       // A long code's life (the public invite): an hour to 7 days; the short code lives 10 minutes whatever.
       if (ttl !== undefined && (b['long'] !== true || !Number.isSafeInteger(ttl) || ttl < 3600 || ttl > 7 * DAY)) refuse(400, 'body', 'ttl: with long, 3600 to 604800 seconds (an hour to 7 days)');
-      if (b['public'] !== undefined && (typeof b['public'] !== 'boolean' || (pub && (b['long'] !== true || group !== undefined)))) refuse(400, 'body', 'public: true, with long (and no group)');
+      if (b['public'] !== undefined && b['public'] !== false) refuse(400, 'body', 'public: true or false');
       // A person code that renews itself: short, for one person at a time (no long, public or group code).
       const renew = b['renew'] === true;
       if (b['renew'] !== undefined && (typeof b['renew'] !== 'boolean' || (renew && (b['long'] === true || pub || group !== undefined)))) refuse(400, 'body', 'renew: true, a short person code (not long, public or a group code)');
@@ -859,12 +875,6 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       }
       const r = await carrier.invite({ name, short: b['long'] !== true, ...(ttl !== undefined && { ttl }), ...(at !== carrier.relay && { relay: at }), ...(renew && { renew: true }), started: startedBy(b) });
       const inv = { id: r.renew ? `r${r.renew}` : hexOf(6), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp }), ...(group !== undefined && { group }), ...(pub && { public: true }), ...(r.renew && { renew: true }) };
-      // One public invite at a time: a new one stops the one before.
-      if (pub) {
-        const old = data.public;
-        if (old) { invites.delete(old.id); try { await carrier.cancelInvite(old.code); } catch {} }
-        data.public = { id: inv.id, name, code: r.code, exp: r.exp, relay: r.relay }; saveData();
-      }
       invites.set(inv.id, inv);
       changed();
       return { ...inv, relay: r.relay };
@@ -887,14 +897,40 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         changed();
         return { cancelled: true, ...(r.unparked !== undefined && { unparked: r.unparked }), ...(r.detail && { detail: r.detail }) };
       }
+      // A public code of mine (its id): Revoke for all.
+      if (carrier.publics().some((x) => x.id === id)) {
+        const r = await carrier.cancelInvite(id);
+        changed();
+        return { cancelled: true, public: true, unparked: r.unparked, ...(r.detail && { detail: r.detail }) };
+      }
       const inv = invites.get(id) ?? refuse(404, 'invite', 'no such invite');
-      // A public invite used already is no invite at the carrier any more: stopped all the same.
       let r = {};
-      try { r = await carrier.cancelInvite(inv.code); } catch (e) { if (data.public?.id !== inv.id) throw e; }
+      try { r = await carrier.cancelInvite(inv.code); } catch (e) { if (!inv.public) throw e; }
       invites.delete(inv.id);
-      if (data.public?.id === inv.id) { delete data.public; saveData(); }
       changed();
       return { cancelled: true, ...(r.unparked !== undefined && { unparked: r.unparked }), ...(r.detail && { detail: r.detail }) };
+    }),
+    // A public code's requests and settings (UI-API.md "Public invite").
+    'POST /api/public/approve': (b) => serial(async () => {
+      if (typeof b['id'] !== 'string') refuse(400, 'body', 'id: a request\'s id (pending.public.requests[].id)');
+      const r = await carrier.approvePublic(b['id'], { started: startedBy(b) }).catch((e) => (e.check === 'challenge_unknown' ? refuse(404, 'request', e.message) : Promise.reject(e)));
+      changed();
+      return r;
+    }),
+    'POST /api/public/refuse': (b) => serial(async () => {
+      if (typeof b['id'] !== 'string') refuse(400, 'body', 'id: a request\'s id');
+      try { const r = carrier.refusePublic(b['id']); changed(); return r; } catch (e) { if (e.check === 'challenge_unknown') refuse(404, 'request', e.message); throw e; }
+    }),
+    'POST /api/public/set': (b) => serial(async () => {
+      const id = b['id'] ?? carrier.publics()[0]?.id;
+      if (typeof id !== 'string') refuse(404, 'public', 'no public code here');
+      if (b['paused'] !== undefined && typeof b['paused'] !== 'boolean') refuse(400, 'body', 'paused: true or false');
+      if (b['cap'] !== undefined && (!Number.isSafeInteger(b['cap']) || b['cap'] < 1 || b['cap'] > 500)) refuse(400, 'body', 'cap: new chats a day, 1 to 500');
+      if (b['paused'] === undefined && b['cap'] === undefined) refuse(400, 'body', 'paused and/or cap');
+      const r = await carrier.setPublic(id, { ...(b['paused'] !== undefined && { paused: b['paused'] }), ...(b['cap'] !== undefined && { cap: b['cap'] }) }, { started: startedBy(b) })
+        .catch((e) => (e.check === 'challenge_unknown' ? refuse(404, 'public', e.message) : Promise.reject(e)));
+      changed();
+      return r;
     }),
     'POST /api/accept': (b) => serial(async () => {
       if (typeof b['code'] !== 'string' || b['code'].trim() === '') refuse(400, 'body', 'code: the short code (K7F3-Q9ZP) or the long one (sgl1…)');
@@ -903,7 +939,10 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       // friend or quiet, the human's choice; own is detected, never asked (store.mjs tiers).
       const tier = b['tier'];
       if (tier !== undefined && tier !== 'friend' && tier !== 'quiet') refuse(400, 'body', 'tier: friend or quiet');
-      const r = await carrier.accept(code, { ...(name !== undefined && { name }), wait: 10, ...(tier !== undefined && { tier }), started: startedBy(b) });
+      // words: a public code's four words, as its page printed them (checked on the reply).
+      if (b['words'] !== undefined && (typeof b['words'] !== 'string' || b['words'].trim() === '')) refuse(400, 'body', 'words: the four words beside a public code');
+      const words = typeof b['words'] === 'string' ? b['words'] : undefined;
+      const r = await carrier.accept(code, { ...(name !== undefined && { name }), wait: 10, ...(tier !== undefined && { tier }), ...(words !== undefined && { words }), started: startedBy(b) });
       const now = r.contact ? carrier.contacts().contacts.find((x) => x.did === r.contact.did) : undefined;
       return r.contact ? { status: r.status, contact: { ...r.contact, pair: now?.pair ?? null, tier: now?.tier ?? null } }
         : { ...r, exp: carrier.contacts().answers.find((x) => x.did === r.did)?.exp ?? null };

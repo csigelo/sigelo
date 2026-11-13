@@ -559,15 +559,23 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       // Proof of age: what the bundle shows (its genesis date; no attestation on a human root).
       const age = await A.call('GET', '/api/attestations');
       ok('ui proof of age: GET /api/attestations → the genesis date, the attestations verified (none here)', age['http'] === 200 && typeof age['created'] === 'string' && Array.isArray(age['attestations']) && age['rejected'] === 0, JSON.stringify(age));
-      // The public invite: a long code, 7 days, kept across restarts in .ui.json; Stop for good.
-      const pub = await A.call('POST', '/api/invite', { long: true, public: true, ttl: 7 * 86400 }), pubSt = (await A.call('GET', '/api/state'))['pending'].public;
-      const badTtl = await A.call('POST', '/api/invite', { ttl: 600 }), badPub = await A.call('POST', '/api/invite', { public: true });
-      ok('ui public invite: a long code for 7 days; the state\'s pending.public (waiting); ttl without long, or too short, and public without long → 400', pub['http'] === 200 && pub['public'] === true && String(pub['code']).startsWith('sgl1')
-        && Math.abs(pub['exp'] - Date.now() / 1000 - 7 * 86400) < 60 && pubSt?.id === pub['id'] && pubSt.waiting === true && pubSt.paired === null && badTtl['http'] === 400 && badPub['http'] === 400
-        && JSON.parse(readFileSync(join(A.dir, 'me.local.ui.json'), 'utf8')).public?.code === pub['code'], JSON.stringify([pub, pubSt]).slice(0, 400));
+      // The public invite (sigelo-public/0): a PUB code with its words and link; bob's use of it a request; approve; Pause; Stop for good.
+      const pub = await A.call('POST', '/api/invite', { public: true, months: 6, cap: 20 }), pubSt = (await A.call('GET', '/api/state'))['pending'].public;
+      const badMonths = await A.call('POST', '/api/invite', { public: true, months: 3 }), badCap = await A.call('POST', '/api/invite', { public: true, cap: 501 }), badLong = await A.call('POST', '/api/invite', { public: true, long: true });
+      ok('ui public invite: POST /api/invite {public, months, cap} → PUB code, sgl2, four words, link; pending.public; months 3, cap 501, long → 400', pub['http'] === 200 && pub['public'] === true && /^PUB-/.test(String(pub['short']))
+        && String(pub['code']).startsWith('sgl2') && typeof pub['words'] === 'string' && String(pub['link']).startsWith('https://sigelo.io/join#') && pubSt?.id === pub['id'] && pubSt.cap === 20 && pubSt.requests.length === 0
+        && badMonths['http'] === 400 && badCap['http'] === 400 && badLong['http'] === 400, JSON.stringify([pub, pubSt]).slice(0, 400));
+      const D = await open('dave');
+      const asked = await D.call('POST', '/api/accept', { code: pub['short'], words: pub['words'] });
+      const req = await until(async () => ((await A.call('GET', '/api/state'))['pending'].public?.requests ?? [])[0]);
+      ok('ui public invite: dave\'s accept waits for approval; alice\'s state lists the request', asked['status'] === 'waiting_approval' && typeof req?.id === 'string', JSON.stringify([asked, req]).slice(0, 300));
+      const ap = await A.call('POST', '/api/public/approve', { id: req!.id }), again = await A.call('POST', '/api/public/approve', { id: req!.id });
+      ok('ui public invite: POST /api/public/approve → approved; the same id again → 404', ap['approved'] === true && again['http'] === 404, JSON.stringify(ap));
+      const ps = await A.call('POST', '/api/public/set', { paused: true }), badPubSet = await A.call('POST', '/api/public/set', {});
+      ok('ui public invite: POST /api/public/set {paused} → paused; nothing to set → 400', ps['paused'] === true && (await A.call('GET', '/api/state'))['pending'].public?.paused === true && badPubSet['http'] === 400, JSON.stringify(ps));
       const stop = await A.call('POST', '/api/invite/cancel', { id: pub['id'] });
-      ok('ui public invite: Stop for good → cancelled; gone from the state and .ui.json', stop['cancelled'] === true && (await A.call('GET', '/api/state'))['pending'].public === null
-        && JSON.parse(readFileSync(join(A.dir, 'me.local.ui.json'), 'utf8')).public === undefined);
+      ok('ui public invite: Stop for good → cancelled at the relay; gone from the state', stop['cancelled'] === true && stop['public'] === true && (await A.call('GET', '/api/state'))['pending'].public === null, JSON.stringify(stop));
+      await D.u.close();
       const nf = await A.call('POST', '/api/notify', { chat: bob!.did, on: false }), nfRow = ((await A.call('GET', '/api/state'))['groups'].contacts as { did: string; notify: boolean }[]).find((c) => c.did === bob!.did);
       ok('ui notify: POST /api/notify {chat, on: false} → the contact\'s notify false; no such chat → 404', nf['notify'] === false && nfRow?.notify === false
         && (await A.call('POST', '/api/notify', { chat: 'did:sigelo:zNope', on: false }))['http'] === 404, JSON.stringify(nf));

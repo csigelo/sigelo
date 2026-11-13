@@ -295,6 +295,12 @@ else {
     const acc2 = await call('POST', '/api/accept', { code: inv2.short });
     const inv3 = await call('POST', '/api/invite', { name: 'later', long: true }), cancel = await call('POST', '/api/invite/cancel', { id: inv3.body.id });
     ok('remote e2e: accept (sealed) a code of the other page; invite and cancel', acc2.status === 200 && acc2.body.status === 'connected' && cancel.body.cancelled === true, JSON.stringify(acc2).slice(0, 300));
+    // A public code over the remote control: made, paused, revoked; approve and refuse of no request → 404 request.
+    const pub = await call('POST', '/api/invite', { public: true, months: 1 }), pset = await call('POST', '/api/public/set', { id: pub.body.id, paused: true });
+    const pap = await call('POST', '/api/public/approve', { id: 'zNone' }), prf = await call('POST', '/api/public/refuse', { id: 'zNone' }), pstop = await call('POST', '/api/invite/cancel', { id: pub.body.id });
+    ok('remote e2e: a public code made and paused sealed → 200; approve, refuse of no request → 404 request; revoked', pub.status === 200 && String(pub.body.short).startsWith('PUB-') && pset.status === 200 && pset.body.paused === true
+      && [pap, prf].every((x) => x.status === 404 && x.body.error.check === 'request') && pstop.body.cancelled === true, JSON.stringify([pub, pset, pap, prf]).slice(0, 600));
+    for (const x of ['POST /api/public/approve', 'POST /api/public/refuse']) done_.set(x, 200);
     spawnSync('node', [CLI, 'init', '--no-recovery'], { env: { ...env, SIGELO_IDENTITY: join(Ad, 'agents', 'sigelo.bot.local.json') } });
     const ag = await call('GET', '/api/agents'), en = await call('POST', '/api/agents/enrol', { agent: 'bot' }), pr = await call('POST', '/api/agents/pair', { agent: 'bot' });
     ok('remote e2e: agents, enrol, pair (scope all) → 200', ag.status === 200 && en.status === 200 && en.body.worker === 0 && pr.status === 200 && pr.body.status === 'connected', JSON.stringify([en, pr]).slice(0, 300));
