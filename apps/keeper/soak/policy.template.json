@@ -23,7 +23,7 @@
       "per_period_max": "20000000000",
       "period_seconds": 86400,
       "rate_per_minute": 2,
-      "approval_above": "400000000",
+      "approval_above": "200000000",
       "max_delegates": 2,
       "allow": [
         {

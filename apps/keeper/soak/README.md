@@ -82,11 +82,11 @@ out of scope.
 
 One tick of `agent.mjs`, as the root agent `soak-root` (account 0):
 
-- every tick: `balance`; `pay bob 0.0002 "soak <n>"`; the identical command again → `ALREADY PAID`
-- every 6 h: `pay carol 0.00042 "rent <k>"` → `WAITING FOR APPROVAL` → `approve-request`, sign
+- every tick: `balance`; `pay bob 0.00008 "soak <n>"`; the identical command again → `ALREADY PAID`
+- every 6 h: `pay carol 0.00025 "rent <k>"` → `WAITING FOR APPROVAL` → `approve-request`, sign
   with the approver key, `POST /approve` → the same pay → `PAID` (or `TRY LATER`: re-run on the
   next ticks while the approval lives, 2 h; given up and counted after 3 h)
-- once a UTC day: `delegate d<YYYYMMDD> 0.00035`; on later ticks the delegate pays bob 0.0002
+- once a UTC day: `delegate d<YYYYMMDD> 0.00028`; on later ticks the delegate pays bob 0.00008
   (TRY LATER until its funding unlocks); then `revoke`, whose first run also checks the
   delegate's token is dead, re-run every tick until every sweep line says `empty`
 
@@ -130,6 +130,17 @@ needed more inputs (fee 0.0000574, measured) and was `REFUSED … per-payment li
 ticks straight, so rent 2 was abandoned. 0.00042 leaves 0.000022: a fee up to ~0.00008
 (4–5 inputs) still passes. A refusal here is the cap doing its job on the real outflow
 (amount + fee), not a keeper defect; the soak just has to ask for less.
+It happened again from 2026-11-07: the self-paying wallet had fragmented to 128 outputs of
+~0.0000386 each, carol needed 5–13 inputs (fee 0.000085–0.000196, measured) and every rent from
+55 to 73 was abandoned. Owner-decided 2026-11-13: ask for less, not raise the cap. Since then
+carol is **0.00025**, bob 0.00008, the delegate 0.00028, and `approval_above` **0.0002** so carol
+still asks for approval; the worst 13-input fee (0.0002) keeps carol at 0.00045, the funding at
+0.00048 and the delegate's bob at 0.00028, all within the caps. The fragmentation itself is
+normal Monero behaviour. Swept 2026-11-13 (Owner: "consolidate"): `sweep_all` to its own address with
+`subaddr_indices: [0]` (without it wallet-rpc sweeps ONE random non-empty subaddress, index 0 last: the
+first try moved 0.0004 from two others), 1 transaction, ~80 inputs, 0.00334 out, fee 0.0011; outputs
+under the per-input fee (~45 of them, 0.0004 in all) are skipped by the wallet as not worth spending
+and stay as dust.
 
 ## Files
 

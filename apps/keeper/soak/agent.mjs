@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // One tick of the scripted soak agent (ROADMAP T6). Run by sigelo-soak-agent.timer every 30 min.
 //
-// Every tick, as soak-root:  balance · pay bob 0.0002 "soak <n>" · the same again (ALREADY PAID)
-// Every 6 h:                 pay carol 0.00042 "rent <k>" → WAITING FOR APPROVAL → approve-request,
+// Every tick, as soak-root:  balance · pay bob 0.00008 "soak <n>" · the same again (ALREADY PAID)
+// Every 6 h:                 pay carol 0.00025 "rent <k>" → WAITING FOR APPROVAL → approve-request,
 //                            sign as the approver, POST /approve → the same pay → PAID (or TRY LATER,
 //                            then re-run on the next ticks while the approval lives)
-// Once a UTC day:            delegate d<YYYYMMDD> 0.00035 → (next ticks) the delegate pays bob 0.0002
+// Once a UTC day:            delegate d<YYYYMMDD> 0.00028 → (next ticks) the delegate pays bob 0.00008
 //                            → revoke, re-run every tick until every sweep line says "empty"
 //
 // Every command goes to soak.log (NDJSON: ts, tick, who, cmd, exit, got, expect, verdict, out);
@@ -46,7 +46,7 @@ const WALLET_RPC = process.env.SIGELO_SOAK_WALLET_RPC ?? WALLET.rpc ?? 'http://1
 const LOG = join(DATA, 'soak.log'), STATS = join(DATA, 'soak-stats.json'), STATE = join(DATA, 'state.json');
 const RATE_GAP_MS = Number(process.env.SOAK_RATE_GAP_MS ?? 62_000); // rate_per_minute 2: space root spends
 const CAROL_EVERY = 6 * 3600 - 600, CAROL_GIVE_UP = 3 * 3600;
-const BOB = '0.0002', CAROL = '0.00042', CAROL_ATOMIC = '420000000', FUND = '0.00035';
+const BOB = '0.00008', CAROL = '0.00025', CAROL_ATOMIC = '250000000', FUND = '0.00028';
 
 const now = () => Math.floor(Date.now() / 1000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

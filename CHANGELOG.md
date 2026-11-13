@@ -5,6 +5,7 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **keeper soak:** asks for less after the wallet fragmented (carol 0.00025, bob 0.00008, delegate 0.00028, `approval_above` 0.0002); the cap counting the fee is by design; outputs swept once.
 - **keeper:** a per_tx_max refusal where the amount fits and the fee pushes it over says so: the fee, its inputs, many small outputs; sweep, raise the limit, or pay less. `facts` gain `amount`, `fee`, `inputs`.
 - **app:** a camera beside Attach in every chat (contact, agent, group): a preview at once, full size follows; on the phone Files: picker, accept size, Open; Chat settings: their size; Settings: Keep location in photos.
 - **android:** big files through the bridge: the system's picker and camera (PhotoProvider, location removed), range reads, partials moved into Downloads (MediaStore; Android 9 asks storage), screen kept on.
