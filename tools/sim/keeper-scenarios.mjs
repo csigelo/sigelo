@@ -17,16 +17,18 @@
 //     the delegator above it keeps paying and gets its reservation back.
 // P — policy.json edited while the keeper runs: caps tightened, a root removed, an approver
 //     added, a root's token rotated with `sigelo-spend token new`, a root added, then a malformed
-//     edit. The documented contract (apps/keeper/README "What a running keeper re-reads"; "The nesting
-//     rule": "tightens a root in policy.json AND RESTARTS"; MONERO.md §6; cli.ts: SIGHUP, like
-//     SIGINT/SIGTERM, exits 0 and removes spend.lock) is that a running keeper re-reads the token
-//     of each root it already serves on every request, and everything else at start only.
-//     So: the rotated token is refused and the new one pays at once (a malformed file changes no
-//     token); nothing else changes until a restart; SIGHUP stops the keeper; a restart on a malformed
-//     file is refused with the field named (no fallback to the old policy); after a good restart
-//     the tightened root clamps its whole subtree, the removed root and its delegates answer 401
-//     (orphaned, with a warning), the new approver's approval pays a request made before the
-//     restart exactly once, and a root re-added on another account refuses the start.
+//     edit. The documented contract (apps/keeper/README "What a running keeper re-reads"; MONERO.md
+//     §6; cli.ts: SIGHUP, like SIGINT/SIGTERM, exits 0 and removes spend.lock) is that a running
+//     keeper re-reads policy.json on its next request when the file changed: for each root it
+//     already serves, the whole entry (token, caps, allowlist, approval_above, max_delegates), and
+//     the top-level approvers; a root added or removed waits for a restart. So: the rotated token
+//     is refused and the new one pays at once, the tightened root is clamped at once (and its
+//     subtree), the new approver's approval pays at once; the removed root still pays and the new
+//     root is 401 until a restart; a malformed file changes nothing; SIGHUP stops the keeper; a
+//     restart on a malformed file is refused with the field named (no fallback to the old policy);
+//     after a good restart the removed root and its delegates answer 401 (orphaned, with a warning),
+//     the pre-restart approval holds (the keeper DID is stable: the same approval again is "already
+//     approved", the pay is paid exactly once), and a root re-added on another account refuses the start.
 //
 // L — no licence.json: /delegate, /fund, /approve and a pay above approval_above refuse 403
 //     licence_required (apps/keeper/licence.ts) while a pay under the caps is paid; then a test vendor's
@@ -290,8 +292,8 @@ const tn = await new Promise((resolve) => execFile(process.execPath, [join(SPEND
 check('P2', 'sigelo-spend token new R3 succeeds on the edited file', !tn.err && /^[0-9a-f]{64}$/.test(tn.stdout), tn);
 const R3new = tn.stdout;
 const validEdited = readFileSync(policyPath, 'utf-8');
-// Before any restart: the running keeper still holds the policy it started with.
-step('P3', 'R1 pays 5 XMR after tightening, before a restart (old caps)', ['200:'], await pay(T('R1'), 5n * XMR, 'r1-edited-unrestarted'));
+// Before any restart: the running keeper re-read the file on its next request (roots it serves, approvers).
+step('P3', 'R1 pays 5 XMR after tightening, before a restart (caps re-read, no restart)', ['403:per_tx_max'], await pay(T('R1'), 5n * XMR, 'r1-edited-unrestarted'));
 step('P4', 'removed R2 pays before a restart', ['200:'], await pay(T('R2'), XMR, 'r2-removed-unrestarted'));
 const oldR3 = await pay(T('R3'), XMR, 'r3-old-token-unrestarted');
 // Root tokens are re-read on every request (apps/keeper/README "What a running keeper re-reads"): the
@@ -310,7 +312,7 @@ if (r4pre.status === 401 && !/restart/.test(tn.stderr)) {
     'a root added to policy.json under a running keeper answers 401 token until the keeper restarts',
     'add R4 to policy.json while `sigelo-spend serve` runs, `token new policy.json R4`, then pay with its token → 401 (tools/sim/keeper-scenarios.mjs step P7; P23 after a restart: 200)');
 }
-step('P8', 'A2 (added, not yet loaded) approves R5\'s request', ['403:approval'], await call('/approve', { method: 'POST', body: approval('A2') }), undefined, /is not in approvers/);
+step('P8', 'A2 (added, re-read) approves R5\'s request before any restart', ['200:'], await call('/approve', { method: 'POST', body: approval('A2') }));
 // A malformed edit under the running keeper: it keeps serving; SIGHUP stops it; the restart is refused.
 writePolicy(validEdited.replace('"net":', '"nett": "typo",\n  "net":'));
 step('P9', 'R1 pays 1 XMR while policy.json is malformed (still running)', ['200:'], await pay(T('R1'), XMR, 'r1-during-malformed'));
@@ -338,7 +340,7 @@ step('P20', 'orphaned e1 pays after the restart', ['401:token'], await pay(T('e1
 step('P21', 'R3\'s old token after the restart', ['401:token'], await pay(T('R3'), XMR, 'r3-old-restarted'));
 step('P22', 'R3\'s new token after the restart', ['200:'], await pay(R3new, XMR, 'r3-new-restarted'));
 step('P23', 'new root R4 after the restart', ['200:'], await pay(T('R4'), XMR / 2n, 'r4-restarted'));
-step('P24', 'A2 approves R5\'s pre-restart request (the keeper DID is stable)', ['200:'], await call('/approve', { method: 'POST', body: approval('A2') }));
+step('P24', 'A2\'s pre-restart approval posted again after the restart: already approved (the keeper DID is stable)', ['403:approval'], await call('/approve', { method: 'POST', body: approval('A2') }), undefined, /already approved/);
 step('P25', 'R5 repeats the pay: paid once', ['200:'], await pay(T('R5'), 2n * XMR, 'r5-approve'));
 const again = await pay(T('R5'), 2n * XMR, 'r5-approve');
 step('P26', 'R5 repeats it again: already paid, no second transaction', ['200:'], again);

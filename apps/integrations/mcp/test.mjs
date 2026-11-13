@@ -80,7 +80,7 @@ await new Promise((r) => keeper.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${keeper.address().port}`;
 
 const IDENTITY_TOOLS = ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'];
-const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_enrol', 'sigelo_enrol_finish', 'sigelo_forget_contact', 'sigelo_group', 'sigelo_history', 'sigelo_inbox', 'sigelo_invite', 'sigelo_links', 'sigelo_presence', 'sigelo_reply', 'sigelo_send', 'sigelo_send_file', 'sigelo_set_tier', 'sigelo_transfer', 'sigelo_wait_for_message'];
+const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_enrol', 'sigelo_enrol_finish', 'sigelo_forget_contact', 'sigelo_group', 'sigelo_history', 'sigelo_inbox', 'sigelo_invite', 'sigelo_links', 'sigelo_presence', 'sigelo_public', 'sigelo_reply', 'sigelo_send', 'sigelo_send_file', 'sigelo_set_tier', 'sigelo_transfer', 'sigelo_wait_for_message'];
 // Present here only if sigelo-contact resolves, as the server decides it (contact.mjs load).
 const sidecar = await import('../../agent/sigelo-agent-contact.ts');
 const HAS_CONTACT = await sidecar.contactLib().then(() => true, (e) => { if (sidecar.absent(e)) return false; throw e; });

@@ -1,4 +1,4 @@
-/* sigelo.io — one stylesheet, no web fonts, no scripts. Light by default, dark by preference. */
+/* sigelo.io — one stylesheet, no web fonts; one script, on /join only. Light by default, dark by preference. */
 :root { --bg: #fdfdfb; --fg: #1d1d1b; --muted: #5d5d58; --line: #d9d9d2; --code: #f1f1ec; --link: #0b5cad; --warn-bg: #fff6d6; --warn-line: #d8b545; --seal: #9b2226; }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #151514; --fg: #e6e6e1; --muted: #a3a39c; --line: #3a3a36; --code: #232321; --link: #7fb6f0; --warn-bg: #2d2711; --warn-line: #8a7426; --seal: #c8423f; }
@@ -32,3 +32,9 @@ th { background: var(--code); }
 .center { text-align: center; } .right { text-align: right; }
 hr { border: 0; border-top: 1px solid var(--line); margin: 2em 0; }
 footer { margin-top: 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+/* /join only: the card site/src/join.mjs draws from the link's fragment. */
+.join-card { margin: 1rem 0 1.5rem; padding: 1rem; border: 1px solid var(--line); border-radius: 6px; background: var(--code); }
+.join-lead { margin: 0 0 .25rem; color: var(--muted); font-size: .9rem; }
+.join-code { margin: 0 0 .75rem; font: 700 clamp(1.6rem, 8vw, 2.6rem)/1.15 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .04em; overflow-wrap: anywhere; user-select: all; }
+.join-words { margin: 0; display: flex; flex-wrap: wrap; gap: .4rem .9rem; font-size: clamp(1.2rem, 5vw, 1.6rem); font-weight: 700; }
+.join-copy { margin: 1rem 0 0; padding: .5rem 1rem; min-height: 44px; font: inherit; color: var(--bg); background: var(--fg); border: 0; border-radius: 4px; cursor: pointer; }

@@ -150,7 +150,11 @@ for (const f of htmlFiles) {
     `${f}: Open Graph (title, description, url = canonical, type, site_name, image og.png 1200 x 630) and twitter:card summary_large_image`);
   ok(tags.filter((t) => t.tag === 'h1').length === 1, `${f}: exactly one <h1>`);
   const ld = scripts.filter((s) => /type="application\/ld\+json"/.test(s.attrs));
-  ok(scripts.length === ld.length, `${f}: no executable <script> (only JSON-LD)`);
+  // /join alone runs a script: site/src/join.mjs, same origin, a module, nothing inline (checked below).
+  const JOIN_SCRIPT = ' type="module" src="/join.mjs"';
+  const exec = scripts.filter((s) => !ld.includes(s));
+  if (f === '/join.html') ok(exec.length === 1 && exec[0].attrs === JOIN_SCRIPT && exec[0].body === '', `${f}: one executable <script>, <script${JOIN_SCRIPT}>, empty (besides JSON-LD)`);
+  else ok(exec.length === 0, `${f}: no executable <script> (only JSON-LD)`);
   if (notFound) ok(ld.length === 0, `${f}: no JSON-LD`);
   else {
     let graph = null; try { graph = JSON.parse(ld[0]?.body ?? ''); } catch { /* reported below */ }
@@ -165,7 +169,8 @@ for (const f of htmlFiles) {
     if (art) ok(art.headline === title.replace(/ — sigelo$/, '') && !Number.isNaN(Date.parse(art.dateModified)), `${f}: TechArticle headline = the title as written (${art.headline}), dateModified`);
   }
   const external = tags.filter((t) => (t.tag === 'link' && t.attrs.rel !== 'canonical' && /^https?:/.test(t.attrs.href)) || (/^(img|script|iframe|source|video|audio)$/.test(t.tag) && t.attrs.src));
-  ok(external.length === 0, `${f}: loads nothing from another origin or by src=`);
+  const srcd = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/gi)].map((m) => m[1]);
+  ok(external.length === 0 && srcd.join() === (f === '/join.html' ? '/join.mjs' : ''), `${f}: loads nothing from another origin or by src=${f === '/join.html' ? ' but its own /join.mjs' : ''}`);
   ok(!/\sstyle=|<style\b|\son[a-z]+=/i.test(html), `${f}: no inline style or event handler (CSP default-src 'self')`);
 }
 ok(new Set(titles).size === titles.length && new Set(descs).size === descs.length, `every page has its own title and description (${titles.length} pages)`);
@@ -287,7 +292,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
 // The reader pays per token. Words = whitespace-separated tokens holding a letter or digit;
 // inside fenced code and on link-list lines they count half. llms.txt counts every word in full.
 {
-  const PAGES = ['404', 'accept', 'adopt', 'changelog', 'contact', 'enrol', 'faq', 'frameworks', 'index', 'keeper', 'pair', 'privacy', 'sandboxes', 'security', 'spec', 'verify'];
+  const PAGES = ['404', 'accept', 'adopt', 'changelog', 'contact', 'enrol', 'faq', 'frameworks', 'index', 'join', 'keeper', 'pair', 'privacy', 'sandboxes', 'security', 'spec', 'verify'];
   const got = htmlFiles.filter((f) => /^\/[\w-]+\.html$/.test(f)).map((f) => f.slice(1, -5)).sort();
   ok(got.join() === PAGES.join(), `pages: exactly ${PAGES.join(', ')} (${got.join(', ')})`);
   const words = (md, half = true) => {
@@ -300,7 +305,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     return w;
   };
   // 2026-10-25 (Owner): / may explain in place, +40 words (155 → 195).
-  const BUDGET = { '/index.md': 195, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150, '/faq.md': 420 };
+  const BUDGET = { '/index.md': 195, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150, '/join.md': 250, '/faq.md': 420 };
   for (const [f, max] of Object.entries(BUDGET)) {
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);
@@ -314,6 +319,53 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   // /privacy: its two halves have their own caps (privacy 90, terms 60 words).
   const [pv, tm] = readFileSync(join(DIST, 'privacy.md'), 'utf8').split(/^## Terms$/m);
   ok(tm !== undefined && words(pv.replace(/^# .*$/m, '')) <= 90 && words(tm) <= 60, `budget: /privacy.md privacy ${words(pv.replace(/^# .*$/m, ''))} ≤ 90, terms ${words(tm ?? '')} ≤ 60`);
+}
+
+// ---- /join: the page a public code's link opens (apps/contact/public.mjs LINK_BASE) -----------------
+// Its script reads the fragment, which never leaves the browser: parseJoin is pure and tested here
+// (no DOM in these tests); the file uses no network, storage or cookie API at all.
+{
+  const js = readFileSync(join(SITE, 'src', 'join.mjs'), 'utf8');
+  const r = await get('/join.mjs');
+  ok(r.status === 200 && r.type === TYPES['.mjs'] && r.body.toString() === js, '/join.mjs: 200, text/javascript, site/src/join.mjs as is');
+  const NET = /\bfetch\b|XMLHttpRequest|sendBeacon|WebSocket|EventSource|localStorage|sessionStorage|indexedDB|document\.cookie|\bimport\s*\(|\bnew\s+(Image|Worker)\b|\.src\s*=|\bhref\s*=|location\.(assign|replace)|location\s*=|\bimport\s+[\w{*]/;
+  ok(!NET.test(js), `site/src/join.mjs: no network, storage, cookie or import API (the fragment goes nowhere)${NET.test(js) ? ` (hit: ${js.match(NET)[0]})` : ''}`);
+  const pub = readFileSync(join(ROOT, 'apps', 'contact', 'public.mjs'), 'utf8'), short = readFileSync(join(ROOT, 'apps', 'contact', 'short.mjs'), 'utf8');
+  const { parseJoin, fillExample, ALPHABET, EXAMPLE_CODE, EXAMPLE_WORDS } = await import(join(SITE, 'src', 'join.mjs'));
+  ok(pub.includes(`export const LINK_BASE = '${ORIGIN}/join#';`) && short.includes(`export const ALPHABET = '${ALPHABET}';`) && short.includes("const FOLD = { I: '1', L: '1', O: '0' };")
+    && short.includes('TAG_LENGTH = 4, TAGGED_LENGTH = SHORT_LENGTH + TAG_LENGTH') && short.includes('SHORT_LENGTH = 8;'),
+    'site/src/join.mjs: the link base (public.mjs LINK_BASE), the alphabet, folding and lengths (8, 12 with a relay tag) of apps/contact/short.mjs');
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const cases = [
+    ['#PUB-7Q4K-M2XD.amber-otter-violin-harbor', { code: 'PUB-7Q4K-M2XD', words: ['amber', 'otter', 'violin', 'harbor'] }],
+    ['#pub7q4km2xd.Amber-Otter-Violin-Harbor', { code: 'PUB-7Q4K-M2XD', words: ['amber', 'otter', 'violin', 'harbor'] }],
+    ['#PUB-7Q4K-M2XD-4WXN.amber-otter-violin-harbor', { code: 'PUB-7Q4K-M2XD-4WXN', words: ['amber', 'otter', 'violin', 'harbor'] }],
+    ['#PUB-7Q4K-M2XO.amber%20otter%20violin%20harbor', { code: 'PUB-7Q4K-M2X0', words: ['amber', 'otter', 'violin', 'harbor'] }],
+    ['#PUB-7Q4K-M2XD', { code: 'PUB-7Q4K-M2XD', words: null }],
+    ['#PUB-7Q4K-M2XD.amber-otter', { code: 'PUB-7Q4K-M2XD', words: null }],
+    ['', null], ['#', null],
+    ['#PUB-7Q4K-M2X', { error: 'not a PUB code' }], ['#PUB-7Q4K-M2XU', { error: 'not a PUB code' }], ['#K7F3-Q9ZP.amber-otter-violin-harbor', { error: 'not a PUB code' }],
+    ['#PUB-%E0%A4%A', { error: 'not readable' }],
+  ];
+  const bad = cases.filter(([h, want]) => !same(parseJoin(h), want)).map(([h]) => h || '(empty)');
+  ok(bad.length === 0, `site/src/join.mjs parseJoin: ${cases.length} fragments (the link's form, case and dashes, a relay tag, O folded, no words, two words, none, short, U, a person's code, bad escapes)${bad.length ? ` (wrong: ${bad.join(' ')})` : ''}`);
+  const jmd = readFileSync(join(DIST, 'join.md'), 'utf8'), jhtml = readFileSync(join(DIST, 'join.html'), 'utf8');
+  const cmd = jmd.match(/^npx sigelo-agent accept .*$/m)?.[0] ?? '';
+  ok(cmd.includes(`accept ${EXAMPLE_CODE} --words "${EXAMPLE_WORDS}"`) && fillExample(cmd, parseJoin('#PUB-7Q4K-M2XD-4WXN.amber-otter-violin-harbor')).includes('accept PUB-7Q4K-M2XD-4WXN --words "amber otter violin harbor"')
+    && fillExample(cmd, parseJoin('#PUB-7Q4K-M2XD')) === cmd,
+    '/join: its accept line carries the example code and words, which a link\'s replace (words kept without any)');
+  ok(jmd.includes(`${ORIGIN}/join#${EXAMPLE_CODE}.word-word-word-word`) && /sigelo_accept/.test(jmd) && /New chat, I have their code/.test(jmd) && /Their four words/.test(jmd) && /approve each new chat/.test(jmd)
+    && /never leaves your browser/.test(jmd) && jmd.includes('(/pair.md)'),
+    '/join: the link\'s form, the agent line, MCP sigelo_accept, the app\'s screens (New chat, I have their code, Their four words), approve each, the fragment stays, Pair for a person\'s code');
+  const nav = jhtml.match(/<nav aria-label="Pages">[\s\S]*?<\/nav>/)?.[0] ?? '';
+  const ix = JSON.parse(readFileSync(join(DIST, 'index.json'), 'utf8'));
+  ok(!/href="\/join\.html"/.test(readFileSync(join(DIST, 'index.html'), 'utf8').match(/<nav[\s\S]*?<\/nav>/)?.[0] ?? '') && !/join/.test(nav)
+    && readFileSync(join(DIST, 'sitemap.xml'), 'utf8').includes(`<loc>${ORIGIN}/join.html</loc>`) && ix.pages.some((p) => p.slug === 'join' && p.html === `${ORIGIN}/join.html`),
+    '/join: in the sitemap and index.json, not in the nav (a landing page, reached by its link)');
+  // https://sigelo.io/join (no .html) must open it: nginx's extensionless location (try_files $uri.html).
+  const conf = readFileSync(join(SITE, 'deploy', 'nginx.conf'), 'utf8'), apache = readFileSync(join(SITE, 'deploy', 'apache.conf'), 'utf8');
+  ok(/location ~ \^\/\[\\w-\]\+\$ \{[^}]*\}[^}]*try_files \$uri \$uri\.html =404;/.test(conf) && apache.includes('RewriteRule ^/([\\w-]+)$ /$1.html [L]'),
+    '/join resolves without .html: nginx.conf try_files $uri $uri.html, apache.conf the same rewrite');
 }
 
 // ---- privacy, terms, release signing -------------------------------------------------------------

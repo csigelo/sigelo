@@ -236,7 +236,7 @@ have not run against a real server yet.
 
 ## Visit statistics (`/_stats/`)
 
-Server-side only: no script, cookie or third party on the site. `server-setup.sh --stats` (as
+Server-side only: no cookie or third party on the site, and one script (/join.mjs, which sends nothing). `server-setup.sh --stats` (as
 root, once, on a prepared server) installs GoAccess, the password file, and `sigelo-stats.timer`,
 which every 15 minutes rebuilds `/var/www/sigelo.io/stats/index.html` (GoAccess over every log
 kept, `--anonymize-ip` as a second cut, the hosts panel off) and `agents.txt` (`stats-agents.sh`:
@@ -408,7 +408,8 @@ fails, and the last ten installed configs are in `/var/backups/sigelo-nginx/`.
   30 kept: 30 days of truncated-address logs and the reports built from them, nothing else. The
   project's own requests (user agent `sigelo-selfcheck/1`) go to `access-self.log`, 7 kept.
 
-- **The site sets no cookies, runs no scripts and loads nothing from another origin**
+- **The site sets no cookies, runs one script (/join.mjs: it shows a join link's code and sends
+  nothing) and loads nothing from another origin**
   (`site/test/run.mjs` checks); `Referrer-Policy: no-referrer` keeps it from leaking where readers
   go next.
 - **Let's Encrypt** is registered without an e-mail address by default; issued certificates are

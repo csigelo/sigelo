@@ -399,6 +399,39 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   }
 }
 
+// ── invite --public, public approve|pause|revoke: one code, many pairings (apps/contact/public.mjs) ───
+{
+  if (!hasRelay()) console.log(`SKIP invite --public: ${NO_RELAY}`);
+  else {
+    const H = tmpHome('public'), home = await startTestRelay(H);
+    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify(home.endpoints), ...KA });
+    const cli = (n: string, ...args: string[]) => cliIn(envOf(n), H)(...args);
+    try {
+      for (const n of ['shop', 'ann', 'ben']) await cli(n, 'init', '--no-recovery');
+      const bad = await cli('shop', 'invite', '--public', '--months', '3'), mixed = await cli('shop', 'invite', '--cap', '9');
+      ok('invite --public --months 3, and --cap without --public: usage (exit 2)', bad.status === 2 && mixed.status === 2 && mixed.stderr.includes('--public'), bad.stderr + mixed.stderr);
+      const inv = await cli('shop', 'invite', '--public', '--json', '--cap', '5', '--name', 'shop'), j = JSON.parse(inv.stdout || '{}') as { short?: string; words?: string; link?: string; id?: string };
+      ok('invite --public: a PUB code, its four words, a link', inv.status === 0 && /^PUB-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(j.short ?? '') && (j.words ?? '').split(' ').length === 4 && (j.link ?? '').startsWith('https://sigelo.io/join#'), inv.stderr);
+      const acc = await cli('ann', 'accept', j.short!, '--words', j.words!, '--wait', '0'), aj = JSON.parse(acc.stdout || '{}') as { status?: string };
+      const box = await cli('shop', 'inbox'), list = JSON.parse((await cli('shop', 'public')).stdout || '[]') as { requests: { id: string }[] }[];
+      ok('accept PUB-… --words: waiting for approval; the owner\'s inbox names the request; public lists it', acc.status === 0 && aj.status === 'waiting_approval' && box.stderr.includes('public approve') && list[0]?.requests.length === 1, acc.stderr + box.stderr);
+      const ap = await cli('shop', 'public', 'approve', list[0]!.requests[0]!.id);
+      const annBox = await cli('ann', 'inbox', '--wait', '5');
+      ok('public approve <id>: paired; ann\'s inbox reports it', ap.status === 0 && ap.stderr.includes('not compared') && annBox.status === 0 && annBox.stderr.includes('paired with'), ap.stderr + annBox.stderr);
+      const wrongWords = await cli('ben', 'accept', 'K7F3-Q9ZP', '--words', 'abandon ability able about');
+      ok('accept --words with a one-time code: usage (exit 2)', wrongWords.status === 2 && wrongWords.stderr.includes('--words'), wrongWords.stderr);
+      const pause = await cli('shop', 'public', 'pause'), paused = await cli('ben', 'accept', j.short!, '--wait', '0');
+      ok('public pause: a joiner is told public_paused', pause.status === 0 && paused.status === 1 && paused.stderr.includes('public_paused'), pause.stderr + paused.stderr);
+      const rv = await cli('shop', 'public', 'revoke'), late = await cli('ben', 'accept', j.short!, '--wait', '0');
+      const contacts = JSON.parse((await cli('shop', 'contacts')).stdout || '{}') as { contacts?: { name: string }[] };
+      ok('public revoke: the code ends for everyone (park_unknown); the pairing it made stays', rv.status === 0 && late.status === 1 && late.stderr.includes('park_unknown') && contacts.contacts?.some((x) => x.name === 'shop-1') === true, rv.stderr + late.stderr);
+    } finally {
+      await home.close?.();
+      rmSync(H, { recursive: true, force: true });
+    }
+  }
+}
+
 // ── one rule for which identity (ENROL.md "Which identity") ───────────────────────────────
 // The operator runs contact verbs on their own file while the shell names an agent (SIGELO_IDENTITY):
 // --identity <file>, or --operator ($SIGELO_HUMAN, else ~/.config/sigelo/me.local.json). Beside a

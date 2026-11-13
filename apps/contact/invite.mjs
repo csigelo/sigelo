@@ -22,6 +22,9 @@ export const V = 'sigelo-invite/0';
 export const TYP_ANSWER = 'invite-answer', TYP_REPLY = 'invite-reply';
 // SKEW: how far the answering side's clock may lag the inviter's when it checks the 7-day cap.
 export const TTL = 86400, TTL_MAX = 7 * 86400, SKEW = 300, PREFIX = 'sgl1', VERSION = 0x01;
+// A public code (contract sigelo-public/0, public.mjs): version 2, sgl2…, the same layout, living up
+// to PUBLIC_TTL_MAX; its answers carry iat and are taken up to REQUEST_TTL old.
+export const PUBLIC_VERSION = 0x02, PUBLIC_PREFIX = 'sgl2', PUBLIC_TTL_MAX = 366 * 86400, REQUEST_TTL = 7 * 86400;
 // HKDF-SHA256 and hash labels, part of the wire contract. The three from the one-time secret use
 // no salt (the secret is 32 random bytes) and one info label each:
 export const LABELS = {
@@ -109,28 +112,38 @@ export function inviteKeys(secret) {
   return { answer_topic: 'i/' + hex(d(LABELS.answer_topic, 16)), reply_topic: 'i/' + hex(d(LABELS.reply_topic, 16)), key: d(LABELS.key, 32) };
 }
 
-/** Alice: a new code for her CURRENT DID. `secret` and `now` are parameters so a fixture fixes every byte. */
-export function makeInvite({ did, relay, now, ttl = TTL, secret = new Uint8Array(randomBytes(32)) }) {
+/** Alice: a new code for her CURRENT DID. `secret` and `now` are parameters so a fixture fixes every byte.
+ *  version 2: a public code (sgl2…, public.mjs), ttl up to PUBLIC_TTL_MAX. */
+export function makeInvite({ did, relay, now, ttl = TTL, secret = new Uint8Array(randomBytes(32)), version = VERSION }) {
   const digest = didDigest(did);
   if (!(secret instanceof Uint8Array) || secret.length !== 32) fail('secret', 'must be 32 bytes');
   checkTime(now);
-  if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > TTL_MAX) fail('ttl', `must be 1 to ${TTL_MAX} seconds`);
+  if (version !== VERSION && version !== PUBLIC_VERSION) fail('code_version', `version ${version}: 1, or 2 for a public code`);
+  const max = version === PUBLIC_VERSION ? PUBLIC_TTL_MAX : TTL_MAX;
+  if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > max) fail('ttl', `must be 1 to ${max} seconds`);
   const exp = now + ttl;
   if (exp > 0xffffffff) fail('ttl', 'the expiry does not fit 4 bytes');
   checkRelay(relay);
   const host = utf8ToBytes(relay), e = new Uint8Array(4);
   new DataView(e.buffer).setUint32(0, exp);
-  const body = concatBytes(Uint8Array.of(VERSION), digest, secret, e, Uint8Array.of(host.length), host);
+  const body = concatBytes(Uint8Array.of(version), digest, secret, e, Uint8Array.of(host.length), host);
   const bytes = concatBytes(body, sha256(body).subarray(0, 4));
-  return { did: 'did:sigelo:' + multibase(digest), secret, exp, relay, bytes, text: PREFIX + multibase(bytes).slice(1), nonce: inviteNonce(bytes) };
+  return { did: 'did:sigelo:' + multibase(digest), secret, exp, relay, bytes, text: `sgl${version}` + multibase(bytes).slice(1), nonce: inviteNonce(bytes), version };
 }
 
 /** Bob: the code back from its text. Throws code_version, code_checksum, code_length, code_relay, code_expired or code_ttl. */
-export function parseInvite(text, now) {
+export function parseInvite(text, now) { return parseCode(text, now, VERSION); }
+/** A public code (sgl2…) back from its text, as parseInvite; it lives up to PUBLIC_TTL_MAX. */
+export function parsePublicCode(text, now) { return parseCode(text, now, PUBLIC_VERSION); }
+
+function parseCode(text, now, version) {
   checkTime(now);
+  const PREFIX = `sgl${version}`, VERSION = version, TTL_MAX = version === PUBLIC_VERSION ? PUBLIC_TTL_MAX : 7 * 86400;
   // Only another version's prefix is a version error. Any other start ("sgI1", "Sgl1", a lost
   // first character) is a typo, and reads as one, like a typo among the digits.
-  if (typeof text === 'string' && /^sgl[02-9]/.test(text)) fail('code_version', `a ${text.slice(0, 4)} code; this library reads ${PREFIX}`);
+  if (typeof text === 'string' && /^sgl[0-9]/.test(text) && !text.startsWith(PREFIX)) {
+    fail('code_version', `a ${text.slice(0, 4)} code; this ${version === PUBLIC_VERSION ? 'reads public codes' : 'library reads'} ${PREFIX}${text.startsWith(PUBLIC_PREFIX) ? ' (sgl2 is a public code: read it with parsePublicCode)' : ''}`);
+  }
   if (typeof text !== 'string' || !text.startsWith(PREFIX)) fail('code_checksum', `it does not start with ${PREFIX}: paste the whole code, from ${PREFIX} to its last character`);
   const digits = text.slice(PREFIX.length);
   if (digits.length === 0 || digits.length > MAX_DIGITS) fail('code_length', `${digits.length} characters after ${PREFIX}, ${digits.length === 0 ? 'none' : `at most ${MAX_DIGITS}`}: not the whole code, or two codes run together`);
@@ -154,9 +167,9 @@ export function parseInvite(text, now) {
   if (now >= exp) fail('code_expired', `it expired at ${iso(exp)}, ${ago(now - exp)} ago by this machine's clock (${iso(now)}): ask for a new code; if it was made just now, this clock is wrong (date -u)`);
   // No inviter makes a code for longer than 7 days. A longer one would keep Bob's one-time secret
   // and key in his store for as long as it says.
-  if (exp - now > TTL_MAX + SKEW) fail('code_ttl', `it expires at ${iso(exp)}, ${ago(exp - now)} from now by this machine's clock (${iso(now)}), and a code lives at most 7 days: this clock is behind (date -u), or the code was not made by sigelo`);
+  if (exp - now > TTL_MAX + SKEW) fail('code_ttl', `it expires at ${iso(exp)}, ${ago(exp - now)} from now by this machine's clock (${iso(now)}), and a code lives at most ${version === PUBLIC_VERSION ? 'a year' : '7 days'}: this clock is behind (date -u), or the code was not made by sigelo`);
   const secret = b.slice(AT_SECRET, AT_EXP);
-  return { did: 'did:sigelo:' + multibase(b.slice(AT_DID, AT_SECRET)), secret, exp, relay, bytes: b, text, nonce: inviteNonce(b) };
+  return { did: 'did:sigelo:' + multibase(b.slice(AT_DID, AT_SECRET)), secret, exp, relay, bytes: b, text, nonce: inviteNonce(b), version };
 }
 
 // ---------------------------------------------------------------- handshake messages
@@ -191,10 +204,13 @@ function prove(identity, typ, nonce, label, rest) {
  * His proof binds the whole code (its nonce: the inviter it names, relay, expiry, secret) and every
  * other member of the answer (transcript).
  */
-export function buildAnswer({ code, identity, bundle, kem_pk, prekeys }) {
+export function buildAnswer({ code, identity, bundle, kem_pk, prekeys, iat }) {
   opaque(kem_pk, 'kem_pk'); opaque(prekeys, 'prekeys'); canonicalBundle(bundle);
   if (!(code?.bytes instanceof Uint8Array)) throw new TypeError('code is required: what parseInvite returned');
-  const rest = { v: V, typ: 'answer', bundle, kem_pk, prekeys };
+  // A public code's answer carries iat, in its transcript (sigelo-public/0): the inviter takes it
+  // up to REQUEST_TTL old, so no answer replays past the joiner's reply topic.
+  if (code.version === PUBLIC_VERSION) checkTime(iat);
+  const rest = { v: V, typ: 'answer', bundle, kem_pk, prekeys, ...(code.version === PUBLIC_VERSION && { iat }) };
   return { ...rest, proof: prove(identity, TYP_ANSWER, inviteNonce(code.bytes), LABELS.answer, rest) };
 }
 
@@ -278,6 +294,40 @@ export function checkAnswer(answer, store, now, agree) {
   checkProof(answer, { v: V, typ: TYP_ANSWER, did: r.did, nonce: p.nonce }, LABELS.answer, r);  // pair: challenge_body, sig
   const pair_key = agreed(agree, answer.kem_pk, p.secret, store, r);                            // own: self, kem
   const a = store.admit(answer.bundle, r, p.name, { relay: p.relay, pair_key }, now);         // pair: revoked … revoked
+  return { ...a, pair_key, secret: p.secret, answer_id: answerId(answer) };
+}
+
+/**
+ * Alice, a public code's answer (sigelo-public/0): every check of checkAnswer before the key
+ * agreement, with iat (REQUEST_TTL old at most, SKEW ahead) instead of a pending invite taken: the
+ * code `p` ({ nonce, exp }) stays. Nothing is stored. → { did: the original DID, current_did, r,
+ * answer_id }. Throws card, challenge_unknown, challenge_expired, bundle, card_did, challenge_body,
+ * transcript, sig, self, revoked.
+ */
+export function screenAnswer(answer, p, store, now) {
+  checkTime(now);
+  shape(answer, 'answer', ['v', 'typ', 'bundle', 'proof', 'kem_pk', 'prekeys', 'iat']);
+  if (answer.proof.body.nonce !== p.nonce) fail('challenge_unknown', 'the answer names another code');
+  if (now >= p.exp) fail('challenge_expired', `the code expired at ${p.exp}`);
+  if (!Number.isSafeInteger(answer.iat) || answer.iat < now - REQUEST_TTL || answer.iat > now + SKEW) fail('challenge_expired', `iat ${answer.iat}: an answer is taken up to 7 days old`);
+  const r = attempt('bundle', () => verify(answer.bundle, now));
+  if (r.did !== answer.proof.body.did) fail('card_did', `the bundle resolves to ${r.did}, the proof claims ${answer.proof.body.did}`);
+  checkProof(answer, { v: V, typ: TYP_ANSWER, did: r.did, nonce: p.nonce }, LABELS.answer, r);
+  if (r.chain.includes(store.self)) fail('self', 'the peer is this store\'s own identity');
+  const held = Object.values(store.load().s.contacts).find((c) => c.chain.some((d) => r.chain.includes(d)));
+  if (held?.revoked) fail('revoked', `${held.did} was revoked by this owner`);
+  return { did: r.chain[0], current_did: r.did, r, answer_id: answerId(answer) };
+}
+
+/**
+ * Alice approves a public code's answer: screened again (a rotation or a revocation since), then
+ * the key agreement and admit, as checkAnswer. p: { nonce, exp, secret (hex), name, relay };
+ * fields: more for the contact record (via). → checkAnswer's result.
+ */
+export function admitAnswer(answer, p, store, now, agree, fields = {}) {
+  const { r } = screenAnswer(answer, p, store, now);
+  const pair_key = agreed(agree, answer.kem_pk, p.secret, store, r);
+  const a = store.admit(answer.bundle, r, p.name, { relay: p.relay, pair_key, ...fields }, now);
   return { ...a, pair_key, secret: p.secret, answer_id: answerId(answer) };
 }
 

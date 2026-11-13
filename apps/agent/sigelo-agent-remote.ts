@@ -39,7 +39,7 @@ export interface Control { id: string; key: string; scope: Scope; ctr: number; c
 // the node are all.
 const READ = ['GET /api/state', 'GET /api/me', 'GET /api/messages', 'GET /api/links', 'GET /api/agents/workers', 'GET /api/groups', 'GET /api/groups/history', 'GET /api/transfers',
   'GET /api/wallet', 'GET /api/wallet/history', 'GET /api/wallet/tx', 'GET /api/price', 'GET /api/picture', 'GET /api/attestations', 'POST /api/statement/check'];
-const CHAT = [...READ, 'POST /api/send', 'POST /api/accept', 'POST /api/invite', 'POST /api/invite/cancel', 'POST /api/words', 'POST /api/rename', 'POST /api/tag', 'POST /api/sync',
+const CHAT = [...READ, 'POST /api/send', 'POST /api/accept', 'POST /api/invite', 'POST /api/invite/cancel', 'POST /api/public/approve', 'POST /api/public/refuse', 'POST /api/public/set', 'POST /api/words', 'POST /api/rename', 'POST /api/tag', 'POST /api/sync',
   'POST /api/links/answer', 'POST /api/pow/try', 'POST /api/wallet/sync', 'POST /api/wallet/receive', 'POST /api/wallet/label', 'POST /api/groups/send', 'POST /api/groups/create', 'POST /api/groups/add', 'POST /api/groups/rename', 'POST /api/groups/join', 'POST /api/groups/share', 'POST /api/groups/dismiss', 'POST /api/picture'];
 const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/presence', 'POST /api/notify', 'POST /api/history/clear', 'GET /api/agents', 'POST /api/agents/enrol', 'POST /api/agents/pair',
   'POST /api/groups/remove', 'POST /api/groups/leave', 'POST /api/groups/role', 'POST /api/groups/brake',

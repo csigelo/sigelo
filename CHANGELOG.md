@@ -5,6 +5,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **site:** sigelo.io/join opens a public code's link: the code and four words shown big from the fragment (never sent; the site's one script, /join.mjs), Copy, then app, agent and MCP lines.
+- **app:** Public invite as the mock: one PUB code for months (Pro), its four words, approve each new chat, per day at most, Approve and Refuse, Pause, Stop for good; Enter their code checks a public code's words.
+- **agent:** public codes: `invite --public` (PUB code, four words, link), `public approve|refuse|pause|resume|cap|revoke`, `accept --words`; `/api/public/*`; MCP `sigelo_public`. THREAT-MODEL §2.19.
+- **relay:** public codes (`sigelo-public/0`): an sgl2 code parked up to a year, Pro only, 3 per account, kept in SQLite, fetched unspent on its own brake; Pause and a daily cap (50, 1-500); Revoke by DELETE.
 - **app:** My code and New chat make a code that renews itself ("Renews itself", on by default): the next code appears in place, with who used the last; "Cancel this code" also cancels at the relay.
 - **agent:** codes that renew themselves (a fresh short code once one is used) and "Cancel this code" at the relay: carrier `cancelInvite`, `POST /api/invite/cancel`, `invite --renew`/`--cancel`, MCP `sigelo_invite`.
 - **relay:** `DELETE /park/<hash>` cancels a parked short code: the parker's login in the body, a tombstone until its expiry, `park_unknown` for anyone else; charged as a lookup. GET and POST unchanged.

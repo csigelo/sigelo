@@ -27,8 +27,11 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 |---|---|---|
 | `GET /api/state` | `since=<seq>` | `{seq, now, me, groups: {mine, contacts}, chats, pending: {invites, paired, answers, failed, public}, events, introductions, transfers}` (`transfers`: `{asked, active}`, null where the host moves no files) |
 | `GET /api/me` | | `{did, original, words, chain, identity_file, recovery: "set"\|"none", key: "file", relay, retention_days, erase, restored?}`; `restored` `{on, keeper, seat: "here"\|"elsewhere"\|null, created?}` when the identity comes from the 25 words and its keeper file has the day it was made (Me: "Restored from seed on …"); `created: true` when the words were made on this device (keeper `made: "here"`; Me: "Created on …; the 25 words are on your paper"); `words`: four words naming `original` (apps/contact/short.mjs `didWords`, a label for the apps' profile list, not a check) |
-| `POST /api/invite` | `{name?, long?, ttl?, public?, group?, renew?, pow_confirmed?}` | `{id, name, code, exp, short?, short_exp?, relay, group?, public?, renew?}`: `short` parked 10 min; `short_exp` the relay's clock; `renew` (a short person code): it renews itself ("Renewing codes"); `ttl` with `long`: the long code's life, 3600 to 604800 s (else 24 h); `public` with `long`: the public invite ("Public invite"); `group`: a group code (a gid of mine, else `404 group_unknown`, `409 group_creator`): whoever pairs through it is added to that group as a person |
-| `POST /api/invite/cancel` | `{id}` or `{code}` (a short code) | `{cancelled: true, unparked?, detail?}`: the public invite too, used or not (Stop for good); a short code is cancelled at the relay too (`unparked`; false: an older relay or offline, `detail` says so, it runs out there); a renewing code's series ends |
+| `POST /api/invite` | `{name?, long?, ttl?, group?, renew?, pow_confirmed?}`, or `{public: true, months?, cap?, open?, name?}` | `{id, name, code, exp, short?, short_exp?, relay, group?, renew?}`: `short` parked 10 min; `short_exp` the relay's clock; `renew` (a short person code): it renews itself ("Renewing codes"); `ttl` with `long`: the long code's life, 3600 to 604800 s (else 24 h); `group`: a group code (a gid of mine, else `404 group_unknown`, `409 group_creator`): whoever pairs through it is added to that group as a person. `public`: a public code ("Public invite") → `{id, name, code: sgl2…, short: PUB-…, words, link, exp, relay, cap, open, did, public: true}`; `months` 1, 6 (default) or 12, `cap` 1 to 500 (50); `402 public_pro` without Pro |
+| `POST /api/public/approve` | `{id}` | `{approved: true, did, name, fingerprint, queued?}`: a request of `pending.public.requests` paired; `404 request` when gone |
+| `POST /api/public/refuse` | `{id}` | `{refused: true, did}`: dropped, the joiner told nothing |
+| `POST /api/public/set` | `{id?, paused?, cap?}` | the code's state as in `pending.public`: Pause, Resume, the cap (default: the first code) |
+| `POST /api/invite/cancel` | `{id}` or `{code}` (a short code) | `{cancelled: true, unparked?, detail?, public?}`: a public code's id too (Stop for good: Revoke for all, pairings made stay); a short code is cancelled at the relay too (`unparked`; false: an older relay or offline, `detail` says so, it runs out there); a renewing code's series ends |
 | `POST /api/accept` | `{code, name?, tier?, pow_confirmed?}` | `{status: "connected", contact: {did, name, fingerprint, pair, tier}}`, or `{status: "waiting"\|"pending", did, detail, exp}`; `tier`: `friend` or `quiet` (own is detected) |
 | `POST /api/words` | `{contact, match}` | `true`: `{checked: true}`; `false`: forget and block |
 | `POST /api/rename` | `{contact, name}` | `{did, name}`; `409 name_taken` if another live contact has it |
@@ -117,7 +120,7 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 
 `contact` is the contact's original DID. A contact in `groups`: `{did, name, current_did, relay, re_pair,
 words, pair, words_checked, tags, local, mine, unread, last, waiting, not_collected, queued, status,
-ours, tier, link, online, online_since, last_seen, presence, notify, seen_upto, kind, kind_set, picture, picture_local}`; `picture`: the rev of the picture shown (a local one, else theirs) or null; `picture_local`: a local one is set ("Pictures"). `kind` ("Kinds"): `agent` or `person`; `kind_set`: the human chose it. `last`: `{dir, text, at, status}`, `status`
+ours, tier, link, online, online_since, last_seen, presence, notify, seen_upto, kind, kind_set, picture, picture_local, via}`; `via`: a public code it came by ("Public invite"), or null; `picture`: the rev of the picture shown (a local one, else theirs) or null; `picture_local`: a local one is set ("Pictures"). `kind` ("Kinds"): `agent` or `person`; `kind_set`: the human chose it. `last`: `{dir, text, at, status}`, `status`
 as in `GET /api/messages`; `notify`: `POST /api/notify`; `seen_upto`: the contact's newest seen receipt (their time), or null. `online`: `true`, `false` (then `last_seen`, the relay's time) or `null` (not known: not allowed, or this page offline); `presence`: what they see of mine. `link`: `{id, purpose, linked_by, expires}` or null. `status`: `ok`, `waiting` (their keys have not come, or the carrier says why messages wait:
 `waiting`), `not_collected` (a message queued, no reader yet), `pair_again` (`re_pair` after a recovery). `tier` (apps/contact/store.mjs): `own` (my agents:
 an unexpired `sigelo-relay/operator` attestation from my DID, seen in a local agent's file or proved
@@ -245,9 +248,13 @@ here: me, a contact whose chain holds `did` (`words_checked` as compared), or un
 protocol object: in a chat it is a message labelled `sigelo-statement/0` whose text is the portable form (an earlier version shows it as
 text). The key agent (KEYS.md) signs none.
 
-**Public invite** (Me → Public invite): a long code (`long`, `ttl` up to 7 days, `public`), one at a time: a new one stops the one before.
-Kept in `.ui.json` `public` `{id, name, code, exp, relay, paired?}` until it runs out or is stopped; state's `pending.public` `{id, name,
-code, exp, relay, waiting, paired}` (`waiting`: nobody used it yet; `paired`: the contact it made). Pairing is one to one: it works once.
+**Public invite** (Me → Public invite; design/public-invite.md, Pro only): a public code, `sigelo-public/0`: `PUB-XXXX-XXXX` with the
+inviter's four words (`words`, didWords of the original DID) and `link` (`https://sigelo.io/join#PUB-….w-w-w-w`), for 1, 6 or 12 months, kept in
+the contact store. State's `pending.public` (the first) and `pending.publics`: `{id, name, short, words, link, exp, relay, cap, open, paused,
+today, chats, requests: [{id, did, current_did, words, received, exp}]}`. Each use is a request (event `public_request`) until approved or
+refused (7 days at most); `open` pairs at once. A contact that came by one carries `via`: `{public: id}` (mine: not compared) or
+`{public: true, words: "checked" | null}` (theirs: checked against the page's words). `POST /api/accept {code, words?}` takes a PUB code or
+its link; `status: "waiting_approval"` until the inviter approves.
 
 **Renewing codes** (My code, New chat): `renew: true` makes a one-person short code that is replaced as soon as it is used:
 the agent parks a fresh one, same name (numbered: `-2`, `-3`), ttl and relay, kept in the contact store. Its pending invite keeps the
