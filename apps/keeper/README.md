@@ -428,7 +428,7 @@ Every route takes the agent's bearer token and answers for that agent only — e
 strict JSON or not the route's shape, `400`), `body` (not read in full: `408` too slow, `413`
 over 1 MB, `400` a broken stream), `route` (`404`), `log` (a line not written, `500`) and
 `internal` (an unexpected exception, `500`). A cap refusal adds `facts` (`cost`, `limit`,
-`fee_included`, `left`, `until`) so a client never parses the prose. The statuses: `200`; `202`
+`fee_included`, `left`, `until`; after pricing also `amount`, `fee` and, when known, `inputs`) so a client never parses the prose. The statuses: `200`; `202`
 approval needed; `400` `request`/`body`; `401` `token`; `403` a refusal by policy or `licence_required`; `404`;
 `408`/`413` `body`; `409` `repeat` (a `ref` reused for another request); `500` `log`/`internal`;
 `502` the wallet (`wallet*`, `relay_failed`); `503` `clock_behind`.
@@ -728,6 +728,7 @@ checks the fixed ones against this table):
 | invoice file unreadable or not `{invoice, bundle}` | 1 | `REFUSED: <path> is not a readable invoice file ({invoice, bundle}). Ask the payee to send it again.` |
 | `invoice`: paid or expired | 1 | `REFUSED: that invoice is already paid (or expired). Ask the payee for a new one.` |
 | `per_tx_max` | 1 | `REFUSED: 0.6 XMR with fee is over your 0.5 XMR per-payment limit. Pay less, or ask your operator.` (`with fee` only when the refusal came after pricing) |
+| `per_tx_max`: priced, and the amount alone fits | 1 | `REFUSED: 0.00053342 XMR with fee is over your 0.0005 XMR per-payment limit. The payment alone (0.00042 XMR) fits; the fee (0.00011342 XMR, 7 inputs) pushed it over. A wallet holding many small outputs pays a bigger fee. Pay less, or ask your operator to sweep them into one or raise your limit.` (the cap counts the fee, and each input adds to it; the input count only when wallet-rpc's reply lists `spent_key_images`) |
 | `per_period_max` | 1 | `REFUSED: you have 0.12 XMR left to spend until 18:00 UTC. Pay less, or wait.` (`until` = when the oldest debit in the window rolls out; the date too if over a day away) |
 | `rate_per_minute`: pay | 2 | `TRY LATER: too many payments this minute. Run the same command in a minute.` |
 | `rate_per_minute`: receive | 2 | `TRY LATER: too many new addresses this minute. Run the same command in a minute.` |

@@ -69,6 +69,7 @@ export const LINES = {
   invoiceFile: (path: string) => `REFUSED: ${path} is not a readable invoice file ({invoice, bundle}). Ask the payee to send it again.`,
   invoice: 'REFUSED: that invoice is already paid (or expired). Ask the payee for a new one.',
   per_tx_max: (cost: string, limit: string, fee: boolean) => `REFUSED: ${cost} XMR${fee ? ' with fee' : ''} is over your ${limit} XMR per-payment limit. Pay less, or ask your operator.`,
+  perTxFee: (cost: string, limit: string, amount: string, fee: string, inputs: string) => `REFUSED: ${cost} XMR with fee is over your ${limit} XMR per-payment limit. The payment alone (${amount} XMR) fits; the fee (${fee} XMR${inputs}) pushed it over. A wallet holding many small outputs pays a bigger fee. Pay less, or ask your operator to sweep them into one or raise your limit.`,
   per_period_max: (left: string, until: string) => `REFUSED: you have ${left} XMR left to spend${until}. Pay less, or wait.`,
   rate: 'TRY LATER: too many payments this minute. Run the same command in a minute.',
   rateReceive: 'TRY LATER: too many new addresses this minute. Run the same command in a minute.',
@@ -144,7 +145,15 @@ export function explain(status: number, b: Body, shown = '', label?: string, ver
     case 'amount': return out('refused', code, LINES.amount, b);
     case 'purpose': return out('refused', code, LINES.purpose, b);
     case 'ref': return out('refused', code, LINES.ref, b);
-    case 'per_tx_max': return out('refused', code, LINES.per_tx_max(toXmr(str(f['cost']) || '0'), toXmr(str(f['limit']) || '0'), f['fee_included'] === true), b);
+    case 'per_tx_max': {
+      const [cost, limit, amount, fee] = [str(f['cost']) || '0', str(f['limit']) || '0', str(f['amount']), str(f['fee'])];
+      // Priced, and the amount alone is within the cap: the fee is the cause, so say so.
+      if (f['fee_included'] === true && /^\d+$/.test(amount) && /^\d+$/.test(fee) && /^\d+$/.test(limit) && BigInt(amount) <= BigInt(limit)) {
+        const n = typeof f['inputs'] === 'number' && Number.isSafeInteger(f['inputs']) && f['inputs'] > 0 ? f['inputs'] : 0;
+        return out('refused', code, LINES.perTxFee(toXmr(cost), toXmr(limit), toXmr(amount), toXmr(fee), n === 0 ? '' : `, ${n} input${n === 1 ? '' : 's'}`), b);
+      }
+      return out('refused', code, LINES.per_tx_max(toXmr(cost), toXmr(limit), f['fee_included'] === true), b);
+    }
     case 'per_period_max': return out('refused', code, LINES.per_period_max(toXmr(str(f['left']) || '0'), typeof f['until'] === 'number' ? ` until ${when(f['until'])}` : ''), b);
     case 'rate_per_minute': return out('try_later', code, verb === 'receive' ? LINES.rateReceive : LINES.rate, b);
     case 'wallet_locked': {

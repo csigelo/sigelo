@@ -318,7 +318,7 @@ const api = async (port: number, path: string, init: { method?: string; body?: u
 interface WalletMode {
   transfer?: 'ok' | 'malformed' | 'nonjson' | 'slow'; relay?: 'ok' | 'error' | 'nonjson' | 'slow'; fee?: number; onRelay?: () => void;
   // G3: a wallet refusal at the build step, the account balance, incoming transfers, and which key `sign` uses.
-  transferError?: string; balance?: { balance: number; unlocked: number; blocks?: number }; transfers?: Record<string, unknown[]>; signAs?: 'view' | 'spend';
+  transferError?: string; keyImages?: number; balance?: { balance: number; unlocked: number; blocks?: number }; transfers?: Record<string, unknown[]>; signAs?: 'view' | 'spend';
   // G5: per-account balances (a relayed sweep empties its account), the next index
   // `create_account` hands out, and a sweep that moves less than its fee.
   balances?: Record<number, { balance: number; unlocked: number; blocks?: number }>; nextAccount?: number; sweepDust?: boolean;
@@ -414,7 +414,8 @@ function mockWallet(mode: WalletMode = {}): Promise<MockWallet> {
         if (t === 'malformed') return answer({ tx_hash: 'aa' + n, fee: 30480000 });
         const metadata = `meta-${txid}`;
         built.set(metadata, txid);
-        return answer({ tx_hash: txid, fee: mode.fee ?? 30480000, amount: (p['destinations'] as { amount: number }[])[0]!.amount, tx_metadata: metadata }, t === 'slow' ? 1500 : 0);
+        const images = mode.keyImages === undefined ? {} : { spent_key_images: { key_images: Array.from({ length: mode.keyImages }, (_, i) => i.toString(16).padStart(64, '0')) } };
+        return answer({ tx_hash: txid, fee: mode.fee ?? 30480000, amount: (p['destinations'] as { amount: number }[])[0]!.amount, tx_metadata: metadata, ...images }, t === 'slow' ? 1500 : 0);
       }
       if (call.method === 'relay_tx') {
         mode.onRelay?.();
@@ -1238,7 +1239,26 @@ refuses('G1 allow: alice cannot pay an address only carol\'s allowlist holds', e
   ok('G3 pay: …and builds nothing', called(w, 'transfer').length === transfers);
   says('G3 row per-period cap', await as3(ALICE, 'pay', 'bob', '1', 'rent'), 'refused', /^REFUSED: you have 0\.99996952 XMR left to spend until \d\d:\d\d UTC\. Pay less, or wait\.$/);
   says('G3 row per-transaction cap (amount)', await as3(ALICE, 'pay', 'bob', '1.5', 'rent'), 'refused', 'REFUSED: 1.5 XMR is over your 1 XMR per-payment limit. Pay less, or ask your operator.');
-  says('G3 row per-transaction cap (amount + fee)', await as3(CAROL, 'pay', 'dave', '1', 'rent'), 'refused', 'REFUSED: 1.00003048 XMR with fee is over your 1 XMR per-payment limit. Pay less, or ask your operator.');
+  // carol pays exactly her cap: the amount alone fits, the fee pushes it over, and the line says so.
+  const feeOver = await as3(CAROL, 'pay', 'dave', '1', 'rent');
+  says('G3 row per-transaction cap (amount fits, the fee pushes it over)', feeOver, 'refused',
+    'REFUSED: 1.00003048 XMR with fee is over your 1 XMR per-payment limit. The payment alone (1 XMR) fits; the fee (0.00003048 XMR) pushed it over. A wallet holding many small outputs pays a bigger fee. Pay less, or ask your operator to sweep them into one or raise your limit.');
+  const ff = ((feeOver.data as Record<string, unknown>)['facts'] ?? {}) as Record<string, unknown>;
+  ok('G3 row per-transaction cap: facts carry amount and fee beside the sum, no inputs when the wallet lists none',
+    ff['cost'] === '1000030480000' && ff['limit'] === '1000000000000' && ff['fee_included'] === true && ff['amount'] === '1000000000000' && ff['fee'] === '30480000' && !('inputs' in ff), JSON.stringify(ff));
+  w.mode.keyImages = 7; w.mode.fee = 113420000;
+  const fed = await as3(CAROL, 'pay', 'dave', '0.99999', 'rent');
+  says('G3 row per-transaction cap: the input count from spent_key_images', fed, 'refused',
+    'REFUSED: 1.00010342 XMR with fee is over your 1 XMR per-payment limit. The payment alone (0.99999 XMR) fits; the fee (0.00011342 XMR, 7 inputs) pushed it over. A wallet holding many small outputs pays a bigger fee. Pay less, or ask your operator to sweep them into one or raise your limit.');
+  ok('G3 row per-transaction cap: …and inputs in the facts', ((fed.data as Record<string, unknown>)['facts'] as Record<string, unknown>)['inputs'] === 7, JSON.stringify(fed.data));
+  w.mode.keyImages = 1;
+  says('G3 row per-transaction cap: one input', await as3(CAROL, 'pay', 'dave', '0.99999', 'rent'), 'refused', /the fee \(0\.00011342 XMR, 1 input\) pushed it over\./);
+  delete w.mode.keyImages; delete w.mode.fee;
+  // Priced, but the amount alone is over the cap (a cap lowered between the checks): the fee is not the cause.
+  ok('G3 row per-transaction cap: priced with the amount alone over keeps the plain line', explain(403, { code: 'per_tx_max', facts: { cost: '1500030480000', limit: '1000000000000', fee_included: true, amount: '1500000000000', fee: '30480000' } }).message ===
+    'REFUSED: 1.50003048 XMR with fee is over your 1 XMR per-payment limit. Pay less, or ask your operator.');
+  ok('G3 row per-transaction cap: priced, from a keeper without amount/fee in facts, keeps the plain line', explain(403, { code: 'per_tx_max', facts: { cost: '1000030480000', limit: '1000000000000', fee_included: true } }).message ===
+    'REFUSED: 1.00003048 XMR with fee is over your 1 XMR per-payment limit. Pay less, or ask your operator.');
   says('G3 row allowlist: an unknown contact', await as3(ALICE, 'pay', 'dave', '0.1', 'x'), 'refused', 'REFUSED: you have no contact named dave. Use an address or an invoice file, or ask your operator to add them.');
   says('G3 row allowlist: an address not on the list', await as3(ALICE, 'pay', OTHER, '0.1', 'x'), 'refused', `REFUSED: you are not allowed to pay ${OTHER}. Ask the payee for an invoice file, or ask your operator to add them.`);
   says('G3 row destination: another network', await as3(ALICE, 'pay', mainnetAddr, '0.1', 'x'), 'refused', `REFUSED: ${mainnetAddr} is not an address you can pay here (wrong network, integrated, or mistyped). Ask the payee for a subaddress.`);

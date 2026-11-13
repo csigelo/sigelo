@@ -404,12 +404,16 @@ export function repairTail(policyPath: string): void {
  * that the policy never saw, and a malformed one after a RELAYED transfer was a spend with no
  * log line; phase (a) is `do_not_relay`, so refusing it now moves no money.
  */
-function asBuilt(r: Record<string, unknown>): { txid: string; fee: string; metadata: string } | string {
+function asBuilt(r: Record<string, unknown>): { txid: string; fee: string; metadata: string; inputs?: number } | string {
   const [txid, fee, metadata] = [r['tx_hash'], r['fee'], r['tx_metadata']];
+  // One key image per input; wallet-rpc 0.18 puts them in the reply. Only words in a cap
+  // refusal hang on it, so a reply without the list (an older wallet) checks nothing less.
+  const images = (r['spent_key_images'] as { key_images?: unknown } | undefined)?.key_images;
+  const inputs = Array.isArray(images) && images.length > 0 ? { inputs: images.length } : {};
   if (typeof txid !== 'string' || !/^[0-9a-f]{64}$/.test(txid)) return `wallet: transfer: tx_hash ${JSON.stringify(txid)} is not 64 hex characters — nothing was relayed`;
   if (typeof fee !== 'number' || !Number.isSafeInteger(fee) || fee < 0) return `wallet: transfer: fee ${JSON.stringify(fee)} is not a non-negative safe integer — nothing was relayed`;
   if (typeof metadata !== 'string' || metadata === '') return 'wallet: transfer: no tx_metadata in the reply (get_tx_metadata was asked for) — nothing was relayed';
-  return { txid, fee: String(fee), metadata };
+  return { txid, fee: String(fee), metadata, ...inputs };
 }
 
 // ---------------------------------------------------------------- one keeper per policy directory
@@ -1219,7 +1223,9 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     // (b) Both caps on what actually leaves the wallet: amount + fee (MONERO.md §4).
     const cost = BigInt(request.amount) + BigInt(built.fee);
     const fits = affordable(agent, pol.agents[agent]!, cost, 'amount + fee', state(log), now);
-    if (!fits.ok) return err(403, fits.reason, { facts: fits.facts });
+    // The amount and fee beside the sum: the amount alone may fit and the fee tip it over
+    // (a wallet of many small outputs needs many inputs, README "per_tx_max").
+    if (!fits.ok) return err(403, fits.reason, { facts: { ...fits.facts, amount: request.amount, fee: built.fee, ...(built.inputs !== undefined && { inputs: built.inputs }) } });
     // A dry run ends here: a price and a plan, and NO receipt. A signed entry for a
     // transaction nobody broadcast would read, to anyone but us, as proof of a payment.
     if (dryRun) return reply(200, { dry_run: true, amount: request.amount, fee: built.fee, cost: String(cost), plan });
