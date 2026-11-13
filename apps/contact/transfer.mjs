@@ -38,6 +38,9 @@ export const OUTSTANDING = 8, HIGH = 4 * CHUNK, LOW = CHUNK, RETRIES = 1;
 export const DAY = 86400, MANIFEST_TTL = 7 * DAY, GATHER_MS = 3000, ANSWER_WAIT = 600, ICE_MS = 30_000;
 // Manifests waiting for a yes: so many per contact and in all; more get `end busy`.
 export const WAIT_CONTACT = 8, WAIT_ALL = 64;
+// The accept rule's default (design §10.2, decided 2026-11-13): files up to 25 MB land without a question
+// from own agents and contacts and from friends whose words were compared.
+export const AUTO_MB = 25;
 export const REASONS = ['done', 'declined', 'cancelled', 'no_path', 'try_tor', 'chunk_hash', 'file_changed', 'busy'];
 export const TYPS = ['manifest', 'offer', 'answer', 'onion', 'end'];
 export const T = { LIST: 1, WANT: 2, DATA: 3, END: 4, TOKEN: 5 };
@@ -245,8 +248,8 @@ export class Serve {
  * finish('chunk_hash'). hashes: the list from an earlier attempt (a resume), else it comes first.
  */
 export class Pull {
-  constructor({ m, have, hashes = null, write, flush, channel, onEnd, onProgress = () => {}, onList = () => {}, h = sha256 }) {
-    Object.assign(this, { m, have, write, flush, ch: channel, onEnd, onProgress, onList, h });
+  constructor({ m, have, hashes = null, write, flush, channel, onEnd, onProgress = () => {}, onList = () => {}, h = sha256, flushEach = OUTSTANDING }) {
+    Object.assign(this, { m, have, write, flush, ch: channel, onEnd, onProgress, onList, h, flushEach: Math.max(1, Math.min(OUTSTANDING, flushEach)) });
     this.hashes = hashes ?? (m.chunks === 0 ? new Uint8Array(0) : null);
     this.listGot = 0; this.listBuf = this.hashes ? null : new Uint8Array(m.chunks * 32);
     this.out = new Map(); this.writingSet = new Set(); this.unflushed = []; this.again = []; this.next = 0;
@@ -300,7 +303,7 @@ export class Pull {
       this.writingSet.delete(i);
       this.unflushed.push(i);
       this.onProgress(buf.length);
-      if (this.unflushed.length >= OUTSTANDING || (this.out.size === 0 && this.writingSet.size === 0)) await this.#flush();
+      if (this.unflushed.length >= this.flushEach || (this.out.size === 0 && this.writingSet.size === 0)) await this.#flush();
       this.#ask();
     }).catch((e) => { this.error = e; this.#end('cancelled'); });
   }
@@ -358,6 +361,18 @@ export function pathOrder({ pro = false, prefer = 'fast', via = 'auto', direct =
   if (via === 'tor') return tor ? ['tor'] : [];
   const order = pro && prefer === 'private' ? ['tor', 'direct', 'turn'] : pro ? ['direct', 'turn', 'tor'] : ['direct', 'tor'];
   return order.filter((p) => (p === 'direct' ? direct : p === 'tor' ? tor : turn && pro));
+}
+/**
+ * The accept rule (design §10.2): → 'auto' (lands without a question) or 'ask'. trust: 'own' (own agents and
+ * contacts), 'compared' (a friend whose four words were compared) or 'other' (not compared, a public-code
+ * joiner, quiet: always asked); limitMb: the contact's own size (0: always ask), null for defaultMb; MB are
+ * 10^6 bytes; direct: may this contact see the addresses already (else the human is asked first).
+ */
+export function acceptRule({ size, trust, limitMb = null, defaultMb = AUTO_MB, direct = true }) {
+  if (trust !== 'own' && trust !== 'compared') return 'ask';
+  const mb = limitMb ?? defaultMb;
+  if (!(Number.isFinite(mb) && mb > 0) || !(size <= mb * 1e6)) return 'ask';
+  return direct === true ? 'auto' : 'ask';
 }
 /** Who serves the onion: the sender if it can, else the receiver; null when no pair of the two works. */
 export function torRoles(sender, receiver) {

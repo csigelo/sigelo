@@ -340,3 +340,9 @@ a.row { text-decoration: none; color: inherit; } a.row small { color: var(--link
 .screen.locked .field { text-align: left; }
 header.top.plain { border-bottom: 0; }
 .card.ask { border-color: var(--accent); }
+
+/* A photo in a chat (design/transfer.md §10.4): the preview, then its full size and state. */
+.msg.photo { padding: 4px 4px 6px; }
+.msg img.photo { display: block; max-width: 100%; height: auto; border-radius: 10px; }
+.msg .ph { display: block; padding: 0; border: 0; background: none; cursor: pointer; }
+.msg.photo .tag, .msg.photo .meta { padding: 0 6px; }

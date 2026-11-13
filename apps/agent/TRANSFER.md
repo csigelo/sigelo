@@ -28,7 +28,8 @@ for it; beside a page they refuse (`busy`): use its Files view.
 | `decline <id>`, `cancel <id>`, `forget <id>` | no; stop either side; drop the record and partials here |
 | `resume <id>` | after a drop or a lapsed offer: only the missing chunks |
 | `direct <contact> on\|off` | may this contact see your addresses |
-| `settings [--tor on\|off] [--prefer fast\|private]` | the Tor checkbox; Pro's order |
+| `auto <contact> <MB>\|default` | that contact's size for landing unasked (0: always ask) |
+| `settings [--tor on\|off] [--prefer fast\|private] [--auto <MB>]` | the Tor checkbox; Pro's order; the size |
 
 Exit 0 done or queued, 1 refused or failed (the check on stderr), 2 usage. MCP: `sigelo_transfer`,
 `action` `send`, `accept`, `decline`, `resume`, `cancel`, `status`; a file offered reaches `sigelo_inbox`
@@ -37,7 +38,9 @@ as an event `{type: "transfer", what: "asked", id, file, size}`. Page: the Files
 
 ## Consent and the direct switch
 
-- **A manifest is a question.** Name, size, SHA-256 and the chunk list's hash, under 1 KiB. Only the
+- **A manifest is a question,** unless the accept rule answers: up to 25 MB (`--auto`, per contact `auto`) from own agents
+  and contacts and friends whose words you compared, direct on, it lands unasked; others always ask.
+  Name, size, SHA-256 and the chunk list's hash, under 1 KiB. Only the
   receiver's operator (CLI, page) or its agent (MCP, told by the operator) says yes. At most 8 wait
   per contact, 64 in all; more are answered `busy`. A manifest lives 7 days.
 - **Direct shows the contact your public and LAN addresses.** On for your own agents; asked once for
@@ -79,6 +82,13 @@ set once checked and flushed), `.list`. Done: placed as `send-file` places one,
 `{type: "file", …, transfer: <id>}`. A drop resumes by itself (3 tries), with a new offer for the same
 manifest. The sender reads the file in place and ends `file_changed` if its size or time moved.
 Partials go 7 days after the last byte, or at `forget`. State: `<identity>.transfers.json` (0600).
+
+## The phone app
+
+It sends and receives by itself, direct only, while open (a lock may cut it; it resumes on return).
+Files come from the system's picker or camera and land in Downloads. A photo's preview
+(`sigelo-photo/0`, ≤ 64 KB) goes at once; location tags are removed unless Settings keeps them. A
+group: one transfer per member you are paired with.
 
 ## What each party learns
 

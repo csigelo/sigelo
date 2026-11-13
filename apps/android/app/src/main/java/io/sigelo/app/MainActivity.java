@@ -58,6 +58,11 @@ import java.util.regex.Pattern;
  * confirmed; not confirmed, the app goes to the background, locked. The FULL key's own window in
  * AndroidKeyStore (SigeloBridge.AUTH_SECONDS) stays the inner guard.
  *
+ * Big files (SigeloBridge "big-*", BigFiles, design/transfer.md §10): the system's picker and camera answer
+ * here (onActivityResult, the camera's and the storage permission's results); a file the page reads is
+ * served by range at ORIGIN/.big/<doc> (serve), never from anywhere else; the screen kept on while a
+ * transfer moves.
+ *
  * Notifications (SigeloBridge "notify"): a tap opens this activity with action io.sigelo.app.OPEN and
  * the tag; the tag goes to the page as {ev:"open", tag} (onNewIntent; a start by the tap: once the
  * page's port is open). POST_NOTIFICATIONS is asked when the page asks (Android 13+).
@@ -237,6 +242,8 @@ public final class MainActivity extends Activity {
         if (!ours(u)) return refuse(404, "Not Found");
         if (!"GET".equals(r.getMethod())) return refuse(405, "Method Not Allowed");
         String path = u.getPath();
+        // A file the page sends, by range (BigFiles: the doc a pick or a photo gave; 409 once it changed).
+        if (path != null && path.startsWith("/.big/") && bridge != null) return bridge.big.range(u, r.getRequestHeaders(), HEADERS);
         if (path == null || path.equals("/")) path = "/index.html";
         if (!SAFE_PATH.matcher(path).matches() || path.contains("..") || path.contains("//")) return refuse(404, "Not Found");
         int dot = path.lastIndexOf('.');
@@ -378,6 +385,7 @@ public final class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int req, String[] perms, int[] grants) {
+        if (bridge != null && bridge.big.permission(req, grants)) return;
         if (req == REQ_NOTIFY) {
             List<Consumer<Boolean>> waiting = new ArrayList<>(pendingNotify);
             pendingNotify.clear();
@@ -436,6 +444,7 @@ public final class MainActivity extends Activity {
             if (cb != null) cb.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result, data));
             return;
         }
+        if (bridge != null && bridge.bigResult(req, result, data)) return;
         if (req == REQ_AUTH) {
             Runnable ok = afterAuth, no = authCancelled;
             afterAuth = authCancelled = null;

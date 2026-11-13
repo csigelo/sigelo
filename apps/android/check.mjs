@@ -2,7 +2,7 @@
 // The Android project checked without the SDK (design/apps.md §8): what can be known of it on a
 // machine with Node alone. The build itself runs on CI (.github/workflows/android.yml).
 //   node apps/android/check.mjs     → ALL PASS (n)
-// The manifest and resources (well-formed, three permissions, no backup, references resolve, the
+// The manifest and resources (well-formed, four permissions (storage on Android 9 only), one provider not exported, no backup, references resolve, the
 // icon from assets/brand/app-icon.svg), the Gradle files (AGP pinned, minSdk 28, targetSdk 35, no
 // dependency, braces balanced), the wrapper (its jar by SHA-256, the distribution pinned), the Java
 // (the bridge's operations as platform-android.mjs sends them, the WebView's settings, every asset
@@ -107,7 +107,10 @@ ok(Object.values(xml).every(Boolean), `XML: ${xmlFiles.length} files well-formed
 const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
 {
   const perms = all(man, 'uses-permission').map((p) => p.attrs['android:name']).sort();
-  ok(perms.join() === 'android.permission.CAMERA,android.permission.INTERNET,android.permission.POST_NOTIFICATIONS', `manifest: INTERNET, CAMERA and POST_NOTIFICATIONS only (${perms})`);
+  ok(perms.join() === 'android.permission.CAMERA,android.permission.INTERNET,android.permission.POST_NOTIFICATIONS,android.permission.WRITE_EXTERNAL_STORAGE', `manifest: INTERNET, CAMERA, POST_NOTIFICATIONS and WRITE_EXTERNAL_STORAGE only (${perms})`);
+  const wes = all(man, 'uses-permission').find((p) => p.attrs['android:name'] === 'android.permission.WRITE_EXTERNAL_STORAGE');
+  ok(wes?.attrs['android:maxSdkVersion'] === '28' && all(man, 'uses-permission').filter((p) => p !== wes).every((p) => p.attrs['android:maxSdkVersion'] === undefined),
+    'manifest: the shared storage only up to Android 9 (maxSdkVersion 28: Downloads through MediaStore after, no permission)');
   ok(all(man, 'uses-sdk').length === 0 && man.attrs.package === undefined, 'manifest: no uses-sdk, no package (minSdk, targetSdk and the namespace are in app/build.gradle)');
   const app = all(man, 'application')[0]?.attrs ?? {};
   ok(app['android:allowBackup'] === 'false' && app['android:dataExtractionRules'] === '@xml/data_extraction_rules' && app['android:debuggable'] === undefined && app['android:usesCleartextTraffic'] === undefined,
@@ -116,7 +119,11 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   ok(acts.length === 1 && acts[0].attrs['android:name'] === '.MainActivity' && acts[0].attrs['android:exported'] === 'true'
     && all(acts[0], 'action').some((a) => a.attrs['android:name'] === 'android.intent.action.MAIN') && all(acts[0], 'category').some((a) => a.attrs['android:name'] === 'android.intent.category.LAUNCHER'),
   'manifest: one activity, MainActivity, exported for the launcher only');
-  ok(all(man, 'service').length + all(man, 'receiver').length + all(man, 'provider').length === 0 && all(acts[0], 'data').length === 0, 'manifest: no service, receiver, provider or URL handler');
+  ok(all(man, 'service').length + all(man, 'receiver').length === 0 && all(acts[0], 'data').length === 0, 'manifest: no service, receiver or URL handler');
+  const pv = all(man, 'provider');
+  ok(pv.length === 1 && pv[0].attrs['android:name'] === '.PhotoProvider' && pv[0].attrs['android:authorities'] === 'io.sigelo.app.photos' && pv[0].attrs['android:exported'] === 'false'
+    && pv[0].attrs['android:grantUriPermissions'] === 'true' && all(pv[0], 'grant-uri-permission').length === 0 && all(pv[0], 'meta-data').length === 0,
+    'manifest: one provider, PhotoProvider (io.sigelo.app.photos), not exported, reached only through the camera intent\'s grant');
   const dx = xml['apps/android/app/src/main/res/xml/data_extraction_rules.xml'];
   const domains = (k) => all(all(dx, k)[0] ?? { kids: [] }, 'exclude').map((e) => `${e.attrs.domain}:${e.attrs.path}`).sort().join();
   ok(all(dx, 'include').length === 0 && domains('cloud-backup') === 'database:.,external:.,file:.,root:.,sharedpref:.' && domains('device-transfer') === domains('cloud-backup'), 'data extraction: every domain excluded from backup and transfer');
@@ -177,7 +184,7 @@ ok(/storeType 'pkcs12'/.test(app) && /sigelo\.debugKeystore/.test(app) && /tasks
 
 // ================================================================ Java
 const java = Object.fromEntries(walk(JAVA).filter((f) => f.endsWith('.java')).map((f) => [f.slice(JAVA.length + 1), read(f)]));
-ok(Object.keys(java).sort().join() === 'MainActivity.java,SigeloBridge.java', `java: MainActivity and SigeloBridge (${Object.keys(java)})`);
+ok(Object.keys(java).sort().join() === 'BigFiles.java,MainActivity.java,PhotoProvider.java,SigeloBridge.java', `java: MainActivity, SigeloBridge, BigFiles and PhotoProvider (${Object.keys(java)})`);
 ok(Object.values(java).every((t) => balanced(code(t)) && /^package io\.sigelo\.app;$/m.test(t) && [...t.matchAll(/^import ([\w.]+);$/gm)].every((m) => /^(android|java|javax|org\.json)\./.test(m[1]))),
   'java: braces balanced, package io.sigelo.app, no import but the platform\'s (no AndroidX)');
 const A = await import(pathToFileURL(join(REPO, 'apps', 'web', 'platform-android.mjs')).href).catch(() => null);
@@ -236,6 +243,27 @@ ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\
     'open event: a tap (onNewIntent, or the start\'s intent) posts {ev:"open", tag}, kept until the page\'s port is open and posted once; the page routes ev messages to their listeners, never to a request waiting');
 }
 ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooserParams\.parseResult/.test(ma), 'files: a file input opens the system picker');
+{
+  // Big files (design/transfer.md §10): BigFiles and PhotoProvider.
+  const bf = java['BigFiles.java'], pp = java['PhotoProvider.java'];
+  ok(/path\.startsWith\("\/\.big\/"\) && bridge != null\) return bridge\.big\.range\(u, r\.getRequestHeaders\(\), HEADERS\);/.test(ma) && ma.indexOf('bridge.big.range') < ma.indexOf('SAFE_PATH.matcher(path)')
+    && /if \(!String\.valueOf\(st\[0\]\)\.equals\(u\.getQueryParameter\("size"\)\) \|\| !String\.valueOf\(st\[1\]\)\.equals\(u\.getQueryParameter\("mtime"\)\)\) return empty\(409/.test(bf)
+    && /to - from \+ 1 > CHUNK\) return empty\(416/.test(bf) && /docOf\(profile == null \? "p1" : profileChecked\(profile\), doc\)/.test(bf),
+    'big files: a range of a doc this profile picked or took, at most 1 MiB, 409 once its size or time moved; before the page\'s own files');
+  ok(/COLUMN_LAST_MODIFIED\)/.test(bf) && /c\.getLong\(di\) \* 1000/.test(bf) && /MediaStore\.MediaColumns\.DATE_MODIFIED/.test(bf),
+    'big files: a doc\'s time is its last-modified, else the media store\'s DATE_MODIFIED (an edit seen on a resume: file_changed)');
+  ok(/MediaStore\.Downloads\.EXTERNAL_CONTENT_URI/.test(bf) && /IS_PENDING, 1\)/.test(bf) && /IS_PENDING, 0\)/.test(bf) && /static final int CHUNK = 1 << 20;/.test(bf) && /byte\[\] buf = new byte\[CHUNK\];\s*for \(int k; \(k = in\.read\(buf\)\) > 0; \) out\.write\(buf, 0, k\);/.test(bf)
+    && /getNoBackupFilesDir\(\), "transfer"\), profile\)/.test(bf) && /r\.no\("land", "the copy into Downloads failed/.test(bf) && /Manifest\.permission\.WRITE_EXTERNAL_STORAGE\}, REQ_STORAGE/.test(bf),
+    'big files: partials in private no-backup storage per profile; landed in Downloads through MediaStore, pending until whole, a 1 MiB buffer; Android 9 asks the storage permission; a failure said (land)');
+  ok(/MediaStore\.ACTION_IMAGE_CAPTURE\)\.putExtra\(MediaStore\.EXTRA_OUTPUT, out\)/.test(bf) && /PhotoProvider\.uriOf\(f\.getName\(\)\)/.test(bf) && /requestPermissions\(new String\[\] \{Manifest\.permission\.CAMERA\}, REQ_CAMERA_PHOTO\)/.test(bf)
+    && /if \(!keep\) stripLocation\(f\);/.test(bf) && /import android\.media\.ExifInterface;/.test(bf) && /TAG_GPS_LATITUDE/.test(bf) && /x\.saveAttributes\(\)/.test(bf)
+    && /takePersistableUriPermission\(u, Intent\.FLAG_GRANT_READ_URI_PERMISSION\)/.test(bf) && /ACTION_OPEN_DOCUMENT/.test(bf),
+    'big files: the system camera into the cache through PhotoProvider, CAMERA asked at the first photo, location tags removed unless kept (the platform\'s ExifInterface); the picker\'s read grant kept');
+  ok(/Pattern\.compile\("\^\[0-9a-f\]\{32\}\\\\\.jpg\$"\)/.test(pp) && /getPathSegments\(\)\.size\(\) != 1/.test(pp) && /getCacheDir\(\), "photos"\)/.test(pp) && (pp.match(/throw new UnsupportedOperationException/g) ?? []).length === 3,
+    'PhotoProvider: one name shape (32 hex .jpg) in cache/photos, nothing else; no insert, delete or update');
+  ok(/FLAG_KEEP_SCREEN_ON/.test(bf) && /if \(bridge != null && bridge\.big\.permission\(req, grants\)\) return;/.test(ma) && /if \(bridge != null && bridge\.bigResult\(req, result, data\)\) return;/.test(ma),
+    'big files: the screen kept on while a transfer moves; the picker\'s, camera\'s and permissions\' answers routed to BigFiles');
+}
 ok(/r\.hasGesture\(\)/.test(ma) && /ACTION_VIEW/.test(ma) && /CATEGORY_BROWSABLE/.test(ma), 'links: elsewhere opens in the browser, on a tap');
 ok(/setEndpointIdentificationAlgorithm\("HTTPS"\)/.test(java['SigeloBridge.java']) && /getDefaultHostnameVerifier\(\)\.verify\(host/.test(java['SigeloBridge.java']) && /setInstanceFollowRedirects\(false\)/.test(java['SigeloBridge.java'])
   && !/TrustManager|setHostnameVerifier|ALLOW_ALL/.test(code(java['SigeloBridge.java'])), 'network: TLS names checked twice, no custom trust, no redirect followed');

@@ -163,7 +163,7 @@
   },
   "vendor/contact/group.mjs": {
    "from": "apps/contact/group.mjs",
-   "sha256": "d79d89ba49e573b710410fd9c043b2868b1c16f48fb056698e6912ea6f051a19"
+   "sha256": "fa67a85eba54bdee4763ea3d61843a540a9fbd4c5ac32959189337f40ed914d1"
   },
   "vendor/contact/invite.mjs": {
    "from": "apps/contact/invite.mjs",
@@ -179,7 +179,11 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "c259eab1ad54efa8fff99a80f4ba5236864f33cd0ae76a71e1c4322f8a89e598"
+   "sha256": "8258cbecb8f8ddae9923a77cc0032821123cb86e90b15b36640069c05f4b3923"
+  },
+  "vendor/contact/photo.mjs": {
+   "from": "apps/contact/photo.mjs",
+   "sha256": "77b5f1332a420e570d3b75c2609c23813fb1dad97066f3f6da46b7b67d5e911a"
   },
   "vendor/contact/prekeys.mjs": {
    "from": "apps/contact/prekeys.mjs",
@@ -205,6 +209,10 @@
    "from": "apps/contact/restore.mjs",
    "sha256": "503c297a9c5881e63a0a1da54c4a87f9f2f20a34dfaf3e04176ab94c5e3e95d3"
   },
+  "vendor/contact/rtc-web.mjs": {
+   "from": "apps/contact/rtc-web.mjs",
+   "sha256": "00b9abfefe68d3f4f5c094d1589ad0d0da0020822732cb6a387228ba52ddbcf6"
+  },
   "vendor/contact/short.mjs": {
    "from": "apps/contact/short.mjs",
    "sha256": "2697d03c03fda4a8fa690b74b74048c8bb6d7bc7b08355435741540f22eeb2bd"
@@ -212,6 +220,18 @@
   "vendor/contact/store.mjs": {
    "from": "apps/contact/store.mjs",
    "sha256": "3c08603d484c1ad6f5b74a8baf96681b35c73297a69f648668efb8666893a30e"
+  },
+  "vendor/contact/transfer-engine.mjs": {
+   "from": "apps/contact/transfer-engine.mjs",
+   "sha256": "5304b8e1c8d053bcddc7730c906e04985d5e3d32eb85ad0703e2c3d8d2e6b17b"
+  },
+  "vendor/contact/transfer-web.mjs": {
+   "from": "apps/contact/transfer-web.mjs",
+   "sha256": "4e0de2e42f0391dc0dc69aa04405fe8afc20e198e0886cd50ec9810de76dba09"
+  },
+  "vendor/contact/transfer.mjs": {
+   "from": "apps/contact/transfer.mjs",
+   "sha256": "1fea281d60719197a181177226104e68d5e597ccc1b8a508972f98ceb067431b"
   },
   "vendor/contact/words-lock.mjs": {
    "from": "apps/contact/words-lock.mjs",
@@ -259,11 +279,11 @@
   },
   "vendor/ui.css": {
    "from": "apps/agent/ui.css",
-   "sha256": "1ea9914a37738908f3703ae262a2a34bfa589696864cf34ec26c718214d273ba"
+   "sha256": "9879efce962ccfba955a64f5a9c6390ee5e52caee6414bfd49a99008efb7e482"
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "d7baa0da141932e54d4db6b7e3ce9f455e4ecf05e7de89ae1f6bacdc31e9b92a"
+   "sha256": "b676ff080301d6c78dee51f79bb2e094e5d79ba4bb2698aea1c0947e0aff7553"
   }
  }
 }

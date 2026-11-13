@@ -22,6 +22,10 @@
 // The relay new codes name: options.relay or the platform's env.relay when given (fixed, as SIGELO_RELAY
 // is for `sigelo-agent ui`), else the page's setting (GET/POST /api/settings, in the page's data),
 // else relay.sigelo.ai. presetRelay(files, host): the first-start form's choice, before any router.
+// Big files (design/transfer.md §10): where the platform has a shell that holds them (platform.big: the
+// Android app's bridge), the page runs the transfer engine itself, the bytes in the shell, the direct path
+// on the WebView's RTCPeerConnection (none: no transfer); /api/transfers* as `sigelo-agent ui` serves them,
+// a file named by the doc the system's picker or camera gave. No Tor here.
 // keeper: { load() → bytes | null, save(bytes) } (seed.mjs keeperOf: the sealed keeper of a restore or a create):
 // the Agents list and their enrolment (apps/contact/page.mjs); without one (an imported SAFE or FULL file) the
 // list is empty and enrolling refuses `keeper`.
@@ -33,6 +37,9 @@ import * as G from './vendor/contact/group.mjs';
 import * as L from './vendor/contact/link.mjs';
 import { makePage, refuse } from './vendor/contact/page.mjs';
 import { codeKind } from './vendor/contact/short.mjs';
+import { Engine as TransferEngine } from './vendor/contact/transfer-engine.mjs';
+import { webIo, webTransfers } from './vendor/contact/transfer-web.mjs';
+import * as rtcWeb from './vendor/contact/rtc-web.mjs';
 
 export const IDENTITY = 'app/me.local.json';
 const unhex = (s) => {
@@ -73,6 +80,9 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
   const opened = async () => { const b = await keeper.load(); if (b === null) return null; try { return JSON.parse(text(b)); } finally { b.fill(0); } };
   const strip = (k) => { if (k === null) return null; const { root_hex: _, ...rest } = k; return rest; };
   const env = Object.fromEntries(Object.entries(platform.env ?? {}).filter(([k, v]) => v !== undefined && v !== null && ['relay', 'endpoints', 'retentionDays', 'shortRelay', 'registry'].includes(k)));
+  // The transfers' io, the records in this profile's files, the bytes in the shell.
+  const big = platform.big ?? null, rtc = typeof globalThis.RTCPeerConnection === 'function' ? rtcWeb : null;
+  const tio = big ? webIo({ files, big, base }) : null;
   const page = makePage({
     makeCarrier: (onEvent, kept) => new Carrier({
       identity: () => { const s = identity(); return { secret: unhex(s.secret), bundle: bundleOf(s) }; },
@@ -95,6 +105,20 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
     },
     hooks: {
       me,
+      ...(tio && { transfers: {
+        lib: webTransfers(tio, { rtc }), identity: IDENTITY,
+        // The screen kept on while a transfer moves (the shell's awake): locked, Android stops the app sooner or later.
+        make: (carrier, onEvent, o) => {
+          let on = false;
+          const e = new TransferEngine({ carrier, io: tio, rtc: async () => rtc, maxServe: 2, compared: o?.compared, onEvent: (x) => {
+            onEvent(x);
+            const now = e.attempts.size > 0;
+            if (now !== on) { on = now; void big.awake?.(now).catch(() => {}); }
+          } });
+          return e;
+        },
+        pick: () => big.pick(), photo: (o) => big.photo(o), open: (uri, name) => big.open(uri, name),
+      } }),
       meInfo: () => ({ identity_file: IDENTITY, recovery: headOf(identity()).recovery === null ? 'none' : 'set', key: 'browser',
         erase: 'On the machine holding the recovery key, with this identity\'s file: SIGELO_IDENTITY=<file> sigelo-agent erase-request --recovery-key <your recovery.key>',
         ...(seat?.restored() && { restored: seat.restored() }) }),

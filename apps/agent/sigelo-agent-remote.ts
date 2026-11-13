@@ -45,7 +45,7 @@ const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/presence'
   'POST /api/groups/remove', 'POST /api/groups/leave', 'POST /api/groups/role', 'POST /api/groups/brake',
   'POST /api/link', 'POST /api/unlink', 'POST /api/links/allow', 'GET /api/settings', 'POST /api/settings', 'GET /api/relays', 'POST /api/relays/test',
   'POST /api/agents/enrol-code', 'POST /api/agents/enrol-words', 'POST /api/agents/revoke', 'POST /api/agents/rename',
-  'POST /api/transfers/accept', 'POST /api/transfers/decline', 'POST /api/transfers/cancel', 'POST /api/transfers/resume', 'POST /api/transfers/forget', 'POST /api/transfers/direct',
+  'POST /api/transfers/accept', 'POST /api/transfers/decline', 'POST /api/transfers/cancel', 'POST /api/transfers/resume', 'POST /api/transfers/forget', 'POST /api/transfers/direct', 'POST /api/transfers/auto',
   'GET /api/transfers/settings', 'POST /api/transfers/settings', 'POST /api/kind',
   'GET /api/keeper', 'POST /api/keeper/agent', 'POST /api/keeper/approvers', 'POST /api/keeper/approve', 'POST /api/keeper/refuse', 'POST /api/keeper/restart',
   'POST /api/wallet/review', 'POST /api/wallet/send', 'GET /api/wallet/services', 'POST /api/wallet/service', 'GET /api/wallet/nodes', 'POST /api/wallet/node',
@@ -87,6 +87,8 @@ export async function remoteCall(scope: Scope, msg: { method: string; path: stri
   const b = msg.body === undefined ? {} : msg.body;
   if (url === null || !url.pathname.startsWith('/api/') || url.origin !== 'http://remote') return [404, { error: { check: 'route', message: 'not a route' } }];
   if (deviceRoute(url.pathname)) return [403, { error: { check: 'remote', message: 'device routes are never remote: moving keys needs a human at the computer' } }];
+  // The phone's own (its picker, its camera, opening a file there): a human holding that phone, never a control.
+  if (['/api/transfers/pick', '/api/transfers/photo', '/api/transfers/open'].includes(url.pathname)) return [403, { error: { check: 'remote', message: 'the phone\'s picker, camera and files are never remote' } }];
   if (url.pathname === '/api/transfers/send') return [403, { error: { check: 'remote', message: 'sending a file of the computer by its path is never remote: a human at the computer picks it' } }];
   if (!SCOPES[scope].has(`${msg.method} ${url.pathname}`)) {
     return routes[`${msg.method} ${url.pathname}`] ? [403, { error: { check: 'scope', message: `${msg.method} ${url.pathname} is outside this control's scope (${scope})` } }]

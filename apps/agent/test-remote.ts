@@ -168,7 +168,7 @@ await page.close();
 {
   const all = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/-]+)`/gm)].map((m) => m[1]!);
   // The device routes (D4) are documented too, and in no scope: deviceRoute refuses them before any scope.
-  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && x !== 'POST /api/transfers/send');
+  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && !['POST /api/transfers/send', 'POST /api/transfers/pick', 'POST /api/transfers/open'].includes(x));
   const [r, c, a] = [rm.SCOPES.read, rm.SCOPES.chat, rm.SCOPES.all];
   ok('remote: every UI-API.md route but the device ones is in scope all; read ⊂ chat ⊂ all', routes.length >= 17 && routes.every((x) => a.has(x)) && a.size === routes.length
     && [...r].every((x) => c.has(x)) && [...c].every((x) => a.has(x)), JSON.stringify(routes.filter((x) => !a.has(x))));
@@ -378,9 +378,10 @@ else {
     const BY_ID = ['accept', 'decline', 'cancel', 'resume', 'forget'].map((v) => `POST /api/transfers/${v}`);
     const byId = await Promise.all(BY_ID.map((x) => call('POST', x.split(' ')[1]!, { id: 'ab'.repeat(16) })));
     const td = await call('POST', '/api/transfers/direct', { contact: 'did:sigelo:zNope', on: true });
-    ok('remote e2e transfers: the list and settings sealed → 200; accept, decline, cancel, resume, forget of an unknown id → 404 transfer_unknown; direct of no contact → 404', tl.status === 200 && ts.status === 200 && tp.body.prefer === 'private'
-      && byId.every((x) => x.status === 404 && x.body.error.check === 'transfer_unknown') && td.status === 404, JSON.stringify([tl, tp, byId, td]).slice(0, 900));
-    for (const x of [...BY_ID, 'POST /api/transfers/direct']) done_.set(x, 200);
+    const ta = await call('POST', '/api/transfers/auto', { contact: 'did:sigelo:zNope', mb: 0 }), tk = await call('POST', '/api/transfers/photo', {});
+    ok('remote e2e transfers: the list and settings sealed → 200; accept, decline, cancel, resume, forget of an unknown id → 404 transfer_unknown; direct and auto of no contact → 404; the phone\'s photo never remote (403)', tl.status === 200 && ts.status === 200 && tp.body.prefer === 'private'
+      && byId.every((x) => x.status === 404 && x.body.error.check === 'transfer_unknown') && td.status === 404 && ta.status === 404 && tk.status === 403 && tk.body.error.check === 'remote', JSON.stringify([tl, tp, byId, td, ta, tk]).slice(0, 900));
+    for (const x of [...BY_ID, 'POST /api/transfers/direct', 'POST /api/transfers/auto']) done_.set(x, 200);
     // A contact's kind and the keeper (scope all): no such contact → 404; no keeper on this computer → none, its writes 409 keeper_none.
     process.env['SIGELO_SPEND_REGISTRY'] = join(H, 'no-keepers.json');   // never this host's own keepers
     const kd = await call('POST', '/api/kind', { contact: 'did:sigelo:zNope', kind: 'agent' }), kg = await call('GET', '/api/keeper');

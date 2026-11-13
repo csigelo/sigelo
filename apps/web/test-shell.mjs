@@ -267,6 +267,39 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const aadOf = (kind, profile, computer = 'c1') => `sigelo-app ${kind}/0${computer === 'c1' ? (profile === 'p1' ? '' : ` ${profile}`) : ` ${profile} ${computer}`}`;
   const profileOf = (m) => { const p = m.profile ?? 'p1'; if (typeof p !== 'string' || !/^p[1-9]\d{0,2}$/.test(p)) throw Object.assign(new Error('a profile id'), { check: 'profile' }); return p; };
   const computerOf = (m) => { const c = m.computer ?? 'c1'; if (typeof c !== 'string' || !/^c[1-9]\d{0,2}$/.test(c)) throw Object.assign(new Error('a computer id'), { check: 'computer' }); return c; };
+  // Big files (BigFiles.java): docs a pick or a photo gave (per profile), partials written at offsets, Downloads.
+  state.big = { docs: new Map(), parts: new Map(), landed: [], awake: [], photos: [], next: null, n: 0 };
+  const hex32 = (v, what) => { if (typeof v !== 'string' || !/^[0-9a-f]{32}$/.test(v)) throw Object.assign(new Error(`${what}: 32 hex`), { check: 'big' }); return v; };
+  const newDoc = (profile, name, bytes) => { const doc = createHash('sha256').update(`doc ${++state.big.n}`).digest('hex').slice(0, 32); state.big.docs.set(`${profile}/${doc}`, { name, bytes, mtime: 1000 }); return { doc, name, size: bytes.length, mtime: 1000, url: `https://appassets.androidplatform.net/.big/${doc}?size=${bytes.length}&mtime=1000&profile=${profile}` }; };
+  const docOf = (m) => state.big.docs.get(`${profileOf(m)}/${hex32(m.doc, 'doc')}`) ?? (() => { throw Object.assign(new Error('no such file here'), { check: 'file' }); })();
+  const partKey = (m) => `${profileOf(m)}/${hex32(m.part, 'part')}`;
+  function bigOp(m) {
+    const B = state.big;
+    switch (m.op) {
+      case 'big-pick': return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
+      case 'big-photo': B.photos.push(m.keepLocation); return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
+      case 'big-hash': { const d = docOf(m), n = Math.ceil(d.bytes.length / 1048576), h = Buffer.alloc(n * 32); for (let i = 0; i < n; i++) createHash('sha256').update(d.bytes.subarray(i * 1048576, (i + 1) * 1048576)).digest().copy(h, i * 32); return { name: d.name, size: d.bytes.length, mtime: d.mtime, sha256: createHash('sha256').update(d.bytes).digest('hex'), hashes: h.toString('base64') }; }
+      case 'big-stat': { const d = docOf(m); return { size: d.bytes.length, mtime: d.mtime }; }
+      case 'big-write': { const k = partKey(m), b = Buffer.from(m.data, 'base64'), p = B.parts.get(k) ?? Buffer.alloc(0), q = Buffer.alloc(Math.max(p.length, m.offset + b.length)); p.copy(q); b.copy(q, m.offset); B.parts.set(k, q); return {}; }
+      case 'big-flush': partKey(m); return {};
+      case 'big-digest': return { sha256: createHash('sha256').update(B.parts.get(partKey(m)) ?? Buffer.alloc(0)).digest('hex') };
+      case 'big-drop': B.parts.delete(partKey(m)); return {};
+      case 'big-free': return { free: 1e12 };
+      case 'big-land': { const k = partKey(m); if (!B.parts.has(k)) throw Object.assign(new Error('no partial'), { check: 'land' }); B.landed.push({ name: m.name, bytes: B.parts.get(k) }); B.parts.delete(k); return { uri: `content://media/external/downloads/${B.landed.length}`, name: m.name }; }
+      case 'big-open': if (!String(m.uri).startsWith('content://media/')) throw Object.assign(new Error('uri'), { check: 'big' }); B.opened = m.uri; return {};
+      case 'big-awake': B.awake.push(m.on); return {};
+      default: throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
+    }
+  }
+  /** The app's origin as MainActivity.serve answers ORIGIN/.big/<doc>: a range of a doc, 409 once its size or time moved. */
+  const bigFetch = async (url, init = {}) => {
+    const u = new URL(url), doc = u.pathname.slice('/.big/'.length), d = state.big.docs.get(`${u.searchParams.get('profile') ?? 'p1'}/${doc}`);
+    if (!d) return { status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+    if (String(d.bytes.length) !== u.searchParams.get('size') || String(d.mtime) !== u.searchParams.get('mtime')) return { status: 409, arrayBuffer: async () => new ArrayBuffer(0) };
+    const [, a, b] = /^bytes=(\d+)-(\d+)$/.exec(init.headers?.Range ?? '') ?? [];
+    const x = d.bytes.subarray(Number(a), Number(b) + 1);
+    return { status: 206, arrayBuffer: async () => x.buffer.slice(x.byteOffset, x.byteOffset + x.length) };
+  };
   const route = (host, port) => { const p = hosts[host]?.[port]; if (!p) throw Object.assign(new Error(`${host}:${port}: unreachable`), { check: 'connect' }); return p; };
   const shell = {
     info: () => JSON.stringify({ v: 'sigelo-shell/0', mode: state.mode, wipe: state.wipe, version: 'test' }),
@@ -365,6 +398,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             state.notes.set(m.tag, { title: m.title, text: m.text, keys: Object.keys(m).sort().join() });
             post({ id: m.id });
           }
+          else if (m.op.startsWith('big-')) post({ id: m.id, ...bigOp(m) });
           else if (m.op === 'unlock') { state.forced.push(m.force === true); state.unlocks = (state.unlocks ?? 0) + 1; if (state.locked) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); post({ id: m.id }); }
           else throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
         } catch (e) { if (m.id !== undefined) post({ id: m.id, error: { check: e.check ?? 'connect', message: e.message } }); }
@@ -376,7 +410,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
     },
   };
   const open = (tag) => current?.postMessage(JSON.stringify({ ev: 'open', tag }));
-  return { shell, target, state, log, keys, open, connect: () => A.connectBridge({ shell, target }) };
+  return { shell, target, state, log, keys, open, bigFetch, connect: () => A.connectBridge({ shell, target }) };
 }
 
 
@@ -1467,4 +1501,36 @@ try {
   await relay?.close?.();
   rmSync(dir, { recursive: true, force: true });
 }
+// ================================================================ big files through the shell (design/transfer.md §10)
+{
+  const F = fakeShell({ mode: 'self' }), bridge = await F.connect(), pb = A.profileBridge(bridge, 'p2');
+  const p = await A.androidPlatform({ bridge, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
+  const big = A.bigFiles(pb, { fetch: F.bigFetch, origin: 'https://appassets.androidplatform.net' });
+  const OPS = ['big-pick', 'big-photo', 'big-hash', 'big-stat', 'big-write', 'big-flush', 'big-digest', 'big-drop', 'big-free', 'big-land', 'big-open', 'big-awake'];
+  ok(OPS.every((o) => A.OPS.includes(o)) && typeof p.big?.pick === 'function' && p.big.profile === 'p1' && big.profile === 'p2', 'big: twelve operations in OPS; the platform\'s big files, per profile');
+  ok(await big.pick() === null, 'big: the picker cancelled → null');
+  const bytes = new Uint8Array(3 * 1048576 + 17); for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31) & 255;
+  F.state.big.next = ['film.mkv', bytes];
+  const d = await big.pick();
+  ok(/^[0-9a-f]{32}$/.test(d.doc) && d.name === 'film.mkv' && d.size === bytes.length && d.url.includes('profile=p2'), `big: pick → a doc of this profile (${JSON.stringify(d).slice(0, 160)})`);
+  const h = await big.hash(d.doc);
+  ok(h.hashes instanceof Uint8Array && h.hashes.length === 4 * 32 && h.sha256 === createHash('sha256').update(bytes).digest('hex'), 'big: hash in the shell → the chunk hashes (bytes) and the whole');
+  const r = await big.read(d.doc, 1048576, 1048576, { size: d.size, mtime: d.mtime });
+  ok(r.length === 1048576 && r[0] === bytes[1048576] && r.at(-1) === bytes[2 * 1048576 - 1] && !F.log.ops.includes('big-read'), 'big: a range read by fetch from the app\'s origin (no base64 over the port)');
+  F.state.big.docs.get(`p2/${d.doc}`).mtime = 2000;
+  ok(await checkOf(() => big.read(d.doc, 0, 10, { size: d.size, mtime: d.mtime })) === 'file_changed', 'big: the file changed since → file_changed');
+  ok(await checkOf(() => A.bigFiles(bridge, { fetch: F.bigFetch }).hash(d.doc)) === 'file', 'big: another profile\'s doc is no file of this one');
+  const part = 'ab'.repeat(16);
+  await big.write(part, 1048576, bytes.subarray(1048576, 2097152)); await big.write(part, 0, bytes.subarray(0, 1048576)); await big.flush(part);
+  ok(await big.sha256(part) === createHash('sha256').update(bytes.subarray(0, 2097152)).digest('hex'), 'big: written at offsets (out of order), read back whole in the shell');
+  const landed = await big.land(part, 'film.mkv');
+  ok(landed.uri === 'content://media/external/downloads/1' && F.state.big.landed[0].bytes.length === 2097152 && await checkOf(() => big.land(part, 'x')) === 'land', 'big: landed in Downloads (the URI kept); landing it twice refused land');
+  await big.open(landed.uri, 'film.mkv'); await big.awake(true); await big.awake(false);
+  ok(F.state.big.opened === landed.uri && F.state.big.awake.join() === 'true,false', 'big: open the landed file; the screen kept on, then let go');
+  F.state.big.next = ['IMG.jpg', new Uint8Array(10).fill(9)];
+  const ph = await big.photo(), ph2 = await big.photo({ keepLocation: true });
+  ok(ph.name === 'IMG.jpg' && ph2.doc !== ph.doc && F.state.big.photos.join() === 'false,true', 'big: photo → a doc; location removed unless keepLocation');
+  ok(await checkOf(() => big.write('nope', 0, new Uint8Array(1))) === 'big', 'big: a part that is not 32 hex refused here, before the shell');
+}
+
 report();

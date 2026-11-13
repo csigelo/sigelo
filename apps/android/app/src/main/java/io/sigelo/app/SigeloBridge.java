@@ -111,6 +111,9 @@ import javax.net.ssl.SSLSocketFactory;
  *          "New message"; the tag (chat:, group: or pay:, TAG) is its notification tag and id, and comes back
  *          when it is tapped. cancel: removed. ask: POST_NOTIFICATIONS asked (Android 13+) → granted.
  *          Not allowed: refused "notify_permission".
+ *   big-pick, big-photo, big-hash, big-stat, big-write, big-flush, big-digest, big-drop, big-free, big-land, big-open,
+ *   big-awake   big files (BigFiles: the system's picker and camera, ranges read from the file itself, partials
+ *          written at offsets, Downloads; design/transfer.md §10). Every one names its profile.
  *   The shell's own event, no id: {ev:"open", tag} when one of our notifications is tapped (MainActivity
  *          onNewIntent; at a start by the tap, kept until the page's port is open, then posted once).
  */
@@ -142,6 +145,7 @@ public final class SigeloBridge {
     private final ExecutorService io = Executors.newCachedThreadPool();
     private final Map<Integer, Conn> streams = new ConcurrentHashMap<>();
     private final AtomicInteger nextStream = new AtomicInteger();
+    final BigFiles big;
     private WebMessagePort port;   // the main thread's: the page's current port
     private String pendingOpen;    // the main thread's: a tapped notification's tag waiting for the page's port
 
@@ -149,6 +153,7 @@ public final class SigeloBridge {
         this.activity = activity;
         this.web = web;
         this.prefs = activity.getSharedPreferences("sigelo", Context.MODE_PRIVATE);
+        this.big = new BigFiles(activity, prefs);
     }
 
     /** A refusal the page reads as {check, message}. */
@@ -244,6 +249,7 @@ public final class SigeloBridge {
     /** The app ends: every stream closed, no thread left. */
     void close() {
         closePort();
+        big.close();
         io.shutdownNow();
     }
 
@@ -340,6 +346,7 @@ public final class SigeloBridge {
             case "forget-profile":
                 answer(to, id, () -> {
                     forgetProfile(profileOf(m));
+                    big.forget(profileOf(m));
                     return ok(id);
                 });
                 break;
@@ -405,9 +412,74 @@ public final class SigeloBridge {
             case "notify":
                 notification(to, id, m);
                 break;
+            case "big-pick":
+            case "big-photo":
+            case "big-land":
+            case "big-open":
+                bigAsync(to, id, m, op);
+                break;
+            case "big-hash":
+                answer(to, id, () -> big.hash(m).put("id", id));
+                break;
+            case "big-stat":
+                answer(to, id, () -> big.stat(m).put("id", id));
+                break;
+            case "big-write":
+                answer(to, id, () -> big.write(m).put("id", id));
+                break;
+            case "big-flush":
+                answer(to, id, () -> big.flush(m).put("id", id));
+                break;
+            case "big-digest":
+                answer(to, id, () -> big.sha(m).put("id", id));
+                break;
+            case "big-drop":
+                answer(to, id, () -> big.drop(m).put("id", id));
+                break;
+            case "big-free":
+                answer(to, id, () -> big.free(m).put("id", id));
+                break;
+            case "big-awake":
+                big.awake(m.optBoolean("on", false));
+                post(to, ok(id));
+                break;
             default:
                 fail(to, id, "op", "no operation " + op);
         }
+    }
+
+    // ---------------------------------------------------------------- big files (BigFiles)
+
+    /** The big-file asks that wait for another activity or a permission: the answer posted when it comes. */
+    private void bigAsync(WebMessagePort to, int id, JSONObject m, String op) {
+        BigFiles.Reply r = new BigFiles.Reply() {
+            @Override
+            public void ok(JSONObject o) {
+                try {
+                    post(to, o.put("id", id));
+                } catch (JSONException e) {
+                    fail(to, id, "big", "unreadable");
+                }
+            }
+
+            @Override
+            public void no(String check, String message) {
+                fail(to, id, check, message);
+            }
+        };
+        try {
+            if (op.equals("big-pick")) big.pick(m, r);
+            else if (op.equals("big-photo")) big.photo(m, r);
+            else if (op.equals("big-land")) big.land(m, r, this::spawn);
+            else big.openFile(m, r);
+        } catch (Refused e) {
+            fail(to, id, e.check, e.getMessage());
+        }
+    }
+
+    /** MainActivity's: a pick or a photo came back. */
+    boolean bigResult(int req, int code, Intent data) {
+        return big.result(req, code, data, this::spawn);
     }
 
     // ---------------------------------------------------------------- the app lock's settings

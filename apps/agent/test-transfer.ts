@@ -40,6 +40,9 @@ try {
   const ask = await cli('alice', 'transfer', 'send', 'bob', file, '--wait', '0');
   ok('send to a friend contact, the switch not set, no terminal: exit 1, direct_ask, says --direct', ask.status === 1 && ask.stderr.includes('direct_ask') && ask.stderr.includes('--direct on'), ask.stderr);
   for (const [a, b] of [['alice', 'bob'], ['bob', 'alice']] as const) await cli(a, 'tier', b, 'own');
+  // The accept rule (design/transfer.md §10.2) lands files up to 25 MB from own contacts unasked: off here, for the consent below.
+  const auto0 = await cli('bob', 'transfer', 'settings', '--auto', '0'), autoBad = await cli('bob', 'transfer', 'settings', '--auto', 'lots');
+  ok('settings --auto 0: kept (always ask), said; --auto lots: exit 2', auto0.status === 0 && json<{ auto_mb: number }>(auto0.stdout)?.auto_mb === 0 && auto0.stderr.includes('up to 0 MB') && autoBad.status === 2, auto0.stderr + autoBad.stderr);
 
   // A no first: decline.
   const small = join(H, 'small.txt');
@@ -78,6 +81,12 @@ try {
   ok('no sigelo-transfer/0 in history', !hist.includes('sigelo-transfer/0'));
   const fg = await cli('bob', 'transfer', 'forget', id), l2 = json<{ in: Rec[] }>((await cli('bob', 'transfer', 'list')).stdout);
   ok('forget: gone from the list', fg.status === 0 && !(l2?.in ?? []).some((r) => r.id === id), fg.stderr);
+  // The accept rule back on, per contact: bob says yes to alice's files up to 1 MB; a small one is accepted by the rule.
+  const au = await cli('bob', 'transfer', 'auto', 'alice', '1'), auBad = await cli('bob', 'transfer', 'auto', 'alice', 'x');
+  const s9 = await cli('alice', 'transfer', 'send', 'bob', small, '--wait', '0'), id9 = json<Rec>(s9.stdout)?.id ?? '';
+  let r9: (Rec & { by?: string }) | undefined;
+  for (let i = 0; i < 30 && !r9; i++) { await new Promise((r) => setTimeout(r, 500)); r9 = json<{ in: (Rec & { by?: string })[] }>((await cli('bob', 'transfer', 'list')).stdout)?.in.find((r) => r.id === id9 && r.by === 'rule'); }
+  ok('transfer auto alice 1: kept; a 5-byte file is accepted by the rule, no question; auto x: exit 2', au.status === 0 && au.stderr.includes('up to 1 MB') && auBad.status === 2 && r9?.state === 'accepted', au.stderr + JSON.stringify(r9));
   const st = await cli('bob', 'transfer', 'settings', '--tor', 'off');
   ok('settings --tor off: kept, said', st.status === 0 && json<{ tor: boolean }>(st.stdout)?.tor === false && st.stderr.includes('Tor off'), st.stderr);
 } finally { await relay.close?.(); }

@@ -21,7 +21,8 @@ interface Engine { kick(): Promise<void>; idle(ms?: number, busy?: () => boolean
 export interface TransferLib {
   send(o: object): Promise<Rec>; accept(o: object): Rec; resume(o: object): Rec; decline(o: object): Promise<Rec>; cancel(o: object): Promise<Rec>; forget(o: object): Rec;
   list(o: object): { out: Rec[]; in: Rec[]; direct: Record<string, boolean>; settings: { tor: boolean; prefer: string } };
-  setDirect(o: object): { did: string; name: string; direct: boolean }; settings(o: object): { tor: boolean; prefer: string };
+  setDirect(o: object): { did: string; name: string; direct: boolean }; settings(o: object): { tor: boolean; prefer: string; auto_mb: number };
+  setAuto(o: object): { did: string; name: string; auto_mb: number | null };
   intake(o: object): Promise<unknown[]>;
   torCaps(cfg: unknown): Promise<{ serve: boolean; connect: boolean }>; torConfig(): unknown; loadRtc(): Promise<unknown>;
   Engine: new (o: object) => Engine;
@@ -39,7 +40,11 @@ export const USAGE = `sigelo-agent transfer — big files agent to agent (TRANSF
   transfer resume <id> [--wait <s>]        after a drop or a lapsed offer: only the chunks missing
   transfer forget <id>                     the record and its partials gone, here
   transfer direct <contact> on|off         the direct switch for that contact
-  transfer settings [--tor on|off] [--prefer fast|private]   Tor (off when no tor daemon answers); Pro's order
+  transfer auto <contact> <MB>|default     that contact's size for landing without a question (0: always ask)
+  transfer settings [--tor on|off] [--prefer fast|private] [--auto <MB>]   Tor (off when no tor daemon
+                                           answers); Pro's order; files from own agents and contacts (and
+                                           friends whose words were compared) up to --auto MB (default 25)
+                                           land unasked, larger ones ask
 
 --wait: seconds to stay connected (default 3600; 0: return once sent). Each verb: --identity <file>, or
 --operator. A watcher (sigelo-agent watch) moves the bytes for it when one runs on the identity.`;
@@ -47,9 +52,9 @@ export const USAGE = `sigelo-agent transfer — big files agent to agent (TRANSF
 const SUBS: Record<string, { flags: string[]; args: [number, number] }> = {
   send: { flags: ['--via', '--direct', '--wait'], args: [2, 2] }, list: { flags: [], args: [0, 0] }, accept: { flags: ['--direct', '--via', '--wait'], args: [1, 1] },
   decline: { flags: [], args: [1, 1] }, cancel: { flags: [], args: [1, 1] }, resume: { flags: ['--wait', '--direct'], args: [1, 1] }, forget: { flags: [], args: [1, 1] },
-  direct: { flags: [], args: [2, 2] }, settings: { flags: ['--tor', '--prefer'], args: [0, 0] },
+  direct: { flags: [], args: [2, 2] }, auto: { flags: [], args: [2, 2] }, settings: { flags: ['--tor', '--prefer', '--auto'], args: [0, 0] },
 };
-const VALUED = ['--via', '--direct', '--wait', '--tor', '--prefer', '--identity'];
+const VALUED = ['--via', '--direct', '--wait', '--tor', '--prefer', '--auto', '--identity'];
 const SESSION = ['send', 'accept', 'resume', 'decline', 'cancel'];
 const out = (x: unknown): void => console.log(safeJson(JSON.stringify(x, null, 2)));
 const note = (s: string): void => console.error(`sigelo-agent: ${safeText(s)}`);
@@ -93,6 +98,9 @@ export async function main(rest: string[]): Promise<number> {
   try { direct = onOff(flags.get('--direct'), '--direct'); tor = onOff(flags.get('--tor'), '--tor'); } catch (e) { return usage((e as Error).message); }
   const prefer = flags.get('--prefer');
   if (prefer !== undefined && prefer !== 'fast' && prefer !== 'private') return usage('--prefer: fast or private');
+  const auto = flags.has('--auto') ? Number(flags.get('--auto')) : undefined;
+  if (auto !== undefined && (!Number.isFinite(auto) || auto < 0)) return usage('--auto: a size in MB, 0: always ask');
+  if (sub === 'auto' && args[1] !== 'default' && !(Number.isFinite(Number(args[1])) && Number(args[1]) >= 0)) return usage('auto: a size in MB (0: always ask), or default');
   let path: string;
   try { path = actingFile('transfer', flags.get('--identity'), flags.has('--operator')); } catch (e) { note((e as Error).message); return 2; }
   if (!existsSync(path)) { note(noIdentity(path, flags.has('--operator'))); return 2; }
@@ -170,11 +178,16 @@ export async function main(rest: string[]): Promise<number> {
         out(r); note(`transfer direct ${r.name}: ${r.direct ? 'on: it may see your public and local addresses' : 'off: Tor, else no path'}`);
         return 0;
       }
+      case 'auto': {
+        const r = X.setAuto({ carrier: c, identity: path, contact: args[0]!, mb: args[1] === 'default' ? null : Number(args[1]) });
+        out(r); note(`transfer auto ${r.name}: ${r.auto_mb === null ? 'the default size' : r.auto_mb === 0 ? 'always asked' : `files up to ${r.auto_mb} MB land without a question`}`);
+        return 0;
+      }
       case 'settings': {
-        const s = X.settings({ identity: path, patch: { ...(tor !== undefined && { tor }), ...(prefer && { prefer }) } });
+        const s = X.settings({ identity: path, patch: { ...(tor !== undefined && { tor }), ...(prefer && { prefer }), ...(auto !== undefined && { auto_mb: auto }) } });
         const caps = await X.torCaps(X.torConfig());
         out({ ...s, tor_daemon: caps });
-        note(`transfer settings: Tor ${s.tor ? (caps.serve || caps.connect ? 'on' : 'on, but no tor daemon answers here: off') : 'off'}; Pro order ${s.prefer}; direct ${(await X.loadRtc()) ? 'available' : 'unavailable (install sigelo-transfer)'}`);
+        note(`transfer settings: Tor ${s.tor ? (caps.serve || caps.connect ? 'on' : 'on, but no tor daemon answers here: off') : 'off'}; Pro order ${s.prefer}; files land unasked up to ${s.auto_mb} MB from own and compared contacts; direct ${(await X.loadRtc()) ? 'available' : 'unavailable (install sigelo-transfer)'}`);
         return 0;
       }
     }

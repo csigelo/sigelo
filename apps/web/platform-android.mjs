@@ -49,6 +49,16 @@
 //                                                                 refused "notify" (a bad tag, title or text) or "notify_permission"
 //   → {op:"notify", id, tag, cancel:true}          ← {id}         that tag's notification removed
 //   → {op:"notify", id, ask:true}                  ← {id, granted} POST_NOTIFICATIONS asked when not granted (Android 13+)
+//   → {op:"big-pick", id, profile} | {op:"big-photo", id, profile, keepLocation}  ← {id, doc, name, size, mtime, url} | {id, cancelled:true}
+//                                                 the system's picker (the read grant kept) or camera (the location tags removed unless kept;
+//                                                 CAMERA asked at the first); doc: 32 hex, this profile's; refused no_camera_app, camera_permission
+//   → {op:"big-hash"|"big-stat", id, profile, doc} ← {id, name, size, mtime, sha256, hashes (base64)} | {id, size, mtime}
+//   GET ORIGIN/.big/<doc>?size=&mtime=&profile= with Range: bytes=a-b (≤ 1 MiB) ← 206 those bytes, 409 when size or mtime moved (fetch, no base64)
+//   → {op:"big-write", id, profile, part, offset, data} | big-flush | big-digest | big-drop {part} | big-free ← {id} | {id, sha256} | {id, free}
+//   → {op:"big-land", id, profile, part, name}    ← {id, uri, name}  the partial moved into Downloads (MediaStore; Android 9: the storage
+//                                                 permission asked at the first); refused "land" with why (no permission, no room)
+//   → {op:"big-open", id, uri, name}              ← {id}         a file that landed, in the system's viewer
+//   → {op:"big-awake", id, on}                    ← {id}         FLAG_KEEP_SCREEN_ON while a transfer moves
 //   any ← {id, error:{check, message}}
 // Events, the shell's own (no id; never an answer): ← {ev:"open", tag} one of our notifications tapped (the app running: at
 // once; started by the tap: kept by the shell until the page's port is open, then posted once). Kept here until a listener
@@ -64,7 +74,8 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify']);
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify',
+  'big-pick', 'big-photo', 'big-hash', 'big-stat', 'big-write', 'big-flush', 'big-digest', 'big-drop', 'big-free', 'big-land', 'big-open', 'big-awake']);
 /** A notification's tag (SigeloBridge.TAG): what it is about, given back when it is tapped. */
 export const TAG = /^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/;
 /** The app lock's choices of minutes away (SigeloBridge.LOCK_AFTER). */
@@ -184,6 +195,47 @@ function makeBridge(info, port) {
   });
 }
 
+/**
+ * Big files through the shell (design/transfer.md §10, SigeloBridge "big-*", BigFiles.java): platform.big as
+ * apps/contact/transfer-web.mjs takes it. The page never holds a file whole: a doc names one the system's
+ * picker or camera gave, read by range from the app's origin (fetch, no base64); what is received is written
+ * at offsets into a partial in the shell, then moved into Downloads. Every call names this profile.
+ */
+export function bigFiles(bridge, { profile = bridge.profile ?? 'p1', fetch: get = globalThis.fetch?.bind(globalThis), origin = globalThis.location?.origin ?? 'https://appassets.androidplatform.net' } = {}) {
+  const req = (op, x = {}) => bridge.request(op, { profile, ...x });
+  const HEX = /^[0-9a-f]{32}$/;
+  const id = (v, what) => { if (typeof v !== 'string' || !HEX.test(v)) throw new MsgError('big', `${what}: 32 hex digits`); return v; };
+  const desc = (x) => (x.cancelled ? null : { doc: id(x.doc, 'doc'), name: String(x.name), size: Number(x.size), mtime: Number(x.mtime), url: String(x.url) });
+  return Object.freeze({
+    profile,
+    /** The system's document picker → { doc, name, size, mtime, url } | null (cancelled). */
+    async pick() { return desc(await req('big-pick')); },
+    /** The system's camera → as pick; keepLocation false: the location tags removed in the shell. */
+    async photo({ keepLocation = false } = {}) { return desc(await req('big-photo', { keepLocation: keepLocation === true })); },
+    async hash(doc) { const x = await req('big-hash', { doc: id(doc, 'doc') }); return { name: String(x.name), size: Number(x.size), mtime: Number(x.mtime), sha256: String(x.sha256), hashes: unb64(x.hashes) }; },
+    async stat(doc) { const x = await req('big-stat', { doc: id(doc, 'doc') }); return { size: Number(x.size), mtime: Number(x.mtime) }; },
+    /** length bytes at offset, read by the shell from the file itself; file_changed when its size or time moved. */
+    async read(doc, offset, length, { size, mtime }) {
+      if (length === 0) return new Uint8Array(0);
+      const r = await get(`${origin}/.big/${id(doc, 'doc')}?size=${size}&mtime=${mtime}&profile=${profile}`, { headers: { Range: `bytes=${offset}-${offset + length - 1}` }, cache: 'no-store' });
+      if (r.status === 409) throw new MsgError('file_changed', 'the file changed since it was offered: send it again');
+      if (r.status !== 206 && r.status !== 200) throw new MsgError('file', `the app could not read the file (${r.status})`);
+      const b = new Uint8Array(await r.arrayBuffer());
+      if (b.length !== length) throw new MsgError('file_changed', 'the file is shorter than it was');
+      return b;
+    },
+    async write(part, offset, bytes) { await req('big-write', { part: id(part, 'part'), offset, data: b64(bytes) }); },
+    async flush(part) { await req('big-flush', { part: id(part, 'part') }); },
+    async sha256(part) { return String((await req('big-digest', { part: id(part, 'part') })).sha256); },
+    async drop(part) { await req('big-drop', { part: id(part, 'part') }); },
+    async free() { return Number((await req('big-free')).free); },
+    /** The partial moved into Downloads → { uri, name }; refused `land` with why (no permission, no room). */
+    async land(part, name) { const x = await req('big-land', { part: id(part, 'part'), name: String(name) }); return { uri: String(x.uri), name: String(x.name) }; },
+    async open(uri, name) { await req('big-open', { uri: String(uri), name: String(name ?? '') }); },
+    async awake(on) { await req('big-awake', { on: on === true }); },
+  });
+}
+
 /** The bridge as profile <id> uses it: every seal and open names that profile (its aliases, its blobs only). */
 export const profileBridge = (bridge, profile) => Object.freeze({
   ...bridge, profile,
@@ -279,6 +331,8 @@ export async function androidPlatform({ bridge, mqtt, name = 'sigelo', indexedDB
     transports: Object.freeze(['mqtts', 'wss']),
     env: Object.freeze({ ...p.env, transport: 'auto' }),
     sealer: keystoreSealer(bridge),
+    // Big files (design/transfer.md §10): the bytes in the shell, this profile's.
+    big: bigFiles(bridge),
     get commits() { return p.commits; },
   });
 }
