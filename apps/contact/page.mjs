@@ -42,10 +42,14 @@
 // derived from K (enrol.mjs `verified`) is words-checked here at once; the words stay to see, and the
 // optional switch (`confirm_words`) holds the key until "They match" (POST /api/agents/enrol-words).
 //
-// Transfers (apps/agent/TRANSFER.md, apps/contact/transfer-node.mjs): hooks.transfers, where the host
-// moves big files ({ lib: transfer-node.mjs, make(carrier, onEvent) → its Engine }; Node only, until the
-// WebView's platform.rtc): the page owns the session, so its engine answers offers and moves the bytes;
-// the /api/transfers* routes; none without the hook (404 route).
+// Transfers (apps/agent/TRANSFER.md, design/transfer.md §10): hooks.transfers, where the host moves big
+// files ({ lib, identity, make(carrier, onEvent, { compared }) → its Engine; lib: transfer-node.mjs on a
+// computer (a file by its path), transfer-web.mjs's in the phone app (a file picked: doc), which also gives
+// pick(), photo({ keepLocation }), open(saved) and url(doc) }): the page owns the session, so its engine
+// answers offers and moves the bytes; the /api/transfers* routes; none without the hook (404 route).
+// compared(did): the contact's four words were compared here (the accept rule). A photo (PHOTO_LABEL,
+// photo.mjs): its preview goes as one message (a group's: the msg's photo) beside the manifest; the chat
+// shows it at once, then the full file by the transfer whose manifest has its sha256.
 //
 // Proof of work (design/profiles.md §6): what the human starts here (the page's start, a code, an
 // answer, "Try now") passes the carrier's `started: 'user'`; past the day's three the route answers
@@ -107,6 +111,7 @@ import { signAs } from './kdf.mjs';
 import * as E from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
 import { didWords } from './short.mjs';
+import { PHOTO_LABEL, checkPhoto } from './photo.mjs';
 
 // The tiers a new contact may be given at its pairing (Settings → Chats: new people's messages).
 const TIER_NEW = new Set(['own', 'friend', 'quiet']);
@@ -240,6 +245,13 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (hidden({ did: m['from'], name: m['name'] })) continue;
       // A contact's own picture (the header's "Pictures"): kept apart, never in the history.
       if (m['label'] === PICTURE_LABEL) { takePicture(m); continue; }
+      // A photo's preview (photo.mjs): into the chat at once, the full file by its transfer.
+      if (m['label'] === PHOTO_LABEL) {
+        let ph = null;
+        try { ph = checkPhoto(m['content']); } catch (e) { record({ kind: 'event', type: 'dropped', did: m['from'], name: m['name'], code: 'photo', detail: e.message }); continue; }
+        record({ kind: 'in', did: m['from'], name: m['name'], text: 'Photo', label: PHOTO_LABEL, photo: ph, ...(Number.isSafeInteger(m['iat']) && { iat: m['iat'] }) });
+        continue;
+      }
       const link = m['link'] ? { link: m['link'] } : {};
       // iat: the sender's time of it, what a seen receipt names (Seen receipts, above).
       const iat = Number.isSafeInteger(m['iat']) ? { iat: m['iat'] } : {};
@@ -347,7 +359,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     }
     changed();
   };
-  const transfers = hooks.transfers ? { lib: hooks.transfers.lib, engine: hooks.transfers.make(carrier, onTransfer) } : null;
+  // The accept rule's "words compared": the pairing's words as the human checked them here (Chats → the four words).
+  const compared = (did) => { const x = carrier.contacts().contacts.find((c) => c.did === did); return Boolean(x && x.pair !== null && x.pair !== undefined && data.checked?.[did] === x.pair); };
+  const transfers = hooks.transfers ? { lib: hooks.transfers.lib, engine: hooks.transfers.make(carrier, onTransfer, { compared }) } : null;
   // The relay new codes name, as the precedence says.
   const newCodes = () => relayFixed ?? kept() ?? DEFAULT_RELAY;
   const settings = () => ({ relay: kept() ?? DEFAULT_RELAY, default: DEFAULT_RELAY, fixed: relayFixed, in_use: carrier.relay });
@@ -728,7 +742,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       // Read: the page has shown them.
       if (last && data.gread[g]?.mid !== last.mid) { data.gread[g] = { mid: last.mid, at: last.received ?? last.iat }; saveData(); }
       return { group: { ...one, unread: 0 }, messages: items.slice(-200).map((i) => ({ mid: i.mid, re: i.re ?? null, from: i.from, name: i.name, role: i.role, tier: i.tier ?? null, mine: i.mine === true,
-        operator: i.operator === true, note: i.note ?? null, text: textOf(i.content), mentions: i.mentions ?? [], mentioned: i.mentioned === true, via: i.via ?? null, at: i.received ?? i.iat })) };
+        operator: i.operator === true, note: i.note ?? null, text: textOf(i.content), mentions: i.mentions ?? [], mentioned: i.mentioned === true, via: i.via ?? null, photo: i.photo ?? null, at: i.received ?? i.iat })) };
     }),
     'POST /api/groups/create': (b) => serial(() => groupCall(async () => {
       const brake = b['brake'];
@@ -1016,7 +1030,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if ((data.read[d] ?? 0) < seq) { data.read[d] = seq; saveData(); }
       receipt(d);
       return { seq, messages: msgs.map((r) => ({ n: r.n, dir: r.kind, at: r.at, iat: r.iat ?? null, text: textOf(r.text), label: r.label ?? '', status: statusOf(r, x.seen_upto), code: r.code ?? null, detail: r.detail ?? null, link: r.link ?? null,
-        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }) })) };
+        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }) })) };
     },
     'POST /api/sync': () => serial(async () => { await carrier.sync(); return { synced: true }; }),
     'POST /api/history/clear': (b) => serial(async () => {
@@ -1216,7 +1230,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     },
   };
   // Transfers: the routes exist only where the host moves files (hooks.transfers).
-  if (transfers) Object.assign(routes, transferRoutes({ X: transfers.lib, engine: transfers.engine, carrier, identity: hooks.transfers.identity, serial, contactOf, changed }));
+  if (transfers) Object.assign(routes, transferRoutes({ X: transfers.lib, engine: transfers.engine, host: hooks.transfers, carrier, identity: hooks.transfers.identity, serial, contactOf, changed, record, groups: G && groupsFile ? { G, file: groupsFile, list: groupsList } : null }));
   if (G) Object.assign(routes, groupRoutes);
   // One handler for every listener: the route's answer as [status, JSON value].
   async function dispatch(method, url, b) {
@@ -1235,10 +1249,10 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
 
 // ---- transfers (UI-API.md "Transfers"): the verbs of apps/contact/transfer-node.mjs over the page's session.
 // Refusals by check: unknown → 404; usage → 400; direct_ask, disk_full, transfer_state and the rest → 409.
-function transferRoutes({ X, engine, carrier, identity, serial, contactOf, changed }) {
+function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf, changed, record, groups }) {
   const call = async (fn) => {
     try { const r = await fn(); changed(); return r; } catch (e) {
-      if (e.check !== undefined && e.status === undefined) e.status = ['transfer_unknown', 'not_contact'].includes(e.check) ? 404 : ['usage', 'body'].includes(e.check) ? 400 : 409;
+      if (e.check !== undefined && e.status === undefined) e.status = ['transfer_unknown', 'not_contact', 'group_unknown'].includes(e.check) ? 404 : ['usage', 'body', 'photo'].includes(e.check) ? 400 : 409;
       throw e;
     }
   };
@@ -1246,15 +1260,64 @@ function transferRoutes({ X, engine, carrier, identity, serial, contactOf, chang
   const directOf = (b) => (b['direct'] === undefined ? undefined : typeof b['direct'] === 'boolean' ? b['direct'] : refuse(400, 'body', 'direct: true or false'));
   const viaOf = (b) => (b['via'] === undefined || b['via'] === 'auto' || b['via'] === 'tor' ? b['via'] : refuse(400, 'body', 'via: auto or tor'));
   const strip = ({ file: _f, ...r }) => r;
-  const settings = async () => ({ ...X.settings({ identity }), tor_daemon: await X.torCaps(X.torConfig()), direct_available: (await X.loadRtc()) !== null });
+  const docs = typeof host.pick === 'function';
+  const settings = async () => ({ ...X.settings({ identity }), tor_daemon: await X.torCaps(X.torConfig()), direct_available: (await X.loadRtc()) !== null,
+    pick: docs, camera: typeof host.photo === 'function', open: typeof host.open === 'function' });
+  // A file to send: a path on this computer, or a doc picked on this phone (never both, each where it is).
+  const sourceOf = (b) => {
+    if (docs) return typeof b['doc'] === 'string' && b['doc'] !== '' ? { doc: b['doc'] } : refuse(400, 'body', 'doc: a file picked on this phone (POST /api/transfers/pick or /photo)');
+    return typeof b['path'] === 'string' && b['path'] !== '' ? { path: b['path'] } : refuse(400, 'body', 'path: a file on this computer');
+  };
+  // A photo's preview from the page (downscaled there): {type, data, w, h}; the file's sha256, size and name are the manifest's.
+  const shotOf = (b) => {
+    const p = b['photo'];
+    if (p === undefined) return null;
+    if (typeof p !== 'object' || p === null || Array.isArray(p)) refuse(400, 'photo', 'photo: {type, data, w, h}');
+    return { type: p['type'], data: p['data'], w: p['w'], h: p['h'] };
+  };
+  const full = (shot, f, name) => { try { return checkPhoto({ ...shot, sha256: f.whole, size: f.size, name }); } catch (e) { e.status = 400; throw e; } };
   return {
     'GET /api/transfers': () => X.list({ carrier, identity, engine }),
     'POST /api/transfers/send': (b) => serial(() => call(async () => {
-      if (typeof b['path'] !== 'string' || b['path'] === '') refuse(400, 'body', 'path: a file on this computer');
-      const c = contactOf(b['to']), d = directOf(b), via = viaOf(b);
-      const r = await X.send({ carrier, identity, to: c.did, path: b['path'], ...(via && { via }), ...(d !== undefined && { direct: d }) });
+      const src = sourceOf(b), d = directOf(b), via = viaOf(b), shot = shotOf(b);
+      if (shot) { const p = { ...shot, sha256: '0'.repeat(64), size: 0, name: 'x' }; try { checkPhoto(p); } catch (e) { e.status = 400; throw e; } }
+      // A group (design §10.3): one transfer per member paired with; the preview (or a line naming the file) as one group message.
+      if (b['group'] !== undefined) {
+        if (!groups) refuse(404, 'route', 'no groups here');
+        const g = groups.list().find((x) => x.gid === b['group']) ?? refuse(404, 'group_unknown', `no group ${String(b['group'])} here`);
+        const f = await X.prepare({ carrier, identity, ...src });
+        const fan = await X.fanOut({ carrier, identity, members: g.members.filter((m) => !m.me).map((m) => ({ did: m.did, name: m.name, contact: m.contact })), f, ...(d !== undefined && { direct: d }), ...(via && { via }), group: g.gid });
+        const name = fan.sent[0] ? X.list({ carrier, identity }).out.find((r) => r.id === fan.sent[0].id)?.name ?? f.name : f.name;
+        const msg = await groups.G.send({ carrier, file: groups.file, group: g.gid, text: shot ? 'Photo' : `File: ${name}`, ...(shot && { photo: full(shot, f, name) }) });
+        void engine.kick();
+        return { group: g.gid, mid: msg.mid, sha256: f.whole, name, size: f.size, sent: fan.sent, unpaired: fan.unpaired, failed: fan.failed };
+      }
+      const c = contactOf(b['to']);
+      const f = await X.prepare({ carrier, identity, ...src });
+      const r = await X.sendTo({ carrier, identity, to: c.did, f, ...(via && { via }), ...(d !== undefined && { direct: d }) });
       void engine.kick();
+      if (shot) {
+        // The preview beside the manifest: one more end-to-end message, into this chat at once.
+        const ph = full(shot, f, r.name), at = Math.floor(Date.now() / 1000);
+        let x = null;
+        try { [x] = await carrier.sendAll(c.did, [ph], { label: PHOTO_LABEL }); } catch (e) { if (!/queued/.test(e.message)) throw e; }
+        record({ kind: 'out', did: c.did, id: x?.id ?? null, text: 'Photo', label: PHOTO_LABEL, photo: ph, status: x?.status ?? 'queued', code: x?.code, detail: x?.detail, at });
+      }
       return strip(r);
+    })),
+    // The phone's own: a file picked (the system's picker), a photo taken (the system's camera), a file that landed opened.
+    ...(docs && { 'POST /api/transfers/pick': () => serial(async () => (await host.pick()) ?? { cancelled: true }) }),
+    ...(typeof host.photo === 'function' && { 'POST /api/transfers/photo': () => serial(async () => (await host.photo({ keepLocation: X.settings({ identity }).keep_location })) ?? { cancelled: true }) }),
+    ...(typeof host.open === 'function' && { 'POST /api/transfers/open': (b) => call(async () => {
+      const r = X.list({ carrier, identity }).in.find((x) => x.id === idOf(b)) ?? refuse(404, 'transfer_unknown', 'no such file here');
+      if (r.state !== 'done' || !r.saved) refuse(409, 'transfer_state', `${r.name} has not landed yet`);
+      await host.open(r.saved, r.name);
+      return { opened: r.id };
+    }) }),
+    'POST /api/transfers/auto': (b) => serial(() => call(async () => {
+      const mb = b['mb'];
+      if (mb !== null && (typeof mb !== 'number' || !Number.isFinite(mb))) refuse(400, 'body', 'mb: a size in MB (0: always ask), or null: the default');
+      return X.setAuto({ carrier, identity, contact: contactOf(b['contact']).did, mb });
     })),
     'POST /api/transfers/accept': (b) => serial(() => call(async () => {
       const d = directOf(b), via = viaOf(b), r = X.accept({ carrier, identity, id: idOf(b), ...(via && { via }), ...(d !== undefined && { direct: d }) });
@@ -1274,6 +1337,8 @@ function transferRoutes({ X, engine, carrier, identity, serial, contactOf, chang
       const patch = {};
       if (b['tor'] !== undefined) { if (typeof b['tor'] !== 'boolean') refuse(400, 'body', 'tor: true or false'); patch.tor = b['tor']; }
       if (b['prefer'] !== undefined) { if (b['prefer'] !== 'fast' && b['prefer'] !== 'private') refuse(400, 'body', 'prefer: fast or private'); patch.prefer = b['prefer']; }
+      if (b['auto_mb'] !== undefined) { if (typeof b['auto_mb'] !== 'number' || !Number.isFinite(b['auto_mb']) || b['auto_mb'] < 0) refuse(400, 'body', 'auto_mb: a size in MB, 0: always ask'); patch.auto_mb = b['auto_mb']; }
+      if (b['keep_location'] !== undefined) { if (typeof b['keep_location'] !== 'boolean') refuse(400, 'body', 'keep_location: true or false'); patch.keep_location = b['keep_location']; }
       X.settings({ identity, patch });
       return settings();
     })),

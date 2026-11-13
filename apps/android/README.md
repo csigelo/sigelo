@@ -99,11 +99,18 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
   the clipboard, marked sensitive (no preview), emptied by the shell after 60 s.
 - `unlock` (the screen lock; `force` skips the minute's window), `lock` (the lock's settings, kept by the shell),
   `notify` (show, cancel, ask the permission); the shell's event `{ev:"open", tag}` when a notification is tapped.
+- Big files (`BigFiles.java`, design/transfer.md §10): `big-pick` (the system's document picker, the read grant
+  kept), `big-photo` (the system's camera into the app's cache through `PhotoProvider`, not exported; CAMERA asked
+  at the first photo; location tags removed unless kept), `big-hash`, `big-stat`; the page reads a file by range
+  at `/.big/<doc>` (409 once it changed); `big-write` / `big-flush` / `big-digest` / `big-drop` a partial in
+  private storage; `big-land` moves it into Downloads (MediaStore, pending until whole; Android 9 asks the storage
+  permission); `big-open`; `big-awake` keeps the screen on while a transfer moves.
 
 The page comes from the APK at `https://appassets.androidplatform.net/` (served by the app, never
 fetched); nothing else loads, links open in the browser. JavaScript on, file access off, mixed content
 never. The camera: asked at the first scan, for this origin and video only. A file input opens the
-system picker. Permissions: INTERNET, CAMERA and POST_NOTIFICATIONS.
+system picker. Permissions: INTERNET, CAMERA, POST_NOTIFICATIONS, and WRITE_EXTERNAL_STORAGE on Android 9 only
+(Downloads; later versions need none). One provider, not exported: the photo a camera app writes.
 
 ## Build (on CI)
 
@@ -146,7 +153,7 @@ node apps/android/assets.mjs --check
 node apps/web/test-shell.mjs    # the page side over a fake shell in Node
 ```
 
-`check.mjs`: the manifest and resources (well-formed, three permissions, no backup, references, the
+`check.mjs`: the manifest and resources (well-formed, four permissions (storage up to Android 9), one provider not exported, no backup, references, the
 icon as `assets/brand/app-icon.svg`), Gradle (versions, no dependency), the wrapper by SHA-256, the Java (the
 bridge's operations as the page sends them, the WebView's settings, every asset type served, the lock,
 notifications and their open event), the version (build.gradle's = `apps/agent/package.json`'s, shipped as

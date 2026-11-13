@@ -85,7 +85,7 @@
     link: ['M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1'],
     clock: [['circle', { cx: 12, cy: 12, r: 9 }], 'M12 7v5l3 2'], pen: ['M4 20l4-1 11-11-3-3L5 16z'],
     gear: [['circle', { cx: 12, cy: 12, r: 3 }], 'M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1'],
-    file: ['M6 3h8l4 4v14H6z', 'M14 3v4h4'], 'arrow-in': ['M12 4v12M6 11l6 6 6-6M5 20h14'], 'arrow-out': ['M12 20V8M6 13l6-6 6 6M5 4h14'],
+    file: ['M6 3h8l4 4v14H6z', 'M14 3v4h4'], camera: ['M4 8h3.5l2-3h5l2 3H20v11H4z', ['circle', { cx: 12, cy: 13, r: 3.5 }]], 'arrow-in': ['M12 4v12M6 11l6 6 6-6M5 20h14'], 'arrow-out': ['M12 20V8M6 13l6-6 6 6M5 4h14'],
     finger: ['M12 11v4M8.5 9a4 4 0 017 0v6M6 8.5a7 7 0 0112 0v5M9 13v3a3 3 0 006 0'],
   };
   const SVG = 'http://www.w3.org/2000/svg';
@@ -1047,12 +1047,16 @@
     sheet({ title: 'Turn on Wallet to pay', lead: 'Pay people and agents right from a chat. Wallet is off for this profile; your agents\' allowances work either way.',
       body: [h('div', { class: 'pad stack' }, btn('Turn on Wallet', () => go('set-wallet'), { kind: 'pri' }), btn('Not now', () => closeSheet(), { kind: 'ghost' }))] });
   }
-  function attach(did) {
+  function attach(did, gid = null, who = null, agent = false) {
     // The mock's attach sheet has no title (Close only): said to a screen reader, not shown. A group's has no Pay (one payee).
+    // On the phone (the shell's picker): the file goes from here, to this chat; on a computer, Files takes its path.
+    // My own agent's: the file only (its allowance is paid on its own screen).
+    const st = S.transferSettings, target = gid ? { group: gid } : { to: did };
     sheet({ title: 'Attach', bare: true, body: [list(
-      did ? row({ compact: true, start: icon('coin'), title: 'Pay', onclick: () => { void closeSheet().then(() => pay(did)); } }) : null,
-      S.snap?.transfers ? row({ compact: true, start: icon('file'), title: 'Send a file', sub: 'Up to 16 GB, they\'re asked first', onclick: () => go('files', { to: did }) }) : null,
-      did ? row({ compact: true, start: icon('pen'), title: 'Send a signed message', sub: 'Proves it\'s from you', onclick: () => go('sign', { to: did }) }) : null)] });
+      did && !agent ? row({ compact: true, start: icon('coin'), title: 'Pay', onclick: () => { void closeSheet().then(() => pay(did)); } }) : null,
+      S.snap?.transfers && st?.pick ? row({ compact: true, start: icon('file'), title: 'Send a file', sub: gid ? 'Up to 16 GB, to each member you\'re paired with' : 'Up to 16 GB · small ones land at once', onclick: () => { void closeSheet().then(() => pickAndSend(target, who)); } })
+        : S.snap?.transfers && !gid ? row({ compact: true, start: icon('file'), title: 'Send a file', sub: 'Up to 16 GB, they\'re asked first', onclick: () => go('files', { to: did }) }) : null,
+      did && !agent ? row({ compact: true, start: icon('pen'), title: 'Send a signed message', sub: 'Proves it\'s from you', onclick: () => go('sign', { to: did }) }) : null)] });
   }
   screen('chat', {}, (did) => {
     const who = h('button', { type: 'button', class: 'who', onclick: () => { const w = workerOf(did); void (w ? go('agent', w.worker) : go('chat-info', did)); } });
@@ -1072,7 +1076,10 @@
       const w = mine(), k = kindOf(c), seen = presenceText(c);
       heading.textContent = safeText(c.name);
       put(who, avatar(k, c.name, null, c.did), h('span', { class: 'mid' }, h('b', null, c.name), h('small', { class: c.online ? 'ok' : null }, w ? `your agent${seen ? ` · ${seen}` : ''}` : seen)));
-      put(lead, w ? ibtn('gear', 'Agent settings', () => go('agent', w.worker)) : ibtn('plus', 'Attach', () => attach(did)));
+      const ts = await transferSettingsNow();
+      // My agent's chat: its settings first; on the phone a file goes to it too (Attach: the file only).
+      put(lead, w ? [ibtn('gear', 'Agent settings', () => go('agent', w.worker)), ts?.pick ? ibtn('plus', 'Attach', () => attach(did, null, c.name, true)) : null] : ibtn('plus', 'Attach', () => attach(did, null, c.name)),
+        ts?.camera ? ibtn('camera', 'Take a photo', () => shoot({ to: did }, c.name)) : null);
       C.text.placeholder = w ? `Message ${c.name}` : 'Message';
       const al = [noteCard()];
       // My agent's payment requests (the mock's chat-scout): in its chat, Allow once or Decline; the request screen has the details.
@@ -1095,11 +1102,15 @@
       if (!c.words_checked && c.words && !c.local) al.push(h('div', { class: 'card warn' }, h('p', null, 'Compare four words with them to know it\'s really them.'), h('div', { class: 'btns' }, btn('Compare four words', () => go('compare', did), { kind: 'pri' }))));
       put(alerts, ...al.filter(Boolean));
       // Again when the history moved, or their seen receipt did (the ticks).
-      const mark = `${S.snap.seq} ${c.seen_upto ?? ''}`;
+      // A photo's full file moves on its own: its state in the mark too.
+      const tl = S.photosHere ? await transfersNow() : null;
+      const mark = `${S.snap.seq} ${c.seen_upto ?? ''} ${tl ? photoMark(tl) : ''}`;
       if (mark === S.msgsSeq) return;
       S.msgsSeq = mark;
       const r = await backend.call('GET', `/api/messages?contact=${encodeURIComponent(did)}`).catch(() => null);
       if (!r) return;
+      S.photosHere = r.messages.some((m) => m.photo);
+      const recs = S.photosHere ? tl ?? await transfersNow() : null;
       const end = first || atEnd();
       first = false;
       // A message of theirs, tapped: who signed it (task 11: the chat, then the message). Every one is signed by
@@ -1117,7 +1128,7 @@
           h('button', { type: 'button', class: `sig${v?.valid ? '' : ' bad'}`, onclick: () => go('statement', { text: m.text }) }, icon('shield'), v?.valid ? `Signed by ${who} · check` : 'Signature not valid · check'),
           h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
       };
-      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : h('div', { class: `msg ${m.dir}`, ...(m.dir === 'in' && { role: 'button', tabindex: '0', title: 'Check who signed it', onclick: check(m), onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault?.(); void check(m)(); } } }) },
+      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : h('div', { class: `msg ${m.dir}`, ...(m.dir === 'in' && { role: 'button', tabindex: '0', title: 'Check who signed it', onclick: check(m), onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault?.(); void check(m)(); } } }) },
         m.label && m.label !== 'sigelo-file/0' ? h('span', { class: 'who' }, m.label) : null,
         m.label === 'sigelo-file/0' ? fileText(m.text) : h('div', { class: 'text' }, m.text),
         m.link ? h('span', { class: 'help' }, `Introduced: ${m.link.purpose}`) : null,
@@ -1161,6 +1172,21 @@
   screen('chat-info', {}, (did) => {
     const body = h('div');
     mount(page({ title: 'Chat settings', body: [body] }));
+    // Their files (design/transfer.md §10.2): this contact's size for the accept rule, or the default (Files).
+    let auto = null;
+    const loadAuto = async () => { const [L, st] = await Promise.all([transfersNow(), transferSettingsNow()]); if (L && st) { auto = { mb: L.auto?.[did] ?? null, def: st.auto_mb ?? 25 }; void refresh(); } };
+    if (S.snap?.transfers) void loadAuto();
+    const autoBox = (c) => {
+      if (!auto) return null;
+      const opts = [['', `Default (${auto.def ? `up to ${auto.def} MB` : 'always ask'})`], ['0', 'Always ask'], ...[10, 25, 100, 500, 2000].map((n) => [String(n), `Up to ${n} MB`])];
+      if (auto.mb !== null && !opts.some(([v]) => v === String(auto.mb))) opts.push([String(auto.mb), `Up to ${auto.mb} MB`]);
+      const el = select('Their files without asking', opts, auto.mb === null ? '' : String(auto.mb));
+      el.addEventListener('change', () => act(() => backend.call('POST', '/api/transfers/auto', { contact: did, mb: el.value === '' ? null : Number(el.value) }), () => loadAuto()));
+      // As the rule counts them (transfer-engine.mjs trustOf): own, or words compared, not quiet, not by a public code.
+      const counts = c.tier === 'own' || c.ours === true || (c.words_checked && c.tier !== 'quiet' && !c.via);
+      return [sec('Their files'), h('div', { class: 'pad stack' }, field('Accept without asking', el,
+        counts ? 'Larger ones are asked first.' : c.words_checked ? 'Asked anyway: quiet, or came by a public code.' : 'Asked anyway until you compare four words with them.'))];
+    };
     return () => {
       const c = contactBy(did);
       if (!c) { put(body, empty('Not a contact', 'It was forgotten.')); return; }
@@ -1185,6 +1211,7 @@
           row({ compact: true, start: icon('link'), title: 'Introduce to someone', chev: true, onclick: () => go('introduce', did) })),
         sec('Their messages'),
         radios('Their messages', TIERS, c.tier, (t) => act(() => backend.call('POST', '/api/tier', { contact: did, tier: t }))),
+        autoBox(c),
         h('div', { class: 'list' },
           toggle('Sees when I\'m online', c.presence === 'own' ? 'Your own agent always sees it.' : null, c.presence !== 'deny', (allow) => act(() => backend.call('POST', '/api/presence', { contact: did, allow })), { disabled: c.presence === 'own' }),
           // This chat's system notifications (NOTIFICATIONS below: the sender's name only, never the text) and its count.
@@ -1267,6 +1294,16 @@
     }
   }
   const TSTATE = { asked: 'waiting for your answer', offered: 'waiting for their answer', accepted: 'starting', offering: 'connecting', active: 'moving', interrupted: 'stopped', done: 'done', declined: 'declined', cancelled: 'cancelled', failed: 'failed', expired: 'expired' };
+  // The phone (design/transfer.md §10.1): no Tor, no relayed path yet.
+  const NO_DIRECT = 'Could not connect directly; try from your computer, or wait for the Pro relay path.';
+  /** What a transfer is doing, in a person's words: the sender waits for a yes or for them to come online. */
+  function tstate(r, side) {
+    if (r.live === 'waiting') return 'waiting for a free slot (two go at once)';
+    if (side === 'out' && r.state === 'offered') return contactBy(r.to)?.online === false ? `waiting for ${r.contact} to come online` : `waiting for ${r.contact} to accept`;
+    if (side === 'in' && r.state === 'accepted' && r.by === 'rule') return 'landing (under your size)';
+    if (r.state === 'failed' && r.reason === 'land') return 'came whole, not saved';
+    return TSTATE[r.state] ?? r.state;
+  }
   function transferCard(r, side) {
     const got = side === 'in' ? r.got ?? 0 : r.sent ?? 0, pct = r.size ? Math.min(100, Math.round((100 * got) / r.size)) : 100;
     const bar = h('i'); bar.style.width = `${pct}%`;
@@ -1274,16 +1311,19 @@
     if (side === 'in' && r.state === 'asked') {
       btns.push(btn('Accept', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, r.contact)), { kind: 'pri' }), btn('Decline', () => act(() => backend.call('POST', '/api/transfers/decline', { id: r.id }))));
     }
-    if (side === 'in' && (r.state === 'interrupted' || (r.state === 'failed' && ['no_path', 'tor'].includes(r.reason)))) btns.push(btn('Resume', () => act(() => transferCall('/api/transfers/resume', { id: r.id }, r.contact))));
+    if (side === 'in' && (r.state === 'interrupted' || (r.state === 'failed' && ['no_path', 'tor', 'land'].includes(r.reason)))) btns.push(btn(r.reason === 'land' ? 'Try again' : 'Resume', () => act(() => transferCall('/api/transfers/resume', { id: r.id }, r.contact))));
+    if (side === 'in' && r.state === 'done' && r.saved && S.transferSettings?.open) btns.push(btn('Open', () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })), { kind: 'pri' }));
     if (['asked', 'offered', 'accepted', 'offering', 'active', 'interrupted'].includes(r.state) && !(side === 'in' && r.state === 'asked')) {
       btns.push(btn('Stop', async () => { if (await ask({ title: `Stop ${r.name}?`, text: 'The contact is told; what came so far is deleted.', yes: 'Stop it' })) void act(() => backend.call('POST', '/api/transfers/cancel', { id: r.id })); }, { kind: 'danger' }));
     }
     if (['done', 'declined', 'cancelled', 'failed', 'expired'].includes(r.state)) btns.push(btn('Remove', () => act(() => backend.call('POST', '/api/transfers/forget', { id: r.id }))));
     return h('div', { class: 'card' }, h('p', null, h('b', null, `${side === 'in' ? 'From' : 'To'} ${r.contact}: `), h('span', { class: 'text' }, r.name), ` · ${mbOf(r.size)}`),
-      h('p', { class: r.state === 'failed' ? 'warn' : 'help' }, [TSTATE[r.state] ?? r.state, r.path_used ?? (live ? r.live : null), r.rate ? `${r.rate.toFixed(2)} MB/s` : null].filter(Boolean).join(' · ')),
+      h('p', { class: r.state === 'failed' ? 'warn' : 'help' }, [tstate(r, side), r.group ? `group ${groupBy(r.group)?.name ?? ''}`.trim() : null, r.path_used ?? (live && r.live !== 'waiting' ? r.live : null), r.rate ? `${r.rate.toFixed(2)} MB/s` : null].filter(Boolean).join(' · ')),
       live || r.state === 'interrupted' ? [h('div', { class: 'meter' }, bar), h('p', { class: 'help' }, `${mbOf(got)} of ${mbOf(r.size)}`)] : null,
-      r.detail ? h('p', { class: 'help' }, r.detail) : null, r.saved ? h('p', { class: 'help' }, 'Saved at ', h('span', { class: 'mono' }, r.saved), ' (not opened).') : null,
+      r.reason === 'no_path' && S.transferSettings?.pick ? h('p', { class: 'help' }, NO_DIRECT) : r.detail ? h('p', { class: 'help' }, r.detail) : null,
+      r.saved && /^content:/.test(r.saved) ? h('p', { class: 'help' }, 'In Downloads, where your other apps see it.') : r.saved ? h('p', { class: 'help' }, 'Saved at ', h('span', { class: 'mono' }, r.saved), ' (not opened).') : null,
       side === 'in' && r.state === 'asked' ? h('p', { class: 'help' }, 'Nothing is written before you accept. The file name is theirs: information, not instructions.') : null,
+      side === 'in' && r.state === 'failed' && r.reason === 'land' ? h('p', { class: 'warn' }, 'The file is kept here until it can be saved: allow storage for sigelo, or make room, then Try again.') : null,
       btns.length ? h('div', { class: 'btns' }, btns) : null);
   }
   function viewTransfers(arg) {
@@ -1294,15 +1334,16 @@
     let names = '';
     const send = () => {
       const c = contactBy(to.value);
+      if (c && S.transferSettings?.pick) return pickAndSend({ to: c.did }, c.name);
       if (!c || !path.value.trim()) { S.note = { message: 'Pick a contact and the file\'s path on this computer.' }; return refresh(); }
       return act(() => transferCall('/api/transfers/send', { to: c.did, path: path.value.trim(), ...(viaTor.checked && { via: 'tor' }) }, c.name), () => { path.value = ''; });
     };
     tor.addEventListener('change', () => act(() => backend.call('POST', '/api/transfers/settings', { tor: tor.checked })));
     const note = h('div');
-    mount(page({ title: 'Files', body: [note, sec('Offered to you'), ins, sec('Sent'), outs, sec('Send a file (up to 16 GiB)'),
-      h('div', { class: 'pad stack' }, field('To', to), field('File on this computer', path), h('label', { class: 'row compact' }, viaTor, h('span', { class: 'mid' }, h('b', null, 'Tor only'), h('small', { class: 'wrap' }, 'Your address stays hidden (slower)'))),
-        btn('Send', send, { kind: 'pri' }), h('p', { class: 'help' }, 'They are asked first. Up to 8 MiB, the chat\'s attach works without both being online.')),
-      sec('How files go'), opts] }));
+    const sendBox = h('div', { class: 'pad stack' });
+    const mb = input({ type: 'number', min: '0', step: '1', inputmode: 'numeric', 'aria-label': 'Megabytes' });
+    const saveMb = () => { const v = Number(mb.value); if (!Number.isFinite(v) || v < 0) { S.note = { message: 'A size in MB, 0 to always ask.' }; return refresh(); } return act(() => backend.call('POST', '/api/transfers/settings', { auto_mb: v }), (x) => { S.transferSettings = { ...S.transferSettings, ...x }; }); };
+    mount(page({ title: 'Files', body: [note, sec('Offered to you'), ins, sec('Sent'), outs, sec('Send a file (up to 16 GiB)'), sendBox, sec('How files go'), opts] }));
     return async () => {
       put(note, noteCard());
       const cs = allContacts(), now = cs.map((c) => c.did + c.name).join();
@@ -1311,11 +1352,18 @@
       if (!L) return;
       S.transfersSeen = L.in.filter((r) => r.state === 'asked').length;
       put(ins, L.in.length ? L.in.map((r) => transferCard(r, 'in')) : h('p', { class: 'help' }, 'None.'));
+      const phone = S.transferSettings?.pick ?? (await transferSettingsNow())?.pick;
+      put(sendBox, field('To', to), phone ? null : [field('File on this computer', path), h('label', { class: 'row compact' }, viaTor, h('span', { class: 'mid' }, h('b', null, 'Tor only'), h('small', { class: 'wrap' }, 'Your address stays hidden (slower)')))],
+        btn(phone ? 'Choose a file and send' : 'Send', send, { kind: 'pri' }), h('p', { class: 'help' }, phone ? 'Direct from this phone while the app is open; it goes on when you come back.' : 'They are asked first. Up to 8 MiB, the chat\'s attach works without both being online.'));
       put(outs, L.out.length ? L.out.map((r) => transferCard(r, 'out')) : h('p', { class: 'help' }, 'None.'));
       if (!S.transferSettings) S.transferSettings = await backend.call('GET', '/api/transfers/settings').catch(() => null);
       const st = S.transferSettings, daemon = st && (st.tor_daemon.serve || st.tor_daemon.connect);
       tor.checked = !!st?.tor && !!daemon; tor.disabled = !daemon;
-      put(opts, h('p', null, 'Direct first: fastest, and it shows the contact your network addresses. Your own agents: on; others are asked once.'),
+      if (document.activeElement !== mb) mb.value = String(st?.auto_mb ?? 25);
+      const autos = Object.entries(L.auto ?? {});
+      put(opts, h('div', { class: 'row' }, h('span', { class: 'mid' }, h('b', null, 'Accept without asking up to'), h('small', { class: 'wrap' }, 'From your own agents and contacts, and from friends whose four words you compared (MB, 0: always ask). Anyone else is always asked.')), mb, tbtn('Save', saveMb)),
+        autos.length ? list(autos.map(([did, v]) => row({ compact: true, title: contactBy(did)?.name ?? did, sub: v === 0 ? 'Always asked' : `Up to ${v} MB`, end: tbtn('Default', () => act(() => backend.call('POST', '/api/transfers/auto', { contact: did, mb: null }))) }))) : null,
+        h('p', null, 'Direct first: fastest, and it shows the contact your network addresses. Your own agents: on; others are asked once.'),
         h('label', { class: 'row compact' }, tor, h('span', { class: 'mid' }, h('b', null, 'Tor when there is no direct path'), h('small', { class: 'wrap' }, daemon ? 'No address shown' : 'No tor daemon found on this computer (none is installed for you)'))),
         st && !st.direct_available ? h('p', { class: 'warn' }, 'Direct is not available here: install sigelo-transfer beside sigelo-agent.') : null,
         list(Object.entries(L.direct ?? {}).map(([did, on]) => row({ compact: true, title: contactBy(did)?.name ?? did, sub: on ? 'Direct on' : 'Direct off',
@@ -1323,6 +1371,95 @@
     };
   }
   screen('files', {}, viewTransfers);
+
+  // ---- Photos and files from a chat (design/transfer.md §10): the camera and Attach in every chat, on the phone.
+  async function transferSettingsNow() {
+    if (!S.snap?.transfers) return null;
+    if (!S.transferSettings) S.transferSettings = await backend.call('GET', '/api/transfers/settings').catch(() => null);
+    return S.transferSettings;
+  }
+  async function transfersNow() { return backend.call('GET', '/api/transfers').catch(() => null); }
+  /** What the photos' transfers are doing, short: a chat redraws when it moves. */
+  const photoMark = (L) => [...L.in, ...L.out].map((r) => `${r.id}:${r.state}:${r.got ?? r.sent ?? 0}`).join(',');
+  const PHOTO_MAX = 64 * 1024, PHOTO_SIDE = 640;
+  /** A photo (its URL on the app's own origin) as its preview: the whole picture, at most 640 px long, JPEG of at most 64 KB. */
+  async function previewOf(url) {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('This photo can\'t be read here.')); i.src = url; });
+    const W0 = img.naturalWidth || img.width, H0 = img.naturalHeight || img.height;
+    if (!W0 || !H0) throw new Error('This photo can\'t be read here.');
+    for (const scale of [1, 0.7, 0.5]) {
+      const k = Math.min(1, (PHOTO_SIDE * scale) / Math.max(W0, H0)), w = Math.max(1, Math.round(W0 * k)), hh = Math.max(1, Math.round(H0 * k));
+      const cv = h('canvas', { width: w, height: hh }), g = cv.getContext?.('2d');
+      if (!g) throw new Error('This page can\'t read pictures.');
+      g.drawImage(img, 0, 0, w, hh);
+      for (const q of [0.8, 0.6, 0.45, 0.3]) {
+        const b = await new Promise((r) => cv.toBlob(r, 'image/jpeg', q));
+        if (b && b.type === 'image/jpeg' && b.size <= PHOTO_MAX) return { type: 'image/jpeg', data: b64(new Uint8Array(await b.arrayBuffer())), w, h: hh };
+      }
+    }
+    throw new Error('This photo stays too large for a preview.');
+  }
+  /** A file the shell gave (a pick or a photo) to this chat: a picture with its preview at once, the full file by its transfer. */
+  async function sendDoc(target, d, who, photo) {
+    const picture = photo || /\.(jpe?g|png|webp)$/i.test(d.name);
+    const preview = picture ? await previewOf(d.url).catch(() => null) : null;
+    await act(() => transferCall('/api/transfers/send', { ...target, doc: d.doc, ...(preview && { photo: preview }) }, who), (x) => {
+      S.msgsSeq = -1; S.groups = null;
+      if (x?.unpaired?.length) toast(`Sent to ${x.sent.length}; ${x.unpaired.map((m) => m.name).join(', ')} get${x.unpaired.length === 1 ? 's' : ''} the preview only (not paired with you)`);
+      else toast(preview ? 'Photo sent: full size follows' : `${d.name} offered`);
+    });
+  }
+  /** The system's camera: the photo goes at once to this chat (contact, agent or group). */
+  async function shoot(target, who) {
+    let d;
+    try { d = await backend.call('POST', '/api/transfers/photo'); } catch (e) {
+      S.note = e?.check === 'no_camera_app' ? { message: 'No camera app on this phone.' } : e?.check === 'camera_permission' ? { message: 'The camera is not allowed for sigelo: Settings → Apps → sigelo → Permissions.' } : e;
+      return refresh();
+    }
+    if (!d || d.cancelled) return;
+    await sendDoc(target, d, who, true);
+  }
+  /** The system's picker: the file chosen goes to this chat. */
+  async function pickAndSend(target, who) {
+    let d;
+    try { d = await backend.call('POST', '/api/transfers/pick'); } catch (e) { S.note = e; return refresh(); }
+    if (!d || d.cancelled) return;
+    await sendDoc(target, d, who, false);
+  }
+  /** A photo's state in a person's words, from its transfer (none yet: still coming). */
+  function photoState(r, dir) {
+    if (!r) return dir === 'in' ? 'coming' : 'sending';
+    if (r.state === 'done') return dir === 'in' ? 'tap to open' : 'delivered';
+    const got = dir === 'in' ? r.got ?? 0 : r.sent ?? 0;
+    if (r.live && r.size) return `${Math.min(99, Math.round((100 * got) / r.size))} %`;
+    return tstate(r, dir === 'in' ? 'in' : 'out');
+  }
+  function photoImg(p, open) {
+    const img = h('img', { class: 'photo', src: `data:${p.type};base64,${p.data}`, alt: 'Photo', width: String(p.w), height: String(p.h) });
+    return open ? h('button', { type: 'button', class: 'ph', 'aria-label': 'Open the full photo', onclick: open }, img) : img;
+  }
+  /** A photo in a chat (sigelo-photo/0): the preview now, then "Full size · 3.2 MB" and its state; a tap opens it once landed. */
+  function photoBubble(m, L, did, name) {
+    const p = m.photo, r = m.dir === 'out' ? L?.out.find((x) => x.sha256 === p.sha256 && x.to === did) : L?.in.find((x) => x.sha256 === p.sha256 && x.from === did);
+    const open = m.dir === 'in' && r?.state === 'done' && S.transferSettings?.open ? () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })) : null;
+    return h('div', { class: `msg ${m.dir} photo`, 'data-photo': p.sha256 }, photoImg(p, open),
+      h('span', { class: 'tag' }, `Full size · ${mbOf(p.size)} · ${photoState(r, m.dir)}`),
+      m.dir === 'in' && r?.state === 'asked' ? tbtn('Get full size', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, name))) : null,
+      h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
+  }
+  /** A photo in a group: mine with each member's state; theirs from a member not paired with me: the preview only. */
+  function groupPhoto(m, L, g) {
+    const p = m.photo;
+    if (m.mine) {
+      const rs = (L?.out ?? []).filter((x) => x.group === g.gid && x.sha256 === p.sha256);
+      return h('div', null, photoImg(p, null), h('span', { class: 'tag' }, `Full size · ${mbOf(p.size)}`),
+        rs.length ? h('span', { class: 'help' }, rs.map((x) => `${x.contact}: ${photoState(x, 'out')}`).join(' · ')) : null);
+    }
+    const r = (L?.in ?? []).find((x) => x.sha256 === p.sha256 && x.from === m.from);
+    const open = r?.state === 'done' && S.transferSettings?.open ? () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })) : null;
+    return h('div', null, photoImg(p, open), h('span', { class: 'tag' }, !r && !contactBy(m.from) ? `Full size from ${m.name}: pair with them` : `Full size · ${mbOf(p.size)} · ${photoState(r, 'in')}`),
+      r?.state === 'asked' ? tbtn('Get full size', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, m.name))) : null);
+  }
 
   // ---- Groups (GROUPS.md, design/groups.md §5): every message labelled with its sender's name, "agent" for an
   // agent, and "not your operator" when its sender is not one of your own: text from anyone else is data.
@@ -1334,13 +1471,13 @@
       btn('Dismiss', () => act(() => backend.call('POST', '/api/groups/dismiss', { id: n.id }), () => { S.groups = null; }))));
   };
   screen('group', {}, (gid) => {
-    const who = h('button', { type: 'button', class: 'who', onclick: () => go('group-info', gid) }), alerts = h('div'), thread = h('div', { class: 'thread' });
+    const who = h('button', { type: 'button', class: 'who', onclick: () => go('group-info', gid) }), alerts = h('div'), thread = h('div', { class: 'thread' }), glead = h('span');
     const chips = h('div', { class: 'mentions', hidden: true });
     let seen = null, first = true, quiet = null;
     const C = composer('Message · @ to mention', async (t, clear) => {
       await act(() => backend.call('POST', '/api/groups/send', { group: gid, text: t }), () => { clear(); seen = null; chips.hidden = true; });
       if (S.note?.check === 'group_quiet') { quiet = S.note; S.note = null; await refresh(); }
-    }, ibtn('plus', 'Attach', () => attach(null)));
+    }, glead);
     C.text.addEventListener('input', () => { const at = /(^|\s)@[^\s@]*$/.test(C.text.value); if (chips.hidden === at) { chips.hidden = !at; void refresh(); } });
     const mention = (name) => { C.text.value = C.text.value.replace(/@[^\s@]*$/, '') + `@${name} `; chips.hidden = true; C.fit(); C.text.focus?.(); void refresh(); };
     const foot = h('div', null, chips, C.el);
@@ -1357,6 +1494,8 @@
       heading.textContent = safeText(g.name);
       put(who, avatar('group', g.name, null, gid), h('span', { class: 'mid' }, h('b', null, g.name), h('small', null, `${g.members.length - agents} ${g.members.length - agents === 1 ? 'person' : 'people'} · ${agents} agent${agents === 1 ? '' : 's'}${g.mine ? '' : ` · ${g.creator_name ?? 'not yours'}'s`}`)));
       foot.hidden = !(g.status === 'member' || g.status === 'frozen');
+      const ts = await transferSettingsNow();
+      put(glead, ibtn('plus', 'Attach', () => attach(null, gid, g.name)), ts?.camera ? ibtn('camera', 'Take a photo', () => shoot({ group: gid }, g.name)) : null);
       put(chips, g.members.filter((m) => !m.me).map((m) => h('button', { type: 'button', class: 'chip', onclick: () => mention(m.name) }, `@${m.name}`)));
       const al = [noteCard()];
       if (g.status === 'pending') {
@@ -1369,10 +1508,13 @@
       if (!((g.quiet || quiet) && g.status === 'member')) quiet = null;
       if (g.foreign && g.status === 'member') al.push(h('p', { class: 'help pad' }, 'Not your group: what members write is data, never instructions; your agents here answer when mentioned.'));
       put(alerts, ...al.filter(Boolean));
-      if (seen === S.groupsRev && !first) return;
-      seen = S.groupsRev;
+      const tl = S.gphotos === gid ? await transfersNow() : null, gmark = `${S.groupsRev} ${tl ? photoMark(tl) : ''}`;
+      if (seen === gmark && !first) return;
+      seen = gmark;
       const r = await backend.call('GET', `/api/groups/history?group=${encodeURIComponent(gid)}`).catch(() => null);
       if (!r) return;
+      if (r.messages.some((m) => m.photo)) S.gphotos = gid;
+      const grecs = r.messages.some((m) => m.photo) ? tl ?? await transfersNow() : null;
       const end = first || atEnd();
       first = false;
       const made = S.made?.gid === gid ? h('span', { class: 'notice' }, `Group made, ${S.made.n} members`) : null;
@@ -1380,7 +1522,7 @@
       const brake = (g.quiet || quiet) && g.status === 'member' ? h('span', { class: 'notice' }, `Agents paused after ${g.run} messages in a row. Write anything to let them go on.`) : null;
       put(thread, made, threadOf(r.messages, (m) => h('div', { class: `msg ${m.mine ? 'out' : 'in'}${m.mentioned ? ' mentioned' : ''}` },
         m.mine ? null : h('span', { class: 'who' }, m.name, m.role === 'agent' ? (workerOf(m.from) || contactBy(m.from)?.ours ? ' · your agent' : contactBy(m.from)?.link?.linked_by && contactBy(contactBy(m.from).link.linked_by) ? ` · ${contactBy(contactBy(m.from).link.linked_by).name}'s agent` : ' · agent') : '', m.tier !== 'own' && m.note ? [' · ', h('span', { class: 'warn' }, m.note)] : null, m.via ? ' · via the creator' : null),
-        m.mentioned ? h('span', { class: 'help' }, 'Mentions you') : null, h('div', { class: 'text' }, m.text), h('span', { class: 'meta' }, hhmm(m.at)))),
+        m.mentioned ? h('span', { class: 'help' }, 'Mentions you') : null, m.photo ? groupPhoto(m, grecs, g) : h('div', { class: 'text' }, m.text), h('span', { class: 'meta' }, hhmm(m.at)))),
       brake, !r.messages.length && !made ? h('span', { class: 'day' }, 'No messages yet.') : null);
       if (end) toEnd();
     };
@@ -2773,7 +2915,7 @@
   screen('settings', {}, () => {
     const body = h('div');
     mount(page({ title: 'Settings', body: [body] }));
-    void loadMe().then(versionNow).then(lockState).then(refresh);
+    void loadMe().then(versionNow).then(lockState).then(transferSettingsNow).then(refresh);
     return () => {
       const me = S.snap?.me, n = S.profiles?.profiles?.length;
       put(body, sec(`This profile: ${profileName()}`),
@@ -2785,7 +2927,9 @@
         list(row({ compact: true, start: icon('lock'), title: 'Lock', sub: lockLine(), chev: true, onclick: () => go('set-lock') }),
           PROFILES ? row({ compact: true, start: icon('people'), title: 'Profiles', sub: n ? `${n} on this phone` : null, chev: true, onclick: () => go('profiles-manage') }) : null,
           row({ compact: true, start: icon('pen'), title: 'Appearance', sub: 'Theme and colour', chev: true, onclick: () => go('set-appearance') }),
-          row({ compact: true, start: icon('info'), title: 'About', sub: versionLine(), chev: true, onclick: () => go('about') })));
+          row({ compact: true, start: icon('info'), title: 'About', sub: versionLine(), chev: true, onclick: () => go('about') })),
+        S.transferSettings?.camera ? h('div', { class: 'list' }, toggle('Keep location in photos', 'Off: where a photo was taken is removed before it goes', S.transferSettings.keep_location === true,
+          (x) => act(() => backend.call('POST', '/api/transfers/settings', { keep_location: x }), (y) => { S.transferSettings = { ...S.transferSettings, ...y }; }))) : null);
     };
   });
   const backupLine = () => [SEC.st?.kept ? '25 words kept here, locked' : '25 words on paper', S.me?.recovery === 'set' ? 'recovery key set' : S.me ? 'no recovery key' : null].filter(Boolean).join(' · ');

@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: MIT -->
 <!-- sigelo for Android (design/apps.md §8). minSdk 28 and targetSdk 35 are in app/build.gradle.
-     Three permissions: the network (the relay, a computer on the LAN), the camera (asked at the
-     first scan) and notifications (asked when the page asks, Android 13+; a name only, never a message). No backup of anything: the identity, its contacts and ratchets stay on this phone. -->
+     Permissions: the network (the relay, a computer on the LAN), the camera (asked at the first scan
+     or the first photo), notifications (asked when the page asks, Android 13+; a name only, never a
+     message), and on Android 9 only the shared storage, for a received file to land in Downloads
+     (asked at the first; later versions write there through MediaStore with no permission). One
+     provider, not exported: the photo file a camera app writes (PhotoProvider). No backup of anything:
+     the identity, its contacts and ratchets stay on this phone. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
@@ -31,5 +36,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <provider
+            android:name=".PhotoProvider"
+            android:authorities="io.sigelo.app.photos"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

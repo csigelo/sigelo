@@ -8,7 +8,8 @@ What it holds and how:
 <ul>
 <li>Keys made in the Android keystore seal the identity file and the computer's text. A FULL identity needs your screen lock.</li>
 <li>Nothing goes into a backup or to a new phone.</li>
-<li>Two permissions: the network, and the camera (asked at the first scan).</li>
+<li>Permissions: the network; the camera (asked at the first scan or photo); notifications (a name only); on Android 9, storage for received files in Downloads.</li>
+<li>Big files and photos go device to device; a photo's location tags are removed unless you keep them.</li>
 <li>No tracker, no analytics, no Google library.</li>
 </ul>
 

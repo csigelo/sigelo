@@ -258,6 +258,8 @@ try {
   ok(await failure(() => send(file('small.bin', seeded('s', 1000)))) === 'direct_ask', 'send to a friend contact, the direct switch not set: direct_ask');
   ok(X.list({ carrier: A.c, identity: A.identity }).out.length === 0, 'and nothing was sent');
   A.c.setTier('bob', 'own'); B.c.setTier('alice', 'own');
+  // The accept rule (design §10.2) would land small files from an own contact unasked: asked here until its own part below.
+  ok(X.settings({ identity: B.identity }).auto_mb === 25 && X.settings({ identity: B.identity, patch: { auto_mb: 0 } }).auto_mb === 0, 'the accept rule: 25 MB by default; 0 (always ask) kept');
   ok(X.directFor({ direct: {} }, { tier: 'own' }) === true && X.directFor({ direct: {} }, { tier: 'friend' }) === null && X.directFor({ direct: { d: false } }, { did: 'd', tier: 'own' }) === false, 'directFor: own on, others asked (null), a kept choice wins');
 
   // Consent: a manifest is a question; nothing is written before the yes; decline tells the sender.
@@ -319,6 +321,29 @@ try {
   await X.cancel({ carrier: A.c, identity: A.identity, id: r5.id, engine: A.e });
   ok(await until(() => B.rec('in', r5.id)?.state === 'cancelled'), 'the sender cancels: cancelled at the receiver');
   ok(await failure(() => X.accept({ carrier: B.c, identity: B.identity, id: r5.id })) === 'transfer_state', 'a cancelled transfer cannot be accepted');
+
+  // The accept rule (design §10.2): from an own contact, under the size set, it lands without a question.
+  X.settings({ identity: B.identity, patch: { auto_mb: 25 } });
+  const small = seeded('auto', 2 * CHUNK + 1), r9 = await send(file('auto.jpg', small));
+  ok(await until(() => B.rec('in', r9.id)?.state === 'done', 120000), 'own contact, 2 MB under 25 MB: landed with no accept', JSON.stringify(B.rec('in', r9.id)));
+  ok(B.rec('in', r9.id)?.by === 'rule' && B.events.some((e) => e.what === 'landing' && e.id === r9.id) && !B.events.some((e) => e.what === 'asked' && e.id === r9.id), 'by the rule: a landing event, no question');
+  ok(createHash('sha256').update(readFileSync(B.rec('in', r9.id).saved)).digest('hex') === createHash('sha256').update(small).digest('hex'), 'and whole');
+  X.setAuto({ carrier: B.c, identity: B.identity, contact: 'alice', mb: 0 });
+  const r10 = await send(file('ask.bin', seeded('ask', 10)));
+  ok(await until(() => B.rec('in', r10.id)?.state === 'asked'), 'the contact set to always ask: asked');
+  await X.decline({ carrier: B.c, identity: B.identity, id: r10.id });
+  X.setAuto({ carrier: B.c, identity: B.identity, contact: 'alice', mb: null });
+  X.settings({ identity: B.identity, patch: { auto_mb: 1 } });
+  const r11 = await send(file('big2.bin', seeded('big2', 2 * CHUNK)));
+  ok(await until(() => B.rec('in', r11.id)?.state === 'asked'), 'larger than the size set (2 MB over 1 MB): asked');
+  await X.decline({ carrier: B.c, identity: B.identity, id: r11.id });
+  // A group's file (design §10.3): one transfer per member paired with; one reached only through the creator: unpaired.
+  const gf = await X.prepare({ carrier: A.c, identity: A.identity, path: file('g.bin', seeded('g', 5000)) });
+  const fan = await X.fanOut({ carrier: A.c, identity: A.identity, members: [{ did: B.did, name: 'bob', contact: true }, { did: 'did:sigelo:zCarol', name: 'carol', contact: false }], f: gf, group: 'ab'.repeat(16) });
+  ok(fan.sent.length === 1 && fan.sent[0].did === B.did && fan.unpaired.length === 1 && fan.unpaired[0].name === 'carol' && fan.failed.length === 0, 'fanOut: bob sent, carol unpaired', JSON.stringify(fan));
+  ok(A.rec('out', fan.sent[0].id)?.group === 'ab'.repeat(16) && A.rec('out', fan.sent[0].id)?.sha256 === gf.whole, 'the record names the group and the one hash');
+  ok(await until(() => B.rec('in', fan.sent[0].id)?.state === 'done', 120000), 'and bob\'s copy lands by the rule (under 1 MB)');
+  X.settings({ identity: B.identity, patch: { auto_mb: 0 } });
 
   // No path: direct off on the receiver, no Tor: no_path, the free refusal's words.
   X.setDirect({ carrier: B.c, identity: B.identity, contact: 'alice', on: false });

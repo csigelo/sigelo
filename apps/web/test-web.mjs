@@ -14,7 +14,7 @@
 // The relay is its own AGPL package: SIGELO_RELAY_DIR, else ../../relay; without it, SKIP part 3.
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -77,7 +77,7 @@ const { search } = await import(pathToFileURL(join(HERE, 'pow-worker.mjs')).href
 const mqttEsm = (await import(pathToFileURL(join(HERE, 'vendor', 'mqtt.esm.js')).href)).default;
 
 // The in-memory IndexedDB and the Worker as a Node thread: test-fakes.mjs (test-shell.mjs uses them too).
-const { FakeIDB, FakeWorker } = await import(pathToFileURL(join(HERE, 'test-fakes.mjs')).href);
+const { FakeBig, FakeIDB, FakeWorker } = await import(pathToFileURL(join(HERE, 'test-fakes.mjs')).href);
 const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platform-node.mjs')).href)).pow;
 
 // ================================================================ 2. platform-web.mjs
@@ -386,7 +386,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   const G_ = { mine: [], contacts: [] };
   const snap = () => ({ seq: sandbox.seq ?? 1, now: now(), me: { did: 'did:sigelo:zMe', relay: 'relay.sigelo.ai', online: true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: null, pow: null, pow_done_ms: null, seat: { holder: 'phone', epoch: 1, here: true }, pow_capped: sandbox.capped ?? null, pow_confirm: null,
       wallet: { on: SET.wallet === true, prices: SET.prices === true, currency: SET.currency ?? null } },
-    groups: { mine: G_.mine, contacts: G_.contacts }, chats: { ...GR.chats }, pending: { invites: [], paired: [], answers: [], failed: [], public: null, ...sandbox.pending }, introductions: sandbox.intro ?? [], events: [] });
+    groups: { mine: G_.mine, contacts: G_.contacts }, chats: { ...GR.chats }, ...(sandbox.transfers && { transfers: sandbox.transfers }), pending: { invites: [], paired: [], answers: [], failed: [], public: null, ...sandbox.pending }, introductions: sandbox.intro ?? [], events: [] });
   // Groups (GROUPS.md) as GET /api/groups and /api/groups/history answer; rev bumped at each change.
   const ME = 'did:sigelo:zMe', GR = { tier: { tier: 'free', groups: 3, members: 8, told: true }, groups: [], notices: [], history: {}, chats: { unread: 0, invited: 0, notices: 0, rev: '0' } };
   const bump = () => { GR.chats.rev = String(Number(GR.chats.rev) + 1); };
@@ -1235,6 +1235,51 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     sandbox.intro = []; MSGS[bo.did] = []; sandbox.pending = { ...sandbox.pending, invites: [] };
   }
 
+  // ---- the phone's photos and files (design/transfer.md §10): the camera beside Attach, a photo's bubble and its tap,
+  // Keep location in photos (Settings), the accept rule's size and the picker (Files)
+  {
+    const bo = G_.contacts[0], SHA = 'ab'.repeat(32), jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]).toString('base64');
+    const TL = { out: [], in: [], direct: {}, auto: {}, settings: {} }, TS = { tor: true, prefer: 'fast', auto_mb: 25, keep_location: false, tor_daemon: { serve: false, connect: false }, direct_available: true, pick: true, camera: true, open: true };
+    Object.assign(routes, {
+      'GET /api/transfers/settings': () => TS, 'GET /api/transfers': () => TL,
+      'POST /api/transfers/photo': () => ({ doc: 'cd'.repeat(16), name: 'IMG_1.jpg', size: 3200000, mtime: 1, url: 'https://app.invalid/.big/x' }),
+      'POST /api/transfers/send': (b) => { sandbox.sent = b; return { id: 'ef'.repeat(16), state: 'offered' }; },
+      'POST /api/transfers/open': (b) => { sandbox.opened = b; return { opened: b.id }; },
+      'POST /api/transfers/settings': (b) => { Object.assign(TS, b); return TS; },
+      'POST /api/transfers/auto': (b) => { sandbox.auto = b; if (b.mb === null) delete TL.auto[b.contact]; else TL.auto[b.contact] = b.mb; return { did: b.contact, name: bo.name, auto_mb: b.mb ?? TS.auto_mb }; },
+    });
+    sandbox.transfers = { asked: 0, active: 0 };
+    await sandbox.ui.go('chat', bo.did); await settle(); await poll();
+    ok(aria('Take a photo', 'BUTTON') && aria('Attach', 'BUTTON'), 'a chat on the phone: the camera beside Attach');
+    await aria('Take a photo', 'BUTTON').click(); await settle(); await poll();
+    ok(calls.some(([, p]) => p === '/api/transfers/photo') && sandbox.sent?.to === bo.did && sandbox.sent.doc === 'cd'.repeat(16), `the camera → POST /api/transfers/photo, then to this chat at once (POST /api/transfers/send {to, doc}) (${JSON.stringify(sandbox.sent)})`);
+    MSGS[bo.did] = [...(MSGS[bo.did] ?? []), { n: 9, dir: 'in', at: now(), iat: now(), text: 'Photo', label: 'sigelo-photo/0', status: null, code: null, detail: null, link: null, photo: { type: 'image/jpeg', data: jpeg, w: 640, h: 480, sha256: SHA, size: 3200000, name: 'IMG_2.jpg' } }];
+    TL.in.push({ id: '12'.repeat(16), from: bo.did, contact: 'bo', name: 'IMG_2.jpg', size: 3200000, sha256: SHA, state: 'done', saved: 'content://media/external/downloads/1', got: 3200000 });
+    sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
+    const bubble = root.all().find((e) => e.attrs['data-photo'] === SHA);
+    ok(bubble?.textContent.includes('Full size · 3.2 MB · tap to open') && bubble.all().some((e) => e.tagName === 'IMG' && e.attrs.src?.startsWith('data:image/jpeg;base64,')), `a photo: the preview, "Full size · 3.2 MB" and its state (${bubble?.textContent})`);
+    await aria('Open the full photo', 'BUTTON').click(); await settle();
+    ok(sandbox.opened?.id === '12'.repeat(16), 'a tap on a photo that landed → POST /api/transfers/open');
+    await sandbox.ui.go('settings'); await settle(); await poll();
+    const kl = aria('Keep location in photos', 'INPUT');
+    ok(kl && kl.checked === false, 'Settings: Keep location in photos, off by default');
+    kl.checked = true; fire(kl, 'change'); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/transfers/settings' && b?.keep_location === true), 'Keep location in photos on → POST /api/transfers/settings {keep_location: true}');
+    await sandbox.ui.go('files'); await settle(); await poll();
+    ok(has('Accept without asking up to') && btn('Choose a file and send') && !has('File on this computer'), 'Files on the phone: the accept rule\'s size, the picker (no path)');
+    await sandbox.ui.go('chat-info', bo.did); await settle(); await poll(); await settle();
+    const ta = aria('Their files without asking', 'SELECT');
+    ok(ta?.value === '' && ta.kids.map((x) => x.textContent).join('|') === 'Default (up to 25 MB)|Always ask|Up to 10 MB|Up to 25 MB|Up to 100 MB|Up to 500 MB|Up to 2000 MB',
+      `Chat settings: their files without asking, the default (25 MB) first (${ta?.kids.map((x) => x.textContent).join('|')})`);
+    ta.value = '0'; fire(ta, 'change'); await settle(); await settle();
+    ok(sandbox.auto?.contact === bo.did && sandbox.auto.mb === 0 && TL.auto[bo.did] === 0, `Always ask → POST /api/transfers/auto {contact, mb: 0} (${JSON.stringify(sandbox.auto)})`);
+    await poll(); const ta2 = aria('Their files without asking', 'SELECT');
+    ta2.value = ''; fire(ta2, 'change'); await settle();
+    ok(sandbox.auto?.mb === null && !(bo.did in TL.auto), 'Default → POST /api/transfers/auto {contact, mb: null}');
+    sandbox.transfers = undefined; sandbox.seq = (sandbox.seq ?? 1) + 1;
+    await sandbox.ui.go('chats'); await settle(); await poll();
+  }
+
   // ---- every screen drawn once, by name, with no error (the test hook)
   {
     const args = { signed: { did: G_.contacts[0].did, n: 1 }, chat: G_.contacts[1].did, person: G_.contacts[0].did, team: 'a'.repeat(32), statement: { text: 'x\nsigelo-statement/0 eyJhIjoxfQ' }, 'signed-mine': { statement: 'x' }, 'chat-info': G_.contacts[1].did, compare: G_.contacts[1].did, agent: 0, group: 'a'.repeat(32), 'group-info': 'a'.repeat(32), introduce: G_.mine[0].did,
@@ -1684,7 +1729,7 @@ function agent(label) {
 // The flush rule, watched: a flush completed between any two PUBLISH or PUBACK (each waits for one),
 // and while a flush is held (gate) nothing is published and nothing acknowledged.
 const watch = { publishes: 0, acks: 0, unflushed: [], tick: 0 };
-async function webApp(a, idb = new FakeIDB(), name = 'app') {
+async function webApp(a, idb = new FakeIDB(), name = 'app', big = null) {
   const p = await W.webPlatform({ name, indexedDB: idb, mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()), env: { relay: HOST } });
   let flushedAt = 0, sentAt = 0;
   const app = { idb, gate: null, flushing: 0, publishes: 0, acks: 0, delivered: 0 };
@@ -1701,6 +1746,7 @@ async function webApp(a, idb = new FakeIDB(), name = 'app') {
       } });
       return client;
     },
+    ...(big && { big }),
   };
   app.platform = platform;
   app.router = makeRouter({ platform, identity: () => a.store, options: relayOpts });
@@ -1893,6 +1939,55 @@ try {
       const rv = await O.call('POST', '/api/agents/revoke', { worker: 1 });
       ok(rv.status === 200 && rv.body.forgot === w1.contact && (await O.call('GET', '/api/agents/workers')).body.workers.find((x) => x.worker === 1).status === 'revoked', 'app enrol: revoke → its contact forgotten, revoked in the list');
     } finally { await O.stop(); }
+  }
+
+  // The phone's big files (design/transfer.md §10): a platform with the shell's bridge (platform.big) runs the
+  // transfer engine in the page; the accept rule; a photo's preview beside its manifest.
+  {
+    const TX = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'transfer-node.mjs')).href);
+    const { sha256 } = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'node_modules', '@noble', 'hashes', 'sha2.js')).href);
+    const ELI = agent('eli'), DEE = agent('dee'), fb = new FakeBig({ sha256 });
+    const P = await webApp(ELI, new FakeIDB(), 'phone', fb);
+    const dee = nodeAgent(DEE), deeId = join(dir, 'dee.local.json');
+    try {
+      await P.router.start();
+      const s0 = await call(P, 'GET', '/api/transfers/settings');
+      ok(s0.status === 200 && s0.body.pick === true && s0.body.camera === true && s0.body.open === true && s0.body.auto_mb === 25 && s0.body.keep_location === false && s0.body.tor_daemon.serve === false,
+        `phone: /api/transfers/settings: pick, camera, open; 25 MB; location removed by default; no Tor (${JSON.stringify(s0.body)})`);
+      ok((await call(P, 'GET', '/api/state')).body.transfers !== null, 'phone: GET /api/state counts transfers (the Files badge)');
+      const inv = await dee.invite({ name: 'eli' });
+      ok((await call(P, 'POST', '/api/accept', { code: inv.code, name: 'dee' })).status === 200, 'phone: paired with a Node agent');
+      await until(async () => { await dee.inbox({ wait: 0.3 }); return dee.contacts().contacts.some((c) => c.did === ELI.did) && (await call(P, 'GET', '/api/state')).body.groups.contacts.some((c) => c.did === DEE.did); });
+      await dee.start();
+      // From a friend whose words were not compared: asked, whatever the size.
+      const f1 = join(dir, 'tiny.txt'); writeFileSync(f1, 'hello');
+      const t1 = await TX.send({ carrier: dee, identity: deeId, to: 'eli', path: f1, direct: true });
+      ok(await until(async () => (await call(P, 'GET', '/api/transfers')).body.in.some((r) => r.id === t1.id && r.state === 'asked')), 'phone: a friend, words not compared: asked');
+      // Compared, direct allowed: the rule says yes (then no path here: no RTCPeerConnection in this test).
+      await call(P, 'POST', '/api/words', { contact: DEE.did, match: true });
+      await call(P, 'POST', '/api/transfers/direct', { contact: DEE.did, on: true });
+      const t2 = await TX.send({ carrier: dee, identity: deeId, to: 'eli', path: f1 });
+      ok(await until(async () => (await call(P, 'GET', '/api/transfers')).body.in.some((r) => r.id === t2.id && r.by === 'rule')), 'phone: words compared, direct on, 5 bytes: accepted by the rule');
+      const au = await call(P, 'POST', '/api/transfers/auto', { contact: DEE.did, mb: 0 }), au2 = await call(P, 'POST', '/api/transfers/settings', { auto_mb: 10, keep_location: true });
+      ok(au.status === 200 && au.body.auto_mb === 0 && (await call(P, 'GET', '/api/transfers')).body.auto[DEE.did] === 0 && au2.body.auto_mb === 10 && au2.body.keep_location === true, 'phone: per contact always ask; the default and keep_location kept');
+      // A photo: the camera (the shell), its preview beside the manifest; the chat shows it at once.
+      fb.next = ['IMG_1.jpg', new Uint8Array(3000).fill(7)];
+      const shot = await call(P, 'POST', '/api/transfers/photo');
+      ok(shot.status === 200 && /^d\d+$/.test(shot.body.doc) && shot.body.name === 'IMG_1.jpg' && fb.photoAsked?.keepLocation === true, 'phone: POST /api/transfers/photo → a doc; keep_location passed to the shell');
+      const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70]).toString('base64');
+      const bad = await call(P, 'POST', '/api/transfers/send', { to: DEE.did, path: '/etc/passwd' });
+      ok(bad.status === 400 && bad.body.error.check === 'body', 'phone: a path is refused (a doc only: the WebView reads no paths)');
+      const sp = await call(P, 'POST', '/api/transfers/send', { to: DEE.did, doc: shot.body.doc, photo: { type: 'image/jpeg', data: jpeg, w: 640, h: 480 } });
+      ok(sp.status === 200 && sp.body.state === 'offered' && sp.body.name === 'IMG_1.jpg' && sp.body.size === 3000, `phone: the photo offered (${JSON.stringify(sp.body).slice(0, 200)})`);
+      const msgs = (await call(P, 'GET', `/api/messages?contact=${encodeURIComponent(DEE.did)}`)).body.messages, pm = msgs.find((m) => m.label === 'sigelo-photo/0');
+      ok(pm?.dir === 'out' && pm.photo.sha256 === sp.body.sha256 && pm.photo.size === 3000 && pm.photo.w === 640, 'phone: the preview in the chat at once, naming the file\'s sha256');
+      let got = [];
+      ok(await until(async () => { got.push(...(await dee.inbox({ wait: 0.5 })).messages); return got.some((m) => m.label === 'sigelo-photo/0' && m.content.sha256 === sp.body.sha256); }), 'the Node agent receives the preview as a sigelo-photo/0 message');
+      const sb = await call(P, 'POST', '/api/transfers/send', { to: DEE.did, doc: shot.body.doc, photo: { type: 'image/webp', data: jpeg, w: 1, h: 1 } });
+      ok(sb.status === 400 && sb.body.error.check === 'photo', 'phone: a preview that is not what it says: 400 photo');
+      const op = await call(P, 'POST', '/api/transfers/open', { id: t1.id });
+      ok(op.status === 409 && op.body.error.check === 'transfer_state', 'phone: open before it landed: 409');
+    } finally { await P.router.stop().catch(() => {}); await dee.stop?.(); }
   }
 
   // One owner per identity: a second app on the same identity is refused while the first runs.

@@ -73,3 +73,26 @@ export class FakeWorker {
   postMessage(data) { this.w.postMessage(data); }
   terminate() { void this.w.terminate(); }
 }
+
+/** The Android shell's big-file bridge (platform.big, SigeloBridge "big-*"), in memory: docs to pick or shoot, parts, Downloads. */
+export class FakeBig {
+  constructor({ sha256 }) { this.sha = sha256; this.docs = new Map(); this.parts = new Map(); this.landed = []; this.opened = []; this.awakes = []; this.n = 0; this.next = null; }
+  add(name, bytes, mtime = 1000) { const doc = `d${++this.n}`; this.docs.set(doc, { name, bytes, mtime }); return { doc, name, size: bytes.length, mtime, url: `https://app.invalid/.big/${doc}` }; }
+  async pick() { return this.next ? this.add(...this.next) : null; }
+  async photo(o) { this.photoAsked = o; return this.next ? this.add(...this.next) : null; }
+  async hash(doc) {
+    const d = this.docs.get(doc), n = Math.ceil(d.bytes.length / 1048576), hashes = new Uint8Array(n * 32);
+    for (let i = 0; i < n; i++) hashes.set(this.sha(d.bytes.subarray(i * 1048576, (i + 1) * 1048576)), i * 32);
+    return { name: d.name, size: d.bytes.length, mtime: d.mtime, sha256: Buffer.from(this.sha(d.bytes)).toString('hex'), hashes };
+  }
+  async stat(doc) { const d = this.docs.get(doc); return { size: d.bytes.length, mtime: d.mtime }; }
+  async read(doc, offset, length) { return this.docs.get(doc).bytes.slice(offset, offset + length); }
+  async write(part, offset, b) { const p = this.parts.get(part) ?? new Uint8Array(0), q = new Uint8Array(Math.max(p.length, offset + b.length)); q.set(p); q.set(b, offset); this.parts.set(part, q); }
+  async flush() {}
+  async sha256(part) { return Buffer.from(this.sha(this.parts.get(part) ?? new Uint8Array(0))).toString('hex'); }
+  async drop(part) { this.parts.delete(part); }
+  async free() { return 1e12; }
+  async land(part, name) { this.landed.push({ name, bytes: this.parts.get(part) }); this.parts.delete(part); return { uri: `content://media/external/downloads/${this.landed.length}`, name }; }
+  async open(uri, name) { this.opened.push({ uri, name }); }
+  async awake(on) { this.awakes.push(on); }
+}
