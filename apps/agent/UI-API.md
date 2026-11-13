@@ -27,8 +27,8 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 |---|---|---|
 | `GET /api/state` | `since=<seq>` | `{seq, now, me, groups: {mine, contacts}, chats, pending: {invites, paired, answers, failed, public}, events, introductions, transfers}` (`transfers`: `{asked, active}`, null where the host moves no files) |
 | `GET /api/me` | | `{did, original, words, chain, identity_file, recovery: "set"\|"none", key: "file", relay, retention_days, erase, restored?}`; `restored` `{on, keeper, seat: "here"\|"elsewhere"\|null, created?}` when the identity comes from the 25 words and its keeper file has the day it was made (Me: "Restored from seed on …"); `created: true` when the words were made on this device (keeper `made: "here"`; Me: "Created on …; the 25 words are on your paper"); `words`: four words naming `original` (apps/contact/short.mjs `didWords`, a label for the apps' profile list, not a check) |
-| `POST /api/invite` | `{name?, long?, ttl?, public?, group?, pow_confirmed?}` | `{id, name, code, exp, short?, short_exp?, relay, group?, public?}`: `short` parked 10 min; `short_exp` the relay's clock; `ttl` with `long`: the long code's life, 3600 to 604800 s (else 24 h); `public` with `long`: the public invite ("Public invite"); `group`: a group code (a gid of mine, else `404 group_unknown`, `409 group_creator`): whoever pairs through it is added to that group as a person |
-| `POST /api/invite/cancel` | `{id}` | `{cancelled: true}`: the public invite too, used or not (Stop for good) |
+| `POST /api/invite` | `{name?, long?, ttl?, public?, group?, renew?, pow_confirmed?}` | `{id, name, code, exp, short?, short_exp?, relay, group?, public?, renew?}`: `short` parked 10 min; `short_exp` the relay's clock; `renew` (a short person code): it renews itself ("Renewing codes"); `ttl` with `long`: the long code's life, 3600 to 604800 s (else 24 h); `public` with `long`: the public invite ("Public invite"); `group`: a group code (a gid of mine, else `404 group_unknown`, `409 group_creator`): whoever pairs through it is added to that group as a person |
+| `POST /api/invite/cancel` | `{id}` or `{code}` (a short code) | `{cancelled: true, unparked?, detail?}`: the public invite too, used or not (Stop for good); a short code is cancelled at the relay too (`unparked`; false: an older relay or offline, `detail` says so, it runs out there); a renewing code's series ends |
 | `POST /api/accept` | `{code, name?, tier?, pow_confirmed?}` | `{status: "connected", contact: {did, name, fingerprint, pair, tier}}`, or `{status: "waiting"\|"pending", did, detail, exp}`; `tier`: `friend` or `quiet` (own is detected) |
 | `POST /api/words` | `{contact, match}` | `true`: `{checked: true}`; `false`: forget and block |
 | `POST /api/rename` | `{contact, name}` | `{did, name}`; `409 name_taken` if another live contact has it |
@@ -138,7 +138,7 @@ seat: {holder, epoch, here}|null, wallet: {on, prices, currency}, picture}` (`wa
 pow/try, the page's start) past 3 searches a day at a relay answers `409 pow_confirm` (its message the question), and goes with
 `pow_confirmed: true`; the automatic retries stop instead (`pow_capped.next`: the next automatic try)
 (`here` false: another device holds the seat; the page shows a banner and its writes refuse `seat_elsewhere`). A pending invite:
-`{name, exp, relay, id?, short?, short_exp?, code?}`; `paired`: `{id, name, paired: <did>}` for the
+`{name, exp, relay, id?, short?, short_exp?, code?, renew?, used?, renew_error?}`; `paired`: `{id, name, paired: <did>}` for the
 pairing view. `answers`: codes this side answered, waiting for the inviter until `exp`. `failed`:
 `pairing_failed` of the last day (`code_expired`: expired before they replied). `public`: the public invite or null ("Public invite"). `introductions`: `[{id, from, name, purpose, peer_name}]`,
 introductions to this identity waiting for an answer, introducer not quiet: the page's banner. The page runs the link handler
@@ -248,6 +248,12 @@ text). The key agent (KEYS.md) signs none.
 **Public invite** (Me → Public invite): a long code (`long`, `ttl` up to 7 days, `public`), one at a time: a new one stops the one before.
 Kept in `.ui.json` `public` `{id, name, code, exp, relay, paired?}` until it runs out or is stopped; state's `pending.public` `{id, name,
 code, exp, relay, waiting, paired}` (`waiting`: nobody used it yet; `paired`: the contact it made). Pairing is one to one: it works once.
+
+**Renewing codes** (My code, New chat): `renew: true` makes a one-person short code that is replaced as soon as it is used:
+the agent parks a fresh one, same name (numbered: `-2`, `-3`), ttl and relay, kept in the contact store. Its pending invite keeps the
+id `r<series>` across codes and restarts: `short` the current code (`code` only for the first), `renew: true`, `used` `[{short, name,
+did, at}]` the codes used (the latest 10; compare the four words with each), `renew_error` why the last renewal failed (retried a
+minute later) or null; it never shows in `paired`. Cancel ends it; a code that runs out unused ends it too.
 
 **Relay setting:** new codes name `SIGELO_RELAY` if set, else the setting, else `relay.sigelo.ai`; a change applies to the
 next invite and to this page's own connection at its next start. Codes accepted never read it: 8 characters are `relay.sigelo.ai`'s,

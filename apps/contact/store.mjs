@@ -2,11 +2,12 @@
 // The contact store of sigelo-invite/0: one JSON file per identity. Contacts are keyed by the
 // peer's ORIGINAL DID with every rotation seen, as accept/node/sigelo-pair.mjs keeps pairings, so
 // a rotation keeps the contact and a recovery still beats a thief (SPEC §7.1).
-//   { v, self, invites: { nonce: { secret, exp, name, peer, relay } },
+//   { v, self, invites: { nonce: { secret, exp, name, peer, relay, short?, short_exp?, renew? } },
 //              accepts: { answer id: { secret, code_did, exp, name, relay, kem_sk, as, named?, tier? } },
 //              contacts: { original DID: { name, did, current_did, current_key, revoked, chain, rotations, relay, pair_key, re_pair?,
 //                                          tier, tier_by, operator_exp?, link?, presence? } },
-//              preset?: { original DID: tier } }
+//              preset?: { original DID: tier },
+//              renew?: { series id: { name, ttl, relay, n, used: [{ short, did, name, at }], due?, claim?, retry?, error? } } }
 // invites: codes this owner handed out, keyed by inviteNonce(code bytes); peer: the original DID of
 // the contact a re-key code is for, null on a new contact's code. accepts: codes this owner
 // answered, keyed by answerId(answer). re_pair: "own_recovery" or "contact_recovery" once a recovery
@@ -32,6 +33,15 @@
 // presence: true when the owner lets this contact see whether this agent is online (setPresence; off
 // by default, design/transfer.md §8 T0). An own agent (ours, or tier own) always sees it: presenceOf.
 // Kept by a re-pair, a merge and a rename, as the tier is.
+// short, short_exp: the short code parked for an invite of mine (carrier.mjs invite) and the relay's
+// exp of it, so a cancel by the short code finds the invite and the state shows it. renew (an invite's
+// series id, and the series in `renew`): a one-person code that renews itself (ROADMAP "Invite codes:
+// auto-renew and cancel"): when its invite is taken (answered, well or not) the series is due, and the
+// carrier parks a fresh code for it (carrier.mjs #renewDue) with the series' name (numbered: n), ttl
+// and relay (null: the defaults). used: the codes of it that were used, the latest RENEW_USED. claim:
+// when a process began a renewal (two processes of one identity park one code); retry, error: a
+// renewal that failed, tried again from retry. Cancelling the current code (cancelInvite) ends the
+// series; so does its code running out unused (purged with it, as nothing is due).
 // The file holds one-time secrets, Bob's one-time key and
 // pairing keys, so it is written 0600. Two simultaneous writers still need the integrator's lock.
 import { utf8ToBytes } from '@noble/hashes/utils.js';
@@ -45,6 +55,8 @@ const UTF8 = new TextDecoder('utf-8', { ignoreBOM: true });
 export const OPERATOR_CTX = 'sigelo-relay/operator';
 // The longest name rename() gives a contact, in characters.
 export const NAME_MAX = 64;
+// Renewing codes: seconds a process's claim on a due series holds; the codes used kept per series.
+export const RENEW_CLAIM = 120, RENEW_USED = 10;
 // What a record keeps of its tier through admit (a re-pair, a merged notice).
 const TIER_KEYS = ['tier', 'tier_by', 'operator_exp', 'link', 'presence'];
 // A recovery key used and replaced still governs every node up to its retirement (SPEC §7.2), and
@@ -262,6 +274,12 @@ export class Contacts {
         delete this.s[k][nonce]; n++;
       }
     }
+    // A series with no current code and nothing due is over (its code ran out unused).
+    for (const id of Object.keys(this.s.renew ?? {})) {
+      if (this.s.renew[id].due || Object.values(this.s.invites).some((p) => p.renew === id)) continue;
+      delete this.s.renew[id]; n++;
+    }
+    if (this.s.renew && Object.keys(this.s.renew).length === 0) delete this.s.renew;
     return n;
   }
 
@@ -291,14 +309,57 @@ export class Contacts {
    * null and peer = a DID of the known contact it is for: an answer from anyone else fails
    * challenge_did, as sigelo-pair pins its challenge to one DID.
    */
-  addInvite(code, name, now, peer = null) {
+  addInvite(code, name, now, peer = null, renew = null) {
     let pin = null;
     if (name === null) {
       const c = this.lookup(peer) ?? fail('not_contact', `a re-key code names the contact it is for; ${JSON.stringify(peer)} is not one`);
       if (c.revoked) fail('revoked', `${c.did} was revoked by this owner`);
       pin = c.did;
     } else if (peer !== null) fail('name', 'a new contact\'s code is for whoever holds it: no peer');
-    return this.#add('invites', code.nonce, { secret: hex(code.secret), exp: code.exp, name, peer: pin, relay: code.relay }, now, TTL_MAX);
+    // renew: { id } to continue a series (gone: it was cancelled), { id, start: { name, ttl, relay } } to begin one.
+    if (renew !== null) {
+      if (pin !== null || typeof renew?.id !== 'string') fail('renew', 'a renewing code is a new contact\'s, with a series id');
+      if (!renew.start && !this.load().s.renew?.[renew.id]) fail('challenge_unknown', 'this renewing code was cancelled');
+    }
+    const nonce = this.#add('invites', code.nonce, { secret: hex(code.secret), exp: code.exp, name, peer: pin, relay: code.relay, ...(renew && { renew: renew.id }) }, now, TTL_MAX);
+    if (renew?.start) { (this.s.renew ??= {})[renew.id] = { name: renew.start.name ?? null, ttl: renew.start.ttl ?? null, relay: renew.start.relay ?? null, n: 1, used: [] }; this.save(); }
+    return nonce;
+  }
+
+  /** The short code parked for invite nonce (carrier.mjs invite), and the relay's exp of it. */
+  setShort(nonce, short, short_exp) {
+    const p = this.load().s.invites[nonce] ?? fail('challenge_unknown', 'no pending invite with this nonce');
+    p.short = short; p.short_exp = short_exp; this.save();
+  }
+
+  /** The renewing series due now (taken, not claimed by a process in the last RENEW_CLAIM s, past retry), claimed. */
+  renewClaim(now, peek = false) {
+    const out = [];
+    for (const [id, x] of Object.entries(this.load().s.renew ?? {})) {
+      if (!x.due || x.claim > now - RENEW_CLAIM || x.retry > now) continue;
+      if (!peek) x.claim = now;
+      out.push({ id, name: x.name, ttl: x.ttl, relay: x.relay, n: x.n });
+    }
+    if (out.length > 0 && !peek) this.save();
+    return out;
+  }
+  /** A fresh code parked for series id: no longer due. */
+  renewDone(id) {
+    const x = this.load().s.renew?.[id];
+    if (!x) return;
+    x.n++; delete x.due; delete x.claim; delete x.retry; delete x.error; this.save();
+  }
+  /** A renewal that failed: tried again from retry (unix seconds); why, shown in the state. */
+  renewFailed(id, why, retry) {
+    const x = this.load().s.renew?.[id];
+    if (!x) return;
+    x.retry = retry; x.error = why; delete x.claim; this.save();
+  }
+  /** Who used a code of series id (the pairing it made). */
+  renewUsed(id, use) {
+    const x = this.load().s.renew?.[id];
+    if (!x) return;
+    x.used = [...x.used, use].slice(-RENEW_USED); this.save();
   }
 
   /**
@@ -322,6 +383,8 @@ export class Contacts {
     this.load();
     const p = typeof nonce === 'string' && Object.hasOwn(this.s[kind], nonce) ? { ...this.s[kind][nonce], nonce } : null;
     if (p) delete this.s[kind][nonce];
+    // A renewing code used, well or not: its series is due a fresh one (carrier.mjs #renewDue).
+    if (kind === 'invites' && p?.renew && this.s.renew?.[p.renew]) this.s.renew[p.renew].due = true;
     if (this.#purge(now) || p) this.save();
     return p;
   }
@@ -329,7 +392,11 @@ export class Contacts {
   /** The owner withdraws a code not yet answered (nonce = code.nonce). */
   cancelInvite(nonce) {
     if (typeof nonce !== 'string' || !Object.hasOwn(this.load().s.invites, nonce)) fail('challenge_unknown', 'no pending invite with this nonce');
-    delete this.s.invites[nonce]; this.save();
+    const series = this.s.invites[nonce].renew;
+    delete this.s.invites[nonce];
+    // A renewing code cancelled: no fresh one after it.
+    if (series && this.s.renew) { delete this.s.renew[series]; if (Object.keys(this.s.renew).length === 0) delete this.s.renew; }
+    this.save();
   }
 
   // Every contact whose chain shares a DID with `chain`. admit lets at most one exist.

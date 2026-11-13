@@ -5,6 +5,9 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **app:** My code and New chat make a code that renews itself ("Renews itself", on by default): the next code appears in place, with who used the last; "Cancel this code" also cancels at the relay.
+- **agent:** codes that renew themselves (a fresh short code once one is used) and "Cancel this code" at the relay: carrier `cancelInvite`, `POST /api/invite/cancel`, `invite --renew`/`--cancel`, MCP `sigelo_invite`.
+- **relay:** `DELETE /park/<hash>` cancels a parked short code: the parker's login in the body, a tombstone until its expiry, `park_unknown` for anyone else; charged as a lookup. GET and POST unchanged.
 - **Docs:** the four words (ENROL.md the source), the busy lock, the relay-metadata line, `reply-hook.sh` shipped, Hermes `mcp add` non-interactive form, "no outside review yet"; keeper copy: mainnet with small amounts.
 
 ## v0.1.15 — 2026-11-13

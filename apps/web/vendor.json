@@ -135,7 +135,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "8969d45d35813cdbc9f15fcbbc15769a43069b62f3a9c3a9c10c4f52805d9d55"
+   "sha256": "b17ae572696edfdf123a419f7c6202549575b0a7f007556ca74cdf6fee1cab98"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
@@ -179,7 +179,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "e5c987505b0358529705e02794fb1b7d57bb437ef3fff697dff710e614a18148"
+   "sha256": "6b2ed440de03282445c90ddd5eb18ee6502f7ba52cf537b1e882c2eb9a58af04"
   },
   "vendor/contact/prekeys.mjs": {
    "from": "apps/contact/prekeys.mjs",
@@ -207,7 +207,7 @@
   },
   "vendor/contact/store.mjs": {
    "from": "apps/contact/store.mjs",
-   "sha256": "dd30c652d94abc0354572667a0d2ef51408a326b1006763c56aed797a7cb5f07"
+   "sha256": "fa991674c35015c7aebca35a0594bdb4f3fa891a88a32ffcb075942bc0b5a086"
   },
   "vendor/contact/words-lock.mjs": {
    "from": "apps/contact/words-lock.mjs",
@@ -223,7 +223,7 @@
   },
   "vendor/package.json": {
    "from": "apps/agent/package.json",
-   "sha256": "c5af2c099b1d16ed6767fadf0754cc56ac835194e1b839dc1d1f8f7b7a62e8f3"
+   "sha256": "401df0685a47b5740f12b6e43fa9e058c125a8031477ba0a61b135506df3f70b"
   },
   "vendor/remote-client.mjs": {
    "from": "apps/agent/remote-client.mjs",
@@ -259,7 +259,7 @@
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "4ff76a1b4ff6fdb18d7edde6d2349ba10631908be9add96c340593558340c6d2"
+   "sha256": "f7a5d32c1b4d871219188b437d73803e5d73b4313c07aebf3d5de45c8a8ce484"
   }
  }
 }

@@ -85,6 +85,12 @@
 // The public invite (UI-API.md "Public invite"): a long code (POST /api/invite long, ttl up to 7 days), once, kept in
 // data.public so it survives a restart; Stop is /api/invite/cancel.
 //
+// Codes that renew themselves (UI-API.md "Renewing codes"): POST /api/invite renew, a short person code that the
+// carrier replaces with a fresh one once it is used (store.mjs renew, in the contact store). Its id here is "r" + the
+// series id, the same after a restart; state's pending invite is the current code, `renew: true`, `used` the codes
+// used. Cancel (/api/invite/cancel, an id or a short code) cancels at the relay too (carrier.mjs cancelInvite) and
+// ends the series.
+//
 // The relay setting (UI-API.md "Settings"): the relay new codes name, kept in data.settings.relay.
 // Precedence: relayFixed (the host's environment: SIGELO_RELAY, or a relay the host was given) wins,
 // then the setting, then relay.sigelo.ai. The carrier is made with the setting; a change applies at
@@ -244,8 +250,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (hidden({ did: d, name: e['name'] })) continue;
       switch (e.type) {
         case 'paired': {
-          const inv = [...invites.values()].find((x) => x.name === e['name'] && !x.paired);
-          if (inv && d) inv.paired = d;
+          // A renewing code stays current (its next code shows in its place): never "paired" itself.
+          const inv = e['renew'] ? invites.get(`r${String(e['renew'])}`) : [...invites.values()].find((x) => x.name === e['name'] && !x.paired && !x.renew);
+          if (inv && d && !inv.renew) inv.paired = d;
           if (d && data.public?.name === e['name'] && !data.public.paired) { data.public.paired = d; saveData(); }
           record({ kind: 'event', type: 'paired', did: d, name: e['name'] });
           if (d) newContact(d, inv);
@@ -590,6 +597,12 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     const isMine = (x) => x.ours || x.tier === 'own';
     const mineGroup = live_.filter(isMine), rest = live_.filter((x) => !isMine(x));
     const pendingInvites = c.invites.filter((p) => !hidden(p)).map((p) => {
+      if (p.renew) {
+        // A renewing code: the current one of its series, wherever it was made (the long code only for the first, made here).
+        const ours = invites.get(`r${p.renew}`), x = c.renewing?.find((y) => y.id === p.renew);
+        return { name: p.name, exp: p.exp, relay: p.relay, id: `r${p.renew}`, short: p.short ?? null, short_exp: p.short_exp ?? null, code: ours?.short === p.short ? ours.code : null, group: null,
+          renew: true, used: (x?.used ?? []).map((u) => ({ short: u.short, name: u.name, did: u.did, at: u.at })), renew_error: x?.error ?? null };
+      }
       const ours = [...invites.values()].find((x) => x.name === p.name);
       return { name: p.name, exp: p.exp, relay: p.relay, ...(ours && { id: ours.id, short: ours.short ?? null, short_exp: ours.short_exp ?? null, code: ours.code, group: ours.group ?? null }) };
     });
@@ -835,14 +848,17 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       // A long code's life (the public invite): an hour to 7 days; the short code lives 10 minutes whatever.
       if (ttl !== undefined && (b['long'] !== true || !Number.isSafeInteger(ttl) || ttl < 3600 || ttl > 7 * DAY)) refuse(400, 'body', 'ttl: with long, 3600 to 604800 seconds (an hour to 7 days)');
       if (b['public'] !== undefined && (typeof b['public'] !== 'boolean' || (pub && (b['long'] !== true || group !== undefined)))) refuse(400, 'body', 'public: true, with long (and no group)');
+      // A person code that renews itself: short, for one person at a time (no long, public or group code).
+      const renew = b['renew'] === true;
+      if (b['renew'] !== undefined && (typeof b['renew'] !== 'boolean' || (renew && (b['long'] === true || pub || group !== undefined)))) refuse(400, 'body', 'renew: true, a short person code (not long, public or a group code)');
       // A group code (Add people): whoever pairs through it is added to that group of mine, as a person.
       if (group !== undefined) {
         const g = typeof group === 'string' && G && groupsFile ? G.list({ carrier, file: groupsFile }).find((x) => x.gid === group) : null;
         if (!g) refuse(404, 'group_unknown', `no group ${String(group)} here`);
         if (!g.mine || g.status !== 'member') refuse(409, 'group_creator', `only ${g.creator_name ?? 'its creator'} adds people to ${g.name}`);
       }
-      const r = await carrier.invite({ name, short: b['long'] !== true, ...(ttl !== undefined && { ttl }), ...(at !== carrier.relay && { relay: at }), started: startedBy(b) });
-      const inv = { id: hexOf(6), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp }), ...(group !== undefined && { group }), ...(pub && { public: true }) };
+      const r = await carrier.invite({ name, short: b['long'] !== true, ...(ttl !== undefined && { ttl }), ...(at !== carrier.relay && { relay: at }), ...(renew && { renew: true }), started: startedBy(b) });
+      const inv = { id: r.renew ? `r${r.renew}` : hexOf(6), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp }), ...(group !== undefined && { group }), ...(pub && { public: true }), ...(r.renew && { renew: true }) };
       // One public invite at a time: a new one stops the one before.
       if (pub) {
         const old = data.public;
@@ -854,13 +870,31 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       return { ...inv, relay: r.relay };
     }),
     'POST /api/invite/cancel': (b) => serial(async () => {
-      const inv = invites.get(String(b['id'])) ?? refuse(404, 'invite', 'no such invite');
+      // By its short code (a code this page did not make: the CLI's, a renewal), at the carrier and the relay.
+      if (b['id'] === undefined && typeof b['code'] === 'string' && b['code'].trim() !== '') {
+        const r = await carrier.cancelInvite(b['code'].trim()).catch((e) => (e.check === 'challenge_unknown' ? refuse(404, 'invite', 'no such invite') : Promise.reject(e)));
+        for (const x of [...invites.values()]) if (x.short === r.short || (r.name !== null && x.name === r.name)) invites.delete(x.id);
+        changed();
+        return { cancelled: true, ...(r.unparked !== undefined && { unparked: r.unparked }), ...(r.detail && { detail: r.detail }) };
+      }
+      const id = String(b['id']);
+      // A renewing code: its series' current code, wherever it was made; cancelling it ends the series.
+      if (id.startsWith('r')) {
+        const cur = carrier.contacts().invites.find((x) => `r${x.renew}` === id);
+        invites.delete(id);
+        if (!cur) refuse(404, 'invite', 'no such invite');
+        const r = cur.short ? await carrier.cancelInvite(cur.short) : { unparked: undefined };
+        changed();
+        return { cancelled: true, ...(r.unparked !== undefined && { unparked: r.unparked }), ...(r.detail && { detail: r.detail }) };
+      }
+      const inv = invites.get(id) ?? refuse(404, 'invite', 'no such invite');
       // A public invite used already is no invite at the carrier any more: stopped all the same.
-      try { await carrier.cancelInvite(inv.code); } catch (e) { if (data.public?.id !== inv.id) throw e; }
+      let r = {};
+      try { r = await carrier.cancelInvite(inv.code); } catch (e) { if (data.public?.id !== inv.id) throw e; }
       invites.delete(inv.id);
       if (data.public?.id === inv.id) { delete data.public; saveData(); }
       changed();
-      return { cancelled: true };
+      return { cancelled: true, ...(r.unparked !== undefined && { unparked: r.unparked }), ...(r.detail && { detail: r.detail }) };
     }),
     'POST /api/accept': (b) => serial(async () => {
       if (typeof b['code'] !== 'string' || b['code'].trim() === '') refuse(400, 'body', 'code: the short code (K7F3-Q9ZP) or the long one (sgl1…)');

@@ -364,6 +364,41 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   }
 }
 
+// ── invite --renew, invite --cancel: a code that renews itself, "Cancel this code" ─────────
+// op's code renews itself: rev answers it, op's inbox pairs and prints the next code; invite --cancel
+// cancels that one, at the relay too, and the series ends.
+{
+  if (!hasRelay()) console.log(`SKIP invite --renew: ${NO_RELAY}`);
+  else {
+    const H = tmpHome('renew'), home = await startTestRelay(H);
+    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify(home.endpoints), ...KA });
+    const cli = (n: string, ...args: string[]) => cliIn(envOf(n), H)(...args);
+    try {
+      for (const n of ['rev', 'op', 'eve']) await cli(n, 'init', '--no-recovery');
+      const longRenew = await cli('op', 'invite', '--renew', '--long'), mixed = await cli('op', 'invite', '--cancel', 'K7F3-Q9ZP', '--name', 'x');
+      ok('invite --renew --long and invite --cancel with --name: usage (exit 2), before anything connects', longRenew.status === 2 && longRenew.stderr.includes('--renew') && mixed.status === 2 && mixed.stderr.includes('--cancel'), longRenew.stderr + mixed.stderr);
+      const inv = await cli('op', 'invite', '--renew', '--json', '--name', 'rev'), j = JSON.parse(inv.stdout || '{}') as { short?: string; renew?: string };
+      ok('invite --renew: a short code, a series id, and the note that it renews itself', inv.status === 0 && /^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(j.short ?? '') && typeof j.renew === 'string' && inv.stderr.includes('renews itself'), inv.stderr);
+      const acc = await cli('rev', 'accept', j.short!, '--name', 'operator', '--wait', '0');
+      const box = await cli('op', 'inbox');
+      const listed = JSON.parse((await cli('op', 'contacts')).stdout || '{}') as { invites?: { short?: string; renew?: string; name: string }[]; renewing?: { id: string; used: { did: string }[] }[] };
+      const next = listed.invites?.find((x) => x.renew === j.renew);
+      ok('the code used: op\'s inbox pairs and prints the next code; contacts lists it (rev-2) and the series with the one used', acc.status === 0 && box.status === 0 && next?.short !== undefined && next.short !== j.short && next.name === 'rev-2'
+        && box.stderr.includes(`your next code: ${next.short}`) && listed.renewing?.[0]?.used.length === 1, box.stderr);
+      const cancel = await cli('op', 'invite', '--cancel', next!.short!, '--json'), cj = JSON.parse(cancel.stdout || '{}') as { cancelled?: boolean; unparked?: boolean };
+      const after = JSON.parse((await cli('op', 'contacts')).stdout || '{}') as { invites?: { renew?: string }[]; renewing?: unknown[] };
+      const late = await cli('eve', 'accept', next!.short!, '--wait', '0');
+      ok('invite --cancel <code>: cancelled here and at the relay (unparked), the series gone; the code then is park_unknown', cancel.status === 0 && cj.cancelled === true && cj.unparked === true
+        && !after.invites?.some((x) => x.renew === j.renew) && after.renewing?.length === 0 && late.status === 1 && late.stderr.includes('park_unknown'), cancel.stderr + late.stderr);
+      const notMine = await cli('eve', 'invite', '--cancel', j.short!);
+      ok('invite --cancel of a code eve never made: exit 1, challenge_unknown', notMine.status === 1 && notMine.stderr.includes('challenge_unknown'), notMine.stderr);
+    } finally {
+      await home.close?.();
+      rmSync(H, { recursive: true, force: true });
+    }
+  }
+}
+
 // ── one rule for which identity (ENROL.md "Which identity") ───────────────────────────────
 // The operator runs contact verbs on their own file while the shell names an agent (SIGELO_IDENTITY):
 // --identity <file>, or --operator ($SIGELO_HUMAN, else ~/.config/sigelo/me.local.json). Beside a

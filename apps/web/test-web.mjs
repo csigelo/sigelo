@@ -1118,6 +1118,18 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await btn('My code and QR').click(); taps++; await settle(); await poll();
     await btn('Make a code').click(); taps++; await settle(); await poll();
     ok(taps === 3 && h1() === 'My code' && has('K7F3-Q9ZP') && btn('Share') && btn('Copy'), 'task 12 from Me, 3 taps: Me, My code and QR, Make a code: the code (and its QR), Share, Copy');
+    // A code that renews itself (on by default for a person code): the note; once used, the next code in its place and who used the last; Cancel this code.
+    ok(calls.some(([, p, b]) => p === '/api/invite' && b.renew === true), 'My code: "Renews itself" on by default → POST /api/invite {renew: true}');
+    const rn = { name: 'contact-1a2b', exp: now() + 86400, relay: 'relay.sigelo.ai', id: 'i1', short: 'K7F3-Q9ZP', short_exp: now() + 600, code: null, group: null, renew: true, used: [], renew_error: null };
+    sandbox.pending = { invites: [rn], paired: [] };
+    await poll(); await settle();
+    ok(h1() === 'My code' && has('K7F3-Q9ZP') && has('A new code appears when this one is used.'), 'a renewing code: "A new code appears when this one is used."');
+    sandbox.pending = { invites: [{ ...rn, short: 'M4QX-8T2B', used: [{ short: 'K7F3-Q9ZP', name: 'fay', did: 'did:sigelo:zFay', at: now() }] }], paired: [] };
+    await poll(); await settle();
+    ok(h1() === 'My code' && has('M4QX-8T2B') && !has('K7F3-Q9ZP') && has('fay used your last code.'), 'used: the next code in its place, on the same screen, and who used the last one');
+    await btn('Cancel this code').click(); await settle();
+    ok(calls.some(([, p, b]) => p === '/api/invite/cancel' && b.id === 'i1'), 'Cancel this code → POST /api/invite/cancel {id}');
+    sandbox.pending = undefined;
     await sandbox.ui.go('me'); await settle(); await poll();
     // The picture sheet (Decided 2026-11-11): yours, end to end, never to the relay in the clear; choose one; no camera here: not offered.
     await aria('Add your picture', 'BUTTON').click(); await settle();
