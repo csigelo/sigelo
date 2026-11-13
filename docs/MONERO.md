@@ -385,6 +385,9 @@ plain words, §4.2):
    alone let 1-atomic-unit payments at a ~3·10⁷ fee each drain ~8.6·10¹⁰ a day against a cap
    of 1000. The fee is known only once the wallet has built the transaction, so caps are
    checked on the amount first and on amount + fee again before anything is relayed.
+   The fee grows with the inputs, so a wallet split into many small outputs can push a
+   payment near the cap over it; the refusal says so: sweep the outputs into one, raise
+   the cap, or pay less.
 8. approval: if the amount alone is above `approval_above` (the lowest along the ancestors)
    — checked after the caps and rate on the amount, before any wallet call — a valid
    spend-approval for this `ref` must be on file (below); otherwise the answer is `202

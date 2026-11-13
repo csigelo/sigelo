@@ -789,6 +789,9 @@ components:
         fee_included: { type: boolean, description: true when the check ran on amount + fee (after the wallet priced it). }
         left: { $ref: '#/components/schemas/Atomic' }
         until: { $ref: '../../schema/common.json#/$defs/unixSeconds', description: When the oldest debit in the window rolls out. }
+        amount: { $ref: '#/components/schemas/Atomic', description: After pricing only. The payment alone; at most `limit` on a per_tx_max refusal means the fee pushed it over. }
+        fee: { $ref: '#/components/schemas/Atomic', description: After pricing only. The fee the wallet priced. }
+        inputs: { type: integer, minimum: 1, description: After pricing, when wallet-rpc's reply lists spent_key_images. The inputs the transaction spends. }
     WalletError:
       allOf:
         - $ref: '#/components/schemas/Error'
