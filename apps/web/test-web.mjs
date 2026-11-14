@@ -116,12 +116,14 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   const o2 = await p2.owner('did:sigelo:zTest').catch(() => null);
   ok(o2 !== null, 'web: owner: free again once released');
   o2?.release();
-  // Proof of work in the worker: the counter platform-node.mjs finds, progress, deadline, abort.
-  const prefix = 'sigelo-relay-pow/0\nrelay.testdid:sigelo:zX0123';
-  ok(await p.pow(prefix, 10) === await nodePow(prefix, 10) && search(prefix, 6) === await nodePow(prefix, 6), 'web: pow in the worker finds the counter Node finds');
+  // Proof of work in the worker (Argon2id, relay/pow.mjs; a test cost of 8 KiB, 1 pass, and once the
+  // real one): the counter platform-node.mjs finds, progress, deadline, abort.
+  const prefix = { prefix: 'sigelo-relay-pow/1\nrelay.testdid:sigelo:zX0123', salt: new Uint8Array(16).fill(7), m: 8, t: 1, p: 1 }, real = { ...prefix, m: 65536, t: 3 };
+  ok(await p.pow(prefix, 6) === await nodePow(prefix, 6) && await search(prefix, 4) === await nodePow(prefix, 4), 'web: pow in the worker finds the counter Node finds');
+  ok(await p.pow(real, 1) === await nodePow(real, 1), 'web: and at the real cost (64 MiB, 3 passes)');
   let tried = 0;
   const far = await p.pow(prefix, 40, { deadline: Date.now() + 4000, onProgress: (n) => { tried = n; } });
-  ok(far === null && tried >= 65536, `web: pow past its deadline: null, with progress on the way (${tried})`);
+  ok(far === null && tried >= 100, `web: pow past its deadline: null, with progress after each evaluation on the way (${tried})`);
   const ac = new AbortController(), aborted = p.pow(prefix, 40, { signal: ac.signal });
   ac.abort();
   ok(await aborted === null, 'web: pow aborted: null');
@@ -1716,7 +1718,7 @@ const { makeRouter, IDENTITY } = await import(pathToFileURL(join(HERE, 'router.m
 const HOST = 'relay.test', CREATED = '2026-10-01T00:00:00Z';
 const dir = mkdtempSync(join(tmpdir(), 'sigelo-web-'));
 const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1,
-  log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+  log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 const relayOpts = { relay: HOST, endpoints, shortRelay: HOST, registry: false, retentionDays: 7, backoff: [100, 400] };
 const seed = (l) => new Uint8Array(createHash('sha256').update(`sigelo-web-test/0 ${l}`).digest());

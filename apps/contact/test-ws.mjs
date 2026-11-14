@@ -213,7 +213,7 @@ try {
     // refusal is y's side (quota_storage, side "reader"), not its relay or its own allowance.
     const tiny = { ...TIERS.free, storage: 200000, maxMessage: 64 * 1024, retentionDays: 7 };
     const q = await startRelay({ host: HOST, db: join(dir, 'quota.db'), httpPort: 0, tcpPort: 0, loginRate: 100000, verifyBudget: 1e9, log: () => {},
-      policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: { free: tiny, pro: TIERS.pro } }) });
+      policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } }, freeQueue: 64 * 1024 * 1024, tiers: { free: tiny, pro: TIERS.pro } }) });
     const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${q.ports.tcp}`, http: `http://127.0.0.1:${q.ports.http}` } };
     const x = make(dir, agent('qx'), { endpoints }), y = make(dir, agent('qy'), { endpoints });
     const r = await pairAndTalk(x, y, 'quota');

@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **relay:** proof of work is Argon2id (`sigelo-relay-pow/1`, 64 MiB, 3 passes; SHA-256 `/0` dropped): base 6 bits (31 s on a phone), 8 under load, 10 per network; GET /challenge states `pow`; 4 checked at once.
+- **agent:** the carrier, the app's Worker and GTK solve Argon2id (hash-wasm 4.12.0) off the main thread and refuse a function they do not know; a login turned away busy is resent unchanged, no second search.
 - **keeper soak:** asks for less after the wallet fragmented (carol 0.00025, bob 0.00008, delegate 0.00028, `approval_above` 0.0002); the cap counting the fee is by design; outputs swept once.
 - **keeper:** a per_tx_max refusal where the amount fits and the fee pushes it over says so: the fee, its inputs, many small outputs; sweep, raise the limit, or pay less. `facts` gain `amount`, `fee`, `inputs`.
 - **app:** a camera beside Attach in every chat (contact, agent, group): a preview at once, full size follows; on the phone Files: picker, accept size, Open; Chat settings: their size; Settings: Keep location in photos.

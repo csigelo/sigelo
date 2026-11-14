@@ -30,6 +30,8 @@ const SOURCES = [
   ['vendor/@noble/ed25519/', 'ts/node_modules/@noble/ed25519/'],
   ['vendor/@noble/', 'apps/contact/node_modules/@noble/'],
   ['vendor/mqtt.esm.js', 'apps/contact/node_modules/mqtt/dist/mqtt.esm.js'],
+  // The proof of work's Argon2id (pow-worker.mjs): hash-wasm's one-algorithm UMD build, as published.
+  ['vendor/hash-wasm/', 'apps/contact/node_modules/hash-wasm/dist/'],
   ['vendor/shim-zlib.mjs', 'apps/agent/shim-zlib.mjs'],
   ['vendor/ui.js', 'apps/agent/ui.js'],
   ['vendor/ui.css', 'apps/agent/ui.css'],

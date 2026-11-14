@@ -89,7 +89,7 @@ const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mj
 const HOST = 'relay.test', CREATED = '2026-10-01T00:00:00Z';
 const dir = mkdtempSync(join(tmpdir(), 'sigelo-platform-relay-'));
 const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1,
-  log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+  log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 const seed = (l) => new Uint8Array(createHash('sha256').update(`sigelo-platform-test/0 ${l}`).digest());
 function agent(label) {

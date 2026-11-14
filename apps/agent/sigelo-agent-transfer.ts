@@ -115,7 +115,7 @@ export async function main(rest: string[]): Promise<number> {
   const c = new lib.Carrier({
     identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: bundleOf(s) }; },
     ...lib.pathsFor(path), ...lib.optionsFromEnv(), keep: true,
-    onEvent: (e: { type?: string }) => { if (e.type === 'pow') note('proof of work for a new identity: 5–60 s'); if (e.type === 'transfer') void engine?.kick(); },
+    onEvent: (e: { type?: string }) => { if (e.type === 'pow') note('proof of work for a new identity: about 30 s on a phone, minutes under load'); if (e.type === 'transfer') void engine?.kick(); },
   }) as unknown as { start(): Promise<void>; stop(): Promise<void>; sync(o?: object): Promise<void> };
   const o = { carrier: c, identity: path, local: w !== null };
   // With no holder: this process holds the session and moves the bytes until the record ends.

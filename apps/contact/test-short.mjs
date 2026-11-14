@@ -214,7 +214,7 @@ const dir = mkdtempSync(join(tmpdir(), 'sigelo-short-'));
 let now = Date.parse('2026-10-14T12:00:00Z') / 1000;
 const lines = [];
 const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => now, diskUsed: () => 0.1,
-  log: (l) => lines.push(l), policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+  log: (l) => lines.push(l), policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 const seed = (l) => new Uint8Array(createHash('sha256').update(`sigelo-short-test/0 ${l}`).digest());
 function agent(label) {
@@ -290,7 +290,7 @@ try {
   // An older relay keeps short codes 10 minutes at most: a longer --ttl is refused there, and said so.
   {
     const OLD = 'old.test', old = await startRelay({ host: OLD, db: join(dir, 'old.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => now, diskUsed: () => 0.1,
-      log: () => {}, park: { ttl: 600 }, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+      log: () => {}, park: { ttl: 600 }, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
     const eps = { ...endpoints, [OLD]: { mqtt: `mqtt://127.0.0.1:${old.ports.tcp}`, http: `http://127.0.0.1:${old.ports.http}` } };
     const co = new Carrier({ identity: () => ({ secret: alice.secret, bundle: alice.bundle }), ...pathsFor(join(dir, 'alice-old.local.json')), relay: OLD, shortRelay: OLD, registry: false, endpoints: eps,
       clock: () => now, keep: true, backoff: [100, 400], retentionDays: 7 });
@@ -405,7 +405,7 @@ try {
   now += 600;
   const CORP = 'corp.test', boss = agent('boss');
   const corp = await startRelay({ host: CORP, db: join(dir, 'corp.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => now, diskUsed: () => 0.1,
-    log: () => {}, closed: [boss.did], policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+    log: () => {}, closed: [boss.did], policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
   try {
     endpoints[CORP] = { mqtt: `mqtt://127.0.0.1:${corp.ports.tcp}`, http: `http://127.0.0.1:${corp.ports.http}` };
     const staff = (label) => {

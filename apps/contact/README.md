@@ -19,7 +19,7 @@ Also `contacts`, `forget <did>`; all as MCP tools
 ([`apps/integrations/mcp/contact.mjs`](../integrations/mcp/contact.mjs)).
 Each verb logs in once, never beside `watch` or `ui`
 ([one owner](../agent/WATCH.md)).
-The first login proves work (5–60 s on phones). `SIGELO_RELAY` names the relay for new codes;
+The first login proves work (Argon2id, ~30 s on phones). `SIGELO_RELAY` names the relay for new codes;
 a Pro reader sets `SIGELO_RELAY_RETENTION_DAYS=90`. State sits
 beside the identity file (0600), plaintext: messages until `inbox` takes them, then the last 500
 in `<identity>.inbox.log`.

@@ -43,7 +43,7 @@ const { startRelay } = await import(pathToFileURL(join(RELAY, 'server.mjs')).hre
 const { relayPolicy } = await import(pathToFileURL(join(RELAY, 'allowance.mjs')).href) as { relayPolicy(ctx: unknown, o: object): unknown };
 const D = mkdtempSync(join(tmpdir(), 'sigelo-moadim-enrol-'));
 const relay = await startRelay({ host: 'relay.test', db: join(D, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, log: () => {},
-  policy: (ctx: unknown) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+  policy: (ctx: unknown) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
 const seen: Buffer[] = [];
 const proxy = (port: number): Promise<{ s: Server; port: number }> => new Promise((done) => {
   const s = createServer((c) => {

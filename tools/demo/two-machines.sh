@@ -45,9 +45,10 @@ get() { node -e 'let s="";process.stdin.on("data",(d)=>{s+=d}).on("end",()=>{let
 step "a relay on loopback (relay/server.mjs, its own environment variables)"
 # It takes no new identity once the disk holding $W is 70 % full (relay_full). Its login rate is
 # the default, 30 a minute per network: each verb below logs in once, both agents share 127.0.0.1,
-# so the 50-message batches go as one `send --lines` each (about 16 logins in the whole run).
+# so the 50-message batches go as one `send --lines` each (about 16 logins in the whole run). Proof
+# of work at 2 bits: 4 Argon2id evaluations (64 MiB each) on average per new identity.
 RELAY_HOST=relay.demo RELAY_DB="$W/relay.db" RELAY_TCP_PORT=0 RELAY_HTTP_PORT=0 \
-  RELAY_POW_BITS=12 RELAY_FREE_QUEUE_MB=64 js "$RELAY_DIR/server.mjs" > "$W/relay.log" 2>&1 &
+  RELAY_POW_BITS=2 RELAY_FREE_QUEUE_MB=64 js "$RELAY_DIR/server.mjs" > "$W/relay.log" 2>&1 &
 RELAY_PID=$!
 i=0
 until grep -q '^sigelo relay:' "$W/relay.log" 2>/dev/null; do
