@@ -278,7 +278,7 @@ else {
   const { TIERS, relayPolicy } = await import(join(RELAY_DIR, 'allowance.mjs'));
   const R = join(T, 'relay'); mkdirSync(R, { recursive: true });
   const relay = await startRelay({ host: 'relay.test', db: join(R, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, log: () => {},
-    policy: (c) => relayPolicy(c, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: TIERS }) });
+    policy: (c) => relayPolicy(c, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } }, freeQueue: 64 * 1024 * 1024, tiers: TIERS }) });
   const endpoints = { 'relay.test': { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
   const U = await import(join(ROOT, 'apps', 'agent', 'sigelo-agent-ui.ts'));
   const op = join(H, 'op.local.json');

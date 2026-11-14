@@ -55,6 +55,6 @@ export async function startTestRelay(dir: string, host = 'relay.test'): Promise<
     // (a cancel and a park each count as a lookup, and the tests' codes ran past 20 in 10 minutes).
     // Public codes are Pro's (relay/park.mjs): every test identity is, here.
     park: { lookups: { n: 1000, window: 600 }, parks: { n: 1000, window: 3600 }, lookupsAll: { n: 8000, window: 600 }, publicFetches: { n: 1000, window: 600 }, pro: () => true },
-    policy: (c: unknown) => relayPolicy(c, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: TIERS }) });
+    policy: (c: unknown) => relayPolicy(c, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } }, freeQueue: 64 * 1024 * 1024, tiers: TIERS }) });
   return Object.assign(relay, { endpoints: { [host]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } } });
 }

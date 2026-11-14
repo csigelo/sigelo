@@ -271,7 +271,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
         case 'connected': note(`watch: connected to ${String(e['relay'])}`); break;
         case 'disconnected': note(`watch: disconnected from ${String(e['relay'])}; reconnecting`); break;
         case 'error': note(`watch: ${String(e['relay'] ?? '')} ${String(e['check'])}: ${String(e['detail'])}`); break;
-        case 'pow': note('watch: proof of work for a new identity: 5–60 s'); break;
+        case 'pow': note('watch: proof of work for a new identity: about 30 s on a phone, minutes under load'); break;
       }
     };
     carrier = new lib.Carrier({

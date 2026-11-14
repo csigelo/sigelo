@@ -313,12 +313,16 @@ export const INVITE_BYTES = 64 * 1024, MAX_ROTATIONS = 64;
 // one per rotation, and again at most hourly), and the last REFUSED_NOTICES refused after that
 // check are refused again unchecked (#onContactNotice).
 export const NOTICE_CHECKS = 4, REFUSED_NOTICES = 16;
-// A proof of work must be sent within the challenge's 300 s. Node on a phone-class ARM64 CPU
-// hashes ~180,000 a second (measured 2026-10-07): 22 bits take 23 s on average, 24 bits 92 s, 26
-// bits 6 minutes. A relay asking more than POW_MAX is refused rather than spun for, and the search
-// stops at POW_MS, before the challenge expires. Any host can be named by a stranger's code, so a
-// relay other than this agent's own (SIGELO_RELAY) gets the plan's normal 22 bits at most.
-export const POW_MAX = 26, POW_MAX_OTHER = 22, POW_MS = 280000;
+// A proof of work (relay/pow.mjs, sigelo-relay-pow/1: Argon2id) must be sent within the
+// challenge's 300 s. One evaluation at 64 MiB, 3 passes takes POW_EVAL_MS on a phone-class ARM64
+// CPU (hash-wasm in Node or a Worker, a big core; measured 2026-11-13; 1.64 s on a little core):
+// 6 bits take 31 s on average, 8 bits 2 minutes, 10 bits 8. A relay asking more than POW_MAX is
+// refused rather than spun for, and the search stops at POW_MS, before the challenge expires. Any
+// host can be named by a stranger's code, so a relay other than this agent's own (SIGELO_RELAY)
+// gets the plan's normal 6 bits at most. POW_COST: the most a relay may ask one evaluation to cost
+// (GET /challenge's `pow`); a cheaper one is computed as stated (it costs the relay only).
+export const POW_MAX = 10, POW_MAX_OTHER = 6, POW_MS = 280000, POW_EVAL_MS = 485;
+export const POW_V = 1, POW_COST = Object.freeze({ m: 65536, t: 3, p: 1 });
 // Searches at one relay in any 24 hours, each counted in the state file as it begins, found or not.
 // An honest relay asks once per identity, and again only if it forgot it. Without a count, a relay
 // that grants a proven login, closes, then refuses the next login's SUBSCRIBE `pow` had this client
@@ -753,14 +757,27 @@ function recovers(c, bundle, fresh) {
 // ---------------------------------------------------------------- relay login (plan §3 "Login")
 
 /**
- * The first c (0, 1, 2, …) with SHA-256("sigelo-relay-pow/0\n" ‖ host ‖ original DID ‖ nonce ‖ c)
- * starting with `bits` zero bits (relay-plan §3 "Proof of work"), or null once Date.now() passes
- * `deadline`. pow: the platform's search (Node's yields to the event loop every 4,096 hashes, about
- * 20 ms on a phone, so the process's connections, keepalives and other identities carry on during
- * a search of minutes).
+ * GET /challenge's `pow` → its cost { m, t, p } when this client computes it: {v: 1, alg:
+ * "argon2id", m, t, p} with these keys only, 1 lane, and m (KiB) and t within POW_COST; else null.
  */
-export function solvePow(host, original, nonce, bits, deadline = Infinity, pow = nodePlatform.pow) {
-  return pow(`sigelo-relay-pow/0\n${host}${original}${nonce}`, bits, { deadline });
+export function powCost(fn) {
+  if (!exact(fn, ['v', 'alg', 'm', 't', 'p']) || fn.v !== POW_V || fn.alg !== 'argon2id' || fn.p !== 1) return null;
+  if (!Number.isInteger(fn.m) || fn.m < 8 || fn.m > POW_COST.m || !Number.isInteger(fn.t) || fn.t < 1 || fn.t > POW_COST.t) return null;
+  return { m: fn.m, t: fn.t, p: 1 };
+}
+
+/**
+ * The first c (0, 1, 2, …) with Argon2id(password = "sigelo-relay-pow/1\n" ‖ host ‖ original DID ‖
+ * nonce ‖ c, salt = SHA-256(nonce) cut to 16 bytes; cost's m KiB, t passes, 1 lane; 32 bytes)
+ * starting with `bits` zero bits (relay-plan §3 "Proof of work", relay/pow.mjs), or null once
+ * Date.now() passes `deadline`. 0 bits: "0", nothing evaluated. pow: the platform's search (Node's
+ * yields to the event loop after each evaluation, ~0.5 s on a phone, so the process's connections,
+ * keepalives and other identities carry on during a search of minutes); cost: powCost's.
+ */
+export function solvePow(host, original, nonce, bits, deadline = Infinity, pow = nodePlatform.pow, cost = POW_COST, onProgress = undefined) {
+  if (bits === 0) return Promise.resolve('0');
+  const salt = sha256(utf8ToBytes(nonce)).subarray(0, 16);
+  return pow({ prefix: `sigelo-relay-pow/1\n${host}${original}${nonce}`, salt, ...cost }, bits, { deadline, ...(onProgress && { onProgress }) });
 }
 
 // The answer body is read as it arrives and cut off past HTTP_MAX, whatever Content-Length says:
@@ -1017,7 +1034,7 @@ export class Carrier {
   #links = new Map(); #work = Promise.resolve(); #busy = 0; #lastWork = 0; #routes = new Map(); #results = new Map();
   #claimed = new Set(); #refusedTopics = new Map(); #handshakes = new Map(); #soon = new Set();
   #renewing = false;
-  #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #powWaits = new Set(); #ask = false;
+  #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #powWaits = new Set(); #ask = false; #spare = new Map();
   #mineMemo = null; #clocks = new Map();
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
@@ -2430,8 +2447,14 @@ export class Carrier {
   // ---- connections
 
   async #credentials(relay, ep, started) {
+    // A login with a proof of work that a busy relay turned away "rate" before spending its nonce
+    // (#dial; relay/pow.mjs): sent again as it is while that nonce lives, no search spent twice.
+    const spare = this.#spare.get(relay);
+    this.#spare.delete(relay);
+    if (spare && spare.until > Date.now()) return spare;
     const { me, proven } = this.#read(({ me, st }) => ({ me, proven: st.relays[relay]?.proven === true }));
     const powMax = relay === this.relay ? POW_MAX : POW_MAX_OTHER;
+    const issued = Date.now();
     const r = await http(this.platform, `${ep.http}/challenge?did=${encodeURIComponent(me.current_did)}`);
     this.#clockFrom(relay, r);
     if (r.status === 429) refuse('rate', `the relay ${relay} turned the login away: too many logins from this network (${relaySays(r.body?.error ?? r.body?.detail)}): ${retryIn(r, 'a minute')}, then try again`, r);
@@ -2461,6 +2484,14 @@ export class Carrier {
         e.permanent = true;
         throw e;
       }
+      // The function the relay states beside the bits: one this client does not compute is not
+      // searched for (a relay of sigelo-relay-pow/0, SHA-256, or one asking more memory than POW_COST).
+      const cost = bits === 0 ? POW_COST : powCost(r.body.pow);
+      if (cost === null) {
+        const e = new MsgError('pow', `the relay asks a proof of work this client does not compute (${JSON.stringify(r.body.pow ?? null).slice(0, 200)}); it computes {v: 1, alg: "argon2id"} at up to ${POW_COST.m} KiB, ${POW_COST.t} passes, 1 lane: update this client, or the relay`);
+        e.permanent = true;
+        throw e;
+      }
       // A search of 0 bits costs nothing and is not counted.
       if (bits > 0) this.#locked(({ now, st }) => {
         const at = (st.relays[relay] ??= { proven: false, claims: {} }), recent = (at.searches ?? []).filter((t) => t > now - DAY);
@@ -2478,12 +2509,14 @@ export class Carrier {
         at.searches = [...recent, now];
       });
       const t0 = Date.now();
-      if (bits > 0) this.#emit({ type: 'pow', relay, bits });
-      pow = await solvePow(relay, me.did, ch.nonce, bits, t0 + POW_MS, this.platform.pow) ?? fail('pow', `no ${bits}-bit proof of work found within the challenge's 5 minutes on this machine: try again, or later (the relay raises it under load)`);
+      if (bits > 0) this.#emit({ type: 'pow', relay, bits, m: cost.m, t: cost.t });
+      pow = await solvePow(relay, me.did, ch.nonce, bits, t0 + POW_MS, this.platform.pow, cost)
+        ?? fail('pow', `no ${bits}-bit proof of work found within ${POW_MS / 1000} s on this machine (${2 ** bits} Argon2id evaluations on average, ~${Math.round((2 ** bits * POW_EVAL_MS * cost.m * cost.t) / (POW_COST.m * POW_COST.t) / 1000)} s on a phone): try again, or later (the relay raises it under load)`);
       if (bits > 0) this.#emit({ type: 'pow_done', relay, bits, ms: Date.now() - t0 });
     }
     const password = canonicalize({ v: LOGIN_V, nonce: ch.nonce, sig, bundle: loginBundle(me.bundle, relay), ...(pow !== undefined && { pow }) });
-    return { username: me.current_did, clientId: clientIdOf(me.did), password, pow };
+    // until: this login's nonce is good till about then (#dial keeps it for a retry after "rate").
+    return { username: me.current_did, clientId: clientIdOf(me.did), password, pow, until: issued + POW_MS };
   }
 
   // How long this agent's own relay keeps a message on the free tier (relay.json, plan §11), when
@@ -2546,12 +2579,19 @@ export class Carrier {
       if (n.accepted && creds.pow !== undefined) this.#locked(({ st }) => { (st.relays[relay] ??= { proven: false, claims: {} }).proven = true; });
       return n;
     };
-    try { await mqttConnect(this.platform, url, creds, link, onPacket, probe ? PROBE_MS : CONNECT_MS); } catch (e) {
-      if (!probe || link.cut || typeof e.code === 'number') throw link.cut ?? await why(e);
-      url = await wsEndpoint(this.platform, ep);
-      try { await mqttConnect(this.platform, url, creds, link, onPacket); } catch (e2) { throw link.cut ?? await why(e2); }
-      FELL_BACK.set(ep.mqtt, url);
-      this.#emit({ type: 'transport', relay, transport: 'wss', detail: `${ep.mqtt} gave no CONNACK within ${PROBE_MS / 1000} s (${e.message}): MQTT over WebSocket at ${url} for the rest of this process` });
+    try {
+      try { await mqttConnect(this.platform, url, creds, link, onPacket, probe ? PROBE_MS : CONNECT_MS); } catch (e) {
+        if (!probe || link.cut || typeof e.code === 'number') throw link.cut ?? await why(e);
+        url = await wsEndpoint(this.platform, ep);
+        try { await mqttConnect(this.platform, url, creds, link, onPacket); } catch (e2) { throw link.cut ?? await why(e2); }
+        FELL_BACK.set(ep.mqtt, url);
+        this.#emit({ type: 'transport', relay, transport: 'wss', detail: `${ep.mqtt} gave no CONNACK within ${PROBE_MS / 1000} s (${e.message}): MQTT over WebSocket at ${url} for the rest of this process` });
+      }
+    } catch (e) {
+      // "rate" with a proof of work: the relay was checking as many proofs as it holds and refused
+      // before spending the nonce (relay/pow.mjs), so this very login is good for the next try.
+      if (e?.check === 'rate' && creds.pow !== undefined && creds.until > Date.now()) this.#spare.set(relay, creds);
+      throw e;
     }
     // A close right after CONNACK (a cut in the same read) reached no listener of this connection.
     if (!link.client.connected) throw link.cut ?? new MsgError('connect', 'the relay closed the connection');

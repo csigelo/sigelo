@@ -41,8 +41,8 @@ const int = (d, maximum) => ({ type: 'integer', minimum: 0, ...(maximum !== unde
 // paired with each other, as sigelo-agent's accept, inbox and contacts show them. 44 bits: the
 // 32-digit pair id stays beside them for whoever wants all 128 (THREAT-MODEL.md §2.10).
 const CONFIRM = 'Show your operator the contact\'s DID and four words (fingerprint) to read to the other side. Same words = no mix-up or casual swap; a relay spending GPU time is caught by pair (32 digits).';
-// The proof of work runs at an identity's first login: about 23 s on average at 22 bits on a
-// phone-class CPU, 92 s at 24 (design/relay-plan.md §11), past some clients' tool timeouts.
+// The proof of work runs at an identity's first login: about 31 s on average at 6 bits of Argon2id
+// on a phone-class CPU, 2 minutes at 8 (design/relay-plan.md §3), past some clients' tool timeouts.
 const POW = 'A first call can take minutes: your first login to the relay solves a proof of work. If your client gives up, call again.';
 const PROFILE = { identity: str('optional profile name [a-z0-9_-], e.g. your subagent name; omit for the default identity') };
 const obj = (props = {}, required = []) => ({ type: 'object', properties: { ...props, ...PROFILE }, required, additionalProperties: false });

@@ -47,7 +47,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { connect } from 'mqtt';
 import { canonicalize, keygen, rotate, sign, verify, verifySig } from 'sigelo';
-import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_SEARCHES, SEEN_LABEL, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, prekeysKey, retentionOf, seal, solvePow, unseal } from './carrier.mjs';
+import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_COST, POW_MAX, POW_MAX_OTHER, POW_SEARCHES, SEEN_LABEL, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, powCost, prekeysKey, retentionOf, seal, solvePow, unseal } from './carrier.mjs';
 import { MAX_ENVELOPE, header, pad } from './envelope.mjs';
 import { V as STORE_V, answerId, buildAnswer, checkAnswer, checkReply, inviteKeys, makeInvite, parseInvite } from './invite.mjs';
 import { isoWeek, pairId, topic } from './kdf.mjs';
@@ -130,6 +130,7 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs'))) {
 }
 const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
 const { TIERS, relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
+const relayPow = await import(pathToFileURL(join(RELAY_DIR, 'pow.mjs')).href);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (cond, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (cond()) return true; await sleep(20); } return cond(); };
@@ -148,7 +149,7 @@ const lines = [];
 // each scenario's expiry and too_large at the client's own window, whatever the defaults.
 const TEST_FREE = { ...TIERS.free, retentionDays: 7, maxMessage: 256 * 1024 };
 const cfg = { host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => now, diskUsed: () => 0.1,
-  log: (l) => lines.push(l), policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: { free: TEST_FREE, pro: TIERS.pro } }) };
+  log: (l) => lines.push(l), policy: (ctx) => relayPolicy(ctx, { pow: { bits: 2, loadBits: 4, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } }, freeQueue: 64 * 1024 * 1024, tiers: { free: TEST_FREE, pro: TIERS.pro } }) };
 let relay = await startRelay(cfg);
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 
@@ -196,9 +197,9 @@ const accountOf = (d) => createHash('sha256').update(d, 'utf8').digest('hex');
 // A plain MQTT client logged in as `a` (the relay lets anyone logged in write to any mailbox): a
 // hostile writer, or the relay replaying what it holds.
 async function rawClient(a, ep = endpoints) {
-  const base = ep[HOST].http, { challenge: ch, pow_bits } = await (await fetch(`${base}/challenge?did=${encodeURIComponent(a.did)}`)).json();
+  const base = ep[HOST].http, { challenge: ch, pow_bits, pow: fn } = await (await fetch(`${base}/challenge?did=${encodeURIComponent(a.did)}`)).json();
   const sig = sign(a.secret, { v: 'sigelo-relay/0', typ: 'relay-login', did: a.did, relay: HOST, nonce: ch.nonce });
-  const password = canonicalize({ v: 'sigelo-relay/0', nonce: ch.nonce, sig, bundle: a.bundle, pow: await solvePow(HOST, a.original, ch.nonce, pow_bits) });
+  const password = canonicalize({ v: 'sigelo-relay/0', nonce: ch.nonce, sig, bundle: a.bundle, pow: await solvePow(HOST, a.original, ch.nonce, pow_bits, Infinity, undefined, powCost(fn)) });
   return new Promise((resolve, reject) => {
     const c = connect(ep[HOST].mqtt, { protocolVersion: 4, clean: false, clientId: 's' + accountOf(a.original).slice(0, 24), username: a.did, password, reconnectPeriod: 0 });
     c.once('connect', () => resolve(c)); c.once('error', reject);
@@ -359,7 +360,8 @@ try {
   // ================================================================ a host a stranger's code names
   {
     // One HTTP server playing two hostile relays: /flood answers GET /challenge with endless
-    // chunks and no Content-Length; /greedy answers a well-formed challenge asking 24 bits.
+    // chunks and no Content-Length; /greedy answers a well-formed challenge asking 24 bits; /sha one
+    // asking 4 bits of sigelo-relay-pow/0 (SHA-256), which this client no longer computes.
     let flooded = 0;
     const fake = createServer((req, res) => {
       const url = new URL(req.url, 'http://x');
@@ -371,6 +373,9 @@ try {
       } else if (url.pathname === '/greedy/challenge') {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ challenge: { v: 'sigelo-relay/0', typ: 'relay-login', did: url.searchParams.get('did'), relay: 'greedy.test', nonce: randomBytes(32).toString('base64url') }, pow_bits: 24 }));
+      } else if (url.pathname === '/sha/challenge') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ challenge: { v: 'sigelo-relay/0', typ: 'relay-login', did: url.searchParams.get('did'), relay: 'sha.test', nonce: randomBytes(32).toString('base64url') }, pow_bits: 4, pow: { v: 0, alg: 'sha256' } }));
       } else { res.writeHead(404); res.end(); }
     });
     await new Promise((r) => fake.listen(0, '127.0.0.1', r));
@@ -382,6 +387,8 @@ try {
     const Y = agent('yuri'), yuri = make(Y, { endpoints: { ...endpoints, 'greedy.test': { mqtt: nowhere, http: `${base}/greedy` } } });
     const code = makeInvite({ did: A.did, relay: 'greedy.test', now }).text;
     await refuses(() => yuri.accept(code, { wait: 0.3 }), 'pow', 'a relay other than the agent\'s own asking 24 bits');
+    const Z = agent('zora'), zora = make(Z, { endpoints: { ...endpoints, 'sha.test': { mqtt: nowhere, http: `${base}/sha` } } });
+    await refuses(() => zora.accept(makeInvite({ did: A.did, relay: 'sha.test', now }).text, { wait: 0.3 }), 'pow', 'a relay asking 4 bits of a proof of work this client does not compute (SHA-256, sigelo-relay-pow/0)');
     ok(yuri.contacts().answers.length === 0 && stateOf(Y).pending.length === 0, 'is refused for good: the answer is withdrawn, so no later round dials that host for it');
     // A code naming an address or a local name, neither the agent's own relay nor configured:
     // refused before anything is stored or dialled.
@@ -492,7 +499,7 @@ try {
       if (name === 'hop2.test' && what === 'check') { checks.push(req.method); res.writeHead(307, { location: `${there}/admin/action` }); res.end(); return; }
       if (what !== 'challenge') { res.writeHead(404); res.end(); return; }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ challenge: { v: 'sigelo-relay/0', typ: 'relay-login', did: url.searchParams.get('did'), relay: name, nonce: randomBytes(32).toString('base64url') }, pow_bits: name === 'loop.test' ? 4 : 0 }));
+      res.end(JSON.stringify({ challenge: { v: 'sigelo-relay/0', typ: 'relay-login', did: url.searchParams.get('did'), relay: name, nonce: randomBytes(32).toString('base64url') }, pow_bits: name === 'loop.test' ? 4 : 0, pow: { v: 1, alg: 'argon2id', m: 8, t: 1, p: 1 } }));
     });
     await new Promise((r) => http.listen(0, '127.0.0.1', r));
     const base = `http://127.0.0.1:${http.address().port}`, nowhere = 'mqtt://127.0.0.1:9';
@@ -567,7 +574,7 @@ try {
       res.writeHead(what === 'challenge' || what === 'check' ? 200 : 404, { 'content-type': 'application/json' });
       if (what === 'check') { req.resume(); req.on('end', () => res.end('{"ok":true}')); return; }
       if (what !== 'challenge') { res.end(); return; }
-      res.end(JSON.stringify({ challenge: { v: 'sigelo-relay/0', typ: 'relay-login', did: url.searchParams.get('did'), relay: 'mute.test', nonce: randomBytes(32).toString('base64url') }, pow_bits: 4 }));
+      res.end(JSON.stringify({ challenge: { v: 'sigelo-relay/0', typ: 'relay-login', did: url.searchParams.get('did'), relay: 'mute.test', nonce: randomBytes(32).toString('base64url') }, pow_bits: 4, pow: { v: 1, alg: 'argon2id', m: 8, t: 1, p: 1 } }));
     });
     await new Promise((r) => http.listen(0, '127.0.0.1', r));
     const M = agent('mia'), mia = make(M, { relay: 'mute.test', transport: 'mqtts', endpoints: { 'mute.test': { mqtt: `mqtt://127.0.0.1:${mute.port}`, http: `http://127.0.0.1:${http.address().port}/mute.test` } } });
@@ -999,8 +1006,22 @@ try {
     fake.closeAllConnections();
     await new Promise((r) => fake.close(r));
   }
-  ok(await solvePow('relay.test', A.original, 'n', 8) === await solvePow('relay.test', A.original, 'n', 8), 'the proof of work is deterministic');
-  ok(await solvePow('relay.test', A.original, 'n', 48, Date.now() + 200) === null, 'and stops at its deadline, before the challenge would expire');
+  {
+    // The proof of work (relay/pow.mjs, sigelo-relay-pow/1): the relay's own solver finds the same c,
+    // at a test cost here (8 KiB, 1 pass); 0 bits evaluate nothing.
+    const T = { m: 8, t: 1, p: 1 }, nonce = 'n'.repeat(43);
+    const c = await solvePow('relay.test', A.original, nonce, 6, Infinity, undefined, T);
+    ok(c === await solvePow('relay.test', A.original, nonce, 6, Infinity, undefined, T) && c === await relayPow.solve('relay.test', A.original, nonce, 6, T),
+      `the proof of work is deterministic, and the relay's (c = ${c} at 6 bits)`);
+    ok(await solvePow('relay.test', A.original, 'n', 48, Date.now() + 200) === null && await solvePow('relay.test', A.original, nonce, 0, Infinity, () => { throw new Error('evaluated'); }) === '0',
+      'and stops at its deadline, before the challenge would expire; 0 bits: "0", nothing evaluated');
+    ok(POW_MAX === relayPow.POW_BITS + 4 && POW_MAX_OTHER === relayPow.POW_BITS && JSON.stringify(POW_COST) === JSON.stringify(relayPow.ARGON),
+      `the client spends at most the relay's base + 4 (${POW_MAX}) at its own relay, the base (${POW_MAX_OTHER}) at another, at the relay's cost`);
+    const fn = { v: 1, alg: 'argon2id', m: 65536, t: 3, p: 1 };
+    ok(JSON.stringify(powCost(fn)) === '{"m":65536,"t":3,"p":1}' && JSON.stringify(powCost({ ...fn, m: 8, t: 1 })) === '{"m":8,"t":1,"p":1}'
+      && [undefined, null, { ...fn, v: 0 }, { ...fn, alg: 'sha256' }, { ...fn, m: 131072 }, { ...fn, t: 4 }, { ...fn, p: 2 }, { ...fn, m: 4 }, { ...fn, extra: 1 }, { v: 1, alg: 'argon2id', m: 65536, t: 3 }].every((x) => powCost(x) === null),
+      'the function a challenge states: Argon2id v1 at up to 64 MiB, 3 passes, 1 lane is computed (less too); anything else, or nothing, is refused');
+  }
 
   // ================================================================ a thief's rotation loses to recovery
   {
@@ -1723,7 +1744,7 @@ try {
     ok(hugo.contacts().contacts.length === 10, 'hugo pairs with ten contacts');
     let subscribes = 0;
     const braked = (ctx) => {
-      const p = relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 }, freeQueue: 64 * 1024 * 1024, tiers: { free: { ...TEST_FREE, mailboxes: 1000 }, pro: TIERS.pro }, rate: { claim: { perSecond: 1, burst: 20 } } });
+      const p = relayPolicy(ctx, { pow: { bits: 2, loadBits: 4, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } }, freeQueue: 64 * 1024 * 1024, tiers: { free: { ...TEST_FREE, mailboxes: 1000 }, pro: TIERS.pro }, rate: { claim: { perSecond: 1, burst: 20 } } });
       const rate = p.rate;
       p.rate = (x) => { if (x.kind === 'subscribe') subscribes++; return rate(x); };
       return p;

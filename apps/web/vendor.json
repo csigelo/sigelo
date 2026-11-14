@@ -135,7 +135,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "431acc9773c658a8530930252369d12a960fac6e0ebdd8286f3b91243f20916f"
+   "sha256": "12f14c970f34d8774e3b933d72073e03e765026427674cd3b22d71450f5585d5"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
@@ -179,7 +179,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "8258cbecb8f8ddae9923a77cc0032821123cb86e90b15b36640069c05f4b3923"
+   "sha256": "d3b44b6b10e4c312d8a576d31588c1a2c4ec7d824e460ca51176e1bf02ab193c"
   },
   "vendor/contact/photo.mjs": {
    "from": "apps/contact/photo.mjs",
@@ -236,6 +236,10 @@
   "vendor/contact/words-lock.mjs": {
    "from": "apps/contact/words-lock.mjs",
    "sha256": "bc83b6d852422ed5fac79f923d6f3e8fcd526e86f7042ebaeb47ed659b1f8506"
+  },
+  "vendor/hash-wasm/argon2.umd.min.js": {
+   "from": "apps/contact/node_modules/hash-wasm/dist/argon2.umd.min.js",
+   "sha256": "dcec617a2e1b700fa132d1583a186cb70611113395e869f2dd6cc82b415d3094"
   },
   "vendor/icon.svg": {
    "from": "apps/agent/icon.svg",

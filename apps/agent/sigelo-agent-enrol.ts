@@ -119,7 +119,7 @@ export function carrierFor(lib: Libs['lib'], path: string, temp = false): Carrie
     identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s, env).sign, bundle: bundleOf(s) }; },
     ...lib.pathsFor(path), ...lib.optionsFromEnv(), keep: true,
     onEvent: (e: { type?: string; ms?: number }) => {
-      if (e.type === 'pow') note('proof of work for a new identity: 5–60 s');
+      if (e.type === 'pow') note('proof of work for a new identity: about 30 s on a phone, minutes under load');
       else if (e.type === 'pow_done') note(`proof of work done in ${((e.ms ?? 0) / 1000).toFixed(1)} s`);
     },
   });

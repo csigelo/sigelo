@@ -123,7 +123,7 @@ export async function main(rest: string[]): Promise<number> {
   const c = new lib.Carrier({
     identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: bundleOf(s) }; },
     ...lib.pathsFor(path), ...lib.optionsFromEnv(), keep: true,
-    onEvent: (e: { type?: string }) => { if (e.type === 'pow') note('proof of work for a new identity: 5–60 s'); },
+    onEvent: (e: { type?: string }) => { if (e.type === 'pow') note('proof of work for a new identity: about 30 s on a phone, minutes under load'); },
   });
   const o = { carrier: c, file: G.groupsPath(path), local: w !== null };
   const sent = (r: Sent): number => {

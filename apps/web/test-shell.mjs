@@ -1128,7 +1128,7 @@ try {
     const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
     const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
     relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, tlsCert: join(dir, 'cert.pem'), tlsKey: join(dir, 'key.pem'), tlsPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1,
-      log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+      log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
     // The stand-in nginx on 443: browser requests (Origin, Sec-Fetch-Site) refused as relay/deploy/nginx.conf
     // refuses them; relay.json; the rest and the upgrade at /mqtt passed to the relay with X-Real-IP.
     const isBrowser = (h) => h.origin !== undefined || h['sec-fetch-site'] !== undefined;
@@ -1195,12 +1195,12 @@ try {
   ok(await checkOf(() => bridge.unlock()) === 'cancelled', 'app lock: unlock with the screen lock not confirmed: cancelled');
   F.state.locked = false;
   ok(await checkOf(() => bridge.unlock()) === 'accepted' && F.state.unlocks === 2, 'app lock: unlock confirmed: resolves (MainActivity.unlock asks the screen lock)');
-  const prefix = 'sigelo-relay-pow/0\nrelay.testdid:sigelo:zA5';
-  ok(await p.pow(prefix, 9) === await nodePow(prefix, 9), 'pow: in the Worker, the counter Node finds');
+  const prefix = { prefix: 'sigelo-relay-pow/1\nrelay.testdid:sigelo:zA5', salt: new Uint8Array(16).fill(5), m: 8, t: 1, p: 1 };
+  ok(await p.pow(prefix, 6) === await nodePow(prefix, 6), 'pow: in the Worker, the counter Node finds');
   let tried = 0;
   const fallback = A.androidPow(() => Promise.reject(new Error('proof of work: the worker failed')));
-  ok(await fallback(prefix, 10, { onProgress: (n) => { tried = n; } }) === await nodePow(prefix, 10) && await A.slicedPow(prefix, 40, { deadline: Date.now() + 300 }) === null,
-    'pow: a Worker that does not start: in the page, in slices, the same counter; past the deadline null');
+  ok(await fallback(prefix, 4, { onProgress: (n) => { tried = n; } }) === await nodePow(prefix, 4) && await A.slicedPow(prefix, 40, { deadline: Date.now() + 300 }) === null,
+    'pow: a Worker that does not start: in the page, @noble\'s Argon2id, the same counter; past the deadline null');
   const ac2 = new AbortController(); ac2.abort();
   ok(await A.slicedPow(prefix, 40, { signal: ac2.signal }) === null && await checkOf(() => A.androidPow(() => Promise.reject(new Error('other')))(prefix, 1)) === 'Error', 'pow: aborted null; another error is not a fallback');
   ok(await checkOf(() => p.mqtt('mqtt://relay.test:1883', {})) === 'connect' && await checkOf(() => p.mqtt('ws://relay.test/mqtt', {})) === 'connect', 'mqtt: plain mqtt:// and ws:// refused (connect)');

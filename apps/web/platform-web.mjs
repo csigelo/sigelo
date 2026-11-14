@@ -18,7 +18,7 @@
 // mqtt:     mqtt.esm (MQTT.js's browser build, given as `mqtt`) over the runtime's WebSocket, wss://
 //           only (ws:// to a loopback address, for tests); transports ['wss']. createWebsocket: a
 //           shell's own socket (design/apps.md §4.3), passed to MQTT.js as is.
-// pow:      the proof-of-work search in a Worker (pow-worker.mjs, @noble SHA-256), progress events.
+// pow:      the proof-of-work search in a Worker (pow-worker.mjs, hash-wasm's Argon2id), progress events.
 // The Android app's platform (platform-android.mjs) is this one with the shell's fetch, mqtt and sealer.
 // env:      what the page says: { relay, endpoints, retentionDays, transport, proxy: null }.
 // No openPath: a page sends files as { bytes, name }.
@@ -135,12 +135,13 @@ export function pageMqtt(mqttLib, { createWebsocket } = {}) {
 // ---------------------------------------------------------------- proof of work in a Worker
 
 /**
- * pow(prefix, bits, { deadline, signal, onProgress }) → the counter as a string, or null past the
- * deadline or on abort. worker(): a Worker running pow-worker.mjs (a module worker beside this
- * file by default). It answers { tried } every so often (onProgress) and { found } once.
+ * pow({ prefix, salt, m, t, p }, bits, { deadline, signal, onProgress }) → the counter as a string,
+ * or null past the deadline or on abort (carrier.mjs solvePow). worker(): a Worker running
+ * pow-worker.mjs (a module worker beside this file by default). It answers { tried } after each
+ * evaluation (onProgress) and { found } once.
  */
 export function workerPow(worker = () => new Worker(new URL('./pow-worker.mjs', import.meta.url), { type: 'module' })) {
-  return (prefix, bits, { deadline = Infinity, signal, onProgress } = {}) => new Promise((resolve, reject) => {
+  return (job, bits, { deadline = Infinity, signal, onProgress } = {}) => new Promise((resolve, reject) => {
     const w = worker();
     let timer = null;
     const end = (f, v) => { if (timer !== null) clearTimeout(timer); signal?.removeEventListener?.('abort', aborted); try { w.terminate(); } catch {} f(v); };
@@ -155,7 +156,7 @@ export function workerPow(worker = () => new Worker(new URL('./pow-worker.mjs', 
       else if (typeof d.error === 'string') end(reject, new Error(`proof of work: ${d.error}`));
     };
     w.onerror = (e) => end(reject, new Error(`proof of work: ${e.message ?? 'the worker failed'}`));
-    w.postMessage({ prefix, bits });
+    w.postMessage({ prefix: job?.prefix, salt: job?.salt, m: job?.m, t: job?.t, p: job?.p, bits });
   });
 }
 

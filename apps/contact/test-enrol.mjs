@@ -141,7 +141,7 @@ setTimeout(() => { console.log(`FAIL the run did not finish in 420 s (${count} c
 const HOST = 'relay.test';
 const dir = mkdtempSync(join(tmpdir(), 'sigelo-enrol-'));
 const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => Math.floor(Date.now() / 1000), diskUsed: () => 0.1,
-  log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 8, loadBits: 12, loadPerHour: 1000 } }) });
+  log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 // An agent in memory: its identity file's content (sigelo-agent's Store) and a carrier on it.
 function agent(label, store) {

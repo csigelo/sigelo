@@ -626,7 +626,7 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
       // The first login proves work, silently for up to a minute on a phone: say so. keep, as without
       // onEvent: messages wait in the state file for inbox.
       keep: true, onEvent: (e: { type?: string; ms?: number }) => {
-        if (e.type === 'pow') note('proof of work for a new identity: 5–60 s');
+        if (e.type === 'pow') note('proof of work for a new identity: about 30 s on a phone, minutes under load');
         else if (e.type === 'pow_done') note(`proof of work done in ${((e.ms ?? 0) / 1000).toFixed(1)} s`);
       },
     });

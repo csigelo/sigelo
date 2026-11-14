@@ -14,7 +14,8 @@
 //     fetch: async (url, { method, body, signal }) → { status, type, headers.get, body },   // fetch, or a tunnel
 //     mqtt:  (url, opts) → an MQTT.js client (mqtts:// or wss://; HTTPS_PROXY for wss)
 //     transports: ['mqtts', 'wss'],
-//     pow:   async (prefix, bits, { deadline, signal }) → the counter as a string, or null past deadline
+//     pow:   async ({ prefix, salt, m, t, p }, bits, { deadline, signal, onProgress }) → the counter
+//            as a string, or null past deadline (the relay's Argon2id search: carrier.mjs solvePow)
 //     env:   optionsFromEnv(process.env) and proxy (HTTPS_PROXY), read when asked
 //     openPath(path, own) → { bytes, name }: a file named by path, for sendFile (its checks)
 //   }
@@ -25,12 +26,14 @@
 // and its parents created 0700, and each of `private` set 0700. files.add: bytes saved under the
 // first of names not taken (a hard link of one temporary copy, else an exclusive write), never
 // over a file; → the name, or null when all are taken. files.remove: a file or a folder, absent or not.
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { connect as tlsConnect } from 'node:tls';
 import { chmodSync, closeSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
+import { createRequire } from 'node:module';
+import { Worker } from 'node:worker_threads';
 import { connect } from 'mqtt';
 import { MsgError, fail } from './kdf.mjs';
 import { MAX_FILE } from './file.mjs';
@@ -201,16 +204,92 @@ function mqtt(url, opts) {
 
 const zeroBits = (d) => { let n = 0; for (const x of d) { if (x !== 0) return n + Math.clz32(x) - 24; n += 8; } return n; };
 
-/** The first c (0, 1, 2, …) with SHA-256(prefix ‖ c) starting with `bits` zero bits, or null once
- *  Date.now() passes deadline (or signal aborts). Yields to the event loop every 4,096 hashes. */
-export async function pow(prefix, bits, { deadline = Infinity, signal } = {}) {
-  for (let i = 0; ; i++) {
-    if (zeroBits(createHash('sha256').update(prefix + i, 'utf8').digest()) >= bits) return String(i);
-    if ((i & 0xfff) === 0xfff) {
-      if (Date.now() > deadline || signal?.aborted) return null;
-      await new Promise((r) => setImmediate(r));
+// The search's threads: hash-wasm's Argon2id (WebAssembly, as the app's Worker runs it). Each takes
+// one search at a time, { job, bits } → a message { tried } after each evaluation and { found }
+// once, or { stopped } after a { stop } (read between evaluations); an idle one is kept IDLE_MS for
+// the next search (starting one costs ~0.1 s on a phone), then ends.
+const HASH_WASM = createRequire(import.meta.url).resolve('hash-wasm');
+const POW_THREAD = `const { parentPort, workerData } = require('node:worker_threads');
+const { argon2id } = require(workerData);
+const zero = ${zeroBits.toString()};
+let stop = false;
+const tick = () => new Promise((r) => setImmediate(r));
+parentPort.on('message', async (msg) => {
+  if (msg.stop) { stop = true; return; }
+  stop = false;
+  const { prefix, salt, m, t, p, bits } = msg;
+  try {
+    for (let i = 0; ; i++) {
+      const out = await argon2id({ password: prefix + i, salt, parallelism: p, iterations: t, memorySize: m, hashLength: 32, outputType: 'binary' });
+      if (zero(out) >= bits) return parentPort.postMessage({ found: String(i) });
+      await tick();
+      if (stop) return parentPort.postMessage({ stopped: true });
+      parentPort.postMessage({ tried: i + 1 });
     }
+  } catch (e) { parentPort.postMessage({ error: String(e && e.message || e) }); }
+});`;
+const POW_IDLE_MS = 30000, idleThreads = [];
+function powThread() {
+  const w = idleThreads.pop();
+  if (w) { clearTimeout(w.idle); w.ref(); return w; }
+  return new Worker(POW_THREAD, { eval: true, workerData: HASH_WASM });
+}
+function powIdle(w) {
+  w.removeAllListeners('message');
+  w.unref();
+  w.idle = setTimeout(() => { const i = idleThreads.indexOf(w); if (i >= 0) idleThreads.splice(i, 1); void w.terminate(); }, POW_IDLE_MS);
+  w.idle.unref();
+  idleThreads.push(w);
+}
+
+/** The first c (0, 1, 2, …) with Argon2id(password = prefix ‖ c, salt, m KiB, t passes, p lanes,
+ *  32 bytes) starting with `bits` zero bits (carrier.mjs solvePow), or null once Date.now() passes
+ *  deadline (or signal aborts). In a worker thread: one evaluation at 64 MiB is ~0.5 s of a core
+ *  on a phone-class CPU, which this thread never waits through, so the process's connections,
+ *  keepalives and other identities carry on. onProgress(tried) after each evaluation. */
+export function pow(job, bits, { deadline = Infinity, signal, onProgress } = {}) {
+  const { prefix, salt, m, t, p } = job ?? {};
+  if (typeof prefix !== 'string' || !(salt instanceof Uint8Array) || ![m, t, p].every(Number.isInteger) || !Number.isInteger(bits) || bits < 0 || bits > 64) {
+    return Promise.reject(new TypeError('pow: want ({ prefix, salt, m, t, p }, bits 0 to 64)'));
   }
+  return new Promise((resolve, reject) => {
+    if (Date.now() > deadline || signal?.aborted) return resolve(null);
+    const w = powThread();
+    let timer = null, done = false;
+    // ok: the thread is free again (found, or stopped), else it is ended.
+    const end = (f, v, free) => {
+      if (done) return;
+      done = true;
+      if (timer !== null) clearTimeout(timer);
+      signal?.removeEventListener?.('abort', aborted);
+      w.off('error', failed); w.off('exit', exited);
+      if (free) powIdle(w); else { w.removeAllListeners('message'); void w.terminate(); }
+      f(v);
+    };
+    // Past the deadline or aborted: answered null now; the thread stops after its evaluation.
+    const aborted = () => {
+      if (done) return;
+      done = true;
+      if (timer !== null) clearTimeout(timer);
+      signal?.removeEventListener?.('abort', aborted);
+      w.removeAllListeners('message');
+      w.on('message', (d) => { if (d?.stopped || typeof d?.found === 'string' || d?.error) { w.off('error', failed); w.off('exit', exited); if (d?.error) void w.terminate(); else powIdle(w); } });
+      w.postMessage({ stop: true });
+      resolve(null);
+    };
+    const failed = (e) => { if (!done) end(reject, new Error(`proof of work: ${e.message}`), false); };
+    const exited = () => { const i = idleThreads.indexOf(w); if (i >= 0) idleThreads.splice(i, 1); if (!done) end(reject, new Error('proof of work: the worker stopped'), false); };
+    signal?.addEventListener?.('abort', aborted, { once: true });
+    if (deadline !== Infinity) timer = setTimeout(aborted, Math.max(0, deadline - Date.now()));
+    w.on('message', (d) => {
+      if (typeof d?.found === 'string') end(resolve, d.found, true);
+      else if (typeof d?.tried === 'number') onProgress?.(d.tried);
+      else end(reject, new Error(`proof of work: ${d?.error ?? 'the worker failed'}`), false);
+    });
+    w.on('error', failed);
+    w.on('exit', exited);
+    w.postMessage({ prefix, salt, m, t, p, bits });
+  });
 }
 
 // ---------------------------------------------------------------- sendFile's path

@@ -106,7 +106,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
-import { DEFAULT_RELAY } from './carrier.mjs';
+import { DEFAULT_RELAY, POW_COST, POW_EVAL_MS } from './carrier.mjs';
 import { signAs } from './kdf.mjs';
 import * as E from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
@@ -329,7 +329,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
           if (st === 'refused' && !i) soon();
           break;
         }
-        case 'pow': live.pow = { bits: Number(e['bits']), since: Date.now() }; break;
+        case 'pow': live.pow = { bits: Number(e['bits']), m: Number(e['m'] ?? POW_COST.m), t: Number(e['t'] ?? POW_COST.t), since: Date.now() }; break;
         case 'pow_done': live.pow = null; live.powDone = Number(e['ms']); break;
         case 'connected':
           live.online.add(String(e['relay'])); live.error = null; void checkClock();
@@ -632,7 +632,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         retention_days: carrier.retentionDays, error: live.error, pow_done_ms: live.powDone,
         // The seat (DEVICES.md): null without one; here false = another device logs in as you: the page shows a banner.
         seat: hooks.seat?.() ?? null,
-        pow: live.pow && { bits: live.pow.bits, elapsed_s: Math.round((Date.now() - live.pow.since) / 1000), expected_s: Math.ceil(2 ** live.pow.bits / 180000) },
+        pow: live.pow && { bits: live.pow.bits, elapsed_s: Math.round((Date.now() - live.pow.since) / 1000), expected_s: Math.ceil((2 ** live.pow.bits * POW_EVAL_MS * (live.pow.m * live.pow.t) / (POW_COST.m * POW_COST.t)) / 1000) },
         pow_capped: live.powCapped, pow_confirm: live.powConfirm,
         // Wallet (Settings → Wallet): the switch and the price choice, for every scope of a control.
         wallet: (({ wallet, prices, currency }) => ({ on: wallet, prices, currency }))(walletSet()),

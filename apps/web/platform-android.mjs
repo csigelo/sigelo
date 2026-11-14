@@ -68,7 +68,7 @@
 // store. Nothing is sent but what the request names: no Origin, no cookie, no redirect followed.
 // While a restore from seed holds the network (platform-web.mjs holdNetwork), https and tls refuse here
 // before anything reaches the shell.
-import { sha256 } from '@noble/hashes/sha2.js';
+import { argon2idAsync } from '@noble/hashes/argon2.js';
 import { MsgError, fail } from './vendor/contact/kdf.mjs';
 import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
@@ -291,26 +291,28 @@ export function bridgeMqtt(bridge, mqttLib) {
   };
 }
 
-/** The proof of work in the page, in slices of 4,096 hashes (a WebView that cannot start the Worker). */
-export async function slicedPow(prefix, bits, { deadline = Infinity, signal, onProgress } = {}) {
-  const e = new TextEncoder(), zero = (d) => { let n = 0; for (const x of d) { if (x !== 0) return n + Math.clz32(x) - 24; n += 8; } return n; };
+/**
+ * The proof of work in the page (a WebView that cannot start the Worker): @noble's JavaScript
+ * Argon2id, which yields to the page every few milliseconds, since the page's policy runs no
+ * WebAssembly. The same counter as the Worker's, ~11 times slower (~5.5 s an evaluation at 64 MiB
+ * on a phone: the base 6 bits often outlast the 280 s search; the carrier says so and tries again).
+ */
+export async function slicedPow({ prefix, salt, m, t, p }, bits, { deadline = Infinity, signal, onProgress } = {}) {
+  const zero = (d) => { let n = 0; for (const x of d) { if (x !== 0) return n + Math.clz32(x) - 24; n += 8; } return n; };
   for (let i = 0; ; i++) {
-    if (zero(sha256(e.encode(prefix + i))) >= bits) return String(i);
-    if ((i & 0xfff) === 0xfff) {
-      if (Date.now() > deadline || signal?.aborted) return null;
-      if ((i & 0xffff) === 0xffff) onProgress?.(i + 1);
-      await new Promise((r) => setTimeout(r, 0));
-    }
+    if (Date.now() > deadline || signal?.aborted) return null;
+    if (zero(await argon2idAsync(prefix + i, salt, { t, m, p, dkLen: 32, asyncTick: 10 })) >= bits) return String(i);
+    onProgress?.(i + 1);
   }
 }
 /** The Worker's search, and the page's when the Worker does not start (once failed, for the app's life). */
 export function androidPow(inWorker = workerPow()) {
   let broken = false;
-  return async (prefix, bits, o = {}) => {
+  return async (job, bits, o = {}) => {
     if (!broken) {
-      try { return await inWorker(prefix, bits, o); } catch (e) { if (!/^proof of work: /.test(e.message)) throw e; broken = true; }
+      try { return await inWorker(job, bits, o); } catch (e) { if (!/^proof of work: /.test(e.message)) throw e; broken = true; }
     }
-    return slicedPow(prefix, bits, o);
+    return slicedPow(job, bits, o);
   };
 }
 
