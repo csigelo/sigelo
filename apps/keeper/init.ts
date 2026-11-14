@@ -285,7 +285,7 @@ export function init(argv: string[], sys: { uid?: number; chown?: Chown } = {}):
   const uid = sys.uid ?? process.getuid?.() ?? -1, root = uid === 0;
   const chown: Chown = (p, u, g) => { if (!root) throw new Error(`internal: chown ${p} as uid ${uid}, not root`); (sys.chown ?? chownSync)(p, u, g); };
   const f = flags(argv, ['--agent-token-file', '--dir', '--net', '--wallet-rpc', '--wallet-rpc-login', '--wallet-file', '--password-file', '--wallet-rpc-port', '--wallet-rpc-bin',
-    '--daemons', '--daemon-proxy', '--daemon-ssl-fingerprint', '--daemon-login-file', '--port', '--agent', '--account', '--allow', '--per-tx', '--per-day', '--licence', '--keeper-package', '--recovery-commitment', '--adopt', '--key'],
+    '--daemons', '--daemon-proxy', '--daemon-ssl-fingerprint', '--daemon-login-file', '--port', '--agent', '--account', '--allow', '--per-tx', '--per-day', '--licence', '--keeper-package', '--recovery-commitment', '--adopt', '--key', '--owner'],
   ['--create-wallet-rpc', '--notify', '--no-systemd']);
   if (f.pos.length > 0) throw new Error(`init takes flags only, not ${JSON.stringify(f.pos[0])}`);
   const dir = resolve(one(f, '--dir') ?? DEFAULT_DIR());
@@ -437,8 +437,12 @@ WantedBy=${wantedBy}
     if (i < 1) throw new Error(`--allow takes label=address, like --allow bob=5B9n…, not ${JSON.stringify(x)}`);
     return { label: x.slice(0, i), addr: x.slice(i + 1) };
   });
+  // --owner: the identity that may change the agents' limits through POST /policy (the operator's DID).
+  const owners = [...new Set(f.v.get('--owner') ?? [])];
+  for (const o of owners) if (!/^did:sigelo:z[1-9A-HJ-NP-Za-km-z]+$/.test(o)) throw new Error(`--owner is a did:sigelo:z… DID (the operator's identity), not ${JSON.stringify(o)}`);
   const policy = {
     net, wallet: { rpc, ...(login !== undefined && { login }) }, unlock_time: 0, priority: 1, dedupe_seconds: 600,
+    ...(owners.length > 0 && { owners: owners.map((did) => ({ did })) }),
     recovery_commitment: keeper.bundle.rotations.length === 0 ? keeper.genesis.recovery! : keeper.bundle.rotations.at(-1)!.next_genesis.recovery!,
     agents: { [agent]: { account, token_hash: tokenHash(token), per_tx_max: perTx, per_period_max: perDay, period_seconds: 86400, rate_per_minute: 3, approval_above: null, max_delegates: 0, allow } },
   };

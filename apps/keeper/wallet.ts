@@ -77,6 +77,7 @@ export const LINES = {
   confirming: 'TRY LATER: a payment is still confirming; your money is locked for about 20 minutes.',
   funds: (held: string) => `REFUSED: you hold ${held} XMR, not enough. Use ${CLI} receive to get paid, or ask your operator.`,
   approval: (ref: string) => `WAITING FOR APPROVAL (ref ${ref}): tell your operator, then run the same command again.`,
+  paused: 'REFUSED: your operator paused your spending. Nothing was paid; ask your operator to resume it.',
   refused: (why: string) => `REFUSED: your operator refused this payment${why === '' ? '' : ` (${why})`}. It is not paid; do not ask for it again.`,
   uncertain: (txid: string) => `UNCERTAIN: the payment may have gone out (txid ${txid}). Do not pay again; tell your operator.`,
   unreachable: 'TRY LATER: the wallet service is not answering.',
@@ -164,6 +165,7 @@ export function explain(status: number, b: Body, shown = '', label?: string, ver
     }
     case 'wallet_funds': return out('refused', code, LINES.funds(typeof b['balance'] === 'string' ? toXmr(b['balance']) : 'less than that'), b);
     case 'approval': return out('waiting', code, LINES.approval(prose(str(b['ref']))), b);
+    case 'paused': return out('refused', code, LINES.paused, b);
     case 'refused': return out('refused', code, LINES.refused(prose(/refused this payment \((.*)\) — it is not paid/s.exec(str(b['error']))?.[1] ?? '')), b);
     case 'relay_failed': return out('uncertain', code, LINES.uncertain(prose(str(b['txid']))), b);
     case 'repeat': return out('refused', code, LINES.conflict(prose(str(b['ref']))), b);

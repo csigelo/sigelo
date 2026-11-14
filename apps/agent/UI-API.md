@@ -52,7 +52,8 @@ keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the on
 | `POST /api/agents/enrol-code` | `{name, tier?, relay?, confirm_words?, operator_name?, pow_confirmed?}` | `{worker, name, did, original, tier, id, state, code, exp, relay, command, words, confirm_words, words_ok, verified}`: `enrol --name` on this page's session (ENROL.md): worker i (next free), a code for 10 minutes, once; its request answered with the worker's identity, the worker filed when it pairs, and words-checked when its DID is the one derived here (`verified`; no tap). `confirm_words: true`: the key waits for enrol-words. `400 keeper` without a keeper root; `409 seat_elsewhere`, `name_taken` |
 | `POST /api/agents/enrol-words` | `{id, match}` | the enrolment: `true` sends its key; `false` drops the code, the key never sent (`device_words`) |
 | `GET /api/keeper` | | the keeper of this computer ("Keeper"): `{state: "here", keepers, agents, requests}`, or `{state: "elsewhere"\|"none"}`, `{state: "unreadable", detail}` |
-| `POST /api/keeper/agent` | `{keeper, agent, per_tx_max?, per_period_max?, period_seconds?, approval_above?, rate_per_minute?, max_delegates?, allow?}` | `{saved, keeper, agent, restart: {command, can}}`: one agent's settings in its `policy.json` |
+| `POST /api/keeper/agent` | `{keeper, agent, per_tx_max?, per_period_max?, period_seconds?, approval_above?, rate_per_minute?, max_delegates?, allow?, paused?}` | `{saved, signed, keeper, agent, policy?, restart: {command, can}}`: one agent's settings, a change signed by this identity at the keeper's `/policy` (`signed: true`) or in its `policy.json` |
+| `POST /api/keeper/policy` | `{keeper, change: {body, sig, bundle}}` | `{saved, signed, relayed, keeper, agent, by, policy}`: a change another device signed (a phone), carried to the keeper's `/policy` as it is |
 | `POST /api/keeper/approvers` | `{keeper, me}` or `{keeper, approvers}` | `{saved, keeper, approvers, restart}`: this identity in or out of `approvers` (`me`), or the whole list of DIDs |
 | `POST /api/keeper/approve` | `{keeper, nonce}` | `{approved, keeper, nonce, agent, amount, next}`: the request signed by this identity and posted to the keeper's `/approve` |
 | `POST /api/keeper/refuse` | `{keeper, nonce, reason?}` | `{refused, keeper, nonce, exp, agent, logged, why?, contact, told}`: the request refused at the keeper (`logged`: its `POST /refuse`, a signed `refused` line) or, when it can't take it, put away here only (`why`); the agent told in its chat ("Payment refused: <reason>", `told`) |
@@ -171,11 +172,15 @@ A bundle carries no "I am an agent" of its own (SPEC); a stranger's agent is a p
 **Keeper** (apps/keeper, `sigelo-spend`; apps/agent/sigelo-agent-spend.ts): the allowance wallet's policy service, where it runs.
 `ui` reads the keepers this host registered (`SIGELO_SPEND_REGISTRY`, else `$XDG_CONFIG_HOME/sigelo-spend/keepers.json`): `none`
 when there is none, `unreadable` (`detail`) when this user cannot read one (the two-user layout: set it there with `sigelo-spend`);
-the self-contained app answers `elsewhere`, its writes `409 keeper_elsewhere` ("Set this on the computer that runs the keeper").
-`here`: `keepers` `[{id, did, net, port, approvers, me_approver, restart: {command, can}}]` (`id` its directory's name; `approvers`
-the policy's DIDs, `me_approver` this identity's current DID among them); `agents` `[{keeper, name, worker, did, account, per_tx_max,
+the self-contained app answers `elsewhere` (`via: null`), its writes `409 keeper_elsewhere` ("Set this on the computer that runs the keeper");
+with a computer of this operator paired to its profile (apps/contact/page.mjs `hooks.computer`) it answers that computer's, `via:
+{computer}`, and a limit is a `policy-change` it signs itself, sent as `POST /api/keeper/policy` (the computer cannot alter it).
+`here`: `keepers` `[{id, did, net, port, approvers, me_approver, me_owner, restart: {command, can}}]` (`id` its directory's name; `approvers`
+the policy's DIDs, `me_approver` this identity's current DID among them, `me_owner` one of its DIDs in `owners`); `agents` `[{keeper, name, worker, did, account, per_tx_max,
 per_period_max, period_seconds, rate_per_minute, approval_above, max_delegates, allow: [{kind: "addr", addr, label} | {kind: "did"|"issuer",
-did, issuer, ctx}], spent, remaining, window_start}]`, every policy entry, `worker` the roster's index when its `did` is a worker's
+did, issuer, ctx}], spent, remaining, window_start, paused, address, incoming, balance?, unlocked_balance?}]`, every policy entry; with the Wallet on,
+`address` (`(i, 0)`, its own), `balance` and `incoming` `[{ts, amount, txid, status}]` from the keeper's `POST /agents` signed by this
+identity when it is an owner, else `address` from the keeper's wallet-rpc (`null` when neither answers); `worker` the roster's index when its `did` is a worker's
 (original or current), or, for an entry with no `did`, its name a live worker's, else null; `spent`: what spend.log debits it since
 `window_start` (amount + fee of each transaction, as the keeper counts); amounts are atomic units as decimal strings; `requests`
 `[{keeper, nonce, agent, worker, amount, to, purpose, ref, iat, exp}]`, newest first: `pending` lines the keeper signed (its
@@ -183,8 +188,12 @@ did, issuer, ctx}], spent, remaining, window_start}]`, every policy entry, `work
 (`400`; an address decoded on the keeper's `net`, `allow_addr`; labels once, `allow_label`; `per_tx_max` within `per_period_max`,
 `keeper_caps`; `period_seconds` an hour, a day, a week or 30 days), keep every other field, and write `policy.json` whole, 0600.
 `approval_above` set needs `approvers` (`409 keeper_approvers`) and the agent's `did` and `genesis` in its entry: written from the
-agent's file when it is on this machine, else `409 keeper_did`. A running keeper takes caps and approvers at its next start
-(apps/keeper/README.md): every write answers `restart`, `can` for a systemd user unit (`POST /api/keeper/restart`). **Approve:** the
+agent's file when it is on this machine, else `409 keeper_did`. **Signed** (apps/keeper/README.md "The Owner"): a keeper that takes `/policy`
+with this identity in `owners` gets the fields given as a `policy-change` signed here (`signed: true`, its `policy` back, in use at once,
+logged there); its refusal `409 keeper_<code>`. Else the file: a keeper not running (`why: "offline"`), from before, or a change that
+writes the agent's `did` and `genesis`; the first such save on a keeper that takes `/policy` adds this identity's original DID to `owners`.
+`paused` (Pause/Resume) needs a keeper that knows it (`409 keeper_old`). Every write answers `restart`, `can` for a systemd user unit
+(`POST /api/keeper/restart`), for a keeper from before 0.1.15. **Approve:** the
 pending request's body, as the keeper signed it, signed by this identity (`"sigelo\n" + JCS(body)`, its current key) with its
 bundle, posted to `127.0.0.1:<install.json port>/approve`; the keeper checks it all again (an approver, the request, the licence:
 its refusal `409 keeper_<code>`, e.g. `keeper_licence_required`); not an approver `409 keeper_not_approver`; not answering
@@ -196,7 +205,7 @@ code): `logged: false`. Either way the request is put away in `.ui.json` `refuse
 gets "Payment refused: <reason>" ("Payment refused." without one) through `POST /api/send` (`told`).
 **A running keeper re-reads its policy** on its next request (0.1.15, apps/keeper/README.md "What a running keeper re-reads"): every write
 answers `live` (true: from its next payment; false: a keeper from before, after a restart; null: not known, a keeper run by hand), read
-from the frozen copy it runs (`install.json` `app`); keepers carry `live` and `refuse` (it takes `/refuse`) the same way. **Seen:** each
+from the frozen copy it runs (`install.json` `app`); keepers carry `live`, `refuse` (it takes `/refuse`) and `policy` (`/policy`) the same way. **Seen:** each
 keeper's `seen` `[{addr, agent, purpose, did, invoice, paid, last}]`, the addresses spend.log names (paid, asked, invoiced), newest first,
 32 at most: "Who it may pay" offers them beside the contacts.
 Unknown keeper `404 keeper_unknown`, agent `404 keeper_agent`; no keeper here `409 keeper_none`, `keeper_unreadable`.
@@ -284,7 +293,7 @@ A request `{id, ctr, nonce, box}` (≤ 1 MiB; `id` hex; `nonce`, `box` base64url
 aad `"sigelo-remote/0 req"` ‖ id ‖ u64be(ctr), JCS `{method, path, body?}`). The answer `{nonce, box}` under aad `"… res"` ‖ id ‖ ctr
 holds `{status, body}`, what this listener would answer. `ctr` must exceed the last one kept (one call at a time):
 a replay, a wrong key or an unknown id get `403` and no body. **Scopes:** `read`: state, me, messages, links, agents/workers, transfers, wallet (its state, history, a payment), price, picture, attestations, statement/check; `chat`: + picture (set), send,
-accept, invite, invite/cancel, words, rename, tag, sync, links/answer (pairs as accept does), pow/try, wallet/sync, wallet/receive, wallet/label; `all`: + statement/sign, forget, tier, kind, notify, history/clear, keeper (its settings, approvers, approve, refuse, restart), the wallet's review, send, service and node, agents
+accept, invite, invite/cancel, words, rename, tag, sync, links/answer (pairs as accept does), pow/try, wallet/sync, wallet/receive, wallet/label; `all`: + statement/sign, forget, tier, kind, notify, history/clear, keeper (its settings, a relayed signed change, approvers, approve, refuse, restart), the wallet's review, send, service and node, agents
 (enrol-code, enrol-words, revoke, rename too), link, unlink, links/allow (who the agents talk to, as tier), settings, relays, relays/test, transfers/accept, decline, cancel, resume, forget, direct, settings. Outside it: `403 scope`;
 `/api/devices*` and `/api/transfers/send` (a file of the computer, by path) never (`403 remote`). `ui --controls` lists them (never a key); `ui --revoke-control <name>` forgets one
 (stop the page first: it owns the file). No TLS: the LAN sees sizes and timing; the text is page control until revoked.

@@ -42,6 +42,11 @@ export interface Agent extends Caps {
    * and a DID alone does not say which key that is. Delegates carry theirs in the log.
    */
   genesis?: Genesis;
+  /**
+   * The Owner's off switch: `true` refuses every payment of this agent (and of its delegates) at
+   * step 2, before any wallet call, code `paused`. The caps stay as they were; Resume clears it.
+   */
+  paused?: boolean;
 }
 /**
  * `{addr, label?}` a literal address, `label` being the name the agent may pay it by;
@@ -59,6 +64,11 @@ export interface Policy {
   max_approval_ttl: number;
   /** Who may approve: CURRENT DIDs; the approval carries the bundle that proves it (approval.ts). */
   approvers?: { did: string }[];
+  /**
+   * Who may change the agents' limits through `POST /policy` (policychange.ts): DIDs, any of an
+   * owner's verified chain. Never an agent's: an agent cannot raise its own allowance.
+   */
+  owners?: { did: string }[];
   /**
    * The root's recovery commitment (`sha256:<hex>`, from the keeper package the ceremony wrote).
    * Every delegate's genesis carries it (MONERO.md §2, §9 decision 2), so the Owner's one
@@ -325,6 +335,10 @@ export function evaluate(req: PayRequest, policy: Policy, state: Spent[], now: n
     if (open !== undefined) return repeat(open);
   }
 
+  // The Owner's off switch: after the repeat (a payment already made is still answered with its
+  // receipt), before the allowlist, the wallet and any approval wait. A paused agent pays nothing.
+  if (agent.paused === true) return no('paused: your operator paused your spending — nothing was paid. Ask your operator to resume it.');
+
   // 5. allowlist — this agent's. Agent context is untrusted, so a destination is never taken on its word.
   const reasons: string[] = [];
   let matched: Match | undefined;
@@ -507,10 +521,10 @@ function checkInvoice(to: Destination & { addr: string }, did: string, bundle: B
 // ---------------------------------------------------------------- the policy file
 
 /** The fields each level may carry. Anything else is refused: a typo'd cap is not a missing one. */
-const TOP = ['net', 'wallet', 'agents', 'unlock_time', 'priority', 'dedupe_seconds', 'max_approval_ttl', 'approvers', 'recovery_commitment'];
+const TOP = ['net', 'wallet', 'agents', 'unlock_time', 'priority', 'dedupe_seconds', 'max_approval_ttl', 'approvers', 'owners', 'recovery_commitment'];
 const LEGACY_TOP = ['net', 'wallet', 'buckets', 'allow', 'token_hash', 'unlock_time', 'priority', 'dedupe_seconds'];
 const BUCKET_FIELDS = ['account', 'per_tx_max', 'per_period_max', 'period_seconds', 'rate_per_minute'];
-const AGENT_FIELDS = [...BUCKET_FIELDS, 'token_hash', 'allow', 'approval_above', 'max_delegates', 'did', 'genesis'];
+const AGENT_FIELDS = [...BUCKET_FIELDS, 'token_hash', 'allow', 'approval_above', 'max_delegates', 'did', 'genesis', 'paused'];
 const DID = /^did:sigelo:z[1-9A-HJ-NP-Za-km-z]+$/;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -553,6 +567,10 @@ export function parsePolicy(raw: unknown): Policy {
   if (!Array.isArray(approvers) || !approvers.every((a) => plain(a) && Object.keys(a).join() === 'did' && typeof a['did'] === 'string' && DID.test(a['did']))) fail('approvers is not a list of { did: "did:sigelo:z…" }');
   const approverDids = (approvers as { did: string }[]).map((a) => a.did);
   if (new Set(approverDids).size !== approverDids.length) fail('approvers names one DID twice');
+  const owners = own(raw, 'owners') ? raw['owners'] : [];
+  if (!Array.isArray(owners) || !owners.every((a) => plain(a) && Object.keys(a).join() === 'did' && typeof a['did'] === 'string' && DID.test(a['did']))) fail('owners is not a list of { did: "did:sigelo:z…" }');
+  const ownerDids = (owners as { did: string }[]).map((a) => a.did);
+  if (new Set(ownerDids).size !== ownerDids.length) fail('owners names one DID twice');
   if (own(raw, 'recovery_commitment') && !(typeof raw['recovery_commitment'] === 'string' && HASH.test(raw['recovery_commitment']))) fail('recovery_commitment is not sha256:<64 hex>');
 
   let entries: [string, unknown][];
@@ -600,6 +618,8 @@ export function parsePolicy(raw: unknown): Policy {
       if (!own(a, 'did') || didOf(a['genesis']) !== a['did']) fail(`${at}genesis does not hash to ${at}did`);
     }
     if (own(a, 'did') && approverDids.includes(a['did'] as string)) fail(`${at}did is also in approvers — an agent cannot approve its own payments`);
+    if (own(a, 'did') && ownerDids.includes(a['did'] as string)) fail(`${at}did is also in owners — an agent cannot set its own limits`);
+    if (own(a, 'paused') && typeof a['paused'] !== 'boolean') fail(`${at}paused is not true or false`);
     const delegates = own(a, 'max_delegates') ? a['max_delegates'] : 0;
     if (!intIn(delegates, 0)) fail(`${at}max_delegates is not a non-negative integer`);
     if (!Array.isArray(a['allow'])) fail(`${at}allow is not an array`);
@@ -612,7 +632,7 @@ export function parsePolicy(raw: unknown): Policy {
       period_seconds: a['period_seconds'] as number, rate_per_minute: a['rate_per_minute'] as number,
       allow: (a['allow'] as unknown[]).map((r, i) => allowRule(r, `${at}allow[${i}]`, net, fail)),
       approval_above: above as string | null, max_delegates: delegates as number, ...(own(a, 'did') && { did: a['did'] as string }),
-      ...(own(a, 'genesis') && { genesis: a['genesis'] as Genesis }),
+      ...(own(a, 'genesis') && { genesis: a['genesis'] as Genesis }), ...(a['paused'] === true && { paused: true }),
     };
     const labels = agents[name]!.allow.flatMap((r) => (r.label === undefined ? [] : [r.label]));
     const dup = labels.find((l, i) => labels.indexOf(l) !== i);
@@ -622,6 +642,7 @@ export function parsePolicy(raw: unknown): Policy {
     net, wallet: { rpc: w['rpc'], ...(own(w, 'login') && { login: w['login'] as string }) }, agents,
     unlock_time: 0, priority: raw['priority'] as number, dedupe_seconds: dedupe, max_approval_ttl: ttl,
     ...(own(raw, 'approvers') && { approvers: approvers as { did: string }[] }),
+    ...(own(raw, 'owners') && { owners: owners as { did: string }[] }),
     ...(own(raw, 'recovery_commitment') && { recovery_commitment: raw['recovery_commitment'] as string }),
   };
 }

@@ -179,6 +179,8 @@ export function effective(t: Tree, roots: Roots, name: string): Agent | undefine
     period_seconds: p.period_seconds, rate_per_minute: Math.min(d.caps.rate_per_minute, p.rate_per_minute),
     allow: d.allow.filter((r) => covered(r, p.allow)), approval_above: lowest(d.approval_above, p.approval_above),
     max_delegates: Math.min(d.max_delegates, Math.max(0, p.max_delegates - 1)),
+    // A delegate can never exceed its delegator: a paused delegator pauses its whole subtree.
+    ...(p.paused === true && { paused: true }),
   };
 }
 

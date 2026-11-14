@@ -646,6 +646,15 @@ raises the balance; the policy caps the rate. Nothing else is needed.
 **Owner top-up** is a transfer to any of the agent's addresses, from the treasury or from
 anywhere. The keeper sees it through `get_balance { account_index: i }` once it unlocks.
 
+**The agent's address and its limits, from the Owner** (2026-11-14, design/agent-wallet-page.md).
+The address shown for an agent is `(i, 0)`: stable, the one Top up pays and `POST /bind` binds to
+its DID. Its balance is the agent's money and the limits say how fast it may spend it: a payment
+fits the unlocked balance, `per_tx_max` and what is left of `per_period_max`; money paid in never
+raises a limit. The Owner changes the limits with a `policy-change` object signed by an identity in
+`owners` (`POST /policy`), logged as a keeper-signed `policy` line; `paused: true` refuses every
+payment of the agent and its subtree. An agent's key never passes, under any DID: an agent cannot
+raise its own allowance. `POST /agents` is the Owner's signed read (address, balance, incoming).
+
 **Revocation** (`POST /revoke {name}`, by any strict ancestor; the Owner revokes through a
 root agent's token — there is no keeper-host admin command). (1) A signed `revoke` line: the
 token stops working at once, for the delegate and its whole subtree. (2) A sweep of each

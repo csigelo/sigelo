@@ -29,6 +29,12 @@
  *
  * Seen: the addresses the keeper paid, was asked to pay or was invoiced for (spend.log), newest first,
  * offered under "Who it may pay" beside the contacts.
+ *
+ * Signed (design/agent-wallet-page.md, Owner 2026-11-14): a keeper that takes `POST /policy` and lists this
+ * identity in `owners` gets every change as a `policy-change` signed by this identity, which it checks and
+ * logs; the file write stays for a keeper from before, or one not running. Its `POST /agents`, signed the same
+ * way, gives each agent's address (i, 0), balance and incoming money. `relayPolicy` carries a change another
+ * device signed (a phone with its own identity) to the keeper untouched: this side cannot alter it.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -154,11 +160,18 @@ export function restartOf(k: KeeperHere): { command: string; can: boolean } {
  * `app`): `live` it re-reads policy.json on its next request, `refuse` it takes POST /refuse (both 0.1.15).
  * null: not known (a keeper run by hand); the page then says both cases.
  */
-export function featuresOf(k: KeeperHere): { live: boolean | null; refuse: boolean | null } {
+export function featuresOf(k: KeeperHere): { live: boolean | null; refuse: boolean | null; policy: boolean | null } {
   const app = typeof k.install['app'] === 'string' ? k.install['app'] as string : null;
-  if (app === null) return { live: null, refuse: null };
-  try { const src = readFileSync(join(dirname(app), 'service.js'), 'utf8'); return { live: src.includes('now in use for'), refuse: src.includes("'POST /refuse'") }; } catch { return { live: null, refuse: null }; }
+  if (app === null) return { live: null, refuse: null, policy: null };
+  try {
+    const src = readFileSync(join(dirname(app), 'service.js'), 'utf8');
+    return { live: src.includes('now in use for'), refuse: src.includes("'POST /refuse'"), policy: src.includes("'POST /policy'") };
+  } catch { return { live: null, refuse: null, policy: null }; }
 }
+/** The policy's `owners` (POST /policy), as DIDs. */
+export const ownersOf = (k: KeeperHere): string[] => (Array.isArray(k.policy['owners']) ? (k.policy['owners'] as Json[]).map((o) => String(o['did'])) : []);
+/** Is this identity one of the keeper's owners: its current DID or one of its chain (the keeper checks the same). */
+export const isOwner = (k: KeeperHere, me: { did: string; chain?: string[] }): boolean => ownersOf(k).some((d) => d === me.did || (me.chain ?? []).includes(d));
 /** The addresses this keeper paid, was asked to pay (pending, refused) or was invoiced for, newest first, once each. */
 function seenOf(k: KeeperHere): Json[] {
   const by = new Map<string, Json>();
@@ -190,18 +203,19 @@ function requests(k: KeeperHere, now: number, refused: Record<string, number>): 
   return open;
 }
 /** GET /api/keeper, `here`: every keeper, its agents (named by the worker they are), the requests waiting. */
-export function view(found: Found, ws: Worker[], me: { did: string }, refused: Record<string, number>, now = Math.floor(Date.now() / 1000)): Json {
+export function view(found: Found, ws: Worker[], me: { did: string; chain?: string[] }, refused: Record<string, number>, now = Math.floor(Date.now() / 1000)): Json {
   if (found.state !== 'here') return found;
   const keepers: Json[] = [], agents: Json[] = [], reqs: Json[] = [];
   for (const k of found.keepers) {
     const m = match(k, ws), approvers = Array.isArray(k.policy['approvers']) ? (k.policy['approvers'] as Json[]).map((a) => String(a['did'])) : [];
-    keepers.push({ id: k.id, did: k.did, net: k.net, port: k.port, approvers, me_approver: approvers.includes(me.did), restart: restartOf(k), ...featuresOf(k), seen: seenOf(k) });
+    keepers.push({ id: k.id, did: k.did, net: k.net, port: k.port, approvers, me_approver: approvers.includes(me.did), me_owner: isOwner(k, me), restart: restartOf(k), ...featuresOf(k), seen: seenOf(k) });
     for (const [name, a] of Object.entries(k.policy['agents'] as Record<string, Json>)) {
       const w = m.get(name) ?? null, period = Number(a['period_seconds']), sp = spent(k, name, now - period);
       const cap = (() => { try { return BigInt(String(a['per_period_max'])); } catch { return 0n; } })();
       agents.push({ keeper: k.id, name, worker: w?.worker ?? null, did: a['did'] ?? null, account: a['account'], per_tx_max: a['per_tx_max'], per_period_max: a['per_period_max'],
         period_seconds: period, rate_per_minute: a['rate_per_minute'], approval_above: a['approval_above'] ?? null, max_delegates: a['max_delegates'] ?? 0,
-        allow: Array.isArray(a['allow']) ? (a['allow'] as unknown[]).map(ruleView) : [], spent: String(sp), remaining: String(sp > cap ? 0n : cap - sp), window_start: now - period });
+        allow: Array.isArray(a['allow']) ? (a['allow'] as unknown[]).map(ruleView) : [], spent: String(sp), remaining: String(sp > cap ? 0n : cap - sp), window_start: now - period,
+        paused: a['paused'] === true, address: null, incoming: [] });
     }
     for (const r of requests(k, now, refused)) reqs.push({ ...r, worker: m.get(String(r['agent']))?.worker ?? null });
   }
@@ -252,13 +266,13 @@ function save(k: KeeperHere): void {
   writeFileSync(tmp, JSON.stringify(k.policy, null, 2) + '\n', { mode: mode || 0o600, flag: 'wx' });
   renameSync(tmp, k.policyPath);
 }
-const FIELDS = ['per_tx_max', 'per_period_max', 'period_seconds', 'rate_per_minute', 'approval_above', 'max_delegates', 'allow'];
+const FIELDS = ['per_tx_max', 'per_period_max', 'period_seconds', 'rate_per_minute', 'approval_above', 'max_delegates', 'allow', 'paused'];
 /**
  * POST /api/keeper/agent: one agent's settings, checked before any is kept. `approval_above` set needs
  * approvers and the agent's DID and genesis in the policy (the keeper names the agent in a request): an
  * agent of this machine (`genesis` given by the page's host) gets them written; another is refused.
  */
-export function setAgent(k: KeeperHere, name: unknown, b: Json, genesisOf: (name: string) => Genesis | null): Json {
+export function setAgent(k: KeeperHere, name: unknown, b: Json, genesisOf: (name: string) => Genesis | null, opts: { write?: boolean; owner?: string } = {}): Json {
   const agents = k.policy['agents'] as Record<string, Json>;
   if (typeof name !== 'string' || !Object.hasOwn(agents, name)) return fail(404, 'keeper_agent', `no agent ${JSON.stringify(name)} in this keeper's policy`);
   const a = { ...agents[name]! }, given = FIELDS.filter((f) => b[f] !== undefined);
@@ -269,6 +283,12 @@ export function setAgent(k: KeeperHere, name: unknown, b: Json, genesisOf: (name
   if (b['rate_per_minute'] !== undefined) a['rate_per_minute'] = int(b['rate_per_minute'], 'rate_per_minute', 1, 600);
   if (b['max_delegates'] !== undefined) a['max_delegates'] = int(b['max_delegates'], 'max_delegates', 0, 1000);
   if (b['allow'] !== undefined) a['allow'] = allowOf(b['allow'], k.net);
+  if (b['paused'] !== undefined) {
+    if (typeof b['paused'] !== 'boolean') fail(400, 'body', 'paused: true or false');
+    // A keeper from before 0.1.16 refuses a policy with a field it does not know: it would stop at its next start.
+    if (featuresOf(k).policy !== true && opts.write !== false) fail(409, 'keeper_old', 'This keeper is from before Pause: update it, or set its limits to 0 meanwhile.');
+    if (b['paused']) a['paused'] = true; else delete a['paused'];
+  }
   if (b['approval_above'] !== undefined) {
     if (b['approval_above'] === null) delete a['approval_above'];
     else {
@@ -284,9 +304,74 @@ export function setAgent(k: KeeperHere, name: unknown, b: Json, genesisOf: (name
   }
   if (BigInt(String(a['per_tx_max'])) > BigInt(String(a['per_period_max']))) fail(400, 'keeper_caps', 'One payment can\'t be more than the whole period allows.');
   if (typeof a['did'] === 'string' && Array.isArray(k.policy['approvers']) && (k.policy['approvers'] as Json[]).some((x) => x['did'] === a['did'])) fail(409, 'keeper_approvers', `${name} is an approver: an agent can't approve its own payments.`);
+  if (opts.write === false) return { entry: a, identity: a['did'] !== agents[name]!['did'] || a['genesis'] !== agents[name]!['genesis'] };
   agents[name] = a;
+  // The first save by this identity on a keeper that takes signed changes makes it an owner: whoever can write
+  // this file is the authority already, and from then on its changes are signed and logged.
+  if (opts.owner !== undefined && featuresOf(k).policy === true && !ownersOf(k).includes(opts.owner)) k.policy['owners'] = [...ownersOf(k).map((d) => ({ did: d })), { did: opts.owner }];
   save(k);
-  return { saved: true, keeper: k.id, agent: name, live: featuresOf(k).live, restart: restartOf(k) };
+  return { saved: true, signed: false, keeper: k.id, agent: name, live: featuresOf(k).live, restart: restartOf(k), ...(Array.isArray(k.policy['owners']) && { owners: ownersOf(k) }) };
+}
+
+/** Who signs here: this identity's DIDs (current, chain) and its key over sigelo's signing input, with its bundle. */
+export interface Signer { did: string; chain: string[]; sign(body: object): string; bundle: Bundle }
+const hex16 = (): string => randomBytes(16).toString('hex');
+/** A keeper-local signed object for this keeper (policychange.ts in apps/keeper), signed by `me`. */
+const signedFor = (k: KeeperHere, me: Signer, rest: Json, now: number): Json => {
+  const body = { v: 'sigelo/0', ...rest, keeper: k.did, net: k.net, nonce: hex16(), iat: now, exp: now + 300 };
+  return { body, sig: me.sign(body), bundle: me.bundle };
+};
+/** The keeper's answer to a signed object, or a 409 naming the keeper's own code (`keeper_owner`, …). */
+async function toKeeper(k: KeeperHere, path: string, env: unknown): Promise<Json> {
+  if (k.port === null) return fail(409, 'keeper_offline', `The keeper's port isn't in ${join(k.dir, 'install.json')}: set it on that computer with sigelo-spend.`);
+  let r;
+  try { r = await post(k.port, path, env); } catch (e) {
+    return fail(409, 'keeper_offline', `The keeper isn't answering on this computer (${(e as { code?: string }).code ?? 'no answer'}). Start it, then save again.`);
+  }
+  if (r.status === 404) fail(409, 'keeper_old', 'This keeper is from before signed changes: update it, or set its limits on this computer\'s page.');
+  if (r.status !== 200) fail(409, `keeper_${String(r.body['code'] ?? 'refused')}`, String(r.body['error'] ?? `the keeper said ${r.status}`));
+  return r.body;
+}
+/**
+ * POST /api/keeper/agent: one agent's settings. A keeper that takes signed changes and lists this identity in
+ * `owners` gets them as a `policy-change` signed here (checked and logged by the keeper, in use at once): the
+ * same checks as the file write first, then only the fields given. Else, or when the keeper is not running,
+ * or when the change needs the agent's did and genesis written (approval_above), the file as before.
+ */
+export async function saveAgent(k: KeeperHere, name: unknown, b: Json, genesisOf: (name: string) => Genesis | null, me: Signer, now = Math.floor(Date.now() / 1000)): Promise<Json> {
+  const dry = setAgent({ ...k, policy: structuredClone(k.policy) }, name, b, genesisOf, { write: false }) as { entry: Json; identity: boolean };
+  if (!isOwner(k, me) || featuresOf(k).policy === false || k.port === null || dry.identity) return setAgent(k, name, b, genesisOf, { owner: me.chain[0] ?? me.did });
+  const set: Json = {};
+  for (const f of FIELDS) if (b[f] !== undefined) set[f] = f === 'paused' ? b[f] : f === 'approval_above' && b[f] === null ? null : dry.entry[f];
+  let r: Json;
+  try { r = await toKeeper(k, '/policy', signedFor(k, me, { typ: 'policy-change', agent: name, set }, now)); } catch (e) {
+    // Not running: the file, as a keeper before signed changes takes it (at its next request or start).
+    if ((e as { check?: string }).check === 'keeper_offline' && b['paused'] === undefined) return { ...setAgent(k, name, b, genesisOf, { owner: me.chain[0] ?? me.did }), why: 'offline' };
+    throw e;
+  }
+  return { saved: true, signed: true, keeper: k.id, agent: name, by: r['by'], policy: r['policy'], live: true, restart: restartOf(k) };
+}
+/** POST /api/keeper/policy: a change signed elsewhere (`{body, sig, bundle}`, a phone's), carried to the keeper as it is. */
+export async function relayPolicy(k: KeeperHere, change: unknown): Promise<Json> {
+  if (!plain(change) || !plain(change['body']) || typeof change['sig'] !== 'string' || !plain(change['bundle'])) return fail(400, 'body', 'change: {body, sig, bundle}, signed by the owner');
+  if (change['body']['keeper'] !== k.did) fail(400, 'body', `change: for keeper ${String(change['body']['keeper'])}, this one is ${k.did}`);
+  const r = await toKeeper(k, '/policy', change);
+  return { saved: true, signed: true, relayed: true, keeper: k.id, agent: r['agent'], by: r['by'], policy: r['policy'], live: true };
+}
+/** The keeper's POST /agents, signed by `me` (an owner): per agent its address, balance and incoming money; null when it can't. */
+export async function ownerView(k: KeeperHere, me: Signer, now = Math.floor(Date.now() / 1000)): Promise<Json | null> {
+  if (!isOwner(k, me) || k.port === null || featuresOf(k).policy === false) return null;
+  try { return await toKeeper(k, '/agents', signedFor(k, me, { typ: 'owner-view' }, now)); } catch { return null; }
+}
+/** GET /api/keeper's agents with what the keeper's owner view says (address, balance, unlocked, incoming, paused). */
+export function mergeView(v: Json, k: KeeperHere, ov: Json): void {
+  const rows = Array.isArray(ov['agents']) ? ov['agents'] as Json[] : [];
+  for (const a of (v['agents'] as Json[]).filter((x) => x['keeper'] === k.id)) {
+    const o = rows.find((x) => x['name'] === a['name']);
+    if (!o) continue;
+    Object.assign(a, { address: typeof o['address'] === 'string' ? o['address'] : null, paused: o['paused'] === true, incoming: Array.isArray(o['incoming']) ? o['incoming'] : [],
+      ...(typeof o['balance'] === 'string' && { balance: o['balance'], unlocked_balance: o['unlocked_balance'] }) });
+  }
 }
 /** POST /api/keeper/approvers: the keeper's approver DIDs (all its agents'), the whole list. */
 export function setApprovers(k: KeeperHere, list: unknown): Json {

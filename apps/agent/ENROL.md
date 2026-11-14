@@ -75,6 +75,14 @@ another agent's context. `--tier friend` (or `quiet`) at enrolment makes them no
 `sigelo-agent enrol --name reviewer --tier friend`. `contacts` shows `ours: true, tier: friend`;
 restore keeps the tier unless `--tier` is given again.
 
+## Fund it, set its limits
+
+With Wallet on and a keeper (apps/keeper) holding an entry for the worker, its page shows its address:
+the first address of its own account, to fund it from any wallet. What arrives is its to spend, within
+the limits on the same page: per payment, per period, ask above, who it may pay, Pause. Each change is
+signed by your identity and checked and logged by the keeper; the worker's own key never passes. A phone
+with its own identity sets them through the computer it is paired with.
+
 ## Restore, rotate
 
 ```sh

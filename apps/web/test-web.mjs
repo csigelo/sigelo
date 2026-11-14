@@ -232,6 +232,30 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await router.call('POST', '/api/agents/enrol-code', { name: 'vps' })];
   ok(JSON.stringify(bads.map((x) => [x.status, x.body.error?.check])) === JSON.stringify([[400, 'body'], [409, 'name_taken'], [409, 'device'], [400, 'keeper']]),
     `router: enrol-code a bad name 400, a name the roster has 409 name_taken; revoke this device 409 device (Devices); no keeper 400 keeper (${JSON.stringify(bads.map((x) => x.body.error?.check))})`);
+  // The keeper from a phone with its own identity (design/agent-wallet-page.md §4): without a paired computer, elsewhere;
+  // with one (hooks.computer), its keeper's view, and a limit as a policy-change signed HERE, the computer only carrying it.
+  {
+    const { verifySig: vsig } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
+    const KDID = didOf(me.genesis).replace(/.$/, (c) => (c === 'a' ? 'b' : 'a')), pcCalls = [];
+    const pc = { name: () => 'desk', call: async (method, path, body) => {
+      pcCalls.push({ method, path, body });
+      if (path === '/api/keeper') return { status: 200, body: { state: 'here', keepers: [{ id: 'keeper', did: KDID, net: 'stagenet' }], agents: [{ keeper: 'keeper', name: 'scout', address: null }], requests: [] } };
+      if (path === '/api/keeper/policy') return { status: 200, body: { saved: true, signed: true, relayed: true, keeper: 'keeper', agent: body.change.body.agent, policy: body.change.body.set } };
+      return { status: 409, body: { error: { check: 'keeper_owner', message: 'owner: no' } } };
+    } };
+    const rpc = mk({ platform: p, identity: () => me, mode: { kind: 'full', standby: false }, seat, computer: pc, options: { registry: false } });
+    const el = (await router.call('GET', '/api/keeper')).body, elw = await router.call('POST', '/api/keeper/agent', { keeper: 'keeper', agent: 'scout', paused: true });
+    ok(el.state === 'elsewhere' && el.via === null && elw.status === 409 && elw.body.error.check === 'keeper_elsewhere', `phone keeper: no paired computer → elsewhere, writes 409 keeper_elsewhere (${JSON.stringify(el)})`);
+    const vk = (await rpc.call('GET', '/api/keeper')).body;
+    const pz = await rpc.call('POST', '/api/keeper/agent', { keeper: 'keeper', agent: 'scout', paused: true, per_tx_max: '50000000000' });
+    const sent = pcCalls.find((c) => c.path === '/api/keeper/policy')?.body;
+    ok(vk.state === 'here' && vk.via?.computer === 'desk' && pz.status === 200 && pz.body.relayed === true && sent?.keeper === 'keeper' && sent.change.body.typ === 'policy-change'
+      && sent.change.body.keeper === KDID && sent.change.body.net === 'stagenet' && JSON.stringify(sent.change.body.set) === '{"per_tx_max":"50000000000","paused":true}'
+      && sent.change.body.exp - sent.change.body.iat === 300 && vsig(me.genesis.key, sent.change.body, sent.change.sig) && didOf(sent.change.bundle.genesis) === didOf(me.genesis),
+      `phone keeper: through the paired computer: its keeper's view (via desk); Pause → a policy-change signed by this phone's identity, carried by the computer (${JSON.stringify(sent?.change?.body ?? pz)})`);
+    const ref = await rpc.call('POST', '/api/keeper/approve', { keeper: 'keeper', nonce: 'ab'.repeat(16) });
+    ok(ref.status === 409 && ref.body.error.check === 'keeper_owner' && pcCalls.at(-1).path === '/api/keeper/approve', 'phone keeper: the other keeper calls go to the computer, its refusal named');
+  }
   // Standby: the seat on another device. Started, it never logs in; writes refused seat_elsewhere; reads answer.
   const p2 = await W.webPlatform({ name: 'seed2', indexedDB: new FakeIDB(), mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
   await SD.restoreInto(p2, { words, name: 'tab', relay: 'relay.sigelo.ai', restore: { restore_height: 3100000 }, seat: 'elsewhere', now: 1761400000 });
@@ -856,13 +880,14 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   // activity, its four words, the allowance), its keeper settings (the four, then Advanced; Save, Restart), the keeper
   // elsewhere, Revoke in 4 taps (task 10), Enrol in 4 (task 3), a contact's kind (This is an agent)
   {
-    const ADDR = '5' + 'B'.repeat(94), NONCE = 'ab'.repeat(16), SCOUT = 'did:sigelo:zscout' + '0'.repeat(40);
+    const ADDR = '5' + 'B'.repeat(94), NONCE = 'ab'.repeat(16), SCOUT = 'did:sigelo:zscout' + '0'.repeat(40), SADDR = '7' + 'E'.repeat(94);
     G_.mine.push(person('scout', { did: SCOUT, tier: 'own', ours: true, presence: 'own', kind: 'agent', kind_set: false, last: { dir: 'in', text: 'Found 3 trips', at: now() - 120, status: null } }));
     W_.workers.push({ worker: W_.workers.length, name: 'scout', did: SCOUT, original: SCOUT, words: 'harvest ivory comet nine', rank: null, placed: 'remote', at: now() - 30 * 86400, status: 'enrolled', revoked: null, seen: null, tier: 'own', contact: SCOUT, local: null, online: true, last_seen: null, attested_until: now() + 40 * 86400, enrolling: null });
     const SW = W_.workers.at(-1).worker;
     const K_ = { state: 'here', keepers: [{ id: 'keeper', did: 'did:sigelo:zKeeper', net: 'stagenet', port: 38090, approvers: [ME], me_approver: true, restart: { command: 'systemctl --user restart sigelo-keeper-keeper.service', can: true } }],
       agents: [{ keeper: 'keeper', name: 'scout', worker: SW, did: SCOUT, account: 1, per_tx_max: '100000000000', per_period_max: '500000000000', period_seconds: 2592000, rate_per_minute: 3, approval_above: '20000000000', max_delegates: 0,
-        allow: [{ kind: 'addr', addr: ADDR, label: 'seat-hold' }], spent: '120000000000', remaining: '380000000000', window_start: now() - 2592000 }],
+        allow: [{ kind: 'addr', addr: ADDR, label: 'seat-hold' }], spent: '120000000000', remaining: '380000000000', window_start: now() - 2592000,
+        paused: false, address: SADDR, balance: '250000000000', unlocked_balance: '250000000000', incoming: [{ ts: now() - 600, amount: '250000000000', txid: 'c3'.repeat(32), status: 'received', index: 0 }] }],
       requests: [{ keeper: 'keeper', nonce: NONCE, agent: 'scout', worker: SW, amount: '30000000000', to: ADDR, purpose: 'seat-hold service', ref: 'r1', iat: now() - 60, exp: now() + 3500 }] };
     const KS = { k: K_, live: false };
     Object.assign(routes, {
@@ -908,8 +933,18 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await btn('Done').click(); await settle(); await poll();
     // The agent's page and its keeper settings.
     await scoutRow().click(); await settle(); await poll();
-    ok(h1() === 'scout' && has('Allowance') && has('0.12 of 0.50 XMR') && has('Asks you above 0.02 XMR · Change') && has('Last activity') && has('Messaged you') && has('Found 3 trips')
-      && has('Its four words') && has('harvest · ivory · comet · nine') && btn('Message') && btn('Revoke scout'), 'an agent\'s page: the allowance card, Last activity (its last message), its four words, Message, Revoke');
+    ok(h1() === 'scout' && has('Allowance') && has('0.12 of 0.50 XMR') && has('Asks you above 0.02 XMR · up to 0.10 XMR a payment · pays 1 payee') && btn('Change limits') && btn('Pause') && has('Last activity') && has('Messaged you') && has('Found 3 trips')
+      && has('Its four words') && has('harvest · ivory · comet · nine') && btn('Message') && btn('Revoke scout'), 'an agent\'s page: the allowance card (Change limits, Pause), Last activity (its last message), its four words, Message, Revoke');
+    ok(has('Address') && root.all().some((e) => e.attrs['data-agent-address'] === SADDR) && has(SADDR) && btn('Copy') && has('0.25 XMR in its account · 0.38 left this month')
+      && has('Send Monero here from any wallet: it is this agent\'s to spend within its limits.') && has('Received 0.25 XMR') && has('In its account'),
+      'agent page: the Address card above Allowance (its (i, 0), QR, Copy, what its account holds, the one line); money received in Last activity');
+    void btn('Pause').click(); await settle(); await poll();
+    ok(calls.some(([, p, b]) => p === '/api/keeper/agent' && b.paused === true && b.agent === 'scout') && !sheet() && has('Paused') && has('scout can\'t pay anyone') && btn('Resume'),
+      'Pause: at once, never asked (braking is quick) → POST /api/keeper/agent {paused: true}; the card says Paused, Resume');
+    void btn('Resume').click(); await settle();
+    ok(sheet() && sh1() === 'Resume scout?' && btn('Resume scout'), 'Resume: one confirmation tap (Resume scout?)');
+    await btn('Resume scout').click(); await settle(); await poll();
+    ok(calls.some(([, p, b]) => p === '/api/keeper/agent' && b.paused === false) && !has('can\'t pay anyone') && btn('Pause'), 'Resume confirmed → POST {paused: false}; Pause again');
     await root.all().find((e) => e.attrs['data-allowance'] !== undefined).click(); await settle(); await poll();
     const fld = kit(root).field;
     ok(h1() === 'scout\'s allowance' && fld('Per payment')?.value === '0.10' && fld('Per period')?.value === '0.50' && fld('Each')?.value === '2592000' && has('Who it may pay') && has('seat-hold')
@@ -919,17 +954,20 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     fld('Per payment').value = 'abc'; fire(fld('Per payment'), 'blur');
     ok(has('Enter an amount in XMR, like 0.25'), 'a field left wrong says how to fix it, under it (on leaving it)');
     await btn('Save').click(); await settle();
-    ok(!calls.some(([, p]) => p === '/api/keeper/agent') && has('Fix the fields marked above, then save.'), 'Save with a field wrong: nothing written, said where');
+    ok(!calls.some(([, p, b]) => p === '/api/keeper/agent' && b.per_tx_max) && has('Fix the fields marked above, then save.'), 'Save with a field wrong: nothing written, said where');
     fld('Per payment').value = '0.05'; fire(fld('Per payment'), 'input');
-    await btn('Save').click(); await settle(); await poll();
-    const saved = calls.find(([, p]) => p === '/api/keeper/agent')?.[2];
+    void btn('Save').click(); await settle();
+    ok(sheet() && sh1() === 'Save scout\'s limits?' && has('Up to 0.05 XMR a payment, 0.50 XMR this month; asks you above 0.02 XMR; pays 1 payee.') && !calls.some(([, p, b]) => p === '/api/keeper/agent' && b.per_tx_max),
+      'Save: one confirmation tap first, saying what is set; nothing sent yet');
+    await btn('Save limits').click(); await settle(); await poll();
+    const saved = calls.find(([, p, b]) => p === '/api/keeper/agent' && b.per_tx_max)?.[2];
     ok(saved?.keeper === 'keeper' && saved.agent === 'scout' && saved.per_tx_max === '50000000000' && saved.per_period_max === '500000000000' && saved.approval_above === '20000000000' && saved.rate_per_minute === 3
       && JSON.stringify(saved.allow) === JSON.stringify([{ addr: ADDR, label: 'seat-hold' }]) && has('Saved.') && has('This keeper is from before 0.1.15: it uses it after a restart.') && btn('Restart the keeper'),
       `Save, to a keeper from before 0.1.15 → POST /api/keeper/agent in atomic units, the allowlist as the keeper writes it; Saved, Restart the keeper (${JSON.stringify(saved)})`);
     await btn('Restart the keeper').click(); await settle();
     ok(calls.some(([, p, b]) => p === '/api/keeper/restart' && b.keeper === 'keeper'), 'Restart the keeper → POST /api/keeper/restart');
     KS.live = true;
-    await btn('Save').click(); await settle(); await poll();
+    void btn('Save').click(); await settle(); await btn('Save limits').click(); await settle(); await poll();
     ok(has('Saved.') && has('The keeper uses it from its next payment.') && !btn('Restart the keeper'), 'Save, to a keeper that re-reads its policy (0.1.15): "uses it from its next payment", no Restart');
     const me_ = aria('I approve its payments', 'INPUT'); me_.checked = false; fire(me_, 'change'); await settle();
     ok(calls.some(([, p, b]) => p === '/api/keeper/approvers' && b.me === false), 'Advanced → I approve its payments off → POST /api/keeper/approvers {me: false}');
@@ -939,7 +977,15 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await sandbox.ui.go('agent', SW); await settle(); await poll();
     await sandbox.ui.go('agent-allowance', SW); await settle(); await poll();
     ok(has('Set this on the computer that runs the keeper.') && !has('0.12 of') && !btn('Save'), 'keeper elsewhere: "Set this on the computer that runs the keeper", no numbers, no Save');
-    KS.k = K_;
+    KS.k = { state: 'elsewhere', via: null };
+    await sandbox.ui.go('agent', SW); await settle(); await poll();
+    ok(has('Set this on the computer that runs the keeper.') && has('Pair the computer that runs the keeper: Me → Devices and computers.') && !has('Send Monero here'), 'a phone with no paired computer: where to pair the computer that runs the keeper');
+    KS.k = { state: 'elsewhere', via: { computer: 'desk', error: 'desk isn\'t answering.' } };
+    await sandbox.ui.go('agent', SW); await settle(); await poll();
+    ok(has('Its keeper runs on desk. desk isn\'t answering.'), 'a phone whose paired computer does not answer: which computer runs its keeper');
+    SET.wallet = false; KS.k = K_; await poll();
+    ok(has('Turn on Wallet to see scout\'s address and set its allowance.') && btn('Turn on Wallet') && !has(SADDR), 'Wallet off: the agent page says Turn on Wallet, no address');
+    SET.wallet = true;
     // Task 10: revoke from Chats in 4 taps (Agents, the agent, Revoke, Revoke in the sheet).
     await sandbox.ui.go('chats'); await settle(); await poll();
     taps = 0;
@@ -1031,7 +1077,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(sRow?.textContent.includes('0.12 of 0.50 XMR this monthSyncing… 3 days behind') && sRow.all().some((e) => e.attrs['data-sync'] === 'syncing') && root.all().find((e) => e.attrs['data-allowances'] !== undefined)?.textContent.includes('Syncing… 3 days behind'),
       'Agents: the allowance line and the allowances card carry the wallet\'s state (Syncing… 3 days behind)');
     await sRow.click(); await settle(); await poll();
-    ok(root.all().find((e) => e.attrs['data-allowance'] !== undefined)?.textContent.includes('Syncing… 3 days behind'), 'the agent\'s page: its allowance card carries the same state');
+    ok(root.all().find((e) => e.attrs['data-allowance-card'] !== undefined)?.textContent.includes('Syncing… 3 days behind'), 'the agent\'s page: its allowance card carries the same state');
     // Can't reach the node; can't reach the wallet service: said, Retry (POST /api/wallet/sync), the last balance greyed.
     WAL.v = nodeDown;
     await sandbox.ui.go("wallet"); await settle(); await poll();
