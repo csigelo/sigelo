@@ -383,6 +383,8 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
           else if (m.op === 'clip-clear') { state.clipCleared++; state.clip = null; post({ id: m.id }); }
           else if (m.op === 'clip-copy') { state.clip = { text: m.text, clear: m.clear }; post({ id: m.id }); }
           else if (m.op === 'share') { state.shared = m.text; post({ id: m.id }); }
+          else if (m.op === 'bars') { if (typeof m.colour !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(m.colour)) throw Object.assign(new Error('colour'), { check: 'bars' }); state.bars = m.colour; post({ id: m.id }); }
+          else if (m.op === 'reload') { state.reloads = (state.reloads ?? 0) + 1; post({ id: m.id }); }
           else if (m.op === 'lock') {
             if ('on' in m && typeof m.on !== 'boolean') throw Object.assign(new Error('on'), { check: 'lock' });
             if ('after' in m && ![1, 5, 15, 60].includes(m.after)) throw Object.assign(new Error('after'), { check: 'lock' });
@@ -510,6 +512,11 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const on = F.state.secure;
   await bridge.secure(false); await bridge.clipClear();
   ok(on === true && F.state.secure === false && F.state.clipCleared === 1, 'shell: FLAG_SECURE on and off (secure), the clipboard cleared (clip-clear)');
+  // No action bar: the system bars in the page's background (bars), the old menu's Reload asked by the page (reload).
+  const opsBefore = F.log.ops.length;
+  await bridge.bars('#151514'); await bridge.reload();
+  ok(F.state.bars === '#151514' && F.state.reloads === 1 && await checkOf(() => bridge.bars('red')) === 'bars' && F.log.ops.length === opsBefore + 2,
+    'shell: the system bars in the page\'s colour (bars, #rrggbb; anything else refused before the shell), the page reloaded by the shell (reload)');
   const WM = await import(pathToFileURL(join(HERE, 'welcome.mjs')).href);
   ok(WM.WORDS_ATTRS.autocomplete === 'off' && WM.WORDS_ATTRS.autocorrect === 'off' && WM.WORDS_ATTRS.autocapitalize === 'none' && WM.WORDS_ATTRS.spellcheck === 'false',
     'welcome.mjs: the words\' boxes without autocomplete, autocorrect, capitals or spellcheck');

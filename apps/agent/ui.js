@@ -400,11 +400,21 @@
   const look = () => ({ theme: prefs.get('theme') ?? 'system', colour: prefs.get('colour') ?? 'seal' });
   function applyLook() {
     const root = document.documentElement, L = look();
-    if (!root) return;
-    if (L.theme === 'light' || L.theme === 'dark') root.setAttribute('data-theme', L.theme); else root.removeAttribute?.('data-theme');
-    if (L.colour === 'teal') root.setAttribute('data-pal', 'teal'); else root.removeAttribute?.('data-pal');
+    if (root) {
+      if (L.theme === 'light' || L.theme === 'dark') root.setAttribute('data-theme', L.theme); else root.removeAttribute?.('data-theme');
+      if (L.colour === 'teal') root.setAttribute('data-pal', 'teal'); else root.removeAttribute?.('data-pal');
+    }
+    bars();
+  }
+  // The Android app has no action bar: its system bars take the page's background (sigeloLocal.bars), at each change of the
+  // look and of the system's day and night.
+  function bars() {
+    if (typeof LOCAL?.bars !== 'function') return;
+    const m = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(globalThis.getComputedStyle?.(globalThis.document?.body)?.backgroundColor ?? '');
+    if (m) Promise.resolve().then(() => LOCAL.bars(`#${m.slice(1).map((x) => Number(x).toString(16).padStart(2, '0')).join('')}`)).catch(() => {});
   }
   applyLook();
+  globalThis.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener?.('change', bars);
   // Wallet is opt-in per profile (this identity), in its settings (GET /api/state me.wallet, POST /api/settings {wallet});
   // off hides the tab and stops every wallet call. This device keeps a mirror per DID for the Profiles sheet only.
   const walletKey = () => `wallet:${S.snap?.me?.did ?? S.me?.original ?? 'here'}`;
@@ -3187,6 +3197,8 @@
           kv('Clock', off === null || off === undefined ? 'not checked' : Math.abs(off) > 60 ? `${Math.abs(off)} s ${off < 0 ? 'ahead' : 'behind'}` : 'right'),
           kv('Relay keeps messages', m ? `${m.retention_days} days` : null),
           m?.restored ? kv(m.restored.created ? 'Created' : 'Restored from 25 words', m.restored.on) : null)),
+        // The app's page started again (the Android app's action bar menu had it): where the page is the app (sigeloLocal).
+        typeof LOCAL?.reload === 'function' ? h('div', { class: 'list' }, row({ compact: true, title: 'Reload the app', sub: 'If a screen looks stuck', onclick: () => { Promise.resolve().then(() => LOCAL.reload()).catch(() => toast('Could not reload.')); } })) : null,
         sec('Licence and links'),
         h('div', { class: 'list' }, kv('Licence', 'MIT: free to use, change and share'),
           h('a', { class: 'row compact', href: 'https://sigelo.io/', target: '_blank', rel: 'noopener noreferrer' }, h('span', { class: 'mid' }, h('b', null, 'sigelo.io'), h('small', null, 'How it works'))),

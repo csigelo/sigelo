@@ -457,7 +457,11 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       async call(method, path, body) { calls.push([method, path, body]); const f = routes[`${method} ${path.split('?')[0]}`], r = f ? f(body ?? {}, path) : null; if (r?.__error) return { status: 409, body: { error: r.__error } }; return f ? { status: 200, body: JSON.parse(JSON.stringify(r)) } : { status: 404, body: { error: { check: 'route', message: `no ${method} ${path}` } } }; },
       onChange() {}, mode: () => ({ kind: 'full' }),
       async unlock() { sandbox.unlocks = (sandbox.unlocks ?? 0) + 1; if (sandbox.refuseUnlock) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); },
+      async reload() { sandbox.reloads = (sandbox.reloads ?? 0) + 1; },
+      async bars(c) { sandbox.bars = [...(sandbox.bars ?? []), c]; },
     },
+    // The page's background as the browser computes it (ui.css --bg): the Android app's system bars take it (sigeloLocal.bars).
+    getComputedStyle: (el) => ({ backgroundColor: el === body ? sandbox.bg ?? 'rgb(253, 253, 251)' : 'rgba(0, 0, 0, 0)' }),
   };
   sandbox.globalThis = sandbox;
   vm.runInNewContext(readFileSync(join(HERE, 'vendor', 'ui.js'), 'utf8'), sandbox);
@@ -1234,6 +1238,16 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(has('What they restore') && has('Your 25 words restore the vault and every keeper wallet; keeper settings are re-entered.'), 'Backup and recovery: the recovery fact');
     await sandbox.ui.go('about'); await settle(); await poll();
     ok(has('Licence') && has('MIT') && root.all().some((e) => e.tagName === 'A' && e.attrs.href === 'https://github.com/csigelo/sigelo') && has(`Version ${PKG_VERSION} · experimental`), `About: the version from apps/agent/package.json (${PKG_VERSION}, read beside ui.js), licence, links (sigelo.io, the source)`);
+    // The Android app has no action bar: its old menu's Reload is About's "Reload the app" (sigeloLocal.reload: the shell's, or a tab's own).
+    const r0 = sandbox.reloads ?? 0;
+    await root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Reload the app')).click(); await settle();
+    ok(has('If a screen looks stuck') && sandbox.reloads === r0 + 1, 'About: "Reload the app" (the action bar\'s menu before) → sigeloLocal.reload, once');
+    // The system bars (no action bar): the page's background at the start, again at a change of the look (Dark: ui.css's #151514).
+    await sandbox.ui.go('set-appearance'); await settle(); await poll();
+    const dark = root.all().find((e) => e.tagName === 'INPUT' && e.attrs['aria-label'] === 'Dark');
+    sandbox.bg = 'rgb(21, 21, 20)'; dark.checked = true; fire(dark, 'change'); await settle();
+    ok(sandbox.bars?.[0] === '#fdfdfb' && sandbox.bars.at(-1) === '#151514', `bars: the page's background to the shell, at the start and at a change of the look (${sandbox.bars})`);
+    sandbox.bg = undefined; const sys = root.all().find((e) => e.tagName === 'INPUT' && e.attrs['aria-label'] === 'System'); sys.checked = true; fire(sys, 'change'); await settle();
     sandbox.intro = []; MSGS[bo.did] = []; sandbox.pending = { ...sandbox.pending, invites: [] };
   }
 

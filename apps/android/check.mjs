@@ -143,7 +143,15 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   for (const f of walk(JAVA)) for (const m of read(f).matchAll(/(?<!android\.)\bR\.(string|drawable|mipmap|xml|color)\.(\w+)/g)) refs.add(`${m[1]}/${m[2]}`);
   const missing = [...refs].filter((r) => !have.has(r));
   ok(missing.length === 0 && refs.size > 8, `resources: every reference resolves (${refs.size}; missing ${missing})`);
-  ok(read(MAIN, 'res', 'values-v35', 'themes.xml').includes('windowOptOutEdgeToEdgeEnforcement') && read(MAIN, 'res', 'values', 'themes.xml').includes('@android:style/Theme.Material.Light.DarkActionBar'), 'theme: the platform\'s Material (no AndroidX); Android 15 not edge to edge');
+  {
+    // No action bar (2026-11-14): the page's own top bar; the system bars in its paper, dark icons, until the page names its background.
+    const th = read(MAIN, 'res', 'values', 'themes.xml'), th35 = read(MAIN, 'res', 'values-v35', 'themes.xml');
+    const item = (n, v) => th.includes(`<item name="android:${n}">${v}</item>`);
+    ok(th.includes('parent="@android:style/Theme.Material.Light.NoActionBar"') && !/ActionBar"|DarkActionBar/.test(th.replace('Light.NoActionBar"', '')) && !/DarkActionBar/.test(th35)
+      && ['windowBackground', 'statusBarColor', 'navigationBarColor'].every((n) => item(n, '@color/sigelo_paper')) && item('windowLightStatusBar', 'true') && item('windowLightNavigationBar', 'true')
+      && th35.includes('<style name="Theme.Sigelo" parent="Base.Sigelo">') && th35.includes('<item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>'),
+      'theme: the platform\'s Material without an action bar (no AndroidX), the system bars and the window in paper with dark icons; Android 15 not edge to edge (the WebView below the status bar)');
+  }
 }
 {
   // The icon: assets/brand/app-icon.svg (the seal) in the adaptive icon's 108 dp, the SVG's 512 square as
@@ -242,6 +250,12 @@ ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\
     && /if \(typeof m\?\.ev === 'string'\) \{[^\n]*return; \}\n\s*const w = waiting\.get\(m\?\.id\);/.test(pa),
     'open event: a tap (onNewIntent, or the start\'s intent) posts {ev:"open", tag}, kept until the page\'s port is open and posted once; the page routes ev messages to their listeners, never to a request waiting');
 }
+ok(!/onCreateOptionsMenu|onOptionsItemSelected|M_RELOAD|android\.view\.Menu|getActionBar/.test(code(ma)) && /void reload\(\) \{\s*if \(web != null\) web\.loadUrl\(START\);/.test(ma)
+  && /case "reload":\s*\/\/[^\n]*\n\s*post\(to, ok\(id\)\);\s*main\.post\(activity::reload\);/.test(jbl)
+  && /if \(!COLOUR\.matcher\(c\)\.matches\(\)\) \{\s*fail\(to, id, "bars",/.test(jbl) && /Pattern\.compile\("\^#\[0-9a-fA-F\]\{6\}\$"\)/.test(jbl)
+  && /w\.setStatusBarColor\(colour\);\s*w\.setNavigationBarColor\(colour\);/.test(ma) && /SYSTEM_UI_FLAG_LIGHT_STATUS_BAR \| View\.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR/.test(ma)
+  && /if \(Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.R && w\.getInsetsController\(\) != null\) w\.getInsetsController\(\)\.setSystemBarsAppearance\(light \? LIGHT_BARS : 0, LIGHT_BARS\);/.test(ma),
+  'no action bar: no menu; Reload is the page\'s (bridge "reload": answered, then the start loaded); the system bars in the page\'s background (bridge "bars", #rrggbb checked), the icons light or dark to match, Android 11+ through the insets controller too');
 ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooserParams\.parseResult/.test(ma), 'files: a file input opens the system picker');
 {
   // Big files (design/transfer.md §10): BigFiles and PhotoProvider.
