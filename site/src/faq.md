@@ -23,7 +23,15 @@ release/verify-release.sh {{release_tag}}                 # a release: checksums
 
 ## I lost a machine or a key. What now?
 
-A lost machine: your 25 words make the same agents again, with the same IDs. A stolen key: recover on a clean machine; the ID stays, your contacts pair again. After a recovery-key change, destroy every old copy: a retired recovery key still wins at the points of the chain it governed.
+Your 25 words bring back your identity, agents' keys and wallet; not chats or contacts, which live on the device. After a recovery every contact and agent pairs again, by design.
+
+A backup file holds chats, contacts and pairing keys, encrypted with your words password, kept where you choose, never on a sigelo server. To change phones:
+
+1. Old phone: Settings → Backup and recovery → Back up this profile.
+2. New phone: Restore from a backup.
+3. Wipe the old phone.
+
+A stolen key: recover on a clean machine; the ID stays. Then destroy every old recovery key: a retired one still wins where it governed.
 
 ```sh
 sigelo-agent recover --recovery-key recovery.key

@@ -29,11 +29,12 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `platform-stub.mjs` | Loaded instead of `apps/contact/platform-node.mjs` (import map): no Node default in a page |
 | `platform-android.mjs` | In the Android app: the bridge (`sigelo-bridge/0`), the shell's fetch, MQTT and key, its lock settings, notifications and their open event |
 | `ws-over-stream.mjs` | RFC 6455 client framing over the shell's TLS stream (wss), and the stream as a socket (mqtts) |
-| `welcome.mjs` | The first run in the mock's words, shared with the GTK phone app: welcome, Name this phone, Keep it safe (25 words on paper or a password), the words and their check, Lock, You're set; restore, join, connect; Back one step |
-| `setup.mjs` | The first run's work in this page (welcome.mjs's api): create, restore, connect, and the import under Advanced; the shell's form set only when a path commits |
+| `welcome.mjs` | The first run in the mock's words, shared with the GTK phone app: welcome, Name this phone, Keep it safe (25 words on paper or a password), the words and their check, Lock, You're set; restore (25 words or a backup file), join, connect; Back one step |
+| `setup.mjs` | The first run's work in this page (welcome.mjs's api): create, restore, restore a backup, connect, and the import under Advanced; the shell's form set only when a path commits |
 | `shell.mjs` | In the Android app: the remote form (a computer's page, on the LAN or over the relay), its pairing and `connectLan` |
 | `seed.mjs` | Restore from seed: `restoreInto` (derive with `apps/contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
 | `create.mjs` | Create my identity: `createInto` (commit with `apps/contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
+| `backup.mjs` | The backup file (`sigelo-backup/0`, `.sbk`): a profile encrypted under the words password (`words-lock.mjs` `lockBytes`), written to Downloads or downloaded; restored as the same device, every session afresh at its first start; `sigeloLocal.backup` |
 | `words.mjs` | The words password (design/apps-seed.md §8): the kept words (`apps/contact/words-lock.mjs`, sealed as kind `words`), `sigeloLocal.words`, the guards of profile removal and the seat |
 | `copy.mjs` | The vendoring: walks the import graph, copies each file byte for byte, writes `vendor.json` |
 | `vendor.json` | Every vendored file, its source and SHA-256 (committed; `vendor/` is not) |

@@ -10,6 +10,8 @@
 //   checkPassword(password, repeat)             → the password, or throws check words_password_rule
 //   wrongGate({ base, sleep }), gate            the delay after a wrong password: 2 s, doubling per failure (at most
 //                                               256 s) in this page's life, none after a right one; no lockout
+//   lockBytes(label, bytes, password, o)        → { iter, salt, iv, ct, check }: any bytes, the same KDF and cipher, `label`
+//   openBytes(label, sealed, password, aad)     → bytes (o.aad: what the caller binds; apps/web/backup.mjs, label sigelo-backup/0)
 //
 // blob: JSON { v: "sigelo-words/0", kdf: "PBKDF2-SHA256", iter, salt, iv, ct } (base64). The password (NFC)
 // goes through PBKDF2-HMAC-SHA256 with a random 16-byte salt and `iter` rounds (ITERATIONS: 1,000,000; about
@@ -39,13 +41,13 @@ export function checkPassword(password, repeat = password) {
   if (p !== String(repeat ?? '')) refuse('words_password_rule', 'The two passwords are not the same.');
   return p;
 }
-async function keys(password, salt, iter) {
+async function keys(password, salt, iter, label = V) {
   const s = subtle();
   const pw = await s.importKey('raw', te.encode(String(password).normalize('NFC')), 'PBKDF2', false, ['deriveBits']);
   const master = new Uint8Array(await s.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, pw, 256));
   try {
     const h = await s.importKey('raw', master, 'HKDF', false, ['deriveKey', 'deriveBits']);
-    const hk = (info) => ({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te.encode(`${V} ${info}`) });
+    const hk = (info) => ({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te.encode(`${label} ${info}`) });
     const key = await s.deriveKey(hk('key'), h, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
     const check = hex(new Uint8Array(await s.deriveBits(hk('check'), h, 256)));
     return { key, check };
@@ -60,22 +62,35 @@ function parse(blob) {
 }
 export function wordsMeta(blob) { const { v, kdf, iter } = parse(blob); return { v, kdf, iter }; }
 
+/**
+ * Bytes encrypted under the password, as the words are: PBKDF2 with a fresh 16-byte salt, HKDF info "<label> key" and
+ * "<label> check", AES-256-GCM over aad → { iter, salt, iv, ct (bytes), check (hex) }.
+ */
+export async function lockBytes(label, bytes, password, { iterations = ITERATIONS, aad: ad = new Uint8Array(0) } = {}) {
+  if (!Number.isSafeInteger(iterations) || iterations < MIN_ITERATIONS) refuse('words_kdf', `at least ${MIN_ITERATIONS} rounds`);
+  const salt = globalThis.crypto.getRandomValues(new Uint8Array(16)), iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const { key, check } = await keys(password, salt, iterations, label);
+  const ct = new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv, additionalData: ad }, key, bytes));
+  return { iter: iterations, salt, iv, ct, check };
+}
+/** lockBytes's bytes back → { plain, check }; a wrong password (or a changed aad): check words_password. */
+export async function openBytes(label, { iter, salt, iv, ct }, password, ad = new Uint8Array(0)) {
+  if (!Number.isSafeInteger(iter) || iter < MIN_ITERATIONS) refuse('words_kdf', `at least ${MIN_ITERATIONS} rounds`);
+  const { key, check } = await keys(String(password ?? ''), salt, iter, label);
+  try { return { plain: new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv, additionalData: ad }, key, ct)), check }; } catch { return refuse('words_password', 'Wrong password.'); }
+}
+
 /** The 25 words encrypted under the password → { blob (bytes), check (hex) }. */
 export async function lockWords(words, password, { iterations = ITERATIONS } = {}) {
   const line = te.encode(cleanWords(words)), p = checkPassword(password);
-  if (!Number.isSafeInteger(iterations) || iterations < MIN_ITERATIONS) refuse('words_kdf', `at least ${MIN_ITERATIONS} rounds`);
-  const salt = globalThis.crypto.getRandomValues(new Uint8Array(16)), iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
   try {
-    const { key, check } = await keys(p, salt, iterations);
-    const ct = new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv, additionalData: aad(iterations) }, key, line));
-    return { blob: te.encode(JSON.stringify({ v: V, kdf: KDF, iter: iterations, salt: b64(salt), iv: b64(iv), ct: b64(ct) })), check };
+    const { iter, salt, iv, ct, check } = await lockBytes(V, line, p, { iterations, aad: aad(iterations) });
+    return { blob: te.encode(JSON.stringify({ v: V, kdf: KDF, iter, salt: b64(salt), iv: b64(iv), ct: b64(ct) })), check };
   } finally { line.fill(0); }
 }
 /** The words back → { words: [25], check }; a wrong password: check words_password. */
 export async function openWords(blob, password) {
-  const o = parse(blob), { key, check } = await keys(String(password ?? ''), o.salt, o.iter);
-  let plain;
-  try { plain = new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv: o.iv, additionalData: aad(o.iter) }, key, o.ct)); } catch { return refuse('words_password', 'Wrong password.'); }
+  const o = parse(blob), { plain, check } = await openBytes(V, o, password, aad(o.iter));
   try { return { words: td.decode(plain).split(' '), check }; } finally { plain.fill(0); }
 }
 /** The check for a password, after the words opened under it (so a wrong one is refused here too). */

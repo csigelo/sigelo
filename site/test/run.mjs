@@ -304,8 +304,9 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     }
     return w;
   };
-  // 2026-10-25 (Owner): / may explain in place, +40 words (155 → 195).
-  const BUDGET = { '/index.md': 195, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150, '/join.md': 250, '/faq.md': 420 };
+  // 2026-10-25 (Owner): / may explain in place, +40 words (155 → 195). 2026-11-14: /faq's lost-device answer says what the
+  // words and the backup file bring back and how to change phones (Owner's request), +34 (420 → 454).
+  const BUDGET = { '/index.md': 195, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150, '/join.md': 250, '/faq.md': 454 };
   for (const [f, max] of Object.entries(BUDGET)) {
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);

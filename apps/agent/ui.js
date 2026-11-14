@@ -3236,7 +3236,7 @@
     const say = h('div', { class: 'pad' });
     const way = (path, title) => row({ compact: true, title, chev: true, attrs: { 'data-add': path }, onclick: async () => { put(say); try { await PROFILES.add(path); } catch (e) { put(say, inlineError(e)); } } });
     sheet({ title: 'Add a profile', lead: `A second identity, for a shop or a project. Up to ${S.profiles?.limit ?? 8}.`,
-      body: [list(way('create', 'Create a new identity'), way('join', 'Join from an invite code'), way('restore', 'Restore from 25 words'), way('computer', 'Use a computer\'s identity')), say] });
+      body: [list(way('create', 'Create a new identity'), way('join', 'Join from an invite code'), way('restore', 'Restore from 25 words'), LOCAL?.backup ? way('backup', 'Restore from a backup') : null, way('computer', 'Use a computer\'s identity')), say] });
   }
   screen('profiles-manage', {}, () => {
     const body = h('div'), names = new Map(), M = { say: null }, renames = h('div', { class: 'card stack' });
@@ -3318,7 +3318,7 @@
   screen('set-backup', {}, () => {
     const body = h('div');
     mount(page({ title: 'Backup and recovery', body: [body] }));
-    void wordsStatus(); void loadMe().then(refresh);
+    void wordsStatus(); void loadMe().then(refresh); void backupStatus();
     return () => {
       const st = SEC.st, m = S.me;
       put(body, sec('Your 25 words'),
@@ -3330,7 +3330,43 @@
         st?.kept ? [sec('Words password'), list(row({ compact: true, title: 'Change the password', chev: true, onclick: () => go('words-change') }),
           row({ compact: true, title: 'Stop keeping the words here', chev: true, onclick: () => go('words-remove') }))]
           : st?.here && WORDS?.set ? [sec('Words password'), list(row({ compact: true, title: 'Set a password', sub: 'Keep the words here, to see them again with your lock and this password', subCls: 'wrap', chev: true, onclick: () => go('words-set') }))] : null,
-        sec('What they restore'), h('div', { class: 'card' }, h('p', null, RECOVERY)));
+        sec('What they restore'), h('div', { class: 'card' }, h('p', null, RECOVERY)),
+        BACKUP ? [sec('Backup file'), backupCard()] : null);
+    };
+  });
+  // ---- The backup file (apps/web/backup.mjs, sigelo-backup/0): this profile's chats, contacts, agents, settings and its keys, encrypted
+  // under the words password, written where the owner takes it from (the Android app: Downloads; a tab: a download). Restore: the first
+  // run's "Restore from a backup", or Profiles → Add. A remote profile has nothing here: its computer holds it. Not on a computer's page.
+  const BACKUP = LOCAL?.backup ?? null;
+  const BK = { st: null };
+  const backupStatus = () => (BACKUP ? BACKUP.status().then((r) => { BK.st = r; return refresh(); }, () => null) : Promise.resolve(null));
+  const BACKUP_KEEP = 'Keep it off this phone: another device, a USB stick, a cloud you trust.';
+  function backupCard() {
+    if (!BK.st) { void backupStatus(); return h('div', { class: 'card' }, h('p', { class: 'help' }, 'Loading…')); }
+    if (BK.st.kind === 'remote') return h('div', { class: 'card' }, h('p', null, 'Nothing to back up here: your computer holds this profile.'));
+    return h('div', { class: 'card' }, h('p', null, 'Your chats, contacts, agents and settings, with this phone\'s keys: a move to a new phone without pairing again.'),
+      h('p', { class: 'help' }, 'Encrypted with your words password. Never sent to a sigelo server.'),
+      h('div', { class: 'btns' }, btn('Back up this profile', () => go('backup-make'), { disabled: !BK.st.can })));
+  }
+  screen('backup-make', {}, () => {
+    const body = h('div', { class: 'pad stack' }), foot = h('div'), pw = pwField('Words password'), again = pwField('Repeat it'), V = { say: null, done: null };
+    mount(page({ title: 'Back up this profile', body: [body], foot: [foot] }));
+    void backupStatus();
+    const make = run(V, async () => { V.done = await BACKUP.make({ password: pw.value, repeat: again.value }); pw.value = ''; again.value = ''; });
+    return () => {
+      if (V.done) {
+        put(body, h('div', { class: 'badge-ic' }, icon('check')), h('p', { class: 'lead center' }, V.done.where === 'Downloads' ? 'Saved in Downloads' : 'Downloaded'),
+          h('p', { class: 'mono center' }, V.done.name), h('p', { class: 'warn' }, BACKUP_KEEP),
+          h('p', { class: 'help' }, 'Anyone with this file and its password owns this identity. A newer backup holds newer chats.'));
+        put(foot, btn('Done', () => back(), { kind: 'pri' }));
+        return;
+      }
+      const kept = BK.st?.kept === true;
+      put(body, h('p', { class: 'lead' }, 'One file with your chats, contacts, agents, settings and this phone\'s keys. On a new phone: Restore from a backup.'),
+        kept ? field('Your words password', pw, 'It opens the file on the new phone.')
+          : [field('A password for this file', pw, 'At least 8 characters. You need it to restore.'), field('Repeat it', again)],
+        inlineError(V.say));
+      put(foot, btn('Make the backup file', make, { kind: 'pri', ic: 'lock', disabled: V.busy || !BK.st?.can }));
     };
   });
   screen('words-show', {}, () => {
@@ -3507,7 +3543,7 @@
         SEC.st?.here && WORDS?.set ? btn('Backup and recovery', () => go('set-backup')) : null));
     };
   });
-  const WORDS_VIEWS = new Set(['words-show', 'words-change', 'words-set', 'words-remove', 'seat-take']);
+  const WORDS_VIEWS = new Set(['words-show', 'words-change', 'words-set', 'words-remove', 'seat-take', 'backup-make']);
   // The screens that show or guard the words ask the screen lock first (the mock's lock rule: the app's opening,
   // a profile switch, a payment above the limit, the 25 words; nothing else).
   for (const v of WORDS_VIEWS) SCREENS.get(v).guard = true;

@@ -235,7 +235,7 @@
   },
   "vendor/contact/words-lock.mjs": {
    "from": "apps/contact/words-lock.mjs",
-   "sha256": "bc83b6d852422ed5fac79f923d6f3e8fcd526e86f7042ebaeb47ed659b1f8506"
+   "sha256": "e088f25b1d591c52d58e9dced341f9c10772de44898a3f4d3ef5471dec405fcd"
   },
   "vendor/hash-wasm/argon2.umd.min.js": {
    "from": "apps/contact/node_modules/hash-wasm/dist/argon2.umd.min.js",
@@ -287,7 +287,7 @@
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "d93a306b91e02f76ca8b471c37c732bdf5c28defa137538d22e9ae2b5ab636f4"
+   "sha256": "03dc0f7eac4e978ac32c39c3dbe9f6826c1fe2f033dbeb21f0dbfa0a29515c8e"
   }
  }
 }

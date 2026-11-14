@@ -307,7 +307,7 @@ phone's own page; never another page). `list()` → `{active, limit: 8, profiles
 did, words, created}]}`; `use(id)` switches (the lock once, then the page of that profile); `rename(id, name)` (1 to 24
 characters, else `profile_name`); `add(path?)` (past 8: `profile_limit`) opens the new one's first run, at `path`'s step when given (the Add
 sheet: `create`, `join` (an invite code first; the new page opens Enter their code with it: `sigeloLocal.joinCode()`, once), `restore`,
-`computer`); `remove(id, {name, words})`:
+`backup` (WebView app: a backup file, below), `computer`); `remove(id, {name, words})`:
 a `words` profile needs `words: true` (`profile_words`) and its name typed (`profile_name`), a `remote` one its name, one
 not set up nothing. A computer's own page has none: no Profiles in Me. A `words` profile whose words are kept needs its
 words password too: WebView `{password}`, GTK `{proof}` (below); else `words_password_needed`, `words_password`.
@@ -322,6 +322,16 @@ typed again, refused `words_other` when they make another identity, `words_check
 `words-status {id?}` → `{here, kept, keyring}`; `words-get {id?}` → `{blob}` (base64 of words-lock.mjs's blob; never the
 check); `words-keep {blob, check, proof?}` (proof needed over kept words); `words-drop {proof}`; `take {proof?}` on the
 start page. The page does the crypto with `/words-lock.mjs`, which `ui` serves (apps/contact/words-lock.mjs, as it is).
+
+## Backup file (the apps)
+
+Not routes (apps/web/backup.mjs, `sigelo-backup/0`): Settings → Backup and recovery → Back up this profile, in the WebView
+app and a tab. `sigeloLocal.backup.status()` → `{kind, can, kept}`; `make({password, repeat?})`: the lock, then the words
+password through the page's gate (none kept: a password for the file, given twice), then the file → `{name, where:
+"Downloads"|"download", size}` (Android: the shell's `big-write` and `big-land`). Refusals: `backup_remote` (a computer's
+page: the computer holds it), `backup_none`, `words_password`, `words_password_rule`. Restore: the first run's "Restore
+from a backup" and the Add sheet's `backup` path; `backup_exists` (the identity is a profile here already),
+`backup_version`, `backup_file`, `words_password`. The GTK phone app and the computer's page: not in this pass.
 
 ## Computers (the apps)
 
