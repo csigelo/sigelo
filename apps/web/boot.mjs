@@ -9,7 +9,8 @@
 // elsewhere; an import of a device file under Advanced. Then a reload.
 //
 //   const app = boot(env)   env: { shell (SigeloShell) | null, target? (where its port arrives), box (the first run's element), main (ui.js's),
-//                           mqtt, indexedDB?, storage (localStorage), session (sessionStorage), reload(), seal? }
+//                           mqtt, indexedDB?, storage (localStorage), session (sessionStorage), reload(), seal?, download? (a tab's
+//                           save of a file: (name, bytes) → name; by default an <a download>) }
 //   app.local               what ui.js reads as globalThis.sigeloLocal: { call, onChange, mode, share, unlock, secure, profiles, computers, words,
 //                           lock, notify, onOpen, reload, bars }
 //   app.ready               → the backend (rejects while there is none: the first run, the connect view)
@@ -23,6 +24,11 @@
 // Error with { check, status }. A words profile whose words are kept behind a password (words.mjs) needs
 // that password too ({ password }).
 // local.words (ui.js Settings → Backup and recovery): words.mjs wordsApi over the active profile; local.secure(on): FLAG_SECURE.
+// local.backup (ui.js Settings → Backup and recovery → Back up this profile; backup.mjs): status() → { kind, can, kept };
+// make({ password, repeat }) the lock, then the words password (kept: through the page's gate; none kept: a new one for
+// this file, given twice), the file written: the Android app into Downloads (the shell's big-write and big-land), a tab
+// downloads it → { name, where, size }. A remote profile: nothing to back up (backup_remote); its computer holds it.
+// The first run's "Restore from a backup" (setup.mjs restoreBackup) refuses an identity another profile here holds.
 // local.computers (ui.js Me → Devices and computers, a remote profile in the Android app; design/profiles.md P2): list() → { active,
 // limit, computers, profile }; use(id) the switch (the lock once, a reload), add() the pairing screens after a reload,
 // forget(id) its control key gone here (the lock), → { revoke }: what to run on the computer, which keeps it until then.
@@ -39,7 +45,7 @@
 // local.bars (the Android app only; else undefined): bars("#rrggbb") the system bars in the page's background (no action bar).
 import { did as didOf, parseBytes } from 'sigelo';
 import { loadIdentity, memoryFiles, openDb, webPlatform } from './platform-web.mjs';
-import { TAG, androidPlatform, connectBridge, keystoreSealer, profileBridge } from './platform-android.mjs';
+import { TAG, androidPlatform, bigFiles, connectBridge, keystoreSealer, profileBridge } from './platform-android.mjs';
 import { makeRouter } from './router.mjs';
 import { addComputerView, remoteBackend, wipeIfAsked } from './shell.mjs';
 import { LIMIT as COMPUTERS_MAX, REVOKE, openComputers } from './computers.mjs';
@@ -47,13 +53,15 @@ import { keeperOf, seatOf } from './seed.mjs';
 import { firstRun, pickProfile } from './welcome.mjs';
 import { setupApi } from './setup.mjs';
 import { LIMIT, dbName, deleteDb, openRegistry, prefixed, runWipes } from './profiles.mjs';
-import { guard, wordsApi } from './words.mjs';
+import { guard, kept, openKept, wordsApi } from './words.mjs';
+import { makeBackup } from './backup.mjs';
+import { checkPassword } from './vendor/contact/words-lock.mjs';
 
 const SETTINGS = 'app/settings.json', PICKED = 'sigelo-picked', FROM = 'sigelo-from', ADD = 'sigelo-add', JOIN = 'sigelo-join';
-const PATHS = new Set(['create', 'join', 'restore', 'computer']);
+const PATHS = new Set(['create', 'join', 'restore', 'computer', 'backup']);
 const refuse = (status, check, message) => { throw Object.assign(new Error(message), { status, check }); };
 
-export function boot({ shell = null, target, box = null, main = null, mqtt, indexedDB = globalThis.indexedDB, storage = globalThis.localStorage, session = null, reload, seal = './vendor/icon.svg', pow, locks } = {}) {
+export function boot({ shell = null, target, box = null, main = null, mqtt, indexedDB = globalThis.indexedDB, storage = globalThis.localStorage, session = null, reload, seal = './vendor/icon.svg', pow, locks, download = pageDownload } = {}) {
   let router = null, raw = null, bridge = null, prof = null, own = null, ownDid = null, regOk, regNo, profOk;   // own: the active profile's platform, once it holds an identity
   const profP = new Promise((y) => { profOk = y; });
   const regP = new Promise((y, n) => { regOk = y; regNo = n; });
@@ -137,12 +145,14 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
   function setup(platform, store, name, reg) {
     if (!box) return;
     hideMain(true);
-    const others = reg.list().some((p) => p.id !== prof.id);
-    const leave = others ? { label: 'Back to my profiles', run: () => profiles.remove(prof.id, {}).catch(() => {}) } : undefined;
-    // Added by one of the Add sheet's four ways: its first run opens at that step; Join keeps the code for the page (joinCode).
+    const more = reg.list().some((p) => p.id !== prof.id);
+    const leave = more ? { label: 'Back to my profiles', run: () => profiles.remove(prof.id, {}).catch(() => {}) } : undefined;
+    // Added by one of the Add sheet's ways: its first run opens at that step; Join keeps the code for the page (joinCode).
     const path = sess.get(ADD);
     sess.set(ADD, '');
-    const api = { ...setupApi(platform, { bridge, mqtt, storage: store, reload, profile: { name, kind: (k) => reg.set(prof.id, { kind: k }), leave } }), join: (code) => sess.set(JOIN, code) };
+    const others = () => reg.list().filter((p) => p.id !== prof.id).map((p) => p.did).filter(Boolean);
+    const rename = async (n) => { try { await reg.rename(prof.id, n); } catch {} };
+    const api = { ...setupApi(platform, { bridge, mqtt, storage: store, reload, profile: { name, kind: (k) => reg.set(prof.id, { kind: k }), leave, others, rename } }), join: (code) => sess.set(JOIN, code) };
     const fr = firstRun(box, api);
     if (PATHS.has(path)) fr.start(path);
   }
@@ -245,6 +255,31 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     },
   });
 
+  // ---- Settings → Backup and recovery → Back up this profile (backup.mjs): the file, written where the owner takes it from
+  /** The file out of the app: the Android app's Downloads (written in parts by the shell, then moved there), a tab's download. */
+  async function saveFile(name, bytes) {
+    if (!raw) return { name: (await download(name, bytes)) ?? name, where: 'download' };
+    const big = bigFiles(raw, { profile: prof.id }), part = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, '0')).join('');
+    try {
+      for (let at = 0; at < bytes.length; at += 512 * 1024) await big.write(part, at, bytes.subarray(at, at + 512 * 1024));
+      await big.flush(part);
+      return { name: (await big.land(part, name)).name, where: 'Downloads' };
+    } catch (e) { try { await big.drop(part); } catch {} throw e; }
+  }
+  const backup = Object.freeze({
+    async status() { const p = await profP; return { kind: p.kind, can: own !== null, kept: own !== null && kept(own) }; },
+    async make({ password, repeat } = {}) {
+      const p = await profP;
+      if (p.kind === 'remote') refuse(409, 'backup_remote', 'Nothing to back up here: your computer holds this profile.');
+      if (!own) refuse(409, 'backup_none', 'Nothing to back up: this profile holds no identity yet.');
+      await raw?.unlock();
+      // Its words kept: their password, through the page's gate (a wrong one waits); none kept: a password for this file.
+      if (kept(own)) await openKept(own, password); else checkPassword(password, repeat);
+      const r = await makeBackup(own, password, { profile: (await regP).byId(p.id) ?? p });
+      try { const s = await saveFile(r.name, r.bytes); return { ...s, size: r.bytes.length }; } finally { r.bytes.fill(0); }
+    },
+  });
+
   const local = Object.freeze({
     async call(method, path, body) {
       let r;
@@ -277,7 +312,17 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     computers,
     // The code a profile added by "Join from an invite code" was made for: once, then gone (ui.js opens Enter their code with it).
     joinCode() { const c = sess.get(JOIN); if (!c) return null; sess.set(JOIN, ''); return c; },
+    backup,
     words: wordsApi(() => own, { unlock: async () => { if (raw) await raw.unlock(); }, withProfile, original: () => ownDid }),
   });
   return { ready, local, registry: regP };
+}
+
+/** A tab's download of a file: an object URL on an <a download>, gone once clicked. */
+function pageDownload(name, bytes) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' })), a = document.createElement('a');
+  a.href = url; a.download = name; a.rel = 'noopener';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return name;
 }

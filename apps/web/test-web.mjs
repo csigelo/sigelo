@@ -55,7 +55,7 @@ const html = readFileSync(join(HERE, 'index.html'), 'utf8'), map = C.importMap(h
   // remote-client.mjs imports node:module and node:url only in Node (its own dependencies), never in the page: C.NODE_ONLY.
   const nodeImports = vendored.filter(([rel]) => /\.m?js$/.test(rel)).flatMap(([rel, src]) => C.importsOf(readFileSync(src, 'utf8')).filter((s) => s.startsWith('node:') && !C.NODE_ONLY[rel]?.includes(s)).map((s) => `${rel}: ${s}`));
   ok(nodeImports.every((x) => x.endsWith('node:zlib') && /qr(-decode)?\.mjs/.test(x)), `no node: import in the page but the QR codec's node:zlib, mapped to the shim (${nodeImports})`);
-  const own = ['app.mjs', 'boot.mjs', 'profiles.mjs', 'router.mjs', 'platform-web.mjs', 'platform-stub.mjs', 'pow-worker.mjs', 'platform-android.mjs', 'ws-over-stream.mjs', 'shell.mjs', 'seed.mjs', 'create.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8'));
+  const own = ['app.mjs', 'boot.mjs', 'profiles.mjs', 'router.mjs', 'platform-web.mjs', 'platform-stub.mjs', 'pow-worker.mjs', 'platform-android.mjs', 'ws-over-stream.mjs', 'shell.mjs', 'seed.mjs', 'create.mjs', 'backup.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8'));
   ok(own.every((t) => !/from 'node:|innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(t)), 'the app\'s modules: no node: import, no HTML strings, no eval');
   const manifest = JSON.parse(readFileSync(join(HERE, 'vendor.json'), 'utf8'));
   ok(Object.keys(manifest.files).length === vendored.length && Object.entries(manifest.files).every(([rel, f]) => f.sha256 === createHash('sha256').update(readFileSync(join(HERE, ...rel.split('/')))).digest('hex')),
@@ -290,6 +290,67 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   ok(tk.status === 200 && tk.body.seat === 'here' && tk.body.holder === 'tab' && started === 1 && (await r2.call('GET', '/api/state')).body.me.seat.here === true && r2.mode().standby === false,
     `seat take: the list signed naming this device, the page starts as the operator (${JSON.stringify(tk.body)})`);
   await r2.stop();
+}
+
+// ================================================================ 2c2. the backup file (backup.mjs, sigelo-backup/0), no relay needed: a profile
+// restored from seed, its words kept, with history, a group, a picture, the page's settings; backed up, restored into a fresh
+// storage byte for byte (the keeper's agents, the kept words, every file), the identity and its keys the same; the refusals.
+{
+  const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href), BK = await import(pathToFileURL(join(HERE, 'backup.mjs')).href);
+  const WD = await import(pathToFileURL(join(HERE, 'words.mjs')).href), WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href);
+  const { makeRouter: mk } = await import(pathToFileURL(join(HERE, 'router.mjs')).href);
+  const { did: didOf } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
+  const { mnemonicFromRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
+  const S0 = new Uint8Array(32).fill(5); S0[31] = 0x0b;
+  const words = mnemonicFromRoot(S0), plat = (name) => W.webPlatform({ name, indexedDB: new FakeIDB(), mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
+  const pA = await plat('old'), enc = (t) => new TextEncoder().encode(t), dec = (b) => new TextDecoder().decode(b);
+  await SD.restoreInto(pA, { words, name: 'phone', relay: 'relay.sigelo.ai', now: 1761400000 });
+  await WD.keepWords(pA, words, 'correct horse', { iterations: 1000 });
+  pA.files.write('app/me.local.history.jsonl', enc('{"kind":"out","text":"dinner on friday?"}\n'));
+  pA.files.write('app/me.local.groups.json', enc('{"v":"sigelo-group/1","groups":{"g1":{"name":"family"}}}'));
+  pA.files.write('app/me.local.ui.json', enc('{"settings":{"currency":"EUR","wallet":true}}'));
+  pA.files.write('app/me.local.pictures/me.webp', new Uint8Array([1, 2, 3]));
+  pA.files.write('app/me.local.transfers.json', enc('{"in":[]}'));
+  pA.files.write('app/me.local.files/.transfer/ab.have', new Uint8Array([9]));
+  await pA.flush();
+  const meA = JSON.parse(dec(await W.loadIdentity(pA))), original = didOf(meA.genesis), kA = dec(await W.loadSealed(pA, 'keeper'));
+  const made = await BK.makeBackup(pA, 'correct horse', { profile: { id: 'p1', name: 'Profile 1' }, iterations: 1000, now: Date.UTC(2026, 10, 14) });
+  const raw = dec(made.bytes), h = BK.readHeader(made.bytes);
+  ok(made.name === 'sigelo-profile-1-2026-11-14.sbk' && h.v === 'sigelo-backup/0' && h.did === original && h.kdf === 'PBKDF2-SHA256' && h.iter === 1000 && h.created === '2026-11-14T00:00:00.000Z' && h.salt.length === 16,
+    `backup: sigelo-<profile>-<date>.sbk; the header plain: version, the DID, the date, the KDF and its rounds (${made.name}, ${JSON.stringify({ ...h, salt: undefined, iv: undefined, ct: undefined })})`);
+  ok(![meA.secret, JSON.parse(kA).root_hex, words.split(' ').slice(0, 3).join(' '), 'dinner on friday', 'family'].some((x) => raw.includes(x)), 'backup: no key, no K, no word, no message, no group name in the clear');
+  const slept = [], g = WL.wrongGate({ sleep: async (ms) => { slept.push(ms); } });
+  const pB = await plat('new');
+  const wrong = await checkOf(() => BK.restoreBackup(pB, made.bytes, 'correct horsf', { gate: g }));
+  ok(wrong === 'words_password' && slept.join() === '2000' && pB.files.read('identity.sealed') === null && pB.files.list('app').length === 0, `restore: a wrong password refused (words_password) after the gate's 2 s, nothing written (${wrong}, ${slept})`);
+  const there = await checkOf(() => BK.restoreBackup(pB, made.bytes, 'correct horse', { gate: g, dids: ['did:sigelo:zOther', original] }));
+  ok(there === 'backup_exists' && pB.files.list('app').length === 0, `restore: an identity another profile here holds refused (backup_exists), nothing written (${there})`);
+  const o = JSON.parse(raw), other = await checkOf(() => BK.restoreBackup(pB, enc(JSON.stringify({ ...o, v: 'sigelo-backup/1' })), 'correct horse', { gate: g }));
+  const moved = await checkOf(() => BK.restoreBackup(pB, enc(JSON.stringify({ ...o, did: 'did:sigelo:zNotIt' })), 'correct horse', { gate: g }));
+  const junk = await checkOf(() => BK.restoreBackup(pB, enc('{"v":"sigelo/0"}'), 'x', { gate: g }));
+  ok(other === 'backup_version' && moved === 'words_password' && junk === 'backup_file', `restore: a file of another version refused (backup_version); a changed header does not open (bound as the AAD); not a backup (${[other, moved, junk]})`);
+  let committed = 0;
+  const r = await BK.restoreBackup(pB, made.bytes, 'correct horse', { gate: g, dids: ['did:sigelo:zOther'], commit: async () => { committed++; } });
+  const meB = JSON.parse(dec(await W.loadIdentity(pB))), names = BK.filesOf(pA.files), namesB = BK.filesOf(pB.files);
+  ok(r.original === original && r.did === original && r.name === 'Profile 1' && r.words?.split(' ').length === 4 && committed === 1 && JSON.stringify(meB) === JSON.stringify(meA)
+    && dec(await W.loadSealed(pB, 'keeper')) === kA, `restore: the same identity file (its secret, so every key) and the same keeper (K, the agents' roster), the name and four words (${r.words})`);
+  delete namesB['app/backup-restored.json'];
+  ok(JSON.stringify(namesB) === JSON.stringify(names) && Object.keys(names).length >= 7 && !('app/me.local.transfers.json' in names) && !Object.keys(names).some((n) => n.includes('.transfer/')) && pB.files.read(BK.FRESH) !== null,
+    `restore: every file the same, byte for byte (history, the group, the picture, settings, seat notes, the device list); the transfers in progress left out; the mark for fresh sessions (${Object.keys(names)})`);
+  ok((await WD.openKept(pB, 'correct horse', g)).words.join(' ') === words, 'restore: the kept words come back, under the same words password');
+  const again = await checkOf(() => BK.restoreBackup(pB, made.bytes, 'correct horse', { gate: g }));
+  ok(again === 'backup_here', `restore: into a profile that holds an identity already refused (${again})`);
+  const rk = mk({ platform: pB, identity: () => meB, mode: { kind: 'full', standby: false }, seat: SD.seatOf(pB, () => meB), keeper: SD.keeperOf(pB), options: { registry: false } });
+  let fresh = 0;
+  rk.carrier.start = async () => {}; rk.carrier.checkClock = async () => {};
+  const fe = rk.carrier.freshEpochs.bind(rk.carrier); rk.carrier.freshEpochs = (x) => { fresh++; return fe(x); };
+  await rk.start();
+  const wk = (await rk.call('GET', '/api/agents/workers')).body, st = (await rk.call('GET', '/api/settings')).body;
+  ok(fresh === 1 && pB.files.read(BK.FRESH) === null && wk.workers[0]?.name === 'phone' && wk.seat === 'here' && st.currency === 'EUR', `restored, started: sessions afresh once (the mark gone), the agents and the seat here, the settings (${JSON.stringify(st).slice(0, 120)})`);
+  await rk.stop();
+  // A profile with no identity: nothing to back up.
+  const pE = await plat('empty');
+  ok(await checkOf(() => BK.makeBackup(pE, 'correct horse', { iterations: 1000 })) === 'backup_none', 'backup: a profile with no identity: backup_none');
 }
 
 // ================================================================ 2d. create a new identity (create.mjs, apps/contact/create.mjs), no relay needed
@@ -1599,10 +1660,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     };
     const P3 = { active: 'p1', limit: 8, profiles: [{ id: 'p1', name: 'Profile 1', kind: 'words', did: 'did:sigelo:zA', words: 'apple brave cider delta', created: 1 }, { id: 'p2', name: 'Work', kind: 'remote', did: 'did:sigelo:zB', words: 'eagle fancy giant hover', created: 2 }] };
     const removed = [];
-    const profiles = { list: async () => JSON.parse(JSON.stringify(P3)), remove: async (id, o) => { removed.push([id, o]); if (o.password !== PW.pw) throw Object.assign(new Error('Wrong password.'), { check: 'words_password' }); return { reload: true }; } };
+    const BKS = { kind: 'words', can: true, kept: true }, made = [];
+    const backup = { status: async () => ({ ...BKS }), make: async (o) => { made.push(o); await sb3.sigeloLocal.unlock(); if (o.password !== PW.pw) wrong(); return { name: 'sigelo-profile-1-2026-11-14.sbk', where: 'Downloads', size: 4096 }; } };
+    const added = [];
+    const profiles = { add: async (path) => { added.push(path); return { reload: true }; }, list: async () => JSON.parse(JSON.stringify(P3)), remove: async (id, o) => { removed.push([id, o]); if (o.password !== PW.pw) throw Object.assign(new Error('Wrong password.'), { check: 'words_password' }); return { reload: true }; } };
     const seatSnap = () => ({ ...snap(), me: { ...snap().me, seat: { holder: 'laptop', epoch: 1, here: false } } });
     const sb3 = { ...sandbox, document: docOf(root3), setInterval: (f, ms) => { iv3.push([f, ms]); return iv3.length; }, history: { replaceState() {}, pushState() {}, back() {} }, sigeloUiTest: undefined,
-      sigeloLocal: { ...sandbox.sigeloLocal, profiles, words, async secure(on) { secure.push(on); },
+      sigeloLocal: { ...sandbox.sigeloLocal, profiles, words, backup, async secure(on) { secure.push(on); },
         async call(method, path, b) { posted.push([method, path, b]); const f = { 'GET /api/state': PW.standby ? seatSnap : snap, 'GET /api/agents/workers': () => ({ keeper: true, seat: 'here', workers: [] }), 'GET /api/me': () => ({ did: 'did:sigelo:zA', original: 'did:sigelo:zA', recovery: 'set', key: 'browser', relay: 'relay.sigelo.ai', retention_days: 7, erase: '', restored: { on: '2026-11-03', keeper: 1, seat: 'here' } }),
           'GET /api/groups': () => ({ tier: GR.tier, groups: [], notices: [] }), 'POST /api/seat/take': () => { if (b?.password !== PW.pw) throw Object.assign(new Error('Wrong password.'), { check: 'words_password' }); return { seat: 'here', holder: 'phone', epoch: 2 }; } }[`${method} ${path.split('?')[0]}`];
           try { return f ? { status: 200, body: f() } : { status: 404, body: { error: { check: 'route', message: 'no' } } }; } catch (e) { return { status: 403, body: { error: { check: e.check, message: e.message } } }; } } } };
@@ -1646,8 +1710,32 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     K.field('Current password').value = 'correct horse';
     await b3('Save').click(); await settle(); await poll3();
     ok(PW.pw === 'battery staple' && K.h1() === 'Backup and recovery' && wc.some(([o, a, b, c]) => o === 'change' && a === 'correct horse' && b === 'battery staple' && c === 'battery staple'), 'Change: old, new and its repeat → local.words.change, back to Backup and recovery');
+    // The backup file (apps/web/backup.mjs): Back up this profile, the lock, the words password; the file named, where it went, keep it off this phone.
+    ok(has3('Backup file') && has3('Never sent to a sigelo server') && b3('Back up this profile'), 'Backup and recovery: the Backup file card, Back up this profile');
+    u = sandbox.unlocks ?? 0;
+    await b3('Back up this profile').click(); await settle(); await poll3();
+    ok(K.h1() === 'Back up this profile' && (sandbox.unlocks ?? 0) === u + 1 && K.field('Your words password')?.attrs.type === 'password' && !K.field('Repeat it'), 'Back up: the screen lock first, then the words password (kept here: no repeat)');
+    K.field('Your words password').value = 'nope'; await b3('Make the backup file').click(); await settle();
+    ok(has3('Wrong password.') && !has3('Saved in Downloads'), 'Back up: a wrong password said, no file');
+    K.field('Your words password').value = 'battery staple'; await b3('Make the backup file').click(); await settle(); await poll3();
+    ok(has3('Saved in Downloads') && has3('sigelo-profile-1-2026-11-14.sbk') && has3('Keep it off this phone: another device, a USB stick, a cloud you trust.') && made.at(-1).password === 'battery staple' && b3('Done'),
+      'Back up: local.backup.make → "Saved in Downloads", the file name, keep it off this phone');
+    await b3('Done').click(); await settle(); await poll3();
+    BKS.kind = 'remote'; BKS.can = false;
+    await backTo(); await root3.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Backup and recovery')).click(); await settle(); await poll3(); await poll3();
+    ok(has3('Nothing to back up here: your computer holds this profile.') && !b3('Back up this profile'), 'Backup file of a remote profile: nothing to back up, the computer holds it');
+    BKS.kind = 'words'; BKS.can = true;
+    await backTo(); await backTo(); await tab3('chats').click(); await settle(); await poll3();
+    await root3.all().find((e) => e.className === 'pchip').click(); await settle();
+    await b3('Add').click(); await settle();
+    const way = root3.all().find((e) => e.attrs?.['data-add'] === 'backup');
+    ok(way?.textContent.includes('Restore from a backup'), 'Profiles → Add: Restore from a backup');
+    await way.click(); await settle();
+    ok(added.at(-1) === 'backup', 'Profiles → Add → Restore from a backup: local.profiles.add("backup") (its first run opens at that screen)');
+    await K.aria('Close', 'BUTTON')?.click(); await settle(); await poll3();
+    await tab3('me').click(); await settle(); await poll3();
+    await K.aria('Settings', 'BUTTON').click(); await settle(); await poll3();
     // Removing the profile: its words password too; taking the seat: the same.
-    await backTo();
     await root3.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Profiles')).click(); await settle(); await poll3();
     await b3('Remove Profile 1…').click(); await settle();
     const ppw = K.field('Its words password');
@@ -2019,10 +2107,33 @@ try {
   await call(again, 'POST', '/api/send', { to: CY.did, text: 'after the restart' });
   read = [];
   ok(await until(async () => { read.push(...(await node.inbox({ wait: 0.5 })).messages); return read.some((m) => m.content === 'after the restart'); }), 'and it sends again: the ratchet state came back whole');
-  ok((await call(again, 'POST', '/api/history/clear')).body.cleared === true && (await call(again, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.length === 0, 'POST /api/history/clear');
-  ok((await call(again, 'POST', '/api/forget', { contact: CY.did })).body.forgotten === CY.did, 'POST /api/forget');
+  // The backup file (backup.mjs): this app's storage onto a new phone (a fresh IndexedDB), the same keys: the contact, its
+  // pairing key and the chat come back, nothing pairs again; sessions start afresh, and messages go both ways at once.
+  let moved;
+  {
+    const BK = await import(pathToFileURL(join(HERE, 'backup.mjs')).href);
+    await W.saveIdentity(again.platform, new TextEncoder().encode(JSON.stringify(ADA.store)));
+    const file = await BK.makeBackup(again.platform, 'correct horse', { profile: { id: 'p1', name: 'ada' }, iterations: 1000 });
+    await again.router.stop();
+    const contacts = (pl) => JSON.parse(new TextDecoder().decode(pl.files.read(nodeLib.pathsFor(IDENTITY).store))).contacts[CY.did];
+    const before = contacts(again.platform), idb2 = new FakeIDB(), fresh = await W.webPlatform({ name: 'app', indexedDB: idb2, mqtt: mqttEsm });
+    await BK.restoreBackup(fresh, file.bytes, 'correct horse');
+    const id2 = JSON.parse(new TextDecoder().decode(await W.loadIdentity(fresh)));
+    moved = await webApp({ ...ADA, store: id2 }, idb2);
+    await moved.router.start();
+    const after = contacts(moved.platform), s2 = (await call(moved, 'GET', '/api/state')).body, row = s2.groups.contacts.find((c) => c.did === CY.did) ?? s2.groups.mine.find((c) => c.did === CY.did);
+    ok(id2.secret === ADA.store.secret && after.pair_key === before.pair_key && typeof after.pair_key === 'string' && !after.re_pair && row?.name === 'cyrus' && row.words_checked === true && row.last?.text === 'after the restart',
+      `backup → restore on a new phone: the same key, the contact with the same pairing key (no re_pair), its name, words checked and the chat (${JSON.stringify(row).slice(0, 120)})`);
+    await call(moved, 'POST', '/api/send', { to: CY.did, text: 'from the new phone' });
+    read = [];
+    ok(await until(async () => { read.push(...(await node.inbox({ wait: 0.5 })).messages); return read.some((m) => m.content === 'from the new phone'); }), 'restored: the contact reads the new phone at once, nothing paired again');
+    await node.send('ada', 'welcome back');
+    ok(await until(async () => (await call(moved, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.some((m) => m.text === 'welcome back')), 'restored: and the new phone reads the contact');
+  }
+  ok((await call(moved, 'POST', '/api/history/clear')).body.cleared === true && (await call(moved, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.length === 0, 'POST /api/history/clear');
+  ok((await call(moved, 'POST', '/api/forget', { contact: CY.did })).body.forgotten === CY.did, 'POST /api/forget');
   ok(!existsSync(join(dir, 'app')) && !existsSync(join(process.cwd(), 'app')), 'nothing of the app reached the disk');
-  await again.router.stop(); A = null;
+  await moved.router.stop(); A = null;
   await node.stop?.();
 } finally {
   try { await A?.router.stop(); } catch {}

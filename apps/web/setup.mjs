@@ -8,6 +8,8 @@
 //   restore  restoreInto (seed.mjs), the same seal
 //   or       Keep it safe → Set a password (keepWords: words.mjs, sealed as a third kind): the words kept, never shown
 //   then     the Lock step (the Android app: bridge.unlock, the screen lock once), then You're set (the four words)
+//   backup   restoreBackup (backup.mjs): a backup file and its password, the same identity as on the old phone (same
+//            keys, same pairings); one another profile here holds refused before anything is written
 //   connect  pairComputer (shell.mjs): SIGELO:CTL: over the relay (the four words), SIGELO:UI: on the LAN; the profile's first computer
 //   import   Advanced: the file a computer wrote for this device (SAFE); the operator's is refused
 import { parseBytes } from 'sigelo';
@@ -19,6 +21,7 @@ import { presetRelay } from './router.mjs';
 import { createInto } from './create.mjs';
 import { restoreInto } from './seed.mjs';
 import { keepWords } from './words.mjs';
+import { restoreBackup } from './backup.mjs';
 import { pairComputer } from './shell.mjs';
 import { scanner } from './welcome.mjs';
 import { didWords } from './vendor/contact/short.mjs';
@@ -31,8 +34,9 @@ const wordsOf = (did) => { try { return didWords(did); } catch { return null; } 
 
 /**
  * welcome.mjs's api over this page's platform. o: { bridge (Android) | null, mqtt, storage, reload, seal,
- * profile: { name (its database), kind(k) (the registry's kind once a path commits: 'words' | 'remote'), leave? } }
- * (profiles.mjs; leave: the welcome's way back to the other profiles, for one added and not set up yet)
+ * profile: { name (its database), kind(k) (the registry's kind once a path commits: 'words' | 'remote'), leave?, others?, rename? } }
+ * (profiles.mjs; leave: the welcome's way back to the other profiles, for one added and not set up yet; others(): the
+ * original DIDs of the other profiles; rename(name): this one named as in a restored backup)
  */
 export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.localStorage, reload = () => { location.hash = ''; location.reload(); }, seal = './vendor/icon.svg', profile = {}, words = {} } = {}) {
   let session = null, release = null;
@@ -67,6 +71,12 @@ export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.l
       await mode('self');
       const r = await restoreInto(platform, { words, name, relay, net, restore, seat: elsewhere ? 'elsewhere' : 'here' });
       return { ok: true, words: wordsOf(r?.did) };
+    },
+    /** A backup file (bytes) and its password → { ok, words }; refused: words_password (after the gate's delay), backup_*. */
+    async restoreBackup(bytes, password) {
+      const r = await restoreBackup(platform, bytes, password, { dids: profile.others?.() ?? [], commit: () => mode('self'), ...(words.gate && { gate: words.gate }) });
+      if (r.name) await profile.rename?.(r.name);
+      return { ok: true, words: r.words };
     },
     async connect(text) {
       if (!bridge) throw new Error('Connecting to a computer needs the app: a browser tab cannot reach the relay or the LAN.');

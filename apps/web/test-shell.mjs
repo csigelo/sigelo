@@ -580,10 +580,10 @@ class FakeEl {
     const api = SU.setupApi(p, { bridge, mqtt: mqttEsm, storage: new Map(), reload: () => { reloaded++; } });
     const fr = WM.firstRun(box, api);
     const welcome = buttons().filter((b) => b.parent?.className === 'choices').map((b) => b.textContent);
-    ok(welcome.join('|') === 'Create my identity|Restore from 25 words|Use my computer instead' && !box.all().some((e) => ['INPUT', 'TEXTAREA'].includes(e.tagName))
+    ok(welcome.join('|') === 'Create my identity|Restore from 25 words|Restore from a backup|Use my computer instead' && !box.all().some((e) => ['INPUT', 'TEXTAREA'].includes(e.tagName))
       && box.textContent.includes('One identity for you and your agents.') && box.textContent.includes('Chat with people and agents, privately. Let your agents act for you, within limits you set.')
       && box.all().some((e) => e.tagName === 'DETAILS' && e.textContent.includes('Import a device file')) && F.state.mode === null,
-      'welcome (the mock\'s words): sigelo, what it is, Create my identity, Restore from 25 words, Use my computer instead (no invite code where the shell keeps none); no field; the import under Advanced; no form set yet');
+      'welcome (the mock\'s words): sigelo, what it is, Create my identity, Restore from 25 words, Restore from a backup, Use my computer instead (no invite code where the shell keeps none); no field; the import under Advanced; no form set yet');
     button('Create my identity').onclick();
     ok(title() === 'Name this phone' && button('‹') && button('Next') && box.textContent.includes('Step 1 of 3') && box.all().some((e) => e.tagName === 'DETAILS' && /More options/.test(e.textContent) && /Monero network/.test(e.textContent) && /Relay/.test(e.textContent)),
       'create 1: Name this phone, Step 1 of 3, Next, Back; the network and the relay under More options');
@@ -1011,6 +1011,92 @@ class FakeEl {
     const p2b = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: idb, pow, name: PR.dbName('p2') });
     ok(p2b.files.read('words.keystore') === null && p2b.files.read('identity.keystore') !== null, 'Remove the password: words.keystore gone from storage, the identity kept');
   } finally { for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } }
+}
+
+// ================================================================ 1e2. the backup file (backup.mjs, boot.mjs local.backup, the first run's "Restore from
+// a backup"; ROADMAP "encrypted backup and restore") over the fake shell: Back up this profile asks the lock and the words password
+// (a wrong one after the gate's delay), writes the file into Downloads through the shell; on a new phone (another keystore) the
+// first run restores it: the same identity, its words kept under the same password; the same DID as another profile refused;
+// a remote profile has nothing to back up.
+{
+  const SD = await import(pathToFileURL(join(HERE, 'seed.mjs')).href), B = await import(pathToFileURL(join(HERE, 'boot.mjs')).href);
+  const PR = await import(pathToFileURL(join(HERE, 'profiles.mjs')).href), WD = await import(pathToFileURL(join(HERE, 'words.mjs')).href), BK = await import(pathToFileURL(join(HERE, 'backup.mjs')).href);
+  const { mnemonicFromRoot } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'keys.js')).href);
+  const { did: didOf } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
+  const S = new Uint8Array(32).fill(8); S[31] = 0x0c;
+  const wa = mnemonicFromRoot(S);
+  const saved = Object.fromEntries(['document', 'location', 'history', 'addEventListener', 'removeEventListener'].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  Object.assign(globalThis, { document: { createElement: (t) => new FakeEl(t) }, location: { hash: '', reload() {} }, history: { pushState() {}, back() {} }, addEventListener() {}, removeEventListener() {} });
+  const memStore = () => { const m = new Map(); return { m, get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+  const pow = A.androidPow(W.workerPow(() => new FakeWorker()));
+  const apps = [];
+  const page = (F, idb, storage, session = memStore()) => { let reloads = 0; const box = new FakeEl('section'); const app = B.boot({ shell: F.shell, target: F.target, box, main: new FakeEl('main'), mqtt: mqttEsm, indexedDB: idb, storage, session, reload() { reloads++; }, pow }); apps.push(app); return { app, box, session, get reloads() { return reloads; } }; };
+  const stopAll = async () => { for (const a of apps.splice(0)) { try { await (await a.ready).stop?.(); } catch {} } };
+  const btnOf = (box, t) => box.all().find((e) => e.tagName === 'BUTTON' && e.textContent === t);
+  const h1 = (box) => box.all().find((e) => e.tagName === 'H1')?.textContent;
+  const regOf = (idb) => JSON.parse(new TextDecoder().decode(idb.dbs.get(PR.REGISTRY_DB).stores.get('files').get(PR.REGISTRY)));
+  try {
+    // The old phone: p1 restored from the words, kept under a password.
+    const F = fakeShell({ mode: 'self' }), idb = new FakeIDB(), storage = memStore();
+    const b0 = await F.connect(), p0 = await A.androidPlatform({ bridge: b0, mqtt: mqttEsm, indexedDB: idb, pow });
+    await SD.restoreInto(p0, { words: wa, name: 'phone', relay: 'relay.test', restore: {}, seat: 'here', now: 1761400000 });
+    await WD.keepWords(p0, wa, 'correct horse');
+    const did1 = didOf(JSON.parse(new TextDecoder().decode(await W.loadIdentity(p0))).genesis);
+    const g = page(F, idb, storage), L = g.app.local;
+    await g.app.ready;
+    await until(() => regOf(idb).profiles[0].did === did1, 5000);
+    const st = await L.backup.status(), unlocks = () => F.log.ops.filter((o) => o === 'unlock').length, u = unlocks(), t = Date.now();
+    const wrong = await checkOf(() => L.backup.make({ password: 'correct horsf' })), wrongMs = Date.now() - t;
+    ok(st.kind === 'words' && st.can === true && st.kept === true && wrong === 'words_password' && wrongMs >= 2000 && unlocks() === u + 1 && F.state.big.landed.length === 0,
+      `Back up this profile: the lock, then the words password; a wrong one refused after 2 s, no file (${JSON.stringify(st)}, ${wrong}, ${wrongMs} ms)`);
+    const made = await L.backup.make({ password: 'correct horse' }), file = F.state.big.landed.at(-1);
+    const h = BK.readHeader(new Uint8Array(file.bytes));
+    ok(made.where === 'Downloads' && /^sigelo-profile-1-\d{4}-\d\d-\d\d\.sbk$/.test(made.name) && file.name === made.name && file.bytes.length === made.size && h.did === did1 && h.iter === 1_000_000 && F.state.big.parts.size === 0,
+      `Back up this profile: the file in Downloads through the shell (big-write, big-land), named for the profile and the day; the header names the DID and 1,000,000 rounds (${made.name}, ${made.size} bytes)`);
+    // The same phone: Profiles → Add → Restore from a backup, with the file of p1: refused, the same DID.
+    await L.profiles.add('backup');
+    await stopAll();
+    const g2 = page(F, idb, storage, g.session);
+    await checkOf(() => g2.app.ready);
+    const input = g2.box.all().find((e) => e.tagName === 'INPUT' && e.type === 'file'), pw = g2.box.all().find((e) => e.tagName === 'INPUT' && e.type === 'password');
+    input.files = [{ arrayBuffer: async () => new Uint8Array(file.bytes).buffer }]; pw.value = 'correct horse';
+    await btnOf(g2.box, 'Restore').onclick();
+    const said = g2.box.all().find((e) => e.className?.includes('say'))?.textContent ?? '';
+    ok(h1(g2.box) === 'Restore from a backup' && g2.box.textContent.includes('Wipe the old phone: two phones with the same keys confuse your contacts.') && /already a profile on this phone/.test(said)
+      && regOf(idb).profiles.find((p) => p.id === 'p2')?.kind === null, `Add → Restore from a backup: the file of a profile here refused (the same DID), nothing set up (${said})`);
+    await stopAll();
+    // The new phone: another keystore, nothing yet. The welcome's "Restore from a backup", the file, its password, the lock, done.
+    const F2 = fakeShell({ mode: null }), idb2 = new FakeIDB(), storage2 = memStore();
+    const n = page(F2, idb2, storage2);
+    await checkOf(() => n.app.ready);
+    ok(h1(n.box) === 'sigelo' && btnOf(n.box, 'Restore from a backup') !== undefined, 'new phone: the welcome offers Restore from a backup');
+    btnOf(n.box, 'Restore from a backup').onclick();
+    const in2 = n.box.all().find((e) => e.tagName === 'INPUT' && e.type === 'file'), pw2 = n.box.all().find((e) => e.tagName === 'INPUT' && e.type === 'password');
+    in2.files = [{ arrayBuffer: async () => new Uint8Array(file.bytes).buffer }];
+    pw2.value = 'wrong password';
+    const t2 = Date.now();
+    await btnOf(n.box, 'Restore').onclick();
+    const said2 = n.box.all().find((e) => e.className?.includes('say'))?.textContent ?? '';
+    ok(/Wrong password/.test(said2) && Date.now() - t2 >= 2000 && F2.state.mode === null && idb2.dbs.get('sigelo')?.stores.get('files').size === 0, `new phone: a wrong password said after the delay; nothing written, no form set (${said2})`);
+    pw2.value = 'correct horse';
+    await btnOf(n.box, 'Restore').onclick();
+    ok(h1(n.box) === 'Lock' && F2.state.mode === 'self', `new phone: restored, then the lock step (${h1(n.box)})`);
+    await btnOf(n.box, 'Use my phone\'s lock').onclick();
+    ok(h1(n.box) === 'Restored' && n.box.textContent.includes('Your identity is back') && n.box.all().some((e) => e.className === 'words4'), 'new phone: Restored, the four words');
+    await btnOf(n.box, 'Open sigelo').onclick();
+    await stopAll();
+    const n2 = page(F2, idb2, storage2), r2 = await n2.app.ready, me2 = (await r2.call('GET', '/api/me')).body;
+    const sealed = F2.log.seals.map((x) => `${x.kind}:${x.full}`).sort().join();
+    ok(n2.reloads === 0 && me2.original === did1 && (await n2.app.local.words.reveal('correct horse')).words.join(' ') === wa && sealed.includes('identity:true') && sealed.includes('keeper:true') && sealed.includes('words:true')
+      && (await r2.call('GET', '/api/agents/workers')).body.workers[0]?.name === 'phone', `new phone: the same identity, sealed under its own keystore (${sealed}); the words come back under the same password; the agents list`);
+    await stopAll();
+    // A remote profile (a computer's page): nothing to back up.
+    const F3 = fakeShell({ mode: 'remote' }), idb3 = new FakeIDB(), rm = page(F3, idb3, memStore());
+    await checkOf(() => rm.app.ready);
+    const s3 = await rm.app.local.backup.status();
+    ok(s3.kind === 'remote' && s3.can === false && await checkOf(() => rm.app.local.backup.make({ password: 'correct horse' })) === 'backup_remote', `a remote profile: nothing to back up (backup_remote) (${JSON.stringify(s3)})`);
+    await stopAll();
+  } finally { await stopAll(); for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } }
 }
 
 // ================================================================ 1f. notifications, the app lock's settings, unlock force (platform-android.mjs,

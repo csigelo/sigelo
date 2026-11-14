@@ -2,8 +2,8 @@
 // First run, shared by the shells (the Android app's page: app.mjs with setup.mjs; the GTK phone app's
 // start page: apps/gtk/web/start.js), in the words of design/ux1/mock.html: one decision per screen.
 //
-//   Welcome   sigelo, what it is, four ways: Create my identity, I have an invite code (where the shell keeps
-//             one: api.join), Restore from 25 words, Use my computer instead. Advanced (folded, only where a
+//   Welcome   sigelo, what it is, the ways in: Create my identity, I have an invite code (where the shell keeps
+//             one: api.join), Restore from 25 words, Restore from a backup (api.restoreBackup), Use my computer instead. Advanced (folded, only where a
 //             shell adds something): an import. Close: back to the other profiles (api.leave).
 //   Create    1. Name this phone (More options: network, relay)  2. Keep it safe: write down 25 words (the words
 //             once: a one-way door, no Back, FLAG_SECURE on Android, copy on the test network only; then Check
@@ -13,6 +13,8 @@
 //   Restore   one screen: the 25 words checked as typed, when they were made (a month, optional), is this
 //             identity in use on another device (main or spare); More options: network, block height, name,
 //             relay; then Restoring, Lock, done
+//   Backup    (where the shell reads one: api.restoreBackup) Restore from a backup: the file, its password, the old phone's
+//             warning; then the lock and done: the profile as it was on the old phone, the same keys
 //   Join      the code they gave (or a scan), kept (api.join), then Name this phone, Join, and Create's step 2;
 //             the app pairs with it once the identity is made (the four words are compared in that chat)
 //   Connect   Use my computer: scan its QR or type its code (Advanced: its relay, a SIGELO:UI: or SIGELO:CTL:
@@ -32,6 +34,7 @@
 //   discard()                          the drawn words dropped (the app stopped before the check)
 //   checkWords(text)                   → { count, ok, error }
 //   restore({ words, name, height, net, elsewhere, relay })  → { ok, message?, words? }
+//   restoreBackup(bytes, password)     optional: → { ok, words? }: a backup file (sigelo-backup/0) restored here
 //   join(code)                         optional: the invite code kept until the new identity's page opens
 //   keepWords(words, password)         optional: Keep it safe → Set a password: the words kept encrypted under it
 //   lock()                             optional: the phone's screen lock, asked once (Lock → Use my phone's lock)
@@ -192,6 +195,7 @@ export function firstRun(box, api, { show = true } = {}) {
         button('Create my identity', () => { C.join = null; go(createName); }, true),
         api.join ? button('I have an invite code', () => go(joinCode)) : null,
         button('Restore from 25 words', () => go(restoreWords)),
+        api.restoreBackup ? button('Restore from a backup', () => go(restoreFile)) : null,
         button('Use my computer instead', () => go(connectCode), 'ghost')),
       adv));
     box.hidden = false;
@@ -409,6 +413,28 @@ export function firstRun(box, api, { show = true } = {}) {
     return s;
   }
 
+  // ---- restore from a backup file (backup.mjs): the file, its password; the same identity, so the old phone must go
+  function restoreFile() {
+    const file = el('input', { type: 'file', accept: '.sbk', attrs: { 'aria-label': 'The backup file' } });
+    const pw = el('input', { type: 'password', attrs: { autocomplete: 'current-password', autocapitalize: 'none', spellcheck: 'false' } });
+    const start = button('Restore', null, true);
+    const s = screen({ title: 'Restore from a backup', lead: 'The .sbk file you saved from your old phone, and its password.',
+      body: [field('Backup file', file), field('Its password', pw, 'Your words password when the old phone kept your words, else the one you gave the file.'),
+        el('p', { className: 'warn', textContent: 'Wipe the old phone: two phones with the same keys confuse your contacts.' })], primary: start });
+    start.onclick = busy(start, s, async () => {
+      const f = file.files?.[0];
+      if (!f) throw new Error('Choose the backup file first.');
+      if (!pw.value) throw new Error('Type its password.');
+      s.say('Restoring… The network stays off until it\'s done.', false);
+      let r;
+      try { r = await api.restoreBackup(new Uint8Array(await f.arrayBuffer()), pw.value); } catch (e) { throw new Error(`Not restored: ${e?.message ?? e}`); }
+      pw.value = '';
+      C.made = r; C.restored = true;
+      afterMade();
+    });
+    return s;
+  }
+
   // ---- connect: this phone controls an agent on another machine
   function connectCode() {
     const code = el('input', { className: 'code-in', placeholder: 'K7F3-Q9ZP', attrs: { autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '9' } });
@@ -460,8 +486,8 @@ export function firstRun(box, api, { show = true } = {}) {
     welcome: home, screen, go, button,
     /** The connect screens alone, as the first screen (a remote profile adding a computer: design/profiles.md P2). */
     connect() { stack.length = 0; current = connectCode; door = false; connectCode(); },
-    /** One of the Add sheet's ways as the first step, the welcome behind it (Back): create, join, restore, computer. */
-    start(path) { const f = { create: createName, join: joinCode, restore: restoreWords, computer: connectCode }[path]; if (f) go(f); },
+    /** One of the Add sheet's ways as the first step, the welcome behind it (Back): create, join, restore, backup, computer. */
+    start(path) { const f = { create: createName, join: joinCode, restore: restoreWords, backup: api.restoreBackup ? restoreFile : null, computer: connectCode }[path]; if (f) go(f); },
     stop() { removeEventListener('popstate', onPop); if (C.words) quiet(api.discard); C.words = null; R.words = ''; secure(false); },
   };
 }

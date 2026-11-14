@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **app:** encrypted backup and restore: Settings → Backup and recovery → Back up this profile writes a `.sbk` file under the words password; Restore from a backup brings the profile back, same keys, no re-pairing.
+- **site:** FAQ, lost a machine: what the 25 words bring back and what not, the backup file (chats, contacts, pairing keys; never on a sigelo server), a new phone in three steps.
 - **android:** no action bar: the page's own top bar is the top, the status and navigation bars take its background (dark icons on light, light on dark); Reload moved to Settings → About ("Reload the app").
 - **accept/pass:** `sigelo-pass/0`, a door for agents beside a captcha: Sigelo-Pass hint, hint file, §5.2 handshake bound to the site's host, HMAC cookie; Express middleware, nginx/Caddy verifier; rate limits.
 - **agent:** `sigelo-agent pass <url>` and MCP `sigelo_pass` (not in the plugin): read a site's Sigelo-Pass hint, prove the DID, keep its cookie per site; refuses a challenge for another host; never solves a captcha.

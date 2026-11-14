@@ -26,6 +26,7 @@
 // Android app's bridge), the page runs the transfer engine itself, the bytes in the shell, the direct path
 // on the WebView's RTCPeerConnection (none: no transfer); /api/transfers* as `sigelo-agent ui` serves them,
 // a file named by the doc the system's picker or camera gave. No Tor here.
+// A restore from a backup file (backup.mjs) leaves a mark: start() then begins every session afresh, before anything is sent.
 // keeper: { load() → bytes | null, save(bytes) } (seed.mjs keeperOf: the sealed keeper of a restore or a create):
 // the Agents list and their enrolment (apps/contact/page.mjs); without one (an imported SAFE or FULL file) the
 // list is empty and enrolling refuses `keeper`.
@@ -40,6 +41,7 @@ import { codeKind } from './vendor/contact/short.mjs';
 import { Engine as TransferEngine } from './vendor/contact/transfer-engine.mjs';
 import { webIo, webTransfers } from './vendor/contact/transfer-web.mjs';
 import * as rtcWeb from './vendor/contact/rtc-web.mjs';
+import { freshAfterRestore } from './backup.mjs';
 
 export const IDENTITY = 'app/me.local.json';
 const unhex = (s) => {
@@ -173,6 +175,8 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
       // with device add --full (design/apps.md, open; review 2026-10-28, MEDIUM 7).
       if (mode.kind === 'full' && !st) refuse(409, 'full_import', FULL_IMPORT);
       owned = await platform.owner(me().original);
+      // The first start after a restore from a backup file (backup.mjs): every session afresh, the pairing keys kept.
+      try { await freshAfterRestore(platform, page.carrier); } catch (e) { owned.release(); owned = null; throw e; }
       // Standby: the owner lock held, nothing sent; reads answer, writes are refused seat_elsewhere.
       if (st && st.here === false) { page.live.seatGone = st.holder; return; }
       try { await page.start(); } catch (e) { owned.release(); owned = null; throw e; }
