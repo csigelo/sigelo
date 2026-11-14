@@ -306,7 +306,8 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   };
   // 2026-10-25 (Owner): / may explain in place, +40 words (155 → 195). 2026-11-14: /faq's lost-device answer says what the
   // words and the backup file bring back and how to change phones (Owner's request), +34 (420 → 454).
-  const BUDGET = { '/index.md': 195, '/adopt.md': 250, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150, '/join.md': 250, '/faq.md': 454 };
+  // 2026-11-14: /adopt and /llms.txt open with the package sentence (agents took `sigelo` for the CLI), +22 each.
+  const BUDGET = { '/index.md': 195, '/adopt.md': 272, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150, '/join.md': 250, '/faq.md': 454 };
   for (const [f, max] of Object.entries(BUDGET)) {
     const w = words(readFileSync(join(DIST, f), 'utf8'));
     ok(w <= max, `budget: ${f} ${w} words ≤ ${max}`);
@@ -316,7 +317,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   const fwWords = words(fw.filter((l) => !/^\|/.test(l)).join('\n'));
   ok(fwWords <= 450 && rowsOf > 0 && rowsOf <= 40, `budget: /frameworks.md ${fwWords} words ≤ 450 outside its table, ${rowsOf} rows ≤ 40`);
   const lw = words(readFileSync(join(DIST, 'llms.txt'), 'utf8'), false);
-  ok(lw <= 150, `budget: /llms.txt ${lw} words ≤ 150 (all counted in full)`);
+  ok(lw <= 172, `budget: /llms.txt ${lw} words ≤ 172 (all counted in full)`);
   // /privacy: its two halves have their own caps (privacy 90, terms 60 words).
   const [pv, tm] = readFileSync(join(DIST, 'privacy.md'), 'utf8').split(/^## Terms$/m);
   ok(tm !== undefined && words(pv.replace(/^# .*$/m, '')) <= 90 && words(tm) <= 60, `budget: /privacy.md privacy ${words(pv.replace(/^# .*$/m, ''))} ≤ 90, terms ${words(tm ?? '')} ≤ 60`);

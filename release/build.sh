@@ -113,6 +113,8 @@ for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recov
 		echo "build.sh: $t-$v.tgz still has a file: dependency" >&2; exit 1
 	fi
 done
+# The bare package answers `sigelo` with where the CLI is (ts/src/nocli.ts): agents took sigelo-offline for it.
+tar -tzf "$out/sigelo-$v.tgz" | grep -qx package/dist/nocli.js || { echo "build.sh: sigelo-$v.tgz has no dist/nocli.js" >&2; exit 1; }
 # The installer ships inside sigelo-spend (it is the same package: `sigelo-spend init`), the tests do not.
 listing=$(tar -tzf "$out/sigelo-spend-$v.tgz")
 for f in cli daemontls init licence rpcrange service; do

@@ -37,6 +37,11 @@ history, which is not public. This public history starts at the import of 2026-1
 - **agent:** codes that renew themselves (a fresh short code once one is used) and "Cancel this code" at the relay: carrier `cancelInvite`, `POST /api/invite/cancel`, `invite --renew`/`--cancel`, MCP `sigelo_invite`.
 - **relay:** `DELETE /park/<hash>` cancels a parked short code: the parker's login in the body, a tombstone until its expiry, `park_unknown` for anyone else; charged as a lookup. GET and POST unchanged.
 - **Docs:** the four words (ENROL.md the source), the busy lock, the relay-metadata line, `reply-hook.sh` shipped, Hermes `mcp add` non-interactive form, "no outside review yet"; keeper copy: mainnet with small amounts.
+- **sigelo:** a `sigelo` bin in the library package: it says the CLI is `sigelo-agent`, the MCP server `sigelo-mcp`, this package the library, and exits 2 (agents took `sigelo-offline` for the CLI).
+- **docs:** llms.txt, /adopt and /frameworks open with which package is the CLI (`sigelo-agent`), the MCP server (`sigelo-mcp`) and the library (`sigelo`, no CLI).
+- **docs:** Hermes: one piped `hermes mcp add` line (`y` piped, one `--env` with HOME and PATH, `--args` last), its two bugs as workarounds; pi: `pi mcp add`, `mcpServers` in a file.
+- **docs:** Agent Zero: no `mcp add`, settings cached, apply from Settings → MCP; AgentRun and URL-only hosts: `sigelo-mcp --http` on loopback with a token, the agent enrols over MCP.
+- **docs:** MCP server beside `watch` on one identity file: no connection between calls; beside a watcher inbox reads its state, invite/accept answer busy; every framework page ends with a check.
 
 ## v0.1.15 — 2026-11-13
 

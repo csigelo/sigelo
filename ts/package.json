@@ -32,6 +32,7 @@
   "main": "dist/sigelo.js",
   "types": "dist/sigelo.d.ts",
   "bin": {
+    "sigelo": "dist/nocli.js",
     "sigelo-offline": "dist/offline.js"
   },
   "files": [

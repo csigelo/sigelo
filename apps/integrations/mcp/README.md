@@ -12,7 +12,9 @@ Claude Code plugin, no wallet ([apps/plugins/](../../plugins/README.md)):
 ## Contact tools
 
 With [`sigelo-contact`](../../contact/README.md) (part of `sigelo-agent`); never in the plugin.
-Beside `sigelo-agent watch` or `ui`, they answer [`busy`](../../agent/WATCH.md#one-process-per-identity-file).
+Between calls no relay connection: each call logs in and out (a transfer holds it until done).
+Beside [`watch`](../../agent/WATCH.md#one-process-per-identity-file) on the same file: `sigelo_inbox` reads its state, sends queue for it; `invite`, `accept`, `wait_for_message` answer `busy` (beside `ui`, all do).
+Recommended: no `watch`, the MCP logs in per call; `watch` only for hooks, after pairing.
 
 | Tool | Does |
 |---|---|

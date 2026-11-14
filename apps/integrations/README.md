@@ -5,10 +5,14 @@ Three ways in, all thin wrappers over the same local code (no crypto here, no ne
 verify, nothing that must be running):
 
 1. **MCP, stdio**: `npx -y sigelo-mcp@0.1.16` (npm, Node ≥ 22.18). Identity, challenge, bundle,
-   verify, contacts: 15 tools. Source: [`mcp/`](mcp/README.md), `cd mcp && npm test` → ALL PASS.
+   verify, contacts: 28 tools. Source: [`mcp/`](mcp/README.md), `cd mcp && npm test` → ALL PASS.
 2. **CLI sidecar**: `sigelo-agent` for frameworks without MCP: [JOIN.md](JOIN.md).
 3. **Remote, verify only**: `https://sigelo.io/mcp` (Streamable HTTP, one tool `sigelo_verify`, no
    key). The only fit for cloud platforms; an identity key never goes on someone else's server.
+
+**Platform host** (URL only, no shell for the agent, e.g. AgentRun): the operator runs
+`sigelo-mcp --http` on loopback with a bearer token and keeps the identity file; the host gets the
+URL and the token; the agent sees tools only and enrols with `sigelo_enrol`. [agentrun.md](agentrun.md).
 
 Plus [`AGENTS.md`](AGENTS.md) (paste into AGENTS.md / CLAUDE.md / GEMINI.md / rules), skills in
 [`claude-code/skills/`](claude-code/skills/sigelo/SKILL.md) (MCP) and
@@ -40,9 +44,11 @@ config matched against the current docs (sources below), not run.
 | VS Code Copilot agent mode | MCP stdio | `.vscode/mcp.json`: `{"servers":{"sigelo":{"type":"stdio","command":"npx","args":["-y","sigelo-mcp@0.1.16"]}}}` | doc-checked | 2026-10-14 |
 | Gemini CLI | MCP stdio | `S` in `~/.gemini/settings.json` (remote: key `httpUrl`, not `url`) | doc-checked | 2026-10-14 |
 | Goose | MCP stdio | `goose session --with-extension "npx -y sigelo-mcp@0.1.16"`, or `extensions:` in `config.yaml` ([others.md](others.md)) | doc-checked | 2026-10-14 |
-| OpenCode, Cline, Agent Zero | MCP stdio | [opencode.md](opencode.md), [others.md](others.md), [agent-zero.md](agent-zero.md) (configs use the checkout path) | doc-checked | 2026-09-24 |
-| pi | CLI sidecar; MCP stdio from pi 1.0 | [agent-pi.md](agent-pi.md) | doc-checked, untested | 2026-11-11 |
-| Hermes Agent | MCP stdio + skill | 9 lines of `~/.hermes/config.yaml` ([apps/integrations/hermes](hermes/INTEGRATION.md)) | run here (unmodified `hermes -z`, scripted model, 12 checks) | 2026-10-03 |
+| OpenCode, Cline | MCP stdio | [opencode.md](opencode.md), [others.md](others.md) (configs use the checkout path) | doc-checked | 2026-09-24 |
+| Agent Zero | MCP stdio | Settings → MCP/A2A → External MCP Servers, `S` with `npx` ([agent-zero.md](agent-zero.md)) | operator's report (setup feedback), not run here | 2026-11-14 |
+| pi | MCP stdio from pi 1.0; CLI skill | `pi mcp add sigelo --env SIGELO_IDENTITY=… -- npx -y sigelo-mcp@0.1.16` ([agent-pi.md](agent-pi.md)) | operator's run (setup feedback) | 2026-11-14 |
+| Hermes Agent | MCP stdio + skill | `printf 'y\n' \| hermes mcp add sigelo --command npx --env SIGELO_IDENTITY=… HOME=… PATH=… --args sigelo-mcp@0.1.16` ([hermes/](hermes/INTEGRATION.md)) | run here (unmodified `hermes -z`, scripted model, 12 checks); command: operator's run | 2026-11-14 |
+| AgentRun | MCP by URL (loopback HTTP) | operator runs `sigelo-mcp --http`; `AGENTRUN_MCP_ALLOW_LOOPBACK=1` ([agentrun.md](agentrun.md)) | operator's report (setup feedback), not run here | 2026-11-14 |
 | OpenClaw | MCP stdio | `openclaw.json`: `{ mcp: { servers: { sigelo: { command: "npx", args: ["-y","sigelo-mcp@0.1.16"] } } } }`; set `SIGELO_IDENTITY` in the gateway's env. | doc-checked; gate planned | 2026-10-14 |
 | LangGraph / LangChain | MCP stdio | `MultiServerMCPClient({"sigelo":{"transport":"stdio","command":"npx","args":["-y","sigelo-mcp@0.1.16"]}})` | run here (langchain-mcp-adapters 0.3.2: 15 tools, init→bundle→verify; remote lists `sigelo_verify`) | 2026-10-14 |
 | CrewAI | MCP stdio | `Agent(..., mcps=[MCPServerStdio(command="npx", args=["-y","sigelo-mcp@0.1.16"])])` (`from crewai.mcp import MCPServerStdio`) | doc-checked | 2026-10-14 |

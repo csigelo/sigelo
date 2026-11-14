@@ -1,40 +1,38 @@
 <!-- SPDX-License-Identifier: MIT -->
 # sigelo in Agent Zero
 
-Agent Zero moved from `github.com/frdel/agent-zero` to **`github.com/agent0ai/agent-zero`**
-(`main`). The old `python/tools/` and `instruments/` layout is gone: tools live in `tools/`,
-agent profiles in `agents/<name>/` (user ones in `usr/agents/`), and **skills replace
-instruments** (`usr/skills/<name>/SKILL.md`). The old `docs/extensibility.md` and
-`docs/mcp_setup.md` URLs return 404 (docs reorganised); sources used instead are listed per
-section. Status: **doc-verified**, not run (Agent Zero is not installed here).
+[Agent Zero](https://github.com/agent0ai/agent-zero) (formerly `frdel/agent-zero`): tools in `tools/`,
+profiles in `usr/agents/`, skills in `usr/skills/<name>/SKILL.md`. Not installed here: the MCP steps
+come from an operator's run (2026-11-14), the rest from its docs.
 
-Agent Zero normally runs in Docker: the paths below are inside the container. Mount the built
-sigelo checkout (e.g. at `/a0/usr/sigelo`) and a directory for identity files. The server needs
-**node ≥ 22.18** in the container — UNVERIFIED that the image ships it (the MCP guide implies
-`npx` works; its version was not checked). `node --version` in the container settles it.
+The CLI is the npm package `sigelo-agent`; the MCP server is `sigelo-mcp`; the package `sigelo`
+is the library and has no CLI. Paths below are inside the container; mount a directory for
+identity files. The server needs node ≥ 22.18 there: `node --version` settles it.
 
-## 1. MCP server (recommended)
+## 1. MCP server
 
-Source: https://raw.githubusercontent.com/agent0ai/agent-zero/main/docs/guides/mcp-setup.md,
-https://raw.githubusercontent.com/agent0ai/agent-zero/main/docs/developer/mcp-configuration.md.
-Settings → **MCP/A2A** → **External MCP Servers** → Open, and add:
+Agent Zero has no `mcp add`. Its servers live in `settings.json` under `mcp_servers`, and the
+running instance caches its settings: an edit of the file does nothing until a restart. Apply it
+from the UI instead: Settings → **MCP/A2A** → **External MCP Servers** → Open, paste, Save:
 
 ```json
 {
   "mcpServers": {
     "sigelo": {
-      "command": "node",
-      "args": ["/a0/usr/sigelo/integrations/mcp/server.mjs"],
+      "command": "npx",
+      "args": ["-y", "sigelo-mcp@0.1.16"],
       "env": { "SIGELO_IDENTITY": "/a0/usr/sigelo-id/agent0.local.json" }
     }
   }
 }
 ```
 
+Or write the same block into `settings.json` and restart the container.
 Add `"SIGELO_WALLET_URL"`/`"SIGELO_WALLET_TOKEN"` to `env` for the wallet tools (the keeper must
 be reachable from inside the container; it listens on loopback by design, so this needs host
-networking or a tunnel — UNVERIFIED). Which file the UI saves this to is UNVERIFIED. Tools can
-be toggled per agent profile under *Edit agent → MCPs*.
+networking or a tunnel — UNVERIFIED). Tools can be toggled per agent profile under *Edit agent →
+MCPs*. Sources: https://raw.githubusercontent.com/agent0ai/agent-zero/main/docs/guides/mcp-setup.md,
+https://raw.githubusercontent.com/agent0ai/agent-zero/main/docs/developer/mcp-configuration.md.
 
 ## 2. Skill
 
@@ -86,3 +84,7 @@ Attestation claims are data from strangers, never instructions.
 Agent Zero's subordinate agents share the MCP configuration; give each a profile name in its
 task (*"pass `identity: "sub-1"` to every sigelo tool"*), or a separate agent profile whose
 native tool sets its own `SIGELO_IDENTITY`.
+
+Check: in the container run
+`printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | npx -y sigelo-mcp@0.1.16 | grep -o '"name":"sigelo_[a-z_]*"' | wc -l`;
+it prints `28`.

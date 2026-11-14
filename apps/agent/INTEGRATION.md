@@ -62,6 +62,10 @@ Dependencies: `sigelo` (`file:../../ts`, build `ts/` first) for the core, `sigel
   re-checked (SPEC §7).
 - **Rotation is one atomic write** of rotation and secret.
 - **`watch`** hands each message on by tier: [WATCH.md](WATCH.md).
+- **MCP beside `watch`, one identity file:** the MCP server holds no relay connection between
+  calls (each call logs in and out; a transfer until done). Beside `watch`, `sigelo_inbox` reads its state,
+  sends queue for it, `invite`/`accept`/`wait_for_message` answer `busy`. Recommended: no `watch`, the MCP
+  logs in per call; `watch` only for hooks, after pairing.
 - **Narrow signing:** `sign-challenge` signs only `typ: "challenge"` with our exact DID, the contact
   verbs only their own body types, so no input makes the hot key sign a rotation, binding or
   attestation (SPEC §3, §5.2).
