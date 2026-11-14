@@ -3,7 +3,8 @@
 
 The page of `sigelo-agent ui` as an Android app: a WebView around [apps/web](../web/README.md) and a
 small bridge in Java for what a page cannot do. No AndroidX, no dependency but the platform; minSdk 28
-(Android 9), targetSdk 35. Design: design/apps.md §8.
+(Android 9), targetSdk 35. Design: design/apps.md §8. No action bar: the page's own top bar is the
+top, the status and navigation bars take its background; Reload is in Settings → About.
 
 ## The first run
 

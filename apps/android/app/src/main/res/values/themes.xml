@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The platform's Material theme (no AndroidX): an action bar for the menu (switch, forget, reload). -->
-    <style name="Theme.Sigelo" parent="@android:style/Theme.Material.Light.DarkActionBar">
-        <item name="android:colorPrimary">@color/sigelo_blue</item>
-        <item name="android:colorPrimaryDark">@color/sigelo_blue_dark</item>
+    <!-- The platform's Material theme (no AndroidX), no action bar: the page has its own top bar. The system
+         bars in the page's paper with dark icons until the page names its own background (SigeloBridge "bars"). -->
+    <style name="Base.Sigelo" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/sigelo_paper</item>
         <item name="android:colorAccent">@color/sigelo_blue</item>
+        <item name="android:windowBackground">@color/sigelo_paper</item>
+        <item name="android:statusBarColor">@color/sigelo_paper</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/sigelo_paper</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
+    <style name="Theme.Sigelo" parent="Base.Sigelo" />
 </resources>

@@ -9,13 +9,14 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.view.Menu;
-import android.view.MenuItem;
 import android.view.View;
+import android.view.Window;
 import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
@@ -48,7 +49,9 @@ import java.util.regex.Pattern;
  * link elsewhere opens in the browser, on a tap); the camera is granted to this origin only, for
  * video only, after Android's CAMERA permission is asked at the first scan; the image picker for a
  * file input. Profiles (several identities, each its own storage and keystore aliases) are the page's
- * (apps/web/profiles.mjs): removing one erases its keys (SigeloBridge forget-profile). The menu: Reload.
+ * (apps/web/profiles.mjs): removing one erases its keys (SigeloBridge forget-profile). No action bar: the page's own
+ * top bar is the app's, the system bars in its background (SigeloBridge "bars"); Reload is in its Settings → About
+ * (SigeloBridge "reload").
  *
  * The app lock: once a form is set and the phone has a screen lock, the screen lock is asked at a
  * start and at a return after the set minutes away (SigeloBridge "lock": 1, 5, 15 or 60; off: neither),
@@ -73,7 +76,8 @@ public final class MainActivity extends Activity {
     static final String START = ORIGIN + "/index.html";
 
     private static final int REQ_FILE = 1, REQ_CAMERA = 2, REQ_AUTH = 3, REQ_NOTIFY = 4;
-    private static final int M_RELOAD = 1;
+    /** WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | APPEARANCE_LIGHT_NAVIGATION_BARS (API 30). */
+    private static final int LIGHT_BARS = 8 | 16;
     /** The page's asks (SigeloBridge "unlock"): not asked again within this long of the last confirmation (elapsed time, ms). */
     static final long CONFIRMED_MS = 60_000;
     private static final String POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS";   // Manifest.permission's, API 33
@@ -456,21 +460,30 @@ public final class MainActivity extends Activity {
         super.onActivityResult(req, result, data);
     }
 
-    // ---------------------------------------------------------------- the menu
+    // ---------------------------------------------------------------- the page's asks of the window
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu m) {
-        m.add(Menu.NONE, M_RELOAD, 1, R.string.reload);
-        return true;
+    /** Settings → About's "Reload the app" (SigeloBridge "reload"; the action bar's menu before): the page again from its start. */
+    void reload() {
+        if (web != null) web.loadUrl(START);
     }
 
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == M_RELOAD) {
-            if (web != null) web.loadUrl(START);
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
+    /**
+     * The status and navigation bars in the page's own background (SigeloBridge "bars": its theme and colour, the
+     * system's day and night), the window's too (seen while the page is hidden for the lock): dark icons on a light
+     * colour, light ones on a dark colour. Android 15 as well: the app is not edge to edge there (values-v35).
+     */
+    @SuppressWarnings("deprecation")   // the bars' colours and the light-bar flags: what API 28 to 35 share without AndroidX
+    void bars(int colour) {
+        Window w = getWindow();
+        w.setStatusBarColor(colour);
+        w.setNavigationBarColor(colour);
+        w.setBackgroundDrawable(new ColorDrawable(colour));
+        boolean light = Color.luminance(colour) > 0.5f;
+        View d = w.getDecorView();
+        int flags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        d.setSystemUiVisibility(light ? d.getSystemUiVisibility() | flags : d.getSystemUiVisibility() & ~flags);
+        // Android 11+: the theme's light bars are the insets controller's, which the flags above do not undo alone.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && w.getInsetsController() != null) w.getInsetsController().setSystemBarsAppearance(light ? LIGHT_BARS : 0, LIGHT_BARS);
     }
 
     void modeChanged() {

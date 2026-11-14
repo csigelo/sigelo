@@ -11,7 +11,7 @@
 //   const app = boot(env)   env: { shell (SigeloShell) | null, target? (where its port arrives), box (the first run's element), main (ui.js's),
 //                           mqtt, indexedDB?, storage (localStorage), session (sessionStorage), reload(), seal? }
 //   app.local               what ui.js reads as globalThis.sigeloLocal: { call, onChange, mode, share, unlock, secure, profiles, computers, words,
-//                           lock, notify, onOpen }
+//                           lock, notify, onOpen, reload, bars }
 //   app.ready               → the backend (rejects while there is none: the first run, the connect view)
 //
 // local.profiles (ui.js: the Profiles sheet, Settings → Profiles): list() → { active, limit, profiles }; use(id) the switch: the lock
@@ -35,6 +35,8 @@
 // gives a name and a generic line, never a message's text; tag chat:… | group:… | pay:…), notify({ tag, cancel: true }) removes it,
 // notify({ ask: true }) → { granted } asks the permission. local.onOpen(fn): fn(tag) when one of them is tapped (a start by the tap:
 // once the bridge is connected); without the shell nothing.
+// local.reload() (ui.js Settings → About, "Reload the app"): the shell loads the page again from its start; a tab, env.reload().
+// local.bars (the Android app only; else undefined): bars("#rrggbb") the system bars in the page's background (no action bar).
 import { did as didOf, parseBytes } from 'sigelo';
 import { loadIdentity, memoryFiles, openDb, webPlatform } from './platform-web.mjs';
 import { TAG, androidPlatform, connectBridge, keystoreSealer, profileBridge } from './platform-android.mjs';
@@ -265,6 +267,10 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
       if (!shell || typeof fn !== 'function') return;
       rawP.then((r) => r.onEvent((m) => { if (m.ev === 'open' && typeof m.tag === 'string' && TAG.test(m.tag)) fn(m.tag); }), () => {});
     },
+    // Settings → About's "Reload the app": the shell loads the page again from its start; a tab reloads itself.
+    async reload() { if (shell) await (await shellOf()).reload(); else reload?.(); },
+    // The system bars in the page's background ("#rrggbb", ui.js at each change of the look); a page has none.
+    bars: shell ? async (colour) => (await shellOf()).bars(colour) : undefined,
     // FLAG_SECURE while the kept words are on the screen (ui.js Settings → Backup and recovery → Show my 25 words).
     async secure(on) { if (raw) await raw.secure(on); },
     profiles,

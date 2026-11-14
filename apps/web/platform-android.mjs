@@ -28,6 +28,9 @@
 //   → {op:"secure", id, on, door?}                 ← {id}         FLAG_SECURE on the window (no screenshot, no recents
 //                                                                 thumbnail) while a seed screen is up; door: the system
 //                                                                 Back swallowed too (a new identity's words, create.mjs)
+//   → {op:"bars", id, colour}                      ← {id}         the system bars (and the window behind the page) in the page's
+//                                                                 background, "#rrggbb": dark icons on a light one (no action bar)
+//   → {op:"reload", id}                            ← {id}         the page loaded again from its start (Settings → About)
 //   → {op:"clip-clear", id}                        ← {id}         the clipboard cleared (after the words were pasted)
 //   → {op:"clip-copy", id, text, clear}            ← {id}         text on the clipboard marked sensitive (no preview), cleared
 //                                                                 by the shell after `clear` seconds (stagenet words only)
@@ -74,7 +77,7 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify',
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'bars', 'reload', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify',
   'big-pick', 'big-photo', 'big-hash', 'big-stat', 'big-write', 'big-flush', 'big-digest', 'big-drop', 'big-free', 'big-land', 'big-open', 'big-awake']);
 /** A notification's tag (SigeloBridge.TAG): what it is about, given back when it is tapped. */
 export const TAG = /^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/;
@@ -160,6 +163,13 @@ function makeBridge(info, port) {
     async forgetProfile(profile) { await request('forget-profile', { profile }); },
     /** FLAG_SECURE on (a seed screen is up) or off; door: the system Back does nothing while on. */
     async secure(on, { door = false } = {}) { await request('secure', { on: on === true, door: on === true && door === true }); },
+    /** The system bars in the page's background ("#rrggbb"); anything else refused (check "bars"), here and in the shell. */
+    async bars(colour) {
+      if (typeof colour !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(colour)) throw new MsgError('bars', 'a colour #rrggbb');
+      await request('bars', { colour });
+    },
+    /** The page loaded again from its start by the shell (Settings → About's "Reload the app"). */
+    async reload() { await request('reload'); },
     /** The system clipboard emptied. */
     async clipClear() { await request('clip-clear'); },
     /** Text on the clipboard, marked sensitive, emptied by the shell after `clear` seconds (1 to 300). */

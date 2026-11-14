@@ -97,6 +97,9 @@ import javax.net.ssl.SSLSocketFactory;
  *          Back does nothing (a new identity's words: the review screen's one button is the only way on).
  *   clip-clear    the system clipboard emptied (the page asks after the words were pasted).
  *   share         the system's share sheet (ACTION_SEND, text/plain) with a message the page wrote: a code and how to use it.
+ *   bars          the status and navigation bars (and the window behind the page) in the page's background,
+ *          #rrggbb: dark icons on a light colour, light ones on a dark colour (MainActivity.bars; no action bar).
+ *   reload        the page loaded again from its start (MainActivity.reload): Settings → About's "Reload the app".
  *   clip-copy     text on the clipboard marked sensitive (no preview; stagenet words only), emptied
  *          after `clear` seconds (1 to 300) unless something else was copied since.
  *   unlock        the screen lock, before a screen that shows or spends the identity (MainActivity.unlock:
@@ -131,6 +134,8 @@ public final class SigeloBridge {
     private static final int HTTP_MAX = 1 << 20, CHUNK = 16384, TIMEOUT_MS = 20000, MAX_STREAMS = 16, AUTH_SECONDS = 300;
     private static final Pattern IPV4 = Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$");
     private static final Pattern HOSTNAME = Pattern.compile("^[A-Za-z0-9.-]{1,253}$");
+    /** The page's background for the system bars: #rrggbb, opaque. */
+    private static final Pattern COLOUR = Pattern.compile("^#[0-9a-fA-F]{6}$");
     /** A notification's tag: what it is about (a chat, a group, a payment request), given back when it is tapped. */
     static final Pattern TAG = Pattern.compile("^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$");
     static final String CHANNEL = "messages", OPEN = "io.sigelo.app.OPEN", EXTRA_OPEN = "open";
@@ -403,6 +408,21 @@ public final class SigeloBridge {
                 post(to, ok(id));
                 break;
             }
+            case "bars": {
+                String c = m.optString("colour");
+                if (!COLOUR.matcher(c).matches()) {
+                    fail(to, id, "bars", "a colour #rrggbb");
+                    break;
+                }
+                activity.bars(0xFF000000 | Integer.parseInt(c.substring(1), 16));
+                post(to, ok(id));
+                break;
+            }
+            case "reload":
+                // Answered first: the reload ends this page and its port (a new one for the page loaded).
+                post(to, ok(id));
+                main.post(activity::reload);
+                break;
             case "unlock":
                 activity.unlock(() -> post(to, ok(id)), () -> fail(to, id, "cancelled", "the screen lock was not confirmed"), m.optBoolean("force", false));
                 break;
