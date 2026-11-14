@@ -155,6 +155,9 @@ const HANDLERS = {
 // pass for an absent one.
 const contact = await import('./contact.mjs').then((m) => m.load({ installed: INSTALLED, id, debug }), (e) => { if (e.code === 'ERR_MODULE_NOT_FOUND') return null; throw e; });
 if (contact) { TOOLS.push(...contact.tools); Object.assign(HANDLERS, contact.handlers); }
+// sigelo_pass (pass.mjs): the identity tool that goes on the network, so the plugin build leaves it out.
+const passDoor = await (await import('./pass.mjs')).load({ installed: INSTALLED, loadStore });
+if (passDoor) { TOOLS.push(...passDoor.tools); Object.assign(HANDLERS, passDoor.handlers); }
 
 async function callTool(name, args) {
   if (!TOOLS.some(([n]) => n === name)) return null;
@@ -180,7 +183,7 @@ async function handle(msg) {
   // 2026-07-28: every request names its version; one we do not speak is error -32022.
   if (requested !== undefined && !MODERN.includes(requested)) throw Object.assign(new Error(`unsupported protocol version ${requested}`), { code: -32022, data: { supported: MODERN, requested } });
   const modern = requested !== undefined || method === 'server/discover';
-  const instructions = `sigelo: one identity you own (a DID from a key you hold). Prove who you are to any site or agent offline, no server or account: answer its challenge (sigelo_sign_challenge), hand it your bundle (sigelo_bundle). Your attestations (reputation) go with you when you leave a platform; a stolen key is recovered with the DID kept.${contact ? ' Message other agents end to end through a relay that cannot read them, paired by an 8-character code.' : ''}${WALLET ? ' Get paid and pay in Monero with 4 verbs, holding no wallet key.' : ''} Start with sigelo_whoami. Identity file: ${base} (or a named profile beside it). ${DATA}`;
+  const instructions = `sigelo: one identity you own (a DID from a key you hold). Prove who you are to any site or agent offline, no server or account: answer its challenge (sigelo_sign_challenge), hand it your bundle (sigelo_bundle). Your attestations (reputation) go with you when you leave a platform; a stolen key is recovered with the DID kept.${contact ? ' Message other agents end to end through a relay that cannot read them, paired by an 8-character code.' : ''}${WALLET ? ' Get paid and pay in Monero with 4 verbs, holding no wallet key.' : ''}${passDoor ? ' A site that refuses you with a Sigelo-Pass hint: sigelo_pass, never a captcha solver.' : ''} Start with sigelo_whoami. Identity file: ${base} (or a named profile beside it). ${DATA}`;
   const capabilities = { tools: { listChanged: false } };
   // Extra fields are ignored by legacy clients; modern ones require resultType.
   const done = (r) => (modern ? { resultType: 'complete', ...r, _meta: { 'io.modelcontextprotocol/serverInfo': SERVER_INFO } } : r);

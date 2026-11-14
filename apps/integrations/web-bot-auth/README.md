@@ -40,7 +40,7 @@ Cloudflare plays no part in this.
 
 Cloudflare's own check needs its registry. Its Verified Bots form (Request Signature) takes the
 directory URL; only then does `cf.bot_management.verified_bot` reflect the signature. Nothing
-here is registered, verified or listed by Cloudflare.
+here is registered, verified or listed by Cloudflare. A site-installed door: [accept/pass](../../../accept/pass/README.md).
 
 ## Domain separation
 

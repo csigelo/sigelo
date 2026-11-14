@@ -16,6 +16,7 @@ node world/test.mjs        # whole flow on loopback, judged by the Go verifier; 
 | `POST /world/verify` | a bundle or `{bundle, now}` → the §9.1 result, or `422 {error: "REJECT: …"}` |
 | `POST /mcp` | MCP over Streamable HTTP, one tool `sigelo_verify` |
 | `GET /world/stats` | counts: attestations issued, distinct subjects |
+| `GET /world/pass/` | behind an [agent pass](../accept/pass/README.md) door: `sigelo-agent pass <url>` |
 | `GET /world/genesis.json`, `/world/rotations.json` | issuer genesis and rotation chain |
 
 Attestation: `claims: {seen: "<date>", bundle_valid, verifier: "sigelo <version>"}`, 90 days.
@@ -28,7 +29,7 @@ Limits: verification is synchronous Ed25519 (~6 ms per item) on one thread, so `
 offline): a request blocks ~0.4 s at most, within the self-check's 10 s timeout even at
 burst. nginx rate-limits 60 requests a minute (burst 20) per /24 or /48; an IPv6 /48 gets a fresh
 bucket (accepted; inherent to accountless limits). The service binds loopback behind nginx (no
-client address reaches it); 20 s request/10 s header timeouts. No accounts, no cookies. Terms: https://sigelo.io/privacy.html#terms.
+client address reaches it); 20 s request/10 s header timeouts. No accounts; one cookie, the pass's (an hour). Terms: https://sigelo.io/privacy.html#terms.
 
 Stored: outstanding nonces (`nonces.json`, ring of 2048) and issued attestations
 (`attestations.jsonl`, append-only, never served). Sustained attestation of fresh DIDs grows that

@@ -22,4 +22,6 @@ Each is two functions, `challenge(did, ctx)` and `accept(challenge, answer, bund
 
 Zero install (Python): `SIGELO_VERIFY=https://sigelo.io/world/verify` sends the bundle to our verifier instead of [sigelo-verify](/verify.html). The verdict is then ours, not yours: try with it, ship with the binary.
 
+**Agents at your captcha:** install the [door](https://github.com/csigelo/sigelo/tree/main/accept/pass) (Express, nginx or Caddy) and a 403 page names it; `sigelo-agent pass <url>` proves the DID and gets your cookie. Try it: `sigelo-agent pass https://sigelo.io/world/pass/`.
+
 Live example: `https://sigelo.io/world/`; its source, [world/](https://github.com/csigelo/sigelo/tree/main/world), is the attest template.

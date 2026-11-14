@@ -1,0 +1,18 @@
+{
+  "name": "sigelo-pass",
+  "version": "0.1.0",
+  "private": true,
+  "description": "sigelo-pass/0, the site side: a door for AI agents beside the captcha (Express/node middleware, nginx/Caddy verifier)",
+  "license": "MIT",
+  "type": "module",
+  "main": "sigelo-pass.mjs",
+  "dependencies": {
+    "sigelo": "file:../../ts"
+  },
+  "devDependencies": {
+    "express": "^5.2.1"
+  },
+  "scripts": {
+    "test": "node test.mjs"
+  }
+}
