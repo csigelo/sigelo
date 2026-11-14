@@ -134,30 +134,69 @@ export function pageMqtt(mqttLib, { createWebsocket } = {}) {
 
 // ---------------------------------------------------------------- proof of work in a Worker
 
+/** The search cannot run here at all: no Worker started, or no Argon2id in it. Permanent (carrier.mjs: no retry loop). */
+export const NO_POW = 'proof of work: this app cannot run the search here (no Worker / no WebAssembly)';
+const noPow = (why) => Object.assign(new Error(NO_POW), { check: 'pow', permanent: true, why: String(why ?? '') });
+/** How long a Worker has to say it is ready (pow-worker.mjs: its engine loaded and checked) before the search counts as impossible here. */
+export const READY_MS = 5000;
+
 /**
  * pow({ prefix, salt, m, t, p }, bits, { deadline, signal, onProgress }) → the counter as a string,
  * or null past the deadline or on abort (carrier.mjs solvePow). worker(): a Worker running
- * pow-worker.mjs (a module worker beside this file by default). It answers { tried } after each
- * evaluation (onProgress) and { found } once.
+ * pow-worker.mjs (a module worker beside this file by default). It says { ready, engine } first
+ * (within readyMs, else NO_POW, thrown permanent), then the job goes; it answers { tried } after each
+ * evaluation (onProgress) and { found } once. There is no search in the page's own thread.
+ * pow.engine() → 'wasm' | 'js' | null (none here): the last search's, else a Worker started to ask
+ * (Settings → About).
  */
-export function workerPow(worker = () => new Worker(new URL('./pow-worker.mjs', import.meta.url), { type: 'module' })) {
-  return (job, bits, { deadline = Infinity, signal, onProgress } = {}) => new Promise((resolve, reject) => {
-    const w = worker();
-    let timer = null;
-    const end = (f, v) => { if (timer !== null) clearTimeout(timer); signal?.removeEventListener?.('abort', aborted); try { w.terminate(); } catch {} f(v); };
+export function workerPow(worker = () => new Worker(new URL('./pow-worker.mjs', import.meta.url), { type: 'module' }), { readyMs = READY_MS } = {}) {
+  let engine;   // undefined: not known yet
+  // One Worker: ready → onReady(w) (the job posted), or the search impossible here → end(reject, NO_POW).
+  const start = (onMessage, onDead, onReady) => {
+    let w;
+    try { w = worker(); } catch (e) { engine = null; onDead(e?.message ?? 'no Worker'); return null; }
+    let ready = false;
+    const timer = setTimeout(() => { if (!ready) { engine = null; onDead(`the worker did not answer within ${readyMs / 1000} s`); } }, readyMs);
+    w.onmessage = (e) => {
+      const d = e.data ?? {};
+      if (!ready && d.ready !== undefined) {
+        ready = true; clearTimeout(timer);
+        if (d.ready === true && typeof d.engine === 'string') { engine = d.engine; onReady(w); } else { engine = null; onDead(d.error ?? 'no engine'); }
+        return;
+      }
+      if (typeof d.engine === 'string') engine = d.engine;
+      onMessage(d);
+    };
+    w.onerror = (e) => { e?.preventDefault?.(); if (!ready) { ready = true; clearTimeout(timer); engine = null; onDead(e?.message ?? 'the worker failed'); } else onMessage({ error: e?.message ?? 'the worker failed' }); };
+    return { w, timer };
+  };
+  const pow = (job, bits, { deadline = Infinity, signal, onProgress } = {}) => new Promise((resolve, reject) => {
+    let one = null, timer = null, done = false;
+    const end = (f, v) => {
+      if (done) return;
+      done = true;
+      if (timer !== null) clearTimeout(timer);
+      if (one) { clearTimeout(one.timer); try { one.w.terminate(); } catch {} }
+      signal?.removeEventListener?.('abort', aborted);
+      f(v);
+    };
     const aborted = () => end(resolve, null);
     if (signal?.aborted) return aborted();
     signal?.addEventListener?.('abort', aborted, { once: true });
     if (deadline !== Infinity) timer = setTimeout(() => end(resolve, null), Math.max(0, deadline - Date.now()));
-    w.onmessage = (e) => {
-      const d = e.data ?? {};
+    one = start((d) => {
       if (typeof d.found === 'string') end(resolve, d.found);
       else if (typeof d.tried === 'number') onProgress?.(d.tried);
       else if (typeof d.error === 'string') end(reject, new Error(`proof of work: ${d.error}`));
-    };
-    w.onerror = (e) => end(reject, new Error(`proof of work: ${e.message ?? 'the worker failed'}`));
-    w.postMessage({ prefix: job?.prefix, salt: job?.salt, m: job?.m, t: job?.t, p: job?.p, bits });
+    }, (why) => end(reject, noPow(why)), (w) => w.postMessage({ prefix: job?.prefix, salt: job?.salt, m: job?.m, t: job?.t, p: job?.p, bits }));
   });
+  pow.engine = () => (engine !== undefined ? Promise.resolve(engine) : new Promise((resolve) => {
+    let one = null;
+    const end = (v) => { if (one) { clearTimeout(one.timer); try { one.w.terminate(); } catch {} } resolve(v); };
+    one = start(() => {}, () => end(null), () => end(engine));
+    if (one === null) resolve(null);
+  }));
+  return pow;
 }
 
 // ---------------------------------------------------------------- one owner per identity

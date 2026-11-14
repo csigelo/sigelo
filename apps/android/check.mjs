@@ -124,6 +124,10 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   ok(pv.length === 1 && pv[0].attrs['android:name'] === '.PhotoProvider' && pv[0].attrs['android:authorities'] === 'io.sigelo.app.photos' && pv[0].attrs['android:exported'] === 'false'
     && pv[0].attrs['android:grantUriPermissions'] === 'true' && all(pv[0], 'grant-uri-permission').length === 0 && all(pv[0], 'meta-data').length === 0,
     'manifest: one provider, PhotoProvider (io.sigelo.app.photos), not exported, reached only through the camera intent\'s grant');
+  // Android 11+ package visibility: the camera intent declared, so resolveActivity sees a camera app (BigFiles cameraApp).
+  const qs = all(man, 'queries');
+  ok(qs.length === 1 && all(qs[0], 'intent').length === 1 && all(qs[0], 'action').map((a) => a.attrs['android:name']).join() === 'android.media.action.IMAGE_CAPTURE' && all(qs[0], 'package').length === 0 && all(qs[0], 'provider').length === 0,
+    'manifest: <queries> names the camera intent alone (no package, no provider)');
   const dx = xml['apps/android/app/src/main/res/xml/data_extraction_rules.xml'];
   const domains = (k) => all(all(dx, k)[0] ?? { kids: [] }, 'exclude').map((e) => `${e.attrs.domain}:${e.attrs.path}`).sort().join();
   ok(all(dx, 'include').length === 0 && domains('cloud-backup') === 'database:.,external:.,file:.,root:.,sharedpref:.' && domains('device-transfer') === domains('cloud-backup'), 'data extraction: every domain excluded from backup and transfer');
@@ -273,6 +277,10 @@ ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooser
     && /if \(!keep\) stripLocation\(f\);/.test(bf) && /import android\.media\.ExifInterface;/.test(bf) && /TAG_GPS_LATITUDE/.test(bf) && /x\.saveAttributes\(\)/.test(bf)
     && /takePersistableUriPermission\(u, Intent\.FLAG_GRANT_READ_URI_PERMISSION\)/.test(bf) && /ACTION_OPEN_DOCUMENT/.test(bf),
     'big files: the system camera into the cache through PhotoProvider, CAMERA asked at the first photo, location tags removed unless kept (the platform\'s ExifInterface); the picker\'s read grant kept');
+  ok(/new Intent\(MediaStore\.ACTION_IMAGE_CAPTURE\)\.resolveActivity\(activity\.getPackageManager\(\)\) != null/.test(bf) && /if \(!cameraApp\(\)\) throw new SigeloBridge\.Refused\("no_camera", /.test(bf)
+    && bf.indexOf('if (!cameraApp())') < bf.indexOf('requestPermissions(new String[] {Manifest.permission.CAMERA}, REQ_CAMERA_PHOTO)') && /r\.no\("no_camera", /.test(bf) && !/no_camera_app/.test(bf),
+    'big files: no app answers the camera intent → refused no_camera before CAMERA is asked (and if the start still finds none)');
+  ok(/setType\(m\.optBoolean\("images", false\) \? "image\/\*" : "\*\/\*"\)/.test(bf), 'big files: the picker for pictures only when the page asks images (the composer\'s Photo), any file otherwise');
   ok(/Pattern\.compile\("\^\[0-9a-f\]\{32\}\\\\\.jpg\$"\)/.test(pp) && /getPathSegments\(\)\.size\(\) != 1/.test(pp) && /getCacheDir\(\), "photos"\)/.test(pp) && (pp.match(/throw new UnsupportedOperationException/g) ?? []).length === 3,
     'PhotoProvider: one name shape (32 hex .jpg) in cache/photos, nothing else; no insert, delete or update');
   ok(/FLAG_KEEP_SCREEN_ON/.test(bf) && /if \(bridge != null && bridge\.big\.permission\(req, grants\)\) return;/.test(ma) && /if \(bridge != null && bridge\.bigResult\(req, result, data\)\) return;/.test(ma),

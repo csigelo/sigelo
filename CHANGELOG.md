@@ -5,6 +5,19 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+## v0.1.17 — 2026-11-15
+
+- **This release:** replaces 0.1.16, which could not hold a connection for a new identity; 0.1.17 is the version to install.
+- **android:** the proof of work runs only in a Worker (WebAssembly, else JavaScript), never in the page: 0.1.16 starved the WebView and lost the relay. No Worker: a clear error at once; About names the engine.
+- **app:** the page's CSP admits `'wasm-unsafe-eval'`: the WebAssembly the app ships may compile; still no eval, no inline script.
+- **app:** "Not connected" says why (the last login's failure, the day's cap), after a restart too; a long screen keeps its scroll at each refresh.
+- **app:** Settings → Relay keeps the relays added by name in the list; an unfinished enrolment says what it waits for (offline: the agent cannot reach you).
+- **app:** an enrolment no longer deadlocks on a lost key: the machine asks again at most once a minute, the operator resends a refused one; Agents says "Sending the key…" or "Waiting for the machine to ask again".
+- **app:** enrolment: the temporary identity never shows in Chats, after a restart too; one words screen (four words large, They match / They differ); an agent's own words named Identity words.
+- **app:** a chat's Pay (the top bar and Attach) shows only with the Wallet on; the bar is Back, the name (its avatar inside, opens the chat settings) and Pay: nothing else to tap.
+- **android:** with no camera app (the stock one disabled) the camera button no longer fails silently: the shell refuses `no_camera` (the intent declared in `<queries>`), the page says so and opens the picker.
+- **app:** the composer has one "+": a row of choices above the box, Photo (pictures only), Camera, File, then Pay and a signed message; a choice, a tap elsewhere or Escape closes it.
+- **app:** Agents folds revoked agents into a closed "Revoked" section; Enrol again beside one makes a new code under its name (a new worker, a new key); the revoked one is never trusted again.
 - **spec:** §12 Create, Read, Update and Deactivate each as inputs, numbered steps and outputs, with a worked example from named vectors checked by `sigelo-verify`; no wire change.
 
 ## v0.1.16 — 2026-11-14

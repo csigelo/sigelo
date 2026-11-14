@@ -302,6 +302,50 @@ try {
   const h4 = await complete({ carrier: co, file: fileOf(owner), keeper, wait: 10, until: (o) => o.placed.length > 0 });
   ok(h2.delivered[0]?.did === w5.did && h3.placed[0]?.did === w5.did && workers.held?.operatorName === 'boss' && h4.placed[0]?.did === w5.did && h4.placed[0].verified === true,
     `yes: sent, placed (the worker files its operator as "boss", the label the enrolment carried), filed verified (${JSON.stringify(h4.placed)} ${JSON.stringify(h3.refused)})`);
+  // The identity lost (0.1.17: both sides then waited on each other for ever). Each side's clock moved by `later`.
+  const { MsgError } = await import('./kdf.mjs');
+  const NOW = () => Math.floor(Date.now() / 1000);
+  const later = (c, sec) => new Proxy(c, { get: (x, p) => (p === 'clock' ? () => x.clock() + sec : typeof x[p] === 'function' ? x[p].bind(x) : x[p]) });
+  // The operator's first identity send: gone on the way ('lost', the send said sent), or refused by the relay ('no_reader').
+  const dropping = (c, mode) => {
+    let n = 0;
+    return new Proxy(c, { get: (x, p) => (p === 'send' ? async (to, content, o) => {
+      if (o?.label === LABEL_IDENTITY && n++ === 0) { if (mode === 'lost') return { status: 'sent', id: 'lost', to }; throw new MsgError('no_reader', 'refused (nobody holds that mailbox yet)'); }
+      return x.send(to, content, o);
+    } : typeof x[p] === 'function' ? x[p].bind(x) : x[p]) });
+  };
+  // Lost: the machine asks again at its next finish once RESEND_S passed (not before), and is answered.
+  const inv7 = await issue({ carrier: co, file: fileOf(owner), i: 6, n: 0, name: 'lost', keeper });
+  const ls = agent('lost-temp'), w6 = workerChain(K, 6, 0, RECOVERY), opL = dropping(co, 'lost');
+  await joinEnrol({ carrier: ls.carrier, file: fileOf(ls), code: inv7.short, name: 'owner', wait: 1, temp: 'lost-temp' }).catch(() => {});
+  await complete({ carrier: co, file: fileOf(owner), keeper });
+  const mL = (c, o) => ({ carrier: c, file: fileOf(ls), temp: 'lost-temp', place: placer('lost', 1), ...o });
+  const q1 = await complete(mL(ls.carrier, { wait: 10, until: (o) => o.sent.length > 0 }));
+  const q2 = await complete({ carrier: opL, file: fileOf(owner), keeper, wait: 10, until: (o) => o.delivered.length > 0 });
+  const q3 = await complete(mL(ls.carrier, { wait: 2 }));
+  const q4 = await complete(mL(later(ls.carrier, 61), { wait: 10, until: (o) => o.sent.length > 0 }));
+  const q5 = await complete({ carrier: opL, file: fileOf(owner), keeper, wait: 10, until: (o) => o.delivered.length > 0 });
+  const q6 = await complete(mL(ls.carrier, { wait: 10, until: (o) => o.placed.length > 0 }));
+  const q7 = await complete({ carrier: co, file: fileOf(owner), keeper, wait: 10, until: (o) => o.placed.length > 0 });
+  ok(q1.sent.length === 1 && q2.delivered.length === 1 && q3.placed.length === 0 && q3.sent.length === 0 && q4.sent.length === 1 && q5.delivered[0]?.did === w6.did && q6.placed[0]?.did === w6.did && q7.placed[0]?.did === w6.did,
+    `the identity lost: no request again within 60 s; at the next finish after, the machine asks again, is answered, placed, filed (${JSON.stringify([q3.sent, q4.refused, q5.refused, q6.refused])})`);
+  // Refused (no_reader): the operator keeps it needs_send and sends again at its next round after RESEND_S, with no new request.
+  const inv8 = await issue({ carrier: co, file: fileOf(owner), i: 7, n: 0, name: 'refused', keeper });
+  const rf = agent('refused-temp'), w7 = workerChain(K, 7, 0, RECOVERY), opR = dropping(co, 'no_reader');
+  await joinEnrol({ carrier: rf.carrier, file: fileOf(rf), code: inv8.short, name: 'owner', wait: 1, temp: 'refused-temp' }).catch(() => {});
+  await complete({ carrier: co, file: fileOf(owner), keeper });
+  const mR = (o) => ({ carrier: rf.carrier, file: fileOf(rf), temp: 'refused-temp', place: placer('refused', 1), ...o });
+  const r1 = await complete(mR({ wait: 10, until: (o) => o.sent.length > 0 }));
+  const r2 = await complete({ carrier: opR, file: fileOf(owner), keeper, wait: 10, until: (o) => o.refused.length > 0 || o.delivered.length > 0 });
+  const marked = pending(fileOf(owner), NOW(), (x) => x.issued[inv8.id]?.needs_send);
+  const r3 = await complete({ carrier: opR, file: fileOf(owner), keeper });
+  const r4 = await complete({ carrier: later(opR, 61), file: fileOf(owner), keeper });
+  const r5 = await complete(mR({ wait: 10, until: (o) => o.placed.length > 0 }));
+  const r6 = await complete({ carrier: co, file: fileOf(owner), keeper, wait: 10, until: (o) => o.placed.length > 0 });
+  ok(r1.sent.length === 1 && r2.refused.some((x) => x.check === 'no_reader' && x.needs_send === inv8.id) && Number.isSafeInteger(marked) && r3.delivered.length === 0
+    && r4.delivered[0]?.did === w7.did && pending(fileOf(owner), NOW(), (x) => x.issued[inv8.id]?.needs_send) === undefined && r5.placed[0]?.did === w7.did && r6.placed[0]?.did === w7.did,
+    `the identity refused (no_reader): kept needs_send, not again within 60 s, sent again at the operator's next round after, placed, filed (${JSON.stringify([r2.refused, r4.refused, r5.refused])})`);
+  for (const a of [ls, rf]) await a.carrier.stop();
   for (const a of [alice, real, pl, hd]) await a.carrier.stop();
   for (const a of [owner, vps, eve, mallory, vps2, lz, ...Object.values(workers)]) await a.carrier.stop();
 } finally {

@@ -8,7 +8,7 @@
 //   const X = webTransfers(io)                        the verbs with { carrier } as transfer-node.mjs's take them
 //
 // big (apps/web/platform-android.mjs, SigeloBridge "big-*"): every call names this profile.
-//   pick() → { doc, name, size, mtime } | null       the system's document picker; the grant kept (a resume after a restart reads it)
+//   pick({images}) → { doc, name, size, mtime } | null  the system's document picker (images: pictures only); the grant kept (a resume after a restart reads it)
 //   hash(doc) → { size, mtime, sha256, hashes }      in the shell (each 1 MiB chunk and the whole), hashes: bytes
 //   stat(doc) → { size, mtime }                      read(doc, offset, length, { size, mtime }) → bytes (a range; file_changed when either moved)
 //   write(part, offset, bytes); flush(part); sha256(part) → hex; drop(part); free() → bytes

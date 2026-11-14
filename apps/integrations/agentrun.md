@@ -16,7 +16,7 @@ AgentRun takes an MCP server by URL only; plain HTTP only on loopback, and loopb
 ## Operator
 
 ```sh
-npm i -g sigelo-mcp@0.1.16
+npm i -g sigelo-mcp@0.1.17
 export SIGELO_IDENTITY="$HOME/.config/sigelo/agentrun.local.json"
 export SIGELO_MCP_TOKEN="$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')"
 sigelo-mcp --http 127.0.0.1:7310

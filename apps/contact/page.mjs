@@ -225,6 +225,16 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
 
   // ---- live status, not kept
   const live = { online: new Set(), pow: null, powDone: null, error: null, seatGone: null, powCapped: null, powConfirm: null };
+  // The last login's failure and the day's cap, kept (data.offline) so that the "Not connected" card says why after a restart
+  // too; gone once connected. A cap whose next try has passed is not brought back.
+  if (typeof data.offline?.error === 'string') live.error = data.offline.error;
+  if (Number.isSafeInteger(data.offline?.pow_capped?.next) && data.offline.pow_capped.next > nowS()) live.powCapped = { relay: String(data.offline.pow_capped.relay), next: data.offline.pow_capped.next };
+  const keepOffline = () => {
+    const was = JSON.stringify(data.offline ?? null), now = live.error === null && live.powCapped === null ? null : { error: live.error, pow_capped: live.powCapped };
+    if (JSON.stringify(now) === was) return;
+    if (now === null) delete data.offline; else data.offline = now;
+    try { saveData(); } catch {}
+  };
   // A call the human made: past the day's searches it asks (pow_confirm) unless they said go on.
   const startedBy = (b) => (b?.['pow_confirmed'] === true ? 'confirmed' : 'user');
   // Writes, one at a time. Once the seat went to another device, every write is refused.
@@ -341,13 +351,16 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
           live.online.add(String(e['relay'])); live.error = null; void checkClock();
           if (live.powCapped?.relay === e['relay']) live.powCapped = null;
           if (live.powConfirm?.relay === e['relay']) live.powConfirm = null;
+          keepOffline();
           break;
         case 'disconnected': live.online.delete(String(e['relay'])); break;
         case 'error':
-          live.error = `${e['check']}: ${e['detail']}`;
+          // A detail that names itself ("proof of work: …", the platform's) is said as it is.
+          live.error = /^proof of work: /.test(String(e['detail'])) ? String(e['detail']) : `${e['check']}: ${e['detail']}`;
           // The day's searches spent: when the next automatic try is, and "Try now" (POST /api/pow/try).
           if (e['check'] === 'pow' && Number.isSafeInteger(e['next'])) live.powCapped = { relay: String(e['relay']), next: e['next'] };
           if (e['check'] === 'pow_confirm') live.powConfirm = { relay: String(e['relay']), detail: String(e['detail']).replace(/^pow_confirm: /, '') };
+          keepOffline();
           break;
         case 'notice': case 'presence': case 'group_tier': break;   // presence, the group tier: the state says it, nothing to take
         case 'seen': defer(() => { receipt(String(e['from']), true); picturesDue(); }); break;   // the contact's receipt: contacts() has it; answered once; it reads pictures
@@ -370,7 +383,10 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   const transfers = hooks.transfers ? { lib: hooks.transfers.lib, engine: hooks.transfers.make(carrier, onTransfer, { compared }) } : null;
   // The relay new codes name, as the precedence says.
   const newCodes = () => relayFixed ?? kept() ?? DEFAULT_RELAY;
-  const settings = () => ({ relay: kept() ?? DEFAULT_RELAY, default: DEFAULT_RELAY, fixed: relayFixed, in_use: carrier.relay });
+  // added: the relays taken here by name (Settings → Relay → Another relay), newest first, so that one stays in the list once another is in use.
+  const ADDED_MAX = 5;
+  const added = () => (Array.isArray(data.settings.relays) ? data.settings.relays.filter((x) => typeof x === 'string' && goodRelay(x)) : []);
+  const settings = () => ({ relay: kept() ?? DEFAULT_RELAY, default: DEFAULT_RELAY, fixed: relayFixed, in_use: carrier.relay, added: added() });
   async function checkClock() { try { await carrier.checkClock(); } catch {} }
   const seen = (d) => { let at = null; for (const r of recs) if (r.did === d && (r.kind === 'in' || r.kind === 'event')) at = r.at; return at; };
   // ---- seen receipts and the chat defaults (the header's)
@@ -456,6 +472,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   async function start() {
     void checkClock();
     timers = [every(() => void checkClock(), 600_000), every(() => void drain().then(() => linkRound()), 60_000)];
+    // The enrolments from before this start (the pending file): their requests held, a failed identity sent again.
+    try { await look(); } catch {}
     await carrier.start({ started: 'user' });
     await drain();
     void linkRound();
@@ -482,10 +500,20 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   };
   const pend = (fn) => E.pending(enrolFile, nowS(), fn, carrier.platform);
   const LIVE = new Set(['code', 'words', 'sending']);
+  // The pending file's enrolments as look() last read them (alive, not done): id → { temp, i, name, needs_send }. They outlive
+  // the page (a restart forgets `enrolling`): a request from their temporary DID is still answered, and an identity whose
+  // send failed (needs_send, enrol.mjs) still goes again, at agentRound.
+  let issuedLive = new Map();
+  const needsSend = () => [...issuedLive.values()].some((f) => f.needs_send);
   function enrolHidden(x) {
     for (const e of enrolling.values()) {
       if (x.did !== undefined && x.did !== null && (x.did === e.temp || (LIVE.has(e.state) && carrier.answeredBy(e.id) === x.did))) return true;
       if (x.name === `${e.name} (enrolling)` && LIVE.has(e.state)) return true;
+    }
+    // After a restart (0.1.16: the temporary identity showed in Chats with a chat and Pay): the pending file's enrolments.
+    for (const [id, f] of issuedLive) {
+      if (x.did !== undefined && x.did !== null && (x.did === f.temp || carrier.answeredBy(id) === x.did)) return true;
+      if (x.name === `${f.name ?? `worker ${f.i}`} (enrolling)`) return true;
     }
     return false;
   }
@@ -495,18 +523,20 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     for (const e of enrolling.values()) {
       if (LIVE.has(e.state) && (e.temp === m['from'] || carrier.answeredBy(e.id) === m['from'])) { agentHeld.push(m); return true; }
     }
+    for (const [id, f] of issuedLive) if (f.temp === m['from'] || carrier.answeredBy(id) === m['from']) { agentHeld.push(m); return true; }
     return false;
   }
-  const agentsBusy = () => agentHeld.length > 0 || [...enrolling.values()].some((e) => LIVE.has(e.state));
+  const agentsBusy = () => agentHeld.length > 0 || needsSend() || [...enrolling.values()].some((e) => LIVE.has(e.state));
   const keeperOr = async () => (K ? await K.read() : null) ?? refuse(400, 'keeper', 'no keeper root here: your 25 words make it (sigelo-agent keeper --from-words on a computer; in the app, Create or Restore from seed)');
   const seatHere = () => { const st = hooks.seat?.(); if (st && st.here === false) refuse(409, 'seat_elsewhere', `the seat is with ${st.holder}: agents are enrolled there (DEVICES.md)`); };
   const pub = (e) => ({ id: e.id, state: e.state, code: e.state === 'code' ? e.short : null, exp: e.exp, relay: e.relay, words: e.words ?? null,
-    confirm_words: e.confirmWords === true, words_ok: e.wordsOk ?? null, verified: e.verified === true,
+    confirm_words: e.confirmWords === true, words_ok: e.wordsOk ?? null, verified: e.verified === true, needs_send: issuedLive.get(e.id)?.needs_send === true,
     command: e.state === 'code' ? `${e.relay !== DEFAULT_RELAY ? `SIGELO_RELAY=${e.relay} ` : ''}sigelo-agent init --enrol ${e.short}` : null, ...(e.check !== undefined && { check: e.check, detail: e.detail ?? null }) });
   // Who answered each code (its four words), codes dead unanswered (the index free again), enrolments done.
   async function look() {
     if (!enrolFile) return;
-    const t = nowS(), issued = pend((st) => Object.fromEntries(Object.entries(st.issued).map(([id, e]) => [id, { done: e.done ?? null }])));
+    const t = nowS(), issued = pend((st) => Object.fromEntries(Object.entries(st.issued).map(([id, e]) => [id, { done: e.done ?? null, temp: e.temp ?? null, i: e.i, name: e.name ?? null, needs_send: e.needs_send !== undefined }])));
+    issuedLive = new Map(Object.entries(issued).filter(([, f]) => !f.done));
     for (const e of enrolling.values()) {
       if (!LIVE.has(e.state)) continue;
       const f = issued[e.id];
@@ -531,7 +561,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   async function agentRound() {
     await look();
     const pass = agentHeld.splice(0);
-    if (!pass.length && ![...enrolling.values()].some((e) => e.state === 'words' || e.state === 'sending')) return;
+    if (!pass.length && !needsSend() && ![...enrolling.values()].some((e) => e.state === 'words' || e.state === 'sending')) return;
     const k = await K?.read();
     if (!k) return;
     const root = await K.root(k);
@@ -542,6 +572,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     let res;
     try { res = await E.complete({ carrier: proxy, file: enrolFile, keeper: root, wait: 0, confirm }); } finally { root.K.fill(0); }
     agentHeld.push(...(res.held ?? []));
+    await look();   // needs_send as enrol.mjs left it
     for (const d of res.delivered) { const e = enrolling.get(d.id); if (e) e.state = 'sending'; }
     for (const x of res.refused) {
       const e = [...enrolling.values()].find((y) => y.temp !== undefined && y.temp === x.from);
@@ -575,6 +606,10 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     const agent = x.ours === true || mine !== null || x.chain.some((d) => workerDids.has(d) || roles.has(d));
     return { kind: agent ? 'agent' : 'person', kind_set: false };
   };
+  const orphan = (n) => {
+    const hit = [...issuedLive].find(([, f]) => f.i === n);
+    return hit ? { id: hit[0], state: hit[1].needs_send ? 'sending' : 'waiting', code: null, exp: null, relay: null, words: null, confirm_words: false, words_ok: null, verified: false, needs_send: hit[1].needs_send, command: null } : null;
+  };
   async function workers() {
     const k = K ? await K.read() : null, st = hooks.seat?.() ?? null, seat = st ? (st.here ? 'here' : 'elsewhere') : null;
     if (!k) return { keeper: false, seat, workers: [] };
@@ -587,7 +622,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       return { worker: n, name: w.name, did: c?.current_did ?? w.did, original: w.original, words: didWords(w.original), rank: w.rank ?? null, placed: w.placed, at: w.at, status, revoked: w.revoked ?? null,
         seen: c ? seen(c.did) : null, tier: c?.tier ?? null, contact: c?.did ?? null, local: here?.name ?? null,
         online: c?.online ?? null, last_seen: c?.last_seen ?? null,
-        attested_until: here?.mine?.exp ?? w.until ?? w.attestation?.body?.exp ?? null, enrolling: e && e.state !== 'expired' ? pub(e) : null };
+        attested_until: here?.mine?.exp ?? w.until ?? w.attestation?.body?.exp ?? null,
+        // Not in this page's memory (made before a restart): what the pending file says, sending again or waiting for the machine.
+        enrolling: e && e.state !== 'expired' ? pub(e) : status === 'pending' ? orphan(n) : null };
     }).sort((a, b) => a.worker - b.worker);
     return { keeper: true, seat, workers: rows };
   }
@@ -1101,7 +1138,10 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (t !== undefined && !TIER_NEW.has(t)) refuse(400, 'body', 'new_tier: own, friend or quiet');
       if (cur !== undefined && cur !== null && !CURRENCIES.includes(cur)) refuse(400, 'body', `currency: one of ${CURRENCIES.join(', ')}`);
       if (v === undefined) {} else if (v === null || v === '' || v === DEFAULT_RELAY) delete data.settings.relay;
-      else if (typeof v === 'string' && goodRelay(v.trim().toLowerCase())) data.settings.relay = v.trim().toLowerCase();
+      else if (typeof v === 'string' && goodRelay(v.trim().toLowerCase())) {
+        data.settings.relay = v.trim().toLowerCase();
+        data.settings.relays = [data.settings.relay, ...added().filter((x) => x !== data.settings.relay)].slice(0, ADDED_MAX);
+      }
       else refuse(400, 'body', `relay: a host name, as relay.example.org (a port after a colon if not the usual)`);
       if (b['seen_receipts'] !== undefined) data.settings.seen = b['seen_receipts'];
       if (b['notify'] !== undefined) data.settings.notify = b['notify'];
@@ -1170,7 +1210,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     // "Try now" (design/profiles.md §6): the automatic tries paused for the day; the human's goes now.
     'POST /api/pow/try': (b) => serial(async () => {
       const r = await carrier.tryNow({ confirmed: b['pow_confirmed'] === true });
-      live.powCapped = null; live.powConfirm = null; changed();
+      live.powCapped = null; live.powConfirm = null; keepOffline(); changed();
       return r;
     }),
     'POST /api/agents/revoke': (b) => serial(async () => {
@@ -1339,7 +1379,8 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
       return strip(r);
     })),
     // The phone's own: a file picked (the system's picker), a photo taken (the system's camera), a file that landed opened.
-    ...(docs && { 'POST /api/transfers/pick': () => serial(async () => (await host.pick()) ?? { cancelled: true }) }),
+    // images: the picker shows pictures only (the composer's Photo).
+    ...(docs && { 'POST /api/transfers/pick': (b) => serial(async () => (await host.pick({ images: b?.['images'] === true })) ?? { cancelled: true }) }),
     ...(typeof host.photo === 'function' && { 'POST /api/transfers/photo': () => serial(async () => (await host.photo({ keepLocation: X.settings({ identity }).keep_location })) ?? { cancelled: true }) }),
     ...(typeof host.open === 'function' && { 'POST /api/transfers/open': (b) => call(async () => {
       const r = X.list({ carrier, identity }).in.find((x) => x.id === idOf(b)) ?? refuse(404, 'transfer_unknown', 'no such file here');

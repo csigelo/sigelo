@@ -1,0 +1,5 @@
+Fixes the connection for a new identity: 0.1.16 lost the relay while logging one in.
+Not connected now says why. Enrolling an agent finishes by itself.
+One + button in a chat: photo, camera, file, pay. Pay shows only with the wallet on.
+No camera app: the photo picker opens instead.
+A revoked agent can be enrolled again.

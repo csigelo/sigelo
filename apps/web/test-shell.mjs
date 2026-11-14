@@ -276,8 +276,8 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   function bigOp(m) {
     const B = state.big;
     switch (m.op) {
-      case 'big-pick': return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
-      case 'big-photo': B.photos.push(m.keepLocation); return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
+      case 'big-pick': B.picks = [...(B.picks ?? []), m.images === true]; return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
+      case 'big-photo': if (B.noCamera) throw Object.assign(new Error('no camera app on this phone'), { check: 'no_camera' }); B.photos.push(m.keepLocation); return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
       case 'big-hash': { const d = docOf(m), n = Math.ceil(d.bytes.length / 1048576), h = Buffer.alloc(n * 32); for (let i = 0; i < n; i++) createHash('sha256').update(d.bytes.subarray(i * 1048576, (i + 1) * 1048576)).digest().copy(h, i * 32); return { name: d.name, size: d.bytes.length, mtime: d.mtime, sha256: createHash('sha256').update(d.bytes).digest('hex'), hashes: h.toString('base64') }; }
       case 'big-stat': { const d = docOf(m); return { size: d.bytes.length, mtime: d.mtime }; }
       case 'big-write': { const k = partKey(m), b = Buffer.from(m.data, 'base64'), p = B.parts.get(k) ?? Buffer.alloc(0), q = Buffer.alloc(Math.max(p.length, m.offset + b.length)); p.copy(q); b.copy(q, m.offset); B.parts.set(k, q); return {}; }
@@ -1291,11 +1291,18 @@ try {
   const prefix = { prefix: 'sigelo-relay-pow/1\nrelay.testdid:sigelo:zA5', salt: new Uint8Array(16).fill(5), m: 8, t: 1, p: 1 };
   ok(await p.pow(prefix, 6) === await nodePow(prefix, 6), 'pow: in the Worker, the counter Node finds');
   let tried = 0;
-  const fallback = A.androidPow(() => Promise.reject(new Error('proof of work: the worker failed')));
-  ok(await fallback(prefix, 4, { onProgress: (n) => { tried = n; } }) === await nodePow(prefix, 4) && await A.slicedPow(prefix, 40, { deadline: Date.now() + 300 }) === null,
-    'pow: a Worker that does not start: in the page, @noble\'s Argon2id, the same counter; past the deadline null');
-  const ac2 = new AbortController(); ac2.abort();
-  ok(await A.slicedPow(prefix, 40, { signal: ac2.signal }) === null && await checkOf(() => A.androidPow(() => Promise.reject(new Error('other')))(prefix, 1)) === 'Error', 'pow: aborted null; another error is not a fallback');
+  // No search in the page's thread (0.1.17): a Worker that cannot run fails the search at once, permanent, with the card's words.
+  const silent = () => ({ postMessage() {}, terminate() {} }), saying = (d) => () => { const w = { postMessage() {}, terminate() {} }; setTimeout(() => w.onmessage?.({ data: d }), 10); return w; };
+  const dead = [A.androidPow(W.workerPow(() => { throw new Error('Worker is not defined'); })), A.androidPow(W.workerPow(silent, { readyMs: 300 })), A.androidPow(W.workerPow(saying({ ready: false, error: 'no Argon2id here' })))];
+  const t0 = Date.now(), errs = await Promise.all(dead.map((f) => f(prefix, 4).then(() => null, (e) => e)));
+  ok(errs.every((e) => e?.check === 'pow' && e.permanent === true && e.message === W.NO_POW) && Date.now() - t0 < 2000 && A.slicedPow === undefined,
+    `pow: no Worker, a silent one, one with no engine: "${W.NO_POW}" at once, permanent; no search in the page (${errs.map((e) => e?.why).join('; ')})`);
+  const named = [await dead[1].engine(), await p.pow.engine(), await A.androidPow(W.workerPow(() => new FakeWorker())).engine()];
+  ok(named.join() === ',wasm,wasm', `pow: the engine Settings → About names: none here; hash-wasm's WebAssembly in the Worker, after a search and asked before one (${named})`);
+  const late = await A.androidPow(W.workerPow(saying({ ready: true, engine: 'js' })))(prefix, 40, { deadline: Date.now() + 200 });
+  const failing = () => { const w = { postMessage() { setTimeout(() => w.onmessage?.({ data: { error: 'out of memory' } }), 5); }, terminate() {} }; setTimeout(() => w.onmessage?.({ data: { ready: true, engine: 'wasm' } }), 5); return w; };
+  const e2 = await A.androidPow(W.workerPow(failing))(prefix, 4).then(() => null, (e) => e);
+  ok(late === null && e2?.message === 'proof of work: out of memory' && e2.permanent !== true, 'pow: a ready Worker: the deadline ends it (null); its error is an ordinary one (retried)');
   ok(await checkOf(() => p.mqtt('mqtt://relay.test:1883', {})) === 'connect' && await checkOf(() => p.mqtt('ws://relay.test/mqtt', {})) === 'connect', 'mqtt: plain mqtt:// and ws:// refused (connect)');
   ok(tried >= 0, 'pow: progress is optional');
 
@@ -1623,6 +1630,14 @@ try {
   F.state.big.next = ['IMG.jpg', new Uint8Array(10).fill(9)];
   const ph = await big.photo(), ph2 = await big.photo({ keepLocation: true });
   ok(ph.name === 'IMG.jpg' && ph2.doc !== ph.doc && F.state.big.photos.join() === 'false,true', 'big: photo → a doc; location removed unless keepLocation');
+  // No app answers the camera intent (BigFiles.java cameraApp): refused no_camera, the picker still there.
+  F.state.big.noCamera = true;
+  const nc = await big.photo().then(() => null, (e) => e);
+  ok(nc?.check === 'no_camera' && /no camera app/.test(nc.message) && (await big.pick())?.name === 'IMG.jpg', `big: no camera app → refused no_camera; the picker works (${nc?.check})`);
+  F.state.big.noCamera = false;
+  // The composer's Photo: the picker for pictures only (images), any file otherwise.
+  await big.pick({ images: true }); await big.pick();
+  ok(F.state.big.picks.slice(-2).join() === 'true,false', `big: pick {images: true} asks the shell for pictures only; a plain pick does not (${F.state.big.picks.join()})`);
   ok(await checkOf(() => big.write('nope', 0, new Uint8Array(1))) === 'big', 'big: a part that is not 32 hex refused here, before the shell');
 }
 

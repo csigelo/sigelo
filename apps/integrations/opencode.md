@@ -59,4 +59,4 @@ processes, declare a second `mcp` entry (`"sigelo-reviewer"`, its own `SIGELO_ID
 restrict tools per agent with its `permission`/tools settings (UNVERIFIED: per-agent MCP tool
 filtering syntax not checked).
 
-Check: run `opencode mcp list`; it prints `sigelo`. With the CLI: `sigelo-agent --version` prints `0.1.16`.
+Check: run `opencode mcp list`; it prints `sigelo`. With the CLI: `sigelo-agent --version` prints `0.1.17`.

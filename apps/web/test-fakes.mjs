@@ -66,7 +66,8 @@ class FakeTx {
 const POW_URL = pathToFileURL(join(HERE, 'pow-worker.mjs')).href;
 export class FakeWorker {
   constructor() {
-    this.w = new NodeWorker(`const { parentPort } = require('node:worker_threads'); import(${JSON.stringify(POW_URL)}).then(({ handle }) => parentPort.on('message', (d) => handle(d, (m) => parentPort.postMessage(m))));`, { eval: true });
+    // A module (data: URL), as a page's module Worker: no CommonJS `exports` in scope, which would take hash-wasm's UMD build.
+    this.w = new NodeWorker(new URL(`data:text/javascript,${encodeURIComponent(`import { parentPort } from 'node:worker_threads'; const { serve } = await import(${JSON.stringify(POW_URL)}); const answer = serve((m) => parentPort.postMessage(m)); parentPort.on('message', (d) => void answer(d));`)}`));
     this.w.on('message', (data) => this.onmessage?.({ data }));
     this.w.on('error', (e) => this.onerror?.(e));
   }
@@ -78,7 +79,7 @@ export class FakeWorker {
 export class FakeBig {
   constructor({ sha256 }) { this.sha = sha256; this.docs = new Map(); this.parts = new Map(); this.landed = []; this.opened = []; this.awakes = []; this.n = 0; this.next = null; }
   add(name, bytes, mtime = 1000) { const doc = `d${++this.n}`; this.docs.set(doc, { name, bytes, mtime }); return { doc, name, size: bytes.length, mtime, url: `https://app.invalid/.big/${doc}` }; }
-  async pick() { return this.next ? this.add(...this.next) : null; }
+  async pick(o) { this.pickAsked = o; return this.next ? this.add(...this.next) : null; }
   async photo(o) { this.photoAsked = o; return this.next ? this.add(...this.next) : null; }
   async hash(doc) {
     const d = this.docs.get(doc), n = Math.ceil(d.bytes.length / 1048576), hashes = new Uint8Array(n * 32);

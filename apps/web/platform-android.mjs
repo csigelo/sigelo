@@ -52,9 +52,10 @@
 //                                                                 refused "notify" (a bad tag, title or text) or "notify_permission"
 //   → {op:"notify", id, tag, cancel:true}          ← {id}         that tag's notification removed
 //   → {op:"notify", id, ask:true}                  ← {id, granted} POST_NOTIFICATIONS asked when not granted (Android 13+)
-//   → {op:"big-pick", id, profile} | {op:"big-photo", id, profile, keepLocation}  ← {id, doc, name, size, mtime, url} | {id, cancelled:true}
+//   → {op:"big-pick", id, profile, images?} | {op:"big-photo", id, profile, keepLocation}  ← {id, doc, name, size, mtime, url} | {id, cancelled:true}
 //                                                 the system's picker (the read grant kept) or camera (the location tags removed unless kept;
-//                                                 CAMERA asked at the first); doc: 32 hex, this profile's; refused no_camera_app, camera_permission
+//                                                 CAMERA asked at the first); doc: 32 hex, this profile's; refused no_camera (no app
+//                                                 answers the camera intent: the page offers the picker), camera_permission
 //   → {op:"big-hash"|"big-stat", id, profile, doc} ← {id, name, size, mtime, sha256, hashes (base64)} | {id, size, mtime}
 //   GET ORIGIN/.big/<doc>?size=&mtime=&profile= with Range: bytes=a-b (≤ 1 MiB) ← 206 those bytes, 409 when size or mtime moved (fetch, no base64)
 //   → {op:"big-write", id, profile, part, offset, data} | big-flush | big-digest | big-drop {part} | big-free ← {id} | {id, sha256} | {id, free}
@@ -71,7 +72,6 @@
 // store. Nothing is sent but what the request names: no Origin, no cookie, no redirect followed.
 // While a restore from seed holds the network (platform-web.mjs holdNetwork), https and tls refuse here
 // before anything reaches the shell.
-import { argon2idAsync } from '@noble/hashes/argon2.js';
 import { MsgError, fail } from './vendor/contact/kdf.mjs';
 import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
@@ -218,8 +218,8 @@ export function bigFiles(bridge, { profile = bridge.profile ?? 'p1', fetch: get 
   const desc = (x) => (x.cancelled ? null : { doc: id(x.doc, 'doc'), name: String(x.name), size: Number(x.size), mtime: Number(x.mtime), url: String(x.url) });
   return Object.freeze({
     profile,
-    /** The system's document picker → { doc, name, size, mtime, url } | null (cancelled). */
-    async pick() { return desc(await req('big-pick')); },
+    /** The system's document picker → { doc, name, size, mtime, url } | null (cancelled); images: pictures only. */
+    async pick({ images = false } = {}) { return desc(await req('big-pick', images === true ? { images: true } : {})); },
     /** The system's camera → as pick; keepLocation false: the location tags removed in the shell. */
     async photo({ keepLocation = false } = {}) { return desc(await req('big-photo', { keepLocation: keepLocation === true })); },
     async hash(doc) { const x = await req('big-hash', { doc: id(doc, 'doc') }); return { name: String(x.name), size: Number(x.size), mtime: Number(x.mtime), sha256: String(x.sha256), hashes: unb64(x.hashes) }; },
@@ -302,29 +302,12 @@ export function bridgeMqtt(bridge, mqttLib) {
 }
 
 /**
- * The proof of work in the page (a WebView that cannot start the Worker): @noble's JavaScript
- * Argon2id, which yields to the page every few milliseconds, since the page's policy runs no
- * WebAssembly. The same counter as the Worker's, ~11 times slower (~5.5 s an evaluation at 64 MiB
- * on a phone: the base 6 bits often outlast the 280 s search; the carrier says so and tries again).
+ * The proof of work: the Worker's search (platform-web.mjs workerPow), and nothing else. There is no
+ * search in the page's own thread: @noble's Argon2id there, 64 MiB and ~5.5 s an evaluation, starved
+ * the WebView until it dropped the relay and reloaded. A Worker that cannot run here fails the search
+ * at once with NO_POW (permanent: the "Not connected" card says it); pow.engine() for Settings → About.
  */
-export async function slicedPow({ prefix, salt, m, t, p }, bits, { deadline = Infinity, signal, onProgress } = {}) {
-  const zero = (d) => { let n = 0; for (const x of d) { if (x !== 0) return n + Math.clz32(x) - 24; n += 8; } return n; };
-  for (let i = 0; ; i++) {
-    if (Date.now() > deadline || signal?.aborted) return null;
-    if (zero(await argon2idAsync(prefix + i, salt, { t, m, p, dkLen: 32, asyncTick: 10 })) >= bits) return String(i);
-    onProgress?.(i + 1);
-  }
-}
-/** The Worker's search, and the page's when the Worker does not start (once failed, for the app's life). */
-export function androidPow(inWorker = workerPow()) {
-  let broken = false;
-  return async (job, bits, o = {}) => {
-    if (!broken) {
-      try { return await inWorker(job, bits, o); } catch (e) { if (!/^proof of work: /.test(e.message)) throw e; broken = true; }
-    }
-    return slicedPow(job, bits, o);
-  };
-}
+export const androidPow = (inWorker = workerPow()) => inWorker;
 
 /** The identity (and a restored keeper) sealed by the shell: AES-256-GCM under a key in AndroidKeyStore (FULL and keeper: unlocked by the user). */
 export const keystoreSealer = (bridge) => Object.freeze({
