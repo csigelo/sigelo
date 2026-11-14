@@ -48,7 +48,7 @@ jobs:
           # page's tests run the in-process relay from that repository at a pinned commit.
           if [ ! -d relay ]; then
             git init -q relay
-            git -C relay fetch -q --depth 1 https://github.com/csigelo/sigelo-relay bbb1dc028164f181871d19afef5c0863374bec7c # sigelo-relay 0.1.4
+            git -C relay fetch -q --depth 1 https://github.com/csigelo/sigelo-relay d7ca6902a97e388b6b0cfbac1f54bc2081190c4a # sigelo-relay 0.1.4, Argon2id proof of work
             git -C relay checkout -q FETCH_HEAD
           fi
           (cd relay && npm ci --ignore-scripts)
