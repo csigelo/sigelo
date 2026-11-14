@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 # accept/test.sh — starts the three drop-ins' example servers (Express, Flask, net/http) on random
 # loopback ports and drives each with a real sigelo agent: accept, replay, tampered sig, wrong bundle,
-# rotated-away key, rotation, bare genesis, forged nonce, wrong DID. `--remote` adds the Python drop-in
+# rotated-away key, rotation, bare genesis, forged nonce, wrong DID; then accept/pass/test.mjs (the agent
+# pass door, loopback only). `--remote` adds the Python drop-in
 # against the remote verifier https://sigelo.io/world/verify (network). Needs node, go, python3.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
@@ -11,6 +12,7 @@ trap 'for p in $pids; do kill "$p" 2>/dev/null || true; done; rm -rf "$tmp"' EXI
 [ -f "$root/ts/dist/sigelo.js" ] || (cd "$root/ts" && npm ci --silent && npx tsc)
 [ -f "$root/apps/agent/dist/cli.js" ] || (cd "$root/apps/agent" && npm ci --silent && npm run build --silent)
 (cd "$here/node" && npm install --no-audit --no-fund --silent)
+(cd "$here/pass" && npm install --no-audit --no-fund --silent)
 (cd "$root/go" && go build -o "$tmp/sigelo-verify" ./cmd/sigelo-verify)
 (cd "$here/go" && go vet ./... && go build -o "$tmp/accept-example" ./example)
 py=python3
@@ -28,3 +30,4 @@ if [ "${4:-}" = --remote ]; then
   set -- "$1" "$2" "$3" python-remote=http://127.0.0.1:$pr
 fi
 node "$here/test.mjs" "$@" || { tail -n 20 "$tmp"/*.log; exit 1; }
+(cd "$here/pass" && node test.mjs)

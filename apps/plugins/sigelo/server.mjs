@@ -3246,6 +3246,18 @@ var init_contact = __esm({
   }
 });
 
+// no-contact:pass.mjs
+var pass_exports = {};
+__export(pass_exports, {
+  load: () => load3
+});
+var load3;
+var init_pass = __esm({
+  "no-contact:pass.mjs"() {
+    load3 = async () => null;
+  }
+});
+
 // apps/integrations/mcp/http.mjs
 var http_exports = {};
 __export(http_exports, {
@@ -3592,6 +3604,11 @@ if (contact) {
   TOOLS.push(...contact.tools);
   Object.assign(HANDLERS, contact.handlers);
 }
+var passDoor = await (await Promise.resolve().then(() => (init_pass(), pass_exports))).load({ installed: INSTALLED, loadStore });
+if (passDoor) {
+  TOOLS.push(...passDoor.tools);
+  Object.assign(HANDLERS, passDoor.handlers);
+}
 async function callTool(name, args) {
   if (!TOOLS.some(([n]) => n === name)) return null;
   let path;
@@ -3612,7 +3629,7 @@ async function handle(msg) {
   const requested = params._meta?.[PV];
   if (requested !== void 0 && !MODERN.includes(requested)) throw Object.assign(new Error(`unsupported protocol version ${requested}`), { code: -32022, data: { supported: MODERN, requested } });
   const modern = requested !== void 0 || method === "server/discover";
-  const instructions = `sigelo: one identity you own (a DID from a key you hold). Prove who you are to any site or agent offline, no server or account: answer its challenge (sigelo_sign_challenge), hand it your bundle (sigelo_bundle). Your attestations (reputation) go with you when you leave a platform; a stolen key is recovered with the DID kept.${contact ? " Message other agents end to end through a relay that cannot read them, paired by an 8-character code." : ""} Start with sigelo_whoami. Identity file: ${base} (or a named profile beside it). ${DATA}`;
+  const instructions = `sigelo: one identity you own (a DID from a key you hold). Prove who you are to any site or agent offline, no server or account: answer its challenge (sigelo_sign_challenge), hand it your bundle (sigelo_bundle). Your attestations (reputation) go with you when you leave a platform; a stolen key is recovered with the DID kept.${contact ? " Message other agents end to end through a relay that cannot read them, paired by an 8-character code." : ""}${passDoor ? " A site that refuses you with a Sigelo-Pass hint: sigelo_pass, never a captcha solver." : ""} Start with sigelo_whoami. Identity file: ${base} (or a named profile beside it). ${DATA}`;
   const capabilities = { tools: { listChanged: false } };
   const done = (r) => modern ? { resultType: "complete", ...r, _meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO } } : r;
   switch (method) {

@@ -6,6 +6,9 @@ A stdio MCP server built on `sigelo-agent`: `node server.mjs`. Tools, configs, t
 Claude Code plugin, no wallet ([apps/plugins/](../../plugins/README.md)):
 `claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo`.
 
+`sigelo_pass {url}`: refused with a Sigelo-Pass hint → the site's cookie `header`
+([accept/pass](../../../accept/pass/README.md)). Not in the plugin.
+
 ## Contact tools
 
 With [`sigelo-contact`](../../contact/README.md) (part of `sigelo-agent`); never in the plugin.

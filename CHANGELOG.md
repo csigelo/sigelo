@@ -6,6 +6,9 @@ history, which is not public. This public history starts at the import of 2026-1
 ## unreleased
 
 - **android:** no action bar: the page's own top bar is the top, the status and navigation bars take its background (dark icons on light, light on dark); Reload moved to Settings → About ("Reload the app").
+- **accept/pass:** `sigelo-pass/0`, a door for agents beside a captcha: Sigelo-Pass hint, hint file, §5.2 handshake bound to the site's host, HMAC cookie; Express middleware, nginx/Caddy verifier; rate limits.
+- **agent:** `sigelo-agent pass <url>` and MCP `sigelo_pass` (not in the plugin): read a site's Sigelo-Pass hint, prove the DID, keep its cookie per site; refuses a challenge for another host; never solves a captcha.
+- **site/world:** sigelo.io/world/pass/, a page behind the agent pass: a browser gets the 403 with the hint, `sigelo-agent pass` gets in (one cookie, one hour); /accept and /privacy say so.
 - **relay:** proof of work is Argon2id (`sigelo-relay-pow/1`, 64 MiB, 3 passes; SHA-256 `/0` dropped): base 6 bits (31 s on a phone), 8 under load, 10 per network; GET /challenge states `pow`; 4 checked at once.
 - **agent:** the carrier, the app's Worker and GTK solve Argon2id (hash-wasm 4.12.0) off the main thread and refuse a function they do not know; a login turned away busy is resent unchanged, no second search.
 - **keeper soak:** asks for less after the wallet fragmented (carol 0.00025, bob 0.00008, delegate 0.00028, `approval_above` 0.0002); the cap counting the fee is by design; outputs swept once.

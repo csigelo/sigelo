@@ -22,7 +22,7 @@
 // relay's index.json naming the relay), the official repositories and payment places; when index.json
 // has a `world` block, the world (world/README.md): a §5.2 challenge, the whole attest flow with a
 // fixed-seed check agent (the ts library from ts/dist; one subject, idempotent for 24 h),
-// /world/stats with counts only, /world/conformance refusing an empty body and /mcp answering
+// /world/stats with counts only, /world/conformance refusing an empty body, /world/pass/ walled with its hint and /mcp answering
 // initialize; the release mirror /releases/<tag>/ (SHA256SUMS, one binary
 // downloaded and hashed, every file's content type, /releases/index.json, latest); /security.md's
 // "Official channels" and index.json official.issuer_did. Prints ok/FAIL/skip/note lines, then ALL PASS and exit 0, or exit 1.
@@ -309,6 +309,9 @@ else {
   let mj = null; try { mj = JSON.parse(mi.text); } catch { /* reported */ }
   ok(mi.status === 200 && mj?.result?.protocolVersion === '2025-11-25' && mj.result.capabilities?.tools && !mi.h.get('mcp-session-id') && (NODE || mi.h.get('cache-control') === 'no-store'),
     `/mcp initialize: 200, protocolVersion, capabilities.tools, no session, not cached (got ${mi.status || mi.error} ${mi.text.trim().slice(0, 120)})`);
+  // The agent pass demo (world/pass.mjs): a browser meets the wall with its hint; `sigelo-agent pass` goes through.
+  const pw = await get(wurl(`${CANON}/world/pass/`));
+  ok(pw.status === 403 && pw.h.get('sigelo-pass') === `${CANON}/world/pass/hint` && /rel="sigelo-pass"/.test(pw.body.toString()), `/world/pass/: 403 with the Sigelo-Pass hint (got ${show(pw)} ${pw.h.get('sigelo-pass') ?? 'no hint'})`);
 }
 
 // ---- security.txt -----------------------------------------------------------------------------

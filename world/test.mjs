@@ -4,7 +4,8 @@
 // the Go reference verifier as the judge. Run from anywhere after `cd ts && npx tsc`:
 //   node world/test.mjs            (needs `go` on PATH or a built go/sigelo-verify; sh for the nginx allowlist)
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync, statSync } from 'node:fs';
+const statSyncMode = (p) => (process.platform === 'win32' ? 0o600 : statSync(p).mode & 0o777);
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,6 +118,27 @@ ok(echo.status === 400 && /challenge differs/.test(echo.json.error), `a challeng
 const over = await post('/world/verify', { bundle: { ...bundleOf(agent.genesis), attestations: Array(65).fill(a) } });
 ok(over.status === 422 && /more than 64/.test(over.json.error), `an over-cap bundle (65 items) is 422: ${over.status} ${over.json.error}`);
 ok((await post('/world/verify', { bundle: { ...bundleOf(agent.genesis), attestations: Array(64).fill(a) } })).status === 200, 'a 64-item bundle still verifies (the cap is inclusive)');
+
+// ---- the agent pass demo (world/pass.mjs): the wall, the hint, the world's challenge, the cookie ----
+{
+  const raw = (p, init) => fetch(base + p, init);
+  let r = await raw('/world/pass/');
+  ok(r.status === 403 && r.headers.get('sigelo-pass') === 'https://sigelo.io/world/pass/hint' && r.headers.get('link') === '<https://sigelo.io/world/pass/hint>; rel="sigelo-pass"'
+    && (await r.text()).includes('<link rel="sigelo-pass" href="https://sigelo.io/world/pass/hint">'), 'pass: /world/pass/ without a cookie → 403 with the Sigelo-Pass hint (header, Link, <link>)');
+  const h = (await get('/world/pass/hint')).json;
+  ok(h.v === 'sigelo-pass/0' && h.ctx === 'sigelo.io' && h.challenge === '/world/challenge' && h.accept === '/world/pass/accept' && h.cookie === 'sigelo_pass' && h.ttl === 3600 && h.wants.operator === false, 'pass: the hint file names the world\'s challenge, its accept route, ctx sigelo.io');
+  const c = (await get(`/world/challenge?did=${encodeURIComponent(agent.did)}`)).json;
+  const body = { challenge: c, did: agent.did, sig: sign(agent.secret, c), bundle: bundleOf(agent.genesis) };
+  r = await raw('/world/pass/accept', { method: 'POST', body: JSON.stringify(body) });
+  const j = await r.json(), sc = r.headers.get('set-cookie') ?? '';
+  ok(r.status === 200 && j.did === agent.did && j.cookie.name === 'sigelo_pass' && j.cookie.path === '/world/pass/' && /^sigelo_pass=sp0\.[^;]+; Path=\/world\/pass\/; Max-Age=3600; HttpOnly; SameSite=Lax; Secure$/.test(sc), `pass: accept → 200, the cookie (Secure, Path /world/pass/): ${sc}`);
+  r = await raw('/world/pass/', { headers: { cookie: `sigelo_pass=${j.cookie.value}` } });
+  ok(r.status === 200 && (await r.text()).includes(agent.did), 'pass: the cookie opens /world/pass/');
+  ok((await raw('/world/pass/accept', { method: 'POST', body: JSON.stringify(body) })).status === 409, 'pass: the same answer replayed → 409');
+  const t = j.cookie.value.slice(0, -3) + (j.cookie.value.at(-3) === 'A' ? 'B' : 'A') + j.cookie.value.slice(-2);
+  ok((await raw('/world/pass/', { headers: { cookie: `sigelo_pass=${t}` } })).status === 403, 'pass: a tampered cookie → 403');
+  ok(statSyncMode(join(dir, 'pass.key')) === 0o600, 'pass: pass.key is 0600 in the state directory');
+}
 
 // ---- idempotent within 24 h, across a restart; the nonce ring survives the restart too ----
 const again = await answer(agent, { genesis: agent.genesis });

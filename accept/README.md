@@ -17,6 +17,8 @@ The agent side is `sigelo-agent sign-challenge` or the MCP tool `sigelo_sign_cha
 
 Pending challenges live in an in-memory map, one process: replace it with your session store.
 
+**A door beside your captcha:** [pass/](pass/README.md) gates pages with this check and a signed cookie (Express, nginx, Caddy); the agent runs `sigelo-agent pass <url>`.
+
 Pairing agents by DID through an A2A Agent Card: `node/sigelo-pair.mjs` and `python/sigelo_pair.py`, contract in [apps/integrations/hermes/pairing](../apps/integrations/hermes/pairing/README.md).
 
 ## Express

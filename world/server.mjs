@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 // world/server.mjs — sigelo.io's own world: proves control of a DID (SPEC §5.2), issues one
 // `admission: "open"` attestation (§5), a self-reported conformance attestation, verifies bundles
-// (§9) and serves the verifier as remote MCP at /mcp (world/mcp.mjs), over loopback HTTP behind nginx.
+// (§9), serves the verifier as remote MCP at /mcp (world/mcp.mjs) and the agent pass demo at
+// /world/pass/ (world/pass.mjs), over loopback HTTP behind nginx.
 // No crypto here: every check is the `sigelo` library (ts/). See world/README.md.
 //
 //   node world/server.mjs                                    serve (env below)
@@ -16,8 +17,8 @@
 // Env: SIGELO_WORLD_KEY (issuer file, default /var/lib/sigelo-world/issuer.json), SIGELO_WORLD_STATE
 // (default: the key's directory), SIGELO_WORLD_PORT (default 8790; 0 = any), SIGELO_WORLD_VECTORS
 // (default ../test-vectors.json beside world/: deploy.sh ships the site's copy). Binds 127.0.0.1 only.
-// State: nonces.json (the outstanding challenges, a ring of RING) and attestations.jsonl (what was
-// issued, append-only, never served). No client address ever reaches this process (nginx sends none).
+// State: nonces.json (the outstanding challenges, a ring of RING), attestations.jsonl (what was
+// issued, append-only, never served) and pass.key (the pass cookie's HMAC key, 0600). No client address ever reaches this process (nginx sends none).
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, appendFileSync, renameSync, existsSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -26,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { attest, canonicalize, commitmentOf, did, keygen, multibase, parse, parseBytes, rotate, sign, structure, verify, verifySig } from '../ts/dist/sigelo.js';
 import { countCases, readSummary } from './conformance.mjs';
 import { mcp } from './mcp.mjs';
+import { passLane } from './pass.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const VERSION = JSON.parse(readFileSync(join(HERE, '../ts/package.json'), 'utf8')).version;
@@ -216,7 +218,7 @@ function verifyBundle(req) {
 
 const ROUTES = {
   'GET /world/': () => ({ issuer: ISS, ctx: CTX, genesis: world.genesis, endpoints: { challenge: 'GET /world/challenge?did=…', attest: 'POST /world/attest',
-    conformance: 'POST /world/conformance', verify: 'POST /world/verify', mcp: 'POST /mcp', stats: 'GET /world/stats', genesis: 'GET /world/genesis.json',
+    conformance: 'POST /world/conformance', verify: 'POST /world/verify', mcp: 'POST /mcp', stats: 'GET /world/stats', genesis: 'GET /world/genesis.json', pass: 'GET /world/pass/',
     rotations: 'GET /world/rotations.json' }, ...(vectors && { vectors_sha256: vectors.sha256, conformance_cases: vectors.cases }) }),
   'GET /world/challenge': (_, url) => challenge(url),
   'GET /world/genesis.json': () => world.genesis,          // nginx serves the published copy; this is the fallback
@@ -235,6 +237,8 @@ const readBody = (req) => new Promise((resolve, reject) => {
 });
 
 const mcpHandle = mcp({ parse, parseBytes, verify: cverify, version: VERSION });
+// The agent pass demo (world/pass.mjs): a page behind a sigelo-pass/0 door, the handshake proveControl.
+const lane = passLane({ state: STATE, ctx: CTX, proveControl });
 
 const server = createServer(async (req, res) => {
   const send = (status, v) => { if (res.headersSent) return; res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v) + '\n'); };
@@ -247,6 +251,15 @@ const server = createServer(async (req, res) => {
       }
       const r = mcpHandle(req.method, req.headers, raw);
       res.writeHead(r.status, r.headers); return res.end(r.body);
+    }
+    if (url.pathname.startsWith('/world/pass/')) {
+      let body;
+      if (req.method === 'POST') {
+        try { body = parseBytes(await readBody(req)); } catch (e) { throw e.status ? e : fail(400, `body is not strict JSON: ${e.message}`); }
+        if (body === null || typeof body !== 'object' || Array.isArray(body)) throw fail(400, 'body is not a JSON object');
+      }
+      const r = lane(req.method, url.pathname, req.headers.cookie, body);
+      if (r) { res.writeHead(r.status, r.headers); return res.end(r.body); }
     }
     const route = ROUTES[`${req.method} ${url.pathname}`];
     if (!route) throw fail(Object.keys(ROUTES).some((k) => k.endsWith(' ' + url.pathname)) ? 405 : 404, `no ${req.method} ${url.pathname}; see GET /world/`);

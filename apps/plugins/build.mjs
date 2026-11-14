@@ -7,7 +7,7 @@
 // scan wants readable source. The sigelo plugin carries no wallet: the directory policy forbids
 // software that transfers cryptocurrency, so the four wallet tools are cut out at build time. Nor
 // the contact tools: they connect to a relay, where this plugin makes no network connections (its
-// README says so), and their post-quantum and MQTT dependencies would be bundled into it.
+// README says so), and their post-quantum and MQTT dependencies would be bundled into it. Nor sigelo_pass.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +45,8 @@ const resolver = {
     // server.mjs's import of contact.mjs gets the answer of a server without sigelo-contact: null.
     b.onResolve({ filter: /^\.\/contact\.mjs$/ }, (a) => (a.importer === join(REPO, 'apps/integrations/mcp/server.mjs') ? { path: 'contact.mjs', namespace: 'no-contact' } : undefined));
     b.onLoad({ filter: /.*/, namespace: 'no-contact' }, () => ({ contents: 'export const load = async () => null;', loader: 'js' }));
+    // Nor sigelo_pass (pass.mjs): it fetches the site that asks, and this plugin makes no network connections.
+    b.onResolve({ filter: /^\.\/pass\.mjs$/ }, (a) => (a.importer === join(REPO, 'apps/integrations/mcp/server.mjs') ? { path: 'pass.mjs', namespace: 'no-contact' } : undefined));
     b.onLoad({ filter: /integrations\/mcp\/server\.mjs$/ }, (a) => {
       let src = readFileSync(a.path, 'utf8');
       // The plugin reports the server's version: it must be the one sigelo-mcp ships at.
@@ -77,6 +79,7 @@ for (const [from, to] of TARGETS) {
     banner: { js: banner(from) },
   });
   const out = r.outputFiles[0].text.replaceAll(REPO + '/', '');
+  if (/sigelo-agent-pass|integrations\/mcp\/pass\.mjs/.test(out)) throw new Error(`apps/plugins/build.mjs: sigelo_pass (network) left in apps/plugins/${to}`);
   if (/sigelo_invite|carrier\.mjs|post-quantum|from "mqtt"/.test(out)) throw new Error(`apps/plugins/build.mjs: contact code left in apps/plugins/${to}`);
   const dest = join(HERE, to);
   if (check) {

@@ -37,6 +37,7 @@
   "files": [
     "server.mjs",
     "contact.mjs",
+    "pass.mjs",
     "http.mjs"
   ],
   "engines": {

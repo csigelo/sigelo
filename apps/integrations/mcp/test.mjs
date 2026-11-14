@@ -79,7 +79,7 @@ const keeper = createServer((req, res) => {
 await new Promise((r) => keeper.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${keeper.address().port}`;
 
-const IDENTITY_TOOLS = ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'];
+const IDENTITY_TOOLS = ['sigelo_add_attestation', 'sigelo_add_issuer', 'sigelo_bundle', 'sigelo_forget_issuer', 'sigelo_init', 'sigelo_pass', 'sigelo_rotate', 'sigelo_sign_challenge', 'sigelo_verify', 'sigelo_whoami'];
 const CONTACT_TOOLS = ['sigelo_accept', 'sigelo_contacts', 'sigelo_enrol', 'sigelo_enrol_finish', 'sigelo_forget_contact', 'sigelo_group', 'sigelo_history', 'sigelo_inbox', 'sigelo_invite', 'sigelo_links', 'sigelo_presence', 'sigelo_public', 'sigelo_reply', 'sigelo_send', 'sigelo_send_file', 'sigelo_set_tier', 'sigelo_transfer', 'sigelo_wait_for_message'];
 // Present here only if sigelo-contact resolves, as the server decides it (contact.mjs load).
 const sidecar = await import('../../agent/sigelo-agent-contact.ts');
@@ -131,6 +131,30 @@ try {
   ok(r.isError && /refusing to overwrite/.test(r.text), 'second init refused');
   r = await c.call('sigelo_whoami');
   ok(r.data.did === agentDid && r.data.chain.length === 1 && r.data.attestations === 0, 'whoami after init');
+
+  // sigelo_pass against accept/pass's drop-in in this process (SKIP without its node_modules)
+  if (!['pass', 'node'].every((d) => existsSync(join(here, '..', '..', '..', 'accept', d, 'node_modules', 'sigelo')))) console.log('SKIP sigelo_pass: npm install in accept/pass and accept/node');
+  else {
+    const { sigeloPass } = await import(pathToFileURL(join(here, '..', '..', '..', 'accept', 'pass', 'sigelo-pass.mjs')).href);
+    const door = async (opts = {}) => {
+      const srv = createServer(); await new Promise((res) => srv.listen(0, '127.0.0.1', res));
+      const origin = `http://127.0.0.1:${srv.address().port}`, d = sigeloPass({ origin, secret: 'k'.repeat(32), ...opts });
+      srv.on('request', (req, res) => d.routes(req, res, () => d.gate(req, res, () => { res.end(`hello ${req.sigeloPass.did}`); })));
+      return { origin, close: () => srv.close() };
+    };
+    const S = await door(), O = await door({ wants: { operator: true } });
+    r = await c.call('sigelo_pass', { url: `${S.origin}/members/` });
+    ok(!r.isError && r.data.did === agentDid && r.data.cookie.name === 'sigelo_pass' && r.data.header.startsWith('sigelo_pass=sp0.'), 'sigelo_pass: through the door, the cookie and its header', r.text);
+    ok(await fetch(`${S.origin}/members/`, { headers: { cookie: r.data.header } }).then((x) => x.text()) === `hello ${agentDid}`, 'sigelo_pass: the header opens the gated page');
+    r = await c.call('sigelo_pass', { url: `${S.origin}/members/` });
+    ok(!r.isError && r.data.reused === true, 'sigelo_pass: a kept cookie is reused; fresh: true makes a new one');
+    r = await c.call('sigelo_pass', { url: `${O.origin}/members/` });
+    ok(r.isError && r.structured?.code === 'wants_operator', 'sigelo_pass: what the site wants and the identity lacks → code wants_operator', r.text);
+    const plain = createServer((_, res) => { res.writeHead(403); res.end('captcha'); }); await new Promise((res) => plain.listen(0, '127.0.0.1', res));
+    r = await c.call('sigelo_pass', { url: `http://127.0.0.1:${plain.address().port}/` });
+    ok(r.isError && r.structured?.code === 'no_hint', 'sigelo_pass: no door → code no_hint, never a captcha', r.text);
+    for (const x of [S, O, plain]) x.close();
+  }
 
   // the world side, from the library (what accept/examples/world.mjs does)
   const world = keygen({ recovery: null });
@@ -889,12 +913,12 @@ sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 99)
   const nmc = join(side, 'node_modules', 'sigelo-contact'), marker = join(dir, 'squatter-ran');
   mkdirSync(mcp, { recursive: true });
   mkdirSync(join(side, 'node_modules'), { recursive: true });
-  for (const f of ['server.mjs', 'contact.mjs']) copyFileSync(join(here, f), join(mcp, f));
-  for (const f of ['package.json', 'sigelo-agent.ts', 'sigelo-agent-keys.ts', 'sigelo-agent-keychain.ts', 'sigelo-agent-keyclient.ts', 'sigelo-agent-adopt.ts', 'sigelo-agent-monero.ts', 'sigelo-agent-contact.ts', 'sigelo-agent-recovery.ts']) copyFileSync(join(here, '..', '..', 'agent', f), join(side, f));
+  for (const f of ['server.mjs', 'contact.mjs', 'pass.mjs']) copyFileSync(join(here, f), join(mcp, f));
+  for (const f of ['package.json', 'sigelo-agent.ts', 'sigelo-agent-keys.ts', 'sigelo-agent-keychain.ts', 'sigelo-agent-keyclient.ts', 'sigelo-agent-adopt.ts', 'sigelo-agent-monero.ts', 'sigelo-agent-contact.ts', 'sigelo-agent-recovery.ts', 'sigelo-agent-pass.ts']) copyFileSync(join(here, '..', '..', 'agent', f), join(side, f));
   for (const to of [join(copy, 'ts'), join(side, 'node_modules', 'sigelo')]) symlinkSync(join(here, '..', '..', '..', 'ts'), to, 'junction');
   const listOf = async (cl) => { await cl.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } }); return (await cl.rpc('tools/list')).result.tools.map((t) => t.name).sort().join(); };
   const c6 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
-  ok(await listOf(c6) === IDENTITY_TOOLS.join(), 'no sigelo-contact: the 9 identity tools only');
+  ok(await listOf(c6) === IDENTITY_TOOLS.join(), 'no sigelo-contact: the 10 identity tools only');
   ok((await c6.rpc('tools/call', { name: 'sigelo_contacts', arguments: {} })).error?.code === -32602, 'no sigelo-contact: sigelo_contacts is an unknown tool');
   c6.close();
   await c6.exited;
@@ -910,14 +934,14 @@ sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 99)
   const e0 = await sideLib.contactLib().then(() => null, (x) => x);
   ok(sideLib.absent(e0) && e0.message.includes(`not loading ${realpathSync(above)}, outside this package`) && !existsSync(marker), 'contact: sigelo-contact above the package\'s own tree is named, never run, and counts as absent', e0?.message);
   const c13 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
-  ok(await listOf(c13) === IDENTITY_TOOLS.join(), 'and the server lists the 9 identity tools only');
+  ok(await listOf(c13) === IDENTITY_TOOLS.join(), 'and the server lists the 10 identity tools only');
   c13.close();
   await c13.exited;
   ok(/no contact tools: .*not loading .*sigelo-contact, outside this package/.test(c13.stderr()) && !existsSync(marker), 'saying so on stderr, its code never run', c13.stderr().slice(0, 300));
   rmSync(join(dir, 'node_modules'), { recursive: true });
   rmSync(join(mcp, 'contact.mjs'));
   const c7 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
-  ok(await listOf(c7) === IDENTITY_TOOLS.join(), 'a package without contact.mjs: the 9 identity tools only');
+  ok(await listOf(c7) === IDENTITY_TOOLS.join(), 'a package without contact.mjs: the 10 identity tools only');
   c7.close();
   copyFileSync(join(here, 'contact.mjs'), join(mcp, 'contact.mjs'));
 
@@ -964,7 +988,7 @@ sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 99)
   // Its own dependencies not installed: no contact tools, said on stderr.
   writeFileSync(join(nmc, 'carrier.mjs'), "import 'sigelo-test-package-not-installed';\n");
   const c10 = client({ SIGELO_IDENTITY: idFile }, join(mcp, 'server.mjs'));
-  ok(await listOf(c10) === IDENTITY_TOOLS.join(), 'sigelo-contact without its dependencies: the 9 identity tools only');
+  ok(await listOf(c10) === IDENTITY_TOOLS.join(), 'sigelo-contact without its dependencies: the 10 identity tools only');
   c10.close();
   await c10.exited;
   ok(/no contact tools: they need sigelo-contact, .*: sigelo-contact is incomplete: .*sigelo-test-package-not-installed/.test(c10.stderr()), 'and one line on stderr names the package', c10.stderr().slice(0, 300));

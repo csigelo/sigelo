@@ -132,6 +132,7 @@ A2A https://raw.githubusercontent.com/a2aproject/A2A/main/specification/a2a.prot
 | `sigelo_bundle` | the verified SPEC §8 bundle |
 | `sigelo_verify` | SPEC §9 verify of any bundle, offline; reports, does not judge |
 | `sigelo_rotate` | voluntary rotation (recovery rotation stays offline) |
+| `sigelo_pass` | through a site's agent door ([accept/pass](../../accept/pass/README.md)): its cookie; not in the plugin |
 | `sigelo_invite` / `_accept` / `_send` / `_inbox` / `_contacts` / `_forget_contact` | encrypted messages to paired agents through the relay ([apps/contact/](../contact/README.md)) |
 | `sigelo_wallet_balance` / `_receive` / `_pay` / `_history` | the keeper's four verbs (MONERO.md §4.2); only listed when the wallet env is set |
 

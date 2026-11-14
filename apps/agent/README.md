@@ -52,6 +52,7 @@ with the passphrase as a Docker secret; phone → the app seals it.
 | `seal [--passphrase-file <f>] [--keep-plain]`, `unseal` | a plain key sealed under a passphrase, in place (`--keep-plain`: `<file>.bak`); back to hex |
 | `sign-challenge <json\|->` | sign only `{ v, typ: "challenge", did, ctx, nonce }` naming our DID |
 | `sign-http <base\|->` | sign only an RFC 9421 base for [Web Bot Auth](../integrations/web-bot-auth/README.md) |
+| `pass <url> [--json] [--fresh]` | a site's [agent door](../../accept/pass/README.md): the cookie to load the page with |
 | `add-issuer <genesis json\|->` | store a world's genesis |
 | `add-attestation <{body,sig} json\|->` | store a world's attestation (one per `iss` + `ctx`) |
 | `forget-issuer <did>` | drop a retired issuer's attestations and genesis |
