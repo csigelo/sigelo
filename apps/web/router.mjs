@@ -27,6 +27,8 @@
 // on the WebView's RTCPeerConnection (none: no transfer); /api/transfers* as `sigelo-agent ui` serves them,
 // a file named by the doc the system's picker or camera gave. No Tor here.
 // A restore from a backup file (backup.mjs) leaves a mark: start() then begins every session afresh, before anything is sent.
+// computer: { name(), call(method, path, body?) → { status, body } }, a computer of this operator paired to this profile:
+// the keeper's routes go there, a limit signed here (apps/contact/page.mjs "Keeper"). Not given by boot.mjs yet.
 // keeper: { load() → bytes | null, save(bytes) } (seed.mjs keeperOf: the sealed keeper of a restore or a create):
 // the Agents list and their enrolment (apps/contact/page.mjs); without one (an imported SAFE or FULL file) the
 // list is empty and enrolling refuses `keeper`.
@@ -69,7 +71,7 @@ export function presetRelay(files, host) {
 export const FULL_IMPORT = 'an operator identity (FULL) with no signed device list naming this app the seat would log in as you beside the device that holds it (the two lose each other\'s messages): refused. Restore from your 25 words here instead (the seat here or on another device), or import the SAFE file sigelo-agent device scan wrote for this app';
 const DEVICES_HERE = 'devices are added, scanned and revoked on the operator\'s computer (sigelo-agent ui), not in this app';
 
-export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' }, options = {}, seat = null, keeper = null, words = null }) {
+export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' }, options = {}, seat = null, keeper = null, words = null, computer = null }) {
   const mode = { ...mode0 };
   const { files } = platform;
   const paths = pathsFor(IDENTITY), base = IDENTITY.replace(/\.json$/, '');
@@ -130,6 +132,7 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
       defer: (f) => { setTimeout(f, 0); },
       // The keeper sealed in the app's storage. The list reads its roster, kept here without the root after the
       // first opening; K is opened only to enrol (on Android, within the screen lock's window); a change is resealed.
+      ...(computer && { computer }),
       ...(keeper && { keeper: {
         read: async () => (roster ??= strip(await opened())),
         root: async () => { const k = await opened(); return { K: unhex(k.root_hex), recovery: k.recovery }; },

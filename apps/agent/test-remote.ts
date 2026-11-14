@@ -385,7 +385,7 @@ else {
     // A contact's kind and the keeper (scope all): no such contact → 404; no keeper on this computer → none, its writes 409 keeper_none.
     process.env['SIGELO_SPEND_REGISTRY'] = join(H, 'no-keepers.json');   // never this host's own keepers
     const kd = await call('POST', '/api/kind', { contact: 'did:sigelo:zNope', kind: 'agent' }), kg = await call('GET', '/api/keeper');
-    const KW = ['agent', 'approvers', 'approve', 'refuse', 'restart'].map((v) => `POST /api/keeper/${v}`), kws = await Promise.all(KW.map((x) => call('POST', x.split(' ')[1]!, { keeper: 'k', nonce: 'ab'.repeat(16), agent: 'a', me: true })));
+    const KW = ['agent', 'policy', 'approvers', 'approve', 'refuse', 'restart'].map((v) => `POST /api/keeper/${v}`), kws = await Promise.all(KW.map((x) => call('POST', x.split(' ')[1]!, { keeper: 'k', nonce: 'ab'.repeat(16), agent: 'a', me: true })));
     ok('remote e2e: kind of no contact → 404; keeper sealed (scope all): state none here, its writes 409 keeper_none', kd.status === 404 && kg.status === 200 && kg.body.state === 'none'
       && kws.every((x) => x.status === 409 && String(x.body.error.check).startsWith('keeper_')), JSON.stringify([kd, kg, kws]).slice(0, 900));
     for (const x of ['POST /api/kind', 'GET /api/keeper', ...KW]) done_.set(x, 200);

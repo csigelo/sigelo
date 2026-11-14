@@ -5,8 +5,17 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+## v0.1.16 — 2026-11-14
+
+- **This release:** backup and restore; an agent's page with its address and limits; Argon2id proof of work;
+  big files and a camera in every chat; no action bar on Android; public codes, codes that renew themselves.
+- **Upgrade:** 0.1.16 is needed to log a new or restored identity in: the relay's proof of work is now Argon2id and 0.1.15 computes the old one.
 - **app:** encrypted backup and restore: Settings → Backup and recovery → Back up this profile writes a `.sbk` file under the words password; Restore from a backup brings the profile back, same keys, no re-pairing.
 - **site:** FAQ, lost a machine: what the 25 words bring back and what not, the backup file (chats, contacts, pairing keys; never on a sigelo server), a new phone in three steps.
+- **keeper:** `POST /policy`: an agent's limits changed by an identity in `owners` (init `--owner`), signed, single use, logged as a `policy` line; an agent's key never passes. `paused` refuses pay, code `paused`.
+- **keeper:** `POST /agents`, the owner's signed read: each agent's limits, its address (i, 0), balance and money received; `/health` and `/balance` give the agent its own `address`.
+- **agent:** the page saves limits as a change signed by its identity at the keeper's `/policy` (the file for older keepers); `POST /api/keeper/policy` carries a phone's signed change untouched.
+- **app:** an agent's page: Address (QR, Copy, what it holds), Allowance with Pause/Resume and Change limits; Save and Resume ask one tap, Pause none; money received in Last activity; Wallet off: Turn on Wallet.
 - **android:** no action bar: the page's own top bar is the top, the status and navigation bars take its background (dark icons on light, light on dark); Reload moved to Settings → About ("Reload the app").
 - **accept/pass:** `sigelo-pass/0`, a door for agents beside a captcha: Sigelo-Pass hint, hint file, §5.2 handshake bound to the site's host, HMAC cookie; Express middleware, nginx/Caddy verifier; rate limits.
 - **agent:** `sigelo-agent pass <url>` and MCP `sigelo_pass` (not in the plugin): read a site's Sigelo-Pass hint, prove the DID, keep its cookie per site; refuses a challenge for another host; never solves a captcha.

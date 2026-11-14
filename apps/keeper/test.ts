@@ -4075,6 +4075,148 @@ if (liveAddress !== null) {
   rmSync(walletDir, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------- 2p. the Owner: pause, POST /policy, POST /agents
+//
+// A change of an agent's limits signed by an identity in `owners`, checked, applied to policy.json
+// whole and logged; an agent's own key (under its DID or any other) never passes. Pause refuses
+// before any wallet call. The mock wallet; no stagenet.
+{
+  const { applyChange, checkChange, checkView, CHANGE_TTL } = await import('./policychange.js');
+  const T = REAL_NOW;
+  const keeperK = keygen({ recovery: seed(0x91), seed: seed(0x92) });
+  const owned = (over: Raw = {}): Raw => g6Raw(undefined, {}, { owners: [{ did: ownerId.did }], ...over });
+  // pure: the policy file
+  ok('owner load: owners and paused load', (() => { const p = parsePolicy(owned({ agents: { ...(owned()['agents'] as Raw), carol: { ...((owned()['agents'] as Raw)['carol'] as Raw), paused: true } } })); return p.owners?.[0]?.did === ownerId.did && p.agents['carol']!.paused === true && p.agents['scout']!.paused === undefined; })());
+  loadRefuses('owner load: an agent listed as an owner is refused', owned({ owners: [{ did: scoutId.did }] }), 'cannot set its own limits');
+  loadRefuses('owner load: paused that is not a boolean is refused', g6Raw(undefined, { paused: 'yes' }), 'paused is not true or false');
+  loadRefuses('owner load: an owner named twice is refused', owned({ owners: [{ did: ownerId.did }, { did: ownerId.did }] }), 'owners names one DID twice');
+  // pure: pause in evaluate, and through the tree
+  const pol = parsePolicy(g6Raw(undefined, { paused: true }));
+  const coffee: PayRequest = { token: ALICE, to: { label: 'bob' }, amount: '1000', purpose: 'coffee' };
+  refuses('pause: a paused agent is refused at its turn, code paused', evaluate(coffee, pol, [], NOW), 'paused: your operator paused your spending');
+  ok('pause: codeOf names it paused', codeOf('paused: your operator paused your spending') === 'paused');
+  const paid: Prior = { ts: NOW - 10, agent: 'scout', ref: 'r1', fp: fingerprint(1, { label: 'bob' }, '1000', 'coffee'), status: 'relayed', line: 0, txid: 'aa' };
+  const rep = evaluate({ ...coffee, ref: 'r1' }, pol, [], NOW, { prior: [paid] });
+  ok('pause: a payment already made is still answered with its outcome (repeat), not paused', !rep.ok && rep.repeat?.status === 'relayed', JSON.stringify(rep));
+  const kid: DelegateEntry = { kind: 'delegate', ts: NOW, name: 'kid', parent: 'scout', account: 7, address: LITERAL, did: twinId.did, genesis: twinId.genesis, token_hash: tokenHash('e'.repeat(64)),
+    caps: { per_tx_max: '10', per_period_max: '10', rate_per_minute: 1 }, allow: [], max_delegates: 0, approval_above: null, kdf: DELEGATE_KDF } as DelegateEntry;
+  ok('pause: a delegate of a paused root is paused too', effective(replayTree([kid], pol.agents), pol.agents, 'kid')?.paused === true);
+  ok('explain: paused is REFUSED with its own line', explain(403, { code: 'paused', error: 'paused: …' }).message === LINES.paused && explain(403, { code: 'paused', error: '' }).status === 'refused');
+
+  // pure: the signed change
+  const ctx = (o: Partial<Parameters<typeof checkChange>[1]> = {}): Parameters<typeof checkChange>[1] => ({
+    keeper: keeperK.did, keeperKey: keeperK.key, net: NET, now: T, owners: [ownerId.did],
+    agents: [{ did: scoutId.did, keys: [scoutId.key] }, { keys: [] }], used: () => false, ...o,
+  });
+  const nonce = (): string => randomBytes(16).toString('hex');
+  const body = (set: Raw, o: Raw = {}) => ({ v: 'sigelo/0', typ: 'policy-change', keeper: keeperK.did, net: NET, agent: 'scout', set, nonce: nonce(), iat: T, exp: T + 300, ...o });
+  const signed = (b: Raw, id: { secret: Uint8Array; genesis: Genesis } = ownerId, bundle = idBundle(id.genesis)) => ({ body: b, sig: sign(id.secret, b), bundle });
+  const good = checkChange(signed(body({ paused: true })), ctx());
+  ok('policy-change: an owner\'s change is accepted, naming the owner', good.ok && good.changed.owner === ownerId.did && good.changed.key === ownerId.key, JSON.stringify(good));
+  refuses('policy-change: signed by the agent\'s own key is refused — it cannot raise its own allowance', checkChange(signed(body({ per_tx_max: '9000000000000' }), scoutId), ctx()), 'owner: ');
+  refuses('policy-change: …even with the agent listed as an owner', checkChange(signed(body({ per_tx_max: '9000000000000' }), scoutId), ctx({ owners: [scoutId.did] })), 'owner: did:sigelo');
+  ok('policy-change: …which names the agent', (() => { const r = checkChange(signed(body({ per_tx_max: '1' }), scoutId), ctx({ owners: [scoutId.did] })); return !r.ok && r.reason.includes('an agent cannot set its own limits'); })());
+  refuses('policy-change: the agent\'s key under another DID, listed as an owner, is refused', checkChange(signed(body({ per_tx_max: '1' }), twinId), ctx({ owners: [twinId.did] })), 'owner: ');
+  ok('policy-change: …as signing with an agent\'s key', (() => { const r = checkChange(signed(body({ per_tx_max: '1' }), twinId), ctx({ owners: [twinId.did] })); return !r.ok && r.reason.includes('signs with an agent\'s key'); })());
+  refuses('policy-change: the keeper\'s own key is refused', checkChange(signed(body({ paused: true }), keeperK), ctx({ owners: [keeperK.did] })), 'owner: the keeper cannot');
+  refuses('policy-change: someone not in owners', checkChange(signed(body({ paused: true }), strangerId), ctx()), 'owner: ');
+  refuses('policy-change: forged — another key signs, the owner\'s bundle attached', checkChange({ ...signed(body({ paused: true })), sig: sign(strangerId.secret, body({ paused: true })) }, ctx()), 'owner: signature does not verify');
+  const b1 = body({ paused: true });
+  refuses('policy-change: the body altered after signing', checkChange({ ...signed(b1), body: { ...b1, set: { per_tx_max: '9000000000000' } } }, ctx()), 'owner: signature does not verify');
+  refuses('policy-change: a used nonce is a replay', checkChange(signed(b1), ctx({ used: (n) => n === b1['nonce'] })), 'owner: nonce');
+  refuses('policy-change: expired', checkChange(signed(body({ paused: true }, { iat: T - 400, exp: T - 1 })), ctx()), 'owner: not valid at');
+  refuses('policy-change: longer-lived than CHANGE_TTL', checkChange(signed(body({ paused: true }, { exp: T + CHANGE_TTL + 1 })), ctx()), 'owner: lives');
+  refuses('policy-change: another keeper\'s', checkChange(signed(body({ paused: true }, { keeper: strangerId.did })), ctx()), 'owner: keeper is');
+  refuses('policy-change: another network\'s', checkChange(signed(body({ paused: true }, { net: 'mainnet' })), ctx()), 'owner: net is');
+  refuses('policy-change: a field that is setup, not a limit (token_hash)', checkChange(signed(body({ token_hash: tokenHash('x') })), ctx()), 'owner: set: "token_hash"');
+  refuses('policy-change: an envelope with more than { body, sig, bundle }', checkChange({ ...signed(body({ paused: true })), x: 1 }, ctx()), 'owner: the request is');
+  refuses('policy-change: a keeper with no owners refuses every change', checkChange(signed(body({ paused: true })), ctx({ owners: [] })), 'owner: this keeper\'s policy names no owners');
+  {
+    const owner2 = keygen({ recovery: ownerId.genesis.recovery!, seed: seed(0x8b) });
+    const r1 = rotate({ genesis: ownerId.genesis, next_genesis: owner2.genesis, iat: T - 100, reason: 'voluntary', secret: ownerId.secret, next_secret: owner2.secret });
+    accepts('policy-change: a rotated owner signs with its current key (its original DID is the owner)', checkChange(signed(body({ paused: true }), owner2, idBundle(ownerId.genesis, [r1])), ctx()));
+    refuses('policy-change: …never with its rotated-away key', checkChange(signed(body({ paused: true }), ownerId, idBundle(ownerId.genesis, [r1])), ctx()), 'owner: signature does not verify');
+  }
+  const vb = { v: 'sigelo/0', typ: 'owner-view', keeper: keeperK.did, net: NET, nonce: nonce(), iat: T, exp: T + 60 };
+  accepts('owner-view: an owner\'s read is accepted', checkView(signed(vb), ctx()));
+  refuses('owner-view: a change body is not a read', checkView(signed(body({ paused: true })), ctx()), 'owner: body has unknown field');
+  refuses('owner-view: the agent cannot read as owner', checkView(signed(vb, scoutId), ctx({ owners: [scoutId.did] })), 'owner: ');
+  // pure: applying
+  const raw = owned();
+  const off = applyChange(applyChange(raw, 'scout', { paused: true }, NET), 'scout', { paused: false, approval_above: null }, NET);
+  ok('apply: paused false and approval_above null remove the fields', !Object.hasOwn((off['agents'] as Record<string, Raw>)['scout']!, 'paused') && !Object.hasOwn((off['agents'] as Record<string, Raw>)['scout']!, 'approval_above'));
+  const throws = (name: string, f: () => unknown, part: string): void => { try { f(); ok(name, false, 'applied'); } catch (e) { ok(name, (e as Error).message.includes(part), (e as Error).message); } };
+  throws('apply: a change that leaves a policy the keeper refuses is refused, naming it', () => applyChange(raw, 'carol', { approval_above: '5' }, NET), 'needs the agent\'s did and genesis');
+  throws('apply: an allowlist address on another network is refused', () => applyChange(raw, 'scout', { allow: [{ addr: walletFromRoot(seed(0x77), 'x', 'mainnet').address }] }, NET), 'policy net is stagenet');
+  throws('apply: no such agent (a delegate is set by its delegator)', () => applyChange(raw, 'kid', { paused: true }, NET), 'no agent "kid"');
+}
+{
+  // over HTTP: the Owner pauses, the agent is refused before the wallet, the change is logged; resume; raise; read
+  const d = mkdtempSync(join(tmpdir(), 'sigelo-spend-owner-'));
+  const w = await mockWallet({ transfers: { in: [{ subaddr_index: { major: 1, minor: 0 }, amount: 200000000000, txid: 'ab'.repeat(32), timestamp: REAL_NOW - 100, confirmations: 30 }], pool: [] } });
+  const pp = join(d, 'policy.json');
+  writeFileSync(pp, JSON.stringify(g6Raw(`http://127.0.0.1:${w.port}/json_rpc`, { approval_above: null }, { owners: [{ did: ownerId.did }] }), null, 2), { mode: 0o600 });
+  let s = await serve({ policyPath: pp, port: 0 });
+  const pay = (body: unknown): Promise<Api> => api(s.port, '/pay', { method: 'POST', token: ALICE, body });
+  const change = (set: Raw, id: { secret: Uint8Array; genesis: Genesis } = ownerId, agent = 'scout') => {
+    const now = Math.floor(Date.now() / 1000), body = { v: 'sigelo/0', typ: 'policy-change', keeper: s.did, net: NET, agent, set, nonce: randomBytes(16).toString('hex'), iat: now, exp: now + 300 };
+    return { body, sig: sign(id.secret, body), bundle: idBundle(id.genesis) };
+  };
+  const post = (path: string, b: unknown): Promise<Api> => api(s.port, path, { method: 'POST', body: b });
+  const lines = (): Record<string, unknown>[] => readFileSync(join(d, 'spend.log'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+  const pause = change({ paused: true });
+  const r = await post('/policy', pause);
+  ok('POST /policy: an owner\'s pause is applied and answered with the new policy', r.status === 200 && r.body['status'] === 'changed' && r.body['by'] === ownerId.did &&
+    (r.body['policy'] as Raw)['paused'] === true, JSON.stringify(r.body));
+  ok('POST /policy: policy.json is rewritten whole, 0600, with paused', (JSON.parse(readFileSync(pp, 'utf-8')) as { agents: Record<string, Raw> }).agents['scout']!['paused'] === true &&
+    (WIN || (statSync(pp).mode & 0o777) === 0o600));
+  const line = lines().at(-1)! as { entry: Raw; sig: string };
+  ok('POST /policy: a keeper-signed policy line names who, which agent and what', line.entry['kind'] === 'policy' && line.entry['by'] === ownerId.did && line.entry['agent'] === 'scout' &&
+    JSON.stringify(line.entry['set']) === '{"paused":true}' && verifySig(s.key, line.entry, line.sig) && verifySig(ownerId.key, (line.entry['change'] as Raw)['body'] as Raw, String((line.entry['change'] as Raw)['sig'])));
+  const calls = called(w, 'transfer').length;
+  const refused = await pay({ to: { label: 'bob' }, amount: '1000000000', purpose: 'while paused' });
+  ok('pause: /pay is 403 paused at once (no restart), before any wallet call', refused.status === 403 && refused.body['code'] === 'paused' && called(w, 'transfer').length === calls, JSON.stringify(refused.body));
+  ok('pause: GET /health says paused and gives the agent its address (i, 0)', await (async () => { const h = await api(s.port, '/health', { token: ALICE }); return h.body['paused'] === true && h.body['address'] === subaddress({ a: keeperWallet.a, B: keeperWallet.B, major: 1, minor: 0, net: NET }); })());
+  const again = await post('/policy', pause);
+  ok('POST /policy: the same signed change again is a replay, refused', again.status === 403 && again.body['code'] === 'owner' && String(again.body['error']).includes('already used'), JSON.stringify(again.body));
+  const self = await post('/policy', change({ paused: false, per_tx_max: '9000000000000' }, scoutId));
+  ok('POST /policy: the agent\'s own key cannot resume or raise its allowance', self.status === 403 && self.body['code'] === 'owner' && lines().filter((l) => (l['entry'] as Raw)['kind'] === 'policy').length === 1, JSON.stringify(self.body));
+  const stranger = await post('/policy', change({ paused: false }, strangerId));
+  ok('POST /policy: an identity that is not an owner is refused', stranger.status === 403 && String(stranger.body['error']).includes('is not one of this keeper\'s owners'), JSON.stringify(stranger.body));
+  const bad = await post('/policy', change({ per_tx_max: 5 }));
+  ok('POST /policy: a value the policy refuses (a number for atomic units) is refused, file unchanged', bad.status === 403 && String(bad.body['error']).includes('per_tx_max is not a decimal string') &&
+    (JSON.parse(readFileSync(pp, 'utf-8')) as { agents: Record<string, Raw> }).agents['scout']!['per_tx_max'] === '5000000000', JSON.stringify(bad.body));
+  await s.close(); s = await serve({ policyPath: pp, port: 0 });
+  ok('restart: a log with policy lines starts (they are not tree lines) and the pause holds', (await pay({ to: { label: 'bob' }, amount: '1000000000', purpose: 'after restart' })).body['code'] === 'paused');
+  const resume = await post('/policy', change({ paused: false, per_tx_max: '6000000000' }));
+  ok('POST /policy: resume and a raise, by the owner', resume.status === 200 && (resume.body['policy'] as Raw)['paused'] === false && (resume.body['policy'] as Raw)['per_tx_max'] === '6000000000', JSON.stringify(resume.body));
+  const paidNow = await pay({ to: { label: 'bob' }, amount: '5500000000', purpose: 'above the old cap' });
+  ok('resume: the agent pays again, within the raised cap', paidNow.status === 200 && typeof paidNow.body['txid'] === 'string', JSON.stringify(paidNow.body));
+  const view = (id: { secret: Uint8Array; genesis: Genesis } = ownerId) => {
+    const now = Math.floor(Date.now() / 1000), body = { v: 'sigelo/0', typ: 'owner-view', keeper: s.did, net: NET, nonce: randomBytes(16).toString('hex'), iat: now, exp: now + 60 };
+    return { body, sig: sign(id.secret, body), bundle: idBundle(id.genesis) };
+  };
+  const v = await post('/agents', view());
+  const scout = (v.body['agents'] as Raw[] | undefined)?.find((a) => a['name'] === 'scout');
+  ok('POST /agents: the owner reads each agent: its address (i, 0), balance, limits, spent, incoming', v.status === 200 && scout !== undefined &&
+    scout['address'] === subaddress({ a: keeperWallet.a, B: keeperWallet.B, major: 1, minor: 0, net: NET }) && scout['balance'] === '4000000000000' && scout['paused'] === false &&
+    scout['per_tx_max'] === '6000000000' && scout['spent'] === String(5500000000 + 30480000) && (scout['incoming'] as Raw[])[0]?.['amount'] === '200000000000' && (scout['incoming'] as Raw[])[0]?.['status'] === 'received', JSON.stringify(v.body));
+  const vs = await post('/agents', view(scoutId));
+  ok('POST /agents: an agent cannot read as owner', vs.status === 403 && vs.body['code'] === 'owner', JSON.stringify(vs.body));
+  await s.close();
+  // a dry-run keeper refuses changes
+  const dry = await serve({ policyPath: pp, port: 0, dryRun: true });
+  s = dry;
+  ok('POST /policy: a dry-run keeper refuses (dry_run)', (await post('/policy', change({ paused: true }))).body['code'] === 'dry_run');
+  await dry.close(); await w.close();
+  rmSync(d, { recursive: true, force: true });
+}
+{
+  // init --owner writes owners
+  const bad = (() => { try { initKeeper(['--owner', 'not-a-did', '--no-systemd', '--dir', join(tmpdir(), 'x-never'), '--wallet-rpc', 'http://127.0.0.1:1/json_rpc', '--agent-token-file', join(tmpdir(), 'never.tok')]); return ''; } catch (e) { return (e as Error).message; } })();
+  ok('init: --owner that is not a DID is refused', bad.includes('--owner is a did:sigelo:z'), bad);
+}
+
 { // the canary's retry: a wallet-rpc that answers only on its third get_version, then one that never answers
   const { rpcRetry } = await import('./canary.js');
   let calls = 0;

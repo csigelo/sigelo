@@ -3,7 +3,7 @@
 
 Not submitted. This file says what F-Droid needs, what is ready, and what waits for a release
 that ships the app. The recipe is [`fdroid/io.sigelo.app.yml`](fdroid/io.sigelo.app.yml) (route B,
-below); the merge request, ready to open after v0.1.15, is [`fdroid/MR.md`](fdroid/MR.md);
+below); the merge request, ready to open after v0.1.16, is [`fdroid/MR.md`](fdroid/MR.md);
 the store listing is [`app/fastlane/metadata/android/en-US/`](app/fastlane/metadata/android/en-US/).
 `node apps/android/check.mjs` checks both.
 
@@ -122,9 +122,10 @@ MATCH`; Debian 21's unsigned build = CI's (5be2fae4c46f); verdict REPRODUCIBLE, 
 v0.1.12 is reproducible, but its app could not log in to a relay; v0.1.13 is the version to submit.
 v0.1.13, run 41247457205 (2026-10-31, `ref=v0.1.13`): `ref: the published sigelo-0.1.13.apk vs debian-21:
 MATCH`; Debian 21's unsigned build = CI's (d7370697b091); verdict REPRODUCIBLE, the recipe as written,
-`commit:` e747ebc (the v0.1.13 tag). Its merge request was never opened, nor v0.1.14's (0.1.14 / 6). v0.1.15 is the
-version to submit: the recipe names 0.1.15 / 7; its `commit:` (still e747ebc, v0.1.13's) becomes the full commit hash of
-the `v0.1.15` tag at the sync, and the merge request opens after its compare run (fdroid/MR.md).
+`commit:` e747ebc (the v0.1.13 tag). Its merge request was never opened, nor v0.1.14's (0.1.14 / 6) or v0.1.15's
+(0.1.15 / 7, `commit:` 6c89b30, the v0.1.15 tag). v0.1.16 is the version to submit: the recipe names 0.1.16 / 8; its
+`commit:` (still 6c89b30, v0.1.15's) becomes the full commit hash of the `v0.1.16` tag at the sync, and the merge request
+opens after its compare run (fdroid/MR.md).
 
 ## Steps and who acts
 

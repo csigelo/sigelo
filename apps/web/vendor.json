@@ -179,7 +179,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "d3b44b6b10e4c312d8a576d31588c1a2c4ec7d824e460ca51176e1bf02ab193c"
+   "sha256": "3208573cbb78769c4dac871b99a7776f3a6a1d67d836294a18d3c4f1dc101f95"
   },
   "vendor/contact/photo.mjs": {
    "from": "apps/contact/photo.mjs",
@@ -251,7 +251,7 @@
   },
   "vendor/package.json": {
    "from": "apps/agent/package.json",
-   "sha256": "401df0685a47b5740f12b6e43fa9e058c125a8031477ba0a61b135506df3f70b"
+   "sha256": "281b4f8daa0fc831786587bd59038235b660b2689240399108b3a24f509da5e2"
   },
   "vendor/remote-client.mjs": {
    "from": "apps/agent/remote-client.mjs",
@@ -287,7 +287,7 @@
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "03dc0f7eac4e978ac32c39c3dbe9f6826c1fe2f033dbeb21f0dbfa0a29515c8e"
+   "sha256": "8f12f5bf31a9efc22341874bd273672ddfbedf13348f1fab061e04378a790f22"
   }
  }
 }

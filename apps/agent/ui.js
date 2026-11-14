@@ -1704,7 +1704,10 @@
   };
   /** Where the limits are when this page cannot set them: said once, plainly (the keeper's state). */
   function keeperAway(K) {
-    if (K?.state === 'elsewhere') return h('div', { class: 'card' }, h('p', null, 'Set this on the computer that runs the keeper.'), h('p', { class: 'help' }, 'Allowances and limits live with the keeper (sigelo-spend), not in this app.'));
+    // Where it runs (design/agent-wallet-page.md §4): the computer this profile is paired to, or how to pair one.
+    const where = K?.via?.computer ? h('p', { class: 'help', 'data-keeper-via': '' }, `Its keeper runs on ${K.via.computer}.${K.via.error ? ` ${K.via.error}` : ''}`)
+      : K?.via === null ? h('p', { class: 'help', 'data-keeper-via': '' }, 'Pair the computer that runs the keeper: Me → Devices and computers.') : null;
+    if (K?.state === 'elsewhere') return h('div', { class: 'card' }, h('p', null, 'Set this on the computer that runs the keeper.'), h('p', { class: 'help' }, 'Allowances and limits live with the keeper (sigelo-spend), not in this app.'), where);
     if (K?.state === 'none') return h('div', { class: 'card' }, h('p', null, 'No keeper on this computer.'), h('p', { class: 'help' }, 'Set allowances on the computer that runs the keeper (sigelo-spend).'));
     if (K?.state === 'unreadable') return h('div', { class: 'card warn' }, h('p', null, 'This page can\'t read the keeper here.'), h('p', { class: 'help' }, K.detail));
     if (K?.state === 'error') return h('div', { class: 'card warn' }, inlineError(K.error));
@@ -1714,6 +1717,10 @@
   function activityOf(w) {
     const c = w.contact ? contactBy(w.contact) : null, out = [];
     for (const r of requestsOf(w.worker)) out.push({ at: r.iat, title: `Asked to pay ${xmr(r.amount)} XMR`, sub: `${r.purpose || 'no reason given'} · waiting for you`, go: () => go('approve', { keeper: r.keeper, nonce: r.nonce }) });
+    // Money sent to its address (the keeper's owner view: its account's transfers in).
+    for (const t of (walletOn() ? policyOf(w.worker)?.incoming : null) ?? []) {
+      out.push({ at: t.ts, title: `Received ${xmr(t.amount)} XMR`, sub: t.status === 'pool' ? 'Arriving: not in a block yet' : t.status === 'locked' ? 'In its account, locked for about 20 minutes' : 'In its account' });
+    }
     if (c?.last) out.push({ at: c.last.at, title: c.last.dir === 'out' ? 'You wrote to it' : 'Messaged you', sub: c.last.text, go: () => go('chat', c.did) });
     const seen = w.online ? null : w.last_seen ?? c?.last_seen ?? null;
     if (seen) out.push({ at: seen, title: 'Last seen online', sub: ago(seen) });
@@ -1854,6 +1861,20 @@
       put(foot, btn('Done', () => home('agents'), { kind: 'pri' }), c ? btn(`Message ${name}`, () => swap('chat', c), { kind: 'ghost' }) : null);
     };
   });
+  /** An agent's address (i, 0): QR, the address, Copy; what its account holds. None yet: why. */
+  function agentAddress(a, w) {
+    if (!a.address) return h('div', { class: 'card', 'data-agent-address': '' }, h('p', null, `${w.name}'s address shows once its keeper answers.`),
+      h('p', { class: 'help' }, 'The keeper gives it to you as its owner: save its limits here once, with the keeper running.'));
+    return h('div', { class: 'card stack', 'data-agent-address': a.address }, qrBox(`monero:${a.address}`), h('p', { class: 'mono' }, a.address),
+      a.balance !== undefined ? h('p', null, h('b', null, `${xmr(a.balance)} XMR`), ` in its account · ${xmr(a.remaining)} left ${periodWord(a.period_seconds)}`) : null,
+      h('div', { class: 'btns' }, btn('Copy', () => copy(a.address))),
+      h('p', { class: 'help' }, 'Send Monero here from any wallet: it is this agent\'s to spend within its limits.'));
+  }
+  /** Pause at once (braking is never asked); Resume with one confirmation tap. Signed by you where the keeper takes it. */
+  async function setPaused(a, w, on) {
+    if (!on && !(await ask({ title: `Resume ${w.name}?`, text: `It can pay again, within its limits. You sign this with your key.`, yes: `Resume ${w.name}`, danger: false }))) return;
+    await act(() => backend.call('POST', '/api/keeper/agent', { keeper: a.keeper, agent: a.name, paused: on }), async () => { toast(on ? `${w.name} paused` : `${w.name} resumed`); S.keeperAt = 0; await keeperNow(true); });
+  }
   screen('agent', {}, (i) => {
     S.keeperAt = 0;   // a screen opened reads the keeper afresh
     const body = h('div'), title = h('h1', null, 'Agent'), acts = h('span');
@@ -1872,13 +1893,22 @@
       };
       const status = w.status === 'revoked' ? h('span', { class: 'warn' }, 'Revoked') : w.status === 'pending' ? 'Not finished'
         : w.online ? h('span', { class: 'ok' }, '● Online') : w.last_seen ? `Last seen ${ago(w.last_seen)}` : 'Enrolled';
-      // The allowance (Wallet on): this computer's keeper, else where it is set; the wallet's sync state with it (Decided).
-      let allowance = null;
-      if (walletOn() && w.status === 'enrolled') {
+      // The address and the allowance (Wallet on; design/agent-wallet-page.md): its account's (i, 0), to fund it from any
+      // wallet; its limits, Pause and Resume. Wallet off: one card to turn it on. Else where the keeper is.
+      let address = null, allowance = null;
+      if (w.status === 'enrolled' && !walletOn()) {
+        allowance = [sec('Allowance'), h('div', { class: 'card', 'data-wallet-off': '' }, h('p', null, `Turn on Wallet to see ${w.name}'s address and set its allowance.`),
+          h('div', { class: 'btns' }, btn('Turn on Wallet', () => go('set-wallet'), { kind: 'pri' })))];
+      } else if (w.status === 'enrolled') {
         const a = policyOf(i), K = S.keeper, sw = syncWords();
-        allowance = [sec('Allowance'), a ? h('button', { type: 'button', class: 'card tap', 'data-allowance': '', onclick: () => go('agent-allowance', i) },
+        address = a ? [sec('Address'), agentAddress(a, w)] : null;
+        allowance = [sec('Allowance'), a ? h('div', { class: `card${a.paused ? ' warn' : ''}`, 'data-allowance-card': '' },
+          a.paused ? h('p', { 'data-paused': '' }, h('b', null, 'Paused'), `: ${w.name} can't pay anyone. Its limits stay as they were.`) : null,
           h('p', null, h('b', null, `${xmr(a.spent)} of ${xmr(a.per_period_max)} XMR`), ` ${periodWord(a.period_seconds)}`), meter(a.spent, a.per_period_max),
-          h('p', { class: 'help' }, `${asksText(a)} · Change`), sw ? h('p', { class: `help${synced() ? '' : ' stale'}`, 'data-sync': walletReady()?.sync?.state }, sw) : null)
+          h('p', { class: 'help' }, `${asksText(a)} · up to ${xmr(a.per_tx_max)} XMR a payment · pays ${a.allow.length === 0 ? 'no one yet' : a.allow.length === 1 ? '1 payee' : `${a.allow.length} payees`}`),
+          sw ? h('p', { class: `help${synced() ? '' : ' stale'}`, 'data-sync': walletReady()?.sync?.state }, sw) : null,
+          h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn pri', 'data-allowance': '', onclick: () => go('agent-allowance', i) }, 'Change limits'),
+            btn(a.paused ? 'Resume' : 'Pause', () => setPaused(a, w, !a.paused))))
           : keeperHere() ? h('div', { class: 'card' }, h('p', null, `${w.name} has no allowance in this computer's keeper.`), h('p', { class: 'help' }, `Give it one there with sigelo-spend: an agent entry with its own account and token, its did ${w.original}.`))
             : keeperAway(K)];
       }
@@ -1886,7 +1916,7 @@
       put(body, noteCard(),
         h('div', { class: 'pad' }, h('div', { class: 'row' }, c ? picButton('agent', w.name, c.did, `Picture for ${w.name}`) : avatar('agent', w.name, 'lg'), h('span', { class: 'mid' }, h('h3', null, w.name), h('p', { class: 'lead' }, status, ` · ${WHERE[w.placed] ?? w.placed}`)))),
         w.status === 'pending' && w.enrolling ? h('div', { class: 'card' }, h('p', null, 'It has not used its code yet.'), h('div', { class: 'btns' }, btn('Show the code', () => go('enrol', { id: w.enrolling.id }), { kind: 'pri' }))) : null,
-        allowance,
+        address, allowance,
         w.status !== 'revoked' && acts_.length ? [sec('Last activity'), list(acts_.map((x) => row({ compact: true, title: x.title, sub: x.sub, end: when(x.at), onclick: x.go })))] : null,
         c && w.status !== 'revoked' ? [sec('What it may do'),
           radios('What it may do', c.tier === 'friend' ? [...TRUST, ['friend', 'Just a count', 'A notice, read when you open the chat']] : TRUST, c.tier, (t) => act(() => backend.call('POST', '/api/tier', { contact: c.did, tier: t }))),
@@ -1904,9 +1934,9 @@
     };
   });
 
-  // An agent's allowance and limits (notes.md "Decided": the four common ones first, then Advanced), written to the keeper's
-  // policy on this computer (POST /api/keeper/agent); the keeper takes them at its next start (Restart the keeper).
-  // Validation on leaving a field and on Save, the message under the field; Save is never disabled.
+  // An agent's allowance and limits (notes.md "Decided": the four common ones first, then Advanced), set at the keeper
+  // (POST /api/keeper/agent): a change signed by you where the keeper takes it, else its policy file. Validation on leaving a
+  // field and on Save, the message under the field; Save is never disabled; Save asks one confirmation tap (Owner 2026-11-14).
   screen('agent-allowance', {}, (i) => {
     S.keeperAt = 0;   // a screen opened reads the keeper afresh
     const body = h('div'), foot = h('div'), title = h('h1', null, 'Allowance'), say = h('div');
@@ -1984,6 +2014,9 @@
       const next = { per_tx_max: atomicOf(B.perTx.el.value), per_period_max: atomicOf(B.perPeriod.el.value), period_seconds: Number(B.period.value),
         approval_above: B.asks.el.value.trim() === '' ? null : atomicOf(B.asks.el.value), rate_per_minute: Number(B.rate.el.value), max_delegates: Number(B.dele.el.value),
         allow: F.rules.map(({ kind, ...r }) => Object.fromEntries(Object.entries(kind === 'addr' ? { addr: r.addr, label: r.label ?? undefined } : { did: r.did ?? undefined, issuer: r.issuer, ctx: r.ctx ?? undefined }).filter(([, v]) => v !== undefined && v !== null))) };
+      const yes = await ask({ title: `Save ${a.name}'s limits?`, text: `Up to ${xmr(next.per_tx_max)} XMR a payment, ${xmr(next.per_period_max)} XMR ${periodWord(next.period_seconds)}; ${next.approval_above === null ? 'never asks you' : `asks you above ${xmr(next.approval_above)} XMR`}; pays ${next.allow.length === 1 ? '1 payee' : `${next.allow.length} payees`}.`,
+        yes: 'Save limits', danger: false });
+      if (!yes) return;
       F.busy = true; put(say); await refresh();
       try { F.saved = await backend.call('POST', '/api/keeper/agent', { keeper: k.id, agent: a.name, ...next }); toast('Saved'); } catch (e) { put(say, inlineError(e)); }
       F.busy = false; S.keeperAt = 0; await keeperNow(true); await refresh();
@@ -2005,8 +2038,9 @@
       // only then the Restart (live false), or both said when the page can't tell (live null: a keeper run by hand).
       const r = F.saved?.restart, live = F.saved?.live;
       put(body, h('div', { class: 'pad stack' }, noteCard(), B.nodes, warnAsk,
+        a.paused ? h('div', { class: 'card warn', 'data-paused': '' }, h('p', null, h('b', null, 'Paused'), `: ${w.name} can't pay anyone.`), h('div', { class: 'btns' }, btn('Resume', () => setPaused(a, w, false)))) : null,
         F.saved ? h('div', { class: 'card soft', 'data-saved': '' }, h('p', null, h('b', null, 'Saved.'),
-          live === true ? ' The keeper uses it from its next payment.' : live === false ? ' This keeper is from before 0.1.15: it uses it after a restart.' : ' A keeper from 0.1.15 uses it from its next payment; an older one after a restart.'),
+          F.saved.signed === true ? ' Signed by you; the keeper checked it and uses it from its next payment.' : live === true ? ' The keeper uses it from its next payment.' : live === false ? ' This keeper is from before 0.1.15: it uses it after a restart.' : ' A keeper from 0.1.15 uses it from its next payment; an older one after a restart.'),
           live === true ? null : r?.can ? h('div', { class: 'btns' }, btn('Restart the keeper', () => act(() => backend.call('POST', '/api/keeper/restart', { keeper: k.id }), () => { F.saved = null; toast('Keeper restarted'); }), { kind: live === false ? 'pri' : '' }))
             : h('p', { class: 'help mono' }, r?.command ?? '')) : null, say));
       put(foot, btn(F.busy ? 'Saving…' : 'Save', () => save(a, k), { kind: 'pri' }));

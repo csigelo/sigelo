@@ -52,7 +52,7 @@ import { devicePage, type DevicePage } from './sigelo-agent-device.ts';
 import { agentsDirFor, busyText, contactDir, contactLib, contactModule, humanPath, insideAgents, operatorFile, lockHolder, lockPath, safeJson, safeText, unreadable, type LinkLib } from './sigelo-agent-contact.ts';
 import type { GroupLib } from './sigelo-agent-group.ts';
 import * as spend from './sigelo-agent-spend.ts';
-import { makeWallet, CURRENCIES, type WalletData } from './sigelo-agent-wallet.ts';
+import { makeWallet, rpc as walletRpc, CURRENCIES, type WalletData } from './sigelo-agent-wallet.ts';
 
 export const OPERATOR_CTX = 'sigelo-relay/operator';
 const DAY = 86400, OPERATOR_DAYS = 90, RENEW_DAYS = 14, BODY_MAX = 256 * 1024;
@@ -463,9 +463,29 @@ export async function startUi(o: UiOptions): Promise<Ui> {
     const x = ws.find((y) => y.did !== undefined && (y.did === a?.did || y.name === name));
     return x?.bundle ? (x.bundle as { genesis: Genesis }).genesis : null;
   };
+  // This identity as the keeper's owner signs (POST /policy, POST /agents): its current key, its bundle.
+  const signerOf = (): spend.Signer => { const m = me(); return { did: m.did, chain: m.chain, sign: (body) => signer(path, m.store).sign(body), bundle: id.bundleOf(m.store) }; };
+  const walletOn = (): boolean => settingsOf()['wallet'] === true;
   Object.assign(routes, {
-    'GET /api/keeper': async () => spend.view(spend.findKeepers(), await workerRows(), { did: me().did }, refusedNow()),
-    'POST /api/keeper/agent': (b: Record<string, unknown>) => serial(async () => { const k = keeperOf(b); return spend.setAgent(k, b['agent'], b, genesisOf(k)); }),
+    // The agents' limits from the files, then (Wallet on) what the keeper says as this identity's owner view: each
+    // agent's address (i, 0), balance and incoming money; not an owner yet: the address from the keeper's wallet.
+    'GET /api/keeper': async () => {
+      const found = spend.findKeepers(), m = me(), v = spend.view(found, await workerRows(), { did: m.did, chain: m.chain }, refusedNow()) as Record<string, unknown>;
+      if (found.state !== 'here' || !walletOn()) return v;
+      for (const k of found.keepers) {
+        const ov = await spend.ownerView(k, signerOf());
+        if (ov) { spend.mergeView(v, k, ov); continue; }
+        const w = (typeof k.policy['wallet'] === 'object' && k.policy['wallet'] !== null ? k.policy['wallet'] : {}) as Record<string, unknown>;
+        if (typeof w['rpc'] !== 'string') continue;
+        for (const a of (v['agents'] as Record<string, unknown>[]).filter((x) => x['keeper'] === k.id)) {
+          try { const r = await walletRpc(w['rpc'] as string, typeof w['login'] === 'string' ? w['login'] : undefined, 'get_address', { account_index: a['account'], address_index: [0] }, 6000); if (typeof r['address'] === 'string') a['address'] = r['address']; } catch { break; }
+        }
+      }
+      return v;
+    },
+    'POST /api/keeper/agent': (b: Record<string, unknown>) => serial(async () => { const k = keeperOf(b); return spend.saveAgent(k, b['agent'], b, genesisOf(k), signerOf()); }),
+    // A change another device of this operator signed (a phone with its own identity): carried to the keeper as it is.
+    'POST /api/keeper/policy': (b: Record<string, unknown>) => serial(async () => spend.relayPolicy(keeperOf(b), b['change'])),
     'POST /api/keeper/approvers': (b: Record<string, unknown>) => serial(async () => {
       const k = keeperOf(b), mine = me().did, list = Array.isArray(k.policy['approvers']) ? (k.policy['approvers'] as { did: string }[]).map((a) => a.did) : [];
       // {me: true|false}: this identity in or out; {approvers: [...]}: the whole list.

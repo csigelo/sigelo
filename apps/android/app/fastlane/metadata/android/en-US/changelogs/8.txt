@@ -1,0 +1,4 @@
+No blue bar at the top: the app's own bar is the top. Back up a profile to an encrypted file and restore it, same keys, no re-pairing.
+An agent's page shows its address and its limits: pause, resume or change them.
+A new proof of work when logging in a new or restored identity: update to log in.
+Big files and a camera in every chat.

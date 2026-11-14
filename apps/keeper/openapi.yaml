@@ -7,7 +7,7 @@ openapi: 3.1.0
 # dialect), so a sigelo bundle or §6.3 invoice here is exactly the SPEC object.
 info:
   title: sigelo-spend keeper
-  version: 0.1.15
+  version: 0.1.16
   summary: The bounded-spending keeper (MONERO.md §4) — loopback HTTP, one agent per bearer token.
   license: { name: MIT, identifier: MIT }
   description: |
@@ -67,8 +67,141 @@ tags:
     description: MONERO.md §4.1 step 8 — the second signature above `approval_above`.
   - name: read
     description: The caller's own budget, log and health.
+  - name: owner
+    description: The Owner's signed change of an agent's limits (pause included) and signed read of every agent; no token.
 
 paths:
+  /policy:
+    post:
+      tags: [owner]
+      operationId: policyChange
+      summary: One agent's limits changed by an owner, checked, applied to policy.json and logged.
+      description: |
+        No bearer token: the owner's signature over `body` (`typ: policy-change`), its bundle
+        (verified offline, a DID of its chain in the policy's `owners`) and an unused nonce are the
+        authorisation (apps/keeper/policychange.ts). An agent's DID, an agent's key under any DID,
+        a delegate's and the keeper's own are refused: an agent cannot raise its own allowance.
+        The change is applied to policy.json as it is on disk, validated whole as at start, written
+        0600, logged as a keeper-signed `policy` line (who, which agent, `set`, the signed change),
+        and in use from the next request. `null` approval_above and `false` paused remove the field.
+        In the lane, with `/approve` and `/refuse` (at most 4 token-less requests).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body, sig, bundle]
+              additionalProperties: false
+              properties:
+                body: { $ref: '#/components/schemas/PolicyChange' }
+                sig: { $ref: '../../schema/common.json#/$defs/signature', description: "The owner's current identity key over \"sigelo\\n\" ‖ JCS(body)." }
+                bundle: { $ref: '../../schema/bundle.json', description: "The owner's own bundle." }
+      responses:
+        '200':
+          description: Changed; a keeper-signed `policy` line was written and policy.json replaced.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, agent, by, nonce, policy]
+                properties:
+                  status: { const: changed }
+                  agent: { type: string }
+                  by: { $ref: '../../schema/common.json#/$defs/did' }
+                  nonce: { type: string }
+                  policy: { $ref: '#/components/schemas/Limits' }
+        '400':
+          description: 'The body is not strict JSON (`code: request`) or its stream broke (`code: body`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 'Refused, `code: owner`: shape, keeper/net, time (`exp − iat` ≤ 600), bundle, not an owner, an agent''s or the keeper''s key, signature, a used nonce, a field that is not a limit, or a result the policy refuses (named). `dry_run` on a --dry-run keeper.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '408': { $ref: '#/components/responses/BodyTimeout' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '500': { $ref: '#/components/responses/LogFailed' }
+        '503': { $ref: '#/components/responses/ClockBehind' }
+
+  /agents:
+    post:
+      tags: [owner]
+      operationId: ownerView
+      summary: Every agent of policy.json, for an owner — limits, spent, address (i, 0), balance, incoming.
+      description: |
+        No bearer token: an owner's signature over `body` (`typ: owner-view`, `exp − iat` ≤ 600),
+        checked before any wallet call. Read-only, outside the lane; not single use. A wallet that
+        does not answer leaves the limits and adds `wallet_error`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body, sig, bundle]
+              additionalProperties: false
+              properties:
+                body: { $ref: '#/components/schemas/OwnerView' }
+                sig: { $ref: '../../schema/common.json#/$defs/signature' }
+                bundle: { $ref: '../../schema/bundle.json' }
+      responses:
+        '200':
+          description: The agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keeper, net, owner, owners, agents]
+                properties:
+                  keeper: { $ref: '../../schema/common.json#/$defs/did' }
+                  net: { $ref: '#/components/schemas/Net' }
+                  owner: { $ref: '../../schema/common.json#/$defs/did' }
+                  owners: { type: array, items: { $ref: '../../schema/common.json#/$defs/did' } }
+                  wallet_error: { type: string }
+                  agents:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Limits'
+                        - type: object
+                          required: [name, account, spent, remaining, window_start]
+                          properties:
+                            name: { type: string }
+                            account: { $ref: '#/components/schemas/AccountIndex' }
+                            did: { $ref: '../../schema/common.json#/$defs/did' }
+                            address: { type: string, description: 'The account''s first address (i, 0): the one Top up pays and `/bind` binds.' }
+                            balance: { $ref: '#/components/schemas/Atomic' }
+                            unlocked_balance: { $ref: '#/components/schemas/Atomic' }
+                            spent: { $ref: '#/components/schemas/Atomic' }
+                            remaining: { $ref: '#/components/schemas/Atomic' }
+                            window_start: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+                            incoming:
+                              type: array
+                              description: The account's incoming transfers, newest first, at most 10.
+                              items:
+                                type: object
+                                properties:
+                                  ts: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+                                  amount: { $ref: '#/components/schemas/Atomic' }
+                                  txid: { type: string }
+                                  status: { enum: [received, locked, pool] }
+                                  index: { type: integer, minimum: 0 }
+        '400':
+          description: 'The body is not strict JSON (`code: request`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 'Refused, `code: owner` (as `/policy`, without the nonce and the change checks).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /pay:
     post:
       tags: [agent]
@@ -261,6 +394,7 @@ paths:
                     properties:
                       agent: { type: string }
                       account: { $ref: '#/components/schemas/AccountIndex' }
+                      address: { type: string, description: 'The account''s first address (i, 0): the agent''s own, stable, to fund it from any wallet; absent when the wallet does not answer `get_address`.' }
                       balance: { $ref: '#/components/schemas/Atomic' }
                       unlocked_balance: { $ref: '#/components/schemas/Atomic' }
                       blocks_to_unlock: { type: integer, minimum: 0 }
@@ -665,8 +799,10 @@ paths:
                   height: { type: integer, minimum: 0 }
                   agent: { type: string }
                   account: { $ref: '#/components/schemas/AccountIndex' }
+                  address: { type: string, description: 'The account''s first address (i, 0).' }
                   balance: { $ref: '#/components/schemas/Atomic' }
                   unlocked_balance: { $ref: '#/components/schemas/Atomic' }
+                  paused: { const: true, description: 'Present when the Owner paused this agent: every /pay is refused `paused`.' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '502':
           description: 'The wallet did not answer, or answered without a height or a balance (`code: wallet`). The keeper''s own facts are still given.'
@@ -773,7 +909,8 @@ components:
             code produces: token, bucket, request, purpose, ref, to, to.addr, to.did, allowlist,
             invoice, amount, per_tx_max, per_period_max, rate_per_minute, repeat, approval,
             relay_failed, wallet, wallet_locked, wallet_funds, wallet_offline, wallet_slow, log, body, route, bind, delegate,
-            fund, revoke, dry_run, licence_required (403: a paid verb on a keeper without a valid
+            fund, revoke, dry_run, paused (403: the Owner paused this agent), owner (403: a refused
+            POST /policy or /agents), licence_required (403: a paid verb on a keeper without a valid
             licence), clock_behind (503), busy (503: the lane is full), origin (403: a foreign
             Host or an Origin header), internal (the catch-all 500), service (a
             reason with no prefix). Not closed: new checks add values.
@@ -969,6 +1106,59 @@ components:
             ref: { type: string }
             pending: { $ref: '#/components/schemas/Receipt', description: The keeper-signed pending line. }
             approval_request: { $ref: '#/components/schemas/SpendApproval', description: The pending line's request (present whenever the line carries one). }
+    PolicyChange:
+      type: object
+      description: The keeper-local policy change (apps/keeper/policychange.ts; not a SPEC object). Signed by an owner; single use by `nonce`.
+      required: [v, typ, keeper, net, agent, set, nonce, iat, exp]
+      additionalProperties: false
+      properties:
+        v: { const: sigelo/0 }
+        typ: { const: policy-change }
+        keeper: { $ref: '../../schema/common.json#/$defs/did' }
+        net: { $ref: '#/components/schemas/Net' }
+        agent: { type: string, description: The agent's name in policy.json (a root). }
+        set:
+          type: object
+          minProperties: 1
+          additionalProperties: false
+          properties:
+            per_tx_max: { $ref: '#/components/schemas/Atomic' }
+            per_period_max: { $ref: '#/components/schemas/Atomic' }
+            period_seconds: { type: integer, minimum: 1 }
+            rate_per_minute: { type: integer, minimum: 1 }
+            approval_above: { oneOf: [{ $ref: '#/components/schemas/Atomic' }, { type: 'null' }] }
+            max_delegates: { type: integer, minimum: 0 }
+            allow: { type: array, items: { $ref: '#/components/schemas/AllowRule' } }
+            paused: { type: boolean }
+        nonce: { type: string, pattern: '^[0-9a-f]{32}$' }
+        iat: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+        exp: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+    OwnerView:
+      type: object
+      description: An owner's signed read (`POST /agents`).
+      required: [v, typ, keeper, net, nonce, iat, exp]
+      additionalProperties: false
+      properties:
+        v: { const: sigelo/0 }
+        typ: { const: owner-view }
+        keeper: { $ref: '../../schema/common.json#/$defs/did' }
+        net: { $ref: '#/components/schemas/Net' }
+        nonce: { type: string, pattern: '^[0-9a-f]{32}$' }
+        iat: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+        exp: { $ref: '../../schema/common.json#/$defs/unixSeconds' }
+    Limits:
+      type: object
+      description: One agent's limits as an owner sets them.
+      required: [per_tx_max, per_period_max, period_seconds, rate_per_minute, approval_above, max_delegates, allow, paused]
+      properties:
+        per_tx_max: { $ref: '#/components/schemas/Atomic' }
+        per_period_max: { $ref: '#/components/schemas/Atomic' }
+        period_seconds: { type: integer, minimum: 1 }
+        rate_per_minute: { type: integer, minimum: 1 }
+        approval_above: { oneOf: [{ $ref: '#/components/schemas/Atomic' }, { type: 'null' }] }
+        max_delegates: { type: integer, minimum: 0 }
+        allow: { type: array, items: { $ref: '#/components/schemas/AllowRule' } }
+        paused: { type: boolean }
     SpendApproval:
       type: object
       description: The keeper-local spend-approval body (apps/keeper/approval.ts; not a SPEC object, no bundle slot accepts it). The approver signs exactly the body the 202 handed out.

@@ -16,7 +16,7 @@ the keeper's four wallet verbs, with no key in the agent.
    ```sh
    printf 'y\n' | hermes mcp add sigelo --command npx \
      --env SIGELO_IDENTITY="$HOME/.hermes/sigelo.local.json" SIGELO_WALLET_URL=… SIGELO_WALLET_TOKEN=… \
-     --args -y sigelo-mcp@0.1.15
+     --args -y sigelo-mcp@0.1.16
    ```
    One `--env` takes all pairs (a second replaces the first); `--args` last takes the rest. The
    `y` enables all tools; without it: `Cancelled.`, nothing saved, exit 0.

@@ -42,6 +42,10 @@
 // derived from K (enrol.mjs `verified`) is words-checked here at once; the words stay to see, and the
 // optional switch (`confirm_words`) holds the key until "They match" (POST /api/agents/enrol-words).
 //
+// Keeper (UI-API.md "Keeper"): hooks.computer, where this profile is paired to a computer that runs the keeper:
+// { name() → its name, call(method, path, body?) → { status, body } }. /api/keeper* go there; a limit is a
+// policy-change signed here with this identity (the computer relays it, POST /api/keeper/policy). None: elsewhere.
+//
 // Transfers (apps/agent/TRANSFER.md, design/transfer.md §10): hooks.transfers, where the host moves big
 // files ({ lib, identity, make(carrier, onEvent, { compared }) → its Engine; lib: transfer-node.mjs on a
 // computer (a file by its path), transfer-web.mjs's in the phone app (a file picked: doc), which also gives
@@ -122,6 +126,8 @@ const DAY = 86400, TAG_MAX = 20, NAME_MAX = 64, TEXT_MAX = 100_000;
 const AGENT_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const goodRelay = (h) => { try { checkRelay(h); return true; } catch { return false; } };
 const nowS = () => Math.floor(Date.now() / 1000);
+/** The limits a policy-change sets (apps/keeper/policychange.ts SETTABLE). */
+const KEEPER_FIELDS = ['per_tx_max', 'per_period_max', 'period_seconds', 'rate_per_minute', 'approval_above', 'max_delegates', 'allow', 'paused'];
 const hexOf = (n) => bytesToHex(randomBytes(n));
 // A short change mark of a string (FNV-1a, 32 bits): not a check of anything, only "something changed".
 const hashOf = (t) => { let x = 0x811c9dc5; for (let i = 0; i < t.length; i++) { x ^= t.charCodeAt(i); x = Math.imul(x, 0x01000193) >>> 0; } return x.toString(36); };
@@ -465,6 +471,15 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
 
   // ---- agents: the operator's workers (keeper `workers`), enrolled by a one-time code from this page
   const K = hooks.keeper ?? null;
+  // The computer this profile is paired to, for the keeper (design/agent-wallet-page.md §4): { name() → its name,
+  // call(method, path, body?) → { status, body } } (its page over the control, scope all), or none.
+  const PC = hooks.computer ?? null;
+  const viaPc = async (method, path, body) => {
+    let r;
+    try { r = await PC.call(method, path, body); } catch (e) { return refuse(409, 'keeper_computer', `${PC.name()} isn't answering (${e?.message ?? 'no answer'}). Its keeper is set there.`); }
+    if (r.status !== 200) return refuse(r.status, r.body?.error?.check ?? 'keeper_computer', r.body?.error?.message ?? `${PC.name()} answered ${r.status}`);
+    return r.body;
+  };
   const pend = (fn) => E.pending(enrolFile, nowS(), fn, carrier.platform);
   const LIVE = new Set(['code', 'words', 'sending']);
   function enrolHidden(x) {
@@ -990,9 +1005,27 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       return { did: c.did, kind: kindOf(c, null, rosterAgents()).kind, kind_set: k !== null };
     }),
     // The keeper's settings and payment requests (UI-API.md "Keeper"): `sigelo-agent ui` answers them where the
-    // keeper runs; here (and on any host without one) they are on the computer that runs it.
-    'GET /api/keeper': () => ({ state: 'elsewhere' }),
-    ...Object.fromEntries(['agent', 'approvers', 'approve', 'refuse', 'restart'].map((r) => [`POST /api/keeper/${r}`, () => refuse(409, 'keeper_elsewhere', 'Set this on the computer that runs the keeper.')])),
+    // keeper runs. Here, with hooks.computer (a computer of this operator paired to this profile, scope all;
+    // design/agent-wallet-page.md §4), they go to that computer, and a limit is changed by a policy-change this
+    // page signs with its own identity: the computer carries it to its keeper and cannot alter it. Without one:
+    // elsewhere, and the writes are refused keeper_elsewhere.
+    'GET /api/keeper': async () => {
+      if (!PC) return { state: 'elsewhere', via: null };
+      try { return { ...(await viaPc('GET', '/api/keeper')), via: { computer: PC.name() } }; } catch (e) { return { state: 'elsewhere', via: { computer: PC.name(), error: e.message } }; }
+    },
+    'POST /api/keeper/agent': async (b) => {
+      if (!PC) return refuse(409, 'keeper_elsewhere', 'Set this on the computer that runs the keeper.');
+      const v = await viaPc('GET', '/api/keeper'), ks = Array.isArray(v.keepers) ? v.keepers : [];
+      const k = ks.find((x) => x.id === b['keeper']) ?? (b['keeper'] === undefined && ks.length === 1 ? ks[0] : null) ?? refuse(404, 'keeper_unknown', `no keeper ${JSON.stringify(b['keeper'])} on ${PC.name()}`);
+      if (typeof b['agent'] !== 'string') refuse(400, 'body', 'agent: its name in the keeper');
+      const set = Object.fromEntries(KEEPER_FIELDS.filter((f) => b[f] !== undefined).map((f) => [f, b[f]]));
+      if (Object.keys(set).length === 0) refuse(400, 'body', `one of ${KEEPER_FIELDS.join(', ')}`);
+      const t = nowS(), body = { v: 'sigelo/0', typ: 'policy-change', keeper: k.did, net: k.net, agent: b['agent'], set, nonce: hexOf(16), iat: t, exp: t + 300 };
+      const idn = carrier.identity();
+      return viaPc('POST', '/api/keeper/policy', { keeper: k.id, change: { body, sig: signAs(idn, body), bundle: idn.bundle } });
+    },
+    ...Object.fromEntries(['approvers', 'approve', 'refuse', 'restart'].map((r) => [`POST /api/keeper/${r}`, (b) => (PC ? viaPc('POST', `/api/keeper/${r}`, b) : refuse(409, 'keeper_elsewhere', 'Set this on the computer that runs the keeper.'))])),
+    'POST /api/keeper/policy': (b) => (PC ? viaPc('POST', '/api/keeper/policy', b) : refuse(409, 'keeper_elsewhere', 'Set this on the computer that runs the keeper.')),
     // The wallet (UI-API.md "Wallet"): none in this page; `sigelo-agent ui` answers these with the computer's.
     'GET /api/wallet': () => ({ on: data.settings.wallet === true, where: 'none' }),
     'GET /api/price': () => ({ on: false, currency: walletSet().currency }),

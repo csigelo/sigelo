@@ -149,6 +149,76 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       && (k2.requests as { nonce: string }[]).every((x) => x.nonce !== 'ef'.repeat(16)), JSON.stringify([rf.body, sent]));
     const rs = await post('restart', { keeper: 'keeper-dir' });
     ok('ui keeper: Restart without a systemd user unit → 409 keeper_restart naming the command', rs.status === 409 && rs.body.error.check === 'keeper_restart' && rs.body.error.message.includes('sigelo-spend serve'));
+    // The Owner's signed path (design/agent-wallet-page.md, apps/keeper/README.md "The Owner"): a keeper that takes /policy
+    // (its frozen copy says so) and a stand-in that checks the signature as policychange.ts does. The first save by file makes
+    // this identity an owner; then every change is a policy-change signed here, the owner view gives the address (i, 0),
+    // balance and incoming money; a change signed elsewhere is carried untouched and the keeper's refusal named.
+    {
+      const KD2 = join(H, 'keeper-owned'), REG2 = join(H, 'keepers2.json');
+      mkdirSync(join(KD2, 'app', 'dist'), { recursive: true, mode: 0o700 });
+      const kid2 = keygen({ recovery: 'sha256:' + '4'.repeat(64) }), other = keygen({ recovery: 'sha256:' + '5'.repeat(64) });
+      const SUBADDR = encodeAddress({ net: 'stagenet', kind: 'subaddress', spend: pt(), view: pt() });
+      const pol0 = { net: 'stagenet', wallet: { rpc: 'http://127.0.0.1:1/json_rpc' }, unlock_time: 0, priority: 1,
+        agents: { scout: { account: 1, token_hash: 'sha256:' + 'b'.repeat(64), per_tx_max: '100000000000', per_period_max: '500000000000', period_seconds: 86400, rate_per_minute: 3, allow: [] } } };
+      writeFileSync(join(KD2, 'policy.json'), JSON.stringify(pol0), { mode: 0o600 });
+      writeFileSync(join(KD2, 'identity.json'), JSON.stringify({ v: 'sigelo/0', typ: 'bundle', genesis: kid2.genesis, rotations: [], bindings: [], attestations: [], issuers: [] }));
+      writeFileSync(join(KD2, 'app', 'dist', 'service.js'), "// now in use for\nconst lane = [['POST /refuse', 1], ['POST /policy', 1]];\n");
+      const seen2: { url?: string; raw: string; ok: boolean }[] = [];
+      const fake2 = createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => {
+        const x = JSON.parse(b) as { body: Record<string, any>; sig: string; bundle: { genesis: { key: string } } };
+        let good = false;
+        try { good = req.headers.origin === undefined && x.body.keeper === kid2.did && x.body.net === 'stagenet' && vf(x.bundle as never, t0).did === meDid && vs(x.bundle.genesis.key, x.body, x.sig); } catch {}
+        seen2.push({ url: req.url, raw: b, ok: good });
+        const send = (st: number, o: unknown) => { res.writeHead(st, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
+        if (!good) return send(403, { error: 'owner: not one of this keeper\'s owners', code: 'owner' });
+        if (req.url === '/agents' && x.body.typ === 'owner-view') return send(200, { keeper: kid2.did, net: 'stagenet', owner: meDid, owners: [meDid],
+          agents: [{ name: 'scout', account: 1, address: SUBADDR, balance: '250000000000', unlocked_balance: '200000000000', paused: false, incoming: [{ ts: t0 - 600, amount: '250000000000', txid: 'c3'.repeat(32), status: 'received', index: 0 }] }] });
+        if (req.url === '/policy' && x.body.typ === 'policy-change') return send(200, { status: 'changed', agent: x.body.agent, by: meDid, nonce: x.body.nonce, policy: { ...x.body.set } });
+        return send(404, { error: 'route: no', code: 'route' });
+      }); });
+      await new Promise<void>((r) => fake2.listen(0, '127.0.0.1', () => r()));
+      writeFileSync(join(KD2, 'install.json'), JSON.stringify({ v: 1, net: 'stagenet', port: (fake2.address() as { port: number }).port, systemd: false, units: [], app: join(KD2, 'app', 'dist', 'cli.js') }));
+      writeFileSync(REG2, JSON.stringify({ keepers: [{ dir: KD2, did: kid2.did, genesis: kid2.genesis }] }));
+      process.env['SIGELO_SPEND_REGISTRY'] = REG2;
+      const kk = { keeper: 'keeper-owned', agent: 'scout' };
+      const k0 = await kj();
+      ok('ui owner: a keeper that takes /policy, this identity not an owner yet: policy true, me_owner false; Wallet off: no address asked',
+        k0.keepers?.[0]?.policy === true && k0.keepers[0].me_owner === false && k0.agents[0].address === null && k0.agents[0].paused === false && seen2.length === 0, JSON.stringify(k0).slice(0, 500));
+      const s1 = await post('agent', { ...kk, per_tx_max: '90000000000' }), p1 = JSON.parse(readFileSync(join(KD2, 'policy.json'), 'utf8'));
+      const meOrig = (JSON.parse((await http(P, 'GET', '/api/me', T)).body) as { original: string }).original;
+      ok('ui owner: the first save goes to the file (not an owner) and makes this identity an owner: its original DID in owners',
+        s1.status === 200 && s1.body.signed === false && p1.agents.scout.per_tx_max === '90000000000' && JSON.stringify(p1.owners) === JSON.stringify([{ did: meOrig }]) && seen2.length === 0, JSON.stringify(s1.body));
+      await http(P, 'POST', '/api/settings', W, { wallet: true });
+      const k1o = await kj(), a1o = k1o.agents?.[0];
+      ok('ui owner: Wallet on, an owner: GET /api/keeper asks the keeper\'s /agents, signed by this identity: the address (i, 0), balance, incoming',
+        k1o.keepers[0].me_owner === true && a1o.address === SUBADDR && a1o.balance === '250000000000' && a1o.incoming[0].amount === '250000000000' && seen2.at(-1)?.url === '/agents' && seen2.at(-1)?.ok === true, JSON.stringify(a1o));
+      const ps = await post('agent', { ...kk, paused: true }), sent2 = JSON.parse(seen2.at(-1)!.raw) as { body: Record<string, any> };
+      ok('ui owner: Pause → a policy-change signed by this identity at the keeper\'s /policy {set: {paused: true}}; the file untouched',
+        ps.status === 200 && ps.body.signed === true && ps.body.policy.paused === true && seen2.at(-1)?.url === '/policy' && seen2.at(-1)?.ok === true
+        && sent2.body.typ === 'policy-change' && sent2.body.agent === 'scout' && JSON.stringify(sent2.body.set) === '{"paused":true}' && sent2.body.exp - sent2.body.iat === 300
+        && !('paused' in JSON.parse(readFileSync(join(KD2, 'policy.json'), 'utf8')).agents.scout), JSON.stringify(ps.body));
+      const rs2 = await post('agent', { ...kk, per_tx_max: '120000000000', per_period_max: '600000000000', approval_above: null, allow: [{ addr: ADDR, label: 'seat-hold' }] });
+      const set2 = (JSON.parse(seen2.at(-1)!.raw) as { body: { set: Record<string, unknown> } }).body.set;
+      ok('ui owner: a raise is checked here first, then signed: only the fields given, the allowlist as the keeper writes it, approval off as null',
+        rs2.status === 200 && rs2.body.signed === true && set2['per_tx_max'] === '120000000000' && set2['approval_above'] === null && (set2['allow'] as { label: string }[])[0]!.label === 'seat-hold' && !('rate_per_minute' in set2), JSON.stringify(set2));
+      const badSigned = await post('agent', { ...kk, per_tx_max: '900000000000' });
+      ok('ui owner: a raise above the period is refused here (400 keeper_caps), nothing sent', badSigned.status === 400 && badSigned.body.error.check === 'keeper_caps' && seen2.at(-1)?.url === '/policy' && seen2.length === 3, String(seen2.length));
+      // A change signed elsewhere (a phone): carried as it is; signed by another identity, the keeper's refusal named.
+      const ob = { v: 'sigelo/0', typ: 'policy-change', keeper: kid2.did, net: 'stagenet', agent: 'scout', set: { per_tx_max: '400000000000' }, nonce: 'aa'.repeat(16), iat: t0, exp: t0 + 300 };
+      const change = { body: ob, sig: sg(other.secret, ob), bundle: { v: 'sigelo/0', typ: 'bundle', genesis: other.genesis, rotations: [], bindings: [], attestations: [], issuers: [] } };
+      const rl = await post('policy', { keeper: 'keeper-owned', change });
+      ok('ui owner: POST /api/keeper/policy carries a change signed elsewhere to the keeper untouched; signed by a non-owner the keeper refuses it → 409 keeper_owner',
+        rl.status === 409 && rl.body.error.check === 'keeper_owner' && JSON.stringify(JSON.parse(seen2.at(-1)!.raw)) === JSON.stringify(change), JSON.stringify(rl.body));
+      const wrongK = await post('policy', { keeper: 'keeper-owned', change: { ...change, body: { ...ob, keeper: kid.did } } }), noCh = await post('policy', { keeper: 'keeper-owned' });
+      ok('ui owner: a change for another keeper, or none, is 400 and never sent', wrongK.status === 400 && noCh.status === 400 && seen2.length === 4, String(seen2.length));
+      await new Promise<void>((r) => fake2.close(() => r()));
+      const off = await post('agent', { ...kk, rate_per_minute: 4 }), offP = await post('agent', { ...kk, paused: false });
+      ok('ui owner: the keeper not running: a limit goes to the file (why offline); Pause or Resume is refused (409 keeper_offline): it must reach the keeper',
+        off.status === 200 && off.body.signed === false && off.body.why === 'offline' && JSON.parse(readFileSync(join(KD2, 'policy.json'), 'utf8')).agents.scout.rate_per_minute === 4
+        && offP.status === 409 && offP.body.error.check === 'keeper_offline', JSON.stringify([off.body, offP.body]));
+      await http(P, 'POST', '/api/settings', W, { wallet: false });
+      process.env['SIGELO_SPEND_REGISTRY'] = REG;
+    }
     const kind = await http(P, 'POST', '/api/kind', W, { contact: 'did:sigelo:zNope', kind: 'agent' }), kindBad = await http(P, 'POST', '/api/kind', W, { contact: 'did:sigelo:zNope', kind: 'robot' });
     ok('ui kind: POST /api/kind of no contact → 404 not_contact (the contact is checked first, any kind)', kind.status === 404 && JSON.parse(kind.body).error.check === 'not_contact' && kindBad.status === 404, kind.body + kindBad.body);
     // ---- the Wallet (UI-API.md "Wallet", sigelo-agent-wallet.ts) over a fake monero-wallet-rpc (digest login, as the keeper's),

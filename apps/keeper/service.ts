@@ -7,7 +7,7 @@
  * nothing else, so the blast radius of a compromised agent is this wallet's balance.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { Agent as HttpAgent, createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { canonicalize, decodeKey, did, keygen, sign, parse, structure, verify, verifySig, type Bundle, type Genesis } from 'sigelo';
@@ -15,6 +15,7 @@ import { deriveIdentity, identitySeed as identitySeedOf, recoveryCommitment } fr
 import { decodeAddress, verifySigeloMoneroSigAddr, type Net } from 'sigelo/dist/monero.js';
 import { affordable, agentOf, evaluate, invoiceKey, parseAllow, parsePolicy, plain, tokenHash, type Decision, type PayRequest, type Plan, type Policy, type Prior, type Spent, type Status } from './policy.js';
 import { approvalRequest, checkApproval, checkRefusal, type ApprovalBody, type Approved, type Refused } from './approval.js';
+import { applyChange, checkChange, checkView, type Changed, type OwnerContext } from './policychange.js';
 import { describe as describeLicence, LICENCE_FILE, licenceRefusal, readLicence, type LicenceStatus } from './licence.js';
 import { confPins, pinnable, pinOf, probeTls, readPins, writeConfPins, writePins, type Pins, type TlsProbe } from './daemontls.js';
 import { asTreeEntry, chain, DELEGATE_KDF, delegateSeed, effective, effectivePolicy, planDelegate, planRevoke, replay as replayTree, reserved, status as statusOf, usedAccounts, type DelegateAsk, type DelegateEntry, type RevokeEntry, type TreeEntry } from './tree.js';
@@ -216,8 +217,12 @@ function logLines(policyPath: string): { r: unknown; at: string }[] {
     try { return { r: JSON.parse(line) as unknown, at: `spend.log: line ${i + 1}` }; } catch (e) { throw new Error(`spend.log: line ${i + 1} is not JSON (${why(e)})`); }
   });
 }
-/** A tree line carries `entry.kind`; a spend line never does. */
+/** A tree line (and a `policy` line) carries `entry.kind`; a spend line never does. */
 const isTreeLine = (r: unknown): boolean => plain(r) && plain(r['entry']) && Object.hasOwn(r['entry'], 'kind');
+/** A `policy` line (POST /policy): the Owner's change, logged; it grants nothing, so it is not replayed into the tree. */
+const isPolicyLine = (r: unknown): boolean => isTreeLine(r) && (r as { entry: Record<string, unknown> }).entry['kind'] === 'policy';
+/** The entry of a `policy` line: who changed which agent's limits to what, with the change they signed. */
+export interface PolicyEntry { kind: 'policy'; ts: number; agent: string; set: Record<string, unknown>; by: string; nonce: string; change: Changed }
 
 /**
  * Replay the log's spends. A line we cannot parse, or one whose debit we cannot compute, is
@@ -247,7 +252,7 @@ export function readLog(policyPath: string): Receipt[] {
  * mint an agent.
  */
 export function readTree(policyPath: string, net: Net, key: string): TreeLine[] {
-  return logLines(policyPath).filter(({ r }) => isTreeLine(r)).map(({ r, at }) => {
+  return logLines(policyPath).filter(({ r }) => isTreeLine(r) && !isPolicyLine(r)).map(({ r, at }) => {
     const l = r as TreeLine;
     const entry = asTreeEntry(l.entry, net, at)!;
     if (typeof l.sig !== 'string' || !verifySig(key, entry, l.sig)) throw new Error(`${at}: ${entry.kind} line is not signed by this keeper (spend.key) — refusing to start`);
@@ -304,6 +309,17 @@ export function priorOf(log: Receipt[], key?: string): Prior[] {
       ...(e.status === 'approved' && { approval: e.approval! }),
       ...(e.status === 'refused' && { refusal: { approver: String(e.refusal!.approver), reason: String(e.refusal!.reason ?? '') } }),
     }];
+  });
+}
+
+/**
+ * The `policy` lines of the log that this keeper signed (`key`), in order: the audit of every change
+ * `POST /policy` made. One it did not sign is left out: it changed nothing and answers nothing.
+ */
+export function readChanges(policyPath: string, key: string): { entry: PolicyEntry; sig: string }[] {
+  return logLines(policyPath).filter(({ r }) => isPolicyLine(r)).flatMap(({ r }) => {
+    const l = r as { entry: PolicyEntry; sig: unknown };
+    return typeof l.sig === 'string' && verifySig(key, l.entry, l.sig) ? [{ entry: l.entry, sig: l.sig }] : [];
   });
 }
 
@@ -831,6 +847,7 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     const changed = Object.keys(agents).filter((n) => agents[n] !== policy.agents[n]);
     policy.agents = agents;
     if (next.approvers === undefined) delete policy.approvers; else policy.approvers = next.approvers;
+    if (next.owners === undefined) delete policy.owners; else policy.owners = next.owners;
     policy.max_approval_ttl = next.max_approval_ttl; policy.dedupe_seconds = next.dedupe_seconds; policy.priority = next.priority;
     eff = effectivePolicy(policy, tree);
     tokensFrom = at; warnedAt = '';
@@ -1053,6 +1070,7 @@ export async function serve(opts: ServeOptions): Promise<Service> {
   const lane = new Map<string, (req: IncomingMessage, res: ServerResponse, raw: string) => Promise<void>>([
     ['POST /pay', (q, r, b) => pay(q, r, b)], ['POST /delegate', (q, r, b) => delegate(q, r, b)], ['POST /fund', (q, r, b) => fund(q, r, b)],
     ['POST /revoke', (q, r, b) => revoke(q, r, b)], ['POST /approve', (q, r, b) => approve(q, r, b)], ['POST /refuse', (q, r, b) => refuse(q, r, b)],
+    ['POST /policy', (q, r, b) => changePolicy(q, r, b)],
   ]);
 
   /**
@@ -1090,8 +1108,8 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     const route = `${req.method} ${url.pathname}`;
     const job = lane.get(route);
     if (job !== undefined) {
-      // /approve and /refuse hold no token (the approver's signature is the authorisation) and share APPROVE_MAX.
-      const isApprove = route === 'POST /approve' || route === 'POST /refuse';
+      // /approve, /refuse and /policy hold no token (the signature is the authorisation) and share APPROVE_MAX.
+      const isApprove = route === 'POST /approve' || route === 'POST /refuse' || route === 'POST /policy';
       // The token BEFORE the body and the lane: a token-less post never waits in it, never reads
       // the log, and never delays an agent's pay (review 2026-10-19: 50 of them held a real pay
       // 10 s). agentOf is constant-time. The token is checked again in the lane (policy.ts):
@@ -1147,6 +1165,13 @@ export async function serve(opts: ServeOptions): Promise<Service> {
       if (route === 'POST /bind') return bindAddr(req, res, who);
       if (route === 'GET /delegates') return delegates(res, who);
       return health(res, who);
+    }
+    // The Owner's read (POST /agents): no token, its signature by an owner is the authorisation;
+    // read-only, so outside the lane. The signature is checked before any wallet call.
+    if (route === 'POST /agents') {
+      const raw = await bodyOrFail(req, res);
+      if (raw === undefined) return;
+      return ownerView(res, raw);
     }
     return fail(res, 404, `route: no handler for ${route}`);
   };
@@ -1412,12 +1437,24 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     } catch { return {}; }
   };
 
+  /**
+   * `{address}`: the account's first address (i, 0), the one Top up pays and `POST /bind` binds to the
+   * agent's DID (SPEC §6.2) — the agent's own address, stable, to fund it from any wallet. Nothing when
+   * the wallet does not answer: the caller's other fields still do.
+   */
+  const addressOf = async (account: number): Promise<{ address?: string }> => {
+    try {
+      const a = (await walletRpc(policy, 'get_address', { account_index: account, address_index: [0] }, 15_000))['address'];
+      return typeof a === 'string' ? { address: a } : {};
+    } catch { return {}; }
+  };
+
   /** GET /balance (§4.2): the caller's ACCOUNT, never the wallet total, and what its policy still allows. */
   const balance = async (res: ServerResponse, who: string): Promise<void> => {
     const account = eff.agents[who]!.account;
     const b = await held(account);
     if (!('balance' in b)) return fail(res, 502, `wallet: get_balance for account ${account} failed or answered no balance`);
-    return json(res, 200, { agent: who, account, ...b, ...usage(who) });
+    return json(res, 200, { agent: who, account, ...await addressOf(account), ...b, ...usage(who) });
   };
 
   /**
@@ -1542,10 +1579,99 @@ export async function serve(opts: ServeOptions): Promise<Service> {
       const [balance, unlocked] = [atomicOf(bal['balance']), atomicOf(bal['unlocked_balance'])];
       if (balance === undefined || unlocked === undefined) throw new Error(`wallet: get_balance for account ${account} answered no balance`);
       return json(res, 200, {
-        net: policy.net, dry_run: dryRun, service, height: h['height'], agent: who, account,
-        balance, unlocked_balance: unlocked,
+        net: policy.net, dry_run: dryRun, service, height: h['height'], agent: who, account, ...await addressOf(account),
+        balance, unlocked_balance: unlocked, ...(eff.agents[who]!.paused === true && { paused: true }),
       });
     } catch (e) { return json(res, 502, { error: why(e), code: 'wallet', net: policy.net, dry_run: dryRun, service }); }
+  };
+
+  // ---------------------------------------------------------------- the Owner (POST /policy, POST /agents)
+
+  /** Who the Owner's signature is checked against: the owners, and every agent (by DID and key), none of whom may sign. */
+  const ownerContext = (now: number, used?: (n: string) => boolean): OwnerContext => ({
+    keeper: identity.did, keeperKey: identity.key, net: policy.net, now, owners: (policy.owners ?? []).map((o) => o.did),
+    agents: [
+      ...Object.values(policy.agents).map((a) => ({ ...(a.did !== undefined && { did: a.did }), keys: a.genesis === undefined ? [] : [a.genesis.key] })),
+      ...[...tree.delegates.values()].map((d) => ({ did: d.did, keys: [d.genesis.key] })),
+    ],
+    ...(used !== undefined && { used }),
+  });
+
+  /**
+   * POST /policy {body, sig, bundle}: one agent's limits, changed by an owner (policychange.ts). In
+   * order: the signature and the owner; the change applied to policy.json as it is on disk and the
+   * result validated whole (`parsePolicy`); the new file written beside it and fsynced; the signed
+   * `policy` line appended (who, which agent, which fields, the change they signed); only then the
+   * file renamed into place and taken at once. A crash between the line and the rename leaves a
+   * logged change that never applied — the page reads the policy back and shows what holds.
+   */
+  const changePolicy = async (_req: IncomingMessage, res: ServerResponse, text: string): Promise<void> => {
+    if (dryRun) return noDryRun(res, 'a policy change writes policy.json and the log');
+    let raw: unknown;
+    try { raw = parse(text); } catch (e) { return fail(res, 400, `request: body is not strict JSON (${why(e)})`); }
+    const now = clock();
+    const used = new Set(readChanges(opts.policyPath, identity.key).map((l) => l.entry.nonce));
+    const r = checkChange(raw, ownerContext(now, (n) => used.has(n)));
+    if (!r.ok) return fail(res, 403, r.reason);
+    const { body } = r.changed;
+    let onDisk: unknown;
+    try { onDisk = JSON.parse(utf8(readFileSync(opts.policyPath))); } catch (e) { return fail(res, 500, `policy: ${opts.policyPath} cannot be read (${why(e)}) — nothing was changed`); }
+    let next: Record<string, unknown>;
+    try { next = applyChange(onDisk, body.agent, body.set, policy.net); } catch (e) { return fail(res, 403, why(e)); }
+    const tmp = join(dirname(opts.policyPath), `.policy.json.${randomBytes(6).toString('hex')}.tmp`);
+    try {
+      const fd = openSync(tmp, 'wx', MODE);
+      try { writeSync(fd, JSON.stringify(next, null, 2) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
+    } catch (e) { try { unlinkSync(tmp); } catch { /* not there */ } return fail(res, 500, `policy: the new policy.json was not written (${why(e)}) — nothing was changed`); }
+    const entry: PolicyEntry = { kind: 'policy', ts: now, agent: body.agent, set: body.set, by: r.changed.owner, nonce: body.nonce, change: r.changed };
+    try { write({ entry, sig: sign(secret, entry) }); } catch (e) {
+      try { unlinkSync(tmp); } catch { /* not there */ }
+      return fail(res, 500, `log: policy line not written (${why(e)}) — nothing was changed`);
+    }
+    try { renameSync(tmp, opts.policyPath); } catch (e) { return fail(res, 500, `policy: logged but not applied: policy.json was not replaced (${why(e)}) — sign the change again`); }
+    refreshTokens();
+    const a = policy.agents[body.agent];
+    return json(res, 200, { status: 'changed', agent: body.agent, by: r.changed.owner, nonce: body.nonce, ...(a !== undefined && { policy: limitsOf(a) }) });
+  };
+
+  /** One agent's limits as the Owner sets them: what /policy answers and /agents lists. */
+  const limitsOf = (a: Policy['agents'][string]): Record<string, unknown> => ({
+    per_tx_max: a.per_tx_max, per_period_max: a.per_period_max, period_seconds: a.period_seconds, rate_per_minute: a.rate_per_minute,
+    approval_above: a.approval_above, max_delegates: a.max_delegates, allow: a.allow, paused: a.paused === true,
+  });
+
+  /**
+   * POST /agents {body, sig, bundle} (`typ: "owner-view"`, policychange.ts `checkView`): every agent of
+   * policy.json with its limits, what it spent this period, its address (i, 0), its account's balance
+   * and the money that came in (`get_transfers` in and pool, its account only, newest first). The
+   * signature is checked before any wallet call; a wallet that does not answer leaves the limits, with
+   * `wallet_error`. Read-only: no line, no lane.
+   */
+  const ownerView = async (res: ServerResponse, text: string): Promise<void> => {
+    let raw: unknown;
+    try { raw = parse(text); } catch (e) { return fail(res, 400, `request: body is not strict JSON (${why(e)})`); }
+    const v = checkView(raw, ownerContext(clock()));
+    if (!v.ok) return fail(res, 403, v.reason);
+    const agents = [];
+    let walletError: string | undefined;
+    for (const [name, a] of Object.entries(policy.agents)) {
+      const u = usage(name);
+      const row: Record<string, unknown> = { name, account: a.account, ...(a.did !== undefined && { did: a.did }), ...limitsOf(eff.agents[name] ?? a), spent: u.spent, remaining: u.remaining, window_start: u.window_start };
+      if (walletError === undefined) {
+        try {
+          Object.assign(row, await addressOf(a.account), await held(a.account));
+          const tr = await walletRpc(policy, 'get_transfers', { in: true, pool: true, account_index: a.account }, 15_000);
+          const list = (x: unknown, pool: boolean) => (Array.isArray(x) ? x : []).flatMap((t: unknown) => {
+            if (!plain(t) || !plain(t['subaddr_index']) || t['subaddr_index']['major'] !== a.account || atomicOf(t['amount']) === undefined) return [];
+            const locked = t['locked'] === true || (typeof t['confirmations'] === 'number' && t['confirmations'] < 10);
+            return [{ ts: Number(t['timestamp']), amount: atomicOf(t['amount'])!, txid: String(t['txid']), status: pool ? 'pool' : locked ? 'locked' : 'received', index: t['subaddr_index']['minor'] }];
+          });
+          row['incoming'] = [...list(tr['in'], false), ...list(tr['pool'], true)].sort((x, y) => y.ts - x.ts).slice(0, 10);
+        } catch (e) { walletError = why(e); }
+      }
+      agents.push(row);
+    }
+    return json(res, 200, { keeper: identity.did, net: policy.net, owner: v.owner, owners: (policy.owners ?? []).map((o) => o.did), agents, ...(walletError !== undefined && { wallet_error: walletError }) });
   };
 
   // ---------------------------------------------------------------- delegation (MONERO.md §4.3, §8 G5)
@@ -1590,6 +1716,8 @@ export async function serve(opts: ServeOptions): Promise<Service> {
     if (dryRun) return noDryRun(res);
     const raw = bodyOf(text, ['name', 'fund', 'caps', 'allow'], '/delegate');
     if (typeof raw === 'string') return fail(res, 400, raw);
+    // A paused agent creates nothing: a delegate would only inherit the pause.
+    if (eff.agents[who]?.paused === true) return fail(res, 403, 'paused: your operator paused your spending — no delegate was created. Ask your operator to resume it.');
     const [name, fundAmt, capsRaw] = [raw['name'], raw['fund'], raw['caps'] ?? {}];
     if (typeof name !== 'string') return fail(res, 400, 'delegate: name is not a string');
     if (typeof fundAmt !== 'string' || !ATOMIC_FUND.test(fundAmt)) return fail(res, 400, 'delegate: fund is not a decimal string of atomic units ("0" for none)');
