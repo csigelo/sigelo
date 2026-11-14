@@ -1138,7 +1138,7 @@
       put(who, avatar(k, c.name, null, c.did), h('span', { class: 'mid' }, h('b', null, c.name), h('small', { class: c.online ? 'ok' : null }, w ? `your agent${seen ? ` · ${seen}` : ''}` : seen)));
       const ts = await transferSettingsNow();
       // My agent's chat: its settings first, then the "+" (photos and files only: its allowance is paid on its own screen).
-      put(lead, w ? ibtn('gear', 'Agent settings', () => go('agent', w.worker)) : null, M.set([...fileChoices({ to: did }, c.name, ts, !w),
+      put(lead, M.set([...fileChoices({ to: did }, c.name, ts, !w),
         !w && walletOn() ? ['coin', 'Pay', () => pay(did)] : null, !w ? ['pen', 'Signed message', () => go('sign', { to: did })] : null]));
       C.text.placeholder = w ? `Message ${c.name}` : 'Message';
       const al = [noteCard()];

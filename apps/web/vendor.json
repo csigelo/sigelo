@@ -287,7 +287,7 @@
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "652756207268afe2ee4e6eb8c601a07f74a55c190d32ca56d5cb58b3a19abd76"
+   "sha256": "c69a0cacba93c89c7828bc490aea1daf9c81e205841681425333e69c7f0fcb87"
   }
  }
 }
