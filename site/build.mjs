@@ -32,9 +32,9 @@ export const MIRROR = `${ORIGIN}/releases/`;
 export const CONTENT_HOSTS = [...OFFICIAL.domains.filter((d) => d.role === 'content'), ...OFFICIAL.hosts].map((d) => d.name);
 export const RELAY_ORIGIN = 'https://sigelo.ai';
 export const NPM_USER = 'csigelo';
-export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit', 'sigelo-contact'];
+export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit', 'sigelo-contact', 'sigelo-key-agent'];
 // A package that joined the lockstep after the first publish: the first version it ships at.
-export const PACKAGE_SINCE = { 'sigelo-contact': '0.1.2' };
+export const PACKAGE_SINCE = { 'sigelo-contact': '0.1.2', 'sigelo-key-agent': '0.1.15' };
 
 const read = (p) => readFileSync(isAbsolute(p) ? p : join(ROOT, p), 'utf8');
 const readBytes = (p) => readFileSync(join(ROOT, p));
@@ -650,7 +650,7 @@ ${L('schema/', '/raw/schema/bundle.json', `${SCHEMAS.length} files, ${kb(SCHEMAS
     release: { version: VERSION, published: true, artefacts: [
       ...packagesAt(VERSION).map((n) => `${n}-${VERSION}.tgz`),
       ...['linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64', 'windows-amd64.exe'].map((t) => `sigelo-verify-${t}`),
-      `sigelo-verify-src-${VERSION}.tar.gz`, 'test-vectors.json', 'SHA256SUMS'],
+      `sigelo-verify-src-${VERSION}.tar.gz`, `sigelo-${VERSION}.cdx.json`, 'test-vectors.json', 'SHA256SUMS'],
       ...(RELEASE && { tag: RELEASE.tag, mirror: MIRROR, github: `${REPO}/releases/tag/${RELEASE.tag}`,
         sha256sums: `${MIRROR}${RELEASE.tag}/SHA256SUMS`,
         files: RELEASE.files.map((f) => ({ name: f.name, sha256: f.sha256, url: `${MIRROR}${RELEASE.tag}/${f.name}` })) }) },
