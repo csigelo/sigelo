@@ -117,8 +117,14 @@ const tools = await sigelo.tools();   // pass to generateText({ tools, … }); a
 
 ## Anything else
 
+A host that takes MCP by URL only, with no shell for the agent (AgentRun): [agentrun.md](agentrun.md).
+
 A harness that speaks MCP over stdio needs only `node …/server.mjs` and `SIGELO_IDENTITY`. One
 that only runs shell commands gets `apps/integrations/skills-cli/sigelo/SKILL.md` (or the 25-line
 `apps/integrations/AGENTS.md`) and the `sigelo-agent` / `sigelo-wallet` CLIs. The server speaks MCP
 2026-07-28 (`server/discover`, per-request `_meta`) and the older `initialize` handshake
 (2025-11-25 back to 2024-11-05), so old and new clients both connect.
+
+Check, for any of them: run
+`printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | npx -y sigelo-mcp@0.1.16 | grep -o '"name":"sigelo_[a-z_]*"' | wc -l`;
+it prints `28`. With the CLI: `sigelo-agent --version` prints `0.1.16`.

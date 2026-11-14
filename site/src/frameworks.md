@@ -4,6 +4,8 @@ description: One config line per agent framework, from Claude Code, Codex and Cu
 ---
 # Works with
 
+The CLI is the npm package `sigelo-agent`; the MCP server is `sigelo-mcp`; the package `sigelo` is the library and has no CLI.
+
 Add sigelo to the agent tool you already use: one line each.
 
 Anything that speaks MCP gets sigelo with one entry. Node ≥ 22.18.
@@ -28,8 +30,10 @@ That entry is `S` below. Set `SIGELO_IDENTITY` in its `env` to give each agent i
 | VS Code Copilot | `.vscode/mcp.json`: `"servers"`, `"type":"stdio"`, same command | docs |
 | Gemini CLI | `S` in `~/.gemini/settings.json` | docs |
 | Goose | `goose session --with-extension "npx -y sigelo-mcp@0.1.16"` | docs |
-| OpenCode, Cline, Agent Zero, pi | per-harness pages in [`apps/integrations/`](https://github.com/csigelo/sigelo/tree/main/integrations) | docs |
-| Hermes Agent | 9 lines of `~/.hermes/config.yaml` ([apps/integrations/hermes](https://github.com/csigelo/sigelo/tree/main/apps/integrations/hermes)) | run |
+| OpenCode, Cline, Agent Zero | per-harness pages in [`apps/integrations/`](https://github.com/csigelo/sigelo/tree/main/apps/integrations) | docs |
+| pi | `pi mcp add sigelo -- npx -y sigelo-mcp@0.1.16` | docs |
+| Hermes Agent | `printf 'y\n' \| hermes mcp add sigelo --command npx --args sigelo-mcp@0.1.16` ([apps/integrations/hermes](https://github.com/csigelo/sigelo/tree/main/apps/integrations/hermes)) | run |
+| AgentRun, URL-only hosts | operator runs `sigelo-mcp --http`; the host gets `http://127.0.0.1:7310/mcp` and a bearer token ([agentrun.md](https://github.com/csigelo/sigelo/blob/main/apps/integrations/agentrun.md)) | docs |
 | OpenClaw | `mcp.servers.sigelo` in `openclaw.json`, same command | docs |
 | LangGraph / LangChain | `MultiServerMCPClient` stdio, same command | run |
 | CrewAI | `mcps=[MCPServerStdio(command="npx", args=["-y","sigelo-mcp@0.1.16"])]` | docs |

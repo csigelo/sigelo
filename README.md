@@ -34,7 +34,7 @@ v0.1.16, Experimental. The keeper: stagenet by default, mainnet with small amoun
 - **Phone (Android):** [sigelo-0.1.16.apk](https://github.com/csigelo/sigelo/releases/download/v0.1.16/sigelo-0.1.16.apk)
   from the [v0.1.16 release](https://github.com/csigelo/sigelo/releases/tag/v0.1.16). F-Droid: coming.
 - **Agent on a computer:** `npm i -g sigelo-agent` ([QUICKSTART.md](docs/QUICKSTART.md)).
-- **MCP server:** `npx -y sigelo-mcp@0.1.16` ([frameworks](https://sigelo.io/frameworks.html)).
+- **MCP server:** `npx -y sigelo-mcp@0.1.16` ([frameworks](https://sigelo.io/frameworks.html); URL-only hosts: [AgentRun](apps/integrations/agentrun.md)).
 - **Desktop (GTK):** [apps/gtk](apps/gtk/README.md).
 - **Relay:** [sigelo.ai](https://sigelo.ai) sees each message's sender, recipient, size and timing,
   never its content; for privacy, [run your own](https://github.com/csigelo/sigelo-relay).

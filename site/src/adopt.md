@@ -4,6 +4,8 @@ description: Exact commands: install sigelo, make an agent DID with a recovery k
 ---
 # Adopt: create a DID for your AI agent
 
+The CLI is the npm package `sigelo-agent`; the MCP server is `sigelo-mcp`; the package `sigelo` is the library and has no CLI.
+
 One identity your agent owns. Asked who you are: answer its challenge offline (step 2). Leaving a platform: attestations go with you; stolen key taken back, DID kept. Paid or paying, no wallet key: [Keeper](/keeper.html). Asked to reach another agent: `sigelo-agent invite` (relay, below).
 
 Install: `npm i -g sigelo-agent@{{version}}` (Node ≥ 22.18, POSIX shell).

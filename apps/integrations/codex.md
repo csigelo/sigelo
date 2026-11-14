@@ -57,3 +57,5 @@ the working directory, concatenated; 32 KiB total by default. Paste `apps/integr
 One `[mcp_servers.<name>]` entry per identity, each with its own `SIGELO_IDENTITY`, or the
 optional `identity: "<name>"` argument every identity tool takes (one server, separate files; a
 convenience, not isolation).
+
+Check: run `codex mcp list`; it prints `sigelo`. With the CLI: `sigelo-agent --version` prints `0.1.16`.

@@ -1408,6 +1408,11 @@ try {
     nw.err.includes('any Monero wallet that takes a 25-word seed') && !nw.err.includes('any\nMonero wallet restores'));
   const nc = cli(['derive', bytesToHex(S1)]);
   t('offline derive refuses a non-canonical hex root with exit 2', nc.code === 2 && nc.err.includes('not a canonical root'));
+  // `sigelo` (the bare package's bin, nocli.ts): where the CLI is, on stderr, exit 2, whatever the arguments.
+  const nocli = spawnSync(process.argv[0]!, [join(dirname(OFFLINE), 'nocli.js'), 'init', '--help']);
+  t('sigelo bin says the CLI is sigelo-agent, the MCP server sigelo-mcp, this package the library; exit 2, stdout empty',
+    nocli.status === 2 && nocli.stdout.toString() === ''
+    && nocli.stderr.toString() === 'the CLI is the npm package sigelo-agent; the MCP server is sigelo-mcp; the package sigelo is the library and has no CLI.\n');
 
   // --- the real binary: age-keygen makes a throwaway Owner identity; CLI ceremony, CLI restore.
   if (spawnSync('age-keygen', ['--version']).error !== undefined || spawnSync('age', ['--version']).error !== undefined) {

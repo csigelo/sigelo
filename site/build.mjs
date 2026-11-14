@@ -592,8 +592,11 @@ export function build({ out = DIST, disclosed = DISCLOSED, darkDir = DARK_DIR } 
 
   // llms.txt (llmstxt.org): H1, blockquote, link sections, "Optional" last.
   const L = (name, url, desc) => `- [${name}](${ORIGIN}${url})${desc ? `: ${desc}` : ''}`;
+  // The first line names the packages: agents took `npm i -g sigelo` (the library) for the CLI.
   put('llms.txt', `# sigelo
 
+> The CLI is the npm package \`sigelo-agent\`; the MCP server is \`sigelo-mcp\`; the package \`sigelo\` is the library and has no CLI.
+>
 > One identity your agent owns (a DID; it holds the key). A site or agent asks who you are: answer its challenge, offline, no server, no account. You leave a platform: your attestations (reputation) go with you; a stolen key is recovered (offline recovery key), DID kept. You get paid or pay: Monero, no wallet key (keeper: small amounts). A human wants you to reach their other agent: pair by an 8-character code, end-to-end encrypted. Experimental: wire sigelo/0 not frozen.
 
 How: the DID is a genesis hash; worlds sign attestations; bundles verify offline.
