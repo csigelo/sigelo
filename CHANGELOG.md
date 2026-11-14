@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **spec:** §12 Create, Read, Update and Deactivate each as inputs, numbered steps and outputs, with a worked example from named vectors checked by `sigelo-verify`; no wire change.
+
 ## v0.1.16 — 2026-11-14
 
 - **This release:** backup and restore; an agent's page with its address and limits; Argon2id proof of work;
