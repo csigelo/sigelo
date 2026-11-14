@@ -65,8 +65,9 @@ the poll reads it in the page and sends nothing; one request renews the push eve
 - **fetch:** the page's, no redirect followed, no credentials, no referrer; **mqtt:** MQTT.js's browser
   build over WebSocket, `wss://` only (`ws://` to loopback for tests); `transports: ['wss']`, so the
   carrier's `auto` is `wss` and `mqtts` is refused. A shell passes its own socket (`createWebsocket`).
-- **pow:** `pow-worker.mjs` in a module Worker (a Worker gets no import map: it imports @noble by path),
-  progress every 65,536 hashes, ended at the deadline or on abort.
+- **pow:** `pow-worker.mjs` in a module Worker, never in the page's thread (a Worker gets no import map: it
+  imports by path). It says `{ ready, engine: 'wasm' | 'js' }` first (hash-wasm, else @noble); none within
+  5 s: the search fails at once, permanent. Progress after each evaluation, ended at the deadline or on abort.
 - **env:** from the page (`relay`, `endpoints`, `retentionDays`); no proxy. An `env.relay` (or the
   router's `options.relay`) is fixed, as `SIGELO_RELAY` is for `ui`; else the page's setting.
 

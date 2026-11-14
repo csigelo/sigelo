@@ -12,7 +12,7 @@
 //                           mqtt, indexedDB?, storage (localStorage), session (sessionStorage), reload(), seal?, download? (a tab's
 //                           save of a file: (name, bytes) → name; by default an <a download>) }
 //   app.local               what ui.js reads as globalThis.sigeloLocal: { call, onChange, mode, share, unlock, secure, profiles, computers, words,
-//                           lock, notify, onOpen, reload, bars }
+//                           lock, notify, onOpen, reload, bars, powEngine }
 //   app.ready               → the backend (rejects while there is none: the first run, the connect view)
 //
 // local.profiles (ui.js: the Profiles sheet, Settings → Profiles): list() → { active, limit, profiles }; use(id) the switch: the lock
@@ -43,6 +43,7 @@
 // once the bridge is connected); without the shell nothing.
 // local.reload() (ui.js Settings → About, "Reload the app"): the shell loads the page again from its start; a tab, env.reload().
 // local.bars (the Android app only; else undefined): bars("#rrggbb") the system bars in the page's background (no action bar).
+// local.powEngine() (ui.js Settings → About): the proof of work's engine, 'wasm' | 'js' (both in a Worker) | null (none here).
 import { did as didOf, parseBytes } from 'sigelo';
 import { loadIdentity, memoryFiles, openDb, webPlatform } from './platform-web.mjs';
 import { TAG, androidPlatform, bigFiles, connectBridge, keystoreSealer, profileBridge } from './platform-android.mjs';
@@ -304,6 +305,8 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     },
     // Settings → About's "Reload the app": the shell loads the page again from its start; a tab reloads itself.
     async reload() { if (shell) await (await shellOf()).reload(); else reload?.(); },
+    // Settings → About's "Proof of work": 'wasm' | 'js' (in a Worker) | null (no search here); undefined: no platform here (a computer's page).
+    async powEngine() { const f = own?.pow?.engine; return typeof f === 'function' ? f() : undefined; },
     // The system bars in the page's background ("#rrggbb", ui.js at each change of the look); a page has none.
     bars: shell ? async (colour) => (await shellOf()).bars(colour) : undefined,
     // FLAG_SECURE while the kept words are on the screen (ui.js Settings → Backup and recovery → Show my 25 words).

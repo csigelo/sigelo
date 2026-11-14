@@ -121,7 +121,7 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
           } });
           return e;
         },
-        pick: () => big.pick(), photo: (o) => big.photo(o), open: (uri, name) => big.open(uri, name),
+        pick: (o) => big.pick(o), photo: (o) => big.photo(o), open: (uri, name) => big.open(uri, name),
       } }),
       meInfo: () => ({ identity_file: IDENTITY, recovery: headOf(identity()).recovery === null ? 'none' : 'set', key: 'browser',
         erase: 'On the machine holding the recovery key, with this identity\'s file: SIGELO_IDENTITY=<file> sigelo-agent erase-request --recovery-key <your recovery.key>',

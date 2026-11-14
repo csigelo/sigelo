@@ -45,8 +45,9 @@ const html = readFileSync(join(HERE, 'index.html'), 'utf8'), map = C.importMap(h
   ok(inline.length === 1 && /type="importmap"/.test(inline[0][1]), `index.html: one inline script, the import map (${inline.length})`);
   ok(scripts.filter((s) => s[2].trim() === '').every((s) => /src="\.\/[^"]+"/.test(s[1])), 'index.html: every other script from this origin, by a relative path');
   const { policy, want } = C.csp(html);
-  ok(policy?.startsWith("default-src 'self'; script-src 'self' " + want + ';') && !/unsafe-(inline|eval)/.test(policy) && /object-src 'none'/.test(policy) && /base-uri 'none'/.test(policy),
-    `index.html: CSP default-src 'self', script-src 'self' and the import map's hash only (${policy})`);
+  // 'wasm-unsafe-eval' (0.1.17): compiling the WebAssembly the app ships (pow-worker.mjs's hash-wasm), no eval; any other unsafe-… refused.
+  ok(policy?.startsWith("default-src 'self'; script-src 'self' 'wasm-unsafe-eval' " + want + ';') && (policy.match(/'[a-z-]*unsafe-[a-z-]*'/g) ?? []).join() === "'wasm-unsafe-eval'" && /object-src 'none'/.test(policy) && /base-uri 'none'/.test(policy),
+    `index.html: CSP default-src 'self', script-src 'self', 'wasm-unsafe-eval' and the import map's hash only (${policy})`);
   const { files, missing } = C.walk(map);
   ok(missing.length === 0, `the import graph resolves in the page (${missing.join('; ')})`);
   const vendored = [...files].filter(([rel]) => rel.startsWith('vendor/'));
@@ -222,6 +223,21 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   ok(m.restored?.on === '2025-10-25' && m.restored.keeper === 1 && m.restored.seat === 'here' && st.me.seat?.here === true && st.me.seat.holder === 'phone' && router.mode().standby === false,
     `router: GET /api/me says restored (day, keeper 1, seat here); GET /api/state me.seat: this phone holds it (${JSON.stringify(m.restored)})`);
   ok((await router.call('POST', '/api/seat/take', { confirm: true })).body.error?.check === 'seat_here', 'router: POST /api/seat/take with the seat here → 409 seat_here');
+  // Settings → Relay → Another relay (0.1.16: the relay added was not displayed): every relay taken by name stays in `added`.
+  await router.call('POST', '/api/settings', { relay: 'own.example.net' }); await router.call('POST', '/api/settings', { relay: 'two.example.net:8883' });
+  const back0 = (await router.call('POST', '/api/settings', { relay: '' })).body, back1 = (await router.call('GET', '/api/settings')).body;
+  ok(back0.relay === 'relay.sigelo.ai' && JSON.stringify(back1.added) === JSON.stringify(['two.example.net:8883', 'own.example.net']),
+    `router: the relays taken by name stay listed (added, newest first) once the default is back in use (${JSON.stringify(back1.added)})`);
+  // The "Not connected" card's why: the last login's failure and the day's cap, kept in the page's data across a restart, gone once connected.
+  const NOW = Math.floor(Date.now() / 1000);
+  router.carrier.onEvent({ type: 'error', relay: 'relay.sigelo.ai', check: 'pow', detail: W.NO_POW });
+  router.carrier.onEvent({ type: 'error', relay: 'relay.sigelo.ai', check: 'pow', detail: 'setup paused', next: NOW + 3600 });
+  router.carrier.onEvent({ type: 'error', relay: 'relay.sigelo.ai', check: 'pow', detail: W.NO_POW });
+  const again = (await mk({ platform: p, identity: () => me, mode: { kind: 'full', standby: false }, seat, options: { registry: false } }).call('GET', '/api/state')).body.me;
+  router.carrier.onEvent({ type: 'connected', relay: 'relay.sigelo.ai' });
+  const online = (await mk({ platform: p, identity: () => me, mode: { kind: 'full', standby: false }, seat, options: { registry: false } }).call('GET', '/api/state')).body.me;
+  ok(again.error === W.NO_POW && again.pow_capped?.next === NOW + 3600 && online.error === null && online.pow_capped === null,
+    `router: me.error and me.pow_capped come back after a restart ("${again.error}"), gone once a login succeeded`);
   // Agents (the app's main list): the sealed keeper's roster; this device is worker 0, FULL, the one agent here.
   const rk = mk({ platform: p, identity: () => me, mode: { kind: 'full', standby: false }, seat, keeper: SD.keeperOf(p), options: { registry: false } });
   const wk = (await rk.call('GET', '/api/agents/workers')).body, none = (await router.call('GET', '/api/agents/workers')).body;
@@ -429,6 +445,8 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   // The focus as a DOM keeps it: a node taken out of its parent (removed, moved, or its parent's children
   // replaced) takes the focus with it when it holds it, and the focus goes to the body.
   const focus = { el: null };
+  // A page's scroll as a browser clamps it: content taken out (a parent's children replaced) puts it back to the top (scroll.clamp on).
+  const scroll = { clamp: false, win: null };
   const lost = (n) => { if (focus.el && (n === focus.el || n.contains?.(focus.el))) focus.el = body; };
   class Node_ {
     constructor() { this.parent = null; }
@@ -444,7 +462,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     set textContent(t) { this.kids = [new Text_(t)]; }
     get childNodes() { return [...this.kids]; }
     append(...k) { for (const x of k) { const n = x instanceof Node_ ? x : new Text_(x); n.remove(); n.parent = this; this.kids.push(n); } }
-    replaceChildren(...k) { for (const c of this.kids.splice(0)) { c.parent = null; lost(c); } this.append(...k); }
+    replaceChildren(...k) { for (const c of this.kids.splice(0)) { c.parent = null; lost(c); } this.append(...k); if (scroll.clamp && scroll.win) scroll.win.scrollY = 0; }
     insert(ref, k, off) { for (const x of k) { const n = x instanceof Node_ ? x : new Text_(x); n.remove(); n.parent = this; this.kids.splice(this.kids.indexOf(ref) + off, 0, n); if (off) ref = n; } }
     contains(x) { for (let n = x; n; n = n.parent) if (n === this) return true; return false; }
     setAttribute(k, v) { this.attrs[k] = String(v); }
@@ -471,7 +489,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   const W_ = { workers: [{ worker: 0, name: 'phone', did: 'did:sigelo:zPhone000000000000000000000000000000000000000000', original: 'did:sigelo:zPhone000000000000000000000000000000000000000000', rank: 'full', placed: 'device', at: 1761400000, status: 'enrolled', revoked: null, seen: null, tier: null, contact: null, local: 'phone', attested_until: null, enrolling: null }] };
   const calls = [], now = () => Math.floor(Date.now() / 1000);
   const G_ = { mine: [], contacts: [] };
-  const snap = () => ({ seq: sandbox.seq ?? 1, now: now(), me: { did: 'did:sigelo:zMe', relay: 'relay.sigelo.ai', online: true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: null, pow: null, pow_done_ms: null, seat: { holder: 'phone', epoch: 1, here: true }, pow_capped: sandbox.capped ?? null, pow_confirm: null,
+  const snap = () => ({ seq: sandbox.seq ?? 1, now: now(), me: { did: 'did:sigelo:zMe', relay: 'relay.sigelo.ai', online: sandbox.offline !== true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: sandbox.meError ?? null, pow: null, pow_done_ms: null, seat: { holder: 'phone', epoch: 1, here: true }, pow_capped: sandbox.capped ?? null, pow_confirm: null,
       wallet: { on: SET.wallet === true, prices: SET.prices === true, currency: SET.currency ?? null } },
     groups: { mine: G_.mine, contacts: G_.contacts }, chats: { ...GR.chats }, ...(sandbox.transfers && { transfers: sandbox.transfers }), pending: { invites: [], paired: [], answers: [], failed: [], public: null, ...sandbox.pending }, introductions: sandbox.intro ?? [], events: [] });
   // Groups (GROUPS.md) as GET /api/groups and /api/groups/history answer; rev bumped at each change.
@@ -480,7 +498,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   const gOf = (gid) => GR.groups.find((g) => g.gid === gid);
   const WAL = { v: null };
   const RELAY = { relay: 'relay.sigelo.ai' }, SET = { seen_receipts: true, notify: true, new_tier: 'friend', new_presence: false }, MSGS = {};
-  const settingsNow = () => ({ relay: RELAY.relay, default: 'relay.sigelo.ai', fixed: null, in_use: 'relay.sigelo.ai', ...SET });
+  const settingsNow = () => ({ relay: RELAY.relay, default: 'relay.sigelo.ai', fixed: null, in_use: 'relay.sigelo.ai', added: RELAY.added ?? [], ...SET });
   const routes = {
     'GET /api/state': () => snap(),
     'GET /api/me': () => ({ did: ME, original: ME, words: 'amber otter violin harbor', recovery: 'set', key: 'browser', relay: 'relay.sigelo.ai', retention_days: 7, erase: 'POST /delete at the relay' }),
@@ -488,7 +506,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     'GET /api/settings': () => settingsNow(),
     // The wallet (UI-API.md "Wallet"): this phone has none until pass 4's block gives it a computer's (WAL.v).
     'GET /api/wallet': () => (SET.wallet !== true ? { on: false } : WAL.v ?? { on: true, where: 'none' }),
-    'POST /api/settings': (b) => { const { relay, ...rest } = b; if (relay !== undefined) RELAY.relay = relay; Object.assign(SET, rest); return settingsNow(); },
+    'POST /api/settings': (b) => { const { relay, ...rest } = b; if (relay) RELAY.added = [relay, ...(RELAY.added ?? []).filter((x) => x !== relay)]; if (relay !== undefined) RELAY.relay = relay || 'relay.sigelo.ai'; Object.assign(SET, rest); return settingsNow(); },
     'POST /api/notify': (b) => { const c = [...G_.mine, ...G_.contacts].find((x) => x.did === b.chat) ?? gOf(b.chat); c.notify = b.on; return { chat: b.chat, notify: b.on }; },
     'POST /api/history/clear': (b) => { if (b.contact) MSGS[b.contact] = []; return { cleared: true, ...(b.contact && { contact: b.contact }) }; },
     'POST /api/invite': (b) => ({ id: b.group ? 'g1' : 'i1', name: 'contact-1a2b', code: 'sgl1example', exp: now() + 86400, short: b.group ? 'G5TR-2KXA' : 'K7F3-Q9ZP', short_exp: now() + 600, relay: 'relay.sigelo.ai' }),
@@ -527,13 +545,15 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     'POST /api/pow/try': (b) => { sandbox.tried = b; return { tried: ['relay.sigelo.ai'] }; },
     'POST /api/agents/revoke': (b) => { const w = W_.workers.find((x) => x.worker === b.worker); w.status = 'revoked'; w.revoked = now(); return { worker: b.worker, name: w.name, cancelled: false, revoked: w.revoked, forgot: w.contact }; },
   };
-  const docOf = (r) => ({ getElementById: () => r, createElement: (t) => new El(t), createElementNS: (_ns, t) => new El(t), createTextNode: (t) => new Text_(t), querySelectorAll: () => [], body, get activeElement() { return focus.el; } });
+  const docLis = new Map();   // the document's listeners (the "+" row's tap elsewhere)
+  const docOf = (r) => ({ getElementById: () => r, createElement: (t) => new El(t), createElementNS: (_ns, t) => new El(t), createTextNode: (t) => new Text_(t), querySelectorAll: () => [], body, get activeElement() { return focus.el; },
+    addEventListener: (t, f) => { docLis.set(t, [...(docLis.get(t) ?? []), f]); }, removeEventListener: (t, f) => { docLis.set(t, (docLis.get(t) ?? []).filter((x) => x !== f)); } });
   const sandbox = {
     document: docOf(root),
     Node: Node_, location: { hash: '', pathname: '/', protocol: 'https:', href: 'https://app.invalid/index.html' },
     // The version beside ui.js (vendor/package.json, apps/agent/package.json as copy.mjs vendors it): About reads it.
     fetch: async (url) => { sandbox.fetched = [...(sandbox.fetched ?? []), String(url)]; return String(url) === 'https://app.invalid/package.json' ? { ok: true, json: async () => JSON.parse(readFileSync(join(HERE, 'vendor', 'package.json'), 'utf8')) } : { ok: false, json: async () => null }; }, history: { replaceState() {} }, sessionStorage: { getItem: () => null, setItem() {} },
-    window: { innerHeight: 800, innerWidth: 400, scrollY: 0, scrollTo() {} }, navigator: { clipboard: { writeText: async (t) => { sandbox.copied = t; } } },
+    window: { innerHeight: 800, innerWidth: 400, scrollY: 0, scrollTo(_x, y) { this.scrollY = y; (sandbox.scrolls ??= []).push(y); } }, navigator: { clipboard: { writeText: async (t) => { sandbox.copied = t; } } },
     setInterval: (f, ms) => { intervals.push([f, ms]); return intervals.length; }, clearInterval() {}, setTimeout: (f, ms) => setTimeout(f, Math.min(ms ?? 0, 10)), clearTimeout,
     console, Date, Promise, Object, Array, String, Number, JSON, Math, Map, Set, Error, encodeURIComponent, URL,
     sigeloUiTest: (t) => { sandbox.ui = t; },
@@ -544,11 +564,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       async unlock() { sandbox.unlocks = (sandbox.unlocks ?? 0) + 1; if (sandbox.refuseUnlock) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); },
       async reload() { sandbox.reloads = (sandbox.reloads ?? 0) + 1; },
       async bars(c) { sandbox.bars = [...(sandbox.bars ?? []), c]; },
+      async powEngine() { return sandbox.powEngine === undefined ? 'wasm' : sandbox.powEngine; },
     },
     // The page's background as the browser computes it (ui.css --bg): the Android app's system bars take it (sigeloLocal.bars).
     getComputedStyle: (el) => ({ backgroundColor: el === body ? sandbox.bg ?? 'rgb(253, 253, 251)' : 'rgba(0, 0, 0, 0)' }),
   };
   sandbox.globalThis = sandbox;
+  scroll.win = sandbox.window;
   vm.runInNewContext(readFileSync(join(HERE, 'vendor', 'ui.js'), 'utf8'), sandbox);
   const settle = () => sleep(30);
   const poll = async () => { await intervals.find(([, ms]) => ms === 2000)[0](); await settle(); };
@@ -596,10 +618,24 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     `enrol: Share, without a share sheet, copies a ready-to-send message: the code, until when, the command, the instructions link (${sandbox.copied})`);
   Object.assign(W_.workers[1].enrolling, { state: 'words', code: null, command: null, words: 'mobile absent bone lion' });
   await poll();
-  ok(h1() === 'Is this vps?' && !root.all().some((e) => e.className === 'code') && root.all().find((e) => e.className === 'words4')?.textContent === 'mobileabsentbonelion' && btn('They match') && btn('They don\'t match'),
-    'enrol: once the agent pairs, the code goes: "Is this vps?", the four words, They match / They don\'t match (its key waits)');
+  const wordsBody = root.all().find((e) => e.className === 'body');
+  ok(h1() === 'Same words on vps?' && !root.all().some((e) => e.className === 'code') && root.all().find((e) => e.className === 'words4 big')?.textContent === 'mobileabsentbonelion' && btn('They match') && btn('They differ')
+    && wordsBody.textContent === 'mobileabsentbonelion',
+    `enrol: once the agent pairs, one screen: "Same words on vps?", the four words large, They match / They differ, nothing else (${wordsBody.textContent})`);
+  // Back on Agents meanwhile: the row says Compare the four words and shows the pairing's words, the way to that screen.
+  await sandbox.ui.go('agents'); await settle(); await poll();
+  const cmpRow = rows().find((e) => e.attrs['data-worker'] === '1');
+  ok(cmpRow?.textContent.includes('Compare the four words') && cmpRow.all().some((e) => e.attrs['data-pairing-words'] === '' && e.textContent === 'mobile · absent · bone · lion'),
+    `Agents: the enrolling row, Compare the four words, the pairing's words on it while comparing (${cmpRow?.textContent})`);
+  await cmpRow.click(); await settle(); await poll();
+  ok(h1() === 'Same words on vps?', 'the row opens the words screen');
   await btn('They match').click(); await settle();
   ok(JSON.stringify(sandbox.wordsAnswer) === JSON.stringify({ id: 'n1', match: true }), `enrol: They match → POST /api/agents/enrol-words {id, match: true} (${JSON.stringify(sandbox.wordsAnswer)})`);
+  // Enrolling for ever (0.1.16): what it waits for, and offline, that the agent cannot reach this profile.
+  Object.assign(W_.workers[1].enrolling, { words_ok: true, state: 'sending' }); sandbox.offline = true; await poll();
+  ok(h1() === 'Enrolling vps' && has('Not connected: the agent cannot reach you.') && !root.all().some((e) => e.className === 'meter busy'), 'enrol: offline, it says the agent cannot reach you (no busy meter)');
+  sandbox.offline = false; await poll();
+  ok(has('Sending its key, end to end, once…') && root.all().some((e) => e.className === 'meter busy'), 'enrol: online, sending its key');
   Object.assign(W_.workers[1].enrolling, { words_ok: true, verified: true, state: 'enrolled' });
   Object.assign(W_.workers[1], { status: 'enrolled', contact: 'did:sigelo:zVps0000000000000000000000000000000000000000000', tier: 'quiet' });
   await poll();
@@ -613,6 +649,20 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   await btn('Try now').click(); await settle();
   ok(sandbox.tried !== undefined, 'Try now → POST /api/pow/try');
   sandbox.capped = null; await poll();
+  // Not connected: the card says why (me.error: the page keeps the last login's failure across a restart), else what happens meanwhile.
+  sandbox.offline = true; sandbox.meError = 'proof of work: this app cannot run the search here (no Worker / no WebAssembly)'; await poll();
+  ok(has('Not connected') && has(sandbox.meError) && !has('Your messages wait here') && btn('Retry'), 'Not connected: the card says why (me.error), Retry');
+  sandbox.meError = null; await poll();
+  ok(has('Not connected') && has('Your messages wait here and go when you\'re back online.'), 'Not connected, no error known: what happens meanwhile');
+  sandbox.offline = false; await poll();
+  // An enrolment whose key's send failed (needs_send: the page sends it again), or one from before a restart (the machine asks again).
+  W_.workers.push({ worker: 9, name: 'stuck', did: 'did:sigelo:zStuck', original: 'did:sigelo:zStuck', words: null, rank: null, placed: 'remote', at: now(), status: 'pending', revoked: null, seen: null, tier: null, contact: null, local: null, attested_until: null,
+    enrolling: { id: 'old', state: 'waiting', needs_send: false } });
+  await poll();
+  const stuck1 = has('Waiting for the machine to ask again…');
+  W_.workers.at(-1).enrolling = { id: 'old', state: 'sending', needs_send: true }; await poll();
+  ok(stuck1 && has('Sending the key…') && !has('Not finished'), 'Agents: an enrolment waiting says for what: Waiting for the machine to ask again…, Sending the key… (not "Not finished")');
+  W_.workers.pop(); await poll();
   await rows()[1].click(); await settle(); await poll();
   ok(h1() === 'vps' && has('Enrolled') && has('Vouched for until') && has('Rename') && btn('Revoke vps') && btn('Message') === undefined, 'an agent\'s page: Enrolled, Vouched for until, Rename, Revoke vps (no Message before its contact comes)');
   void btn('Revoke vps').click(); await settle();
@@ -628,16 +678,33 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   await back(); await poll();
   const phone = rows().find((e) => e.textContent.includes('phone'));
   ok(phone?.all().some((e) => e.className === 'dot sm') && phone.textContent.includes('Online'), 'agents: an online agent\'s row has the dot and says Online');
+  // Revoked stays revoked, folded into a closed "Revoked" section; its row is no button, Enrol again beside it.
+  const fold = root.all().find((e) => e.tagName === 'DETAILS' && e.attrs['data-revoked'] === '');
+  const vpsRow = rows().find((e) => e.textContent.includes('vps'));
+  ok(fold && !fold.attrs.open && fold.all().find((e) => e.tagName === 'SUMMARY')?.textContent === 'Revoked (1)' && fold.contains(vpsRow) && vpsRow.tagName === 'DIV' && fold.all().some((e) => e.tagName === 'BUTTON' && e.textContent === 'Enrol again'),
+    `Agents: revoked folded under a closed "Revoked (1)"; its row not tappable, Enrol again beside it (${fold?.textContent})`);
+  await fold.all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Enrol again').click(); await settle(); await poll();
+  ok(h1() === 'Enrol an agent' && kit(root).field('Agent name')?.value === 'vps' && btn('Make a code'), 'Enrol again: the enrol screen, its name filled in');
+  await btn('Make a code').click(); await settle(); await poll();
+  const again2 = calls.filter(([, p]) => p === '/api/agents/enrol-code').at(-1)?.[2];
+  ok(again2?.name === 'vps' && h1() === 'Code for vps' && W_.workers.at(-1).worker !== 1, `Enrol again → POST /api/agents/enrol-code {name: vps}: a new code, a new worker (${JSON.stringify(again2)})`);
+  W_.workers.pop(); await sandbox.ui.go('agents'); await settle(); await poll();
   await tabBtn('chats').click(); await settle(); await poll();
   const chatRow = (n) => root.all().find((e) => e.tagName === 'BUTTON' && e.attrs['data-chat']?.startsWith(`did:sigelo:z${n}`));
   ok(chatRow('ana')?.textContent.includes('Agent') && chatRow('bo')?.textContent.includes('2 new messages') && !chatRow('bo').textContent.includes('secret') && chatRow('bo').all().some((e) => e.className === 'count' && e.textContent === '2') && chatRow('cy'),
     'Chats: a row per contact; my agent marked Agent; a friend\'s row a count only (2 new messages, the text not shown)');
   await chatRow('bo').click(); await settle(); await poll();
-  ok(root.all().some((e) => e.className === 'who' && e.textContent.includes('bo') && e.textContent.includes('last seen 5 min ago')) && aria('Message', 'TEXTAREA') && aria('Send', 'BUTTON') && aria('Attach', 'BUTTON') && btn('Pay'),
-    'a chat: the name and "last seen 5 min ago" in the top bar; the composer (Attach, Message, Send); Pay');
-  await btn('Pay').click(); await settle();
-  ok(sheet() && sh1() === 'Turn on Wallet to pay' && btn('Turn on Wallet'), 'Pay with Wallet off: the sheet that turns it on');
-  await aria('Close', 'BUTTON').click(); await settle();
+  ok(root.all().some((e) => e.className === 'who' && e.textContent.includes('bo') && e.textContent.includes('last seen 5 min ago')) && aria('Message', 'TEXTAREA') && aria('Send', 'BUTTON') && aria('Attach', 'BUTTON') && !btn('Pay'),
+    'a chat: the name and "last seen 5 min ago" in the top bar; the composer (Attach, Message, Send); no Pay with the Wallet off');
+  // The bar: Back, the name (its avatar inside the one control), Pay with the Wallet on; nothing else to tap.
+  const barTaps = () => root.all().find((e) => e.tagName === 'HEADER').all().filter((e) => e.tagName === 'BUTTON');
+  const bar0 = barTaps().map((e) => e.className);
+  SET.wallet = true; await poll();
+  const bar1 = barTaps().map((e) => e.attrs['aria-label'] ?? e.textContent.slice(0, 2));
+  ok(bar0.length === 2 && bar0[1] === 'who' && bar1.length === 3 && btn('Pay') && barTaps()[1].all().some((e) => /^av/.test(e.className)),
+    `a chat's bar: Back, the name (the avatar in it); Pay only with the Wallet on (${JSON.stringify([bar0, bar1])})`);
+  SET.wallet = false; await poll();
+  ok(!btn('Pay'), 'the Wallet off again: no Pay');
   await root.all().find((e) => e.className === 'who').click(); await settle(); await poll();
   const seesMe = aria('Sees when I\'m online', 'INPUT');
   ok(h1() === 'Chat settings' && seesMe && seesMe.checked === false && has('Show them') && has('Just a count') && has('Quiet') && btn('Block bo…'), 'Chat settings: Their messages (Show them, Just a count, Quiet), Sees when I\'m online off (deny), Block');
@@ -658,9 +725,14 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const outs = root.all().filter((e) => e.className === 'msg out');
     ok(outs.length === 3 && outs[0].textContent.endsWith('✓✓') && outs[0].all().some((e) => e.attrs['aria-label'] === 'Seen') && outs[1].textContent.endsWith(' ✓') && outs[1].all().some((e) => e.attrs['aria-label'] === 'Delivered to the relay')
       && outs[2].textContent.endsWith('waiting to send') && has('Today'), `a chat: a day line; ✓✓ seen, ✓ at the relay, waiting said in words (${outs.map((e) => e.textContent).join(' | ')})`);
-    await aria('Attach', 'BUTTON').click(); await settle();
-    ok(sheet() && sh1() === 'Attach' && has('Pay') && has('Send a signed message') && has('Proves it\'s from you') && aria('Close', 'BUTTON'), 'the attach sheet (Telegram\'s): Pay, Send a signed message; Close');
-    await aria('Close', 'BUTTON').click(); await settle();
+    // The composer's one "+": a row of choices above the box (no sheet); Escape, a choice or a tap elsewhere closes it.
+    const plus = aria('Attach', 'BUTTON'), tray = () => root.all().find((e) => e.className === 'tray');
+    await plus.click(); await settle();
+    const picks = () => tray().all().filter((e) => e.className === 'pick').map((e) => e.textContent);
+    ok(!sheet() && tray()?.hidden === false && plus.attrs['aria-expanded'] === 'true' && picks().includes('Signed message') && !picks().includes('Pay') && !picks().includes('Camera'),
+      `the "+": its row opens (aria-expanded), a signed message; no Pay with the Wallet off, no camera off the phone (${picks().join(', ')})`);
+    tray().on.keydown?.forEach((f) => f({ key: 'Escape', preventDefault() {} })); await settle();
+    ok(tray().hidden === true && plus.attrs['aria-expanded'] === 'false', 'the "+": Escape closes the row');
     await root.all().find((e) => e.className === 'msg in').click(); taps++; await settle(); await poll();
     ok(taps === 2 && h1() === 'Signed message' && has('✓ Signed by bo') && has('Their four words match the ones you compared. Not changed since they signed it.') && has('Dinner on Friday?') && btn('Check another message'),
       'task 11, 2 taps: the chat, then their message: Signed message (who, the words compared, not changed, the text)');
@@ -855,6 +927,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await btn('OK').click(); await settle(); await poll();
     ok(calls.some(([m, p, b]) => m === 'POST' && p === '/api/settings' && b.relay === 'relay.example.org') && root.all().some((e) => e.attrs['data-relay'] === 'relay.example.org' && e.attrs['aria-pressed'] === 'true') && !btn('OK'),
       'relay: a relay that answers is tested, then taken (POST /api/settings); the field closes');
+    // One not in the public list, then another relay in use: the one added stays in the list (0.1.16).
+    await btn('Add a relay').click(); await settle();
+    kit(root).field('Another relay').value = 'own.example.net';
+    await btn('OK').click(); await settle(); await poll();
+    await root.all().find((e) => e.attrs['data-relay'] === 'relay.sigelo.ai').click(); await settle(); await poll();
+    ok(root.all().some((e) => e.attrs['data-relay'] === 'own.example.net' && e.attrs['aria-pressed'] === 'false' && e.textContent.includes('added')) && root.all().some((e) => e.attrs['data-relay'] === 'relay.sigelo.ai' && e.attrs['aria-pressed'] === 'true'),
+      'relay: a relay added, then the default taken again: the added one stays listed (added)');
     await back();
     await root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Chats and history')).click(); await settle(); await poll();
     const rs = aria('Send seen receipts', 'INPUT');
@@ -934,7 +1013,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     // The agent's page and its keeper settings.
     await scoutRow().click(); await settle(); await poll();
     ok(h1() === 'scout' && has('Allowance') && has('0.12 of 0.50 XMR') && has('Asks you above 0.02 XMR · up to 0.10 XMR a payment · pays 1 payee') && btn('Change limits') && btn('Pause') && has('Last activity') && has('Messaged you') && has('Found 3 trips')
-      && has('Its four words') && has('harvest · ivory · comet · nine') && btn('Message') && btn('Revoke scout'), 'an agent\'s page: the allowance card (Change limits, Pause), Last activity (its last message), its four words, Message, Revoke');
+      && has('Identity words') && has('The agent\'s own identity, not the pairing.') && !has('Its four words') && has('harvest · ivory · comet · nine') && btn('Message') && btn('Revoke scout'), 'an agent\'s page: the allowance card (Change limits, Pause), Last activity (its last message), its identity words (named apart from the pairing\'s), Message, Revoke');
     ok(has('Address') && root.all().some((e) => e.attrs['data-agent-address'] === SADDR) && has(SADDR) && btn('Copy') && has('0.25 XMR in its account · 0.38 left this month')
       && has('Send Monero here from any wallet: it is this agent\'s to spend within its limits.') && has('Received 0.25 XMR') && has('In its account'),
       'agent page: the Address card above Allowance (its (i, 0), QR, Copy, what its account holds, the one line); money received in Last activity');
@@ -1005,7 +1084,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const nw = W_.workers.at(-1);
     ok(h1() === 'Code for notes' && btn('Share') && btn('Copy') && has('Give it to notes: share it, or let it scan the QR.'), 'enrol: the code, Share and Copy, the QR to scan');
     Object.assign(nw.enrolling, { state: 'words', code: null, command: null, words: 'harvest ivory comet nine' }); await poll();
-    ok(h1() === 'Is this notes?' && has('The agent shows four words. Same words here?'), 'enrol: its four words, to compare with the ones the agent shows');
+    ok(h1() === 'Same words on notes?' && has('harvest') && btn('They differ'), 'enrol: its four words, to compare with the ones the agent shows');
     await btn('They match').click(); taps++; await settle();
     Object.assign(nw.enrolling, { state: 'enrolled', words_ok: true }); Object.assign(nw, { status: 'enrolled', contact: null }); await poll();
     ok(taps === 4 && has('notes is ready') && btn('Done')?.className === 'btn pri' && !calls.some(([, p, b]) => p === '/api/send' && b.to === nw.did), 'task 3, 4 taps: Agents, Enrol agent, Make a code, They match; ready, Done first, no first message sent');
@@ -1147,10 +1226,11 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await btn('Back to the chat').click(); await settle(); await poll();
     const payB = root.all().find((e) => e.attrs['data-pay'] === TX3);
     ok(h1() !== 'Check and send' && payB?.textContent.includes('You paid') && payB.textContent.includes('0.05 XMR') && payB.textContent.includes('Dinner · confirmed'), `Back to the chat: the payment in the chat, You paid 0.05 XMR, Dinner · confirmed (${payB?.textContent})`);
-    // The same from the attach sheet: Attach, Pay, Review, Send (4 taps inside the chat).
+    // The same from the "+": Attach, Pay, Review, Send (4 taps inside the chat).
     void aria('Attach', 'BUTTON').click(); await settle();
-    ok(sheet() && sh1() === 'Attach' && btn('Pay'), 'the attach sheet: Pay');
-    await btn('Pay').click(); await settle(); await poll(); await poll();
+    const payPick = root.all().find((e) => e.className === 'pick' && e.textContent === 'Pay');
+    ok(payPick && root.all().find((e) => e.className === 'tray')?.hidden === false, 'the "+": Pay among the choices, the Wallet on');
+    await payPick.click(); await settle(); await poll(); await poll();
     ok(h1() === 'Pay bo', 'Attach → Pay: Pay bo (then Review, Send: 4 taps inside the chat)');
     // No address from them: said, Ask in the chat, or paste one.
     const cy = G_.contacts.find((c) => c.name === 'cy');
@@ -1345,6 +1425,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(has('What they restore') && has('Your 25 words restore the vault and every keeper wallet; keeper settings are re-entered.'), 'Backup and recovery: the recovery fact');
     await sandbox.ui.go('about'); await settle(); await poll();
     ok(has('Licence') && has('MIT') && root.all().some((e) => e.tagName === 'A' && e.attrs.href === 'https://github.com/csigelo/sigelo') && has(`Version ${PKG_VERSION} · experimental`), `About: the version from apps/agent/package.json (${PKG_VERSION}, read beside ui.js), licence, links (sigelo.io, the source)`);
+    ok(has('Proof of work') && has('WebAssembly in a Worker'), 'About: where the proof of work runs (sigeloLocal.powEngine: WebAssembly in a Worker)');
+    // A screen redrawn at the poll keeps its scroll (0.1.16: the profile jumped to the top); a new screen starts at the top.
+    scroll.clamp = true; sandbox.window.scrollY = 640; await poll();
+    const kept = sandbox.window.scrollY;
+    await sandbox.ui.go('set-appearance'); await settle(); await poll();
+    ok(kept === 640 && sandbox.window.scrollY === 0, `the poll's redraw keeps the scroll (${kept}); another screen starts at the top (${sandbox.window.scrollY})`);
+    scroll.clamp = false; await back();
     // The Android app has no action bar: its old menu's Reload is About's "Reload the app" (sigeloLocal.reload: the shell's, or a tab's own).
     const r0 = sandbox.reloads ?? 0;
     await root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Reload the app')).click(); await settle();
@@ -1373,9 +1460,37 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     });
     sandbox.transfers = { asked: 0, active: 0 };
     await sandbox.ui.go('chat', bo.did); await settle(); await poll();
-    ok(aria('Take a photo', 'BUTTON') && aria('Attach', 'BUTTON'), 'a chat on the phone: the camera beside Attach');
-    await aria('Take a photo', 'BUTTON').click(); await settle(); await poll();
+    // One "+" (0.1.17: Attach and a camera button were two): Photo, Camera, File, then (Pay with the Wallet on) a signed message.
+    const pickOf = (l) => root.all().find((e) => e.className === 'pick' && e.textContent === l), trayEl = () => root.all().find((e) => e.className === 'tray');
+    const choose = async (l) => { await aria('Attach', 'BUTTON').click(); await settle(); const b = pickOf(l); await b?.click(); await settle(); await poll(); return b; };
+    ok(!aria('Take a photo', 'BUTTON') && aria('Attach', 'BUTTON') && trayEl()?.hidden === true && trayEl().all().filter((e) => e.className === 'pick').map((e) => e.textContent).join() === 'Photo,Camera,File,Signed message',
+      `a chat on the phone: one "+", its row Photo, Camera, File, Signed message (the Wallet off: no Pay) (${trayEl()?.all().filter((e) => e.className === 'pick').map((e) => e.textContent).join()})`);
+    // A tap elsewhere closes it.
+    await aria('Attach', 'BUTTON').click(); await settle();
+    const open1 = trayEl().hidden === false;
+    const lis1 = docLis.get('pointerdown')?.length ?? 0;
+    for (const f of docLis.get('pointerdown') ?? []) f({ target: root.all().find((e) => e.className === 'thread') });
+    ok(open1 && lis1 === 1 && trayEl().hidden === true && (docLis.get('pointerdown') ?? []).length === 0, 'the "+": a tap elsewhere closes the row (and lets go of the document)');
+    if (!trayEl().hidden) await aria('Attach', 'BUTTON').click();
+    await choose('Camera');
+    ok(trayEl().hidden === true, 'a choice closes the row');
     ok(calls.some(([, p]) => p === '/api/transfers/photo') && sandbox.sent?.to === bo.did && sandbox.sent.doc === 'cd'.repeat(16), `the camera → POST /api/transfers/photo, then to this chat at once (POST /api/transfers/send {to, doc}) (${JSON.stringify(sandbox.sent)})`);
+    // No camera app (0.1.16: the stock one disabled, the tap did nothing): one line, and the picker instead, to this chat.
+    const photoWas = routes['POST /api/transfers/photo'];
+    routes['POST /api/transfers/photo'] = () => ({ __error: { check: 'no_camera', message: 'no camera app on this phone' } });
+    routes['POST /api/transfers/pick'] = () => ({ doc: 'ce'.repeat(16), name: 'IMG_7.jpg', size: 1000, mtime: 1, url: 'https://app.invalid/.big/y' });
+    const picks0 = calls.filter(([, p]) => p === '/api/transfers/pick').length;
+    await choose('Camera');
+    ok(has('No camera app on this phone: choose a photo instead.') && calls.filter(([, p]) => p === '/api/transfers/pick').length === picks0 + 1 && calls.filter(([, p]) => p === '/api/transfers/pick').at(-1)[2]?.images === true
+      && sandbox.sent?.doc === 'ce'.repeat(16) && sandbox.sent.to === bo.did,
+      `no camera app (no_camera): said in one line, the photo picker (images) opened instead, the photo to this chat (${JSON.stringify(sandbox.sent)})`);
+    routes['POST /api/transfers/photo'] = photoWas;
+    // Photo: the picker for pictures, sent as a photo; File: any file.
+    await choose('Photo');
+    const pk = calls.filter(([, p]) => p === '/api/transfers/pick');
+    await choose('File');
+    const pk2 = calls.filter(([, p]) => p === '/api/transfers/pick');
+    ok(pk.at(-1)[2]?.images === true && pk2.length === pk.length + 1 && pk2.at(-1)[2]?.images === undefined, 'Photo → POST /api/transfers/pick {images: true}; File → the picker for any file');
     MSGS[bo.did] = [...(MSGS[bo.did] ?? []), { n: 9, dir: 'in', at: now(), iat: now(), text: 'Photo', label: 'sigelo-photo/0', status: null, code: null, detail: null, link: null, photo: { type: 'image/jpeg', data: jpeg, w: 640, h: 480, sha256: SHA, size: 3200000, name: 'IMG_2.jpg' } }];
     TL.in.push({ id: '12'.repeat(16), from: bo.did, contact: 'bo', name: 'IMG_2.jpg', size: 3200000, sha256: SHA, state: 'done', saved: 'content://media/external/downloads/1', got: 3200000 });
     sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
@@ -1465,7 +1580,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       }
     }
     // The sheets, over Settings: the system Back closes them (one entry), as their Close does; the screen stays.
-    const sheetsOf = { 'new-chat': [], profiles: [], 'profile-add': [], attach: [G_.contacts[1].did], 'pay-off': [G_.contacts[1].did], picture: ['me', 'You'], rename: ['Rename bo', 'bo', async () => {}], confirm: [{ title: 'Sure?', yes: 'Yes' }] };
+    const sheetsOf = { 'new-chat': [], profiles: [], 'profile-add': [], picture: ['me', 'You'], rename: ['Rename bo', 'bo', async () => {}], confirm: [{ title: 'Sure?', yes: 'Yes' }] };
     for (const [name, a] of Object.entries(sheetsOf)) {
       for (const how of ['system', 'close']) {
         sbB.ui.home('chats'); await settle(); await sleep(20);
@@ -1486,7 +1601,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await sysBack(); await pollB();
     const fromTab = view();
     await sysBack();
-    ok(bad.length === 0 && visited >= 2 * sbB.ui.screens.length + 16 && fromTab === 'chats' && H.left === 1 && view() === 'chats',
+    ok(bad.length === 0 && visited >= 2 * sbB.ui.screens.length + 12 && fromTab === 'chats' && H.left === 1 && view() === 'chats',
       `Back everywhere: ${sbB.ui.screens.length} screens (the system Back and their own Back or Close) and ${Object.keys(sheetsOf).length} sheets, each back to the screen before it (the mock's Close: paired → Chats, enrolled → Agents, sent → Wallet); a tab root back to Chats; only Chats, the first screen, leaves the app (${bad.slice(0, 6).join('; ')})`);
     void roots;
   }
@@ -2044,7 +2159,8 @@ try {
     const ip = await W.webPlatform({ name: 'op', indexedDB: new FakeIDB(), mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()), env: { relay: HOST } });
     await SD.restoreInto(ip, { words: mnemonicFromRoot(S0), name: 'phone', relay: HOST, now: Math.floor(Date.now() / 1000) });
     const opMe = JSON.parse(new TextDecoder().decode(await W.loadIdentity(ip)));
-    const O = makeRouter({ platform: ip, identity: () => opMe, mode: { kind: 'full', standby: false }, seat: SD.seatOf(ip, () => opMe), keeper: SD.keeperOf(ip), options: relayOpts });
+    const mkO = () => makeRouter({ platform: ip, identity: () => opMe, mode: { kind: 'full', standby: false }, seat: SD.seatOf(ip, () => opMe), keeper: SD.keeperOf(ip), options: relayOpts });
+    let O = mkO();
     await O.start();
     try {
       const ec = await O.call('POST', '/api/agents/enrol-code', { name: 'vps', tier: 'quiet' });
@@ -2067,14 +2183,19 @@ try {
         const seenWords = await until(async () => (await O.call('GET', '/api/agents/workers')).body.workers.find((w) => w.worker === 1)?.enrolling?.words);
         const words = (await O.call('GET', '/api/agents/workers')).body.workers.find((w) => w.worker === 1)?.enrolling?.words;
         ok(seenWords && words === j.contact?.fingerprint, `app enrol: the machine paired through the code; the app shows the same four words (${words})`);
+        // The app restarted mid-enrolment (0.1.16: the temporary identity then showed in Chats, with a chat and Pay): still hidden.
+        await O.stop(); O = mkO(); await O.start();
+        const st0 = (await O.call('GET', '/api/state')).body;
+        ok(![...st0.groups.mine, ...st0.groups.contacts].some((c) => c.name.includes('(enrolling)')) && !st0.pending.invites.some((x) => x.name.includes('(enrolling)')),
+          `app enrol: after a restart the temporary identity is still not a contact (${JSON.stringify([...st0.groups.mine, ...st0.groups.contacts].map((c) => c.name))})`);
         res = await E.complete({ carrier: tc, file, temp: tempFile, wait: 60, until: (o) => o.placed.length > 0, place });
       } finally { await tc.stop(); }
       const K1 = keeperRoot(S0, 1);
       ok(res.placed.length === 1 && worker?.secret === Buffer.from(agentIdentitySeed(K1, 1, 0)).toString('hex'), `app enrol: the machine received worker 1 of the app's keeper root, end to end (${JSON.stringify(res.refused)})`);
       // The worker's row, the contact in Mine and the temporary pairing's removal settle in separate
       // steps after the enrolment lands; CI saw the row enrolled before the rest had settled, so the
-      // whole condition is waited for, not a snapshot of it.
-      const settled = (w, st) => w?.status === 'enrolled' && w.contact && w.placed === 'remote' && w.tier === 'quiet' && w.enrolling?.state === 'enrolled'
+      // whole condition is waited for, not a snapshot of it. Restarted above: the row's enrolment is no longer in memory (null).
+      const settled = (w, st) => w?.status === 'enrolled' && w.contact && w.placed === 'remote' && w.tier === 'quiet' && (w.enrolling?.state === 'enrolled' || w.enrolling === null)
         && st.groups.mine.some((c) => c.did === w.contact && c.ours === true && c.name === 'vps')
         && ![...st.groups.mine, ...st.groups.contacts].some((c) => c.name.includes('(enrolling)')) && !st.pending.invites.some((x) => x.name.includes('(enrolling)'));
       let w1, st;

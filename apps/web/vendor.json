@@ -151,7 +151,7 @@
   },
   "vendor/contact/enrol.mjs": {
    "from": "apps/contact/enrol.mjs",
-   "sha256": "0897984b540f7f52881318f942629bd9d2889d98c2d61e076cb8d69e495a11ed"
+   "sha256": "276eb54433ba39ffb18449e14a691799c90bedfdccb76780d12b023d8294524c"
   },
   "vendor/contact/envelope.mjs": {
    "from": "apps/contact/envelope.mjs",
@@ -179,7 +179,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "3208573cbb78769c4dac871b99a7776f3a6a1d67d836294a18d3c4f1dc101f95"
+   "sha256": "f918363c805f0ec378978b10e9fb5086da73e6160b27a36b5128cabf05365b8e"
   },
   "vendor/contact/photo.mjs": {
    "from": "apps/contact/photo.mjs",
@@ -227,7 +227,7 @@
   },
   "vendor/contact/transfer-web.mjs": {
    "from": "apps/contact/transfer-web.mjs",
-   "sha256": "4e0de2e42f0391dc0dc69aa04405fe8afc20e198e0886cd50ec9810de76dba09"
+   "sha256": "bbbe9754c385cb09f821c43ca01db1a6a82d5b28cb439d29d6cdc922298b03fd"
   },
   "vendor/contact/transfer.mjs": {
    "from": "apps/contact/transfer.mjs",
@@ -251,7 +251,7 @@
   },
   "vendor/package.json": {
    "from": "apps/agent/package.json",
-   "sha256": "281b4f8daa0fc831786587bd59038235b660b2689240399108b3a24f509da5e2"
+   "sha256": "27e6b0e4b7f0f4e938c0bb8e42ca5516c66bc39cdf2a61a579a49c7ed01cc372"
   },
   "vendor/remote-client.mjs": {
    "from": "apps/agent/remote-client.mjs",
@@ -283,11 +283,11 @@
   },
   "vendor/ui.css": {
    "from": "apps/agent/ui.css",
-   "sha256": "9879efce962ccfba955a64f5a9c6390ee5e52caee6414bfd49a99008efb7e482"
+   "sha256": "9797a2479c02a6fb2c4d9efa939c863009eea2e18fb802cda5cb039138eb1d7d"
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "8f12f5bf31a9efc22341874bd273672ddfbedf13348f1fab061e04378a790f22"
+   "sha256": "652756207268afe2ee4e6eb8c601a07f74a55c190d32ca56d5cb58b3a19abd76"
   }
  }
 }

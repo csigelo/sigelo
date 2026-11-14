@@ -57,9 +57,15 @@
 //
 // The pending file, 0600, beside the identity (x.json → x.enrol.json), under its own lock:
 //   { v, issued: { invite nonce: { key, i, n, name, did, old_pair, relay, exp, attestation, issuer,
-//                                   temp?, invite?, done? } },
+//                                   temp?, invite?, done?, sent_at?, needs_send? } },
 //         joining: { invite nonce: { key, code_did, relay, exp, sent, temp } } }
 // Entries go at exp, 24 hours after they were made, whatever their state.
+//
+// Neither side waits on one message (0.1.17: a lost identity left both sides waiting for the other).
+// The machine sends its request again at most every RESEND_S while no identity has come (`sent`:
+// the unix time of the last send; true, as an earlier version kept it, counts as long ago). The
+// operator whose identity send was refused or failed marks the enrolment `needs_send` (the time of
+// that try) and sends again at its next round, at most every RESEND_S, while the entry lives.
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -82,6 +88,10 @@ export const PENDING_TTL = DAY;
 export const PINNED_CREATED = '1970-01-01T00:00:00Z', ROTATION_IAT = 0, MAX_N = 64;
 const KEY_INFO = 'sigelo-enrol/0 key', PROOF_PREFIX = 'sigelo-enrol/0 request\n';
 const SKEW = 300, WAIT_STEP = 300;
+/** The least time between two sends of the same request, or of the same identity after a failure (seconds). */
+export const RESEND_S = 60;
+// Due: never sent (false, undefined), sent by an earlier version (true: long ago), or RESEND_S since.
+const due = (at, now) => at === undefined || at === null || at === false || at === true || !(now - at < RESEND_S);
 
 // ---------------------------------------------------------------- the worker's identity
 
@@ -301,7 +311,8 @@ export async function complete({ carrier, file, wait = 0, until = () => false, k
   const out = { delivered: [], placed: [], refused: [], sent: [], held: [], rest: { messages: [], events: [], dropped: {} } };
   const end = Date.now() + wait * 1000;
   for (let first = true; ; first = false) {
-    if (first && place) await sendRequests(carrier, file, temp, out, true);
+    if (first && place) await sendRequests(carrier, file, temp, out);
+    if (keeper) await resend(carrier, file, keeper, out);
     if (keeper) await settle(carrier, file, keeper, out);
     const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
     const batch = await carrier.inbox({ wait: Math.min(left, WAIT_STEP), paired: true });
@@ -315,7 +326,7 @@ export async function complete({ carrier, file, wait = 0, until = () => false, k
     if (batch.offline !== undefined) { out.offline = batch.offline; out.lastError = carrier.lastError; break; }
     // A pairing this inbox completed sends its request now, not at the next run; a worker that
     // paired in this inbox is filed now.
-    if (place && out.placed.length === 0) await sendRequests(carrier, file, temp, out, false);
+    if (place && out.placed.length === 0) await sendRequests(carrier, file, temp, out);
     if (keeper) await settle(carrier, file, keeper, out);
     if (until(out) || Date.now() >= end) break;
   }
@@ -323,16 +334,17 @@ export async function complete({ carrier, file, wait = 0, until = () => false, k
 }
 
 // The machine: a request for each enrolment of this temporary identity whose pairing is complete
-// and that has not sent one; at a first round, again for those sent before without an answer (the
-// operator's inbox may have gone to another reader).
-async function sendRequests(carrier, file, temp, out, first) {
-  const todo = pendingOf(carrier)(file, nowOf(carrier), (s) => Object.entries(s.joining).filter(([, j]) => j.temp === temp && (!j.sent || first)));
+// and that has not sent one, or sent it RESEND_S ago or more with no identity come since (it was
+// lost, refused, or read elsewhere; the operator answers a request again until the worker paired).
+async function sendRequests(carrier, file, temp, out) {
+  const now0 = nowOf(carrier);
+  const todo = pendingOf(carrier)(file, now0, (s) => Object.entries(s.joining).filter(([, j]) => j.temp === temp && due(j.sent, now0)));
   for (const [id, j] of todo) {
     const c = liveHolding(carrier, j.code_did);
     if (!c) continue;
     try {
       const r = await carrier.send(c.did, request(hexToBytes(j.key), pairOf(c)), { label: LABEL_ENROL });
-      pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.joining[id]) s.joining[id].sent = true; });
+      pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.joining[id]) s.joining[id].sent = nowOf(carrier); });
       out.sent.push({ did: c.did, status: r.status });
     } catch (e) {
       out.refused.push({ check: e.check ?? 'error', detail: `the enrolment request to ${c.name} did not go (${e.message}): it goes at the next sigelo-agent enrol --finish`, from: c.did });
@@ -375,6 +387,13 @@ async function onRequest(carrier, file, keeper, m, out, confirm) {
     return;
   }
   if (confirm || e.confirm_words) pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].confirmed = true; });
+  await sendIdentity(carrier, file, keeper, id, e, c, out);
+}
+
+// The operator: worker e.i's identity to the temporary DID c, with its own invite. Refused or failed:
+// marked needs_send (resend tries again), never left to a request that may not come again.
+async function sendIdentity(carrier, file, keeper, id, e, c, out) {
+  const now = nowOf(carrier), who = `${c.name ?? c.did} (${c.did})`;
   try {
     // The worker's own invite, made once per enrolment: a repeated request gets the same.
     let invite = e.invite;
@@ -385,10 +404,25 @@ async function onRequest(carrier, file, keeper, m, out, confirm) {
     const identity = workerIdentity({ K: keeper.K, i: e.i, n: e.n, recovery: keeper.recovery, attestation: e.attestation, issuer: e.issuer });
     if (didOf([identity.genesis, ...identity.rotations.map((x) => x.next_genesis)].at(-1)) !== e.did) fail('keeper', `worker ${e.i} derives to another DID than at enrol: the keeper root changed since (sigelo-agent keeper)`);
     const sent = await carrier.send(c.did, identityMessage(identity, invite, e.i, e.operator_name ?? null), { label: LABEL_IDENTITY });
+    pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) { s.issued[id].sent_at = nowOf(carrier); delete s.issued[id].needs_send; } });
     out.delivered.push({ id, name: e.name, temp: c.did, did: e.did, status: sent.status });
   } catch (x) {
     if (!(x instanceof MsgError)) throw x;
-    out.refused.push({ check: x.check, detail: `worker ${e.i} did not go to ${who} (${x.message}): it goes when the machine asks again (sigelo-agent enrol --finish there)`, from: m.from });
+    if (x.check !== 'keeper') pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].needs_send = nowOf(carrier); });
+    out.refused.push({ check: x.check, detail: `worker ${e.i} did not go to ${who} (${x.message}): it goes again at the next round, or when the machine asks again (sigelo-agent enrol --finish there)`, from: c.did, needs_send: id });
+  }
+}
+
+// The operator: each enrolment whose identity send failed (needs_send), sent again once RESEND_S
+// passed, while the entry lives, its worker has not paired, and its temporary DID is still a live
+// contact. Only what onRequest already let go (its proof checked, its words confirmed when asked).
+async function resend(carrier, file, keeper, out) {
+  const now = nowOf(carrier);
+  const todo = pendingOf(carrier)(file, now, (s) => Object.entries(s.issued).filter(([, e]) => e.needs_send !== undefined && e.temp && !e.done && due(e.needs_send, now) && (e.confirmed || !e.confirm_words)));
+  for (const [id, e] of todo) {
+    const c = readStore(carrier).contacts[e.temp];
+    if (!c || c.revoked || !c.pair_key) continue;
+    await sendIdentity(carrier, file, keeper, id, e, c, out);
   }
 }
 

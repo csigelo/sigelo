@@ -119,7 +119,7 @@ export function csp(html = readFileSync(join(HERE, 'index.html'), 'utf8')) {
 function main(check) {
   const map = importMap(), { files, missing } = walk(map), problems = [...missing.map((x) => `unresolved: ${x}`)];
   const { policy, want } = csp();
-  if (!policy || !policy.includes(`script-src 'self' ${want}`)) problems.push(`index.html's CSP must say script-src 'self' ${want} (the import map's hash)`);
+  if (!policy || !policy.includes(`script-src 'self' 'wasm-unsafe-eval' ${want};`)) problems.push(`index.html's CSP must say script-src 'self' 'wasm-unsafe-eval' ${want} (the Worker's WebAssembly; the import map's hash)`);
   const manifest = {};
   for (const [rel, src] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
     if (src === null || !rel.startsWith('vendor/')) continue;

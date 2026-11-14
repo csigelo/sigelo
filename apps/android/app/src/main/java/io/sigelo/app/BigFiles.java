@@ -53,11 +53,12 @@ import java.util.regex.Pattern;
  * class keeps, per profile) and reads it by byte range; it writes what it receives into a partial here
  * at offsets, then has the partial moved into the phone's Downloads.
  *
- *   big-pick   the system's document picker (ACTION_OPEN_DOCUMENT); the read grant kept (a resume after a
+ *   big-pick   the system's document picker (ACTION_OPEN_DOCUMENT; images: pictures only); the read grant kept (a resume after a
  *              restart still reads it) → {doc, name, size, mtime} | {cancelled}
  *   big-photo  the system's camera (ACTION_IMAGE_CAPTURE) into this app's cache through PhotoProvider; CAMERA
  *              asked at the first (declared for the scan, Android refuses the intent until it is granted);
- *              the location tags removed unless keepLocation → {doc, name, size, mtime} | {cancelled}
+ *              the location tags removed unless keepLocation → {doc, name, size, mtime} | {cancelled};
+ *              refused no_camera when no app answers the intent (the page offers the picker instead)
  *   big-hash   each 1 MiB chunk's SHA-256 and the whole file's, here (the page would take minutes) → {name, size, mtime, sha256, hashes}
  *   big-stat   {size, mtime}: the sender checks the file is still the one hashed
  *   a range    GET ORIGIN/.big/<doc>?size=&mtime= with Range (MainActivity.serve → range): 206 and those bytes,
@@ -215,7 +216,8 @@ final class BigFiles {
         if (pendingPick != null) pendingPick.no("cancelled", "another pick");
         pendingPick = r;
         pendingPickProfile = profile;
-        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+        // images: pictures only (the composer's Photo, and the way on when there is no camera app).
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(m.optBoolean("images", false) ? "image/*" : "*/*")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         try {
             activity.startActivityForResult(i, REQ_PICK);
@@ -227,6 +229,8 @@ final class BigFiles {
 
     void photo(JSONObject m, Reply r) throws SigeloBridge.Refused {
         String profile = profileOf(m);
+        // No app answers the camera intent (0.1.16: the stock camera disabled, the tap did nothing): said, before CAMERA is asked.
+        if (!cameraApp()) throw new SigeloBridge.Refused("no_camera", "no camera app on this phone");
         if (pendingPhoto != null) pendingPhoto.no("cancelled", "another photo");
         pendingPhoto = r;
         pendingPhotoProfile = profile;
@@ -252,8 +256,13 @@ final class BigFiles {
             activity.startActivityForResult(i, REQ_PHOTO);
         } catch (ActivityNotFoundException e) {
             pendingPhoto = null;
-            r.no("no_camera_app", "no camera app on this phone");
+            r.no("no_camera", "no camera app on this phone");
         }
+    }
+
+    /** An app answers ACTION_IMAGE_CAPTURE (Android 11+: seen through the manifest's <queries>). */
+    private boolean cameraApp() {
+        return new Intent(MediaStore.ACTION_IMAGE_CAPTURE).resolveActivity(activity.getPackageManager()) != null;
     }
 
     /** MainActivity.onRequestPermissionsResult for ours: true when it was ours. */

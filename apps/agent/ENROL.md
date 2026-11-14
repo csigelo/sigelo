@@ -59,6 +59,7 @@ Then you send the worker's identity (key, chain, attestation) once over that end
 (label `sigelo-identity/0`) with an invite the worker answers, so its contacts start with you. The
 temporary DID is forgotten on both sides and its mailboxes given up. Without `--wait`, or with
 either side offline, run `sigelo-agent enrol --finish` on each side in turn (pending 24 hours).
+A lost key is sent again: the server asks again at most once a minute, and you resend a refused one.
 
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
 443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
