@@ -115,6 +115,7 @@
     "transfer-web.mjs",
     "rtc-web.mjs",
     "photo.mjs",
+    "public.mjs",
     "words-lock.mjs",
     "fixtures/carrier-v0.json",
     "fixtures/device-v1.json",
