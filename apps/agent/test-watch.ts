@@ -176,7 +176,12 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
       ok('watch --spool: the own message written to <dir>/<id>.json, a line saying how to answer', await until(() => spooled().length === 1) && await until(() => w2!.out.includes('(answer: sigelo-agent reply --to ')), w2.out + w2.err.slice(-300));
       const task = JSON.parse(readFileSync(join(SPOOL, spooled()[0]!), 'utf8')) as { id: string; content: string; from: string };
       ok('the spooled file: the message as inbox gives it, its id the file name', task.content === 'a task for later' && `${task.id}.json` === spooled()[0] && task.from === D.mine, JSON.stringify(task));
-      ok('spooled = taken: inbox beside the watcher has no own message left', (JSON.parse((await cli('alice', 'inbox', '--tier', 'own')).stdout) as { messages: unknown[] }).messages.length === 0);
+      // inbox beside a spooling watcher (the service): it takes what was spooled, files deleted, no login (which would evict it).
+      const fromSpool = await cli('alice', 'inbox', '--tier', 'own');
+      const fs1 = (JSON.parse(fromSpool.stdout) as { messages: { id: string; content: string }[] }).messages;
+      ok('inbox beside the spooling watcher: the spooled message, taken (its file deleted), said', fs1.length === 1 && fs1[0]!.id === task.id && fs1[0]!.content === 'a task for later' && spooled().length === 0
+        && fromSpool.stderr.includes('from the watcher\'s spool') && w2.c.exitCode === null, fromSpool.stdout + fromSpool.stderr);
+      ok('and a second inbox has none left', (JSON.parse((await cli('alice', 'inbox', '--tier', 'own')).stdout) as { messages: unknown[] }).messages.length === 0);
       const rq = await cli('alice', 'reply', '--to', task.id, 'done:', 'the task');
       ok('reply --to <id> beside the watcher: queued for it (exit 0)', rq.status === 0 && (JSON.parse(rq.stdout) as { status: string; msg_id: string }).status === 'queued'
         && (JSON.parse(rq.stdout) as { msg_id: string }).msg_id === task.id && rq.stderr.includes('reply: queued for sigelo-agent watch'), rq.stdout + rq.stderr);
@@ -244,6 +249,39 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
       await relay.close?.();
       rmSync(H, { recursive: true, force: true });
     }
+  }
+}
+
+// ── service (sigelo-agent-service.ts, WATCH.md "Always on"): the unit written and read back, nothing installed ──────
+// SIGELO_SERVICE_DIR: a temporary directory; SIGELO_SERVICE_DRY=1: no systemctl, what would run printed.
+{
+  const S = await import('./sigelo-agent-service.ts');
+  const H = tmpHome('service'), id = join(H, 'my agent %1.local.json');
+  const p = S.planFor(id, undefined, { SIGELO_RELAY: 'relay.example', SIGELO_SECRET_THING: 'x', SIGELO_NAME: 'Ana "the" agent' } as NodeJS.ProcessEnv, CLI);
+  const u = S.unitOf(p), back = S.parseUnit(u);
+  ok('service: the unit runs watch --identity <file> --spool <file>.spool --quiet, read back word for word (spaces, %, quotes)',
+    JSON.stringify(back.exec) === JSON.stringify([process.execPath, CLI, 'watch', '--identity', id, '--spool', join(H, 'my agent %1.local.spool'), '--quiet']), JSON.stringify(back.exec));
+  ok('service: SIGELO_IDENTITY set, the relay kept, nothing else of the environment', back.env['SIGELO_IDENTITY'] === id && back.env['SIGELO_RELAY'] === 'relay.example' && back.env['SIGELO_NAME'] === 'Ana "the" agent' && !('SIGELO_SECRET_THING' in back.env), JSON.stringify(back.env));
+  ok('service: Restart=always, RestartSec=15, after network-online.target, WantedBy=default.target', back.restart === 'always' && u.includes('RestartSec=15') && u.includes('After=network-online.target') && back.wanted === 'default.target');
+  const pl = S.plistOf(p);
+  ok('service: the macOS LaunchAgent: RunAtLoad, KeepAlive, the same arguments, XML-escaped', pl.includes('<key>KeepAlive</key><true/>') && pl.includes('<key>RunAtLoad</key><true/>') && pl.includes('&quot;') === false && pl.includes('Ana "the" agent') && pl.includes(`<string>${CLI}</string>`));
+  ok('service: Windows: the schtasks command, ONLOGON', /^schtasks \/Create \/SC ONLOGON .*\/TN sigelo-watch \/TR ".*watch --identity .*--quiet"$/.test(S.schtasksOf(p)), S.schtasksOf(p));
+  if (process.platform === 'linux') {
+    const env = { PATH: process.env['PATH'] ?? '', HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_IDENTITY: join(H, 'svc.local.json'), SIGELO_SERVICE_DIR: join(H, 'units'), SIGELO_SERVICE_DRY: '1' };
+    const run = cliIn(env, H);
+    const none = await run('service', 'install');
+    await run('init', '--no-recovery');
+    const ins = await run('service', 'install');
+    const unit = join(H, 'units', 'sigelo-watch.service');
+    ok('service install: refused with no identity; then the unit written, systemctl --user daemon-reload and enable --now (dry), how to check, linger',
+      none.status === 2 && ins.status === 0 && existsSync(unit) && ins.stderr.includes('(dry run) systemctl --user enable --now sigelo-watch.service') && ins.stdout.includes('journalctl --user -u sigelo-watch') && ins.stdout.includes('loginctl enable-linger')
+      && S.parseUnit(readFileSync(unit, 'utf8')).exec.includes(join(H, 'svc.local.spool')), ins.stdout + ins.stderr);
+    const st = await run('service', 'status');
+    ok('service status: installed, no watcher now (exit 3, said)', st.status === 3 && (JSON.parse(st.stdout) as { installed: boolean; listening: boolean }).installed === true && st.stderr.includes('no watcher holds'), st.stdout + st.stderr);
+    const rm = await run('service', 'remove');
+    ok('service remove: the unit gone, disable --now (dry)', rm.status === 0 && !existsSync(unit) && rm.stderr.includes('systemctl --user disable --now sigelo-watch.service'), rm.stdout + rm.stderr);
+    ok('service: a bad subcommand → exit 2', (await run('service', 'start')).status === 2);
+    rmSync(H, { recursive: true, force: true });
   }
 }
 

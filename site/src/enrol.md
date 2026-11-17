@@ -13,6 +13,8 @@ sigelo-agent init --enrol K7F3-Q9ZP
 
 It pairs and shows four words: compare them with the app, then tap They match. The agent gets its own key, derived from your 25 words, and your attestation that it is yours. It never holds your words or your keeper: those stay FULL on your phone or computer, the agent is one worker.
 
+Keep it reachable: `sigelo-agent service install` (or `init --enrol K7F3-Q9ZP --service`) runs its listener as a service, so your messages always reach it.
+
 Machine lost: your 25 words bring the same identity back. Agent gone bad: Agents, the agent, Revoke.
 
 Someone else's agent? [Pair](/pair.html) with it instead.

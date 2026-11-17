@@ -432,6 +432,10 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   const wl = await http(P, 'GET', '/words-lock.mjs', {});
   ok('ui security: words-lock.mjs (sigelo-contact\'s, byte for byte) served as JavaScript, for Me → Security in the GTK phone app (design/apps-seed.md §8)', wl.status === 200 && String(wl.headers['content-type']).startsWith('text/javascript')
     && wl.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'words-lock.mjs'), 'utf8'));
+  const vw = await http(P, 'GET', '/voice-web.mjs', {}), vv = await http(P, 'GET', '/voice.mjs', {}), vs = await http(P, 'GET', '/api/transfers/settings', T);
+  ok('ui voice: the recorder (voice-web.mjs) and its checks (voice.mjs), sigelo-contact\'s byte for byte, served as JavaScript; settings say voice (the computer keeps recordings), no mic (no shell)',
+    vw.status === 200 && String(vw.headers['content-type']).startsWith('text/javascript') && vw.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'voice-web.mjs'), 'utf8')
+    && vv.status === 200 && vv.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'voice.mjs'), 'utf8') && JSON.parse(vs.body).voice === true && JSON.parse(vs.body).mic === false, vs.body.slice(0, 200));
   ok('ui devices: the page has a Devices view: camera by getUserMedia (feature-detected), an image file, paste; BarcodeDetector first, jsQR after', /getUserMedia/.test(js.body) && /enumerateDevices/.test(js.body)
     && /createImageBitmap/.test(js.body) && /BarcodeDetector/.test(js.body) && /\/qr-decode\.mjs/.test(js.body) && /\/api\/devices\/scan/.test(js.body));
   if (posixModes) {

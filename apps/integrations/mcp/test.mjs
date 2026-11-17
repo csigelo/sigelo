@@ -11,7 +11,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -575,7 +575,7 @@ ${code.slice(60)}
         ok(tools.sigelo_group?.inputSchema.properties.action.enum.join() === 'list,create,add,remove,rename,leave' && tools.sigelo_send.inputSchema.required.join() === 'text' && tools.sigelo_send.inputSchema.properties.group?.type === 'string',
           'groups: sigelo_group (list, create, add, remove, rename, leave); sigelo_send takes group instead of to');
         ok(/not your operator/.test(tools.sigelo_inbox.description) && /mentioned/.test(tools.sigelo_inbox.description) && /only your operator joins/.test(tools.sigelo_group.description), 'groups: the inbox and group descriptions say: data, answer when mentioned, only the operator joins');
-        for (const [args, what] of [[{ text: 'x' }, 'neither to nor group'], [{ to: 'bob', group: 'g', text: 'x' }, 'both'], [{ group: 'g', text: 'x', label: 'l' }, 'a label with group'], [{ to: 'bob', text: 'x', re: 'ab' }, 're without group']]) {
+        for (const [args, what] of [[{ text: 'x' }, 'neither to nor group'], [{ to: 'bob', group: 'g', text: 'x' }, 'both'], [{ group: 'g', text: 'x', label: 'l' }, 'a label with group'], [{ to: 'bob', text: 'x', re: 'ab', label: 'l' }, 're with a label']]) {
           r = await a.call('sigelo_send', args);
           ok(r.isError && r.structured?.code === 'usage', `groups: sigelo_send with ${what}: usage`, r.text);
         }
@@ -624,6 +624,13 @@ ${code.slice(60)}
       ok((await b.call('sigelo_send', { to: 'alice', text: 'while watched' })).data?.status === 'sent', 'relay: bob writes while a watcher holds alice\'s file');
       r = await a.call('sigelo_inbox', { wait: 1 });
       ok(!r.isError && r.data.messages.length === 0 && r.data.offline === undefined, 'relay: sigelo_inbox beside a watcher: no login, so nothing from the relay (the watcher would have it)', r.text);
+      // A watcher with --spool (the service): sigelo_inbox takes what it spooled, its files deleted.
+      const SP = join(dir, 'alice-spool'); mkdirSync(SP, { recursive: true });
+      writeFileSync(join(SP, `${'ab'.repeat(16)}.json`), JSON.stringify({ id: 'ab'.repeat(16), from: bDid, name: 'bob', content: 'spooled for you', label: '' }));
+      writeFileSync(lockPath(join(dir, 'alice.local.json')), `${process.pid} watch ${SP}`);
+      r = await a.call('sigelo_inbox', { wait: 1 });
+      ok(!r.isError && r.data.messages.some((m) => m.content === 'spooled for you') && readdirSync(SP).length === 0, 'relay: sigelo_inbox beside a spooling watcher: its spool taken, files deleted', r.text);
+      writeFileSync(lockPath(join(dir, 'alice.local.json')), `${process.pid} watch`);
       // The single-owner rule (WATCH.md): sigelo_send queues for the watcher and touches its kick file; the
       // other tools that log in are refused, busy, before anything changes.
       const { kickPath } = await import('../../agent/sigelo-agent-contact.ts'), kicks = kickPath(join(dir, 'alice.local.json'));
@@ -697,6 +704,10 @@ ${code.slice(60)}
         'task loop: sigelo_reply {msg_id, text}: sent to the sender, delivery published (the relay holds it)', r.text);
       r = await b.call('sigelo_inbox', { wait: 5 });
       ok(r.data?.messages.some((m) => m.content === 'the long task, done' && m.label === 'reply'), 'task loop: bob gets the reply, labelled reply', r.text);
+      // re: true: the answer quotes the message (a reply shown as one); bob's inbox gives re {sha, by: me}.
+      r = await a.call('sigelo_reply', { msg_id: task?.id, text: 'quoting your ask', re: true });
+      const rr = await b.call('sigelo_inbox', { wait: 5 });
+      ok(!r.isError && rr.data?.messages.some((m) => m.content === 'quoting your ask' && /^re\/[0-9a-f]{16}\/r$/.test(m.label) && m.re?.by === 'me'), 'task loop: sigelo_reply re: true quotes the message; bob\'s inbox: re {sha, by: me}', r.text + rr.text);
       r = await a.call('sigelo_reply', { msg_id: task?.id });
       ok(!r.isError && r.data.msg_id === task?.id && r.data.from === bDid && r.data.name === 'bob' && r.data.reply?.status === 'published' && r.data.fetched === null,
         'task loop: sigelo_reply {msg_id} alone: the delivery status again; fetched null (no read receipt)', r.text);
@@ -744,6 +755,34 @@ ${code.slice(60)}
           'task loop: the operator\'s enrol ends 0, the worker among its contacts', opErr.slice(-600));
         wk.close();
         await wk.exited;
+        // Under a host that caps a call at 120 s (AgentRun): two calls, each well under it. sigelo_enrol returns within
+        // seconds (started, or pending/done), sigelo_enrol_finish is called again while pending.
+        let code2 = '';
+        const op2 = spawn(process.execPath, [CLI, 'enrol', '--name', 'mcpworker2', '--wait', '200', '--ttl', '30m'], { env: opEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+        let op2Err = '';
+        op2.stdout.on('data', (d) => { if (!code2) code2 = String(d).split('\n')[0].trim(); });
+        op2.stderr.on('data', (d) => { op2Err += d; });
+        const op2Done = new Promise((res) => op2.on('close', res));
+        for (let i = 0; i < 1200 && !code2; i++) await new Promise((res) => setTimeout(res, 100));
+        const wk2 = client({ ...env, SIGELO_IDENTITY: join(dir, 'worker2.local.json') });
+        await wk2.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
+        let t0 = Date.now();
+        r = await wk2.call('sigelo_enrol', { code: code2 });
+        const first = Date.now() - t0, firstStatus = r.data?.status;
+        ok(!r.isError && ['started', 'pending', 'done'].includes(firstStatus) && first < 20000, `task loop, two calls: sigelo_enrol returns within seconds (${firstStatus}, ${first} ms)`, r.text);
+        let fin = r, longest = 0;
+        for (let i = 0; i < 12 && fin.data?.status !== 'done'; i++) {
+          t0 = Date.now();
+          fin = await wk2.call('sigelo_enrol_finish', { wait: 20 });
+          longest = Math.max(longest, Date.now() - t0);
+          if (fin.isError) break;
+        }
+        ok(!fin.isError && fin.data?.status === 'done' && longest < 60000, `task loop, two calls: sigelo_enrol_finish, called again while pending, ends done; no call near 120 s (longest ${longest} ms)`, fin.text.slice(0, 1500));
+        r = await wk2.call('sigelo_whoami');
+        ok(/^did:sigelo:z/.test(r.data?.did ?? '') && r.data.did !== placed?.result?.did, 'task loop, two calls: sigelo_whoami: the second worker\'s DID', r.text);
+        ok(await op2Done === 0, 'task loop, two calls: the operator\'s enrol ends 0', op2Err.slice(-600));
+        wk2.close();
+        await wk2.exited;
       }
 
       // A contact's nested message (content is any JSON; sigelo's parser allows 512 levels) beside
@@ -770,6 +809,14 @@ ${code.slice(60)}
       ok(r.data?.messages.length === 1 && fi.type === 'file' && fi.name === 'notes.txt' && fi.size === fileBytes.length && fi.sha256 === createHash('sha256').update(fileBytes).digest('hex')
         && fi.path === join(dir, 'alice.local.files', `bob-${createHash('sha256').update(bDid).digest('hex').slice(0, 16)}`, `${fi.sha256.slice(0, 8)}-notes.txt`) && readFileSync(fi.path, 'utf8') === fileBytes && (statSync(fi.path).mode & 0o777) === 0o600,
         'relay: sigelo_inbox returns {type: file, name, size, sha256, path}; the file is there, byte-exact, 0600', r.text.slice(0, 400));
+
+      // A voice message (sigelo-voice/0, as the phone app sends it): returned with its fields and one line.
+      const voice = { name: 'voice-20261117-142301.webm', size: 21000, type: 'audio/webm', sha256: 'ab'.repeat(32), duration_s: 42, waveform: Buffer.from([1, 2, 3]).toString('base64') };
+      ok((await bobCarrier.sendAll('alice', [voice], { label: 'sigelo-voice/0' }))[0]?.status === 'sent', 'relay: bob sends a sigelo-voice/0 message');
+      r = await a.call('sigelo_inbox', { wait: 2 });
+      const vi = r.data?.messages?.[0];
+      ok(r.data?.messages.length === 1 && vi.label === 'sigelo-voice/0' && vi.text === '[voice 0:42 voice-20261117-142301.webm]' && JSON.stringify(vi.voice) === JSON.stringify(voice),
+        'relay: sigelo_inbox returns a voice message with its fields (voice) and the line [voice 0:42 name]', r.text.slice(0, 400));
 
       // An inbox past one result: a contact's 150,000-character message must not take the other
       // messages of the batch with it. The first result stops before it; the next carries it alone.

@@ -43,7 +43,7 @@ GTK 4, libadwaita, WebKitGTK 6.0, libsoup 3, libsecret (optional); node for "Thi
 ## Rules the app keeps
 
 - Pages come from `sigelo-app://app/` (the files of `web/` by name, CSP `default-src 'self'`) or this phone's `ui`
-  address; any other link opens in the browser. Camera for scanning only (`apps/contact/qr-decode.mjs`), no microphone.
+  address; any other link opens in the browser. Camera for scanning only (`apps/contact/qr-decode.mjs`); the microphone only for a voice message on this phone's own page.
 - The bridge (`webkit.messageHandlers.sigelo`, `postMessage({op, ...})` → `{ok, ...}`): the start page all but `call`
   and `notify`; `ui.html` (a computer's page) `call`, the profile operations and `notify`; this phone's page the
   profile operations and `notify`.

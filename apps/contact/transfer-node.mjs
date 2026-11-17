@@ -34,7 +34,7 @@ import { createHash, createHmac, createPrivateKey, createPublicKey, generateKeyP
 import { closeSync, createReadStream, existsSync, fdatasyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, statfsSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { open as openFile } from 'node:fs/promises';
 import net from 'node:net';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TRANSFER_SEND, contactDir } from './carrier.mjs';
 import { fail } from './kdf.mjs';
@@ -409,4 +409,39 @@ export async function loadRtc() {
     } catch {}
   }
   return null;
+}
+
+// ---------------------------------------------------------------- voice messages recorded in the page (voice.mjs)
+
+/**
+ * The page's recordings on this computer (apps/contact/page.mjs hooks.transfers.rec): the pieces into
+ * <identity>.voice/.rec/<rec>.part (0600), kept whole as <identity>.voice/<name> (0600, the directory 0700), then
+ * sent by path as any file; not under <identity>.files/, which sendable refuses (files received). read(saved): a
+ * voice message that landed, to play: only under this identity's files or recordings, at most 16 MiB.
+ */
+export function voiceFiles(identity) {
+  const base = resolve(identity).replace(/\.json$/, ''), dir = `${base}.voice`, recs = join(dir, '.rec'), files = `${base}.files`;
+  const partOf = (rec) => { if (!/^[0-9a-f]{32}$/.test(rec)) fail('usage', 'rec: 32 hex digits'); return join(recs, `${rec}.part`); };
+  return {
+    async write(rec, offset, bytes) {
+      mkdirSync(recs, { recursive: true, mode: 0o700 });
+      const fd = openSync(partOf(rec), offset === 0 ? 'w' : 'r+', 0o600);
+      try { writeSync(fd, bytes, 0, bytes.length, offset); } finally { closeSync(fd); }
+    },
+    async keep(rec, name) {
+      const from = partOf(rec);
+      if (!existsSync(from)) fail('voice', 'no recording sent for this rec (POST /api/transfers/voice-part first)');
+      const clean = String(name).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(-200) || 'voice.webm', dot = clean.lastIndexOf('.');
+      let to = join(dir, clean);
+      for (let i = 2; existsSync(to) && i < 1000; i++) to = join(dir, dot > 0 ? `${clean.slice(0, dot)} (${i})${clean.slice(dot)}` : `${clean} (${i})`);
+      renameSync(from, to);
+      return { path: to };
+    },
+    async read(saved) {
+      const p = typeof saved === 'string' ? resolve(saved) : '';
+      if (!(p.startsWith(files + '/') || p.startsWith(dir + '/')) || p.includes('/../')) fail('voice', 'not a voice message of this identity');
+      if (statSync(p).size > 16 * 2 ** 20) fail('voice', 'too large for a voice message');
+      return new Uint8Array(readFileSync(p));
+    },
+  };
 }

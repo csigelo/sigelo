@@ -15,6 +15,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.view.View;
 import android.view.Window;
 import android.webkit.PermissionRequest;
@@ -47,8 +48,9 @@ import java.util.regex.Pattern;
  *
  * Rules: JavaScript on; file access off; mixed content never; no other origin is ever loaded (a
  * link elsewhere opens in the browser, on a tap); the camera is granted to this origin only, for
- * video only, after Android's CAMERA permission is asked at the first scan; the image picker for a
- * file input. Profiles (several identities, each its own storage and keystore aliases) are the page's
+ * video only, after Android's CAMERA permission is asked at the first scan; the microphone to this origin
+ * only, for audio only (a voice message), at once once RECORD_AUDIO is granted (asked by the page first, SigeloBridge "mic");
+ * the image picker for a file input. Profiles (several identities, each its own storage and keystore aliases) are the page's
  * (apps/web/profiles.mjs): removing one erases its keys (SigeloBridge forget-profile). No action bar: the page's own
  * top bar is the app's, the system bars in its background (SigeloBridge "bars"); Reload is in its Settings → About
  * (SigeloBridge "reload").
@@ -69,6 +71,10 @@ import java.util.regex.Pattern;
  * Notifications (SigeloBridge "notify"): a tap opens this activity with action io.sigelo.app.OPEN and
  * the tag; the tag goes to the page as {ev:"open", tag} (onNewIntent; a start by the tap: once the
  * page's port is open). POST_NOTIFICATIONS is asked when the page asks (Android 13+).
+ *
+ * Stay connected (StayConnected, SigeloBridge "stay"): with the switch on, the foreground service is started as the
+ * app leaves the screen (onPause, still in front: allowed) and keeps this process, this WebView and its relay
+ * connection alive; Back on the first screen then moves the task back instead of finishing it.
  */
 public final class MainActivity extends Activity {
     static final String HOST = "appassets.androidplatform.net";
@@ -171,7 +177,9 @@ public final class MainActivity extends Activity {
             web.goBack();
             return;
         }
-        super.onBackPressed();
+        // Stay connected: the page (and its connection) kept, the app only minimised.
+        if (StayConnected.on(this)) moveTaskToBack(true);
+        else super.onBackPressed();
     }
 
     @Override
@@ -227,11 +235,13 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         if (web != null) web.onPause();   // animations only: the page's JavaScript (the carrier) runs on
+        StayConnected.follow(this, StayConnected.on(this));
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
+        if (isFinishing()) StayConnected.follow(this, false);
         if (bridge != null) bridge.close();
         if (web != null) web.destroy();
         web = null;
@@ -308,6 +318,14 @@ public final class MainActivity extends Activity {
         @Override
         public void onPermissionRequest(PermissionRequest req) {
             String[] res = req.getResources();
+            // The microphone (a voice message): audio only, our origin only, granted at once when RECORD_AUDIO is (the page
+            // asked it through the bridge first, "mic": one dialog, not two); without it denied, never a second prompt.
+            boolean audio = res.length == 1 && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(res[0]);
+            if (audio && ours(req.getOrigin())) {
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) req.grant(res);
+                else req.deny();
+                return;
+            }
             boolean video = res.length == 1 && PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res[0]);
             if (!video || !ours(req.getOrigin())) {
                 req.deny();
@@ -319,6 +337,7 @@ public final class MainActivity extends Activity {
             }
             if (pendingCamera != null) pendingCamera.deny();
             pendingCamera = req;
+            asking(Manifest.permission.CAMERA);
             requestPermissions(new String[] {Manifest.permission.CAMERA}, REQ_CAMERA);
         }
 
@@ -369,6 +388,31 @@ public final class MainActivity extends Activity {
         return out.toArray(new String[0]);
     }
 
+    // ---------------------------------------------------------------- permissions: asked at the moment of need, never refused for good
+    // (0.1.17): a control asks Android again while it still asks; once it stops (refused twice, or "don't ask again"), the
+    // page opens this app's settings page with one line naming the switch (open-settings). Each ask is remembered here,
+    // since shouldShowRequestPermissionRationale is false both before the first ask and once Android stops asking.
+
+    /** Asking `perm` now: remembered, so a later refusal can be told from a first ask. */
+    void asking(String perm) {
+        getSharedPreferences("sigelo-permissions", MODE_PRIVATE).edit().putBoolean(perm, true).apply();
+    }
+    /** Android no longer shows the prompt for `perm`: asked before, refused, and no rationale wanted. */
+    boolean blocked(String perm) {
+        return checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED && getSharedPreferences("sigelo-permissions", MODE_PRIVATE).getBoolean(perm, false)
+            && !shouldShowRequestPermissionRationale(perm);
+    }
+    /** This app's page in the system settings (Permissions, Notifications). */
+    void openSettings() {
+        startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getPackageName(), null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
+    /** Notifications are refused for good: POST_NOTIFICATIONS blocked, or turned off in the system's settings. */
+    boolean notificationsBlocked() {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        return (Build.VERSION.SDK_INT >= 33 && blocked(POST_NOTIFICATIONS)) || (nm != null && !nm.areNotificationsEnabled()
+            && (Build.VERSION.SDK_INT < 33 || checkSelfPermission(POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED));
+    }
+
     /** Notifications may be shown: POST_NOTIFICATIONS granted (Android 13+) and not turned off in the system's settings. */
     boolean notificationsAllowed() {
         NotificationManager nm = getSystemService(NotificationManager.class);
@@ -382,9 +426,17 @@ public final class MainActivity extends Activity {
             answer.accept(notificationsAllowed());
             return;
         }
+        // Android shows no prompt any more: the page opens the settings page instead.
+        if (blocked(POST_NOTIFICATIONS)) {
+            answer.accept(false);
+            return;
+        }
         pendingNotify.add(answer);
         // One request up at a time: a second ask waits for its answer.
-        if (pendingNotify.size() == 1) requestPermissions(new String[] {POST_NOTIFICATIONS}, REQ_NOTIFY);
+        if (pendingNotify.size() == 1) {
+            asking(POST_NOTIFICATIONS);
+            requestPermissions(new String[] {POST_NOTIFICATIONS}, REQ_NOTIFY);
+        }
     }
 
     @Override

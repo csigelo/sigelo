@@ -207,6 +207,7 @@ export class Contacts {
     const c = this.#find(who), to = name.trim();
     if (Object.values(this.s.contacts).some((x) => !x.revoked && x.did !== c.did && x.name === to)) fail('name_taken', `another contact is called ${JSON.stringify(to)}`);
     c.name = to;
+    delete c.name_from;   // the human's name: never replaced by the one the contact tells (carrier.mjs "Names")
     this.save();
     return { did: c.did, name: to };
   }

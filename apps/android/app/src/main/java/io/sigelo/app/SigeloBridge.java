@@ -117,6 +117,12 @@ import javax.net.ssl.SSLSocketFactory;
  *   big-pick, big-photo, big-hash, big-stat, big-write, big-flush, big-digest, big-drop, big-free, big-land, big-open,
  *   big-awake   big files (BigFiles: the system's picker and camera, ranges read from the file itself, partials
  *          written at offsets, Downloads; design/transfer.md §10). Every one names its profile.
+ *   stay          Stay connected (StayConnected): {on?, battery?, notifications?} → {on, exempt, asked, notify, notifyAsked,
+ *          notifyBlocked}; on kept for the phone (default true), the foreground service follows; battery and notifications
+ *          ask the system at each tap while Android still shows its prompt, then open the app's page in its settings. Its event, no id: {ev:"nudge"} (its alarm, the end of Doze): the page's carrier
+ *          reconnects when down.
+ *   big-keep, big-url, mic, app-settings   voice messages (BigFiles): a recording kept as a file to send, a landed one
+ *          to play, RECORD_AUDIO asked at the first (refused mic_permission, remembered), the app's settings page.
  *   The shell's own event, no id: {ev:"open", tag} when one of our notifications is tapped (MainActivity
  *          onNewIntent; at a start by the tap, kept until the page's port is open, then posted once).
  */
@@ -159,6 +165,7 @@ public final class SigeloBridge {
         this.web = web;
         this.prefs = activity.getSharedPreferences("sigelo", Context.MODE_PRIVATE);
         this.big = new BigFiles(activity, prefs);
+        StayConnected.page = this;
     }
 
     /** A refusal the page reads as {check, message}. */
@@ -253,6 +260,7 @@ public final class SigeloBridge {
 
     /** The app ends: every stream closed, no thread left. */
     void close() {
+        if (StayConnected.page == this) StayConnected.page = null;
         closePort();
         big.close();
         io.shutdownNow();
@@ -418,6 +426,11 @@ public final class SigeloBridge {
                 post(to, ok(id));
                 break;
             }
+            case "open-settings":
+                // This app's page in the system settings: a permission Android no longer asks for is switched on there.
+                post(to, ok(id));
+                main.post(activity::openSettings);
+                break;
             case "reload":
                 // Answered first: the reload ends this page and its port (a new one for the page loaded).
                 post(to, ok(id));
@@ -432,11 +445,33 @@ public final class SigeloBridge {
             case "notify":
                 notification(to, id, m);
                 break;
+            case "stay":
+                try {
+                    StayConnected.op(activity, m, o -> {
+                        try {
+                            post(to, o.put("id", id));
+                        } catch (JSONException e) {
+                            fail(to, id, "stay", "no answer");
+                        }
+                    });
+                } catch (Refused e) {
+                    fail(to, id, e.check, e.getMessage());
+                } catch (JSONException e) {
+                    fail(to, id, "stay", "no answer");
+                }
+                break;
             case "big-pick":
             case "big-photo":
             case "big-land":
             case "big-open":
+            case "mic":
                 bigAsync(to, id, m, op);
+                break;
+            case "big-keep":
+                answer(to, id, () -> big.keep(m).put("id", id));
+                break;
+            case "big-url":
+                answer(to, id, () -> big.url(m).put("id", id));
                 break;
             case "big-hash":
                 answer(to, id, () -> big.hash(m).put("id", id));
@@ -462,6 +497,14 @@ public final class SigeloBridge {
             case "big-awake":
                 big.awake(m.optBoolean("on", false));
                 post(to, ok(id));
+                break;
+            case "app-settings":
+                try {
+                    big.appSettings();
+                    post(to, ok(id));
+                } catch (android.content.ActivityNotFoundException e) {
+                    fail(to, id, "open", "no settings page for the app on this phone");
+                }
                 break;
             default:
                 fail(to, id, "op", "no operation " + op);
@@ -491,6 +534,7 @@ public final class SigeloBridge {
             if (op.equals("big-pick")) big.pick(m, r);
             else if (op.equals("big-photo")) big.photo(m, r);
             else if (op.equals("big-land")) big.land(m, r, this::spawn);
+            else if (op.equals("mic")) big.mic(m, r);
             else big.openFile(m, r);
         } catch (Refused e) {
             fail(to, id, e.check, e.getMessage());
@@ -556,6 +600,16 @@ public final class SigeloBridge {
 
     // ---------------------------------------------------------------- notifications
 
+    /** StayConnected's nudge (main thread): {ev:"nudge"} to the page, whose carrier reconnects, with its backoff, when down. */
+    void nudge() {
+        if (port == null) return;
+        try {
+            post(port, new JSONObject().put("ev", "nudge"));
+        } catch (JSONException e) {
+            // nothing to say it with
+        }
+    }
+
     /** A string field of 1 to NOTE_MAX characters, else null. */
     private static String line(JSONObject m, String k) {
         Object v = m.opt(k);
@@ -571,7 +625,7 @@ public final class SigeloBridge {
         if (m.optBoolean("ask", false)) {
             activity.askNotifications(granted -> {
                 try {
-                    post(to, ok(id).put("granted", granted));
+                    post(to, ok(id).put("granted", granted).put("blocked", !granted && activity.notificationsBlocked()));
                 } catch (JSONException e) {
                     fail(to, id, "notify", "no answer");
                 }

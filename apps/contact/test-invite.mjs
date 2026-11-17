@@ -189,6 +189,19 @@ try {
 const gen = spawnSync(process.execPath, [join(HERE, 'gen-invite.mjs'), '--check'], { encoding: 'utf8' });
 ok(gen.status === 0, `gen-invite.mjs --check: ${(gen.stderr || gen.stdout).trim()}`);
 
+// Names (carrier.mjs "Names"): the pairing's handshake is unchanged (an unknown member is still refused, `card`); each
+// side's display name goes after it, in a seen receipt {seen: 0, name}, which an older client takes as a receipt.
+{
+  const { theirName, THEIR_NAME_MAX } = await import('./carrier.mjs');
+  ok(theirName('  Ana  ') === 'Ana' && theirName('A\u202eB\u0007C\n') === 'ABC' && theirName('') === null && theirName('\u200f') === null && theirName(5) === null
+    && [...theirName('x'.repeat(100))].length === THEIR_NAME_MAX && THEIR_NAME_MAX === 40, 'theirName: trimmed, control and bidi characters dropped, at most 40, else null');
+  // Replies (carrier.mjs "Replies"): the label names the quoted text's hash and whose it is, read back from the other side.
+  const { reLabel, reOf, quoteHash } = await import('./carrier.mjs');
+  const l1 = reLabel('Dinner on Friday?', false), l2 = reLabel('Dinner on Friday?', true);
+  ok(/^re\/[0-9a-f]{16}\/r$/.test(l1) && l2.endsWith('/s') && reOf(l1)?.by === 'me' && reOf(l2)?.by === 'them' && reOf(l1).sha === quoteHash('Dinner on Friday?') && reOf('reply') === null && reOf('re/zz/r') === null,
+    'reLabel / reOf: re/<16 hex>/<s|r>, read as by them (the sender quoted its own) or by me');
+}
+
 for (const f of fails) console.log('FAIL ' + f);
 if (fails.length) { console.log(`${fails.length} FAILED, ${pass} passed`); process.exit(1); }
 console.log(`ALL PASS (${pass})`);

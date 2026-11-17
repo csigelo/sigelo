@@ -994,10 +994,12 @@ app.connect('activate', () => {
     if (/^https?:\/\//.test(uri) && !ours(uri)) new Gtk.UriLauncher({ uri }).launch(win, null, null);
     return true;
   });
-  // Camera for scanning only (the start page, this phone's Devices view); never the microphone, nothing else.
+  // Camera for scanning only (the start page, this phone's Devices view); the microphone alone for a voice message on this
+  // phone's own page (granted at once: the system's portal, where there is one, is the only ask); nothing else.
   view.connect('permission-request', (_v, req) => {
-    const camera = req instanceof WebKit.UserMediaPermissionRequest && req.is_for_video_device && !req.is_for_audio_device, uri = view.get_uri() ?? '';
-    if (camera && (uri.startsWith('sigelo-app://app/start.html') || (selfOrigin !== null && uri.startsWith(selfOrigin)))) req.allow(); else req.deny();
+    const media = req instanceof WebKit.UserMediaPermissionRequest, uri = view.get_uri() ?? '', self = selfOrigin !== null && uri.startsWith(selfOrigin);
+    const camera = media && req.is_for_video_device && !req.is_for_audio_device, mic = media && req.is_for_audio_device && !req.is_for_video_device;
+    if ((camera && (uri.startsWith('sigelo-app://app/start.html') || self)) || (mic && self)) req.allow(); else req.deny();
     return true;
   });
   view.connect('load-failed', (_v, _e, uri, err) => { if (selfOrigin !== null && uri.startsWith(selfOrigin)) startPage(`This phone's page stopped: ${err.message}`); return false; });

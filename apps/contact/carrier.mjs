@@ -54,6 +54,9 @@
 //                                            tiers: only those from contacts of these tiers, the rest stay); local: no
 //                                            session, the state file only (a started carrier elsewhere is connected);
 //                                            paired: the wait also ends at a pairing (enrol.mjs); from: that DID's only.
+//                                            The wait is the caller's: a session the relay ends early is logged in again
+//                                            at the pace backoff sets until then; ended: { code, detail, n }, the relay's
+//                                            last word when it ended one (n times) during this inbox
 //                                            Each message and file has an id (messageId), the same at every read
 //   await c.reply(id, content, { label, local }), c.replyFile(id, file, { local }) → as send, sendFile, to the sender of
 //                                            message id (kept RECEIVED_DAYS), with msg_id and delivery; c.replyStatus(id) →
@@ -95,6 +98,9 @@
 //   c.clockOffset(), await c.checkClock()  → { relay, offset, checked } | null: the relay's clock less this one's, seconds
 //   await c.start(), c.sync(), c.stop()    stay connected, reconnecting with backoff; events reach onEvent
 //   await c.tryNow({ confirmed })          the human's "Try now": a login at each relay in use not connected
+//   c.wake()                               a nudge from outside (the Android app's Stay connected: its alarm, the end of
+//                                          Doze): a started carrier retries, with its backoff, each relay in use that is
+//                                          down with no try already waiting; nothing else
 //   started: 'user' | 'confirmed'          (start, invite, accept, tryNow) a search the human started: past
 //                                          POW_SEARCHES a day it is never refused, it asks (pow_confirm),
 //                                          and 'confirmed' goes on; without it (automatic retries) the cap holds
@@ -236,6 +242,7 @@
 //     what to send and when is the app's (apps/contact/page.mjs: one first receipt to a contact not
 //     known to read them, further ones only once one came back). A contact on an earlier version takes
 //     the first as a message with that label, and never sends one: its messages stay at one tick.
+//     Once paired, each side also sends one {seen: 0, name}: its display name (the "Names" below).
 //   - Presence (design/transfer.md §8 T0): a started carrier sets the will $sigelo/presence on its
 //     CONNECT and publishes, to each contact that may see it (store.mjs presenceOf: own agents
 //     always, others when the owner allowed them), one marker on presenceTopic(K, own original DID,
@@ -363,6 +370,30 @@ export const TRANSFER_LABEL = 'sigelo-transfer/0', TRANSFER_SEND = Symbol('sigel
 const TRANSFERS_MAX = 256;
 // Seen receipts (the header's): sent only with SEEN_SEND, never an inbox message.
 export const SEEN_LABEL = 'sigelo-seen/0', SEEN_SEND = Symbol('sigelo-seen send');
+// Names (0.1.17: "the system allocated some random text" for a new contact). Once paired, each side tells the other its
+// display name (selfName) in a seen receipt {seen: 0, name}: an existing message older clients take as a receipt and
+// whose extra member they ignore (no new label, no new typ). The receiver files the contact under it only while the
+// contact's name was made up here (name_from "auto": an unnamed invite or accept, a public code's) or came from them
+// before; a name the human gave or changed is never replaced. The name: at most THEIR_NAME_MAX characters, trimmed, no
+// control or bidi characters, else ignored; one another contact holds gets " (2)", " (3)"….
+export const THEIR_NAME_MAX = 40;
+// Replies (0.1.17: "reply to messages"): a message that answers one names it in its label, re/<h>/<s|r>, h the first 16
+// hex of SHA-256 over the quoted text, s when the sender quotes its own message, r the recipient's. The envelope's body is
+// exact (envelope.mjs BODY): no member can be added, and a label is free text an older client shows as a tag. Each side
+// finds the quoted message among its own by its text and its author; inbox() gives it as re: {sha, by: me | them}.
+export const RE_LABEL = /^re\/([0-9a-f]{16})\/([sr])$/;
+export const quoteHash = (text) => hex(sha256(utf8ToBytes(String(text)))).slice(0, 16);
+/** The label of a reply to `text`, own: the sender's own message, else the recipient's. */
+export const reLabel = (text, own) => `re/${quoteHash(text)}/${own ? 's' : 'r'}`;
+/** A received message's label read as a reply: { sha, by: "them" (its sender quoted its own) | "me" }, or null. */
+export const reOf = (label) => { const m = RE_LABEL.exec(typeof label === 'string' ? label : ''); return m ? { sha: m[1], by: m[2] === 's' ? 'them' : 'me' } : null; };
+const NAME_BAD = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+/** A name as a peer sent it, for display: trimmed, control and bidi characters dropped, at most THEIR_NAME_MAX; else null. */
+export function theirName(v) {
+  if (typeof v !== 'string') return null;
+  const t = [...v.replace(NAME_BAD, '').trim()].slice(0, THEIR_NAME_MAX).join('').trim();
+  return t === '' ? null : t;
+}
 // Received files of one name and hash prefix kept side by side, at most (#onFile).
 const FILE_COPIES = 64;
 // A contact's folder of received files: its name as safeName keeps it, and 16 hex digits of the
@@ -393,6 +424,13 @@ const TICK = 3600 * 1000, BACKOFF = [1000, 60000];
 // A connection that held this long resets the backoff when it closes; a shorter one does not, so a
 // relay that accepts and closes at once is dialled ever more slowly, as one that refuses is.
 const STABLE_MS = 60000;
+// A session the relay ended itself (its notice session_*: relay/auth.mjs endWith), or a login it
+// turned away (rate, relay_full): the next session waits backoff[0], 2 × that, … up to backoff[1] ms
+// after it (BACKOFF by default: 1 s … 60 s), kept in the state (st.relays[relay].ended) so a new process waits too (0.1.17: a
+// temporary identity cut by the relay logged in again at once, 30 times a minute, until the rate
+// refused it). Reset by a session this client ends itself, or one the relay held ENDED_LASTS ms.
+const ENDED_LASTS = 300000;
+const ENDED_RETRY = new Set(['rate', 'relay_full', 'connect', 'timeout']);
 // Login refusals no retry can fix.
 const PERMANENT = new Set(['password', 'bundle', 'sig', 'retired_recovery', 'client_id', 'closed', 'challenge', 'relay', 'identity']);
 // A refusal by one of these is this process failing, not a message: the delivery is not acknowledged.
@@ -1009,6 +1047,7 @@ class Link {
     this.collect = null; this.lastIn = 0; this.since = Date.now(); this.tokens = RATE.burst; this.at = Date.now(); this.pow = false; this.closing = false;
     this.abort = null;   // rejects the PUBLISH or SUBSCRIBE in flight when the connection closes
     this.cut = null;     // the MsgError of limitPackets, once it cut the connection
+    this.ended = null;   // the relay's notice before it ended this session ({ code, detail }: relay/auth.mjs endWith)
     // Presence: the contacts' marker topics subscribed on this connection; this agent's markers
     // published on it (topic → its contact); when it connected (a marker's since); the will set.
     this.presenceIn = new Set(); this.presenceOut = new Map(); this.onlineAt = 0; this.will = false;
@@ -1035,11 +1074,14 @@ export class Carrier {
   #claimed = new Set(); #refusedTopics = new Map(); #handshakes = new Map(); #soon = new Set();
   #renewing = false;
   #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #powWaits = new Set(); #ask = false; #spare = new Map();
-  #mineMemo = null; #clocks = new Map();
+  #mineMemo = null; #clocks = new Map(); #selfName = () => null;
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
     onEvent, keep, backoff = BACKOFF, tick = TICK, files, log, transport = 'auto', shortRelay = DEFAULT_RELAY, registry = REGISTRY_URL, registryPin = RELEASE_DID, relays, registryFile,
-    platform = nodePlatform }) {
+    platform = nodePlatform, selfName = null }) {
+    // This side's display name, told to each new contact once paired (the header's "Names"): a string or a function → one, or null.
+    if (selfName !== null && typeof selfName !== 'string' && typeof selfName !== 'function') throw new TypeError('selfName: a string, a function → a string or null, or null');
+    this.#selfName = typeof selfName === 'function' ? selfName : () => selfName;
     if (!TRANSPORTS.includes(transport)) throw new TypeError(`transport: ${TRANSPORTS.join(', ')}`);
     // The platform (design/apps.md §4.2, platform-node.mjs): files, lock, network, proof of work.
     if (typeof platform?.files?.read !== 'function' || typeof platform.transact !== 'function' || typeof platform.fetch !== 'function' || typeof platform.mqtt !== 'function'
@@ -1236,6 +1278,14 @@ export class Carrier {
   #emit(ev) { try { this.onEvent(ev); } catch {} }
 
   // An event kept for the next inbox() as well: a CLI or MCP agent has no onEvent.
+  // This side's name to a contact just paired (the header's "Names"), in its outbox: it goes with the next round.
+  #tellName(st, did) {
+    let n = null;
+    try { n = theirName(this.#selfName()); } catch {}
+    if (n === null) return;
+    this.#entry(st, did).outbox.push({ id: randomId(), label: SEEN_LABEL, content: { seen: 0, name: n } });
+  }
+
   #note(st, now, ev) {
     st.events.push({ ...ev, at: now });
     if (st.events.length > EVENTS_MAX) st.events.splice(0, st.events.length - EVENTS_MAX);
@@ -1413,6 +1463,8 @@ export class Carrier {
       return;
     }
     const note = { code: n.code.slice(0, 64), detail: typeof n.detail === 'string' ? n.detail.slice(0, 200) : '', ...(QUOTA_SIDES.has(n.side) && { side: n.side }) };
+    // Why the relay is about to end this session (relay/auth.mjs endWith): kept for #closed.
+    if (note.code.startsWith('session_')) link.ended = { code: note.code, detail: note.detail };
     // id: the packet id of the PUBLISH a refusal names (#publish), kept out of events.
     if (link.collect) link.collect.push(Number.isSafeInteger(n.id) ? { ...note, id: n.id } : note);
     else this.#emit({ type: 'notice', relay: link.relay, ...note });
@@ -1504,8 +1556,19 @@ export class Carrier {
       events.push({ type: 'transfer', from: c.did, name: c.name });
     } else if (r.body.label === SEEN_LABEL) {
       // A seen receipt (the header's): the highest kept; one malformed is counted, never an inbox message.
-      const n = r.body.content?.seen;
-      if (!Number.isSafeInteger(n) || n < 0) { st.dropped.seen = (st.dropped.seen ?? 0) + 1; events.push({ type: 'dropped', check: 'seen', detail: 'a seen receipt without its time' }); } else {
+      const n = r.body.content?.seen, nm = theirName(r.body.content?.name);
+      if (nm !== null) {
+        const all = store.load().s.contacts, rec = all[c.did];
+        if (rec && (rec.name_from === 'auto' || rec.name_from === 'them') && rec.name !== nm) {
+          const taken = (x) => Object.values(all).some((y) => !y.revoked && y.did !== rec.did && y.name === x);
+          let to = nm;
+          for (let i = 2; taken(to) && i < 100; i++) to = `${nm} (${i})`;
+          rec.name = to; rec.name_from = 'them'; store.save();
+          events.push({ type: 'named', did: c.did, name: to });
+        } else if (rec && rec.name_from === 'auto') { rec.name_from = 'them'; store.save(); }
+      }
+      // A name's receipt (seen 0) says nothing of what was shown.
+      if (nm !== null && n === 0) { /* the name only */ } else if (!Number.isSafeInteger(n) || n < 0) { st.dropped.seen = (st.dropped.seen ?? 0) + 1; events.push({ type: 'dropped', check: 'seen', detail: 'a seen receipt without its time' }); } else {
         const e = this.#entry(st, c.did);
         e.seen_peer = true;
         e.seen_upto = Math.max(e.seen_upto ?? 0, n);
@@ -1886,6 +1949,7 @@ export class Carrier {
       throw e;
     }
     const c = store.lookup(res.did), K = hexToBytes(res.pair_key);
+    if (p.auto && !before[c.did] && c.name === p.name) { c.name_from = 'auto'; store.save(); }
     // What checkAnswer replaced, put back if the reply cannot reach the answerer (#unpair).
     const undo = { contact: before[c.did] ?? null, peer: st.peers[c.did] ?? null };
     const s = session({ me: { did: me.did, current_did: me.current_did, sign: me.sign }, peer: c, K });
@@ -1899,6 +1963,7 @@ export class Carrier {
     }
     st.peers[c.did] = { session: dumpSession(s), announced: me.current_did, known: me.current_did, outbox: st.peers[c.did]?.outbox ?? [], prekeys_resend: false, prekeys_iat: now };
     this.#queue(st, { ...entry, bytes: frame });
+    this.#tellName(st, c.did);
     // Who answered this code (answeredBy): saved with the pairing, whoever reads the paired event.
     for (const [x, a] of Object.entries(st.answered)) if (!(a.exp > now)) delete st.answered[x];
     st.answered[nonce] = { did: c.did, exp: p.exp + DAY };
@@ -1945,6 +2010,7 @@ export class Carrier {
     const name = `${p.name ?? 'public'}-${p.chats + 1}`;
     const res = admitAnswer(req.answer, { nonce, exp: p.exp, secret: p.secret, name, relay: p.relay }, store, now, (pk) => { const k = kemEncapsulate(pk); ct = k.ct; return k.shared; }, { via: { public: nonce } });
     const c = store.lookup(res.did), K = hexToBytes(res.pair_key);
+    if (!before[c.did] && c.name === name) { c.name_from = 'auto'; store.save(); }
     const undo = { contact: before[c.did] ?? null, peer: st.peers[c.did] ?? null };
     const s = session({ me: { did: me.did, current_did: me.current_did, sign: me.sign }, peer: c, K });
     const prekeys = s.in.prekeys.issue({ current_did: me.current_did, sign: me.sign }, s.pair, now);
@@ -1957,6 +2023,7 @@ export class Carrier {
     store.save();
     st.peers[c.did] = { session: dumpSession(s), announced: me.current_did, known: me.current_did, outbox: st.peers[c.did]?.outbox ?? [], prekeys_resend: false, prekeys_iat: now };
     this.#queue(st, { ...entry, bytes: frame });
+    this.#tellName(st, c.did);
     this.#routes = new Map();
     return [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key), public: nonce })];
   }
@@ -2032,6 +2099,7 @@ export class Carrier {
     // An entry written before `as` was kept: unknown, so the notice goes (#next `first`).
     const answered = waiting.find(([x]) => x === id)[1], held = answered.as ?? null;
     const c = renamed(store, store.lookup(res.did), answered);
+    if (!answered.named && c.name === answered.name && c.name_from === undefined && !res.rekeyed) { c.name_from = 'auto'; store.save(); }
     const s = session({ me: { did: me.did, current_did: me.current_did, sign: me.sign }, peer: c, K: hexToBytes(res.pair_key) });
     const pub = answered.public ? { public: true, words_checked: Boolean(answered.words) } : {};
     const events = [this.#note(st, now, { type: 'paired', did: c.did, name: c.name, current_did: c.current_did, rekeyed: res.rekeyed, fingerprint: wordsOf(res.pair_key), ...pub })];
@@ -2040,6 +2108,7 @@ export class Carrier {
       events.push({ type: 'dropped', check: e.check, detail: `the reply's prekeys: ${e.message}` });
     }
     st.peers[c.did] = { session: dumpSession(s), announced: held, known: held, outbox: st.peers[c.did]?.outbox ?? [], prekeys_resend: false, prekeys_iat: 0 };
+    this.#tellName(st, c.did);
     for (const [x] of waiting) this.#handshakes.set(x, { contact: { name: c.name, did: c.did, current_did: c.current_did, fingerprint: wordsOf(res.pair_key), ...pub } });
     this.#routes = new Map();
     return events;
@@ -2433,10 +2502,11 @@ export class Carrier {
   }
 
   // Until queued work is done and nothing has arrived for QUIET ms (and `until()` holds), or max ms.
-  async #idle({ max = DRAIN, until = null } = {}) {
+  async #idle({ max = DRAIN, until = null, down = null } = {}) {
     const end = Date.now() + max;
     for (;;) {
       await this.#drain();
+      if (down?.()) return;
       const last = Math.max(this.#lastWork, ...[...this.#links.values()].map((l) => l.lastIn));
       if (Date.now() - last >= QUIET && (!until || until())) return;
       if (Date.now() >= end) return;
@@ -2633,11 +2703,35 @@ export class Carrier {
     if (this.#links.get(link.relay) === link) this.#links.delete(link.relay);
     this.#emit({ type: 'disconnected', relay: link.relay });
     if (Date.now() - link.since >= STABLE_MS) this.#attempts.delete(link.relay);
+    // Logged in, then closed: by this client (it hung up), or by the relay (its notice says why).
+    if (link.onlineAt > 0) this.#ended(link.relay, link.closing ? null : { ms: Date.now() - link.since, ...(link.ended ?? { code: 'session_ended', detail: 'the relay closed the connection' }) });
     if (!this.#started || this.#connecting.has(link.relay) || (link.closing && !link.pow)) return;
     if (link.cut?.permanent) {
       this.#emit({ type: 'error', relay: link.relay, check: link.cut.check, detail: link.cut.message, ...(link.cut.next !== undefined && { next: link.cut.next }) });
       this.#abandon(link.relay, link.cut);
     } else this.#retry(link.relay);
+  }
+
+  // The relay ended a session (why: { ms it lasted, code, detail }) or refused a login (why: { code,
+  // detail }), or this client ended one itself (why null): the pace of the next login (backoff).
+  #ended(relay, why) {
+    try {
+      this.#locked(({ st }) => {
+        const r = (st.relays[relay] ??= { proven: false, claims: {} });
+        if (why === null || (why.ms ?? 0) >= ENDED_LASTS) { delete r.ended; if (why === null) return; }
+        r.ended = { n: Math.min(32, (r.ended?.n ?? 0) + 1), at: Date.now(), code: String(why.code).slice(0, 64), detail: String(why.detail ?? '').slice(0, 200) };
+      });
+    } catch {}
+  }
+  // Before a login to `relay`: the wait the last early ends ask (backoff), but never past `end` (ms).
+  async #pace(relay, end = null) {
+    let e = null;
+    try { e = this.#read(({ st }) => st.relays[relay]?.ended ?? null); } catch {}
+    if (!e || !(e.n > 0) || !Number.isFinite(e.at)) return;
+    const [first, most] = this.backoff;
+    const due = e.at + Math.min(most, first * 2 ** (e.n - 1));
+    const ms = Math.min(due, end ?? due) - Date.now();
+    if (ms > 0) await sleep(Math.min(ms, most));
   }
 
   // Exponential backoff with jitter: first, 2 × first, … up to most. started: the first try's only
@@ -2712,15 +2806,36 @@ export class Carrier {
 
   // Connects (or refreshes) each relay, waits for the round to settle, and hangs up again unless
   // started.
+  // A wait (idle.max) is the caller's: a session the relay ends early, or a login it turns away
+  // after the first, is tried again at the backoff pace until that time, never returned early
+  // (0.1.17: `inbox --wait 300` said "no message came within 300 s" after ~20 s). this.ended: the
+  // relay's last word on a session it ended during this one ({ code, detail, n }), or null.
   async #session(relays, idle = {}, started) {
     const opened = [];
     this.#locked((ctx) => this.#expireKeys(ctx));
+    const end = idle.max !== undefined && !this.#started ? Date.now() + idle.max : null;
+    this.ended = null;
     try {
-      for (const r of relays) {
-        if (this.#links.get(r)?.up) this.#refreshSoon(r);
-        else opened.push(await this.#connect(r, started));
+      for (let round = 0; ; round++) {
+        for (const r of relays) {
+          if (this.#links.get(r)?.up) { this.#refreshSoon(r); continue; }
+          await this.#pace(r, end);
+          if (end !== null && round > 0 && Date.now() >= end) continue;
+          try { opened.push(await this.#connect(r, started)); } catch (e) {
+            if (ENDED_RETRY.has(e.check)) this.#ended(r, { code: e.check, detail: e.message });
+            // The first login fails the verb as it always did; one after the relay ended a session waits again.
+            if (end === null || round === 0 || !ENDED_RETRY.has(e.check)) throw e;
+            this.ended = { code: e.check, detail: e.message, n: (this.ended?.n ?? 0) + 1 };
+          }
+        }
+        const down = () => relays.some((r) => !this.#links.get(r)?.up);
+        await this.#idle(end === null ? idle : { ...idle, max: Math.max(0, end - Date.now()), down });
+        if (end === null || Date.now() >= end || !down() || opened.some((l) => l.cut)) break;
+        if (idle.until?.()) break;
+        // The relay ended it: why, then the same wait on a new login.
+        const gone = opened.filter((l) => !l.up && l.ended).at(-1)?.ended ?? { code: 'session_ended', detail: 'the relay closed the connection' };
+        this.ended = { ...gone, n: (this.ended?.n ?? 0) + 1 };
       }
-      await this.#idle(idle);
       // One more round now that deliveries have stopped: claims past their time are given up
       // only then (#refresh), and a frame that waited for a claim goes.
       for (const r of relays) if (this.#links.get(r)?.up) this.#refreshSoon(r);
@@ -2745,7 +2860,8 @@ export class Carrier {
   // local: no session: the code is made and kept only; its answer topic is claimed at this
   // identity's next login (a device added offline, device.mjs), so connect once before it answers.
   // renew: true begins a series of renewing codes (store.mjs renew); a series id continues one (#renewDue).
-  async invite({ name, ttl, short = false, relay, local = false, started, renew = false } = {}) {
+  // named: false when the caller made the name up (a placeholder): the contact takes the name the other side tells.
+  async invite({ name, ttl, short = false, relay, local = false, started, renew = false, named = name !== undefined } = {}) {
     const at = relay === undefined ? this.relay : relayArg(relay);
     if (short && ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < SHORT_TTL_MIN || ttl > SHORT_TTL_MAX)) {
       fail('ttl', `a short code lives ${SHORT_TTL_MIN} to ${SHORT_TTL_MAX} seconds (default ${SHORT_TTL}), not ${JSON.stringify(ttl)}; longer: the long code (invite --long --ttl)`);
@@ -2756,6 +2872,7 @@ export class Carrier {
       const code = makeInvite({ did: me.current_did, relay: at, now, ...(ttl !== undefined && { ttl }) });
       store.addInvite(code, name ?? `invite-${code.nonce.slice(1, 9)}`, now, null,
         series === null ? null : { id: series, ...(renew === true && { start: { name: name ?? null, ttl: ttl ?? null, relay: relay === undefined ? null : at } }) });
+      if (!named) { store.load().s.invites[code.nonce].auto = true; store.save(); }
       return code;
     });
     if (local) {
@@ -3206,6 +3323,8 @@ export class Carrier {
 
   /** The owner renames a contact (a name or any DID of its chain; store.mjs rename) → { did, name }. */
   rename(who, name) { return this.#locked(({ store }) => store.rename(who, name)); }
+  /** This side's display name as it is told to new contacts (the header's "Names"), or null. */
+  selfName() { try { return theirName(this.#selfName()); } catch { return null; } }
 
   contacts() {
     return this.#read(({ now, store, st }) => {
@@ -3218,7 +3337,7 @@ export class Carrier {
             prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null, link: c.link ?? null,
             // Presence (the header's): what this contact sees of mine, and theirs as read now (null: not known).
             presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null,
-            seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true, via: c.via ?? null };
+            seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true, via: c.via ?? null, name_from: c.name_from ?? null };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay,
           ...(typeof p.short === 'string' && { short: p.short, short_exp: p.short_exp }), ...(p.renew && { renew: p.renew }) })),
@@ -3362,6 +3481,14 @@ export class Carrier {
     return { ...r, msg_id: id, delivery: this.replyStatus(id).reply };
   }
 
+  /** The label of a reply quoting received message `id` (a text): re/<h>/r (the header's "Replies"). */
+  quote(id) {
+    this.#receivedFor(id);
+    const m = this.#read(({ st }) => st.inbox.find((x) => messageId(x) === id)) ?? this.history().messages.find((x) => messageId(x) === id);
+    if (!m || typeof m.content !== 'string') fail('msg_unknown', `message ${id} is not a text here to quote (a file, or gone from the log)`);
+    return reLabel(m.content, false);
+  }
+
   /** A file, as sendFile, to the sender of message `id` → sendFile's result, with msg_id and delivery. */
   async replyFile(id, file, { local = false } = {}) {
     const rec = this.#receivedFor(id);
@@ -3415,7 +3542,7 @@ export class Carrier {
     if (from !== undefined && typeof from !== 'string') fail('body', 'from: a contact\'s DID');
     const picks = (store, now) => { const t = want && store.tiers(now); return (m) => (from === undefined || m.from === from) && (!want || want.has(t.get(m.from) ?? 'friend')); };
     const ready = () => this.#read(({ now, store, st }) => st.inbox.some(picks(store, now)) || (st.links?.length ?? 0) > 0 || (st.groups?.length ?? 0) > 0 || (st.devices?.length ?? 0) > 0 || st.events.some((e) => e.type === 'pairing_failed' || (paired && e.type === 'paired')));
-    let offline = null;
+    let offline = null, ended = null;
     if (local) {
       for (const end = Date.now() + wait * 1000; Date.now() < end && !ready();) await sleep(250);
     } else {
@@ -3425,6 +3552,7 @@ export class Carrier {
       try {
         await this.#session(relays, wait > 0 ? { max: wait * 1000, until: ready } : {});
       } catch (e) { this.lastError = e; offline = e instanceof MsgError ? e.message : `connect: ${e.message}`; }
+      ended = this.ended;
       // A renewing code this session took: its fresh one now, before the events go out.
       if (offline === null) await this.#renewDue();
     }
@@ -3432,7 +3560,7 @@ export class Carrier {
       this.#sweepFiles(st, now);
       const pick = picks(store, now), messages = st.inbox.filter(pick);
       this.#logOut(messages);
-      const out = { messages, events: st.events, dropped: st.dropped, ...(offline && { offline }) };
+      const out = { messages: messages.map((m) => (reOf(m?.label) ? { ...m, re: reOf(m.label) } : m)), events: st.events, dropped: st.dropped, ...(offline && { offline }), ...(ended && { ended }) };
       st.inbox = st.inbox.filter((m) => !pick(m)); st.events = []; st.dropped = {};
       return out;
     });
@@ -3592,6 +3720,12 @@ export class Carrier {
     if (!this.#powWaits.delete(relay)) return;
     clearTimeout(this.#timers.get(relay));
     this.#timers.delete(relay);
+  }
+
+  /** A nudge from outside (the phone woke): each relay in use down and not already waiting, a retry with the backoff; automatic (no proof-of-work confirmation). */
+  wake() {
+    if (!this.#started) return;
+    for (const r of this.#relaysInUse()) if (!this.#links.get(r)?.up && !this.#timers.has(r) && !this.#connecting.has(r)) this.#retry(r);
   }
 
   /**

@@ -46,9 +46,11 @@ const str = (d) => ({ type: 'string', description: d });
 // server may name any profile); separate processes with separate SIGELO_IDENTITY are the boundary.
 const PROFILE = { identity: str('optional profile name [a-z0-9_-], e.g. your subagent name; omit for the default identity') };
 const idObj = (props = {}, required = []) => obj({ ...props, ...PROFILE }, required);
+// Replaced once the contact tools are known (noId).
+const NO_ID = '{no identity}';
 const TOOLS = [
-  ['sigelo_whoami', 'Your sigelo identity: current DID, genesis document, DID chain, number of stored attestations. Call first; if it says no identity, call sigelo_init once.', idObj()],
-  ['sigelo_init', 'Create your identity ONCE (refuses if one exists). recovery: the operator\'s offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which. The DID it makes is yours across every platform.', idObj({ recovery: str('"z6Mk…" recovery public key from your operator, or "none"') }, ['recovery'])],
+  ['sigelo_whoami', 'Your sigelo identity: current DID, genesis document, DID chain, number of stored attestations. Call first; if it says no identity: ' + NO_ID + '.', idObj()],
+  ['sigelo_init', 'Create an identity of your own ONCE (refuses if one exists); an agent meant to be enrolled under its operator uses sigelo_enrol instead. recovery: the operator\'s offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which. The DID it makes is yours across every platform.', idObj({ recovery: str('"z6Mk…" recovery public key from your operator, or "none"') }, ['recovery'])],
   ['sigelo_sign_challenge', 'Prove you are your DID: sign a world\'s challenge {v, typ:"challenge", did, ctx, nonce} exactly as received. Anything else is refused. Returns {did, sig}; send sig back to that world. This is how a site or agent learns who you are, offline, no account.', idObj({ challenge: json('the challenge body, as JSON object or text') }, ['challenge'])],
   ['sigelo_add_issuer', 'Store a world\'s genesis document so its attestations about you verify offline.', idObj({ genesis: json('the issuer genesis document') }, ['genesis'])],
   ['sigelo_add_attestation', `Store a world's signed attestation {body, sig} about you (replaces an older one from the same issuer+ctx). Pass issuer (its genesis) too when you have it. ${DATA}`, idObj({ attestation: json('{body, sig}'), issuer: json('optional: the issuer genesis document') }, ['attestation'])],
@@ -89,7 +91,7 @@ const input = (v, name) => {
 const loadStore = (path) => {
   if (!existsSync(path)) {
     const named = path === base ? '' : ` for the profile "${/^sigelo\.(.+)\.local\.json$/.exec(path.slice(dirname(path).length + 1))?.[1]}"`, have = profiles();
-    throw refusal('no_identity', `no identity${named} at ${path}: call sigelo_init once${named ? ' with the same identity' : ''}${have.length ? `, or use an existing profile: ${have.join(', ')}` : ''}`);
+    throw refusal('no_identity', `no identity${named} at ${path}: ${noId()}${named ? ' (with the same identity)' : ''}${have.length ? `, or use an existing profile: ${have.join(', ')}` : ''}`);
   }
   // There, but not loading: never "call sigelo_init", which would make another identity.
   try { return id.load(path); } catch (e) { throw refusal('identity_unreadable', `identity file ${path} does not load (${e.message.split('\n')[0]}): restore it from your copy; do not call sigelo_init, which makes a new identity`, e); }
@@ -153,8 +155,16 @@ const HANDLERS = {
 // otherwise, with one line on stderr, and a package that ships no contact.mjs gets null too. This
 // server never depends on them. Anything else wrong in them stops it: a broken install must not
 // pass for an absent one.
+// What an agent with no identity does (0.1.17, agent k: "call sigelo_init once" made an identity of its own where its
+// operator meant to enrol it): with the contact tools, sigelo_enrol for an agent meant to be enrolled under its
+// operator; sigelo_init only for an identity of its own.
+function noId() {
+  return contact ? 'an agent meant to be enrolled under its operator calls sigelo_enrol with the code from the operator\'s app; sigelo_init only for an identity of its own'
+    : 'an agent meant to be enrolled under its operator runs sigelo-agent init --enrol <code from the operator\'s app> (the contact tools are not installed here); sigelo_init only for an identity of its own';
+}
 const contact = await import('./contact.mjs').then((m) => m.load({ installed: INSTALLED, id, debug }), (e) => { if (e.code === 'ERR_MODULE_NOT_FOUND') return null; throw e; });
 if (contact) { TOOLS.push(...contact.tools); Object.assign(HANDLERS, contact.handlers); }
+for (const t of TOOLS) if (t[0] === 'sigelo_whoami') t[1] = t[1].replace(NO_ID, noId());
 // sigelo_pass (pass.mjs): the identity tool that goes on the network, so the plugin build leaves it out.
 const passDoor = await (await import('./pass.mjs')).load({ installed: INSTALLED, loadStore });
 if (passDoor) { TOOLS.push(...passDoor.tools); Object.assign(HANDLERS, passDoor.handlers); }

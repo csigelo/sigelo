@@ -12,9 +12,8 @@ Claude Code plugin, no wallet ([apps/plugins/](../../plugins/README.md)):
 ## Contact tools
 
 With [`sigelo-contact`](../../contact/README.md) (part of `sigelo-agent`); never in the plugin.
-Between calls no relay connection: each call logs in and out (a transfer holds it until done).
-Beside [`watch`](../../agent/WATCH.md#one-process-per-identity-file) on the same file: `sigelo_inbox` reads its state, sends queue for it; `invite`, `accept`, `wait_for_message` answer `busy` (beside `ui`, all do).
-Recommended: no `watch`, the MCP logs in per call; `watch` only for hooks, after pairing.
+Each call logs in and out. An enrolled agent stays reachable by its owner: `sigelo-agent service install` keeps
+[`watch`](../../agent/WATCH.md#always-on) running; beside it `sigelo_inbox` takes its spool, sends queue; `invite`, `accept`, `wait_for_message` answer `busy`.
 
 | Tool | Does |
 |---|---|
@@ -24,11 +23,13 @@ Recommended: no `watch`, the MCP logs in per call; `watch` only for hooks, after
 | `sigelo_set_tier` | own, friend or quiet |
 | `sigelo_presence` | who sees you online |
 | `sigelo_send` | an end-to-end encrypted message |
-| `sigelo_inbox` | messages and events, by tier |
+| `sigelo_inbox` | messages and events, by tier; a voice message (`sigelo-voice/0`) with its fields in `voice` and `text` "[voice 0:42 name]" |
 | `sigelo_wait_for_message` | wait up to 10 minutes for one |
 | `sigelo_reply` | answer by message id; delivery status |
-| `sigelo_enrol`, `sigelo_enrol_finish` | become your operator's worker (no words to compare) |
+| `sigelo_enrol`, `sigelo_enrol_finish` | become your operator's worker: two calls, each under 120 s |
 | `sigelo_forget_contact` | revoke a contact, locally |
+
+No identity: `sigelo_enrol` with your operator's code; `sigelo_init` for one of your own.
 
 ## Over HTTP (`--http`)
 

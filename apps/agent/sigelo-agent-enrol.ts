@@ -51,14 +51,15 @@ export const USAGE = `Own agents, derived from your seed (ENROL.md): worker i of
                                            the tier stays unless --tier
   enrol --finish [--wait <s>]              finish what is pending here, either side (kept 24 hours)
   init --enrol <code> [--wait <s>]         on the other machine: pair, then become the operator's worker, filing it
-                                           as "operator" (or its label); --wait 0 to 300 s, default 120
+       [--service]                         as "operator" (or its label); --wait 0 to 300 s, default 120; --service:
+                                           then sigelo-agent service install, so its owner's messages always come
 Operator identity: --identity, else $SIGELO_HUMAN, else ~/.config/sigelo/me.local.json; never in the agents'
 directory (SIGELO_IDENTITY's, unless it names this file, and the default's). Exit 3: still pending when the wait ended.`;
 
 export interface Placed { id: string; name: string; did: string; original: string; i?: number; n?: number; ours?: boolean | null; tier?: string; temp: string | null; released?: boolean; exp: number;
   worker?: number | null; operator?: string; status?: string | null; contact?: { fingerprint?: string } | null; verified?: boolean; words?: string | null }
 export interface Out { delivered: { id: string; name: string; temp: string; did: string }[]; placed: Placed[]; refused: { check: string; detail: string; from?: string }[];
-  sent: { did: string }[]; rest: Batch; held?: unknown[]; offline?: string; lastError?: unknown }
+  sent: { did: string }[]; rest: Batch; held?: unknown[]; offline?: string; lastError?: unknown; status?: { check: string; detail: string }[] }
 export interface Carrier { relay: string; stop(): Promise<void>; unpark(code: string, o?: { relay: string }): Promise<string>; inbox(o: object): Promise<Batch>;
   accept(code: string, o: object): Promise<{ status: string; contact?: { did: string; name: string; fingerprint?: string } }>;
   contacts(): { answers: unknown[]; contacts: { did: string; revoked: boolean; ours: boolean; tier: string; pair?: string | null }[] }; presetTier(did: string, tier: string): { tier: string } }
@@ -505,6 +506,8 @@ const placer = (l: Libs, path: string, wait: () => number) => async (x: { identi
 };
 
 /** The machine, after the code: the temporary identity runs the enrolment until placed or `wait`. */
+// init --enrol --service: the listener installed as a service once placed (sigelo-agent-service.ts).
+let serviceAsked = false;
 async function asMachine(l: Libs, path: string, temp: string, wait: number, said?: string, own = true): Promise<number> {
   const res = await runMachine(l, path, temp, wait);
   report(temp, res, said, own);
@@ -513,10 +516,15 @@ async function asMachine(l: Libs, path: string, temp: string, wait: number, said
     dropTemp(temp);
     out({ did: p.did, original: p.original, worker: p.worker, operator: p.operator, status: p.status });
     if (p.status !== 'connected') { note('enrol: the worker\'s pairing with the operator completes when the operator runs sigelo-agent enrol --finish; then here too'); return 3; }
+    // Always reachable by its owner (WATCH.md "Always on"): the service, now with --service, else offered in one line.
+    if (serviceAsked) return await (await import('./sigelo-agent-service.ts')).main(path, ['install']);
+    note('enrol: run sigelo-agent service install to receive your owner\'s messages at all times');
     return 0;
   }
   if (res.offline !== undefined) { debug(res.lastError, { identity: temp, relay: l.lib.optionsFromEnv().relay ?? l.lib.DEFAULT_RELAY }); return 1; }
-  note('enrol: not done yet; kept 24 hours: once the operator has run sigelo-agent enrol --finish, run it here too');
+  // The operator's word on this request (enrol.mjs "The machine is told why"), one line; else the generic one.
+  const said_ = res.status?.at(-1);
+  note(said_ ? `enrol: not done yet: ${said_.check}: ${said_.detail}` : 'enrol: not done yet; kept 24 hours: once the operator has run sigelo-agent enrol --finish, run it here too');
   return 3;
 }
 
@@ -590,6 +598,7 @@ export async function initEnrol(path: string, code: string, rest: string[], o: {
   let long: string | undefined, l: Libs | undefined;
   try {
     const wait = seconds(flag('--wait'), JOIN_WAIT), name = flag('--name'), end = Date.now() + wait * 1000;
+    serviceAsked = rest.includes('--service') && !o.words;
     // --name named the OPERATOR here before (an agent ran `--name <its own name>` and filed its operator so).
     // The operator chooses the agent's name; this side files the operator as "operator" (or its label).
     if (name !== undefined && !o.words) note(`init --enrol: --name ${JSON.stringify(name)} is not used: your operator names this agent, and it is filed here as "operator" (or the label your operator chose)`);

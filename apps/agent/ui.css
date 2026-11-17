@@ -352,4 +352,24 @@ header.top.plain { border-bottom: 0; }
 .msg.photo { padding: 4px 4px 6px; }
 .msg img.photo { display: block; max-width: 100%; height: auto; border-radius: 10px; }
 .msg .ph { display: block; padding: 0; border: 0; background: none; cursor: pointer; }
+.photo-view img.photo { display: block; width: 100%; height: auto; border-radius: 10px; }
 .msg.photo .tag, .msg.photo .meta { padding: 0 6px; }
+.msg a.link { color: inherit; text-decoration: underline; overflow-wrap: anywhere; }
+.quotebar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-left: 3px solid var(--link); margin: 0 0 6px; }
+.quotebar .quote { flex: 1; min-width: 0; }
+.quote { display: block; text-align: left; font: inherit; color: inherit; background: none; border: 0; border-left: 3px solid var(--link); padding: 2px 8px; margin: 0 0 4px; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.quote b { display: block; font-size: .85em; }
+.msg.hl { outline: 2px solid var(--link); }
+
+/* A voice message (design/transfer.md "Voice"): play/pause, the waveform over its progress, the length; the recorder's sheet. */
+.voice { display: flex; align-items: center; gap: var(--s2); min-width: 200px; }
+.voice .vbody { flex: 1; min-width: 0; }
+.voice .vplay { flex: none; border-radius: 50%; background: var(--surface-2); }
+.voice .vwave { display: flex; align-items: center; gap: 2px; height: 28px; }
+.voice .vwave > i { flex: 1; min-width: 1px; max-width: 4px; border-radius: 1px; background: currentColor; opacity: .45; }
+.voice .meter.vprog { height: 4px; margin-top: 4px; }
+.rec .rec-now { display: flex; align-items: center; gap: var(--s2); margin: 0; font-size: 1.1em; }
+.rec .rec-time { font-variant-numeric: tabular-nums; }
+.rec .rec-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--danger); animation: recblink 1.2s ease-in-out infinite; }
+@keyframes recblink { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .rec .rec-dot { animation: none; } }

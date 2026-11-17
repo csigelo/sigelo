@@ -71,11 +71,20 @@ import java.util.regex.Pattern;
  *              refused "land" with why (no permission, no room): the page says it, the partial kept
  *   big-open   a file that landed opened by the system's viewer (ACTION_VIEW, a read grant)
  *   big-awake  FLAG_KEEP_SCREEN_ON while a transfer moves
+ *   big-keep   a recording the page wrote into <part>.part (a voice message, apps/contact/voice-web.mjs) kept as a file
+ *              in the cache beside the photos, under its name → {doc, name, size, mtime, url}: sent as a photo is
+ *   big-url    a file that landed (a content URI of the media store) as a doc the page reads → {doc, name, size, mtime, url}:
+ *              a voice message played in the page (read back by range)
+ *   mic        RECORD_AUDIO asked at a tap on Voice (before the page's getUserMedia, the only dialog: MainActivity grants
+ *              the WebView's own ask once the permission exists) → {granted: true}; refused mic_permission (the next tap
+ *              asks again); once Android no longer shows the dialog (refused twice, "don't ask again") mic_blocked at
+ *              once: the page opens the app's settings page instead. A refusal is never final.
+ *   app-settings  the app's page in the system settings (ACTION_APPLICATION_DETAILS_SETTINGS), where it is allowed
  * part: a transfer id (32 hex). doc: 32 hex. profile: as the keystore's (p1, p2…).
  */
 final class BigFiles {
     static final int CHUNK = 1 << 20;
-    static final int REQ_PICK = 5, REQ_PHOTO = 6, REQ_CAMERA_PHOTO = 7, REQ_STORAGE = 8;
+    static final int REQ_PICK = 5, REQ_PHOTO = 6, REQ_CAMERA_PHOTO = 7, REQ_STORAGE = 8, REQ_MIC = 9;
     private static final Pattern HEX32 = Pattern.compile("^[0-9a-f]{32}$");
     private static final Pattern PROFILE = Pattern.compile("^p[1-9][0-9]{0,2}$");
     private static final Pattern SAFE_NAME = Pattern.compile("[\\\\/:*?\"<>|\\x00-\\x1f]");
@@ -94,7 +103,7 @@ final class BigFiles {
     private final SharedPreferences prefs;
     private final SecureRandom rng = new SecureRandom();
     private final Map<String, RandomAccessFile> open = new ConcurrentHashMap<>();
-    private Reply pendingPick, pendingPhoto, pendingStorage;   // the main thread's
+    private Reply pendingPick, pendingPhoto, pendingStorage, pendingMic;   // the main thread's
     private String pendingPickProfile, pendingPhotoProfile, pendingPhotoDoc;
     private boolean pendingKeepLocation;
     private Runnable afterStorage;
@@ -237,6 +246,13 @@ final class BigFiles {
         pendingKeepLocation = m.optBoolean("keepLocation", false);
         // CAMERA is declared (the scan): Android refuses ACTION_IMAGE_CAPTURE until it is granted. Asked here at the first.
         if (activity.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            // Android shows no prompt any more (refused twice, "don't ask again"): the page opens the settings page.
+            if (activity.blocked(Manifest.permission.CAMERA)) {
+                pendingPhoto = null;
+                r.no("camera_blocked", "the camera is off for sigelo: switch on Camera in its Permissions");
+                return;
+            }
+            activity.asking(Manifest.permission.CAMERA);
             activity.requestPermissions(new String[] {Manifest.permission.CAMERA}, REQ_CAMERA_PHOTO);
             return;
         }
@@ -265,15 +281,57 @@ final class BigFiles {
         return new Intent(MediaStore.ACTION_IMAGE_CAPTURE).resolveActivity(activity.getPackageManager()) != null;
     }
 
+    /** The microphone for a voice message: RECORD_AUDIO asked at the first, its answer to the page. */
+    void mic(JSONObject m, Reply r) {
+        if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            r.ok(granted());
+            return;
+        }
+        // Asked before and no rationale: Android shows no dialog any more (refused twice, or "don't ask again").
+        if (prefs.getBoolean("mic.asked", false) && !activity.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+            r.no("mic_blocked", MIC_BLOCKED);
+            return;
+        }
+        prefs.edit().putBoolean("mic.asked", true).apply();
+        if (pendingMic != null) pendingMic.no("cancelled", "another ask for the microphone");
+        pendingMic = r;
+        activity.requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+    }
+
+    private static final String MIC_OFF = "the microphone is off for sigelo: tap Voice again to allow it";
+    private static final String MIC_BLOCKED = "Android no longer asks: switch on Permissions → Microphone in the app's settings";
+
+    /** The app's page in the system settings: a refused permission is allowed there. */
+    void appSettings() {
+        Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", activity.getPackageName(), null));
+        activity.startActivity(i);
+    }
+
+    private static JSONObject granted() {
+        try {
+            return new JSONObject().put("granted", true);
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** MainActivity.onRequestPermissionsResult for ours: true when it was ours. */
     boolean permission(int req, int[] grants) {
         boolean granted = grants.length == 1 && grants[0] == PackageManager.PERMISSION_GRANTED;
+        if (req == REQ_MIC) {
+            Reply r = pendingMic;
+            pendingMic = null;
+            if (r != null && granted) r.ok(granted());
+            else if (r != null) r.no("mic_permission", MIC_OFF);
+            return true;
+        }
         if (req == REQ_CAMERA_PHOTO) {
             if (granted) shoot();
             else if (pendingPhoto != null) {
                 Reply r = pendingPhoto;
                 pendingPhoto = null;
-                r.no("camera_permission", "the camera is not allowed for sigelo (Settings → Apps → sigelo → Permissions)");
+                if (activity.blocked(Manifest.permission.CAMERA)) r.no("camera_blocked", "the camera is off for sigelo: switch on Camera in its Permissions");
+                else r.no("camera_permission", "the camera is not allowed for sigelo: tap Camera again to allow it");
             }
             return true;
         }
@@ -406,6 +464,39 @@ final class BigFiles {
         long[] after = statOf(where);
         if (after[0] != st[0] || after[1] != st[1]) throw new SigeloBridge.Refused("file_changed", "the file changed while it was read: send it again");
         return new JSONObject().put("name", nameOf(where)).put("size", size).put("mtime", st[1]).put("sha256", hexOf(whole.digest())).put("hashes", Base64.encodeToString(hashes, Base64.NO_WRAP));
+    }
+
+    /** A recording written into <part>.part, kept as a file the page sends (a doc), under its name. */
+    JSONObject keep(JSONObject m) throws Exception {
+        String profile = profileOf(m);
+        File f = partOf(m);
+        String name = clean(m.optString("name"));
+        synchronized (this) {
+            release(f);
+        }
+        if (!f.isFile() || f.length() == 0) throw new SigeloBridge.Refused("voice", "no recording written for this part");
+        int dot = name.lastIndexOf('.');
+        String doc = newToken(), file = doc + (dot > 0 ? name.substring(dot).toLowerCase(Locale.ROOT) : "");
+        File to = new File(photos(activity), file);
+        if (!f.renameTo(to)) {
+            try (InputStream in = new FileInputStream(f); OutputStream out = new FileOutputStream(to)) {
+                copy(in, out);
+            }
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+        }
+        prefs.edit().putString("name." + file, name).apply();
+        keepDoc(profile, doc, "f:" + file);
+        return describe(profile, doc, "f:" + file);
+    }
+
+    /** A file that landed (the media store's content URI) as a doc the page reads by its URL: one doc per URI. */
+    JSONObject url(JSONObject m) throws Exception {
+        String profile = profileOf(m), s = m.optString("uri");
+        if (!s.startsWith("content://media/")) throw new SigeloBridge.Refused("big", "uri: a file that landed in Downloads");
+        String doc = hexOf(sha256().digest(("uri\n" + s).getBytes(java.nio.charset.StandardCharsets.UTF_8))).substring(0, 32);
+        keepDoc(profile, doc, "u:" + s);
+        return describe(profile, doc, "u:" + s);
     }
 
     JSONObject stat(JSONObject m) throws Exception {

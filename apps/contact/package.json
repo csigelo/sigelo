@@ -82,6 +82,10 @@
     "./rtc-web.mjs": "./rtc-web.mjs",
     "./photo": "./photo.mjs",
     "./photo.mjs": "./photo.mjs",
+    "./voice": "./voice.mjs",
+    "./voice.mjs": "./voice.mjs",
+    "./voice-web": "./voice-web.mjs",
+    "./voice-web.mjs": "./voice-web.mjs",
     "./words-lock": "./words-lock.mjs",
     "./words-lock.mjs": "./words-lock.mjs",
     "./package.json": "./package.json"
@@ -115,6 +119,8 @@
     "transfer-web.mjs",
     "rtc-web.mjs",
     "photo.mjs",
+    "voice.mjs",
+    "voice-web.mjs",
     "public.mjs",
     "words-lock.mjs",
     "fixtures/carrier-v0.json",
@@ -141,13 +147,14 @@
     "test-short.mjs",
     "test-device.mjs",
     "test-transfer.mjs",
-    "test-transfer-web.mjs"
+    "test-transfer-web.mjs",
+    "test-voice.mjs"
   ],
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-ws.mjs && node test-short.mjs && node test-renew.mjs && node test-public.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs && node test-presence.mjs && node test-link.mjs && node test-device.mjs && node test-platform.mjs && node test-group.mjs && node test-transfer.mjs && node test-transfer-web.mjs",
+    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-ws.mjs && node test-short.mjs && node test-renew.mjs && node test-public.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs && node test-presence.mjs && node test-ended.mjs && node test-link.mjs && node test-device.mjs && node test-platform.mjs && node test-group.mjs && node test-transfer.mjs && node test-transfer-web.mjs && node test-voice.mjs",
     "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs && node gen-short.mjs && node gen-device.mjs",
     "prepack": "node ../../release/prepack.mjs pre",
     "postpack": "node ../../release/prepack.mjs post",

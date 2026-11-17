@@ -66,6 +66,20 @@
 // the unix time of the last send; true, as an earlier version kept it, counts as long ago). The
 // operator whose identity send was refused or failed marks the enrolment `needs_send` (the time of
 // that try) and sends again at its next round, at most every RESEND_S, while the entry lives.
+//
+// The machine is told why (0.1.17: `enrol --finish` said "not done yet" for ever while the operator
+// refused or held its request). The operator answers the temporary identity with a status, label
+// LABEL_ENROL, {v, typ: "status", check, detail}: no key, no secret, no other DID; the check is the
+// operator's (enrol_proof, enrol_unpaired, enrol_from, enrol_used, enrol_done, enrol_words while the
+// words gate holds the key, device_words when they differed, or the failed send's check). Sent once
+// per reason, again when the reason changes: the pending file's `told` { temp DID: { check, exp } }.
+// The machine takes a status only from the contact it paired with through the code, keeps the last in
+// its joining entry (`status`), and complete() hands it out (`status`).
+//
+// A request held (the words gate: confirm() said not yet) is kept in its issued entry (`held`: the message,
+// proof only, no key), not only in the caller's memory: each complete() as the operator takes the held ones
+// again first, so an app restarted, killed in the background or offline meanwhile still answers it once the
+// words are confirmed, without the machine asking again (0.1.17: two real enrolments stalled this way).
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -79,7 +93,7 @@ import { platform as nodePlatform } from './platform-node.mjs';
 
 export const ENROL_V = 'sigelo-enrol/1';
 export const LABEL_ENROL = 'sigelo-enrol/1', LABEL_IDENTITY = 'sigelo-identity/0';
-export const TYP_REQUEST = 'enrol-request', TYP_IDENTITY = 'enrol-identity';
+export const TYP_REQUEST = 'enrol-request', TYP_IDENTITY = 'enrol-identity', TYP_STATUS = 'status';
 export const OPERATOR_CTX = 'sigelo-relay/operator', OPERATOR_DAYS = 90, DAY = 86400;
 // How long an enrolment stays pending, on either side: the invite's own default life.
 export const PENDING_TTL = DAY;
@@ -171,6 +185,27 @@ export function matches(content, key, pair) {
   return d === 0;
 }
 
+// What the machine is told for each check: for its human, never naming another DID (the operator's own
+// detail may name the one that took the code).
+const TOLD = {
+  enrol_proof: 'the request matches no enrolment code the operator issued in the last 24 hours (expired or cancelled): ask for a new code',
+  enrol_unpaired: 'the operator has not seen this machine pair through the code yet: it answers once the pairing completes',
+  enrol_from: 'another identity paired through this code first: ask the operator for a new code',
+  enrol_used: 'this code placed another worker already: ask the operator for a new code',
+  enrol_done: 'this worker was placed already: nothing more is sent',
+  enrol_words: 'the operator\'s app waits for its human to compare the four words: check that both sides show the same',
+  device_words: 'the operator said the four words differ: the key was not sent and the code is dropped; ask for a new code',
+};
+/** The operator's status for the machine: why its request is refused or held. No key, no DID. */
+export const statusMessage = (check, detail) => ({ v: ENROL_V, typ: TYP_STATUS, check, detail });
+/** The machine's reading of a status: { check, detail }, or null for any other shape. */
+export function readStatus(content) {
+  if (!isObject(content) || content.v !== ENROL_V || content.typ !== TYP_STATUS || typeof content.check !== 'string' || !/^[a-z][a-z0-9_]{0,39}$/.test(content.check) || typeof content.detail !== 'string') return null;
+  return { check: content.check, detail: content.detail.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ').slice(0, 300) };
+}
+/** The status the machine is sent for an operator's check (its own words for the known ones). */
+export const toldFor = (check, detail) => TOLD[check] ?? `the operator could not send the key yet (${detail.replace(/ \(did:sigelo:[^)]*\)/g, '')}): it tries again within a minute`;
+
 /** The message that carries the worker: its identity file, a long invite to pair as it, and how it files its operator (optional). */
 export const identityMessage = (identity, invite, worker = null, operatorName = null) => ({ v: ENROL_V, typ: TYP_IDENTITY, identity, invite, worker, ...(operatorName !== null && { operator_name: operatorName }) });
 // The operator's label for itself, as the worker files it: a contact name (1 to 64, no control or bidi characters).
@@ -229,7 +264,7 @@ export function pending(file, now, fn = () => undefined, platform = nodePlatform
       if (s?.v !== ENROL_V || !isObject(s.issued) || !isObject(s.joining)) fail('enrol_file', `${file} is not a ${ENROL_V} file: delete it to drop the pending enrolments`);
     }
     const before = canonicalize(s);
-    for (const k of ['issued', 'joining']) for (const [id, e] of Object.entries(s[k])) if (!(e.exp > now)) delete s[k][id];
+    for (const k of ['issued', 'joining', 'told']) for (const [id, e] of Object.entries(s[k] ?? {})) if (!(e.exp > now)) delete s[k][id];
     const out = fn(s);
     if (canonicalize(s) !== before) platform.files.write(file, utf8ToBytes(JSON.stringify(s, null, 2)));
     return out;
@@ -304,14 +339,22 @@ export async function accept({ carrier, file, code: text, name, wait = 10, temp 
  *   machine: temp = the temporary identity's file this carrier runs on; place(checked, { operator })
  *     writes the worker's file and pairs as it → { status, contact? }.
  * → { delivered: [{ id, name, temp, did }], placed: [{ id, name, did, original, … }], refused: [{ check, detail, from }],
+ *     status (machine): [{ check, detail, at }] the operator's word on its request, told (operator): [{ to, check, detail }],
  *     sent: [{ did }], rest: the batch without what was handled, offline? }
  */
 export async function complete({ carrier, file, wait = 0, until = () => false, keeper = null, place = null, temp = null, confirm = null }) {
   if (keeper) checkKeeper(keeper);
-  const out = { delivered: [], placed: [], refused: [], sent: [], held: [], rest: { messages: [], events: [], dropped: {} } };
+  const out = { delivered: [], placed: [], refused: [], sent: [], held: [], status: [], told: [], rest: { messages: [], events: [], dropped: {} } };
   const end = Date.now() + wait * 1000;
+  // One request answered once per call, however it came (held before, and the same again from the inbox).
+  const done = new Set(), once = (m) => { const k = `${m?.from} ${m?.content?.proof}`; if (done.has(k)) return false; done.add(k); return true; };
   for (let first = true; ; first = false) {
     if (first && place) await sendRequests(carrier, file, temp, out);
+    // The requests held before (the header's "A request held"): taken again first, once per complete().
+    if (first && keeper) {
+      const kept = pendingOf(carrier)(file, nowOf(carrier), (s) => Object.values(s.issued).filter((e) => e.held && !e.done).map((e) => e.held));
+      for (const m of kept) if (once(m)) await onRequest(carrier, file, keeper, m, out, confirm);
+    }
     if (keeper) await resend(carrier, file, keeper, out);
     if (keeper) await settle(carrier, file, keeper, out);
     const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
@@ -319,7 +362,8 @@ export async function complete({ carrier, file, wait = 0, until = () => false, k
     out.rest.events.push(...batch.events);
     for (const [k, n] of Object.entries(batch.dropped ?? {})) out.rest.dropped[k] = (out.rest.dropped[k] ?? 0) + n;
     for (const m of batch.messages) {
-      if (m?.label === LABEL_ENROL && keeper) await onRequest(carrier, file, keeper, m, out, confirm);
+      if (m?.label === LABEL_ENROL && place && readStatus(m.content) && onStatus(carrier, file, temp, m, out)) continue;
+      if (m?.label === LABEL_ENROL && keeper && !readStatus(m.content)) { if (once(m)) await onRequest(carrier, file, keeper, m, out, confirm); }
       else if (m?.label === LABEL_IDENTITY && place && await onIdentity(carrier, file, temp, m, out, place)) continue;
       else out.rest.messages.push(m);
     }
@@ -330,7 +374,39 @@ export async function complete({ carrier, file, wait = 0, until = () => false, k
     if (keeper) await settle(carrier, file, keeper, out);
     if (until(out) || Date.now() >= end) break;
   }
+  // The machine: the operator's last word when none came in this run (an earlier run kept it).
+  if (place && out.status.length === 0 && out.placed.length === 0) {
+    const kept = pendingOf(carrier)(file, nowOf(carrier), (s) => Object.values(s.joining).filter((j) => j.temp === temp && j.status).map((j) => j.status));
+    out.status.push(...kept);
+  }
   return out;
+}
+
+// The operator: tell the temporary DID `to` (a live contact) why its request is refused or held, once per
+// check (the header's "The machine is told why"). Best effort: a send that fails is tried at the next reason.
+async function tell(carrier, file, to, check, detail, out) {
+  const c = readStore(carrier).contacts[to];
+  if (!c || c.revoked || !c.pair_key) return;
+  const now = nowOf(carrier);
+  const fresh = pendingOf(carrier)(file, now, (s) => s.told?.[to]?.check !== check);
+  if (!fresh) return;
+  const words = toldFor(check, detail);
+  try {
+    await carrier.send(c.did, statusMessage(check, words), { label: LABEL_ENROL });
+    pendingOf(carrier)(file, nowOf(carrier), (s) => { (s.told ??= {})[to] = { check, detail: words, exp: now + PENDING_TTL }; });
+    out.told.push({ to, check, detail: words });
+  } catch (e) { if (!(e instanceof MsgError)) throw e; }
+}
+
+// The machine: the operator's status, from the contact it paired with through a code → true when taken.
+function onStatus(carrier, file, temp, m, out) {
+  const c = readStore(carrier).contacts[m.from], st = readStatus(m.content);
+  const now = nowOf(carrier);
+  const id = c && !c.revoked ? pendingOf(carrier)(file, now, (s) => Object.entries(s.joining).find(([, j]) => j.temp === temp && c.chain.includes(j.code_did))?.[0]) : undefined;
+  if (!id) return false;
+  pendingOf(carrier)(file, now, (s) => { if (s.joining[id]) s.joining[id].status = { ...st, at: now }; });
+  out.status.push({ ...st, at: now, from: m.from });
+  return true;
 }
 
 // The machine: a request for each enrolment of this temporary identity whose pairing is complete
@@ -373,17 +449,23 @@ async function onRequest(carrier, file, keeper, m, out, confirm) {
     e.temp = c.did;
     return { id, e };
   });
-  if (r.check) { out.refused.push({ ...r, from: m.from }); return; }
+  if (r.check) { out.refused.push({ ...r, from: m.from }); await tell(carrier, file, m.from, r.check, r.detail, out); return; }
   const { id, e } = r;
   // The words gate (devices.md §5.1): the human compares the pairing's four words on this side
   // before the key goes. Declined: the enrolment is dropped, nothing is ever sent for it.
   // An enrolment made with the switch on is never sent unasked: without a confirm() here, it waits.
   const said = e.confirmed ? true : confirm ? await confirm({ id, name: e.name, i: e.i, did: e.did, temp: c.did, words: fingerprint(pair), ask: e.confirm_words === true }) : e.confirm_words ? null : true;
   // Not yet (the page waits for the human's tap): the request is kept, nothing goes.
-  if (said === null || said === undefined) { out.held.push(m); return; }
+  if (said === null || said === undefined) {
+    const kept = { from: m.from, name: m.name ?? null, label: LABEL_ENROL, content: m.content };
+    pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].held = kept; });
+    out.held.push(m); await tell(carrier, file, c.did, 'enrol_words', '', out); return;
+  }
+  pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) delete s.issued[id].held; });
   if (!said) {
     pendingOf(carrier)(file, nowOf(carrier), (s) => { delete s.issued[id]; });
     out.refused.push({ check: 'device_words', detail: `the four words of ${who} were not confirmed: worker ${e.i} not sent, the code is dropped; make a new one`, from: m.from });
+    await tell(carrier, file, c.did, 'device_words', '', out);
     return;
   }
   if (confirm || e.confirm_words) pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].confirmed = true; });
@@ -410,6 +492,7 @@ async function sendIdentity(carrier, file, keeper, id, e, c, out) {
     if (!(x instanceof MsgError)) throw x;
     if (x.check !== 'keeper') pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].needs_send = nowOf(carrier); });
     out.refused.push({ check: x.check, detail: `worker ${e.i} did not go to ${who} (${x.message}): it goes again at the next round, or when the machine asks again (sigelo-agent enrol --finish there)`, from: c.did, needs_send: id });
+    if (x.check !== 'keeper') await tell(carrier, file, c.did, x.check, x.message, out);
   }
 }
 

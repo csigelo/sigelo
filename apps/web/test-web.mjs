@@ -489,7 +489,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   const W_ = { workers: [{ worker: 0, name: 'phone', did: 'did:sigelo:zPhone000000000000000000000000000000000000000000', original: 'did:sigelo:zPhone000000000000000000000000000000000000000000', rank: 'full', placed: 'device', at: 1761400000, status: 'enrolled', revoked: null, seen: null, tier: null, contact: null, local: 'phone', attested_until: null, enrolling: null }] };
   const calls = [], now = () => Math.floor(Date.now() / 1000);
   const G_ = { mine: [], contacts: [] };
-  const snap = () => ({ seq: sandbox.seq ?? 1, now: now(), me: { did: 'did:sigelo:zMe', relay: 'relay.sigelo.ai', online: sandbox.offline !== true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: sandbox.meError ?? null, pow: null, pow_done_ms: null, seat: { holder: 'phone', epoch: 1, here: true }, pow_capped: sandbox.capped ?? null, pow_confirm: null,
+  const snap = () => ({ seq: sandbox.seq ?? 1, now: now(), enrol_words: sandbox.enrolWords ?? [], me: { did: 'did:sigelo:zMe', relay: 'relay.sigelo.ai', online: sandbox.offline !== true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: sandbox.meError ?? null, pow: null, pow_done_ms: null, seat: { holder: 'phone', epoch: 1, here: true }, pow_capped: sandbox.capped ?? null, pow_confirm: null,
       wallet: { on: SET.wallet === true, prices: SET.prices === true, currency: SET.currency ?? null } },
     groups: { mine: G_.mine, contacts: G_.contacts }, chats: { ...GR.chats }, ...(sandbox.transfers && { transfers: sandbox.transfers }), pending: { invites: [], paired: [], answers: [], failed: [], public: null, ...sandbox.pending }, introductions: sandbox.intro ?? [], events: [] });
   // Groups (GROUPS.md) as GET /api/groups and /api/groups/history answer; rev bumped at each change.
@@ -543,6 +543,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     'POST /api/groups/dismiss': (b) => { GR.notices = GR.notices.filter((n) => n.id !== b.id); bump(); return { dismissed: 1 }; },
     'POST /api/agents/enrol-words': (b) => { sandbox.wordsAnswer = b; return { id: b.id, state: 'sending' }; },
     'POST /api/pow/try': (b) => { sandbox.tried = b; return { tried: ['relay.sigelo.ai'] }; },
+    'POST /api/agents/cancel': (b) => { const i = W_.workers.findIndex((x) => x.enrolling?.id === b.id); const w = W_.workers[i]; if (i >= 0) W_.workers.splice(i, 1); return { id: b.id, worker: w?.worker ?? null, cancelled: true, revoked: null, forgot: null }; },
     'POST /api/agents/revoke': (b) => { const w = W_.workers.find((x) => x.worker === b.worker); w.status = 'revoked'; w.revoked = now(); return { worker: b.worker, name: w.name, cancelled: false, revoked: w.revoked, forgot: w.contact }; },
   };
   const docLis = new Map();   // the document's listeners (the "+" row's tap elsewhere)
@@ -555,7 +556,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     fetch: async (url) => { sandbox.fetched = [...(sandbox.fetched ?? []), String(url)]; return String(url) === 'https://app.invalid/package.json' ? { ok: true, json: async () => JSON.parse(readFileSync(join(HERE, 'vendor', 'package.json'), 'utf8')) } : { ok: false, json: async () => null }; }, history: { replaceState() {} }, sessionStorage: { getItem: () => null, setItem() {} },
     window: { innerHeight: 800, innerWidth: 400, scrollY: 0, scrollTo(_x, y) { this.scrollY = y; (sandbox.scrolls ??= []).push(y); } }, navigator: { clipboard: { writeText: async (t) => { sandbox.copied = t; } } },
     setInterval: (f, ms) => { intervals.push([f, ms]); return intervals.length; }, clearInterval() {}, setTimeout: (f, ms) => setTimeout(f, Math.min(ms ?? 0, 10)), clearTimeout,
-    console, Date, Promise, Object, Array, String, Number, JSON, Math, Map, Set, Error, encodeURIComponent, URL,
+    console, Date, Promise, Object, Array, String, Number, JSON, Math, Map, Set, Error, encodeURIComponent, URL, Blob, atob, btoa,
     sigeloUiTest: (t) => { sandbox.ui = t; },
     localStorage: { m: new Map(), getItem(k) { return this.m.get(k) ?? null; }, setItem(k, v) { this.m.set(k, String(v)); }, removeItem(k) { this.m.delete(k); } },
     sigeloLocal: {
@@ -565,6 +566,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       async reload() { sandbox.reloads = (sandbox.reloads ?? 0) + 1; },
       async bars(c) { sandbox.bars = [...(sandbox.bars ?? []), c]; },
       async powEngine() { return sandbox.powEngine === undefined ? 'wasm' : sandbox.powEngine; },
+      async openSettings() { sandbox.settingsOpened = (sandbox.settingsOpened ?? 0) + 1; },
     },
     // The page's background as the browser computes it (ui.css --bg): the Android app's system bars take it (sigeloLocal.bars).
     getComputedStyle: (el) => ({ backgroundColor: el === body ? sandbox.bg ?? 'rgb(253, 253, 251)' : 'rgba(0, 0, 0, 0)' }),
@@ -632,6 +634,8 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   await btn('They match').click(); await settle();
   ok(JSON.stringify(sandbox.wordsAnswer) === JSON.stringify({ id: 'n1', match: true }), `enrol: They match → POST /api/agents/enrol-words {id, match: true} (${JSON.stringify(sandbox.wordsAnswer)})`);
   // Enrolling for ever (0.1.16): what it waits for, and offline, that the agent cannot reach this profile.
+  // "Not connected" waits out the grace window after a start or a return to the front (0.1.17: it flashed on every resume).
+  sandbox.ui.graceOver();
   Object.assign(W_.workers[1].enrolling, { words_ok: true, state: 'sending' }); sandbox.offline = true; await poll();
   ok(h1() === 'Enrolling vps' && has('Not connected: the agent cannot reach you.') && !root.all().some((e) => e.className === 'meter busy'), 'enrol: offline, it says the agent cannot reach you (no busy meter)');
   sandbox.offline = false; await poll();
@@ -654,6 +658,27 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   ok(has('Not connected') && has(sandbox.meError) && !has('Your messages wait here') && btn('Retry'), 'Not connected: the card says why (me.error), Retry');
   sandbox.meError = null; await poll();
   ok(has('Not connected') && has('Your messages wait here and go when you\'re back online.'), 'Not connected, no error known: what happens meanwhile');
+  // Back to the front (visibilitychange): a failure to connect inside the grace window is not said, a quiet sync goes at
+  // once; a refusal by the relay is said at once; past the window, the card as before.
+  const syncs0 = calls.filter(([, p]) => p === '/api/sync').length;
+  sandbox.meError = 'connect: cannot reach the relay relay.sigelo.ai: Unable to resolve host "relay.sigelo.ai"';
+  for (const f of docLis.get('visibilitychange') ?? []) f({});
+  await settle(); await poll();
+  const inGrace = !has('Not connected') && sandbox.ui.graceLeft() > 0 && calls.filter(([, p]) => p === '/api/sync').length === syncs0 + 1;
+  sandbox.meError = 'closed: this relay admits only its operator\'s agents'; await poll();
+  const refusal = has('Not connected') && has('closed: this relay admits only its operator\'s agents');
+  sandbox.meError = 'connect: cannot reach the relay relay.sigelo.ai: Unable to resolve host "relay.sigelo.ai"'; await poll();
+  const hidden2 = !has('Not connected');
+  sandbox.ui.graceOver(); await poll();
+  ok(inGrace && refusal && hidden2 && has('Not connected') && has('Unable to resolve host'), `resume: a DNS failure inside the grace window unsaid (a quiet sync at once), a refusal said at once, past the window said with its reason (${[inGrace, refusal, hidden2]})`);
+  sandbox.meError = null;
+  // An agent's four words waiting: a card on every tab's root, its Compare opens the words screen (0.1.17).
+  sandbox.enrolWords = [{ id: 'n1', name: 'vps' }]; sandbox.seq = (sandbox.seq ?? 1) + 1;
+  await tabBtn('chats').click(); await settle(); await poll();
+  const wcard = root.all().find((e) => e.attrs?.['data-enrol-words'] === 'n1');
+  ok(wcard?.textContent.includes('vps is waiting for you') && wcard.textContent.includes('Compare the four words'), `Chats: an enrolment's words waiting, said on this tab too (${wcard?.textContent})`);
+  sandbox.enrolWords = []; sandbox.seq += 1; await poll();
+  await tabBtn('agents').click(); await settle(); await poll();
   sandbox.offline = false; await poll();
   // An enrolment whose key's send failed (needs_send: the page sends it again), or one from before a restart (the machine asks again).
   W_.workers.push({ worker: 9, name: 'stuck', did: 'did:sigelo:zStuck', original: 'did:sigelo:zStuck', words: null, rank: null, placed: 'remote', at: now(), status: 'pending', revoked: null, seen: null, tier: null, contact: null, local: null, attested_until: null,
@@ -661,8 +686,44 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   await poll();
   const stuck1 = has('Waiting for the machine to ask again…');
   W_.workers.at(-1).enrolling = { id: 'old', state: 'sending', needs_send: true }; await poll();
+  // An open <details> stays open across a state tick (0.1.17: the Revoked section folded itself), and a text field
+  // being typed in is not redrawn under the fingers: no redraw till it lets go of the focus (0.1.17: the keyboard closed).
+  {
+    const det = () => root.all().find((e) => e.tagName === 'DETAILS' && e.attrs['data-revoked'] === '');
+    W_.workers.push({ worker: 8, name: 'old', did: 'did:sigelo:zOld', original: 'did:sigelo:zOld', words: null, rank: null, placed: 'remote', at: now(), status: 'revoked', revoked: now(), seen: null, tier: null, contact: null, local: null, attested_until: null, enrolling: null });
+    sandbox.seq = (sandbox.seq ?? 1) + 1; await poll();
+    const d0 = det();
+    if (d0) { d0.open = true; for (const f of d0.on.toggle ?? []) f({}); }
+    sandbox.seq += 1; await poll(); await poll();
+    ok(d0 && det() && det() !== d0 && det().open === true, 'an open Revoked section stays open across a state tick (redrawn, its open state kept)');
+    W_.workers.pop(); sandbox.seq += 1; await poll();
+    // A field of the screen being typed in: a tick leaves the screen as it is; it is drawn once the field lets go.
+    const scr = () => rows()[0]?.parent;
+    const fld = new El('input'); fld.attrs.type = 'text'; fld.type = 'text'; fld.value = 'half';
+    scr()?.append(fld); fld.focus();
+    // A first tick replaces the field (this screen redraws its fields): from then on, a tick waits while one is typed in.
+    sandbox.seq += 1; await poll();
+    const replaced = !root.contains(fld);
+    scr()?.append(fld); fld.focus();
+    const before = rows().map((e) => e.textContent).join('|');
+    W_.workers[1].name = 'vps2'; sandbox.seq += 1; await poll();
+    const held = rows().map((e) => e.textContent).join('|') === before && focus.el === fld && fld.value === 'half';
+    focus.el = body; for (const f of docLis.get('focusout') ?? []) f({}); await settle(); await settle();
+    ok(replaced && held && rows().some((e) => e.textContent.includes('vps2')), `a field being typed in: once a redraw replaced one, a state tick does not redraw under it (focus and text kept), the screen drawn once it lets go (${[replaced, held]})`);
+    W_.workers[1].name = 'vps'; sandbox.seq += 1; await poll();
+  }
   ok(stuck1 && has('Sending the key…') && !has('Not finished'), 'Agents: an enrolment waiting says for what: Waiting for the machine to ask again…, Sending the key… (not "Not finished")');
-  W_.workers.pop(); await poll();
+  // Its own screen: why the machine's request waits (the status it is told), and Cancel enrolling in that state too.
+  W_.workers.at(-1).enrolling = { id: 'old', state: 'waiting', needs_send: false, check: 'enrol_proof', detail: 'the request matches no enrolment code the operator issued' };
+  await sandbox.ui.go('enrol', { id: 'old' }); await settle(); await poll();
+  const why = root.all().find((e) => e.attrs?.['data-enrol-check'] === 'enrol_proof');
+  ok(h1() === 'Enrolling stuck' && why?.textContent.includes('matches no enrolment code') && btn('Cancel enrolling'), `Enrolling: the check and its words shown, Cancel enrolling there (${why?.textContent})`);
+  void btn('Cancel enrolling').click(); await settle();
+  ok(sheet() && sh1() === 'Cancel enrolling stuck?' && btn('Keep waiting'), 'Cancel enrolling: a sheet naming it, Keep waiting');
+  await root.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === 'Cancel enrolling').at(-1).click(); await settle(); await poll();
+  ok(calls.some(([m, p, b]) => p === '/api/agents/cancel' && b.id === 'old') && h1() === 'Agents' && !rows().some((e) => e.textContent.includes('stuck')), 'Cancel enrolling (confirmed) → POST /api/agents/cancel {id}; back on Agents, gone');
+  if (W_.workers.at(-1)?.name === 'stuck') W_.workers.pop();
+  await poll();
   await rows()[1].click(); await settle(); await poll();
   ok(h1() === 'vps' && has('Enrolled') && has('Vouched for until') && has('Rename') && btn('Revoke vps') && btn('Message') === undefined, 'an agent\'s page: Enrolled, Vouched for until, Rename, Revoke vps (no Message before its contact comes)');
   void btn('Revoke vps').click(); await settle();
@@ -725,6 +786,39 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const outs = root.all().filter((e) => e.className === 'msg out');
     ok(outs.length === 3 && outs[0].textContent.endsWith('✓✓') && outs[0].all().some((e) => e.attrs['aria-label'] === 'Seen') && outs[1].textContent.endsWith(' ✓') && outs[1].all().some((e) => e.attrs['aria-label'] === 'Delivered to the relay')
       && outs[2].textContent.endsWith('waiting to send') && has('Today'), `a chat: a day line; ✓✓ seen, ✓ at the relay, waiting said in words (${outs.map((e) => e.textContent).join(' | ')})`);
+    // A link in a message (0.1.17: "the link still doesn't work": it was plain text): an anchor to a new window (the shells
+    // send it to the system's browser), the trailing full stop left out; its tap does not open "who signed it".
+    MSGS[bo.did].push(m(5, 'in', 'Menu: https://example.org/menu?day=fri. Or ftp://x.example, javascript:alert(1)', null));
+    sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
+    const anchors = root.all().filter((e) => e.tagName === 'A' && e.className === 'link');
+    const views0 = calls.length;
+    for (const f of anchors[0]?.on?.click ?? []) f({ stopPropagation() { sandbox.stopped = true; } });
+    ok(anchors.length === 1 && anchors[0].attrs.href === 'https://example.org/menu?day=fri' && anchors[0].attrs.target === '_blank' && anchors[0].attrs.rel === 'noopener noreferrer' && sandbox.stopped === true
+      && h1() !== 'Signed message' && calls.length === views0 && root.all().some((e) => e.className === 'text' && e.textContent === 'Menu: https://example.org/menu?day=fri. Or ftp://x.example, javascript:alert(1)'),
+      `a message's https:// link: tappable, to a new window, its tap kept from the bubble; ftp: and javascript: stay text (${anchors.map((a) => a.attrs.href)})`);
+    MSGS[bo.did].pop(); sandbox.seq += 1; await poll(); await poll();
+    // Reply to one message (0.1.17): a double click (a swipe on a phone) quotes it above the box, × drops it; Send carries
+    // re (its n); a reply shows its quote, which goes to the message answered.
+    const bub1 = root.all().find((e) => e.attrs['data-n'] === '1');
+    for (const f of bub1?.on?.dblclick ?? []) f({});
+    await settle();
+    const qbar = () => root.all().find((e) => e.className === 'quotebar');
+    const quoted = qbar()?.hidden === false && qbar().textContent.includes('bo') && qbar().textContent.includes('Dinner on Friday?');
+    await aria('Drop the reply', 'BUTTON')?.click(); await settle();
+    const dropped = qbar()?.hidden === true;
+    for (const f of bub1?.on?.dblclick ?? []) f({});
+    const ta = aria('Message', 'TEXTAREA'); ta.value = 'Friday works'; fire(ta, 'input');
+    const sendWas = routes['POST /api/send'];
+    routes['POST /api/send'] = (b) => ({ n: 98, at: now(), kind: 'out', did: b.to, id: 'x', text: b.text, status: 'sent' });
+    await aria('Send', 'BUTTON').click(); await settle();
+    const sent = calls.filter(([, p]) => p === '/api/send').at(-1)?.[2];
+    if (sendWas) routes['POST /api/send'] = sendWas; else delete routes['POST /api/send'];
+    ok(quoted && dropped && sent?.re === 1 && sent.text === 'Friday works' && qbar()?.hidden === true, `reply: the message quoted above the box, × drops it; Send carries re (${JSON.stringify([quoted, dropped, qbar()?.hidden, sent])})`);
+    MSGS[bo.did].push({ ...m(6, 'in', 'Great', null), label: 're/0123456789abcdef/r', re: { n: 2, dir: 'out', text: 'Yes! 8 o\'clock?' } });
+    sandbox.seq += 1; await poll(); await poll();
+    const qb = root.all().find((e) => e.attrs['data-n'] === '6')?.all().find((e) => e.tagName === 'BUTTON' && e.className === 'quote');
+    ok(qb?.textContent === 'YouYes! 8 o\'clock?' && !root.all().find((e) => e.attrs['data-n'] === '6').textContent.includes('re/0123'), `reply: shown with its quote (who, the first line), not its label (${qb?.textContent})`);
+    MSGS[bo.did].pop(); sandbox.seq += 1; await poll(); await poll();
     // The composer's one "+": a row of choices above the box (no sheet); Escape, a choice or a tap elsewhere closes it.
     const plus = aria('Attach', 'BUTTON'), tray = () => root.all().find((e) => e.className === 'tray');
     await plus.click(); await settle();
@@ -838,6 +932,19 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(text.value === 'go on @bo ', `group chat: a member tapped: @bo in the text (${JSON.stringify(text.value)})`);
     await aria('Send', 'BUTTON').click(); await settle();
     ok(calls.some(([m, p, b]) => p === '/api/groups/send' && b.group === g.gid && b.text === 'go on @bo ') && text.value === '', 'group chat: Send → POST /api/groups/send {group, text}; the box empties');
+    // Reply in a group: the message quoted, Send carries re (its mid); a reply shows the quote.
+    const gb = root.all().find((e) => e.attrs['data-mid'] === '2'.repeat(16));
+    for (const f of gb?.on?.dblclick ?? []) f({});
+    await settle();
+    const gq = root.all().find((e) => e.className === 'quotebar')?.textContent ?? '';
+    text.value = 'nice'; fire(text, 'input');
+    await aria('Send', 'BUTTON').click(); await settle(); await poll();
+    const gsent = calls.filter(([, p]) => p === '/api/groups/send').at(-1)?.[2];
+    GR.history[g.gid].push({ mid: '4'.repeat(16), re: '2'.repeat(16), from: bo.did, name: 'bo', role: 'human', tier: 'friend', mine: false, operator: false, note: null, text: 'agreed', mentions: [], mentioned: false, via: null, at: now() });
+    bump(); await poll(); await poll();
+    const gqb = root.all().find((e) => e.attrs['data-mid'] === '4'.repeat(16))?.all().find((e) => e.className === 'quote');
+    ok(gq.includes('ana') && gq.includes('build is green') && gsent?.re === '2'.repeat(16) && gqb?.textContent === 'anabuild is green', `group reply: quoted, re: the mid; shown with its quote (${JSON.stringify(gsent)} ${gqb?.textContent})`);
+    GR.history[g.gid].pop();
     await root.all().find((e) => e.className === 'who').click(); await settle(); await poll();
     const member = (d) => root.all().find((e) => e.attrs['data-member'] === d);
     ok(h1() === 'crew' && has('People') && has('Agents') && member(ME)?.textContent.includes('You') && member(ana.did)?.tagName === 'BUTTON' && btn('Add people') && has('Pause agents after 20 in a row') && btn('Leave group') && has('3 of 8'),
@@ -1484,6 +1591,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(has('No camera app on this phone: choose a photo instead.') && calls.filter(([, p]) => p === '/api/transfers/pick').length === picks0 + 1 && calls.filter(([, p]) => p === '/api/transfers/pick').at(-1)[2]?.images === true
       && sandbox.sent?.doc === 'ce'.repeat(16) && sandbox.sent.to === bo.did,
       `no camera app (no_camera): said in one line, the photo picker (images) opened instead, the photo to this chat (${JSON.stringify(sandbox.sent)})`);
+    // The camera refused once: the next tap asks again (a line says so); refused for good: the tap opens the settings page.
+    routes['POST /api/transfers/photo'] = () => ({ __error: { check: 'camera_permission', message: 'the camera is not allowed for sigelo: tap Camera again to allow it' } });
+    await choose('Camera');
+    const once = has('The camera was not allowed. Tap Camera again to allow it.') && !sandbox.settingsOpened;
+    routes['POST /api/transfers/photo'] = () => ({ __error: { check: 'camera_blocked', message: 'the camera is off for sigelo: switch on Camera in its Permissions' } });
+    await choose('Camera');
+    ok(once && sandbox.settingsOpened === 1 && has('Switch on Camera in Permissions, then come back.'), 'camera refused: tap again to ask; refused for good: the tap opens sigelo\'s settings page, one line naming the switch');
     routes['POST /api/transfers/photo'] = photoWas;
     // Photo: the picker for pictures, sent as a photo; File: any file.
     await choose('Photo');
@@ -1495,9 +1609,33 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     TL.in.push({ id: '12'.repeat(16), from: bo.did, contact: 'bo', name: 'IMG_2.jpg', size: 3200000, sha256: SHA, state: 'done', saved: 'content://media/external/downloads/1', got: 3200000 });
     sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
     const bubble = root.all().find((e) => e.attrs['data-photo'] === SHA);
-    ok(bubble?.textContent.includes('Full size · 3.2 MB · tap to open') && bubble.all().some((e) => e.tagName === 'IMG' && e.attrs.src?.startsWith('data:image/jpeg;base64,')), `a photo: the preview, "Full size · 3.2 MB" and its state (${bubble?.textContent})`);
+    // A blob: URL (0.1.17: the phone showed no preview: the app's CSP allows img-src 'self' blob:, never data:).
+    const pimg = bubble?.all().find((e) => e.tagName === 'IMG');
+    const csp = /img-src ([^;]*)/.exec(readFileSync(join(HERE, 'index.html'), 'utf8'))?.[1] ?? '';
+    ok(bubble?.textContent.includes('Full size · 3.2 MB · tap to open') && pimg?.attrs.src?.startsWith('blob:') && csp.split(' ').includes('blob:') && !csp.includes('data:'),
+      `a photo: the preview as a blob: URL the page's CSP allows (img-src ${csp}), "Full size · 3.2 MB" and its state (${bubble?.textContent} ${pimg?.attrs.src})`);
+    const blobBytes = pimg ? new Uint8Array(await (await fetch(pimg.attrs.src)).arrayBuffer()) : null;
+    ok(blobBytes && Buffer.from(blobBytes).toString('base64') === jpeg, 'the blob: URL holds the preview\'s JPEG bytes');
     await aria('Open the full photo', 'BUTTON').click(); await settle();
     ok(sandbox.opened?.id === '12'.repeat(16), 'a tap on a photo that landed → POST /api/transfers/open');
+    // One whose full size has not come: a tap shows the preview large, and says what it waits for.
+    const SHA2 = '9f'.repeat(32);
+    MSGS[bo.did] = [...MSGS[bo.did], { n: 10, dir: 'in', at: now(), iat: now(), text: 'Photo', label: 'sigelo-photo/0', status: null, code: null, detail: null, link: null, photo: { type: 'image/jpeg', data: jpeg, w: 640, h: 480, sha256: SHA2, size: 2100000, name: 'IMG_3.jpg' } }];
+    sandbox.seq += 1; await poll(); await poll();
+    const larger = root.all().find((e) => e.attrs['data-photo'] === SHA2)?.all().find((e) => e.tagName === 'BUTTON' && e.attrs['aria-label'] === 'Show the photo larger');
+    await larger?.click(); await settle();
+    ok(larger && sheet() && sh1() === 'IMG_3.jpg' && has('Full size · 2.1 MB · coming') && root.all().some((e) => e.className === 'pad stack photo-view'), 'a photo still coming: a tap shows the preview large in a sheet, and that the full size is coming');
+    await aria('Close', 'BUTTON')?.click(); await settle();
+    // Drafts kept (0.1.17): the unsent text stays per chat across screens, on this device (localStorage, restarts too); sent, it goes.
+    let box = aria('Message', 'TEXTAREA');
+    box.value = 'half a thought'; fire(box, 'input'); await settle();
+    await sandbox.ui.go('chats'); await settle(); await poll();
+    await sandbox.ui.go('chat', bo.did); await settle(); await poll();
+    box = aria('Message', 'TEXTAREA');
+    const draftKeys = () => [...sandbox.localStorage.m.keys()].filter((k) => k.startsWith('sigelo-ui:draft:') && k.includes(':c:'));
+    const kept = box.value === 'half a thought' && draftKeys().length === 1 && draftKeys()[0].endsWith(`:c:${bo.did}`);
+    await aria('Send', 'BUTTON').click(); await settle();
+    ok(kept && box.value === '' && draftKeys().length === 0, `a chat's unsent text is kept across screens (per profile and chat), and gone once sent (${JSON.stringify(draftKeys())})`);
     await sandbox.ui.go('settings'); await settle(); await poll();
     const kl = aria('Keep location in photos', 'INPUT');
     ok(kl && kl.checked === false, 'Settings: Keep location in photos, off by default');
@@ -1514,6 +1652,120 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await poll(); const ta2 = aria('Their files without asking', 'SELECT');
     ta2.value = ''; fire(ta2, 'change'); await settle();
     ok(sandbox.auto?.mb === null && !(bo.did in TL.auto), 'Default → POST /api/transfers/auto {contact, mb: null}');
+    // Voice messages (design/transfer.md "Voice"): "Voice" in the "+" once this page can record (getUserMedia and
+    // MediaRecorder); the recorder (voice-web.mjs) over a fake MediaRecorder; the recording in pieces, then sent.
+    {
+      const VW = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'voice-web.mjs')).href);
+      const VSHA = 'cd'.repeat(32), HSHA = 'ce'.repeat(32), REC = { tracks: 0, audios: [], bytes: Uint8Array.from({ length: 200_000 }, (_, i) => i % 256) };
+      REC.bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
+      class Rec {
+        static isTypeSupported(t) { return t === 'audio/webm;codecs=opus'; }
+        constructor(_s, o) { this.mimeType = o.mimeType; this.state = 'inactive'; REC.made = o; }
+        start() { this.state = 'recording'; }
+        stop() { this.state = 'inactive'; setTimeout(() => { this.ondataavailable?.({ data: new Blob([REC.bytes]) }); this.onstop?.(); }, 5); }
+      }
+      class FakeAudio {
+        constructor(src) { Object.assign(this, { src, paused: true, currentTime: 0, duration: 42, lis: {} }); REC.audios.push(this); }
+        addEventListener(t, f) { (this.lis[t] ??= []).push(f); }
+        fire(t) { for (const f of this.lis[t] ?? []) f(); }
+        async play() { this.paused = false; }
+        pause() { this.paused = true; this.fire('pause'); }
+      }
+      // Before: no microphone API here, no Voice (the row as above).
+      Object.assign(TS, { voice: true, mic: true });
+      await sandbox.ui.go('settings'); await settle(); await poll();
+      const kl2 = aria('Keep location in photos', 'INPUT'); kl2.checked = false; fire(kl2, 'change'); await settle();
+      await sandbox.ui.go('chat', bo.did); await settle(); await poll();
+      const row = () => trayEl()?.all().filter((e) => e.className === 'pick').map((e) => e.textContent).join();
+      ok(row() === 'Photo,Camera,File,Signed message', `no microphone API in this page: no Voice (${row()})`);
+      sandbox.navigator.mediaDevices = { getUserMedia: async (c) => { REC.asked = c; if (REC.deny) throw Object.assign(new Error('denied'), { name: 'NotAllowedError' }); return { getTracks: () => [{ stop() { REC.tracks++; } }] }; } };
+      Object.assign(sandbox, { MediaRecorder: Rec, Blob, atob, btoa, Audio: FakeAudio, crypto: globalThis.crypto, sigeloVoice: VW });
+      const parts = [];
+      Object.assign(routes, {
+        'POST /api/transfers/mic': () => (REC.micBlocked ? { __error: { check: 'mic_blocked', message: 'Android no longer asks' } } : REC.micNo ? { __error: { check: 'mic_permission', message: 'the microphone is off for sigelo' } } : { granted: true }),
+        'POST /api/transfers/voice-part': (b) => { parts.push(b); return { rec: b.rec, size: b.offset + Buffer.from(b.data, 'base64').length }; },
+        'POST /api/transfers/send': (b) => { sandbox.sent = b; return { id: 'ef'.repeat(16), state: 'offered', ...(b.voice && { sha256: VSHA, name: b.voice.name, size: 200_000 }) }; },
+        'POST /api/transfers/mic-settings': () => { REC.settings = (REC.settings ?? 0) + 1; return { opened: true }; },
+        'GET /api/transfers/audio': (_b, path) => ({ id: /id=([0-9a-f]+)/.exec(path)[1], type: 'audio/webm', data: Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 9]).toString('base64') }),
+      });
+      sandbox.seq = (sandbox.seq ?? 1) + 1; await poll();
+      ok(row() === 'Photo,Camera,File,Voice,Signed message', `a page that records: the "+" row Photo, Camera, File, Voice, Signed message (${row()})`);
+      const sends0 = calls.filter(([, p]) => p === '/api/transfers/send').length;
+      await choose('Voice');
+      const recSheet = sheet();
+      ok(calls.some(([, p]) => p === '/api/transfers/mic') && REC.asked?.audio === true && REC.made?.mimeType === 'audio/webm;codecs=opus' && recSheet && has('Recording') && has('/ 5:00') && has('sigelo asks for the microphone to record a voice message.') === false,
+        'Voice: the microphone asked of the shell at this first tap, then getUserMedia({audio}) and MediaRecorder (webm/opus) at once; the sheet shows the time out of 5:00');
+      await sleep(450);
+      await btn('Send').click(); await settle(); await settle(); await poll();
+      const whole = Buffer.concat(parts.map((p) => Buffer.from(p.data, 'base64')));
+      ok(parts.length === 2 && parts[0].offset === 0 && parts[1].offset === 128 * 1024 && parts.every((p) => p.rec === parts[0].rec && /^[0-9a-f]{32}$/.test(p.rec)) && Buffer.compare(whole, Buffer.from(REC.bytes)) === 0,
+        `Send: the recording to the shell in pieces of 128 KiB (POST /api/transfers/voice-part) (${parts.map((p) => p.offset)})`);
+      const sv = sandbox.sent;
+      ok(sv?.to === bo.did && sv.rec === parts[0].rec && /^voice-\d{8}-\d{6}\.webm$/.test(sv.voice?.name) && sv.voice.type === 'audio/webm' && sv.voice.duration_s === 1 && sv.voice.waveform === undefined && !('data' in sv.voice),
+        `then POST /api/transfers/send {to, rec, voice: {name, type, duration_s}} (no Web Audio here: no waveform) (${JSON.stringify(sv)})`);
+      ok(REC.tracks === 1 && !sheet(), `the microphone let go, the sheet closed (${REC.tracks} ${Boolean(sheet())})`);
+      // The shell refuses the microphone: said, nothing recorded.
+      REC.micNo = true; const asked0 = REC.asked; REC.asked = null;
+      await choose('Voice');
+      ok(sheet() && has('The microphone is off for sigelo. Tap Voice again to allow it.') && btn('Close') && !btn('Open settings') && REC.asked === null && !has('Recording') && !REC.settings,
+        'RECORD_AUDIO refused (mic_permission): one line in the Voice sheet, tap Voice again; nothing recorded, no settings page yet');
+      await btn('Close').click(); await settle();
+      // A refusal is never final: the next tap asks again, and a yes records.
+      REC.micNo = false;
+      const mics0 = calls.filter(([, p]) => p === '/api/transfers/mic').length;
+      await choose('Voice');
+      ok(calls.filter(([, p]) => p === '/api/transfers/mic').length === mics0 + 1 && REC.asked?.audio === true && has('Recording'), 'Voice again after a refusal: asked again; allowed, it records');
+      await btn('Cancel').click(); await settle(); await settle();
+      // Android asks no more (refused twice, "don't ask again"): the same tap opens the app's settings page, one line what to switch on.
+      REC.micBlocked = true; REC.asked = null;
+      await choose('Voice'); await settle();
+      ok(REC.settings === 1 && sheet() && has('Permissions → Microphone → Allow') && btn('Open settings') && REC.asked === null, 'mic_blocked: the tap opens the app\'s settings page at once (POST /api/transfers/mic-settings), one line naming what to switch on');
+      await btn('Open settings').click(); await settle();
+      ok(REC.settings === 2, 'and Open settings there again');
+      await btn('Close').click(); await settle();
+      REC.micBlocked = false; REC.asked = asked0;
+      // The page's own ask refused (a browser tab, or the WebView's): the same line, Close.
+      REC.deny = true;
+      await choose('Voice'); await settle();
+      ok(sheet() && has('The microphone is off for sigelo. Tap Voice again to allow it.') && btn('Close'), 'getUserMedia refused (NotAllowedError): the same line in the sheet');
+      await btn('Close').click(); await settle();
+      REC.deny = false;
+      // Cancel: nothing sent, the microphone let go.
+      await choose('Voice'); await sleep(250);
+      await btn('Cancel').click(); await settle(); await settle();
+      ok(calls.filter(([, p]) => p === '/api/transfers/send').length === sends0 + 1 && REC.tracks === 3 && !sheet(), `Cancel: nothing sent, the microphone let go (${REC.tracks})`);
+      // The bubbles: mine plays what was recorded here; theirs "receiving…" until it lands, then plays the file.
+      const wave = Buffer.from([10, 200, 90]).toString('base64');
+      MSGS[bo.did] = [...(MSGS[bo.did] ?? []),
+        { n: 20, dir: 'out', at: now(), iat: now(), text: 'Voice message', label: 'sigelo-voice/0', status: 'sent', code: null, detail: null, link: null, voice: { name: sv.voice.name, size: 200_000, type: 'audio/webm', sha256: VSHA, duration_s: 1 } },
+        { n: 21, dir: 'in', at: now(), iat: now(), text: 'Voice message', label: 'sigelo-voice/0', status: null, code: null, detail: null, link: null, voice: { name: 'voice-20261117-150000.webm', size: 5, type: 'audio/webm', sha256: HSHA, duration_s: 42, waveform: wave } }];
+      TL.in.push({ id: '34'.repeat(16), from: bo.did, contact: 'bo', name: 'voice-20261117-150000.webm', size: 5, sha256: HSHA, state: 'active', live: true, got: 2 });
+      sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
+      const vb = () => root.all().find((e) => e.attrs['data-voice'] === HSHA), playOf = (el) => el?.all().find((e) => e.tagName === 'BUTTON' && e.className.includes('vplay'));
+      ok(vb()?.textContent.includes('0:42 · receiving… 40 %') && !playOf(vb()) && vb().all().filter((e) => e.parentNode?.className === 'vwave').length === 3,
+        `theirs, coming: its length, "receiving…" and how far, the waveform; no play yet (${vb()?.textContent})`);
+      const mineB = root.all().find((e) => e.attrs['data-voice'] === VSHA);
+      ok(playOf(mineB) && mineB.textContent.includes('0:01'), `mine: plays what was recorded here (${mineB?.textContent})`);
+      TL.in.at(-1).state = 'done'; TL.in.at(-1).saved = 'content://media/external/downloads/7'; TL.in.at(-1).live = undefined; TL.in.at(-1).got = 5;
+      sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
+      const pb = playOf(vb());
+      ok(pb?.attrs['aria-label'] === 'Play voice message' && vb().textContent.includes('0:42 · voice message'), `landed: Play (${vb()?.textContent})`);
+      await pb.click(); await settle();
+      const a1 = REC.audios.at(-1);
+      ok(calls.some(([m, p]) => m === 'GET' && p === `/api/transfers/audio?id=${'34'.repeat(16)}`) && a1?.src.startsWith('blob:') && a1.paused === false && playOf(vb()).attrs['aria-label'] === 'Pause',
+        'Play → GET /api/transfers/audio?id=…, an <audio> from a blob: URL, playing; the button says Pause');
+      a1.currentTime = 21; a1.fire('timeupdate');
+      const prog = vb().all().find((e) => e.className === 'meter vprog')?.kids[0];
+      ok(prog?.style.width === '50%', `the progress bar follows the playback (${prog?.style.width})`);
+      await playOf(vb()).click(); await settle();
+      ok(a1.paused === true && playOf(vb()).attrs['aria-label'] === 'Play voice message', 'Pause: paused, the button says Play again');
+      const gets = calls.filter(([m, p]) => m === 'GET' && p.startsWith('/api/transfers/audio')).length;
+      await playOf(root.all().find((e) => e.attrs['data-voice'] === VSHA)).click(); await settle();
+      ok(REC.audios.at(-1).paused === false && REC.audios.at(-1) !== a1 && a1.paused && calls.filter(([m, p]) => m === 'GET' && p.startsWith('/api/transfers/audio')).length === gets,
+        'mine: plays from the bytes recorded here (no fetch), the other one stopped');
+      for (const k of ['MediaRecorder', 'Audio', 'sigeloVoice']) delete sandbox[k];
+      delete sandbox.navigator.mediaDevices;
+    }
     sandbox.transfers = undefined; sandbox.seq = (sandbox.seq ?? 1) + 1;
     await sandbox.ui.go('chats'); await settle(); await poll();
   }
@@ -1650,6 +1902,34 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await A6.K.btn('Send 0.20 XMR').click(); await settle();
     ok(LK.unlocks.length === u0 + 2 && SENDS.length === 2 && SENDS[1].id === 'r200000000000', 'Send above the limit, the lock confirmed → sent');
 
+    // Settings → Stay connected (sigeloLocal.stay, the Android shell's switch for the phone): on by default with its help line; off
+    // stops it; turned on, what is missing asked one at a time after one line why; a refusal leaves a row whose tap asks again.
+    {
+      const ST = { st: { on: true, exempt: false, asked: false, notify: false, notifyAsked: false, notifyBlocked: false }, calls: [] };
+      const say = (k, v) => { ST.calls.push(`${k}:${v}`); return { ...ST.st }; };
+      const S6 = mk({ stay: { get: async () => ({ ...ST.st }), set: async ({ on }) => { ST.st.on = on; return say('on', on); }, battery: async (y) => say('battery', y), notifications: async (y) => say('notifications', y) } });
+      await settle(); await S6.poll();
+      await S6.sb.ui.go('settings'); await settle(); await S6.poll();
+      const sw6 = S6.K.aria('Stay connected', 'INPUT');
+      ok(sw6?.checked === true && S6.K.has('Keeps the connection open while the app is minimised, so messages arrive and calls can ring. Shows a small notification.')
+        && S6.K.has('Notifications are off') && S6.K.has('Battery saving may pause it') && ST.calls.length === 0,
+        'Settings: Stay connected on by default, its help line; notifications off and battery saving each a row; nothing asked at the screen\'s start');
+      sw6.checked = false; fire(sw6, 'change'); await settle(); await S6.poll();
+      const offOk = ST.calls.join() === 'on:false' && !S6.K.sheet() && !S6.K.has('Battery saving may pause it');
+      const sw7 = S6.K.aria('Stay connected', 'INPUT');
+      sw7.checked = true; fire(sw7, 'change'); await settle();
+      const first = S6.K.sheet() && S6.K.sh1() === 'Allow notifications?';
+      await S6.K.sheet().all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Allow').click(); await settle(); await sleep(30);
+      const second = S6.K.sheet() && S6.K.sh1() === 'Let it run in the background?' && S6.K.has('Without this, Android may pause the connection to save battery.');
+      await S6.K.sheet().all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Not now').click(); await settle(); await sleep(30); await S6.poll();
+      ok(offOk && first && second && ST.calls.join() === 'on:false,on:true,notifications:true,battery:false',
+        `Stay connected: off → set({on:false}), its rows gone; on → notifications then the battery exemption, one at a time, each after its line why (${ST.calls})`);
+      ST.st.notifyBlocked = true; await S6.sb.ui.go('settings'); await settle(); await S6.poll();
+      const rowTap = S6.K.has('Tap, then switch on Notifications.'), n7 = ST.calls.length;
+      await S6.r.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Notifications are off')).click(); await settle();
+      ok(rowTap && ST.calls.length === n7 + 1 && ST.calls.at(-1) === 'notifications:true', `a refusal never final: Android no longer asking, the row names what to switch on and its tap opens the system's page (${ST.calls.at(-1)})`);
+    }
+
     // A browser tab or the GTK app: no screen lock; the words password stands in where one is kept (the page locks itself).
     const WPW = { pw: 'correct horse', checks: [] };
     const words = { status: async () => ({ here: true, kept: true, iterations: 1 }), check: async (p) => { WPW.checks.push(p); if (p !== WPW.pw) throw Object.assign(new Error('Wrong password.'), { check: 'words_password' }); return true; },
@@ -1691,8 +1971,21 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     bo.last = { dir: 'in', text: 'the secret plan', at: now() + 5 }; bo.unread = 3;
     await N6.poll();
     const n1 = NOTES.filter((x) => !x.ask && !x.cancel);
-    ok(base === 0 && n1.length === 1 && n1[0].tag === `chat:${bo.did}` && n1[0].title === bo.name && n1[0].text === 'New message' && !JSON.stringify(NOTES).includes('secret') && NOTES.some((x) => x.ask === true),
-      `a new message: one notification, the sender's name and "New message", never the text; what was there at the start raises none; the permission asked once (${JSON.stringify(n1)})`);
+    ok(base === 0 && n1.length === 1 && n1[0].tag === `chat:${bo.did}` && n1[0].title === bo.name && n1[0].text === 'New message' && !JSON.stringify(NOTES).includes('secret') && !NOTES.some((x) => x.ask === true),
+      `a new message: one notification, the sender's name and "New message", never the text; what was there at the start raises none; no permission asked by itself (${JSON.stringify(n1)})`);
+    // The permission at the moment of need, with why (0.1.17): a card once a chat has a message; Allow asks Android.
+    N6.sb.ui.home('chats'); await settle(); await N6.poll();
+    const card = N6.r.all().find((e) => e.attrs?.['data-notify-ask'] === 'first');
+    const allow = card?.all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Allow');
+    await allow?.click(); await settle();
+    ok(card?.textContent.includes('the sender\'s name only') && NOTES.filter((x) => x.ask === true).length === 1, 'notifications: asked only on the card\'s Allow, which says why; once');
+    {
+      const OS = [], N7 = mk({ notify: async (o) => (o.ask ? { granted: false, blocked: true } : {}), openSettings: async () => { OS.push(1); }, onOpen: () => {} });
+      await settle(); await N7.poll(); N7.sb.ui.home('chats'); await settle(); await N7.poll();
+      await N7.r.all().find((e) => e.attrs?.['data-notify-ask'] === 'first')?.all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Allow')?.click(); await settle(); await N7.poll();
+      const again = N7.r.all().find((e) => e.attrs?.['data-notify-ask'] === 'blocked');
+      ok(OS.length === 1 && again?.textContent.includes('Open settings'), 'notifications refused for good (Android asks no more): the tap opens sigelo\'s settings page; the card says what to switch on, never a dead control');
+    }
     cy.notify = false; cy.last = { dir: 'in', text: 'muted words', at: now() + 6 };
     const q = G_.mine[0], qWas = q.tier; q.tier = 'quiet'; q.last = { dir: 'in', text: 'quiet words', at: now() + 6 };
     await N6.poll();
@@ -2031,7 +2324,7 @@ try {
   await A.router.start(); await B.router.start();
   ok(A.router.carrier.transport === 'wss' && A.router.carrier.platform === A.platform, 'router: the carrier runs on the web platform, MQTT over WebSocket');
   const st0 = await call(A, 'GET', '/api/state?since=0');
-  ok(st0.status === 200 && Object.keys(st0.body).sort().join() === 'chats,events,groups,introductions,me,now,pending,seq,transfers' && st0.body.transfers === null && st0.body.me.did === ADA.did
+  ok(st0.status === 200 && Object.keys(st0.body).sort().join() === 'chats,enrol_words,events,groups,introductions,me,now,pending,seq,transfers' && st0.body.transfers === null && st0.body.me.did === ADA.did
     && Object.keys(st0.body.me).sort().join() === 'clock_checked,clock_offset,did,error,online,picture,pow,pow_capped,pow_confirm,pow_done_ms,relay,retention_days,seat,wallet' && st0.body.me.seat === null && st0.body.me.picture === null && st0.body.me.pow_capped === null
     && JSON.stringify(st0.body.me.wallet) === JSON.stringify({ on: false, prices: false, currency: null }),
   `GET /api/state: UI-API.md's keys, me.did (${JSON.stringify(st0.body).slice(0, 200)})`);
@@ -2044,6 +2337,23 @@ try {
   const nr = await call(A, 'GET', '/api/nothing'), nb = await call(A, 'POST', '/api/send', [1]), nc = await call(A, 'POST', '/api/send', { to: 'did:sigelo:zNo', text: 'x' });
   ok(nr.status === 404 && nr.body.error.check === 'route' && nb.status === 400 && nb.body.error.check === 'body' && nc.status === 404 && nc.body.error.check === 'not_contact', 'errors as over HTTP: 404 route, 400 body, 404 not_contact');
 
+  // Names (carrier.mjs "Names"; 0.1.17: a new contact was "contact-…"): an unnamed code, a Node agent named "Dee Node"
+  // accepts it unnamed: the app files it under the name it told, from them (editable); the agent files the app's
+  // made-up placeholder only while the app tells none.
+  {
+    const DN = agent('dn'), dn = new nodeLib.Carrier({ identity: () => ({ secret: DN.secret, bundle: { v: 'sigelo/0', typ: 'bundle', genesis: DN.store.genesis, rotations: [], bindings: [], attestations: [], issuers: [] } }),
+      ...nodeLib.pathsFor(join(dir, 'dn.local.json')), ...relayOpts, keep: true, selfName: 'Dee \u202eNode' });
+    const invN = await call(A, 'POST', '/api/invite', {});
+    await dn.accept(invN.body.short, { wait: 5 });
+    let rowN = null;
+    for (let i = 0; i < 20 && rowN?.name !== 'Dee Node'; i++) { await dn.inbox({ wait: 0.5 }); rowN = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === DN.did); }
+    ok(/^contact-[0-9a-f]{4}$/.test(invN.body.name ?? 'contact-0000') && rowN?.name === 'Dee Node' && rowN.name_from === 'them', `names: an unnamed code's contact takes the name it told, sanitised, marked from them (${JSON.stringify(rowN && { name: rowN.name, name_from: rowN.name_from })})`);
+    const rn = await call(A, 'POST', '/api/rename', { contact: DN.did, name: 'dee' });
+    const rowN2 = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === DN.did);
+    ok(rn.status === 200 && rowN2.name === 'dee' && rowN2.name_from === null, 'names: renamed in the app: the human\'s name, no longer from them');
+    await call(A, 'POST', '/api/forget', { contact: DN.did }).catch(() => {});
+    await dn.stop();
+  }
   // Pairing 1: the app invites (a short code parked at the relay), a Node agent accepts.
   const node = nodeAgent(CY);
   const inv = await call(A, 'POST', '/api/invite', { name: 'cy' });
@@ -2055,7 +2365,7 @@ try {
   const paired = await until(async () => (await call(A, 'GET', '/api/state')).body.groups.contacts.some((c) => c.did === CY.did));
   const cyRow = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
   ok(paired && cyRow.name === 'cy' && cyRow.words === node.contacts().contacts[0].fingerprint, `pair: the Node agent accepted the app's short code; both hold the same four words (${acc.status})`);
-  ok(Object.keys(cyRow).sort().join() === 'current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
+  ok(Object.keys(cyRow).sort().join() === 'current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,name_from,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
     `a contact in groups: UI-API.md's keys (${Object.keys(cyRow).sort()})`);
   ok(await until(async () => (await call(A, 'GET', '/api/state')).body.me.online), 'GET /api/state: online once paired, the session up (MQTT.js over WebSocket, proof of work in the worker)');
   ok((await call(A, 'GET', '/api/state')).body.pending.paired.some((x) => x.id === inv.body.id && x.paired === CY.did), 'GET /api/state: pending.paired names the invite that paired');
@@ -2101,6 +2411,25 @@ try {
   const links = await call(A, 'GET', '/api/links');
   ok(links.status === 200 && Object.keys(links.body).sort().join() === 'allow,links,made,received' && links.body.made.length === 0, `GET /api/links: {made, links, received, allow} (${JSON.stringify(links.body)})`);
   ok((await call(A, 'POST', '/api/sync')).body.synced === true, 'POST /api/sync');
+  // Replies (carrier.mjs "Replies"): the page answers the agent's message by its n; the agent's inbox gives re; the agent
+  // answers that by its msg_id (quote); the page shows the quote with the n of the message answered.
+  {
+    const ms = (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages, inN = ms.find((m) => m.dir === 'in' && m.text === 'and back to the page');
+    const rs = await call(A, 'POST', '/api/send', { to: CY.did, text: 'answering that', re: inN.n });
+    const bad = await call(A, 'POST', '/api/send', { to: CY.did, text: 'x', re: 99999 });
+    const got = [];
+    await until(async () => { got.push(...(await node.inbox({ wait: 0.5 })).messages); return got.some((m) => m.content === 'answering that'); });
+    const gm = got.find((m) => m.content === 'answering that');
+    ok(rs.status === 200 && /^re\/[0-9a-f]{16}\/r$/.test(rs.body.label) && bad.status === 404 && gm?.re?.by === 'me' && gm.re.sha === rs.body.label.slice(3, 19),
+      `POST /api/send re: the label quotes it; the agent's inbox: re {sha, by: me} (${JSON.stringify(gm?.re)})`);
+    await node.send('ada', 'quoted back', { label: node.quote(gm.msg_id ?? gm.id) });
+    let back = null;
+    await until(async () => { back = (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.find((m) => m.text === 'quoted back'); return back !== undefined; });
+    const outN = (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.find((m) => m.text === 'answering that');
+    ok(back?.re?.n === outN?.n && back.re.dir === 'out' && back.re.text === 'answering that', `GET /api/messages: a reply's re {n, dir, text}: the page's own message it answers (${JSON.stringify(back?.re)})`);
+    // The seen receipt these reads owe goes now, not inside the held commit below.
+    await sleep(2000);
+  }
 
   // The flush rule: no PUBLISH and no PUBACK without a flush completed since the one before it.
   ok(watch.publishes > 0 && watch.acks > 0 && watch.unflushed.length === 0, `flush rule: ${watch.publishes} PUBLISH, ${watch.acks} PUBACK, each after a flush (${watch.unflushed.slice(0, 3)})`);
@@ -2183,6 +2512,8 @@ try {
         const seenWords = await until(async () => (await O.call('GET', '/api/agents/workers')).body.workers.find((w) => w.worker === 1)?.enrolling?.words);
         const words = (await O.call('GET', '/api/agents/workers')).body.workers.find((w) => w.worker === 1)?.enrolling?.words;
         ok(seenWords && words === j.contact?.fingerprint, `app enrol: the machine paired through the code; the app shows the same four words (${words})`);
+        const stW = (await O.call('GET', '/api/state')).body;
+        ok(![...stW.groups.mine, ...stW.groups.contacts].some((c) => c.name.includes('(enrolling)') || c.did === tk.did), 'app enrol: during it, the temporary identity is no contact in Chats');
         // The app restarted mid-enrolment (0.1.16: the temporary identity then showed in Chats, with a chat and Pay): still hidden.
         await O.stop(); O = mkO(); await O.start();
         const st0 = (await O.call('GET', '/api/state')).body;
@@ -2196,19 +2527,69 @@ try {
       // steps after the enrolment lands; CI saw the row enrolled before the rest had settled, so the
       // whole condition is waited for, not a snapshot of it. Restarted above: the row's enrolment is no longer in memory (null).
       const settled = (w, st) => w?.status === 'enrolled' && w.contact && w.placed === 'remote' && w.tier === 'quiet' && (w.enrolling?.state === 'enrolled' || w.enrolling === null)
-        && st.groups.mine.some((c) => c.did === w.contact && c.ours === true && c.name === 'vps')
+        && st.groups.mine.some((c) => c.did === w.contact && c.ours === true && c.name === 'vps' && c.kind === 'agent' && c.kind_set === false)
         && ![...st.groups.mine, ...st.groups.contacts].some((c) => c.name.includes('(enrolling)')) && !st.pending.invites.some((x) => x.name.includes('(enrolling)'));
       let w1, st;
       const enrolled = await until(async () => {
         w1 = (await O.call('GET', '/api/agents/workers')).body.workers.find((x) => x.worker === 1); st = (await O.call('GET', '/api/state')).body;
         return settled(w1, st) ? w1 : null;
       }, 30000);
-      ok(enrolled, `app enrol: the list shows it enrolled (remote, quiet as chosen), in Mine as ours; nothing of the temporary pairing shows (${JSON.stringify(w1).slice(0, 240)} mine=${JSON.stringify(st?.groups.mine.map((c) => [c.name, c.ours]))})`);
+      ok(enrolled, `app enrol: the list shows it enrolled (remote, quiet as chosen), in Mine as ours, an agent with no manual step (kind agent, not set by hand); nothing of the temporary pairing shows (${JSON.stringify(w1).slice(0, 240)} mine=${JSON.stringify(st?.groups.mine.map((c) => [c.name, c.ours]))})`);
       const kp = JSON.parse(new TextDecoder().decode(await W.loadSealed(ip, 'keeper')));
       ok(kp.workers['1']?.name === 'vps' && kp.workers['1'].placed === 'remote' && ip.files.read('keeper.sealed') !== null && !Buffer.from(ip.files.read('keeper.sealed')).toString('latin1').includes(kp.root_hex),
         'app enrol: the roster kept in the sealed keeper (resealed), worker 1 vps, remote');
       const rv = await O.call('POST', '/api/agents/revoke', { worker: 1 });
       ok(rv.status === 200 && rv.body.forgot === w1.contact && (await O.call('GET', '/api/agents/workers')).body.workers.find((x) => x.worker === 1).status === 'revoked', 'app enrol: revoke → its contact forgotten, revoked in the list');
+      // Cancel in any state (0.1.17: a stale "k (enrolling)" could not be removed): the machine paired (words), then Cancel:
+      // the pending entry gone, the temporary contact forgotten, the worker off the roster (its key never went).
+      const ec2 = await O.call('POST', '/api/agents/enrol-code', { name: 'stale' });
+      const tk2 = keygen({ recovery: 'sha256:' + '2'.repeat(64) }), temp2 = join(dir, 'stale.enrol-t.local.json');
+      const tc2 = new nodeLib.Carrier({ identity: () => ({ secret: tk2.secret, bundle: { v: 'sigelo/0', typ: 'bundle', genesis: tk2.genesis, rotations: [], bindings: [], attestations: [], issuers: [] } }),
+        ...nodeLib.pathsFor(temp2), ...relayOpts, keep: true });
+      try { await E.accept({ carrier: tc2, file: E.enrolPath(join(dir, 'stale.local.json')), code: ec2.body.code, name: 'operator', wait: 10, temp: temp2 }); } finally { await tc2.stop(); }
+      const row2 = () => O.call('GET', '/api/agents/workers').then((r) => r.body.workers.find((x) => x.worker === ec2.body.worker));
+      const paired2 = await until(async () => (await row2())?.enrolling?.state === 'words');
+      const tempDid = tk2.did;
+      const cn = await O.call('POST', '/api/agents/cancel', { id: ec2.body.id });
+      const after2 = await row2(), again = await O.call('POST', '/api/agents/cancel', { id: ec2.body.id });
+      ok(paired2 && cn.status === 200 && cn.body.cancelled === true && cn.body.revoked === null && cn.body.forgot === tempDid && after2 === undefined && again.status === 404,
+        `app enrol: Cancel while its words wait → the temporary contact forgotten, the worker off the roster, a second Cancel 404 (${JSON.stringify(cn.body)})`);
+      // 0.1.17, two real enrolments: the app away (killed in the background, offline) while the machine answered its code
+      // and asked; back, it never showed the words nor answered. Now: the app restarted while the answer waited at the
+      // relay shows the four words; restarted again while the request is held, it still answers it once they match.
+      const ec3 = await O.call('POST', '/api/agents/enrol-code', { name: 'late', confirm_words: true });
+      await O.stop();
+      const tk3 = keygen({ recovery: 'sha256:' + '3'.repeat(64) }), temp3 = join(dir, 'late.enrol-t.local.json'), file3 = E.enrolPath(join(dir, 'late.local.json'));
+      const tc3 = new nodeLib.Carrier({ identity: () => ({ secret: tk3.secret, bundle: { v: 'sigelo/0', typ: 'bundle', genesis: tk3.genesis, rotations: [], bindings: [], attestations: [], issuers: [] } }),
+        ...nodeLib.pathsFor(temp3), ...relayOpts, keep: true });
+      let worker3 = null;
+      const place3 = async (x) => {
+        worker3 = x.identity;
+        const sec = Uint8Array.from(Buffer.from(x.identity.secret, 'hex'));
+        const wc = new nodeLib.Carrier({ identity: () => ({ secret: sec, bundle: { v: 'sigelo/0', typ: 'bundle', genesis: x.identity.genesis, rotations: x.identity.rotations, bindings: [], attestations: x.identity.attestations, issuers: x.identity.issuers } }),
+          ...nodeLib.pathsFor(join(dir, 'late.local.json')), ...relayOpts, keep: true });
+        try { return await wc.accept(x.invite, { name: 'operator', wait: 20 }); } finally { await wc.stop(); }
+      };
+      const row3 = () => O.call('GET', '/api/agents/workers').then((r) => r.body.workers.find((x) => x.worker === ec3.body.worker));
+      let j3, asked3, told3, placed3;
+      try {
+        j3 = await E.accept({ carrier: tc3, file: file3, code: ec3.body.code, name: 'operator', wait: 1, temp: temp3 });
+        O = mkO(); await O.start();
+        let words3 = null;
+        await until(async () => { const w = await row3(); words3 = w?.enrolling?.state === 'words' && w.enrolling.words ? w.enrolling.words : null; return words3 !== null; }, 30000);
+        const sw = (await O.call('GET', '/api/state')).body.enrol_words;
+        ok(sw?.length === 1 && sw[0].id === ec3.body.id && sw[0].name === 'late', `GET /api/state: enrol_words names the enrolment that waits for its words (${JSON.stringify(sw)})`);
+        ok(j3.status !== 'connected' && words3, `app enrol, away: the machine answered while the app was gone (${j3.status}); restarted, the app shows the four words (${words3})`);
+        asked3 = await E.complete({ carrier: tc3, file: file3, temp: temp3, wait: 20, place: place3, until: (o) => o.sent.length > 0 });
+        told3 = await E.complete({ carrier: tc3, file: file3, temp: temp3, wait: 20, place: place3, until: (o) => o.status.length > 0 });
+        await O.stop(); O = mkO(); await O.start();
+        const again3 = await until(async () => { const w = await row3(); return w?.enrolling?.state === 'words' && w.enrolling.words === words3; }, 20000);
+        const yes = await O.call('POST', '/api/agents/enrol-words', { id: ec3.body.id, match: true });
+        void yes;
+        placed3 = await E.complete({ carrier: tc3, file: file3, temp: temp3, wait: 40, place: place3, until: (o) => o.placed.length > 0 });
+        ok(asked3.sent.length === 1 && told3.status.some((x) => x.check === 'enrol_words') && again3 && yes.status === 200 && placed3.placed.length === 1 && placed3.sent.length === 0 && Boolean(worker3?.secret),
+          `app enrol, away: the request held, the app restarted: the words still shown, "They match" answers the held request; the machine placed without asking again (${JSON.stringify([again3, yes.status, asked3.sent.length, told3.status.map((x) => x.check), placed3.placed.length, placed3.sent.length])})`);
+      } finally { await tc3.stop(); }
     } finally { await O.stop(); }
   }
 
@@ -2258,6 +2639,50 @@ try {
       ok(sb.status === 400 && sb.body.error.check === 'photo', 'phone: a preview that is not what it says: 400 photo');
       const op = await call(P, 'POST', '/api/transfers/open', { id: t1.id });
       ok(op.status === 409 && op.body.error.check === 'transfer_state', 'phone: open before it landed: 409');
+      // A voice message (design/transfer.md "Voice"): RECORD_AUDIO asked of the shell; the recording in pieces into the
+      // shell, kept there as a file, sent as a photo's full file; its fields as one sigelo-voice/0 message.
+      {
+        const V = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'voice.mjs')).href);
+        const vs0 = (await call(P, 'GET', '/api/transfers/settings')).body;
+        ok(vs0.voice === true && vs0.mic === true, `phone: settings say voice and mic (${JSON.stringify(vs0).slice(0, 200)})`);
+        const mc = await call(P, 'POST', '/api/transfers/mic');
+        fb.micDenied = true;
+        const md = await call(P, 'POST', '/api/transfers/mic');
+        fb.micDenied = false;
+        ok(mc.status === 200 && mc.body.granted === true && md.status === 409 && md.body.error.check === 'mic_permission' && fb.micAsked === 2, 'phone: POST /api/transfers/mic asks the shell (RECORD_AUDIO): granted, or 409 mic_permission');
+        const ms = await call(P, 'POST', '/api/transfers/mic-settings');
+        ok(ms.status === 200 && ms.body.opened === true && fb.settingsOpened === 1, 'phone: POST /api/transfers/mic-settings opens the app\'s settings page (the shell)');
+        const audio = Uint8Array.from({ length: 300_000 }, (_, i) => (i * 7) % 251), rec = 'ab'.repeat(16), PART = 128 * 1024;
+        audio.set([0x1a, 0x45, 0xdf, 0xa3]);
+        const parts = [];
+        for (let off = 0; off < audio.length; off += PART) parts.push(await call(P, 'POST', '/api/transfers/voice-part', { rec, offset: off, data: Buffer.from(audio.subarray(off, off + PART)).toString('base64') }));
+        ok(parts.length === 3 && parts.every((x) => x.status === 200) && parts.at(-1).body.size === 300_000, 'phone: the recording in three pieces of at most 128 KiB');
+        const big = await call(P, 'POST', '/api/transfers/voice-part', { rec, offset: 0, data: Buffer.alloc(PART + 3).toString('base64') });
+        ok(big.status === 400 && big.body.error.check === 'body', 'phone: a piece over 128 KiB: 400');
+        const wave = Buffer.from([10, 200, 90, 30]).toString('base64'), name = 'voice-20261117-142301.webm';
+        const vbad = await call(P, 'POST', '/api/transfers/send', { to: DEE.did, rec, voice: { name, type: 'audio/webm', duration_s: 0 } });
+        ok(vbad.status === 400 && vbad.body.error.check === 'voice', 'phone: a voice message of 0 s: 400 voice (nothing kept, nothing sent)');
+        const vs = await call(P, 'POST', '/api/transfers/send', { to: DEE.did, rec, voice: { name, type: 'audio/webm', duration_s: 42, waveform: wave } });
+        ok(vs.status === 200 && vs.body.state === 'offered' && vs.body.name === name && vs.body.size === 300_000 && fb.kept?.includes(name) && !fb.parts.has(rec),
+          `phone: the recording kept by the shell as a file and offered as a transfer (${JSON.stringify(vs.body).slice(0, 200)})`);
+        const vm = (await call(P, 'GET', `/api/messages?contact=${encodeURIComponent(DEE.did)}`)).body.messages.find((m) => m.label === V.VOICE_LABEL);
+        ok(vm?.dir === 'out' && vm.text === 'Voice message' && vm.voice.sha256 === vs.body.sha256 && vm.voice.duration_s === 42 && vm.voice.waveform === wave && vm.voice.size === 300_000 && vm.voice.type === 'audio/webm',
+          `phone: the voice message in the chat at once, naming the file's sha256 (${JSON.stringify(vm)?.slice(0, 200)})`);
+        let heard = [];
+        ok(await until(async () => { heard.push(...(await dee.inbox({ wait: 0.5 })).messages); return heard.some((m) => m.label === V.VOICE_LABEL && m.content.sha256 === vs.body.sha256); }), 'the Node agent receives it as a sigelo-voice/0 message');
+        const item = V.voiceItems({ messages: heard.filter((m) => m.label === V.VOICE_LABEL) }).messages[0];
+        ok(item.text === '[voice 0:42 voice-20261117-142301.webm]' && item.voice.duration_s === 42 && !('data' in item.content), `what inbox prints for it: [voice 0:42 name], no audio inline (${item.text})`);
+        ok(await until(async () => { await TX.intake({ carrier: dee, identity: deeId }); return TX.list({ carrier: dee, identity: deeId }).in.some((r) => r.sha256 === vs.body.sha256 && r.name === name); }), 'the Node agent is offered the recording itself (its manifest, the same sha256)');
+        // Received: a voice file that landed (the shell's Downloads) read back to play; before it lands, 409.
+        const tfile = 'app/me.local.transfers.json', tf = JSON.parse(new TextDecoder().decode(P.platform.files.read(tfile))), one = tf.in[t1.id];
+        fb.landed.push({ name: 'voice-1.ogg', bytes: Uint8Array.from([0x4f, 0x67, 0x67, 0x53, 1, 2, 3]) });
+        tf.in['cd'.repeat(16)] = { ...one, id: 'cd'.repeat(16), name: 'voice-1.ogg', size: 7, state: 'done', saved: `content://media/external/downloads/${fb.landed.length}`, at: one.at };
+        tf.in['ce'.repeat(16)] = { ...one, id: 'ce'.repeat(16), name: 'voice-2.ogg', size: 7, state: 'active', at: one.at };
+        P.platform.files.write(tfile, new TextEncoder().encode(JSON.stringify(tf)));
+        const pa = await call(P, 'GET', `/api/transfers/audio?id=${'cd'.repeat(16)}`), pn = await call(P, 'GET', `/api/transfers/audio?id=${'ce'.repeat(16)}`);
+        ok(pa.status === 200 && pa.body.type === 'audio/ogg' && Buffer.from(pa.body.data, 'base64').toString('latin1').startsWith('OggS') && pn.status === 409 && pn.body.error.check === 'transfer_state',
+          `phone: GET /api/transfers/audio: a landed voice message's bytes (read back from the shell by range), 409 before it lands (${pa.status} ${pn.status})`);
+      }
     } finally { await P.router.stop().catch(() => {}); await dee.stop?.(); }
   }
 

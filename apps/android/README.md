@@ -81,6 +81,26 @@ The sealed files are in the app's private storage, with the contacts, ratchets a
 is opened at start and lives in the app's memory while it runs. Nothing is in a backup or moved to a
 new phone. THREAT-MODEL §3.12 says what this does not defend.
 
+## Stay connected
+
+Settings → Stay connected (on by default; one setting for the phone, not per profile): the app keeps
+its relay connection while minimised, so messages arrive and a call can ring. StayConnected.java is a
+foreground service of type `specialUse` that owns no socket: the connection is the page's (the carrier
+in the WebView, its TLS stream in SigeloBridge), and the service keeps that process at foreground
+priority. It starts as the app leaves the screen (onPause) and shows one silent notification,
+"sigelo · connected" (channel "Connection", low importance); a tap opens the app. Back on the first
+screen minimises the app instead of closing it. Removed from the recent apps, the page ends and the
+service with it (`stopWithTask`); it is not started at boot, since without the page there is nothing
+to keep. No wake lock. An inexact alarm every 15 minutes (`setAndAllowWhileIdle`) and the end of Doze
+send the page `{ev:"nudge"}`: the carrier reconnects, with its backoff, when it is down.
+
+Asks: turning the switch on asks what is missing, one at a time, each after one line why: notifications,
+then the battery exemption (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`); never at a start. A refusal
+is never final: Settings shows a row that says what it costs, and its tap asks again, or once Android
+stops asking (two refusals), opens the app's page in the system's settings. Notifications denied, the
+service runs all the same; Android 13+ then shows its notice only in the quick settings' list of
+active apps. Not yet measured on a phone: the battery cost, Doze, vendor task killers.
+
 ## The bridge (SigeloBridge.java)
 
 The page sees one object, `SigeloShell` (`info()`, `connect()`), and gets a message port for this

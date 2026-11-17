@@ -53,7 +53,9 @@
 // answers offers and moves the bytes; the /api/transfers* routes; none without the hook (404 route).
 // compared(did): the contact's four words were compared here (the accept rule). A photo (PHOTO_LABEL,
 // photo.mjs): its preview goes as one message (a group's: the msg's photo) beside the manifest; the chat
-// shows it at once, then the full file by the transfer whose manifest has its sha256.
+// shows it at once, then the full file by the transfer whose manifest has its sha256. A voice message (VOICE_LABEL,
+// voice.mjs) goes the same way, its fields as the message and the recording as the file, where the host records
+// (hooks.transfers.rec: write(rec, offset, bytes), keep(rec, name) → { doc } | { path }, read(saved) → bytes).
 //
 // Proof of work (design/profiles.md §6): what the human starts here (the page's start, a code, an
 // answer, "Try now") passes the carrier's `started: 'user'`; past the day's three the route answers
@@ -110,12 +112,13 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
-import { DEFAULT_RELAY, POW_COST, POW_EVAL_MS } from './carrier.mjs';
+import { DEFAULT_RELAY, POW_COST, POW_EVAL_MS, RE_LABEL, quoteHash, reLabel } from './carrier.mjs';
 import { signAs } from './kdf.mjs';
 import * as E from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
 import { didWords } from './short.mjs';
 import { PHOTO_LABEL, checkPhoto } from './photo.mjs';
+import { VOICE_LABEL, VOICE_SIZE_MAX, checkVoice } from './voice.mjs';
 
 // The tiers a new contact may be given at its pairing (Settings → Chats: new people's messages).
 const TIER_NEW = new Set(['own', 'friend', 'quiet']);
@@ -252,7 +255,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   // What the carrier's inbox() hands over, as every client takes it: messages and the events it
   // keeps (pairings, failures, rotations), into the history. Taken at once after any event, and
   // every minute for what no event announced.
-  let draining = null, again = false;
+  let draining = null, again = false, drainedOnline = 0;   // drainedOnline: when a drain last ended while connected (ms)
   function take(b) {
     // A linked contact's messages carry the link (id, purpose): data, shown beside them.
     for (const m of (L.labelled ? L.labelled(carrier, b.messages) : b.messages)) {
@@ -266,6 +269,13 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         let ph = null;
         try { ph = checkPhoto(m['content']); } catch (e) { record({ kind: 'event', type: 'dropped', did: m['from'], name: m['name'], code: 'photo', detail: e.message }); continue; }
         record({ kind: 'in', did: m['from'], name: m['name'], text: 'Photo', label: PHOTO_LABEL, photo: ph, ...(Number.isSafeInteger(m['iat']) && { iat: m['iat'] }) });
+        continue;
+      }
+      // A voice message (voice.mjs): its bubble at once, the recording by its transfer.
+      if (m['label'] === VOICE_LABEL) {
+        let vo = null;
+        try { vo = checkVoice(m['content']); } catch (e) { record({ kind: 'event', type: 'dropped', did: m['from'], name: m['name'], code: 'voice', detail: e.message }); continue; }
+        record({ kind: 'in', did: m['from'], name: m['name'], text: 'Voice message', label: VOICE_LABEL, voice: vo, ...(Number.isSafeInteger(m['iat']) && { iat: m['iat'] }) });
         continue;
       }
       const link = m['link'] ? { link: m['link'] } : {};
@@ -305,7 +315,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     if (draining) { again = true; return draining; }
     draining = (async () => {
       try {
-        do { again = false; take(await carrier.inbox({ local: true })); await groupRound(); } while (again);
+        do { again = false; const t0 = Date.now(), up = live.online.size > 0; take(await carrier.inbox({ local: true })); await groupRound(); if (up && live.online.size > 0) drainedOnline = t0; } while (again);
         // Device messages: wiped answers, a standby asking for the seat (it goes, and this page stops logging in as you).
         if (live.seatGone === null && hooks.deviceRound) {
           const r = await hooks.deviceRound();
@@ -363,7 +373,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
           keepOffline();
           break;
         case 'notice': case 'presence': case 'group_tier': break;   // presence, the group tier: the state says it, nothing to take
-        case 'seen': defer(() => { receipt(String(e['from']), true); picturesDue(); }); break;   // the contact's receipt: contacts() has it; answered once; it reads pictures
+        case 'seen': defer(() => { receipt(String(e['from']), true); picturesDue(); }); break;
+        // A new contact told its name (carrier.mjs "Names"): my groups that list it under the made-up one are sent again.
+        case 'named': if (G && groupsFile) defer(() => serial(() => G.refreshNames({ carrier, file: groupsFile, did: String(e['did']) })).catch(() => {})); break;   // the contact's receipt: contacts() has it; answered once; it reads pictures
         default: soon();
       }
     } catch (err) { live.error = `history: ${err.message}`; }
@@ -535,8 +547,20 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   // Who answered each code (its four words), codes dead unanswered (the index free again), enrolments done.
   async function look() {
     if (!enrolFile) return;
-    const t = nowS(), issued = pend((st) => Object.fromEntries(Object.entries(st.issued).map(([id, e]) => [id, { done: e.done ?? null, temp: e.temp ?? null, i: e.i, name: e.name ?? null, needs_send: e.needs_send !== undefined }])));
+    const t = nowS(), issued = pend((st) => Object.fromEntries(Object.entries(st.issued).map(([id, e]) => [id, { done: e.done ?? null, temp: e.temp ?? null, i: e.i, name: e.name ?? null, needs_send: e.needs_send !== undefined,
+      page: e.page ?? null, confirm_words: e.confirm_words === true, words_ok: e.words_ok ?? null, did: e.did, original: e.original, relay: e.relay, sent: e.sent_at !== undefined, held: e.held !== undefined,
+      told: e.temp && st.told?.[e.temp] ? { check: st.told[e.temp].check, detail: st.told[e.temp].detail ?? '' } : null }])));
     issuedLive = new Map(Object.entries(issued).filter(([, f]) => !f.done));
+    // This page's enrolments come back from the pending file after a restart (0.1.17: an app killed in the background
+    // forgot them: the four words never showed and the request was never answered): the code, the words, the answer.
+    for (const [id, f] of issuedLive) {
+      if (enrolling.has(id) || !f.page) continue;
+      const by = f.temp ?? carrier.answeredBy(id);
+      enrolling.set(id, { id, worker: f.i, name: f.name, short: f.page.short, code: f.page.short, exp: f.page.short_exp, relay: f.relay, tier: f.page.tier ?? 'own',
+        state: f.sent || f.needs_send ? 'sending' : by ? 'words' : 'code', did: f.did, original: f.original, confirmWords: f.confirm_words, ...(f.words_ok !== null && { wordsOk: f.words_ok }),
+        ...(by && { temp: by, words: carrier.contacts().contacts.find((x) => x.did === by)?.fingerprint ?? null }) });
+      changed();
+    }
     for (const e of enrolling.values()) {
       if (!LIVE.has(e.state)) continue;
       const f = issued[e.id];
@@ -548,7 +572,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         e.temp = by; e.state = 'words';
         e.words = carrier.contacts().contacts.find((x) => x.did === by)?.fingerprint ?? null;
         changed();
-      } else if (t > e.exp + 30) {
+      } else if (t > e.exp + 30 && drainedOnline > (e.exp + 30) * 1000) {
+        // Run out, and read: only once a drain while online came after its end, so an answer the relay held while
+        // this page was away (in the background, reconnecting) is taken first (0.1.17: it was dropped as expired).
         e.state = 'expired';
         pend((st) => { delete st.issued[e.id]; });
         try { await carrier.cancelInvite(e.code); } catch {}
@@ -561,21 +587,22 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   async function agentRound() {
     await look();
     const pass = agentHeld.splice(0);
-    if (!pass.length && !needsSend() && ![...enrolling.values()].some((e) => e.state === 'words' || e.state === 'sending')) return;
+    if (!pass.length && !needsSend() && ![...issuedLive.values()].some((f) => f.held) && ![...enrolling.values()].some((e) => e.state === 'words' || e.state === 'sending')) return;
     const k = await K?.read();
     if (!k) return;
     const root = await K.root(k);
     // The carrier as enrolment sees it: its inbox is what the page kept apart.
     const proxy = new Proxy(carrier, { get: (x, p) => (p === 'inbox' ? async () => ({ messages: pass.splice(0), events: [], dropped: {} }) : typeof x[p] === 'function' ? x[p].bind(x) : x[p]) });
     // The optional switch: the key waits for "They match" (null: not yet, the request kept for the next round).
-    const confirm = async (o) => { if (!o.ask) return true; const e = enrolling.get(o.id); if (e && !e.words) e.words = o.words; return e?.wordsOk ?? null; };
+    const confirm = async (o) => { if (!o.ask) return true; const e = enrolling.get(o.id); if (e && !e.words) e.words = o.words; return e?.wordsOk ?? issuedLive.get(o.id)?.words_ok ?? null; };
     let res;
     try { res = await E.complete({ carrier: proxy, file: enrolFile, keeper: root, wait: 0, confirm }); } finally { root.K.fill(0); }
-    agentHeld.push(...(res.held ?? []));
+    // Held requests stay in the pending file (enrol.mjs "A request held"): the next round takes them again.
     await look();   // needs_send as enrol.mjs left it
     for (const d of res.delivered) { const e = enrolling.get(d.id); if (e) e.state = 'sending'; }
-    for (const x of res.refused) {
-      const e = [...enrolling.values()].find((y) => y.temp !== undefined && y.temp === x.from);
+    // What the machine is told (enrol.mjs toldFor: its words, no DID), shown here the same.
+    for (const x of [...res.refused.map((y) => ({ to: y.from, check: y.check, detail: E.toldFor(y.check, y.detail) })), ...res.told]) {
+      const e = [...enrolling.values()].find((y) => y.temp !== undefined && y.temp === x.to);
       if (e) Object.assign(e, { check: x.check, detail: x.detail });
     }
     for (const p of res.placed) {
@@ -608,7 +635,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   };
   const orphan = (n) => {
     const hit = [...issuedLive].find(([, f]) => f.i === n);
-    return hit ? { id: hit[0], state: hit[1].needs_send ? 'sending' : 'waiting', code: null, exp: null, relay: null, words: null, confirm_words: false, words_ok: null, verified: false, needs_send: hit[1].needs_send, command: null } : null;
+    return hit ? { id: hit[0], state: hit[1].needs_send ? 'sending' : 'waiting', code: null, exp: null, relay: null, words: null, confirm_words: false, words_ok: null, verified: false, needs_send: hit[1].needs_send, command: null,
+      ...(hit[1].told && { check: hit[1].told.check, detail: hit[1].told.detail }) } : null;
   };
   async function workers() {
     const k = K ? await K.read() : null, st = hooks.seat?.() ?? null, seat = st ? (st.here ? 'here' : 'elsewhere') : null;
@@ -645,7 +673,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       const last = msgs.at(-1), read = data.read[x.did] ?? 0;
       const queued = msgs.filter((r) => r.kind === 'out' && r.status === 'queued');
       return {
-        did: x.did, name: x.name, current_did: x.current_did, relay: x.relay, re_pair: x.re_pair, words: x.fingerprint, pair,
+        did: x.did, name: x.name, name_from: x.name_from ?? null, current_did: x.current_did, relay: x.relay, re_pair: x.re_pair, words: x.fingerprint, pair,
         words_checked: pair !== null && data.checked[x.did] === pair, tags: data.tags[x.did] ?? [],
         // Came by a public code (carrier.mjs via): mine ({public: id}, nobody compared) or theirs ({public: true, words}).
         via: x.via ?? null,
@@ -679,6 +707,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     const m = hooks.me();
     return {
       seq, now: t,
+      // Enrolments whose four words wait for the human (this page's): said on every tab, not only on Agents (0.1.17).
+      enrol_words: [...enrolling.values()].filter((e) => e.state === 'words' && e.confirmWords && e.wordsOk === undefined && e.words).map((e) => ({ id: e.id, name: e.name })),
       me: {
         did: m.did, relay: carrier.relay, online: live.online.has(carrier.relay), clock_offset: clock?.offset ?? null, clock_checked: clock?.checked ?? null,
         retention_days: carrier.retentionDays, error: live.error, pow_done_ms: live.powDone,
@@ -794,11 +824,12 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       // Read: the page has shown them.
       if (last && data.gread[g]?.mid !== last.mid) { data.gread[g] = { mid: last.mid, at: last.received ?? last.iat }; saveData(); }
       return { group: { ...one, unread: 0 }, messages: items.slice(-200).map((i) => ({ mid: i.mid, re: i.re ?? null, from: i.from, name: i.name, role: i.role, tier: i.tier ?? null, mine: i.mine === true,
-        operator: i.operator === true, note: i.note ?? null, text: textOf(i.content), mentions: i.mentions ?? [], mentioned: i.mentioned === true, via: i.via ?? null, photo: i.photo ?? null, at: i.received ?? i.iat })) };
+        operator: i.operator === true, note: i.note ?? null, text: textOf(i.content), mentions: i.mentions ?? [], mentioned: i.mentioned === true, via: i.via ?? null, photo: i.photo ?? null, ...(i.voice && { voice: i.voice }), at: i.received ?? i.iat })) };
     }),
     'POST /api/groups/create': (b) => serial(() => groupCall(async () => {
       const brake = b['brake'];
       return gout(await G.create({ carrier, file: groupsFile, name: b['name'], members: dids(b['members'], 'members'), humans: dids(b['humans'], 'humans', false), ...(brake !== undefined && brake !== null && { brake }),
+        ...(carrier.selfName() !== null && { selfName: carrier.selfName() }),
         ...(typeof b['role'] === 'string' && { role: b['role'] }) }));
     })),
     'POST /api/groups/add': (b) => serial(() => groupCall(async () => gout(await G.add({ carrier, file: groupsFile, group: gid(b), members: dids(b['members'], 'members'), humans: dids(b['humans'], 'humans', false) })))),
@@ -939,7 +970,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         if (!g) refuse(404, 'group_unknown', `no group ${String(group)} here`);
         if (!g.mine || g.status !== 'member') refuse(409, 'group_creator', `only ${g.creator_name ?? 'its creator'} adds people to ${g.name}`);
       }
-      const r = await carrier.invite({ name, short: b['long'] !== true, ...(ttl !== undefined && { ttl }), ...(at !== carrier.relay && { relay: at }), ...(renew && { renew: true }), started: startedBy(b) });
+      // Unnamed: the made-up name gives way to the one the contact tells once paired (carrier.mjs "Names").
+      const r = await carrier.invite({ name, named: !(b['name'] === undefined || b['name'] === ''), short: b['long'] !== true, ...(ttl !== undefined && { ttl }), ...(at !== carrier.relay && { relay: at }), ...(renew && { renew: true }), started: startedBy(b) });
       const inv = { id: r.renew ? `r${r.renew}` : hexOf(6), name, code: r.code, exp: r.exp, ...(r.short !== undefined && { short: r.short, short_exp: r.short_exp }), ...(group !== undefined && { group }), ...(pub && { public: true }), ...(r.renew && { renew: true }) };
       invites.set(inv.id, inv);
       changed();
@@ -1081,7 +1113,11 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       const c = contactOf(b['to']), st = b['statement'];
       // A signed statement (the header's): its portable text, labelled, checked before it goes.
       if (st !== undefined && (typeof st !== 'string' || !checkStatement(st, nowS()).valid)) refuse(400, 'statement', 'statement: the portable text of a valid signed statement (POST /api/statement/check)');
-      const text = st ?? b['text'], label = st !== undefined ? STATEMENT_LABEL : '';
+      // re: the n of a message of this chat that this one answers (carrier.mjs "Replies"): its label quotes it.
+      const re = b['re'];
+      if (re !== undefined && (st !== undefined || !Number.isSafeInteger(re))) refuse(400, 'body', 're: the n of a message of this chat (not with a statement)');
+      const quoted = re === undefined ? null : recs.find((r) => (r.kind === 'in' || r.kind === 'out') && r.did === c.did && r.n === re && typeof r.text === 'string') ?? refuse(404, 'message', 'no such message in this chat to answer');
+      const text = st ?? b['text'], label = st !== undefined ? STATEMENT_LABEL : quoted ? reLabel(quoted.text, quoted.kind === 'out') : '';
       if (typeof text !== 'string' || text.trim() === '' || text.length > TEXT_MAX) refuse(400, 'body', `text: 1 to ${TEXT_MAX} characters`);
       // at: before it is sealed, so a receipt naming its iat covers it (statusOf).
       const at = nowS(), lab = label ? { label } : {};
@@ -1096,11 +1132,21 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     'GET /api/messages': (_, q) => {
       const x = contactOf(q.get('contact')), d = x.did, since = Number(q.get('since') ?? 0) || 0;
       const msgs = recs.filter((r) => (r.kind === 'in' || r.kind === 'out') && r.did === d && r.n > since).slice(-200);
+      // A reply's quote (carrier.mjs "Replies"): the message it names, found among this chat's by its text and author.
+      const all = recs.filter((r) => (r.kind === 'in' || r.kind === 'out') && r.did === d);
+      const reOf = (r) => {
+        const m = RE_LABEL.exec(r.label ?? '');
+        if (!m) return null;
+        const kind = (r.kind === 'out') === (m[2] === 's') ? 'out' : 'in';
+        const q = all.filter((x) => x.n < r.n && x.kind === kind && typeof x.text === 'string' && quoteHash(x.text) === m[1]).at(-1);
+        return { n: q?.n ?? null, dir: kind, text: q ? q.text.split('\n')[0].slice(0, 120) : null };
+      };
       // Read: the page has shown them; a seen receipt when one is due (the header's).
       if ((data.read[d] ?? 0) < seq) { data.read[d] = seq; saveData(); }
       receipt(d);
       return { seq, messages: msgs.map((r) => ({ n: r.n, dir: r.kind, at: r.at, iat: r.iat ?? null, text: textOf(r.text), label: r.label ?? '', status: statusOf(r, x.seen_upto), code: r.code ?? null, detail: r.detail ?? null, link: r.link ?? null,
-        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }) })) };
+        ...(RE_LABEL.test(r.label ?? '') && { re: reOf(r) }),
+        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }), ...(r.voice && { voice: r.voice }) })) };
     },
     'POST /api/sync': () => serial(async () => { await carrier.sync(); return { synced: true }; }),
     'POST /api/history/clear': (b) => serial(async () => {
@@ -1183,7 +1229,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         r = await E.issue({ carrier, file: enrolFile, i, n: 0, name, keeper: root, relay: at, started: startedBy(b), confirmWords: words === true,
           ...(typeof label === 'string' && label !== '' && { operatorName: label }) });
       } finally { root.K.fill(0); }
-      const until = pend((x) => x.issued[r.id]?.attestation?.body?.exp ?? null);
+      // What this page shows of it, kept with the enrolment so a restart brings the code screen back (look()).
+      const until = pend((x) => { const y = x.issued[r.id]; if (y) y.page = { short: r.short, short_exp: r.short_exp, tier: tier ?? 'own' }; return y?.attestation?.body?.exp ?? null; });
       await K.update((x) => { x.workers[i] = { name, n: 0, did: r.did, original: r.original, placed: 'remote', at: nowS(), ...(until && { until }) }; });
       if (tier === 'friend' || tier === 'quiet') carrier.presetTier(r.original, tier);
       const e = { id: r.id, worker: i, name, short: r.short, code: r.code, exp: r.short_exp, relay: r.relay, tier: tier ?? 'own', state: 'code', did: r.did, original: r.original, confirmWords: words === true };
@@ -1197,6 +1244,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (typeof b['match'] !== 'boolean') refuse(400, 'body', 'match: true (the agent\'s machine shows the same four words) or false');
       if (!LIVE.has(e.state)) refuse(409, 'enrol_state', `this enrolment is ${e.state}`);
       e.wordsOk = b['match'];
+      pend((x) => { if (x.issued[e.id]) x.issued[e.id].words_ok = b['match']; });
       await agentRound();
       if (!b['match']) {
         pend((x) => { delete x.issued[e.id]; });
@@ -1212,6 +1260,34 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       const r = await carrier.tryNow({ confirmed: b['pow_confirmed'] === true });
       live.powCapped = null; live.powConfirm = null; keepOffline(); changed();
       return r;
+    }),
+    // Cancel an enrolment in any state before it is done (0.1.17: a stale "k (enrolling)" could not be removed): the
+    // pending entry dropped, the temporary contact forgotten, the code withdrawn. Its worker leaves the roster (the
+    // index free again), or is marked revoked once its key may have gone (sent once, or being sent).
+    'POST /api/agents/cancel': (b) => serial(async () => {
+      seatHere();
+      if (!enrolFile) refuse(404, 'route', 'no enrolment here');
+      const id = String(b['id'] ?? ''), e = enrolling.get(id);
+      await look();
+      const f = pend((x) => { const y = x.issued[id]; if (y) delete x.issued[id]; if (y?.temp && x.told) delete x.told[y.temp]; return y ?? null; });
+      if (!f && !(e && LIVE.has(e.state))) refuse(404, 'enrol', 'no such enrolment pending here (done, expired or cancelled)');
+      if (f?.done) refuse(409, 'enrol_state', 'this enrolment is done: revoke the agent instead');
+      if (e?.state === 'code') { try { await carrier.cancelInvite(e.code); } catch {} }
+      const temp = e?.temp ?? f?.temp ?? carrier.answeredBy(id);
+      if (temp) { try { await carrier.forget(temp); } catch {} }
+      const i = e?.worker ?? f?.i, keyWent = f?.sent_at !== undefined || f?.needs_send !== undefined || e?.state === 'sending', t = nowS();
+      let revoked = null;
+      if (Number.isSafeInteger(i)) {
+        await K?.update((k) => {
+          const w = k.workers[i];
+          if (!w || w.placed !== 'remote' || w.revoked !== undefined) return;
+          if (keyWent) { w.revoked = t; revoked = t; } else delete k.workers[i];
+        });
+      }
+      if (e) Object.assign(e, { state: 'failed', check: 'cancelled', detail: 'Cancelled: the code no longer works and nothing more is sent.' });
+      await look();
+      changed();
+      return { id, worker: i ?? null, cancelled: true, revoked, forgot: temp ?? null };
     }),
     'POST /api/agents/revoke': (b) => serial(async () => {
       seatHere();
@@ -1229,6 +1305,12 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         return { worker: i, name: w.name, cancelled: true, revoked: null, forgot: null };
       }
       if (e && LIVE.has(e.state)) { pend((x) => { delete x.issued[e.id]; }); e.state = 'failed'; e.check = 'revoked'; if (e.temp) { try { await carrier.forget(e.temp); } catch {} } }
+      // One made before a restart (only the pending file knows it): dropped too, its temporary contact forgotten.
+      for (const [id, f] of [...issuedLive].filter(([, y]) => y.i === i)) {
+        pend((x) => { delete x.issued[id]; });
+        const temp = f.temp ?? carrier.answeredBy(id);
+        if (temp) { try { await carrier.forget(temp); } catch {} }
+      }
       const c = contactOfWorker(w);
       if (c) await carrier.forget(c.did);
       const t = nowS();
@@ -1335,7 +1417,7 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
   const strip = ({ file: _f, ...r }) => r;
   const docs = typeof host.pick === 'function';
   const settings = async () => ({ ...X.settings({ identity }), tor_daemon: await X.torCaps(X.torConfig()), direct_available: (await X.loadRtc()) !== null,
-    pick: docs, camera: typeof host.photo === 'function', open: typeof host.open === 'function' });
+    pick: docs, camera: typeof host.photo === 'function', open: typeof host.open === 'function', voice: typeof host.rec?.keep === 'function', mic: typeof host.mic === 'function' });
   // A file to send: a path on this computer, or a doc picked on this phone (never both, each where it is).
   const sourceOf = (b) => {
     if (docs) return typeof b['doc'] === 'string' && b['doc'] !== '' ? { doc: b['doc'] } : refuse(400, 'body', 'doc: a file picked on this phone (POST /api/transfers/pick or /photo)');
@@ -1349,10 +1431,23 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
     return { type: p['type'], data: p['data'], w: p['w'], h: p['h'] };
   };
   const full = (shot, f, name) => { try { return checkPhoto({ ...shot, sha256: f.whole, size: f.size, name }); } catch (e) { e.status = 400; throw e; } };
+  // A voice message (voice.mjs): the recording sent in pieces first (POST /api/transfers/voice-part, rec), then send
+  // {rec, voice: {name, type, duration_s, waveform?}}: the host keeps it as a file, which goes as a photo's full file does.
+  const recOf = (b) => (typeof b['rec'] === 'string' && /^[0-9a-f]{32}$/.test(b['rec']) ? b['rec'] : refuse(400, 'body', 'rec: a recording id (32 hex digits)'));
+  const voiceOf = (b) => {
+    const v = b['voice'];
+    if (v === undefined) return null;
+    if (typeof v !== 'object' || v === null || Array.isArray(v) || b['rec'] === undefined || !host.rec) refuse(400, 'voice', 'voice: {name, type, duration_s, waveform?} with rec, where this host records');
+    const x = { name: v['name'], type: v['type'], duration_s: v['duration_s'], ...(v['waveform'] !== undefined && { waveform: v['waveform'] }) };
+    try { checkVoice({ ...x, sha256: '0'.repeat(64), size: 1 }); } catch (e) { e.status = 400; throw e; }
+    return x;
+  };
+  const fullVoice = (vo, f, name) => { try { return checkVoice({ ...vo, sha256: f.whole, size: f.size, name }); } catch (e) { e.status = 400; throw e; } };
+  const AUDIO = { webm: 'audio/webm', ogg: 'audio/ogg', m4a: 'audio/mp4' };
   return {
     'GET /api/transfers': () => X.list({ carrier, identity, engine }),
     'POST /api/transfers/send': (b) => serial(() => call(async () => {
-      const src = sourceOf(b), d = directOf(b), via = viaOf(b), shot = shotOf(b);
+      const vo = voiceOf(b), src = vo ? await host.rec.keep(recOf(b), vo.name) : sourceOf(b), d = directOf(b), via = viaOf(b), shot = shotOf(b);
       if (shot) { const p = { ...shot, sha256: '0'.repeat(64), size: 0, name: 'x' }; try { checkPhoto(p); } catch (e) { e.status = 400; throw e; } }
       // A group (design §10.3): one transfer per member paired with; the preview (or a line naming the file) as one group message.
       if (b['group'] !== undefined) {
@@ -1361,7 +1456,7 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
         const f = await X.prepare({ carrier, identity, ...src });
         const fan = await X.fanOut({ carrier, identity, members: g.members.filter((m) => !m.me).map((m) => ({ did: m.did, name: m.name, contact: m.contact })), f, ...(d !== undefined && { direct: d }), ...(via && { via }), group: g.gid });
         const name = fan.sent[0] ? X.list({ carrier, identity }).out.find((r) => r.id === fan.sent[0].id)?.name ?? f.name : f.name;
-        const msg = await groups.G.send({ carrier, file: groups.file, group: g.gid, text: shot ? 'Photo' : `File: ${name}`, ...(shot && { photo: full(shot, f, name) }) });
+        const msg = await groups.G.send({ carrier, file: groups.file, group: g.gid, text: shot ? 'Photo' : vo ? 'Voice message' : `File: ${name}`, ...(shot && { photo: full(shot, f, name) }), ...(vo && { voice: fullVoice(vo, f, name) }) });
         void engine.kick();
         return { group: g.gid, mid: msg.mid, sha256: f.whole, name, size: f.size, sent: fan.sent, unpaired: fan.unpaired, failed: fan.failed };
       }
@@ -1376,12 +1471,41 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
         try { [x] = await carrier.sendAll(c.did, [ph], { label: PHOTO_LABEL }); } catch (e) { if (!/queued/.test(e.message)) throw e; }
         record({ kind: 'out', did: c.did, id: x?.id ?? null, text: 'Photo', label: PHOTO_LABEL, photo: ph, status: x?.status ?? 'queued', code: x?.code, detail: x?.detail, at });
       }
+      if (vo) {
+        // The voice message beside the manifest, as a photo's preview goes.
+        const v = fullVoice(vo, f, r.name), at = Math.floor(Date.now() / 1000);
+        let x = null;
+        try { [x] = await carrier.sendAll(c.did, [v], { label: VOICE_LABEL }); } catch (e) { if (!/queued/.test(e.message)) throw e; }
+        record({ kind: 'out', did: c.did, id: x?.id ?? null, text: 'Voice message', label: VOICE_LABEL, voice: v, status: x?.status ?? 'queued', code: x?.code, detail: x?.detail, at });
+      }
       return strip(r);
     })),
     // The phone's own: a file picked (the system's picker), a photo taken (the system's camera), a file that landed opened.
     // images: the picker shows pictures only (the composer's Photo).
     ...(docs && { 'POST /api/transfers/pick': (b) => serial(async () => (await host.pick({ images: b?.['images'] === true })) ?? { cancelled: true }) }),
+    // The microphone asked of the shell before the page records (Android: RECORD_AUDIO at the first); none elsewhere.
+    // Refused once, never asked again (the shell remembers): mic-settings opens the app's settings page instead.
+    ...(typeof host.mic === 'function' && { 'POST /api/transfers/mic': async () => ({ granted: await host.mic() }) }),
+    ...(typeof host.micSettings === 'function' && { 'POST /api/transfers/mic-settings': async () => { await host.micSettings(); return { opened: true }; } }),
     ...(typeof host.photo === 'function' && { 'POST /api/transfers/photo': () => serial(async () => (await host.photo({ keepLocation: X.settings({ identity }).keep_location })) ?? { cancelled: true }) }),
+    // A recording's pieces (at most 128 KiB each, in order): into the host's file for it, kept until send names it.
+    ...(host.rec && { 'POST /api/transfers/voice-part': (b) => serial(async () => {
+      const rec = recOf(b), off = b['offset'], data = b['data'];
+      if (!Number.isSafeInteger(off) || off < 0 || off > VOICE_SIZE_MAX) refuse(400, 'body', 'offset: bytes from the start');
+      if (typeof data !== 'string' || data === '' || data.length > Math.ceil((128 * 1024) / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) refuse(400, 'body', 'data: base64 of 1 byte to 128 KiB');
+      const bytes = unb64(data);
+      if (off + bytes.length > VOICE_SIZE_MAX) refuse(400, 'voice', `a voice message is at most ${VOICE_SIZE_MAX / 2 ** 20} MiB`);
+      await host.rec.write(rec, off, bytes);
+      return { rec, size: off + bytes.length };
+    }) }),
+    // A voice message's recording that landed here, to play: {id, type, data (base64)}.
+    ...(host.rec && { 'GET /api/transfers/audio': (_, q) => call(async () => {
+      const id = idOf({ id: q.get('id') }), r = X.list({ carrier, identity }).in.find((x) => x.id === id) ?? refuse(404, 'transfer_unknown', 'no such file here');
+      if (r.state !== 'done' || !r.saved) refuse(409, 'transfer_state', `${r.name} has not landed yet`);
+      if (r.size > VOICE_SIZE_MAX) refuse(409, 'voice', 'too large for a voice message');
+      const bytes = await host.rec.read(r.saved);
+      return { id, type: AUDIO[/\.([a-z0-9]+)$/i.exec(r.name)?.[1]?.toLowerCase() ?? ''] ?? 'application/octet-stream', data: b64(bytes) };
+    }) }),
     ...(typeof host.open === 'function' && { 'POST /api/transfers/open': (b) => call(async () => {
       const r = X.list({ carrier, identity }).in.find((x) => x.id === idOf(b)) ?? refuse(404, 'transfer_unknown', 'no such file here');
       if (r.state !== 'done' || !r.saved) refuse(409, 'transfer_state', `${r.name} has not landed yet`);

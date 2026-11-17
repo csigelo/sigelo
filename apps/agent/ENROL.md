@@ -60,6 +60,10 @@ Then you send the worker's identity (key, chain, attestation) once over that end
 temporary DID is forgotten on both sides and its mailboxes given up. Without `--wait`, or with
 either side offline, run `sigelo-agent enrol --finish` on each side in turn (pending 24 hours).
 A lost key is sent again: the server asks again at most once a minute, and you resend a refused one.
+A request you refuse or hold is answered with why (label `sigelo-enrol/1`, `{typ: "status", check,
+detail}`, no key): `enrol --finish` on the server prints `not done yet: <check>: <detail>`; the app shows the same.
+Then keep it reachable: `sigelo-agent service install` there (or `init --enrol <code> --service`) runs the
+listener as a service, so its owner's messages always come ([WATCH.md](WATCH.md#always-on)).
 
 **Sandboxes and firewalls.** Messaging dials only the relay, `relay.sigelo.ai` by default: 8883, else
 443 (automatic; `SIGELO_RELAY_TRANSPORT=wss` skips the 5 s probe). `HTTPS_PROXY`, `NO_PROXY` apply.
