@@ -19,6 +19,7 @@ import * as control from './sigelo-agent-control.ts';
 import * as group from './sigelo-agent-group.ts';
 import * as transfer from './sigelo-agent-transfer.ts';
 import * as door from './sigelo-agent-pass.ts';
+import * as service from './sigelo-agent-service.ts';
 
 const USAGE = `sigelo-agent — a portable sigelo/0 identity for an AI agent, and its contacts
 
@@ -64,6 +65,7 @@ The human's page (UI-API.md):
 
 Staying connected (WATCH.md):
   ${watch.USAGE.replaceAll('\n', '\n  ')}
+  ${service.USAGE.replaceAll('\n', '\n  ')}
 
 A <json|-> argument may also be a file holding the JSON.
 Identity file: --identity <file>; --operator: yours ($SIGELO_HUMAN, else ~/.config/sigelo/me.local.json);
@@ -131,6 +133,7 @@ if (asOperator) rest.splice(rest.indexOf('--operator'), 1);
 if (asOperator && (cmd === 'init' || cmd === 'adopt')) usage(`${cmd} --operator: your identity comes from your 25 words: sigelo-agent keeper --from-words`);
 let path: string;
 try { path = contact.actingFile(cmd ?? '', fileFlag, asOperator); } catch (e) { usage((e as Error).message); }
+if (cmd === 'service') await contact.exit(await service.main(path, rest));
 const now = Math.floor(Date.now() / 1000);
 // The verbs that read the identity: with none, "run init" and exit 2, as the contact verbs say
 // it (a bare "load: no identity" exited 1).

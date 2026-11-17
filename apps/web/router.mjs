@@ -122,6 +122,16 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
           return e;
         },
         pick: (o) => big.pick(o), photo: (o) => big.photo(o), open: (uri, name) => big.open(uri, name),
+        // Voice messages: the recording in the shell (a partial, then a file sent as a photo is), RECORD_AUDIO asked
+        // first; one that landed read back by range from the app's origin to play (at most 16 MiB).
+        ...(big.keep && { rec: {
+          write: (rec, offset, bytes) => big.write(rec, offset, bytes), keep: (rec, name) => big.keep(rec, name),
+          read: async (saved) => {
+            const d = await big.url(saved), out = new Uint8Array(d.size);
+            for (let o = 0; o < d.size; o += 1 << 20) out.set(await big.read(d.doc, o, Math.min(1 << 20, d.size - o), { size: d.size, mtime: d.mtime }), o);
+            return out;
+          },
+        }, mic: () => big.mic(), micSettings: () => big.appSettings() }),
       } }),
       meInfo: () => ({ identity_file: IDENTITY, recovery: headOf(identity()).recovery === null ? 'none' : 'set', key: 'browser',
         erase: 'On the machine holding the recovery key, with this identity\'s file: SIGELO_IDENTITY=<file> sigelo-agent erase-request --recovery-key <your recovery.key>',

@@ -135,7 +135,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "12f14c970f34d8774e3b933d72073e03e765026427674cd3b22d71450f5585d5"
+   "sha256": "1ce2b4a96691ca52fc0afd075a221fc9ba1db4c2a04e611945a7ea23306417d6"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
@@ -151,7 +151,7 @@
   },
   "vendor/contact/enrol.mjs": {
    "from": "apps/contact/enrol.mjs",
-   "sha256": "276eb54433ba39ffb18449e14a691799c90bedfdccb76780d12b023d8294524c"
+   "sha256": "42838a28097bad39f851391cc00d06582efa1ff9f16b56cb8cadc7f83452922a"
   },
   "vendor/contact/envelope.mjs": {
    "from": "apps/contact/envelope.mjs",
@@ -163,7 +163,7 @@
   },
   "vendor/contact/group.mjs": {
    "from": "apps/contact/group.mjs",
-   "sha256": "fa67a85eba54bdee4763ea3d61843a540a9fbd4c5ac32959189337f40ed914d1"
+   "sha256": "4c101593b78ddbb62ad3823cf430cf718af800a4a5665efbc7a4ad44430e63b9"
   },
   "vendor/contact/invite.mjs": {
    "from": "apps/contact/invite.mjs",
@@ -179,7 +179,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "f918363c805f0ec378978b10e9fb5086da73e6160b27a36b5128cabf05365b8e"
+   "sha256": "3e626e85d44521e935092ff11f7722b046dd4a146b60e33e46432f5c013d93f8"
   },
   "vendor/contact/photo.mjs": {
    "from": "apps/contact/photo.mjs",
@@ -219,7 +219,7 @@
   },
   "vendor/contact/store.mjs": {
    "from": "apps/contact/store.mjs",
-   "sha256": "3c08603d484c1ad6f5b74a8baf96681b35c73297a69f648668efb8666893a30e"
+   "sha256": "25d44380611ed4e58c6cddc4b69727ee15829b8b5d1399ebde83ec07c46ff29a"
   },
   "vendor/contact/transfer-engine.mjs": {
    "from": "apps/contact/transfer-engine.mjs",
@@ -232,6 +232,14 @@
   "vendor/contact/transfer.mjs": {
    "from": "apps/contact/transfer.mjs",
    "sha256": "1fea281d60719197a181177226104e68d5e597ccc1b8a508972f98ceb067431b"
+  },
+  "vendor/contact/voice-web.mjs": {
+   "from": "apps/contact/voice-web.mjs",
+   "sha256": "f4ce15479cd21fb01d2f309e85f6aca40ce1789917162d00f5111c3bb094461c"
+  },
+  "vendor/contact/voice.mjs": {
+   "from": "apps/contact/voice.mjs",
+   "sha256": "67f4e828cf64556b1d0d2de85a8cc623001d49476ed989e606476185000c1f7e"
   },
   "vendor/contact/words-lock.mjs": {
    "from": "apps/contact/words-lock.mjs",
@@ -283,11 +291,11 @@
   },
   "vendor/ui.css": {
    "from": "apps/agent/ui.css",
-   "sha256": "9797a2479c02a6fb2c4d9efa939c863009eea2e18fb802cda5cb039138eb1d7d"
+   "sha256": "6d5ed871e5a2cce5fd8130064d9d1ce0fe8580c395821070a6dcf4b200cc2260"
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "c69a0cacba93c89c7828bc490aea1daf9c81e205841681425333e69c7f0fcb87"
+   "sha256": "ed477d5825908d5a89f38c51535018bfa870b00f494bdacde9ff880442e3c589"
   }
  }
 }

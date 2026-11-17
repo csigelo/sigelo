@@ -8,8 +8,9 @@
 // never by the model, which sees only the text, labelled with group, sender, role, tier and "not your
 // operator".
 //
-//   typ msg     any member  {text, re?, mentions?, photo?}   one copy per member the sender is paired with;
-//                           (photo: an inline preview, photo.mjs; the full file goes by one transfer per member)
+//   typ msg     any member  {text, re?, mentions?, photo?, voice?}   one copy per member the sender is paired with;
+//                           (photo: an inline preview, photo.mjs; voice: a voice message's fields, voice.mjs;
+//                           the full file goes by one transfer per member)
 //                           the rest through the creator: one more copy to it with fwd (their DIDs)
 //                           and the sender's chain, which the creator re-sends as is (never re-signed)
 //   typ roster  the creator {group}: the whole group, ver + 1 (create, add, remove, rename, brake)
@@ -42,9 +43,10 @@
 //
 //   create({ carrier, file, name, members, humans, brake, role, selfName, tier, local }) → { group, sent }
 //   add / remove({ …, group, members[, humans] }), rename({ …, group, name }), setBrake({ …, group, brake }),
+//   refreshNames({ carrier, file, did }): a contact's told name into the rosters of mine that list it otherwise,
 //   setRole({ …, group, member, role }), share({ …, group, member }) (the roster again, same ver, to one member)
 //   leave({ carrier, file, group, local }), join({ carrier, file, group }) (a pending invitation)
-//   send({ carrier, file, group, text, re, mentions, photo, local }) → { gid, mid, copies, via_creator, unreached }
+//   send({ carrier, file, group, text, re, mentions, photo, voice, local }) → { gid, mid, copies, via_creator, unreached }
 //   handle({ carrier, file, batch, local, tiers }) → { batch: its messages plus the group messages,
 //          notices, joined, removed, refused, ignored, forwarded, filed (new for the inbox), copies };
 //          run before an inbox returns (tiers [] by a watcher: everything filed, nothing taken)
@@ -60,6 +62,7 @@ import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
 import { canonicalize, did as didOf, verify, verifySig } from 'sigelo';
 import { GROUP_LABEL, GROUP_SEND } from './carrier.mjs';
 import { checkPhoto } from './photo.mjs';
+import { checkVoice } from './voice.mjs';
 import { MsgError, checkNow, fail, signAs } from './kdf.mjs';
 import { platform as nodePlatform } from './platform-node.mjs';
 
@@ -128,7 +131,7 @@ export function checkRoster(g) {
 export function checkBody(b) {
   const bad = (why) => fail('group_message', `not a ${GROUP_V} message: ${why}`);
   if (!isObject(b) || b.v !== GROUP_V || !TYPS.includes(b.typ)) bad('v and typ');
-  const more = { msg: [['text'], ['re', 'mentions', 'photo']], roster: [['group'], []], leave: [[], []] }[b.typ];
+  const more = { msg: [['text'], ['re', 'mentions', 'photo', 'voice']], roster: [['group'], []], leave: [[], []] }[b.typ];
   if (!keysAre(b, ['v', 'typ', 'gid', 'mid', 'iat', 'from', ...more[0]], more[1])) bad(`a ${b.typ} is {v, typ, gid, mid, iat, from${more[0].map((k) => `, ${k}`).join('')}${more[1].map((k) => `, ${k}?`).join('')}}`);
   if (typeof b.gid !== 'string' || !GID.test(b.gid)) bad('gid: 16 bytes, hex');
   if (typeof b.mid !== 'string' || !MID.test(b.mid)) bad('mid: 8 bytes, hex');
@@ -139,6 +142,7 @@ export function checkBody(b) {
     if (Object.hasOwn(b, 're') && (typeof b.re !== 'string' || !MID.test(b.re))) bad('re: a mid');
     if (Object.hasOwn(b, 'mentions') && (!Array.isArray(b.mentions) || b.mentions.length > LIMITS.pro.members || b.mentions.some((d) => typeof d !== 'string' || !DID.test(d)) || new Set(b.mentions).size !== b.mentions.length)) bad('mentions: distinct DIDs');
     if (Object.hasOwn(b, 'photo')) { try { checkPhoto(b.photo); } catch (e) { bad(e.message); } }
+    if (Object.hasOwn(b, 'voice')) { try { checkVoice(b.voice); } catch (e) { bad(e.message); } }
   }
   if (b.typ === 'roster' && checkRoster(b.group).gid !== b.gid) bad('the roster names another gid');
   return b;
@@ -307,6 +311,18 @@ async function change({ carrier, file, group, local = false }, fn) {
   const sent = await deliver(carrier, rosterCopies(mine, g.group, now, [...g.group.members.map((m) => m.did), ...also]), local);
   return { group: summary(g, mine, view), ...sent };
 }
+/** A contact's name changed to the one it told once paired (carrier.mjs "Names", event `named`): each group of yours
+ *  that lists it under another name gets the roster again with its name (a group code's join is filed before the
+ *  name comes). → [{ group, sent… }]. */
+export async function refreshNames({ carrier, file, did, local = false }) {
+  const now = nowOf(carrier), mine = me(carrier, now), view = contactsOf(carrier), c = view.get(did);
+  if (!c?.live) return [];
+  const gids = state(file, now, (s) => Object.values(s.groups).filter((g) => g.group.creator === mine.original && g.status === 'member'
+    && g.group.members.some((m) => m.did === did && m.name !== c.name)).map((g) => g.group.gid), platformOf(carrier));
+  const out = [];
+  for (const gid of gids) out.push(await change({ carrier, file, group: gid, local }, (R) => { for (const m of R.members) if (m.did === did) m.name = checkName(c.name, MEMBER_NAME_MAX, 'a member\'s name'); }));
+  return out;
+}
 /** Add live contacts to a group of yours (humans: those of them with role human). */
 export function add({ carrier, file, group, members, humans = [], tier: given, local }) {
   const { lim, tier } = limitsFor(carrier, given);
@@ -401,9 +417,9 @@ function mentionsIn(text, R, view) {
 }
 
 /** A message to a group: one copy per member paired with, the rest through the creator. */
-export async function send({ carrier, file, group, text, re, mentions = [], photo, local = false }) {
+export async function send({ carrier, file, group, text, re, mentions = [], photo, voice, local = false }) {
   const now = nowOf(carrier), mine = me(carrier, now), view = contactsOf(carrier);
-  const t = checkText(text), ph = photo === undefined ? undefined : checkPhoto(photo);
+  const t = checkText(text), ph = photo === undefined ? undefined : checkPhoto(photo), vo = voice === undefined ? undefined : checkVoice(voice);
   if (re !== undefined && (typeof re !== 'string' || !MID.test(re))) fail('group_message', 're: a message id (mid, 16 hex)');
   const { R, body, frozen } = state(file, now, (s) => {
     const g = pick(s, group), R = g.group;
@@ -413,10 +429,10 @@ export async function send({ carrier, file, group, text, re, mentions = [], phot
     if (self.role === 'agent' && R.brake !== 'off' && g.run >= R.brake) fail('group_quiet', `${g.run} agent messages in a row in ${R.name} with no human between (brake ${R.brake}): wait until a human writes`);
     const named = mentions.map((w) => (R.members.find((m) => m.did === w || m.name === w || view.get(m.did)?.name === w) ?? fail('group_member', `${JSON.stringify(w)} is not in ${R.name}`)).did);
     const all = [...new Set([...named, ...mentionsIn(t, R, view)])];
-    const body = { v: GROUP_V, typ: 'msg', gid: R.gid, mid: newMid(), iat: now, from: mine.current, text: t, ...(re !== undefined && { re }), ...(all.length > 0 && { mentions: all }), ...(ph && { photo: ph }) };
+    const body = { v: GROUP_V, typ: 'msg', gid: R.gid, mid: newMid(), iat: now, from: mine.current, text: t, ...(re !== undefined && { re }), ...(all.length > 0 && { mentions: all }), ...(ph && { photo: ph }), ...(vo && { voice: vo }) };
     g.seen[body.mid] = now;
     g.run = self.role === 'human' ? 0 : g.run + 1;
-    push(g.history, { mid: body.mid, ...(re !== undefined && { re }), from: mine.original, name: self.name, role: self.role, content: t, ...(all.length > 0 && { mentions: all }), ...(ph && { photo: ph }), iat: now, received: now, mine: true }, HISTORY_MAX);
+    push(g.history, { mid: body.mid, ...(re !== undefined && { re }), from: mine.original, name: self.name, role: self.role, content: t, ...(all.length > 0 && { mentions: all }), ...(ph && { photo: ph }), ...(vo && { voice: vo }), iat: now, received: now, mine: true }, HISTORY_MAX);
     return { R, body, frozen: g.status === 'frozen' };
   }, platformOf(carrier));
   const c = signed(mine, body), direct = [], fwd = [];
@@ -524,7 +540,7 @@ function onMessage(s, m, ctx) {
   const item = {
     label: GROUP_LABEL, group: { gid: R.gid, name: R.name }, mid: b.mid, ...(b.re !== undefined && { re: b.re }), from: sender.did, current_did: b.from,
     name: k?.name ?? sender.name, role: sender.role, tier: k?.tier === 'quiet' ? 'quiet' : k?.tier === 'own' ? 'own' : 'friend', operator, ...(!operator && { note: NOT_OPERATOR }),
-    contact: Boolean(k), content: b.text, ...(b.mentions && { mentions: b.mentions }), ...(b.photo && { photo: b.photo }), mentioned: (b.mentions ?? []).includes(mine.original),
+    contact: Boolean(k), content: b.text, ...(b.mentions && { mentions: b.mentions }), ...(b.photo && { photo: b.photo }), ...(b.voice && { voice: b.voice }), mentioned: (b.mentions ?? []).includes(mine.original),
     foreign: foreignOf(R.creator, mine, view), ...(via && { via }), iat: b.iat, received: m.received ?? now,
   };
   if (g.status === 'pending') { push(g.held, item, HELD_MAX); return; }

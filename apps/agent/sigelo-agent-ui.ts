@@ -65,6 +65,8 @@ const STATIC: Record<string, [string, string]> = {
   '/qr.mjs': ['contact:qr.mjs', 'text/javascript'], '/qr-decode.mjs': ['contact:qr-decode.mjs', 'text/javascript'],
   // The words password's crypto (WebCrypto only), for Me → Security in the GTK phone app's page (design/apps-seed.md §8).
   '/words-lock.mjs': ['contact:words-lock.mjs', 'text/javascript'],
+  // Voice messages (design/transfer.md "Voice"): the page's recorder and the checks it imports.
+  '/voice-web.mjs': ['contact:voice-web.mjs', 'text/javascript'], '/voice.mjs': ['contact:voice.mjs', 'text/javascript'],
   // The package's own package.json: About reads its version (a release bump reaches every form).
   '/package.json': ['pkg:package.json', 'application/json'],
 };
@@ -92,8 +94,9 @@ export function uiHolder(identity: string): number | null {
 }
 export const busy = (identity: string, pid: number, what: string): string => busyText(identity, { pid, kind: 'ui' }, what);
 /** The lock for a page (kind ui) or a watcher; refused while either runs on the file. → its release. */
-export function takeLock(identity: string, kind: 'ui' | 'watch' = 'ui'): () => void {
-  const f = lockPath(identity), mine = kind === 'ui' ? String(process.pid) : `${process.pid} watch`;
+// spool: a watcher's --spool directory, kept in the lock so inbox beside it reads what it spooled (sigelo-agent-contact.ts takeSpool).
+export function takeLock(identity: string, kind: 'ui' | 'watch' = 'ui', spool: string | null = null): () => void {
+  const f = lockPath(identity), mine = kind === 'ui' ? String(process.pid) : `${process.pid} watch${spool !== null && !/[\r\n]/.test(spool) ? ` ${spool}` : ''}`;
   for (let i = 0; i < 3; i++) {
     try {
       const fd = openSync(f, 'wx', 0o600);
@@ -157,7 +160,7 @@ interface PageLib {
       readPicture(name: string): Uint8Array | null; writePicture(name: string, bytes: Uint8Array | null): void };
     hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string; restored?: unknown };
       agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean;
-      transfers: { lib: unknown; identity: string; make(carrier: unknown, onEvent: (e: unknown) => void, o: { compared(did: string): boolean }): unknown };
+      transfers: { lib: unknown; identity: string; make(carrier: unknown, onEvent: (e: unknown) => void, o: { compared(did: string): boolean }): unknown; rec?: unknown };
       controls: { pending(): { name: string; scope: string; words: string | null }[]; confirm(name: string, match: boolean): Promise<boolean> };
       keeper: { read(): Promise<Keeper | null>; root(k: Keeper): Promise<{ K: Uint8Array; recovery: string }>; update(fn: (k: Keeper) => void): Promise<void> } };
   }): {
@@ -254,7 +257,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
   // The routes over the carrier, shared with the self-contained app (apps/contact/page.mjs, apps/web/router.mjs).
   const P = await contactModule<PageLib>('page');
   // Transfers (TRANSFER.md): the page owns the session, so its engine moves the files (apps/contact/page.mjs hooks.transfers).
-  const TX = await contactModule<{ Engine: new (o: object) => unknown }>('transfer-node');
+  const TX = await contactModule<{ Engine: new (o: object) => unknown; voiceFiles(identity: string): unknown }>('transfer-node');
   // Groups (GROUPS.md): the page handles them at each drain (apps/contact/page.mjs groupRound); the verbs beside it refuse busy.
   const G = await contactModule<GroupLib>('group');
   const linksFile = L.linksPath(path);
@@ -314,7 +317,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
         return r;
       },
       defer: (f) => { setImmediate(f); },
-      transfers: { lib: TX, identity: path, make: (carrier, onEvent, o) => new TX.Engine({ carrier, identity: path, onEvent, compared: o.compared }) },
+      transfers: { lib: TX, identity: path, make: (carrier, onEvent, o) => new TX.Engine({ carrier, identity: path, onEvent, compared: o.compared }), rec: TX.voiceFiles(path) },
       hidden: (x) => relay?.hidden(x) ?? false,
       // The Controls card (GET /api/controls, POST /api/controls/confirm): relay controls paired, their
       // four words not confirmed; the same effect as the terminal's y/N (relayTerminal).

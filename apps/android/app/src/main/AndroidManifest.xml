@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- sigelo for Android (design/apps.md §8). minSdk 28 and targetSdk 35 are in app/build.gradle.
      Permissions: the network (the relay, a computer on the LAN), the camera (asked at the first scan
-     or the first photo), notifications (asked when the page asks, Android 13+; a name only, never a
+     or the first photo), the microphone (asked at the first voice message), notifications (asked when the page asks, Android 13+; a name only, never a
      message), and on Android 9 only the shared storage, for a received file to land in Downloads
      (asked at the first; later versions write there through MediaStore with no permission). One
      provider, not exported: the photo file a camera app writes (PhotoProvider). No backup of anything:
@@ -11,10 +11,17 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- Stay connected (StayConnected): a foreground service of type specialUse while minimised; the battery exemption
+         asked once, when the user turns the switch on or taps its row in Settings. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- Android 11+ package visibility: without it resolveActivity finds no camera app even when one is there. -->
     <queries>
@@ -49,5 +56,16 @@
             android:authorities="io.sigelo.app.photos"
             android:exported="false"
             android:grantUriPermissions="true" />
+
+        <!-- Stay connected: keeps this process (the page and its relay connection) alive while minimised; ends with the task. -->
+        <service
+            android:name=".StayConnected"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the end-to-end messaging connection open while the app is minimised, so messages arrive and calls can ring." />
+        </service>
     </application>
 </manifest>

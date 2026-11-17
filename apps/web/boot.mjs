@@ -12,7 +12,7 @@
 //                           mqtt, indexedDB?, storage (localStorage), session (sessionStorage), reload(), seal?, download? (a tab's
 //                           save of a file: (name, bytes) → name; by default an <a download>) }
 //   app.local               what ui.js reads as globalThis.sigeloLocal: { call, onChange, mode, share, unlock, secure, profiles, computers, words,
-//                           lock, notify, onOpen, reload, bars, powEngine }
+//                           lock, notify, openSettings, onOpen, reload, bars, powEngine }
 //   app.ready               → the backend (rejects while there is none: the first run, the connect view)
 //
 // local.profiles (ui.js: the Profiles sheet, Settings → Profiles): list() → { active, limit, profiles }; use(id) the switch: the lock
@@ -39,9 +39,12 @@
 // return after `after` minutes away; off, the page's own asks (the 25 words, a switch, a payment above the limit) still ask.
 // local.notify (the Android app only; else undefined): notify({ tag, title, text }) a system notification shown as given (the page
 // gives a name and a generic line, never a message's text; tag chat:… | group:… | pay:…), notify({ tag, cancel: true }) removes it,
-// notify({ ask: true }) → { granted } asks the permission. local.onOpen(fn): fn(tag) when one of them is tapped (a start by the tap:
+// notify({ ask: true }) → { granted, blocked } asks the permission (blocked: Android asks no more: openSettings() instead). local.onOpen(fn): fn(tag) when one of them is tapped (a start by the tap:
 // once the bridge is connected); without the shell nothing.
 // local.reload() (ui.js Settings → About, "Reload the app"): the shell loads the page again from its start; a tab, env.reload().
+// local.stay (the Android app only; else undefined): Settings → Stay connected, the shell's switch for the phone (not per profile):
+// get() → { on, exempt, asked, notify, notifyAsked, notifyBlocked }, set({ on }), battery(yes), notifications(yes) (platform-android.mjs stay).
+// The shell's nudge ({ev:"nudge"}: its alarm, the end of Doze) reaches the running carrier's wake().
 // local.bars (the Android app only; else undefined): bars("#rrggbb") the system bars in the page's background (no action bar).
 // local.powEngine() (ui.js Settings → About): the proof of work's engine, 'wasm' | 'js' (both in a Worker) | null (none here).
 import { did as didOf, parseBytes } from 'sigelo';
@@ -73,6 +76,8 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
   const rawP = shell ? connectBridge({ shell, ...(target && { target }) }) : Promise.resolve(null);
   rawP.catch(() => {});
   const shellOf = async () => raw ?? (await rawP);
+  // Stay connected's nudge: the running carrier reconnects, with its backoff, at each relay that is down (nothing else).
+  rawP.then((r) => r?.onEvent(() => { try { router?.carrier?.wake?.(); } catch {} }, 'nudge'), () => {});
 
   /** p1 before profiles: an identity sealed in `sigelo` → words; the shell's form remote → remote; else nothing yet. */
   async function migrate() {
@@ -133,7 +138,9 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     const identity = parseBytes(id);
     own = platform;
     try { ownDid = didOf(identity.genesis); } catch {}
-    router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' }, seat: seatOf(platform, () => identity), keeper: keeperOf(platform),
+    // The name told to a new contact once paired (carrier.mjs "Names"): this profile's, unless it is still the default "Profile N".
+    const selfName = () => { const n = reg.list().find((x) => x.id === prof.id)?.name ?? null; return n && !/^Profile \d+$/.test(n) ? n : null; };
+    router = makeRouter({ platform, identity: () => identity, mode: settings.mode ?? { kind: 'safe' }, seat: seatOf(platform, () => identity), keeper: keeperOf(platform), options: { selfName },
       words: { guard: (password) => guard(platform, password) } });
     await router.start();
     globalThis.addEventListener?.('pagehide', () => { void router.stop(); });
@@ -298,6 +305,8 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     lock: shell ? Object.freeze({ kind: 'screen', get: async () => (await shellOf()).lockGet(), set: async (o) => (await shellOf()).lockSet(o ?? {}) }) : undefined,
     // System notifications (the sender's or group's name only); a page has none.
     notify: shell ? async (o) => (await shellOf()).notify(o ?? {}) : undefined,
+    // This app's page in the system settings: a permission Android no longer asks for (the Android app only).
+    openSettings: shell ? async () => (await shellOf()).openSettings() : undefined,
     // fn(tag) when one of our notifications is tapped.
     onOpen(fn) {
       if (!shell || typeof fn !== 'function') return;
@@ -307,6 +316,9 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     async reload() { if (shell) await (await shellOf()).reload(); else reload?.(); },
     // Settings → About's "Proof of work": 'wasm' | 'js' (in a Worker) | null (no search here); undefined: no platform here (a computer's page).
     async powEngine() { const f = own?.pow?.engine; return typeof f === 'function' ? f() : undefined; },
+    // Stay connected (Settings): the shell's switch and its two asks; a page has none.
+    stay: shell ? Object.freeze({ get: async () => (await shellOf()).stay(), set: async ({ on } = {}) => (await shellOf()).stay({ on }),
+      battery: async (yes) => (await shellOf()).stay({ battery: yes === true }), notifications: async (yes) => (await shellOf()).stay({ notifications: yes === true }) }) : undefined,
     // The system bars in the page's background ("#rrggbb", ui.js at each change of the look); a page has none.
     bars: shell ? async (colour) => (await shellOf()).bars(colour) : undefined,
     // FLAG_SECURE while the kept words are on the screen (ui.js Settings → Backup and recovery → Show my 25 words).

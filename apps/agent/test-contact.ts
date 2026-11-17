@@ -175,6 +175,12 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   const fb = cli('inbox'), fj = JSON.parse(fb.stdout || '{}') as { messages?: { type?: string; path?: string }[] };
   ok('inbox with a file: the item on stdout, "📎 name size → path" on stderr', fb.status === 0 && fj.messages?.[0]?.type === 'file' && fj.messages[0].path === fileItem.path
     && fb.stderr.includes(`sigelo-agent: 📎 report.pdf 1.5 KiB → ${fileItem.path} (from peer)`), fb.stderr);
+  // A voice message (sigelo-voice/0, from the phone app), held: its fields checked (voice) and one line, [voice 0:42 name].
+  const voice = { name: 'voice-20261117-142301.webm', size: 21000, type: 'audio/webm', sha256: 'ab'.repeat(32), duration_s: 42 };
+  writeFileSync(heldFile, JSON.stringify({ messages: [{ from: peer.did, name: 'peer', label: 'sigelo-voice/0', content: voice }], events: [], dropped: {} }), { mode: 0o600 });
+  const vb = cli('inbox'), vj = JSON.parse(vb.stdout || '{}') as { messages?: { text?: string; voice?: { duration_s: number } }[] };
+  ok('inbox with a voice message: [voice 0:42 name] (text) and its fields (voice) on stdout, the line on stderr', vb.status === 0 && vj.messages?.[0]?.text === '[voice 0:42 voice-20261117-142301.webm]'
+    && vj.messages[0].voice?.duration_s === 42 && vb.stderr.includes('sigelo-agent: [voice 0:42 voice-20261117-142301.webm] from peer'), vb.stderr);
   const fg = cli('forget', peer.did), fr = JSON.parse(fg.stdout || '{}') as { revoked?: boolean; released?: boolean };
   ok('forget, unreachable: revoked here (JSON on stdout), exit 1 saying the mailboxes go later', fg.status === 1 && fr.revoked === true && fg.stderr.includes('offline'), fg.stderr);
   // An identity file that does not parse: named, and never "run init" (that makes another identity).

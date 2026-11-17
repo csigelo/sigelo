@@ -17,7 +17,7 @@ import { agentIdentitySeed, identitySeed, keeperRoot, recoveryCommitment } from 
 import { makeInvite } from './invite.mjs';
 import {
   DAY, ENROL_V, LABEL_ENROL, LABEL_IDENTITY, OPERATOR_CTX, OPERATOR_DAYS, PENDING_TTL, PINNED_CREATED, TYP_IDENTITY, TYP_REQUEST, accept as joinEnrol, checkIdentity, complete,
-  enrolKey, enrolPath, identityMessage, IDENTITY_PATH, issue, matches, operatorAttestation, operatorChain, operatorIdentity, operatorLabel, pending, proofOf, request, workerChain, workerGenesis, workerIdentity,
+  enrolKey, enrolPath, identityMessage, IDENTITY_PATH, issue, matches, operatorAttestation, operatorChain, operatorIdentity, operatorLabel, pending, proofOf, readStatus, request, statusMessage, workerChain, workerGenesis, workerIdentity,
 } from './enrol.mjs';
 import { fingerprint } from './short.mjs';
 
@@ -183,6 +183,10 @@ try {
   ok(mc.placed.length === 1 && mc.placed[0].did === w0.did && mc.placed[0].status === 'connected' && mc.refused.length === 0, `the machine placed worker 0 and paired as it (${JSON.stringify(mc.placed)} ${JSON.stringify(mc.refused)})`);
   ok(op.delivered.length === 1 && op.delivered[0].temp === vps.did && op.placed.length === 1 && op.placed[0].did === w0.did && op.placed[0].tier === 'own' && op.refused.length === 0,
     `the operator sent worker 0 once to the temporary DID, then filed the worker own (${JSON.stringify(op.placed)} ${JSON.stringify(op.refused)})`);
+  // No manual step (0.1.16: the agent was set as one by hand): the contacts list shows the worker ours, tier own (works for
+  // me), and the temporary identity is gone from it.
+  const cw = co.contacts().contacts.find((x) => x.did === w0.original && !x.revoked);
+  ok(cw?.ours === true && cw.tier === 'own' && !co.contacts().contacts.some((x) => x.did === vps.did && !x.revoked), `the operator's contacts: the worker ours, tier own; no temporary contact left (${JSON.stringify(cw && { ours: cw.ours, tier: cw.tier })})`);
   ok(op.placed[0].verified === true && op.placed[0].words === fingerprint(pairWith0(owner, w0.did)) && op.held.length === 0,
     'own enrolment: the worker that paired is the DID derived here (verified), its four words given only to show; no words gate asked');
   ok(workers.vps?.operatorName === 'operator', 'the worker files its operator as "operator" by default');
@@ -214,6 +218,15 @@ try {
   await eve.carrier.send(owner.did, request(enrolKey(seed('no such code')), pairWith(eve, owner)), { label: LABEL_ENROL });
   const bd = await bad;
   ok(pa.status === 'connected' && bd.delivered.length === 0 && bd.refused.some((x) => x.check === 'enrol_proof'), `a plain accept, then a request no enrolment matches: enrol_proof, nothing sent (${JSON.stringify(bd.refused)})`);
+  // The requester is told why (a status, label sigelo-enrol/1: no key, no DID), once per reason.
+  const toldE = (await eve.carrier.inbox({ wait: 3 })).messages.filter((x) => x.label === LABEL_ENROL);
+  ok(bd.told.length === 1 && toldE.length === 1 && toldE[0].content.typ === 'status' && toldE[0].content.check === 'enrol_proof' && /no enrolment code/.test(toldE[0].content.detail)
+    && Object.keys(toldE[0].content).sort().join() === 'check,detail,typ,v' && !/did:sigelo/.test(toldE[0].content.detail), `and told why: {v, typ: status, check: enrol_proof, detail}, no key, no DID (${JSON.stringify(toldE.map((x) => x.content))})`);
+  const bad2 = complete({ carrier: co, file: fileOf(owner), keeper, wait: 30, until: (o) => o.refused.length > 0 });
+  await eve.carrier.send(owner.did, request(enrolKey(seed('no such code')), pairWith(eve, owner)), { label: LABEL_ENROL });
+  ok((await bad2).told.length === 0, 'the same request again: refused, not told twice');
+  ok(readStatus(statusMessage('enrol_x', 'a\u202eb\nc'))?.detail === 'a b c' && readStatus({ ...statusMessage('Bad!', 'x') }) === null && readStatus(request(enrolKey(seed('x')), '0'.repeat(32))) === null,
+    'readStatus: control and bidi characters blanked; a bad check or a request is no status');
 
   // A worker identity from a DID the machine did not enrol with: not taken, left in the inbox.
   const mi = await mallory.carrier.invite({ name: 'vps2', short: true });
@@ -296,6 +309,10 @@ try {
   const h1 = await complete({ carrier: feed(unasked.held), file: fileOf(owner), keeper, confirm: gate });
   ok(h1.held.length === 1 && h1.delivered.length === 0 && asked?.ask === true && asked.words === fingerprint(pairWith0(owner, hd.did)) && asked.i === 5,
     `confirm() null (not yet): held again, nothing sent; it was asked with ask: true and the temporary pairing's words (${JSON.stringify(asked)})`);
+  const hs = await complete({ carrier: hd.carrier, file: fileOf(hd), temp: 'held-temp', place: placer('held', 1), wait: 10, until: (o) => o.status.length > 0 });
+  const hk = await complete({ carrier: hd.carrier, file: fileOf(hd), temp: 'held-temp', place: placer('held', 1) });
+  ok(unasked.told.map((x) => x.check).join() === 'enrol_words' && h1.told.length === 0 && hs.status.at(-1)?.check === 'enrol_words' && /four words/.test(hs.status.at(-1).detail) && hk.status[0]?.check === 'enrol_words',
+    `held: the machine is told once (enrol_words), and keeps it for its next finish (${JSON.stringify([unasked.told, hs.status, hk.status])})`);
   answer = true;
   const h2 = await complete({ carrier: feed(h1.held), file: fileOf(owner), keeper, confirm: gate });
   const h3 = await complete({ carrier: hd.carrier, file: fileOf(hd), temp: 'held-temp', place: placer('held', 1), wait: 10, until: (o) => o.placed.length > 0 });
@@ -345,6 +362,7 @@ try {
   ok(r1.sent.length === 1 && r2.refused.some((x) => x.check === 'no_reader' && x.needs_send === inv8.id) && Number.isSafeInteger(marked) && r3.delivered.length === 0
     && r4.delivered[0]?.did === w7.did && pending(fileOf(owner), NOW(), (x) => x.issued[inv8.id]?.needs_send) === undefined && r5.placed[0]?.did === w7.did && r6.placed[0]?.did === w7.did,
     `the identity refused (no_reader): kept needs_send, not again within 60 s, sent again at the operator's next round after, placed, filed (${JSON.stringify([r2.refused, r4.refused, r5.refused])})`);
+  ok(r2.told[0]?.check === 'no_reader' && r5.status.some((x) => x.check === 'no_reader' && /tries again within a minute/.test(x.detail) && !/did:sigelo/.test(x.detail)), `and the machine was told why the key had not come (${JSON.stringify(r5.status)})`);
   for (const a of [ls, rf]) await a.carrier.stop();
   for (const a of [alice, real, pl, hd]) await a.carrier.stop();
   for (const a of [owner, vps, eve, mallory, vps2, lz, ...Object.values(workers)]) await a.carrier.stop();

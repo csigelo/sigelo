@@ -168,7 +168,7 @@ await page.close();
 {
   const all = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/-]+)`/gm)].map((m) => m[1]!);
   // The device routes (D4) are documented too, and in no scope: deviceRoute refuses them before any scope.
-  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && !['POST /api/transfers/send', 'POST /api/transfers/pick', 'POST /api/transfers/open'].includes(x));
+  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && !['POST /api/transfers/send', 'POST /api/transfers/pick', 'POST /api/transfers/open', 'POST /api/transfers/voice-part', 'POST /api/transfers/mic'].includes(x));
   const [r, c, a] = [rm.SCOPES.read, rm.SCOPES.chat, rm.SCOPES.all];
   ok('remote: every UI-API.md route but the device ones is in scope all; read ⊂ chat ⊂ all', routes.length >= 17 && routes.every((x) => a.has(x)) && a.size === routes.length
     && [...r].every((x) => c.has(x)) && [...c].every((x) => a.has(x)), JSON.stringify(routes.filter((x) => !a.has(x))));
@@ -373,6 +373,8 @@ else {
     const ec3 = await call('POST', '/api/agents/enrol-code', { name: 'vps3', confirm_words: true }), ew = await call('POST', '/api/agents/enrol-words', { id: ec3.body.id, match: false }), pt = await call('POST', '/api/pow/try', {});
     ok('remote e2e agents: the words answer (false: the code dropped, its key never sent) and Try now, sealed → 200', ec3.status === 200 && ew.status === 200 && ew.body.state === 'failed' && ew.body.check === 'device_words'
       && pt.status === 200 && Array.isArray(pt.body.tried), JSON.stringify([ec3, ew, pt]).slice(0, 600));
+    const ec4 = await call('POST', '/api/agents/enrol-code', { name: 'vps4' }), cn = await call('POST', '/api/agents/cancel', { id: ec4.body.id });
+    ok('remote e2e agents: Cancel enrolling, sealed → 200, cancelled', ec4.status === 200 && cn.status === 200 && cn.body.cancelled === true, JSON.stringify([ec4, cn]).slice(0, 600));
     // Transfers: the list and the settings answer 200; the verbs on a transfer or a contact answer by the route itself (none here: 404).
     const tl = await call('GET', '/api/transfers'), ts = await call('GET', '/api/transfers/settings'), tp = await call('POST', '/api/transfers/settings', { prefer: 'private' });
     const BY_ID = ['accept', 'decline', 'cancel', 'resume', 'forget'].map((v) => `POST /api/transfers/${v}`);

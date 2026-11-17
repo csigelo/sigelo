@@ -5,6 +5,28 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **android:** Stay connected (Settings, on by default): a foreground service keeps the app and its relay connection alive while minimised, with a quiet notification; permissions asked at first use, re-askable.
+- **android:** permissions are asked at the moment of need, never at a start: notifications from a card that says why; refused, a tap asks again; once Android asks no more, the tap opens sigelo's settings page.
+- **agent:** `service install | status | remove`: the listener as a service (systemd user unit, macOS LaunchAgent), so an enrolled agent always gets its owner's messages; `inbox` and the MCP read its spool.
+- **app:** reply to one message in a chat or a group: swipe it (or double-click), its quote above the box, × drops it; a reply shows its quote, a tap goes to it. **agent:** `send --re`, `reply --re`; **mcp:** `re`.
+- **app:** a state tick no longer redraws a field under your fingers (the keyboard stayed open); a redraw gives a field its text and caret back; an open section (Revoked, the words) stays open.
+- **app:** an enrolment survives the app going away: its code, four words, answer and held request are kept with it; back after a restart or offline, the words show (on every tab) and the request is answered.
+- **app:** a new contact takes the name the other side tells once paired (`name_from: "them"`, ≤ 40 characters, sanitised), not "contact-…"; a name you gave stays; a group's roster follows. **agent:** `SIGELO_NAME`.
+- **app:** back to the front, "Not connected" no longer flashes: for 5 s after a start or a resume a failure to connect is not said and a sync goes at once; a refusal by the relay shows at once.
+- **app:** https:// links in a message are tappable: they open in the system's browser (a new window in a tab); a tap on one no longer opens "who signed it". Nothing else in a message is markup.
+- **app:** a photo's preview shows on the phone (a blob: URL: the page's CSP never allowed data:); a tap opens the full size once landed, else the preview large with what it waits for.
+- **app:** the composer keeps its unsent text per profile and chat across screens and restarts (this device only); sent, it goes.
+- **mcp:** no identity: an agent meant to work under its operator is told to call `sigelo_enrol` with the operator's code; `sigelo_init` only for an identity of its own.
+- **mcp:** enrolment in two calls under a 120 s cap: `sigelo_enrol` returns within seconds and pairs in the background, `sigelo_enrol_finish` again while pending; `wait` keeps the one-call way.
+- **app:** every enrolling state has Cancel enrolling (`POST /api/agents/cancel`): the pending entry dropped, the temporary contact forgotten, the code withdrawn; Revoke drops one from before a restart too.
+- **app:** an enrolment request refused or held is answered with why (`sigelo-enrol/1` `{typ: "status", check, detail}`, no key); `enrol --finish` prints it in one line and the Enrolling screen shows the same.
+- **agent:** `inbox --wait` waits the whole time asked: a session the relay ends early is logged in again at 1 s, 2 s, 4 s … 60 s (kept across runs), and stderr says the relay's reason; no more 30 logins a minute.
+- **relay:** a session the relay ends itself gets a notice `{code, detail}` first: `session_unproven` (no proof of work, past 60 s), `session_seat` (its seat went to a proven identity), `session_closed`.
+- **relay:** the rate refusals name what counts: logins (or challenges) from every device behind this address, retries included.
+- **app:** voice messages: Voice in the "+" records at once (up to 5 min, Send or Cancel); sent as a photo's full file with its length and waveform (`sigelo-voice/0`); the bubble plays it once landed.
+- **android:** the microphone is asked at the first tap on Voice, one dialog (the WebView's own ask granted by the app); refused, the next tap asks again; blocked, it opens the app's settings.
+- **app:** the CLI's `inbox` and the MCP's `sigelo_inbox` show a voice message as `[voice 0:42 name]` with its fields; the computer page and the GTK app record and play voice messages too.
+
 ## v0.1.17 — 2026-11-15
 
 - **This release:** replaces 0.1.16, which could not hold a connection for a new identity; 0.1.17 is the version to install.

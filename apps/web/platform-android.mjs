@@ -51,7 +51,9 @@
 //                                                                 chat:… | group:… | pay:… (TAG) names it and comes back in "open";
 //                                                                 refused "notify" (a bad tag, title or text) or "notify_permission"
 //   → {op:"notify", id, tag, cancel:true}          ← {id}         that tag's notification removed
-//   → {op:"notify", id, ask:true}                  ← {id, granted} POST_NOTIFICATIONS asked when not granted (Android 13+)
+//   → {op:"notify", id, ask:true}                  ← {id, granted, blocked} POST_NOTIFICATIONS asked when not granted (Android 13+);
+//                                                                 blocked: Android no longer asks (open-settings instead)
+//   → {op:"open-settings", id}                     ← {id}         this app's page in the system settings
 //   → {op:"big-pick", id, profile, images?} | {op:"big-photo", id, profile, keepLocation}  ← {id, doc, name, size, mtime, url} | {id, cancelled:true}
 //                                                 the system's picker (the read grant kept) or camera (the location tags removed unless kept;
 //                                                 CAMERA asked at the first); doc: 32 hex, this profile's; refused no_camera (no app
@@ -63,9 +65,21 @@
 //                                                 permission asked at the first); refused "land" with why (no permission, no room)
 //   → {op:"big-open", id, uri, name}              ← {id}         a file that landed, in the system's viewer
 //   → {op:"big-awake", id, on}                    ← {id}         FLAG_KEEP_SCREEN_ON while a transfer moves
+//   → {op:"stay", id, on?, battery?, notifications?} ← {id, on, exempt, asked, notify, notifyAsked, notifyBlocked}  Stay connected
+//                                                 (StayConnected.java): on kept for the phone (default true; not per profile), the foreground
+//                                                 service follows; battery true: the system's prompt, each tap; notifications true: the system's
+//                                                 prompt while Android still shows it, else (notifyBlocked) the app's notification settings;
+//                                                 false only remembers the page's why was declined; exempt: battery optimisation off for the
+//                                                 app; notify: notifications allowed. Anything but booleans refused "stay"
+//   → {op:"big-keep", id, profile, part, name}    ← as big-pick   a voice message's recording (written with big-write) kept as a file to send
+//   → {op:"big-url", id, profile, uri}            ← as big-pick   a file that landed, as a doc the page fetches whole (a voice message played)
+//   → {op:"mic", id, profile}                     ← {id, granted:true}  RECORD_AUDIO asked at the first; refused "mic_permission"
+//                                                 (a refusal remembered: no second dialog, refused at once until allowed in Settings)
+//   → {op:"app-settings", id}                     ← {id}         the app's page in the system settings (to allow the microphone)
 //   any ← {id, error:{check, message}}
 // Events, the shell's own (no id; never an answer): ← {ev:"open", tag} one of our notifications tapped (the app running: at
-// once; started by the tap: kept by the shell until the page's port is open, then posted once). Kept here until a listener
+// once; started by the tap: kept by the shell until the page's port is open, then posted once); ← {ev:"nudge"} Stay
+// connected's alarm (at most every 15 minutes) or the end of Doze: the carrier reconnects, with its backoff, when down. Kept here until a listener
 // is set (bridge.onEvent).
 // https: https:// to any host; http:// only to a private IPv4 address (a computer's `ui --remote`
 // on the LAN, sealed in the page). tls: certificate and host name checked by the system's trust
@@ -77,8 +91,9 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'bars', 'reload', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify',
-  'big-pick', 'big-photo', 'big-hash', 'big-stat', 'big-write', 'big-flush', 'big-digest', 'big-drop', 'big-free', 'big-land', 'big-open', 'big-awake']);
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'bars', 'reload', 'open-settings', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify', 'stay',
+  'big-pick', 'big-photo', 'big-hash', 'big-stat', 'big-write', 'big-flush', 'big-digest', 'big-drop', 'big-free', 'big-land', 'big-open', 'big-awake',
+  'big-keep', 'big-url', 'mic', 'app-settings']);
 /** A notification's tag (SigeloBridge.TAG): what it is about, given back when it is tapped. */
 export const TAG = /^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/;
 /** The app lock's choices of minutes away (SigeloBridge.LOCK_AFTER). */
@@ -117,7 +132,12 @@ function makeBridge(info, port) {
     try { m = JSON.parse(e.data); } catch { return; }
     if (typeof m?.s === 'number') { streams.get(m.s)?.got(m); return; }
     // The shell's own events go to their listeners (kept until there is one), never to a request waiting.
-    if (typeof m?.ev === 'string') { if (listeners.size) for (const f of listeners) { try { f(m); } catch {} } else if (early.length < 16) early.push(m); return; }
+    // A listener may take one kind only (onEvent(fn, ev)); a nudge is never kept (it says "now").
+    if (typeof m?.ev === 'string') {
+      const to = [...listeners].filter((l) => l.ev === undefined || l.ev === m.ev);
+      if (to.length) for (const l of to) { try { l.fn(m); } catch {} } else if (m.ev !== 'nudge' && early.length < 16) early.push(m);
+      return;
+    }
     const w = waiting.get(m?.id);
     if (!w) return;
     waiting.delete(m.id);
@@ -191,16 +211,30 @@ function makeBridge(info, port) {
      * asked ({ ask: true } → { granted }). Checked here before the shell sees it: a bad tag, title or text refused "notify".
      */
     async notify({ tag, title, text, cancel = false, ask = false } = {}) {
-      if (ask === true) return { granted: (await request('notify', { ask: true })).granted === true };
+      if (ask === true) { const r = await request('notify', { ask: true }); return { granted: r.granted === true, blocked: r.blocked === true }; }
       if (cancel === true) { await request('notify', { tag: tagOf(tag), cancel: true }); return {}; }
       await request('notify', { tag: tagOf(tag), title: line(title, 'title'), text: line(text, 'text') });
       return {};
     },
-    /** fn(event) for the shell's events ({ ev: "open", tag }); those that came before the first listener, at once. → stop(). */
-    onEvent(fn) {
-      listeners.add(fn);
-      while (early.length) { const m = early.shift(); try { fn(m); } catch {} }
-      return () => listeners.delete(fn);
+    /**
+     * Stay connected → { on, exempt, asked, notify, notifyAsked, notifyBlocked }: { on } the switch; { battery } / { notifications }:
+     * true asks the system (notifyBlocked: Android no longer shows the prompt, its settings page opens), false remembers a declined why.
+     * Non-booleans refused "stay".
+     */
+    async stay(o = {}) {
+      const x = {};
+      for (const k of ['on', 'battery', 'notifications']) if (o[k] !== undefined) { if (typeof o[k] !== 'boolean') throw new MsgError('stay', `${k}: true or false`); x[k] = o[k]; }
+      const r = await request('stay', x);
+      return { on: r.on === true, exempt: r.exempt === true, asked: r.asked === true, notify: r.notify === true, notifyAsked: r.notifyAsked === true, notifyBlocked: r.notifyBlocked === true };
+    },
+    /** This app's page in the system settings, where a permission Android no longer asks for is switched on. */
+    async openSettings() { await request('open-settings', {}); },
+    /** fn(event) for the shell's events ({ ev: "open", tag }, { ev: "nudge" }), or those of kind ev only; those it takes that came before it, at once. → stop(). */
+    onEvent(fn, ev) {
+      const l = { fn, ev };
+      listeners.add(l);
+      for (const m of early.filter((x) => ev === undefined || x.ev === ev)) { early.splice(early.indexOf(m), 1); try { fn(m); } catch {} }
+      return () => listeners.delete(l);
     },
   });
 }
@@ -243,6 +277,15 @@ export function bigFiles(bridge, { profile = bridge.profile ?? 'p1', fetch: get 
     async land(part, name) { const x = await req('big-land', { part: id(part, 'part'), name: String(name) }); return { uri: String(x.uri), name: String(x.name) }; },
     async open(uri, name) { await req('big-open', { uri: String(uri), name: String(name ?? '') }); },
     async awake(on) { await req('big-awake', { on: on === true }); },
+    // Voice messages (apps/contact/voice-web.mjs): the recording written as a partial (write), kept as a file to send.
+    /** The partial <part> kept as a file under name → { doc, name, size, mtime, url }: sent as a photo is. */
+    async keep(part, name) { return desc(await req('big-keep', { part: id(part, 'part'), name: String(name) })); },
+    /** A file that landed (its content URI) as a doc the page reads → { doc, name, size, mtime, url }. */
+    async url(uri) { return desc(await req('big-url', { uri: String(uri) })); },
+    /** RECORD_AUDIO asked at the first voice message → true; refused mic_permission. */
+    async mic() { return (await req('mic')).granted === true; },
+    /** The app's page in the system settings (a refused permission is allowed there). */
+    async appSettings() { await bridge.request('app-settings', {}); },
   });
 }
 

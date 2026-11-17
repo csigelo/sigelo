@@ -49,7 +49,19 @@
       if (c === null || c === undefined || c === false) continue;
       el.append(c instanceof Node ? c : document.createTextNode(safeText(c)));
     }
+    if (tag === 'details') keepOpen(el);
     return el;
+  }
+  // A <details> keeps the open state the human gave it across redraws (0.1.17: the Revoked section folded itself at
+  // every state tick): keyed by the screen and its summary's words (counts left out), restored when drawn again.
+  const OPENED = new Map();
+  function keepOpen(el) {
+    const sum = (el.childNodes ?? el.kids ?? []).find?.((c) => c.tagName === 'SUMMARY');
+    let view = '';
+    try { view = S.stack.at(-1)?.view ?? ''; } catch {}
+    const key = `${view}|${String(sum?.textContent ?? '').replace(/\(\d+\)|\d+/g, '').trim()}`;
+    if (OPENED.has(key)) el.open = OPENED.get(key);
+    el.addEventListener?.('toggle', () => { OPENED.set(key, el.open === true); });
   }
   /**
    * el's children replaced: lists flattened, strings as escaped text, empties dropped. A screen is drawn
@@ -87,6 +99,7 @@
     gear: [['circle', { cx: 12, cy: 12, r: 3 }], 'M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1'],
     file: ['M6 3h8l4 4v14H6z', 'M14 3v4h4'], image: [['rect', { x: 3, y: 5, width: 18, height: 14, rx: 2 }], ['circle', { cx: 9, cy: 10, r: 1.5 }], 'M21 16l-5-5-8 8'], camera: ['M4 8h3.5l2-3h5l2 3H20v11H4z', ['circle', { cx: 12, cy: 13, r: 3.5 }]], 'arrow-in': ['M12 4v12M6 11l6 6 6-6M5 20h14'], 'arrow-out': ['M12 20V8M6 13l6-6 6 6M5 4h14'],
     finger: ['M12 11v4M8.5 9a4 4 0 017 0v6M6 8.5a7 7 0 0112 0v5M9 13v3a3 3 0 006 0'],
+    mic: [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], 'M5 11a7 7 0 0014 0M12 18v3'], play: ['M8 5l11 7-11 7z'], pause: ['M8 5v14M16 5v14'],
   };
   const SVG = 'http://www.w3.org/2000/svg';
   /** An icon as inline SVG (aria-hidden: the control around it carries the label); null where there is no SVG. */
@@ -169,6 +182,14 @@
     get(k) { try { return globalThis.localStorage?.getItem(`sigelo-ui:${k}`) ?? null; } catch { return null; } },
     set(k, v) { try { if (v === null) globalThis.localStorage?.removeItem(`sigelo-ui:${k}`); else globalThis.localStorage?.setItem(`sigelo-ui:${k}`, v); } catch {} },
   };
+  // "Not connected" waits out a grace window after the start and after each return to the front (0.1.17: Android drops
+  // the socket in the background and the first try on resume fails, "Unable to resolve host", before the network is
+  // up: the card flashed for 1-2 s each time). Inside it a failure to connect (DNS, a socket, a timeout) is not said;
+  // a refusal by the relay (any other check) is said at once, with its reason. After it, the card as before.
+  const GRACE_MS = 5000;
+  let graceUntil = Date.now() + GRACE_MS;
+  const transient = (e) => e === null || e === undefined || /^(connect|timeout)\b|resolve host|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|network/i.test(String(e));
+  const offline = () => { const me = S.snap?.me; return !!me && !me.online && !(Date.now() < graceUntil && transient(me.error)); };
   const relayNow = () => Date.now() / 1000 + (S.snap?.me?.clock_offset ?? 0);
   const left = (exp) => {
     const s = Math.max(0, Math.round(exp - relayNow()));
@@ -480,14 +501,33 @@
    * drawn anew (a row, a radio, a switch) gets it back on its new self, found by what it says: a keyboard or a screen
    * reader keeps its place across the poll.
    */
-  async function refresh() {
+  // A text field being typed in (0.1.17: "the keyboard closes at some text"): a state tick does not redraw a screen
+  // whose redraw replaced a field being typed in before (REPLACES); it is drawn once the field lets go of the focus.
+  // A field that survived a redraw is marked data-keep and never holds one back (the composer, a screen's own inputs).
+  // A redraw that replaces it anyway gives the new field the text and the caret back, and the focus.
+  const REPLACES = new Set();
+  const typing = () => { const a = document.activeElement; return !!a && a !== document.body && app.contains?.(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['radio', 'checkbox', 'button', 'file'].includes(a.type))) && a.getAttribute?.('data-keep') === null && REPLACES.has(S.stack.at(-1)?.view); };
+  let redrawDue = false;
+  globalThis.document?.addEventListener?.('focusout', () => { if (redrawDue) { redrawDue = false; setTimeout(() => { if (!typing()) void refresh(); else redrawDue = true; }, 0); } }, true);
+  async function refresh(tick = false) {
     fillChip();
+    if (tick && typing()) { redrawDue = true; try { fillTabs(); } catch {} return; }
     const was = document.activeElement, k = was && was !== document.body && app.contains?.(was) ? keyOf(was) : null;
+    const text = k && typeof was.value === 'string' ? { value: was.value, start: was.selectionStart ?? null, end: was.selectionEnd ?? null } : null;
     const upd = S.update, kept = keepScroll();
     try { await S.update(); } catch (e) { S.note = e; }
     if (S.update === upd) kept();   // the same screen redrawn: where it was; a screen changed meanwhile has its own
     try { fillTabs(); S.sheet?.update?.(); } catch {}
-    if (k && !app.contains?.(was)) [...(app.querySelectorAll?.('button, input, select, textarea, summary') ?? [])].find((e) => keyOf(e) === k)?.focus?.({ preventScroll: true });
+    if (k && app.contains?.(was) && typeof was.value === 'string') was.setAttribute?.('data-keep', '');
+    if (k && !app.contains?.(was)) {
+      if (text && S.update === upd) REPLACES.add(S.stack.at(-1)?.view);
+      const el = [...(app.querySelectorAll?.('button, input, select, textarea, summary') ?? [])].find((e) => keyOf(e) === k);
+      if (el && text && S.update === upd && el.tagName !== 'SELECT' && el.type !== 'radio' && el.type !== 'checkbox') {
+        el.value = text.value;
+        try { if (text.start !== null) el.setSelectionRange?.(text.start, text.end ?? text.start); } catch {}
+      }
+      el?.focus?.({ preventScroll: true });
+    }
   }
   const keyOf = (el) => [el.tagName, el.getAttribute?.('aria-label') ?? '', el.type === 'radio' ? `${el.name}=${el.value}` : '', el.labels?.[0]?.textContent ?? '', String(el.textContent ?? '').slice(0, 80)].join('|');
   /** A screen on top of this one (its own history entry); a guarded one asks the screen lock first. */
@@ -581,7 +621,7 @@
   }
   function fillChip() {
     if (!S.chip) return;
-    const me = S.snap?.me, online = me?.online, sub = !me ? 'Connecting…' : online ? wordsLine(myWords()) : 'Not connected';
+    const me = S.snap?.me, online = me?.online, sub = !me ? 'Connecting…' : online ? wordsLine(myWords()) : offline() ? 'Not connected' : 'Connecting…';
     S.chip.setAttribute('aria-label', `${profileName()}. Switch profile`);
     put(S.chip, h('span', { class: `dot${!me ? ' off' : online ? '' : ' warn'}` }), h('span', { class: 't' }, h('b', null, profileName()), h('small', null, sub)), icon('down'));
   }
@@ -675,9 +715,13 @@
     if (S.fatal && !S.snap) out.push(h('div', { class: 'card warn' }, inlineError(S.fatal)));
     if (!me) return out;
     // Why, when the page knows (me.error: the last login's failure, kept across a restart); else what happens meanwhile.
-    if (!me.online && !me.pow) out.push(h('div', { class: 'card warn' }, row({ title: 'Not connected', sub: me.error ? String(me.error) : 'Your messages wait here and go when you\'re back online.', subCls: 'wrap', end: tbtn('Retry', () => act(() => backend.call('POST', '/api/sync'))) })));
+    if (offline() && !me.pow) out.push(h('div', { class: 'card warn' }, row({ title: 'Not connected', sub: me.error ? String(me.error) : 'Your messages wait here and go when you\'re back online.', subCls: 'wrap', end: tbtn('Retry', () => act(() => backend.call('POST', '/api/sync'))) })));
     const off = me.clock_offset;
     if (off !== null && off !== undefined && Math.abs(off) > 60) out.push(h('div', { class: 'card warn' }, h('p', null, `Your clock is ${Math.abs(off)} s ${off < 0 ? 'ahead of' : 'behind'} the relay's. Set it right, or codes fail.`)));
+    const nc = notifyCard();
+    if (nc) out.push(nc);
+    // An agent's four words to compare (0.1.17: they waited on the Agents screen alone): on every tab's root.
+    for (const x of S.snap?.enrol_words ?? []) out.push(h('div', { class: 'card warn', 'data-enrol-words': x.id }, row({ title: `${x.name} is waiting for you`, sub: 'Compare the four words to finish enrolling it', subCls: 'wrap', end: tbtn('Compare', () => go('enrol', { id: x.id })) })));
     if (me.pow) {
       const pct = Math.min(95, Math.round((100 * me.pow.elapsed_s) / Math.max(30, 2 * me.pow.expected_s)));
       const bar = h('i'); bar.style.width = `${pct}%`;
@@ -1050,12 +1094,69 @@
     }
     return out;
   }
+  // Reply to one message (0.1.17: "reply to messages"): a swipe to the right on a bubble (or a double click) picks it;
+  // the composer shows it quoted above the box with × to drop it; the reply shows the quote, and a tap on the quote
+  // goes to the message it answers, marked a moment, when it is loaded. Nothing else: no threads, no editing.
+  function replyable(el, pick) {
+    let x0 = null, y0 = null;
+    el.addEventListener('pointerdown', (ev) => { x0 = ev.clientX; y0 = ev.clientY; });
+    el.addEventListener('pointerup', (ev) => { if (x0 !== null && ev.clientX - x0 > 60 && Math.abs((ev.clientY ?? 0) - (y0 ?? 0)) < 40) pick(); x0 = null; });
+    el.addEventListener('dblclick', () => pick());
+    return el;
+  }
+  /** The bar above the composer: the message answered, × drops it. → { el, set(q|null), get() }. */
+  function quoteBar(onChange = () => {}) {
+    const el = h('div', { class: 'quotebar', hidden: true }), Q = { q: null };
+    Q.set = (q) => {
+      Q.q = q; el.hidden = !q;
+      put(el, q ? [h('div', { class: 'quote' }, h('b', null, q.who), q.text), ibtn('x', 'Drop the reply', () => { Q.set(null); onChange(); })] : null);
+    };
+    Q.el = el; Q.get = () => Q.q;
+    return Q;
+  }
+  /** A reply's quote in its bubble: who wrote the message answered and its first line; a tap goes to it. */
+  function quoteIn(who, text, target) {
+    return h('button', { type: 'button', class: 'quote', onclick: (ev) => { ev.stopPropagation?.(); jumpTo(target); } }, h('b', null, who), text ?? 'A message not shown here');
+  }
+  function jumpTo(sel) {
+    const el = sel ? [...(app.querySelectorAll?.('.msg') ?? [])].find((e) => e.getAttribute?.(sel[0]) === sel[1]) : null;
+    if (!el) { toast('That message is not loaded here'); return; }
+    el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    el.classList?.add('hl'); setTimeout(() => el.classList?.remove('hl'), 1600);
+  }
   const atEnd = () => (window.innerHeight ?? 0) + (window.scrollY ?? 0) >= (document.body?.scrollHeight ?? 0) - 80;
   const toEnd = () => window.scrollTo?.(0, document.body?.scrollHeight ?? 0);
-  function composer(placeholder, onSend, lead, top = null) {
-    const text = h('textarea', { rows: 1, placeholder, 'aria-label': 'Message' });
-    // The box grows with what is typed, up to a third of the screen (ui.css), and back after Send.
-    const fit = () => { if (!text.style) return; text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${text.scrollHeight + 2}px`; };
+  // A message's text with its https:// (and http://) addresses tappable (0.1.17: "the link still doesn't work": they were
+  // plain text). Each opens outside the app: a tab's new window; the Android shell and the GTK app send a link elsewhere to
+  // the system's browser. The tap does not reach the bubble (its "who signed it"). Nothing else is markup: text stays text.
+  const LINK_RE = /\bhttps?:\/\/[^\s<>"'`]+/g;
+  function richText(t) {
+    const out = [];
+    let at = 0;
+    for (const m of String(t).matchAll(LINK_RE)) {
+      let u = m[0];
+      const tail = /[.,;:!?)\]}'"»]+$/.exec(u)?.[0] ?? '';
+      if (tail) u = u.slice(0, -tail.length);
+      let ok = false;
+      try { ok = ['https:', 'http:'].includes(new URL(u).protocol); } catch {}
+      if (!ok) continue;
+      if (m.index > at) out.push(String(t).slice(at, m.index));
+      out.push(h('a', { class: 'link', href: u, target: '_blank', rel: 'noopener noreferrer', onclick: (ev) => ev.stopPropagation?.() }, u));
+      at = m.index + u.length;
+    }
+    if (at < String(t).length) out.push(String(t).slice(at));
+    return out;
+  }
+  // A chat's unsent text, kept per profile and chat on this device (prefs: localStorage) across screens and restarts
+  // (0.1.17: "keep the text if I change the screen"); gone once sent. At most DRAFT_MAX characters are kept.
+  const DRAFT_MAX = 20000;
+  const draftKey = (id) => `draft:${S.snap?.me?.did ?? S.me?.original ?? 'here'}:${id}`;
+  function composer(placeholder, onSend, lead, top = null, draft = null) {
+    const text = h('textarea', { rows: 1, placeholder, 'aria-label': 'Message', 'data-keep': '' });
+    if (draft) text.value = prefs.get(draftKey(draft)) ?? '';
+    const keep = () => { if (draft) prefs.set(draftKey(draft), text.value.trim() ? text.value.slice(0, DRAFT_MAX) : null); };
+    // The box grows with what is typed, up to a third of the screen (ui.css), and back after Send; the draft kept as it goes.
+    const fit = () => { keep(); if (!text.style) return; text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${text.scrollHeight + 2}px`; };
     const sendBtn = ibtn('send', 'Send', async () => {
       const t = text.value;
       if (!t.trim()) return;
@@ -1109,7 +1210,8 @@
     const pick = S.snap?.transfers && ts?.pick;
     return [pick ? ['image', 'Photo', () => pickAndSend(target, who, true)] : null,
       ts?.camera ? ['camera', 'Camera', () => shoot(target, who)] : null,
-      pick ? ['file', 'File', () => pickAndSend(target, who)] : toPerson && S.snap?.transfers ? ['file', 'File', () => go('files', { to: target.to })] : null];
+      pick ? ['file', 'File', () => pickAndSend(target, who)] : toPerson && S.snap?.transfers ? ['file', 'File', () => go('files', { to: target.to })] : null,
+      ts?.voice && canVoice() ? ['mic', 'Voice', () => recordVoice(target, who)] : null];
   }
   /** Pay from a chat: offered only with the Wallet on (0.1.16: a profile with it off showed Pay in every chat). */
   function pay(did) {
@@ -1119,8 +1221,8 @@
     const who = h('button', { type: 'button', class: 'who', onclick: () => { const w = workerOf(did); void (w ? go('agent', w.worker) : go('chat-info', did)); } });
     const alerts = h('div'), thread = h('div', { class: 'thread' });
     const mine = () => kindOf(contactBy(did) ?? {}) === 'agent' && workerOf(did);
-    const lead = h('span'), M = plusMenu();
-    const C = composer('Message', (t, clear) => act(() => backend.call('POST', '/api/send', { to: did, text: t }), () => { clear(); S.msgsSeq = -1; }), lead, M.tray);
+    const lead = h('span'), M = plusMenu(), RQ = quoteBar();
+    const C = composer('Message', (t, clear) => act(() => backend.call('POST', '/api/send', { to: did, text: t, ...(RQ.get() && { re: RQ.get().n }) }), () => { clear(); RQ.set(null); S.msgsSeq = -1; }), lead, [RQ.el, M.tray], `c:${did}`);
     const heading = h('h1', { class: 'sr' });
     // The bar: Back, the name (avatar and name, one control: the chat settings, or my agent's page), Pay with the Wallet on.
     const payBtn = tbtn('Pay', () => pay(did)), payAt = h('span', null, walletOn() ? payBtn : null);
@@ -1169,7 +1271,7 @@
       S.msgsSeq = mark;
       const r = await backend.call('GET', `/api/messages?contact=${encodeURIComponent(did)}`).catch(() => null);
       if (!r) return;
-      S.photosHere = r.messages.some((m) => m.photo);
+      S.photosHere = r.messages.some((m) => m.photo || m.voice);
       const recs = S.photosHere ? tl ?? await transfersNow() : null;
       const end = first || atEnd();
       first = false;
@@ -1188,11 +1290,13 @@
           h('button', { type: 'button', class: `sig${v?.valid ? '' : ' bad'}`, onclick: () => go('statement', { text: m.text }) }, icon('shield'), v?.valid ? `Signed by ${who} · check` : 'Signature not valid · check'),
           h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
       };
-      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : h('div', { class: `msg ${m.dir}`, ...(m.dir === 'in' && { role: 'button', tabindex: '0', title: 'Check who signed it', onclick: check(m), onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault?.(); void check(m)(); } } }) },
-        m.label && m.label !== 'sigelo-file/0' ? h('span', { class: 'who' }, m.label) : null,
-        m.label === 'sigelo-file/0' ? fileText(m.text) : h('div', { class: 'text' }, m.text),
+      const pick = (m) => () => { RQ.set({ n: m.n, who: m.dir === 'out' ? 'You' : c.name, text: String(m.text).split('\n')[0].slice(0, 120) }); C.text.focus?.(); };
+      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && { role: 'button', tabindex: '0', title: 'Check who signed it', onclick: check(m), onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault?.(); void check(m)(); } } }) },
+        m.re ? quoteIn(m.re.dir === 'out' ? 'You' : c.name, m.re.text, m.re.n === null ? null : ['data-n', String(m.re.n)]) : null,
+        m.label && m.label !== 'sigelo-file/0' && !m.re ? h('span', { class: 'who' }, m.label) : null,
+        m.label === 'sigelo-file/0' ? fileText(m.text) : h('div', { class: 'text' }, richText(m.text)),
         m.link ? h('span', { class: 'help' }, `Introduced: ${m.link.purpose}`) : null,
-        h('span', { class: 'meta' }, hhmm(m.at), ticks(m)))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'));
+        h('span', { class: 'meta' }, hhmm(m.at), ticks(m))), pick(m))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'));
       if (end) toEnd();
     };
   });
@@ -1481,7 +1585,14 @@
         if (!S.note) S.note = line;   // the send cleared it: kept in the chat, beside the photo sent
         return refresh();
       }
-      S.note = e?.check === 'camera_permission' ? { message: 'The camera is not allowed for sigelo: Settings → Apps → sigelo → Permissions.' } : e;
+      // A refusal is never final (0.1.17): refused once, a tap on Camera asks again; once Android asks no more, the tap
+      // opens sigelo's page in the system settings, with the one switch to turn on.
+      if (e?.check === 'camera_blocked' && typeof LOCAL?.openSettings === 'function') {
+        S.note = { message: 'Switch on Camera in Permissions, then come back.' };
+        void LOCAL.openSettings().catch(() => {});
+        return refresh();
+      }
+      S.note = e?.check === 'camera_permission' ? { message: 'The camera was not allowed. Tap Camera again to allow it.' } : e;
       return refresh();
     }
     if (!d || d.cancelled) return;
@@ -1502,15 +1613,34 @@
     if (r.live && r.size) return `${Math.min(99, Math.round((100 * got) / r.size))} %`;
     return tstate(r, dir === 'in' ? 'in' : 'out');
   }
-  function photoImg(p, open) {
-    const img = h('img', { class: 'photo', src: `data:${p.type};base64,${p.data}`, alt: 'Photo', width: String(p.w), height: String(p.h) });
-    return open ? h('button', { type: 'button', class: 'ph', 'aria-label': 'Open the full photo', onclick: open }, img) : img;
+  // A preview's image as a blob: URL (0.1.17: the phone showed none: the page's CSP allows img-src 'self' blob:, not data:),
+  // one per photo while the page lives (at most PHOTOS_MAX, the oldest let go); data: only where there is no Blob.
+  const PHOTOS = new Map(), PHOTOS_MAX = 200;
+  function photoSrc(p) {
+    if (typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') return `data:${p.type};base64,${p.data}`;
+    const key = `${p.sha256}:${p.type}:${p.data.length}`;
+    let u = PHOTOS.get(key);
+    if (!u) {
+      try { u = URL.createObjectURL(new Blob([unb64(p.data)], { type: p.type })); } catch { return `data:${p.type};base64,${p.data}`; }
+      PHOTOS.set(key, u);
+      if (PHOTOS.size > PHOTOS_MAX) { const [k, v] = PHOTOS.entries().next().value; PHOTOS.delete(k); try { URL.revokeObjectURL(v); } catch {} }
+    }
+    return u;
+  }
+  /** The preview large, in a sheet: what a tap shows while the full size is not here (or for one I sent). */
+  function viewPhoto(p, line) {
+    sheet({ title: p.name, body: [h('div', { class: 'pad stack photo-view' }, h('img', { class: 'photo', src: photoSrc(p), alt: 'Photo', width: String(p.w), height: String(p.h) }), h('p', { class: 'help' }, line))] });
+  }
+  // open: the full file (landed, and this app can open files), else the preview large.
+  function photoImg(p, open, line = `Full size · ${mbOf(p.size)}`) {
+    const img = h('img', { class: 'photo', src: photoSrc(p), alt: 'Photo', width: String(p.w), height: String(p.h) });
+    return h('button', { type: 'button', class: 'ph', 'aria-label': open ? 'Open the full photo' : 'Show the photo larger', onclick: open ?? (() => viewPhoto(p, line)) }, img);
   }
   /** A photo in a chat (sigelo-photo/0): the preview now, then "Full size · 3.2 MB" and its state; a tap opens it once landed. */
   function photoBubble(m, L, did, name) {
     const p = m.photo, r = m.dir === 'out' ? L?.out.find((x) => x.sha256 === p.sha256 && x.to === did) : L?.in.find((x) => x.sha256 === p.sha256 && x.from === did);
     const open = m.dir === 'in' && r?.state === 'done' && S.transferSettings?.open ? () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })) : null;
-    return h('div', { class: `msg ${m.dir} photo`, 'data-photo': p.sha256 }, photoImg(p, open),
+    return h('div', { class: `msg ${m.dir} photo`, 'data-photo': p.sha256 }, photoImg(p, open, `Full size · ${mbOf(p.size)} · ${photoState(r, m.dir)}`),
       h('span', { class: 'tag' }, `Full size · ${mbOf(p.size)} · ${photoState(r, m.dir)}`),
       m.dir === 'in' && r?.state === 'asked' ? tbtn('Get full size', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, name))) : null,
       h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
@@ -1529,6 +1659,132 @@
       r?.state === 'asked' ? tbtn('Get full size', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, m.name))) : null);
   }
 
+  // ---- Voice messages (design/transfer.md "Voice"): "Voice" in the "+" records here (voice-web.mjs: MediaRecorder; a
+  // test gives it as globalThis.sigeloVoice), the recording goes as a photo's full file does, its fields as one message
+  // (sigelo-voice/0). The bubble: play/pause, the waveform with a progress bar, the length; it plays the file once it
+  // has landed (GET /api/transfers/audio), "receiving…" before; mine plays from what was recorded here.
+  const voiceLib = lazy('/voice-web.mjs'), VOICE_PART = 128 * 1024;
+  const canVoice = () => !SHELL && typeof navigator.mediaDevices?.getUserMedia === 'function' && typeof globalThis.MediaRecorder === 'function';
+  const mss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const VOICE = { mine: new Map(), url: new Map(), audio: null, sha: null, prog: new Map(), btns: new Map(), t: 0 };
+  // The microphone (2026-11-17: permission asks automatic and smooth, a refusal never final): asked at a tap
+  // on Voice, never earlier, with one line why; the system dialog is the only one (the app grants the WebView's own ask
+  // once the permission exists); refused, the next tap asks again; once Android asks no more (mic_blocked) the same tap
+  // opens the app's settings page, with one line naming what to switch on. Never a dead control.
+  const micLine = (e) => (e?.check === 'mic_permission' ? (S.transferSettings?.mic ? 'The microphone is off for sigelo. Tap Voice again to allow it.' : 'The microphone is off for this page: allow it in the browser\'s site settings, then tap Voice again.')
+    : e?.check === 'mic_blocked' ? 'In the settings that opened: Permissions → Microphone → Allow. Then tap Voice again.'
+    : e?.check === 'no_mic' ? 'No microphone found here.' : e?.check === 'no_recorder' ? 'This page cannot record sound.' : String(e?.message ?? e));
+  const randHex = (n) => { const b = new Uint8Array(n); if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(b); else for (let i = 0; i < n; i++) b[i] = Math.floor(Math.random() * 256); return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''); };
+  /** "Voice" in the "+": records at once in a sheet (the time, a level, Send and Cancel); at 5:00 it stops and sends. */
+  async function recordVoice(target, who) {
+    const V = globalThis.sigeloVoice ?? await voiceLib();
+    if (!V) { S.note = { message: 'This page cannot record sound.' }; return refresh(); }
+    const box = h('div', { class: 'pad stack rec' }), time = h('b', { class: 'rec-time', 'aria-live': 'off' }, '0:00'), level = h('i');
+    let r = null, done = false;
+    const finish = async () => {
+      if (done || !r) return;
+      done = true;
+      let out = null;
+      try { out = await r.stop(); } catch (e) { await closeSheet(); S.note = e; return refresh(); }
+      await closeSheet();
+      if (out) await sendVoice(target, out, who);
+    };
+    // Refused: one line in this sheet (the next tap on Voice asks again); Android asks no more: its settings page opened.
+    const settings = () => backend.call('POST', '/api/transfers/mic-settings');
+    const refused = async (e) => {
+      done = true;
+      const blocked = e?.check === 'mic_blocked';
+      put(box, h('p', { class: 'rec-off' }, micLine(e)), blocked ? btn('Open settings', () => act(settings), { kind: 'pri' }) : null, btn('Close', () => closeSheet()));
+      if (blocked) await settings().catch(() => {});
+    };
+    put(box, h('p', { class: 'help' }, 'sigelo asks for the microphone to record a voice message.'));
+    sheet({ title: 'Voice message', lead: `To ${who}. Up to 5 minutes.`, onClose: () => { if (!done) { done = true; r?.cancel(); } }, body: [box] });
+    // Android: RECORD_AUDIO through the shell (its one dialog, the first time only; remembered after); a browser asks at getUserMedia.
+    if (S.transferSettings?.mic) { try { await backend.call('POST', '/api/transfers/mic'); } catch (e) { return refused(e); } }
+    if (done) return;
+    try {
+      r = await V.record({ env: globalThis, onTick: (x) => { time.textContent = mss(x.elapsed); level.style.width = `${Math.round((100 * x.level) / 255)}%`; if (x.done) void finish(); } });
+    } catch (e) { if (done) return; return refused(e); }
+    if (done) { r.cancel(); return; }   // closed while the microphone was being asked for
+    put(box, h('p', { class: 'rec-now' }, h('span', { class: 'rec-dot', 'aria-hidden': 'true' }), 'Recording ', time, ' / 5:00'),
+      h('div', { class: 'meter', 'aria-hidden': 'true' }, level),
+      btn('Send', () => finish(), { kind: 'pri', ic: 'send' }), btn('Cancel', () => closeSheet()));
+  }
+  /** The recording to the shell in pieces, then sent: the fields as one message, the file by its transfer. */
+  async function sendVoice(target, v, who) {
+    const rec = randHex(16);
+    await act(async () => {
+      for (let off = 0; off < v.bytes.length; off += VOICE_PART) await backend.call('POST', '/api/transfers/voice-part', { rec, offset: off, data: b64(v.bytes.subarray(off, off + VOICE_PART)) });
+      return transferCall('/api/transfers/send', { ...target, rec, voice: { name: v.name, type: v.type, duration_s: v.duration_s, ...(v.waveform && { waveform: v.waveform }) } }, who);
+    }, (x) => {
+      S.msgsSeq = -1; S.groups = null;
+      if (x?.sha256) VOICE.mine.set(x.sha256, { bytes: v.bytes, type: v.type });
+      if (x?.unpaired?.length) toast(`Sent to ${x.sent.length}; ${x.unpaired.map((m) => m.name).join(', ')} can't play it (not paired with you)`);
+      else toast('Voice message sent');
+    });
+  }
+  /** The playing one's progress and button, wherever its bubble is drawn now. */
+  function voiceShow(sha) {
+    const a = VOICE.sha === sha ? VOICE.audio : null, pct = a && a.duration > 0 ? Math.min(100, (100 * a.currentTime) / a.duration) : 0, on = Boolean(a && !a.paused);
+    const p = VOICE.prog.get(sha), b = VOICE.btns.get(sha);
+    if (p) p.style.width = `${Math.round(pct)}%`;
+    if (b) { b.setAttribute('aria-label', on ? 'Pause' : 'Play voice message'); b.setAttribute('aria-pressed', on ? 'true' : 'false'); put(b, icon(on ? 'pause' : 'play') ?? (on ? '❚❚' : '▶')); }
+  }
+  /** Play or pause one voice message: the bytes recorded here, or the file that landed (fetched once). */
+  async function voicePlay(v, id) {
+    if (VOICE.sha === v.sha256 && VOICE.audio) { if (VOICE.audio.paused) await VOICE.audio.play?.(); else VOICE.audio.pause?.(); return voiceShow(v.sha256); }
+    if (VOICE.audio) { const was = VOICE.sha; VOICE.audio.pause?.(); VOICE.audio = null; VOICE.sha = null; voiceShow(was); }
+    let url = VOICE.url.get(v.sha256);
+    if (!url) {
+      const mine = VOICE.mine.get(v.sha256);
+      let blob;
+      try { blob = mine ? new Blob([mine.bytes], { type: mine.type }) : await backend.call('GET', `/api/transfers/audio?id=${encodeURIComponent(id)}`).then((x) => new Blob([unb64(x.data)], { type: x.type })); } catch (e) { S.note = e; return refresh(); }
+      url = URL.createObjectURL(blob);
+      VOICE.url.set(v.sha256, url);
+    }
+    const a = new Audio(url);
+    VOICE.audio = a; VOICE.sha = v.sha256;
+    a.addEventListener('timeupdate', () => voiceShow(v.sha256));
+    a.addEventListener('pause', () => voiceShow(v.sha256));
+    a.addEventListener('ended', () => { a.currentTime = 0; if (VOICE.audio === a) { VOICE.audio = null; VOICE.sha = null; } voiceShow(v.sha256); });
+    try { await a.play(); } catch (e) { S.note = { message: `This voice message can't be played here (${e?.message ?? e}).` }; VOICE.audio = null; VOICE.sha = null; return refresh(); }
+    voiceShow(v.sha256);
+  }
+  /** A voice message's body: play/pause (once it can play), the waveform over its progress, the length and its state. */
+  function voiceBody(v, r, dir, state) {
+    const id = dir === 'in' && r?.state === 'done' ? r.id : null, can = Boolean(id) || (dir === 'out' && VOICE.mine.has(v.sha256));
+    const prog = h('i'), peaks = typeof v.waveform === 'string' ? [...unb64(v.waveform)] : [];
+    VOICE.prog.set(v.sha256, prog);
+    const play = can ? h('button', { type: 'button', class: 'ib vplay', 'aria-label': 'Play voice message', 'aria-pressed': 'false', onclick: () => voicePlay(v, id) }, icon('play') ?? '▶') : null;
+    if (play) VOICE.btns.set(v.sha256, play); else VOICE.btns.delete(v.sha256);
+    const wave = h('div', { class: 'vwave', 'aria-hidden': 'true' }, peaks.map((p) => { const bar = h('i'); bar.style.height = `${Math.max(8, Math.round((100 * p) / 255))}%`; return bar; }));
+    const out = h('div', { class: 'voice' }, play, h('div', { class: 'vbody' }, peaks.length ? wave : null, h('div', { class: 'meter vprog', role: 'progressbar', 'aria-label': 'Played' }, prog),
+      h('span', { class: 'tag' }, `${mss(v.duration_s)} · ${can ? 'voice message' : state}`)));
+    voiceShow(v.sha256);
+    return out;
+  }
+  /** Their voice message's state before it plays: "receiving…" (or the transfer's own words), "Get it" when asked. */
+  const voiceState = (r, dir) => (dir === 'out' ? photoState(r, 'out') : !r || ['accepted', 'offering', 'active', 'offered'].includes(r.state) ? (r?.live && r.size ? `receiving… ${Math.min(99, Math.round((100 * (r.got ?? 0)) / r.size))} %` : 'receiving…') : photoState(r, 'in'));
+  /** A voice message in a chat (sigelo-voice/0). */
+  function voiceBubble(m, L, did, name) {
+    const v = m.voice, r = m.dir === 'out' ? L?.out.find((x) => x.sha256 === v.sha256 && x.to === did) : L?.in.find((x) => x.sha256 === v.sha256 && x.from === did);
+    return h('div', { class: `msg ${m.dir} vmsg`, 'data-voice': v.sha256 }, voiceBody(v, r, m.dir, voiceState(r, m.dir)),
+      m.dir === 'out' && r ? h('span', { class: 'help' }, photoState(r, 'out')) : null,
+      m.dir === 'in' && r?.state === 'asked' ? tbtn('Get it', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, name))) : null,
+      h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
+  }
+  /** A voice message in a group: mine with each member's state; theirs from a member not paired with me: the length only. */
+  function groupVoice(m, L, g) {
+    const v = m.voice;
+    if (m.mine) {
+      const rs = (L?.out ?? []).filter((x) => x.group === g.gid && x.sha256 === v.sha256);
+      return h('div', { 'data-voice': v.sha256 }, voiceBody(v, null, 'out', 'sent'), rs.length ? h('span', { class: 'help' }, rs.map((x) => `${x.contact}: ${photoState(x, 'out')}`).join(' · ')) : null);
+    }
+    const r = (L?.in ?? []).find((x) => x.sha256 === v.sha256 && x.from === m.from);
+    return h('div', { 'data-voice': v.sha256 }, voiceBody(v, r, 'in', !r && !contactBy(m.from) ? `from ${m.name}: pair with them to hear it` : voiceState(r, 'in')),
+      r?.state === 'asked' ? tbtn('Get it', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, m.name))) : null);
+  }
+
   // ---- Groups (GROUPS.md, design/groups.md §5): every message labelled with its sender's name, "agent" for an
   // agent, and "not your operator" when its sender is not one of your own: text from anyone else is data.
   const groupNotice = (n) => {
@@ -1543,10 +1799,11 @@
     const chips = h('div', { class: 'mentions', hidden: true });
     let seen = null, first = true, quiet = null;
     const GM = plusMenu();
+    const RQ = quoteBar();
     const C = composer('Message · @ to mention', async (t, clear) => {
-      await act(() => backend.call('POST', '/api/groups/send', { group: gid, text: t }), () => { clear(); seen = null; chips.hidden = true; });
+      await act(() => backend.call('POST', '/api/groups/send', { group: gid, text: t, ...(RQ.get() && { re: RQ.get().mid }) }), () => { clear(); RQ.set(null); seen = null; chips.hidden = true; });
       if (S.note?.check === 'group_quiet') { quiet = S.note; S.note = null; await refresh(); }
-    }, glead, GM.tray);
+    }, glead, [RQ.el, GM.tray], `g:${gid}`);
     C.text.addEventListener('input', () => { const at = /(^|\s)@[^\s@]*$/.test(C.text.value); if (chips.hidden === at) { chips.hidden = !at; void refresh(); } });
     const mention = (name) => { C.text.value = C.text.value.replace(/@[^\s@]*$/, '') + `@${name} `; chips.hidden = true; C.fit(); C.text.focus?.(); void refresh(); };
     const foot = h('div', null, chips, C.el);
@@ -1582,16 +1839,19 @@
       seen = gmark;
       const r = await backend.call('GET', `/api/groups/history?group=${encodeURIComponent(gid)}`).catch(() => null);
       if (!r) return;
-      if (r.messages.some((m) => m.photo)) S.gphotos = gid;
-      const grecs = r.messages.some((m) => m.photo) ? tl ?? await transfersNow() : null;
+      if (r.messages.some((m) => m.photo || m.voice)) S.gphotos = gid;
+      const grecs = r.messages.some((m) => m.photo || m.voice) ? tl ?? await transfersNow() : null;
       const end = first || atEnd();
       first = false;
       const made = S.made?.gid === gid ? h('span', { class: 'notice' }, `Group made, ${S.made.n} members`) : null;
       // The loop brake (design/groups.md §3): agents wait until a person writes.
       const brake = (g.quiet || quiet) && g.status === 'member' ? h('span', { class: 'notice' }, `Agents paused after ${g.run} messages in a row. Write anything to let them go on.`) : null;
-      put(thread, made, threadOf(r.messages, (m) => h('div', { class: `msg ${m.mine ? 'out' : 'in'}${m.mentioned ? ' mentioned' : ''}` },
+      const byMid = new Map(r.messages.map((m) => [m.mid, m]));
+      const gpick = (m) => () => { RQ.set({ mid: m.mid, who: m.mine ? 'You' : m.name, text: String(m.text).split('\n')[0].slice(0, 120) }); C.text.focus?.(); };
+      put(thread, made, threadOf(r.messages, (m) => replyable(h('div', { class: `msg ${m.mine ? 'out' : 'in'}${m.mentioned ? ' mentioned' : ''}`, 'data-mid': m.mid },
+        m.re ? quoteIn(byMid.get(m.re)?.mine ? 'You' : byMid.get(m.re)?.name ?? 'A member', byMid.get(m.re) ? String(byMid.get(m.re).text).split('\n')[0].slice(0, 120) : null, ['data-mid', m.re]) : null,
         m.mine ? null : h('span', { class: 'who' }, m.name, m.role === 'agent' ? (workerOf(m.from) || contactBy(m.from)?.ours ? ' · your agent' : contactBy(m.from)?.link?.linked_by && contactBy(contactBy(m.from).link.linked_by) ? ` · ${contactBy(contactBy(m.from).link.linked_by).name}'s agent` : ' · agent') : '', m.tier !== 'own' && m.note ? [' · ', h('span', { class: 'warn' }, m.note)] : null, m.via ? ' · via the creator' : null),
-        m.mentioned ? h('span', { class: 'help' }, 'Mentions you') : null, m.photo ? groupPhoto(m, grecs, g) : h('div', { class: 'text' }, m.text), h('span', { class: 'meta' }, hhmm(m.at)))),
+        m.mentioned ? h('span', { class: 'help' }, 'Mentions you') : null, m.photo ? groupPhoto(m, grecs, g) : m.voice ? groupVoice(m, grecs, g) : h('div', { class: 'text' }, richText(m.text)), h('span', { class: 'meta' }, hhmm(m.at))), gpick(m))),
       brake, !r.messages.length && !made ? h('span', { class: 'day' }, 'No messages yet.') : null);
       if (end) toEnd();
     };
@@ -1793,7 +2053,7 @@
    */
   function enrolWaits(en) {
     if (!en || !['code', 'words', 'sending', 'waiting'].includes(en.state)) return null;
-    if (S.snap?.me && !S.snap.me.online) return 'Not connected: the agent cannot reach you';
+    if (offline()) return 'Not connected: the agent cannot reach you';
     // Its key's send failed (needs_send): this page sends it again; one from before a restart: the machine asks again (UI-API.md).
     if (en.needs_send) return 'Sending the key';
     if (en.state === 'waiting') return 'Waiting for the machine to ask again';
@@ -1802,10 +2062,10 @@
     return 'Waiting for the agent to answer the code';
   }
   // The same, as a status line: "…" while it goes on, a full stop when offline; "Not finished" when nothing is known.
-  const enrolLine = (en) => { const t = enrolWaits(en); return t === null ? 'Not finished' : S.snap?.me && !S.snap.me.online ? `${t}.` : `${t}…`; };
+  const enrolLine = (en) => { const t = enrolWaits(en); return t === null ? 'Not finished' : offline() ? `${t}.` : `${t}…`; };
   function workerRow(w, tap = true) {
     const en = w.enrolling, waiting = w.status === 'pending' && en?.state === 'code' && en.exp > relayNow();
-    const off = S.snap?.me && !S.snap.me.online;
+    const off = offline();
     const comparing = w.status === 'pending' && en?.state === 'words' && en.confirm_words && en.words_ok === null && en.words;
     const state = w.status === 'revoked' ? `Revoked ${w.revoked ? day(w.revoked) : ''}`.trim()
       : waiting && !off ? ['Waiting for its code · ', countdown(en.exp), ' left']
@@ -1862,10 +2122,17 @@
 
   // Enrol an agent (ENROL.md; the mock's four taps): a name and how much to trust it, then one code for the agent,
   // ten minutes, once; then the four words (its key waits for "They match"), then ready.
+  // Cancel an enrolment in any state but code (that one has "Cancel this code"): POST /api/agents/cancel (0.1.17: a stale
+  // "k (enrolling)" could not be removed). Its key gone already: the agent is revoked, else it leaves the list.
+  async function cancelEnrol(en, name) {
+    if (await ask({ title: `Cancel enrolling ${name}?`, text: 'The code stops working and nothing more is sent to it. If its key went already, it is revoked.', yes: 'Cancel enrolling', no: 'Keep waiting' })) {
+      void act(() => backend.call('POST', '/api/agents/cancel', { id: en.id }), () => { S.workersAt = 0; home('agents'); });
+    }
+  }
   const TRUST = [['own', 'Works for me', 'Its messages shown in full. For agents you run.'], ['quiet', 'Reads the web', 'Low trust: you read it when you choose.']];
   screen('enrol', {}, (arg) => {
     const E = { id: arg?.id ?? null, first: null, busy: false, error: null, tier: 'own' };
-    const nameIn = input({ autocapitalize: 'none', maxlength: '64', placeholder: 'notes' });
+    const nameIn = input({ autocapitalize: 'none', maxlength: '64', placeholder: 'notes', 'data-keep': '' });
     if (typeof arg?.name === 'string') nameIn.value = arg.name;   // Enrol again (a revoked agent's name): a new code, a new key
     const body = h('div', { class: 'pad stack' }), foot = h('div'), title = h('h1', null, 'Enrol an agent'), say = h('div');
     const trust = radios('Trust', TRUST, 'own', (t) => { E.tier = t; trustLine.textContent = `Trust: ${TRUST.find(([v]) => v === t)[1].toLowerCase()}`; });
@@ -1907,7 +2174,7 @@
         const cancel = async () => {
           if (await ask({ title: `Cancel the code for ${name}?`, text: 'It stops working at once.', yes: 'Cancel this code', no: 'Keep it' })) void act(() => backend.call('POST', '/api/agents/revoke', { worker: w?.worker ?? E.first?.worker }), () => back());
         };
-        const off = S.snap?.me && !S.snap.me.online;
+        const off = offline();
         put(body, off ? h('div', { class: 'card warn' }, h('p', null, `${enrolWaits(en)}.`)) : null,
           h('div', { class: 'center stack' }, qrBox(en.code), h('p', { class: 'code' }, en.code), h('p', { class: 'lead' }, `Waiting for ${name}. Works once, for `, countdown(en.exp), '.'),
           h('div', { class: 'btns' }, btn('Share', () => share(enrolMessage(en.code, en.exp, en.command)), { kind: 'pri' }), btn('Copy', () => copy(en.code))),
@@ -1921,7 +2188,7 @@
       if (en.state === 'words' && en.confirm_words && en.words_ok === null) {
         // One screen, nothing else on it (0.1.16: the step was easy to miss): the pairing's four words large, They match / They differ.
         title.textContent = `Same words on ${name}?`;
-        if (!en.words) { put(body, h('p', { class: 'lead' }, 'The agent entered the code. Waiting for its four words…')); return; }
+        if (!en.words) { put(body, h('p', { class: 'lead' }, 'The agent entered the code. Waiting for its four words…'), btn('Cancel enrolling', () => cancelEnrol(en, name), { kind: 'danger' })); return; }
         const no = async () => {
           if (await ask({ title: `Drop the code for ${name}?`, text: 'Different words mean someone else may have used it. Its key is not sent.', yes: 'They differ: drop it', no: 'Back' })) {
             void act(() => backend.call('POST', '/api/agents/enrol-words', { id: en.id, match: false }));
@@ -1933,9 +2200,12 @@
       }
       title.textContent = `Enrolling ${name}`;
       // What it waits for, said (enrolWaits): offline, the agent cannot reach this profile, and the meter stops.
-      const waits = enrolWaits(en) ?? 'Waiting for the agent to answer the code', off = S.snap?.me && !S.snap.me.online;
+      const waits = enrolWaits(en) ?? 'Waiting for the agent to answer the code', off = offline();
       put(body, h('div', { class: 'hero center stack' }, h('p', { class: `lead${off ? ' warn' : ''}`, role: 'status' }, en.state === 'sending' && !off && !en.needs_send ? 'Sending its key, end to end, once…' : `${waits}${off ? '.' : '…'}`),
-        off ? null : h('div', { class: 'meter busy' }, h('i')), en.words ? h('details', { class: 'more', ...(en.state === 'words' && { open: true }) }, h('summary', null, 'The pairing\'s four words'), fourWords(en.words)) : null, en.check ? inlineError({ message: en.detail ?? en.check }) : null));
+        off ? null : h('div', { class: 'meter busy' }, h('i')), en.words ? h('details', { class: 'more', ...(en.state === 'words' && { open: true }) }, h('summary', null, 'The pairing\'s four words'), fourWords(en.words)) : null,
+        // Why the machine's request waits, as the machine is told (enrol.mjs status): the same check and words.
+        en.check ? h('div', { class: 'card warn', 'data-enrol-check': en.check }, h('p', null, en.detail ?? en.check)) : null),
+        btn('Cancel enrolling', () => cancelEnrol(en, name), { kind: 'danger' }));
     };
   });
 
@@ -2021,7 +2291,8 @@
           w.revoked ? h('div', { class: 'kv' }, h('span', null, 'Revoked'), h('span', null, day(w.revoked))) : null,
           w.revoked ? null : row({ compact: true, title: 'Rename', sub: w.name, chev: true, onclick: () => renameSheet(`Rename ${w.name}`, w.name, (name) => backend.call('POST', '/api/agents/rename', { worker: i, name }).then(() => { S.workersAt = 0; }), 'Lowercase letters, digits, - and _.') })),
         w.revoked ? null : w.placed === 'device' ? h('p', { class: 'help pad' }, 'A device: revoke it under Devices on the computer that added it.')
-          : h('div', { class: 'pad' }, btn(w.enrolling?.state === 'code' ? 'Cancel this code' : `Revoke ${w.name}`, revoke, { kind: 'danger' })));
+          : h('div', { class: 'pad' }, w.status === 'pending' && w.enrolling && w.enrolling.state !== 'code' ? btn('Cancel enrolling', () => cancelEnrol(w.enrolling, w.name), { kind: 'danger' })
+            : btn(w.enrolling?.state === 'code' ? 'Cancel this code' : `Revoke ${w.name}`, revoke, { kind: 'danger' })));
     };
   });
 
@@ -3050,7 +3321,7 @@
   screen('settings', {}, () => {
     const body = h('div');
     mount(page({ title: 'Settings', body: [body] }));
-    void loadMe().then(versionNow).then(lockState).then(transferSettingsNow).then(refresh);
+    void loadMe().then(versionNow).then(lockState).then(transferSettingsNow).then(stayNow).then(refresh);
     return () => {
       const me = S.snap?.me, n = S.profiles?.profiles?.length;
       put(body, sec(`This profile: ${profileName()}`),
@@ -3064,9 +3335,27 @@
           row({ compact: true, start: icon('pen'), title: 'Appearance', sub: 'Theme and colour', chev: true, onclick: () => go('set-appearance') }),
           row({ compact: true, start: icon('info'), title: 'About', sub: versionLine(), chev: true, onclick: () => go('about') })),
         S.transferSettings?.camera ? h('div', { class: 'list' }, toggle('Keep location in photos', 'Off: where a photo was taken is removed before it goes', S.transferSettings.keep_location === true,
-          (x) => act(() => backend.call('POST', '/api/transfers/settings', { keep_location: x }), (y) => { S.transferSettings = { ...S.transferSettings, ...y }; }))) : null);
+          (x) => act(() => backend.call('POST', '/api/transfers/settings', { keep_location: x }), (y) => { S.transferSettings = { ...S.transferSettings, ...y }; }))) : null,
+        stayBlock());
     };
   });
+  // Settings → Stay connected (the Android app: LOCAL.stay, the shell's switch for this phone, StayConnected.java). Turned on by
+  // the user: what is still missing (notifications, then the battery exemption), each after one line why, one at a time; never at
+  // a start. A refusal is never final: a row says what it costs, its tap asks again, or once Android stops asking, opens the
+  // app's page in the system's settings with one line naming what to switch on.
+  const STAY = LOCAL?.stay ?? null;
+  const stayNow = async () => { if (STAY) { try { S.stay = await STAY.get(); } catch { S.stay = null; } } };
+  // Back from the system's page (a prompt, the battery list, the notification settings): what it now says.
+  globalThis.document?.addEventListener?.('visibilitychange', () => { if (STAY && S.stay && !document.hidden) void stayNow().then(refresh); });
+  async function stayOn(on) {
+    let st = await STAY.set({ on });
+    if (on && !st.notify) st = await STAY.notifications(await ask({ title: 'Allow notifications?', text: st.notifyBlocked ? 'So new messages can tell you. In the settings that open, switch on Notifications.' : 'So new messages can tell you, and the app can show it is connected.', yes: st.notifyBlocked ? 'Open settings' : 'Allow', no: 'Not now', danger: false }));
+    if (on && !st.exempt) st = await STAY.battery(await ask({ title: 'Let it run in the background?', text: 'Without this, Android may pause the connection to save battery.', yes: 'Allow', no: 'Not now', danger: false }));
+    S.stay = st;
+  }
+  const stayBlock = () => (S.stay ? [h('div', { class: 'list' }, toggle('Stay connected', 'Keeps the connection open while the app is minimised, so messages arrive and calls can ring. Shows a small notification.', S.stay.on, (x) => act(() => stayOn(x)))),
+    S.stay.on && !S.stay.notify ? list(row({ compact: true, title: 'Notifications are off', sub: S.stay.notifyBlocked ? 'Messages arrive, but nothing tells you. Tap, then switch on Notifications.' : 'Messages arrive, but nothing tells you. Tap to turn them on.', onclick: () => act(async () => { S.stay = await STAY.notifications(true); }) })) : null,
+    S.stay.on && !S.stay.exempt ? list(row({ compact: true, title: 'Battery saving may pause it', sub: 'Android may cut the connection while the phone sleeps. Tap to let it run.', onclick: () => act(async () => { S.stay = await STAY.battery(true); }) })) : null] : null);
   const backupLine = () => [SEC.st?.kept ? '25 words kept here, locked' : '25 words on paper', S.me?.recovery === 'set' ? 'recovery key set' : S.me ? 'no recovery key' : null].filter(Boolean).join(' · ');
 
   // Settings → Wallet (notes.md "Decided"): the switch (this profile's, in its settings), a local price (opt-in, with what
@@ -3278,7 +3567,7 @@
     const load = () => backend.call('GET', '/api/settings').then((x) => { C.s = x; }, (e) => { C.say = e; });
     const set = async (patch) => {
       C.say = null;
-      try { C.s = await backend.call('POST', '/api/settings', patch); if ('notify' in patch) { N.global = C.s.notify !== false; N.globalAt = Date.now(); if (N.global) void notifyAsk(true); } } catch (e) { C.say = e; }
+      try { C.s = await backend.call('POST', '/api/settings', patch); if ('notify' in patch) { N.global = C.s.notify !== false; N.globalAt = Date.now(); if (N.global) void notifyAsk(); } } catch (e) { C.say = e; }
       await refresh();
     };
     void load().then(refresh);
@@ -3623,6 +3912,14 @@
       h('div', { class: 'foot' }, btn('Unlock', open, { kind: 'pri', ic: 'lock' }))));
     pw.focus?.();
   }
+  // Back to the front: the grace window again, a quiet try at once, and the card drawn again once the window ends.
+  function resumed() {
+    graceUntil = Date.now() + GRACE_MS;
+    if (S.snap?.me && !S.snap.me.online) void backend.call('POST', '/api/sync').catch(() => {}).then(() => poll()).catch(() => {});
+    setTimeout(() => { void refresh(); }, GRACE_MS + 100);
+  }
+  setTimeout(() => { void refresh(); }, GRACE_MS + 100);
+  globalThis.document?.addEventListener?.('visibilitychange', () => { if (!document.hidden) resumed(); });
   globalThis.document?.addEventListener?.('visibilitychange', () => {
     if (lockKind() !== 'password' || !pageLock().on) return;
     if (document.hidden) { L.away = Date.now(); return; }
@@ -3688,7 +3985,7 @@
   // page started, a chat or group whose Notifications are off, Quiet contacts, everything when Settings → Chats and history →
   // Notifications is off, the chat on the screen while the page is seen. A tap opens that chat or the request (openTag).
   const NOTIFY = typeof LOCAL?.notify === 'function' ? (o) => LOCAL.notify(o) : PROFILE_SHELL ? (o) => shellAsk(PROFILE_SHELL)('notify', o) : null;
-  const N = { seen: null, asked: false, global: null, globalAt: 0, pays: new Set(), keeperAt: 0 };
+  const N = { seen: null, asked: false, denied: null, global: null, globalAt: 0, pays: new Set(), keeperAt: 0 };
   const TAG = /^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/;
   const tagOfChat = (did) => `chat:${did}`, tagOfGroup = (gid) => `group:${gid}`;
   const clip = (t) => [...String(t ?? '')].slice(0, 100).join('');
@@ -3734,12 +4031,27 @@
   LOCAL?.onOpen?.((tag) => { void openTag(tag); });
   if (PROFILE_SHELL) globalThis.sigeloOpen = (tag) => { void openTag(tag); };
   /** Android 13 and later ask the permission to notify: once, while the app is on the screen, when Notifications are on. */
-  async function notifyAsk(force = false) {
-    if (typeof LOCAL?.notify !== 'function' || (N.asked && !force) || globalThis.document?.hidden) return;
-    N.asked = true;
-    if (!force && prefs.get('notify-asked') === '1') return;
+  // Asked at the human's tap only (the card, the Notifications switch), never at a start. Refused: a line, and the next tap
+  // asks Android again; once Android asks no more (blocked), the tap opens sigelo's settings page instead.
+  async function notifyAsk() {
+    if (typeof LOCAL?.notify !== 'function' || globalThis.document?.hidden) return null;
     prefs.set('notify-asked', '1');
-    try { await LOCAL.notify({ ask: true }); } catch {}
+    let r = null;
+    try { r = await LOCAL.notify({ ask: true }); } catch {}
+    N.denied = r && !r.granted ? (r.blocked ? 'blocked' : 'refused') : null;
+    if (N.denied === 'blocked' && typeof LOCAL?.openSettings === 'function') { toast('Switch on Notifications for sigelo, then come back'); void LOCAL.openSettings().catch(() => {}); }
+    else if (N.denied === 'refused') toast('Notifications not allowed. Tap again to allow them.');
+    void refresh();
+    return r;
+  }
+  /** The ask's moment: the first chat with a message, on a phone that shows notifications, until answered or dismissed. */
+  function notifyCard() {
+    if (typeof LOCAL?.notify !== 'function' || N.global === false || prefs.get('notify-asked') === '1' && N.denied !== 'refused' && N.denied !== 'blocked') return null;
+    if (![...(S.snap?.groups?.mine ?? []), ...(S.snap?.groups?.contacts ?? [])].some((c) => c.last)) return null;
+    const why = N.denied === 'blocked' ? 'Notifications are off for sigelo in Android. Tap to open its settings and switch them on.'
+      : N.denied === 'refused' ? 'Notifications were not allowed. Tap to ask again.' : 'Get a notification when a message comes while sigelo is closed: the sender\'s name only, never the text.';
+    return h('div', { class: 'card', 'data-notify-ask': N.denied ?? 'first' }, row({ title: 'Notifications', sub: why, subCls: 'wrap',
+      end: [tbtn(N.denied === 'blocked' ? 'Open settings' : 'Allow', () => void notifyAsk()), N.denied ? null : tbtn('Not now', () => { prefs.set('notify-asked', '1'); N.denied = null; void refresh(); })] }));
   }
 
   // ================================================================ POLLING and the start
@@ -3763,8 +4075,9 @@
       return;
     }
     if (S.held) { S.held = false; await render(); return; }
-    await refresh();
-    if (!S.fatal) { try { await notifyNew(); } catch {} if (N.global !== false && N.seen) void notifyAsk(); }
+    await refresh(true);
+    // Notifications are asked at need, never at a start (0.1.17): the card a first message brings (notifyCard), or the switch.
+    if (!S.fatal) { try { await notifyNew(); } catch {} }
   }
   setInterval(() => { for (const el of document.querySelectorAll('.countdown')) el.textContent = left(Number(el.dataset.exp)); }, 1000);
   // Installable on this machine (manifest.webmanifest, sw.js: the three files, never /api/).
@@ -3772,7 +4085,7 @@
   if (!TOKEN && !SHELL && !LOCAL) { mount(h('div', { class: 'screen' }, h('div', { class: 'hero' }, empty('Can\'t open this page', 'This page has no key: open the link sigelo-agent ui printed.')))); return; }
   H?.replaceState?.(stateOf(0), '');
   // The tests (apps/web/test-web.mjs) reach every screen by name through this hook; a page never has it.
-  globalThis.sigeloUiTest?.({ go, back, home, screens: [...SCREENS.keys()],
+  globalThis.sigeloUiTest?.({ go, back, home, screens: [...SCREENS.keys()], graceOver: () => { graceUntil = 0; }, graceLeft: () => Math.max(0, graceUntil - Date.now()),
     sheets: { 'new-chat': openNewChat, profiles: openProfiles, 'profile-add': addProfile, picture: pictureSheet, rename: renameSheet, confirm: ask } });
   void render();
   void poll();

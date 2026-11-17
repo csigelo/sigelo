@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attest, keygen, sign } from 'sigelo';
 import { OPERATOR_CTX } from './store.mjs';
-import { BRAKE, GROUP_LABEL, GROUP_V, LIMITS, add, limitsFor, setRole, share, tierOf, checkBody, checkBrake, checkContent, checkRoster, create, groupsPath, handle, history, join as joinGroup, leave, list, newGid, newMid, remove, rename, send, setBrake, state } from './group.mjs';
+import { BRAKE, GROUP_LABEL, GROUP_V, LIMITS, add, limitsFor, setRole, share, tierOf, checkBody, checkBrake, checkContent, checkRoster, create, groupsPath, handle, history, join as joinGroup, leave, list, newGid, newMid, refreshNames, remove, rename, send, setBrake, state } from './group.mjs';
 import { groupTierOf } from './carrier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -112,7 +112,7 @@ const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort:
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 const make = (a) => {
   const paths = pathsFor(join(dir, `${a.label}.local.json`));
-  a.c = new Carrier({ identity: () => ({ secret: a.secret, bundle: a.bundle }), ...paths, relay: HOST, endpoints, clock: () => now, keep: true, backoff: [100, 400], retentionDays: 7 });
+  a.c = new Carrier({ identity: () => ({ secret: a.secret, bundle: a.bundle }), ...paths, relay: HOST, endpoints, clock: () => now, keep: true, backoff: [100, 400], retentionDays: 7, ...(a.selfName && { selfName: a.selfName }) });
   a.f = groupsPath(join(dir, `${a.label}.local.json`)); a.paths = paths; a.out = []; a.seen = [];
   return a;
 };
@@ -374,6 +374,36 @@ try {
   ok(!logs.includes('sigelo-group'), 'no group message in any inbox.log');
   ok(all.every((a) => !a.c.history().messages.some((m) => m.label === GROUP_LABEL)), 'none in history()');
   ok(all.every((a) => (JSON.parse(readFileSync(a.paths.state, 'utf8')).groups ?? []).length === 0), 'and none left in any carrier state');
+  // ---- names (carrier.mjs "Names"; 0.1.17: a new contact was "contact-…"): each side tells its own once paired; an
+  // unnamed pairing takes it (name_from "them"), sanitised; a name the human gave stays; a group code's join, filed
+  // before the name came, gets it in the roster (refreshNames).
+  const N1 = make(Object.assign(agent('names one'), { selfName: 'Nora \u202ex\n' })), N2 = make(Object.assign(agent('names two'), { selfName: () => 'Ben' }));
+  const N3 = make(Object.assign(agent('names three'), { selfName: 'Carl' })), N4 = make(Object.assign(agent('names four'), { selfName: 'Dee' }));
+  const inv1 = await N1.c.invite({});
+  await N2.c.accept(inv1.code, { wait: 0.3 });
+  for (let i = 0; i < 3; i++) { now += 5; await N1.c.inbox(); await N2.c.inbox(); }
+  const cOf = (a, b) => a.c.contacts().contacts.find((x) => x.did === b.did);
+  ok(cOf(N1, N2)?.name === 'Ben' && cOf(N1, N2).name_from === 'them' && cOf(N2, N1)?.name === 'Nora x' && cOf(N2, N1).name_from === 'them',
+    `names: an unnamed invite and accept take the names each side told, sanitised (${cOf(N1, N2)?.name}, ${JSON.stringify(cOf(N2, N1)?.name)})`);
+  await pair(N1, N3, 'carl-chosen', 'boss');
+  now += 5; await N1.c.inbox(); await N3.c.inbox();
+  ok(cOf(N1, N3)?.name === 'carl-chosen' && cOf(N1, N3).name_from === null && cOf(N3, N1)?.name === 'boss', 'names: a name the human gave stays');
+  N1.c.rename(N2.did, 'benny');
+  ok(cOf(N1, N2).name === 'benny' && cOf(N1, N2).name_from === null, 'names: renamed by the human: no longer from them');
+  const inv4 = await N1.c.invite({ name: 'contact-ab12', named: false });
+  await N4.c.accept(inv4.code, { wait: 0.3 });
+  now += 5; await N1.c.inbox();
+  const g4 = (await create({ carrier: N1.c, file: N1.f, name: 'naming', members: [N4.did], selfName: N1.c.selfName() })).group;
+  for (let i = 0; i < 3 && cOf(N1, N4)?.name !== 'Dee'; i++) { now += 5; await N4.c.inbox(); await N1.c.inbox(); }
+  const before4 = groupAt(N1, g4.gid).group.members.find((m) => m.did === N4.did).name;
+  await refreshNames({ carrier: N1.c, file: N1.f, did: N4.did });
+  ok(cOf(N1, N4)?.name === 'Dee' && before4 === 'contact-ab12' && groupAt(N1, g4.gid).group.members.find((m) => m.did === N4.did).name === 'Dee',
+    `names: a join filed before its name came; the name, then the roster gets it (${before4} → ${groupAt(N1, g4.gid).group.members.map((m) => m.name)})`);
+  const g4at4 = async () => { now += 5; await turn(N4); return groupAt(N4, g4.gid)?.group.members.find((m) => m.did === N1.did)?.name; };
+  let creatorName = null;
+  for (let i = 0; i < 3 && creatorName !== 'Nora x'; i++) creatorName = await g4at4();
+  ok(creatorName === 'Nora x', `names: the creator's own name in the roster is its told one, not "creator" (${creatorName})`);
+  for (const a of [N1, N2, N3, N4]) await a.c.stop();
   for (const a of all) await a.c.stop();
 } finally {
   await relay.close();

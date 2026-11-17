@@ -115,7 +115,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
   if (!Number.isSafeInteger(hookMs) || hookMs < 0) throw Object.assign(new Error(`watch: --hook-timeout: whole seconds, 0 for no limit, not ${JSON.stringify(o.hookTimeout)}`), { usage: true });
   const spool = o.spool === undefined ? null : resolve(o.spool);
   if (spool !== null) mkdirSync(spool, { recursive: true, mode: 0o700 });
-  const release = takeLock(path, 'watch');
+  const release = takeLock(path, 'watch', spool);
   try {
     const { lib, link } = await contactLib();
     const print = o.print ?? ((l: string) => { process.stdout.write(`${safeText(l)}\n`); });

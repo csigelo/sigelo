@@ -257,7 +257,10 @@ const PRIVATE = (h) => { const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$
 function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const target = new EventTarget(), keys = new Map(), log = { ops: [], streams: [], seals: [] };
   const state = { mode, wipe, locked: false, secure: false, door: false, secureLog: [], clipCleared: 0, clip: null,
-    lock: { on: true, after: 1, secure: true }, granted: true, asked: 0, notes: new Map(), pendingOpen: null, forced: [] };
+    lock: { on: true, after: 1, secure: true }, granted: true, asked: 0, notes: new Map(), pendingOpen: null, forced: [],
+    // Stay connected (StayConnected.java): the switch for the phone, its two asks (each once, then the system's page), what opened.
+    stay: { on: true, exempt: false, asked: false, notifyAsked: false }, opened: [], denials: 0 };
+  const live = new Set();   // the open TLS sockets: cut() drops them all, as a lost network
   let current = null;
   const ALIASES = { 'identity:false': 0, 'identity:true': 1, control: 2 };
   // Per profile, as SigeloBridge.java: p1 the aliases and blob version 1 of before; another its own aliases,
@@ -288,6 +291,19 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
       case 'big-land': { const k = partKey(m); if (!B.parts.has(k)) throw Object.assign(new Error('no partial'), { check: 'land' }); B.landed.push({ name: m.name, bytes: B.parts.get(k) }); B.parts.delete(k); return { uri: `content://media/external/downloads/${B.landed.length}`, name: m.name }; }
       case 'big-open': if (!String(m.uri).startsWith('content://media/')) throw Object.assign(new Error('uri'), { check: 'big' }); B.opened = m.uri; return {};
       case 'big-awake': B.awake.push(m.on); return {};
+      // Voice messages (BigFiles.java keep, url, mic): a partial kept as a doc; a landed file as a doc; RECORD_AUDIO asked
+      // once (B.micAnswer: the person's answer to the one dialog), a refusal remembered: never a second dialog.
+      case 'big-keep': { const k = partKey(m); if (!B.parts.has(k)) throw Object.assign(new Error('no recording written for this part'), { check: 'voice' }); const b = B.parts.get(k); B.parts.delete(k); return newDoc(profileOf(m), m.name, b); }
+      case 'big-url': { const i = Number(/\/(\d+)$/.exec(String(m.uri))?.[1]) - 1; if (!String(m.uri).startsWith('content://media/') || !B.landed[i]) throw Object.assign(new Error('uri'), { check: 'big' }); return newDoc(profileOf(m), B.landed[i].name, B.landed[i].bytes); }
+      case 'mic': {
+        if (B.micGranted) return { granted: true };
+        // Android shows its dialog until it was refused twice ("don't ask again"); then none: mic_blocked at once.
+        if ((B.micRefusals ?? 0) >= 2) throw Object.assign(new Error('Android no longer asks'), { check: 'mic_blocked' });
+        B.micDialogs = (B.micDialogs ?? 0) + 1;
+        if (B.micAnswer) { B.micGranted = true; return { granted: true }; }
+        B.micRefusals = (B.micRefusals ?? 0) + 1; throw Object.assign(new Error('the microphone is off for sigelo: tap Voice again to allow it'), { check: 'mic_permission' });
+      }
+      case 'app-settings': B.settingsOpened = (B.settingsOpened ?? 0) + 1; return {};
       default: throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
     }
   }
@@ -326,7 +342,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
           } else if (m.op === 'tls') {
             const sock = tlsConnect({ host: '127.0.0.1', port: route(m.host, m.port), servername: m.host, ca });
             await new Promise((y, n) => { sock.once('secureConnect', y); sock.once('error', n); });
-            const s = ++sid; streams.set(s, sock); log.streams.push(`${m.host}:${m.port}`);
+            const s = ++sid; streams.set(s, sock); log.streams.push(`${m.host}:${m.port}`); live.add(sock); sock.on('close', () => live.delete(sock));
             post({ id: m.id, stream: s });
             sock.on('data', (d) => post({ s, data: d.toString('base64') }));
             sock.on('error', (e) => { sock.err = e.message; });
@@ -400,7 +416,19 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             state.notes.set(m.tag, { title: m.title, text: m.text, keys: Object.keys(m).sort().join() });
             post({ id: m.id });
           }
-          else if (m.op.startsWith('big-')) post({ id: m.id, ...bigOp(m) });
+          else if (m.op === 'stay') {
+            for (const k of ['on', 'battery', 'notifications']) if (k in m && typeof m[k] !== 'boolean') throw Object.assign(new Error(k), { check: 'stay' });
+            const st = state.stay;
+            if ('on' in m) st.on = m.on;
+            // Android shows the notifications prompt until two refusals; after that only the app's settings page.
+            if ('battery' in m && !st.exempt) { st.asked = true; if (m.battery) { state.opened.push('battery-prompt'); st.exempt = state.exemptOnAsk ?? false; } }
+            if (m.notifications === true && !state.granted) {
+              if (state.denials < 2) { st.notifyAsked = true; state.opened.push('notify-prompt'); state.asked++; state.granted = state.grantOnAsk ?? false; if (!state.granted) state.denials++; }
+              else state.opened.push('notify-settings');
+            }
+            post({ id: m.id, ...st, notify: state.granted, notifyBlocked: state.denials >= 2 });
+          }
+          else if (m.op.startsWith('big-') || m.op === 'mic' || m.op === 'app-settings') post({ id: m.id, ...bigOp(m) });
           else if (m.op === 'unlock') { state.forced.push(m.force === true); state.unlocks = (state.unlocks ?? 0) + 1; if (state.locked) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); post({ id: m.id }); }
           else throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
         } catch (e) { if (m.id !== undefined) post({ id: m.id, error: { check: e.check ?? 'connect', message: e.message } }); }
@@ -412,7 +440,9 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
     },
   };
   const open = (tag) => current?.postMessage(JSON.stringify({ ev: 'open', tag }));
-  return { shell, target, state, log, keys, open, bigFetch, connect: () => A.connectBridge({ shell, target }) };
+  const nudge = () => current?.postMessage(JSON.stringify({ ev: 'nudge' }));
+  const cut = () => { for (const s of live) s.destroy(); };
+  return { shell, target, state, log, keys, open, nudge, cut, bigFetch, connect: () => A.connectBridge({ shell, target }) };
 }
 
 
@@ -1187,6 +1217,37 @@ class FakeEl {
     L0.onOpen(() => {});
     await L0.unlock({ force: true });
     ok(L0.lock === undefined && L0.notify === undefined && Date.now() - t0 < 500, 'local without the shell: lock and notify undefined, onOpen nothing, unlock resolves at once');
+    // ---- Stay connected (bridge "stay", local.stay): on by default, kept by the shell for the phone, each ask once then the system's page
+    {
+      const FS = fakeShell({ mode: 'self' }), bs = await FS.connect(), n0 = FS.log.ops.length;
+      const g0 = await bs.stay();
+      const bad = await Promise.all([{ on: 'yes' }, { on: 1 }, { battery: 'x' }, { notifications: null }].map((o) => checkOf(() => bs.stay(o))));
+      ok(g0.on === true && g0.exempt === false && g0.asked === false && g0.notify === true && g0.notifyAsked === false && bad.every((c) => c === 'stay') && FS.log.ops.length === n0 + 1,
+        `stay: on by default, { on, exempt, asked, notify, notifyAsked }; anything but booleans refused "stay" before the shell (${bad})`);
+      const off = await bs.stay({ on: false });
+      const Ls = boot(FS), lg = await Ls.stay.get();
+      ok(off.on === false && lg.on === false && typeof Ls.stay.set === 'function' && (await Ls.stay.set({ on: true })).on === true && FS.state.stay.on === true,
+        'stay: the switch kept by the shell for the phone (a second page, any profile, reads it); local.stay.set through it');
+      const b1 = await Ls.stay.battery(true), b2 = await Ls.stay.battery(true), b0 = await Ls.stay.battery(false);
+      FS.state.granted = false;
+      const d0 = await Ls.stay.notifications(false), n1 = await Ls.stay.notifications(true), n2 = await Ls.stay.notifications(true), n3 = await Ls.stay.notifications(true);
+      ok(b1.asked === true && b2.exempt === false && b0.asked === true && d0.notify === false && d0.notifyAsked === false && n1.notifyBlocked === false && n2.notifyBlocked === true && n3.notify === false
+        && FS.state.opened.join() === 'battery-prompt,battery-prompt,notify-prompt,notify-prompt,notify-settings' && FS.state.asked === 2,
+        `stay: a refusal never final: the battery prompt at each tap; notifications asked again while Android shows the prompt, then the app's settings page (notifyBlocked); a declined why asks nothing (${FS.state.opened})`);
+      const FT = fakeShell({ mode: 'self' }), bt = await FT.connect();
+      FT.state.granted = false; FT.state.grantOnAsk = true;
+      const t1 = await bt.stay({ on: true, notifications: true }), t2 = await bt.stay({ notifications: true });   // allowed: the second asks nothing
+      ok(t1.notify === true && t1.notifyAsked === true && FT.state.opened.join() === 'notify-prompt' && t2.notify === true && FT.state.asked === 1,
+        `stay: notifications asked once at the switch (the system's prompt), allowed: nothing more opens (${FT.state.opened})`);
+      ok((boot(null)).stay === undefined, 'stay: none without the shell (a tab, a computer\'s page)');
+      // The nudge: to a listener of that kind only, never kept for a later one; the early open still reaches onOpen.
+      const FN = fakeShell({ mode: 'self' }), bn = await FN.connect(), got = [], opens = [];
+      bn.onEvent((m) => opens.push(m.ev), 'open');
+      FN.nudge(); await sleep(50);
+      bn.onEvent((m) => got.push(m.ev), 'nudge');
+      FN.nudge(); FN.open('chat:did:sigelo:zN'); await sleep(50);
+      ok(got.join() === 'nudge' && opens.join() === 'open', `nudge: to its listener only, a nudge before any listener dropped (not kept "now" for later) (${got} / ${opens})`);
+    }
     // ---- words check: the password through the gate, no screen lock
     const S = new Uint8Array(32).fill(9); S[31] = 0x0d;
     const pw = await A.androidPlatform({ bridge, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow });
@@ -1356,6 +1417,18 @@ try {
     ok(await until(async () => (await Y.call('GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.some((m) => m.dir === 'in' && m.text === 'back over wss')), 'Node agent → wss app: read');
     ok(X.sh.log.streams.every((s) => s === `${HOST}:8883`) && X.sh.log.streams.length >= 1 && Y.sh.log.streams.every((s) => s === `${HOST}:443`) && Y.sh.log.streams.length >= 1,
       `the shell's streams: mqtts to 8883 only, wss to 443 only (${X.sh.log.streams.length}, ${Y.sh.log.streams.length})`);
+    // Stay connected's nudge (carrier.wake, through boot's listener in the app): up, nothing; the connection cut, the carrier's
+    // own backoff retry and no second dial beside it.
+    const s0 = X.sh.log.streams.length;
+    X.router.carrier.wake();
+    await sleep(400);
+    const quiet = X.sh.log.streams.length === s0;
+    X.sh.cut();
+    await sleep(20);
+    X.router.carrier.wake(); X.router.carrier.wake();
+    const back = await until(async () => X.sh.log.streams.length > s0 && (await X.call('GET', '/api/state')).body.me.online);
+    await sleep(600);
+    ok(quiet && back && X.sh.log.streams.length === s0 + 1, `wake: nothing while up; after a cut one reconnection, with the backoff, none beside it (${s0} → ${X.sh.log.streams.length})`);
     ok(browser.refused === 0 && browser.headers.length > 3 && browser.headers.every((h) => h.origin === undefined && h['sec-fetch-site'] === undefined),
       `the relay's browser rule (Origin, Sec-Fetch-Site → 403) never hit: ${browser.headers.length} requests, ${browser.refused} refused`);
   } finally {
@@ -1639,6 +1712,27 @@ try {
   await big.pick({ images: true }); await big.pick();
   ok(F.state.big.picks.slice(-2).join() === 'true,false', `big: pick {images: true} asks the shell for pictures only; a plain pick does not (${F.state.big.picks.join()})`);
   ok(await checkOf(() => big.write('nope', 0, new Uint8Array(1))) === 'big', 'big: a part that is not 32 hex refused here, before the shell');
+  // Voice messages: the microphone asked at a tap on Voice (the one dialog), asked again after a refusal while Android
+  // shows its dialog, then mic_blocked at once (the page opens the app's settings page); the recording written as a
+  // partial, kept as a doc to send; a voice message that landed read back as a doc.
+  ok(['big-keep', 'big-url', 'mic', 'app-settings'].every((o) => A.OPS.includes(o)), 'voice: big-keep, big-url, mic and app-settings in OPS');
+  F.state.big.micAnswer = false;
+  const m1 = await checkOf(() => big.mic()), m2 = await checkOf(() => big.mic()), m3 = await checkOf(() => big.mic());
+  ok(m1 === 'mic_permission' && m2 === 'mic_permission' && m3 === 'mic_blocked' && F.state.big.micDialogs === 2,
+    `voice: RECORD_AUDIO refused → mic_permission, asked again at the next tap; once Android asks no more → mic_blocked, no dialog (${m1} ${m2} ${m3}, ${F.state.big.micDialogs} dialogs)`);
+  await big.appSettings();
+  ok(F.state.big.settingsOpened === 1, 'voice: app-settings → the app\'s page in the system settings');
+  // Allowed there (Settings), or yes at a dialog: granted, no dialog again.
+  F.state.big.micRefusals = 0; F.state.big.micAnswer = true;
+  ok(await big.mic() === true && await big.mic() === true && F.state.big.micDialogs === 3, 'voice: allowed → granted, remembered (no dialog the second time)');
+  const rec = 'cd'.repeat(16), audio = Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]);
+  await big.write(rec, 4, audio.subarray(4)); await big.write(rec, 0, audio.subarray(0, 4));
+  const kept = await big.keep(rec, 'voice-20261117-142301.webm');
+  ok(/^[0-9a-f]{32}$/.test(kept.doc) && kept.name === 'voice-20261117-142301.webm' && kept.size === 8 && kept.url.includes('profile=p2') && await checkOf(() => big.keep(rec, 'x.webm')) === 'voice',
+    `voice: the recording kept by the shell as a doc of this profile (${JSON.stringify(kept).slice(0, 120)}); kept twice: voice`);
+  ok((await big.hash(kept.doc)).sha256 === createHash('sha256').update(audio).digest('hex'), 'voice: the kept recording hashed in the shell as any file sent');
+  const lu = await big.url(landed.uri);
+  ok(lu.name === 'film.mkv' && lu.size === 2097152 && await checkOf(() => big.url('file:///etc/passwd')) === 'big', 'voice: a landed file as a doc to read back (content://media/ only)');
 }
 
 report();

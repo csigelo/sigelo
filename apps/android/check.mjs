@@ -2,7 +2,7 @@
 // The Android project checked without the SDK (design/apps.md §8): what can be known of it on a
 // machine with Node alone. The build itself runs on CI (.github/workflows/android.yml).
 //   node apps/android/check.mjs     → ALL PASS (n)
-// The manifest and resources (well-formed, four permissions (storage on Android 9 only), one provider not exported, no backup, references resolve, the
+// The manifest and resources (well-formed, eight permissions (storage on Android 9 only; the microphone for voice messages), one provider not exported, one service (Stay connected), no backup, references resolve, the
 // icon from assets/brand/app-icon.svg), the Gradle files (AGP pinned, minSdk 28, targetSdk 35, no
 // dependency, braces balanced), the wrapper (its jar by SHA-256, the distribution pinned), the Java
 // (the bridge's operations as platform-android.mjs sends them, the WebView's settings, every asset
@@ -107,7 +107,9 @@ ok(Object.values(xml).every(Boolean), `XML: ${xmlFiles.length} files well-formed
 const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
 {
   const perms = all(man, 'uses-permission').map((p) => p.attrs['android:name']).sort();
-  ok(perms.join() === 'android.permission.CAMERA,android.permission.INTERNET,android.permission.POST_NOTIFICATIONS,android.permission.WRITE_EXTERNAL_STORAGE', `manifest: INTERNET, CAMERA, POST_NOTIFICATIONS and WRITE_EXTERNAL_STORAGE only (${perms})`);
+  ok(perms.join() === 'android.permission.CAMERA,android.permission.FOREGROUND_SERVICE,android.permission.FOREGROUND_SERVICE_SPECIAL_USE,android.permission.INTERNET,android.permission.POST_NOTIFICATIONS,android.permission.RECORD_AUDIO,android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,android.permission.WRITE_EXTERNAL_STORAGE',
+    `manifest: INTERNET, CAMERA, POST_NOTIFICATIONS, RECORD_AUDIO (voice messages), WRITE_EXTERNAL_STORAGE, and for Stay connected FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS only (${perms})`);
+  ok(all(man, 'uses-feature').some((f) => f.attrs['android:name'] === 'android.hardware.microphone' && f.attrs['android:required'] === 'false'), 'manifest: a microphone not required (a phone without one still installs it)');
   const wes = all(man, 'uses-permission').find((p) => p.attrs['android:name'] === 'android.permission.WRITE_EXTERNAL_STORAGE');
   ok(wes?.attrs['android:maxSdkVersion'] === '28' && all(man, 'uses-permission').filter((p) => p !== wes).every((p) => p.attrs['android:maxSdkVersion'] === undefined),
     'manifest: the shared storage only up to Android 9 (maxSdkVersion 28: Downloads through MediaStore after, no permission)');
@@ -119,7 +121,13 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   ok(acts.length === 1 && acts[0].attrs['android:name'] === '.MainActivity' && acts[0].attrs['android:exported'] === 'true'
     && all(acts[0], 'action').some((a) => a.attrs['android:name'] === 'android.intent.action.MAIN') && all(acts[0], 'category').some((a) => a.attrs['android:name'] === 'android.intent.category.LAUNCHER'),
   'manifest: one activity, MainActivity, exported for the launcher only');
-  ok(all(man, 'service').length + all(man, 'receiver').length === 0 && all(acts[0], 'data').length === 0, 'manifest: no service, receiver or URL handler');
+  ok(all(man, 'receiver').length === 0 && all(acts[0], 'data').length === 0 && !perms.includes('android.permission.RECEIVE_BOOT_COMPLETED'), 'manifest: no receiver (none at boot), no URL handler');
+  // Stay connected (StayConnected.java): one foreground service of type specialUse, its subtype said, not exported, ending with the task.
+  const sv = all(man, 'service'), prop = sv.length === 1 ? all(sv[0], 'property') : [];
+  ok(sv.length === 1 && sv[0].attrs['android:name'] === '.StayConnected' && sv[0].attrs['android:exported'] === 'false' && sv[0].attrs['android:foregroundServiceType'] === 'specialUse'
+    && sv[0].attrs['android:stopWithTask'] === 'true' && prop.length === 1 && prop[0].attrs['android:name'] === 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE'
+    && /end-to-end messaging connection open/.test(prop[0].attrs['android:value'] ?? '') && all(sv[0], 'intent-filter').length === 0,
+    'manifest: one service, StayConnected: not exported, foregroundServiceType specialUse with its PROPERTY_SPECIAL_USE_FGS_SUBTYPE, stopWithTask, no intent filter');
   const pv = all(man, 'provider');
   ok(pv.length === 1 && pv[0].attrs['android:name'] === '.PhotoProvider' && pv[0].attrs['android:authorities'] === 'io.sigelo.app.photos' && pv[0].attrs['android:exported'] === 'false'
     && pv[0].attrs['android:grantUriPermissions'] === 'true' && all(pv[0], 'grant-uri-permission').length === 0 && all(pv[0], 'meta-data').length === 0,
@@ -196,7 +204,7 @@ ok(/storeType 'pkcs12'/.test(app) && /sigelo\.debugKeystore/.test(app) && /tasks
 
 // ================================================================ Java
 const java = Object.fromEntries(walk(JAVA).filter((f) => f.endsWith('.java')).map((f) => [f.slice(JAVA.length + 1), read(f)]));
-ok(Object.keys(java).sort().join() === 'BigFiles.java,MainActivity.java,PhotoProvider.java,SigeloBridge.java', `java: MainActivity, SigeloBridge, BigFiles and PhotoProvider (${Object.keys(java)})`);
+ok(Object.keys(java).sort().join() === 'BigFiles.java,MainActivity.java,PhotoProvider.java,SigeloBridge.java,StayConnected.java', `java: MainActivity, SigeloBridge, BigFiles, PhotoProvider and StayConnected (${Object.keys(java)})`);
 ok(Object.values(java).every((t) => balanced(code(t)) && /^package io\.sigelo\.app;$/m.test(t) && [...t.matchAll(/^import ([\w.]+);$/gm)].every((m) => /^(android|java|javax|org\.json)\./.test(m[1]))),
   'java: braces balanced, package io.sigelo.app, no import but the platform\'s (no AndroidX)');
 const A = await import(pathToFileURL(join(REPO, 'apps', 'web', 'platform-android.mjs')).href).catch(() => null);
@@ -217,6 +225,11 @@ ok(['setJavaScriptEnabled(true)', 'setAllowFileAccess(false)', 'MIXED_CONTENT_NE
 ok(/static final String HOST = "appassets\.androidplatform\.net"/.test(ma) && /shouldInterceptRequest[\s\S]*?return serve\(r\)/.test(ma) && /if \(!ours\(u\)\) return refuse\(404/.test(ma),
   'WebView: the page from https://appassets.androidplatform.net/ (intercepted), anything else refused, never fetched');
 ok(/RESOURCE_VIDEO_CAPTURE\.equals\(res\[0\]\)/.test(ma) && /!video \|\| !ours\(req\.getOrigin\(\)\)/.test(ma) && /requestPermissions\(new String\[\] \{Manifest\.permission\.CAMERA\}/.test(ma), 'camera: video only, our origin only, CAMERA asked at the first request');
+// The microphone (voice messages): the WebView's ask granted at once for audio only, our origin only, when RECORD_AUDIO is
+// granted, else denied without a prompt (the page asked through the bridge first: one dialog, not two).
+ok(/boolean audio = res\.length == 1 && PermissionRequest\.RESOURCE_AUDIO_CAPTURE\.equals\(res\[0\]\);\s*if \(audio && ours\(req\.getOrigin\(\)\)\) \{\s*if \(checkSelfPermission\(Manifest\.permission\.RECORD_AUDIO\) == PackageManager\.PERMISSION_GRANTED\) req\.grant\(res\);\s*else req\.deny\(\);/.test(ma)
+  && !/RECORD_AUDIO\}, REQ_/.test(ma),
+  'microphone: the WebView granted audio capture only, for our origin only, once RECORD_AUDIO is; never a second prompt from the WebView');
 const jbl = java['SigeloBridge.java'];
 ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\s\S]*?SystemClock\.elapsedRealtime\(\) - awayAt >= bridge\.lockAfter\(\) \* 60_000L\) locked = true;[\s\S]*?if \(locked && afterAuth == null\) lockNow\(\);/.test(ma)
   && /protected void onStop\(\) \{\s*if \(afterAuth == null\) awayAt = SystemClock\.elapsedRealtime\(\);/.test(ma) && /if \(bridge == null \|\| !bridge\.lockOn\(\) \|\| bridge\.mode\(\) == null \|\| km == null \|\| !km\.isDeviceSecure\(\)\) \{\s*showPage\(\);/.test(ma)
@@ -251,8 +264,31 @@ ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\
     'notify: POST_NOTIFICATIONS asked when the page asks (Android 13+), its own request code; the camera\'s path as before');
   ok(/protected void onNewIntent\(Intent i\) \{\s*super\.onNewIntent\(i\);\s*setIntent\(i\);\s*opened\(i\);/.test(ma) && /if \(saved == null\) opened\(getIntent\(\)\);/.test(ma) && /SigeloBridge\.OPEN\.equals\(i\.getAction\(\)\)/.test(ma)
     && /if \(port != null\) postOpen\(port, tag\);\s*else pendingOpen = tag;/.test(jbl) && /if \(pendingOpen != null\) \{\s*String tag = pendingOpen;\s*pendingOpen = null;\s*postOpen\(mine, tag\);/.test(jbl) && /put\("ev", "open"\)\.put\("tag", tag\)/.test(jbl)
-    && /if \(typeof m\?\.ev === 'string'\) \{[^\n]*return; \}\n\s*const w = waiting\.get\(m\?\.id\);/.test(pa),
+    && /if \(typeof m\?\.ev === 'string'\) \{[\s\S]{0,400}?return;\n\s*\}\n\s*const w = waiting\.get\(m\?\.id\);/.test(pa),
     'open event: a tap (onNewIntent, or the start\'s intent) posts {ev:"open", tag}, kept until the page\'s port is open and posted once; the page routes ev messages to their listeners, never to a request waiting');
+}
+{
+  // Stay connected (StayConnected.java; design/push.md §A): the process kept, not a socket of its own; no wake lock, no exact alarm, no boot start.
+  const sc = java['StayConnected.java'], scc = code(sc), strings = read(MAIN, 'res', 'values', 'strings.xml');
+  ok(/startForeground\(NOTE, n, ServiceInfo\.FOREGROUND_SERVICE_TYPE_SPECIAL_USE\); else startForeground\(NOTE, n\);/.test(sc) && /return START_NOT_STICKY;/.test(sc)
+    && !/WakeLock|newWakeLock|setExact|setAlarmClock|SCHEDULE_EXACT_ALARM|BOOT_COMPLETED|Socket/.test(scc),
+    'stay: startForeground with type specialUse (Android 14+), not sticky; no wake lock, no exact alarm, no boot start, no socket of its own');
+  ok(/am\.setAndAllowWhileIdle\(AlarmManager\.ELAPSED_REALTIME_WAKEUP, SystemClock\.elapsedRealtime\(\) \+ NUDGE_MS, alarm\(\)\)/.test(sc) && /NUDGE_MS = 15 \* 60_000L;/.test(sc) && /am\.cancel\(alarm\(\)\);/.test(sc)
+    && /PendingIntent\.getService\(this, 0, new Intent\(this, StayConnected\.class\)\.setAction\(NUDGE\), PendingIntent\.FLAG_IMMUTABLE/.test(sc)
+    && /ACTION_DEVICE_IDLE_MODE_CHANGED/.test(sc) && /!pm\.isDeviceIdleMode\(\)\) nudge\(\);/.test(sc) && /unregisterReceiver\(idle\);/.test(sc),
+    'stay: an inexact alarm every 15 minutes (setAndAllowWhileIdle, immutable, explicit), cancelled at the end; the end of Doze nudges too');
+  ok(/NotificationManager\.IMPORTANCE_LOW\)/.test(sc) && /\.setContentTitle\(getString\(R\.string\.stay_title\)\)/.test(sc) && !/setContentText|addAction|setStyle/.test(scc)
+    && strings.includes('<string name="stay_title">sigelo · connected</string>') && /PendingIntent\.getActivity\(this, 0, open, PendingIntent\.FLAG_IMMUTABLE/.test(sc) && /\.setOngoing\(true\)/.test(sc),
+    'stay: the notification "sigelo · connected", low importance, no text, no action; a tap opens the app (immutable)');
+  ok(/prefs\(c\)\.getBoolean\(ON, true\)/.test(sc) && /if \(m\.has\(k\) && !\(m\.opt\(k\) instanceof Boolean\)\) throw new SigeloBridge\.Refused\("stay",/.test(sc)
+    && /!open\(a, new Intent\(Settings\.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri\.parse\("package:" \+ a\.getPackageName\(\)\)\)\)\) \{\s*open\(a, new Intent\(Settings\.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS\)\);/.test(sc)
+    && /if \(!blocked\(a\)\) \{[\s\S]{0,120}?a\.askNotifications\(/.test(sc) && /&& !a\.shouldShowRequestPermissionRationale\(POST_NOTIFICATIONS\);/.test(sc) && /Settings\.ACTION_APP_NOTIFICATION_SETTINGS/.test(sc),
+    'stay: the switch on by default, booleans only (refused "stay"); a refusal never final: the battery prompt at each tap, POST_NOTIFICATIONS while Android shows it, then the app\'s settings page');
+  ok(/StayConnected\.follow\(this, StayConnected\.on\(this\)\);\s*super\.onPause\(\);/.test(ma) && /if \(isFinishing\(\)\) StayConnected\.follow\(this, false\);/.test(ma)
+    && /if \(StayConnected\.on\(this\)\) moveTaskToBack\(true\);\s*else super\.onBackPressed\(\);/.test(ma) && !/StayConnected/.test(code(ma).replace(/[\s\S]*?protected void onCreate/, '').split('onBackPressed')[0]),
+    'stay: started as the app leaves the screen (onPause), stopped when it finishes; Back on the first screen minimises while on (the page and its connection kept)');
+  ok(/StayConnected\.page = this;/.test(jbl) && /if \(StayConnected\.page == this\) StayConnected\.page = null;/.test(jbl) && /put\("ev", "nudge"\)/.test(jbl) && /case "stay":\s*try \{\s*StayConnected\.op\(activity, m,/.test(jbl),
+    'stay: the bridge answers "stay" through StayConnected.op and posts {ev:"nudge"} to the page; registered while open');
 }
 ok(!/onCreateOptionsMenu|onOptionsItemSelected|M_RELOAD|android\.view\.Menu|getActionBar/.test(code(ma)) && /void reload\(\) \{\s*if \(web != null\) web\.loadUrl\(START\);/.test(ma)
   && /case "reload":\s*\/\/[^\n]*\n\s*post\(to, ok\(id\)\);\s*main\.post\(activity::reload\);/.test(jbl)
@@ -283,6 +319,10 @@ ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooser
   ok(/setType\(m\.optBoolean\("images", false\) \? "image\/\*" : "\*\/\*"\)/.test(bf), 'big files: the picker for pictures only when the page asks images (the composer\'s Photo), any file otherwise');
   ok(/Pattern\.compile\("\^\[0-9a-f\]\{32\}\\\\\.jpg\$"\)/.test(pp) && /getPathSegments\(\)\.size\(\) != 1/.test(pp) && /getCacheDir\(\), "photos"\)/.test(pp) && (pp.match(/throw new UnsupportedOperationException/g) ?? []).length === 3,
     'PhotoProvider: one name shape (32 hex .jpg) in cache/photos, nothing else; no insert, delete or update');
+  ok(/requestPermissions\(new String\[\] \{Manifest\.permission\.RECORD_AUDIO\}, REQ_MIC\)/.test(bf) && /shouldShowRequestPermissionRationale\(Manifest\.permission\.RECORD_AUDIO\)/.test(bf) && /r\.no\("mic_blocked", MIC_BLOCKED\)/.test(bf)
+    && /r\.no\("mic_permission", MIC_OFF\)/.test(bf) && /ACTION_APPLICATION_DETAILS_SETTINGS, Uri\.fromParts\("package", activity\.getPackageName\(\), null\)/.test(bf)
+    && /if \(!s\.startsWith\("content:\/\/media\/"\)\) throw new SigeloBridge\.Refused\("big", "uri: a file that landed in Downloads"\);/.test(bf),
+    'voice: RECORD_AUDIO asked at a tap (mic), asked again after a refusal while Android shows its dialog, then mic_blocked; app-settings opens the app\'s settings page; big-url takes landed files only');
   ok(/FLAG_KEEP_SCREEN_ON/.test(bf) && /if \(bridge != null && bridge\.big\.permission\(req, grants\)\) return;/.test(ma) && /if \(bridge != null && bridge\.bigResult\(req, result, data\)\) return;/.test(ma),
     'big files: the screen kept on while a transfer moves; the picker\'s, camera\'s and permissions\' answers routed to BigFiles');
 }
