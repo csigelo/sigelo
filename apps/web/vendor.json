@@ -259,7 +259,7 @@
   },
   "vendor/package.json": {
    "from": "apps/agent/package.json",
-   "sha256": "27e6b0e4b7f0f4e938c0bb8e42ca5516c66bc39cdf2a61a579a49c7ed01cc372"
+   "sha256": "1b11e4004bd6561e152261d5abac9d8cd631d3ed6c7047793c57d322540faa30"
   },
   "vendor/remote-client.mjs": {
    "from": "apps/agent/remote-client.mjs",
@@ -295,7 +295,7 @@
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "ed477d5825908d5a89f38c51535018bfa870b00f494bdacde9ff880442e3c589"
+   "sha256": "1a4ff9573c700e813844cae7a270a31dbc9587571e8dae1192657cb72e4c13cc"
   }
  }
 }

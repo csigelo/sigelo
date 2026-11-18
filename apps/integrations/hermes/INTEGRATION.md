@@ -13,7 +13,7 @@ Hermes host. The operator runs:
 ```sh
 printf 'y\n' | hermes mcp add sigelo --command npx \
   --env SIGELO_IDENTITY="$HOME/.hermes/sigelo.local.json" HOME="$HOME" PATH="$PATH" \
-  --args sigelo-mcp@0.1.17
+  --args sigelo-mcp@0.1.18
 ```
 
 Hermes passes the server only `--env`: `HOME` and `PATH` let `npx` run. Wallet: add

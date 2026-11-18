@@ -20,7 +20,7 @@ from the UI instead: Settings → **MCP/A2A** → **External MCP Servers** → O
   "mcpServers": {
     "sigelo": {
       "command": "npx",
-      "args": ["-y", "sigelo-mcp@0.1.17"],
+      "args": ["-y", "sigelo-mcp@0.1.18"],
       "env": { "SIGELO_IDENTITY": "/a0/usr/sigelo-id/agent0.local.json" }
     }
   }
@@ -86,5 +86,5 @@ task (*"pass `identity: "sub-1"` to every sigelo tool"*), or a separate agent pr
 native tool sets its own `SIGELO_IDENTITY`.
 
 Check: in the container run
-`printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | npx -y sigelo-mcp@0.1.17 | grep -o '"name":"sigelo_[a-z_]*"' | wc -l`;
+`printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | npx -y sigelo-mcp@0.1.18 | grep -o '"name":"sigelo_[a-z_]*"' | wc -l`;
 it prints `28`.

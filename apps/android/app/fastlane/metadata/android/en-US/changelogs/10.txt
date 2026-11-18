@@ -1,0 +1,6 @@
+Enrolling an agent completes, after a restart too, and every step has Cancel.
+Reply to one message: swipe it. Links in a message open in the browser.
+Unsent text is kept per chat. Photo previews show on the phone.
+Voice messages: record up to 5 minutes from the + button.
+Stay connected (on by default) keeps the relay connection while the app is minimised.
+Permissions are asked when needed, with why.
