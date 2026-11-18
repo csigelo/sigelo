@@ -24,6 +24,7 @@ const a = keygen({ recovery: seed(9), seed: seed(1), created: '2026-10-14T00:00:
 const bundle = bundleOf(a.genesis);
 const signed = await signCard(card, bundle, signerOf(a), NOW);
 ok(verifyCard(signed, NOW).did === a.did, 'sign → verify round trip');
+ok(verifyCard(signed, NOW).key === a.genesis.key, 'key: the current public key, from the genesis');
 ok(signed.capabilities.extensions.length === 2 && signed.capabilities.extensions[0].uri === 'urn:other', 'other extensions kept');
 const tamperOf = (s) => (f) => { const c = structuredClone(s); f(c); return c; }, tamper = tamperOf(signed);
 await rejects(() => verifyCard(tamper((c) => { c.supportedInterfaces[0].url = 'https://evil.example/a2a'; }), NOW), /bad signature/, 'changed url refused');
@@ -38,6 +39,7 @@ const b = keygen({ recovery: seed(9), seed: seed(3), created: '2026-10-14T00:00:
 const rot = rotate({ genesis: a.genesis, next_genesis: b.genesis, iat: NOW - 10, reason: 'voluntary', secret: a.secret, next_secret: b.secret });
 const rotated = { ...bundle, rotations: [rot] };
 ok(verifyCard(await signCard(card, rotated, signerOf(b), NOW), NOW).did === b.did, 'after rotation: signed by the new key, verifies');
+ok(verifyCard(await signCard(card, rotated, signerOf(b), NOW), NOW).key === b.genesis.key, 'key after rotation: the rotated-to key');
 await rejects(() => signCard(card, rotated, signerOf(a), NOW), /bad signature/, 'after rotation: the old key refused');
 
 // The operator (params.operator): the attestation sigelo-agent writes, and the operator's chain.

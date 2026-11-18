@@ -38,7 +38,7 @@ npm test                                                  # ALL PASS
 ```
 
 `verify.mjs` (60 lines, published `sigelo` package): one sigelo extension, `verify(bundle)`
-offline, `did` = the bundle's current DID, `sig` checked with that DID's key. It reports; whom
+offline, `did` = the bundle's current DID, `key` = that DID's public key (what `sig` is checked with). It reports; whom
 to trust is the caller's call. `sign.mjs` signs through sigelo-agent's signer for `$SIGELO_IDENTITY`
 (file, keychain or key agent).
 
