@@ -266,6 +266,10 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
   const pl = S.plistOf(p);
   ok('service: the macOS LaunchAgent: RunAtLoad, KeepAlive, the same arguments, XML-escaped', pl.includes('<key>KeepAlive</key><true/>') && pl.includes('<key>RunAtLoad</key><true/>') && pl.includes('&quot;') === false && pl.includes('Ana "the" agent') && pl.includes(`<string>${CLI}</string>`));
   ok('service: Windows: the schtasks command, ONLOGON', /^schtasks \/Create \/SC ONLOGON .*\/TN sigelo-watch \/TR ".*watch --identity .*--quiet"$/.test(S.schtasksOf(p)), S.schtasksOf(p));
+  const ph = S.planFor(id, undefined, { PATH: '/usr/bin:/x', SIGELO_RELAY: 'relay.example', SIGELO_SECRET_THING: 'x' } as NodeJS.ProcessEnv, CLI, { host: 'claude', cwd: H }), bh = S.parseUnit(S.unitOf(ph));
+  ok('service --host claude: the unit runs host claude --identity --spool --cwd --quiet, PATH kept (the SDK finds claude), no secret',
+    JSON.stringify(bh.exec) === JSON.stringify([process.execPath, CLI, 'host', 'claude', '--identity', id, '--spool', join(H, 'my agent %1.local.spool'), '--cwd', H, '--quiet'])
+      && bh.env['PATH'] === '/usr/bin:/x' && !('SIGELO_SECRET_THING' in bh.env) && S.unitOf(ph).includes('(sigelo-agent host claude)') && !('PATH' in back.env), JSON.stringify(bh));
   if (process.platform === 'linux') {
     const env = { PATH: process.env['PATH'] ?? '', HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_IDENTITY: join(H, 'svc.local.json'), SIGELO_SERVICE_DIR: join(H, 'units'), SIGELO_SERVICE_DRY: '1' };
     const run = cliIn(env, H);
@@ -281,6 +285,12 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
     const rm = await run('service', 'remove');
     ok('service remove: the unit gone, disable --now (dry)', rm.status === 0 && !existsSync(unit) && rm.stderr.includes('systemctl --user disable --now sigelo-watch.service'), rm.stdout + rm.stderr);
     ok('service: a bad subcommand → exit 2', (await run('service', 'start')).status === 2);
+    const hi = await run('service', 'install', '--host', 'claude', '--cwd', H);
+    const HS = await import('./sigelo-agent-host.ts'), sdkHere = await import(HS.SDK_MODULE).then(() => true, () => false);
+    if (sdkHere) ok('service install --host claude: the unit runs host claude in --cwd (dry)', hi.status === 0 && S.parseUnit(readFileSync(unit, 'utf8')).exec.slice(2, 4).join(' ') === 'host claude' && hi.stdout.includes('sigelo-agent host claude for'), hi.stdout + hi.stderr);
+    else ok('service install --host claude without the SDK: refused up front (exit 1, the install line), no unit written', hi.status === 1 && hi.stderr.includes(HS.SDK_MISSING) && !existsSync(unit), hi.stdout + hi.stderr);
+    ok('service install: --host other than claude, or --cwd without --host → exit 2', (await run('service', 'install', '--host', 'codex')).status === 2 && (await run('service', 'install', '--cwd', H)).status === 2);
+    await run('service', 'remove');
     rmSync(H, { recursive: true, force: true });
   }
 }

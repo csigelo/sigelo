@@ -14,6 +14,10 @@
  *            with `launchctl bootstrap gui/<uid>`
  *   Windows  not automated: the schtasks command to run once (ONLOGON), printed
  *
+ * `service install --host claude [--cwd DIR]`: the unit runs `sigelo-agent host claude` instead (sigelo-agent-host.ts: the
+ * operator's messages go into a Claude session it holds), in DIR (default: where install ran), PATH kept so
+ * the SDK finds `claude`.
+ *
  * SIGELO_SERVICE_DIR: where the unit or plist is written (tests); SIGELO_SERVICE_DRY=1: nothing is run
  * (no systemctl, launchctl): what would run is printed. Nothing here needs root.
  */
@@ -28,21 +32,23 @@ const note = (s: string): void => { process.stderr.write(`sigelo-agent: ${s}\n`)
 const say = (s: string): void => { process.stdout.write(`${s}\n`); };
 
 /** What the service runs: node, this CLI, watch for `identity` spooling to `spool`; the environment it keeps. */
-export interface Plan { node: string; cli: string; identity: string; spool: string; env: Record<string, string> }
+export interface Plan { node: string; cli: string; identity: string; spool: string; env: Record<string, string>; host?: 'claude'; cwd?: string }
 // The variables a watcher needs as this shell has them (the relay, the key's provider); never a secret.
 const KEPT = ['SIGELO_RELAY', 'SIGELO_RELAY_ENDPOINTS', 'SIGELO_RELAY_TRANSPORT', 'SIGELO_SHORT_RELAY', 'SIGELO_KEY_PROVIDER', 'SIGELO_KEY_AGENT', 'SIGELO_NAME', 'HTTPS_PROXY', 'NO_PROXY'];
-export function planFor(identity: string, spool?: string, env: NodeJS.ProcessEnv = process.env, cli = process.argv[1] ?? ''): Plan {
+export function planFor(identity: string, spool?: string, env: NodeJS.ProcessEnv = process.env, cli = process.argv[1] ?? '', o: { host?: 'claude'; cwd?: string } = {}): Plan {
   const id = resolve(identity);
-  const kept = Object.fromEntries(KEPT.filter((k) => typeof env[k] === 'string' && env[k] !== '').map((k) => [k, env[k]!]));
-  return { node: process.execPath, cli: resolve(cli), identity: id, spool: resolve(spool ?? `${id.replace(/\.json$/, '')}.spool`), env: { SIGELO_IDENTITY: id, ...kept } };
+  const kept = Object.fromEntries([...KEPT, ...(o.host ? ['PATH'] : [])].filter((k) => typeof env[k] === 'string' && env[k] !== '').map((k) => [k, env[k]!]));
+  return { node: process.execPath, cli: resolve(cli), identity: id, spool: resolve(spool ?? `${id.replace(/\.json$/, '')}.spool`), env: { SIGELO_IDENTITY: id, ...kept },
+    ...(o.host && { host: o.host, cwd: resolve(o.cwd ?? process.cwd()) }) };
 }
-export const argsOf = (p: Plan): string[] => [p.node, p.cli, 'watch', '--identity', p.identity, '--spool', p.spool, '--quiet'];
+export const argsOf = (p: Plan): string[] => [p.node, p.cli, ...(p.host ? ['host', p.host] : ['watch']), '--identity', p.identity, '--spool', p.spool, ...(p.host && p.cwd ? ['--cwd', p.cwd] : []), '--quiet'];
+const what = (p: Plan): string => (p.host ? `sigelo-agent host ${p.host}` : 'sigelo-agent watch');
 
 // systemd: a word with a space, a quote or a backslash in double quotes, escaped; % doubled (a specifier otherwise).
 const sdWord = (w: string): string => { const t = w.replace(/%/g, '%%'); return /[\s"\\]/.test(t) ? `"${t.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : t; };
 /** The systemd user unit. */
 export function unitOf(p: Plan): string {
-  return ['[Unit]', 'Description=sigelo: receive your owner\'s messages (sigelo-agent watch)', 'Wants=network-online.target', 'After=network-online.target', '',
+  return ['[Unit]', `Description=sigelo: receive your owner's messages (${what(p)})`, 'Wants=network-online.target', 'After=network-online.target', '',
     '[Service]', ...Object.entries(p.env).map(([k, v]) => `Environment=${sdWord(`${k}=${v}`)}`), `ExecStart=${argsOf(p).map(sdWord).join(' ')}`,
     'Restart=always', `RestartSec=${RESTART_S}`, '', '[Install]', 'WantedBy=default.target', ''].join('\n');
 }
@@ -94,18 +100,26 @@ function run(cmd: string, args: string[]): { ok: boolean; out: string } {
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim() || (r.error?.message ?? '') };
 }
 
-export const USAGE = `service install [--spool <dir>] | service status | service remove
+export const USAGE = `service install [--spool <dir>] [--host claude [--cwd <dir>]] | service status | service remove
       the listener as a service of this machine (systemd user unit; macOS LaunchAgent; Windows: the step printed):
-      sigelo-agent watch --spool <dir> --quiet for this identity, restarted always; inbox and the MCP read its spool`;
+      sigelo-agent watch --spool <dir> --quiet for this identity, restarted always; inbox and the MCP read its spool;
+      --host claude: it runs host claude instead (a Claude session in <dir>, default here, fed the operator's messages)`;
 
 /** sigelo-agent service …; → the exit code. */
 export async function main(path: string, rest: string[]): Promise<number> {
   const [sub, ...more] = rest, os = platformOf();
-  const spoolAt = more.indexOf('--spool'), spool = spoolAt >= 0 ? more[spoolAt + 1] : undefined;
-  if (!['install', 'status', 'remove'].includes(sub ?? '') || (spoolAt >= 0 && (spool === undefined || sub !== 'install'))) { note(`usage: ${USAGE}`); return 2; }
-  const p = planFor(path, spool), dir = dirFor(os);
+  const f: Record<string, string> = {};
+  for (let i = 0; i < more.length; i += 2) {
+    const k = more[i]!, v = more[i + 1];
+    if (!['--spool', '--host', '--cwd'].includes(k) || v === undefined || f[k] !== undefined || sub !== 'install') { note(`usage: ${USAGE}`); return 2; }
+    f[k] = v;
+  }
+  if (!['install', 'status', 'remove'].includes(sub ?? '') || (f['--host'] !== undefined && f['--host'] !== 'claude') || (f['--cwd'] !== undefined && f['--host'] === undefined)) { note(`usage: ${USAGE}`); return 2; }
+  const p = planFor(path, f['--spool'], process.env, process.argv[1] ?? '', f['--host'] ? { host: 'claude', cwd: f['--cwd'] } : {}), dir = dirFor(os);
   if (sub === 'install') {
     if (!existsSync(p.identity)) { note(`service: no identity at ${p.identity}: enrol or init first`); return 2; }
+    // --host claude: the SDK must load here, before a unit that would fail at each restart is written.
+    if (p.host) try { await (await import('./sigelo-agent-host.ts')).loadSdk(); } catch (e) { note(`service: ${(e as Error).message}`); return 1; }
     mkdirSync(p.spool, { recursive: true, mode: 0o700 });
     if (os === 'win32' || os === 'other') {
       say(`Run this once in a terminal (it starts the listener at each logon), then sign out and in:\n  ${schtasksOf(p)}`);
@@ -116,7 +130,7 @@ export async function main(path: string, rest: string[]): Promise<number> {
     if (os === 'linux') {
       const f = join(dir, UNIT);
       writeFileSync(f, unitOf(p), { mode: 0o644 });
-      say(`wrote ${f}: sigelo-agent watch for ${p.identity}, own messages to ${p.spool}`);
+      say(`wrote ${f}: ${what(p)} for ${p.identity}, own messages ${p.host ? `from the operator into the session, the others to` : 'to'} ${p.spool}`);
       const a = run('systemctl', ['--user', 'daemon-reload']), b = a.ok ? run('systemctl', ['--user', 'enable', '--now', UNIT]) : a;
       if (!b.ok) { note(`service: systemctl --user did not take it (${b.out}): the unit is written; start it with systemctl --user enable --now ${UNIT}`); return 1; }
       say(`enabled and started (systemctl --user enable --now ${UNIT}).`);
@@ -126,7 +140,7 @@ export async function main(path: string, rest: string[]): Promise<number> {
     }
     const f = join(dir, `${LABEL}.plist`);
     writeFileSync(f, plistOf(p), { mode: 0o644 });
-    say(`wrote ${f}: sigelo-agent watch for ${p.identity}, own messages to ${p.spool}`);
+    say(`wrote ${f}: ${what(p)} for ${p.identity}, own messages ${p.host ? `from the operator into the session, the others to` : 'to'} ${p.spool}`);
     const uid = process.getuid?.() ?? 0;
     const r = run('launchctl', ['bootstrap', `gui/${uid}`, f]);
     if (!r.ok) { note(`service: launchctl did not load it (${r.out}): load it with launchctl bootstrap gui/${uid} ${f}`); return 1; }

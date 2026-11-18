@@ -63,7 +63,13 @@ interface Car {
   relay: string;
   start(): Promise<void>; stop(): Promise<void>; sync(o?: { wait?: number }): Promise<void>;
   peek(): Item[]; take(pick: (m: Item, tier: string) => boolean): Item[];
+  contacts(): { contacts: WatchContact[] };
+  send(to: string, content: string, o?: { label?: string }): Promise<{ status: string; detail?: string }>;
 }
+/** A contact as the carrier lists it (the fields a host reads). */
+export interface WatchContact { name: string; did: string; current_did?: string; chain: string[]; revoked?: boolean; tier?: string }
+/** An own message offered to a router (sigelo-agent-host.ts): its id, sender, sender's name, text or file. */
+export type Routed = Item & { id: string; sender: string };
 export interface WatchOptions {
   identity: string; onMessage?: string; onNotice?: string; onPairing?: string; quiet?: boolean;
   /** Seconds a hook may run before it is stopped (default HOOK_MS / 1000); 0: no limit. */
@@ -75,8 +81,16 @@ export interface WatchOptions {
   /** Where lines go (stdout). */
   print?: (line: string) => void;
   syncMs?: number;
+  /** An own direct message, before --spool or --on-message: true takes it (handled there), false leaves it to them. */
+  route?: (m: Routed) => boolean | Promise<boolean>;
+  /** Told when a message waits for someone else to read: spooled (own, not routed), or a friend's in the inbox. */
+  told?: (t: { name: string; where: 'spool' | 'inbox'; count?: number }) => void;
 }
-export interface Watch { relay: string; close(): Promise<void>; idle(): Promise<void>; /** Resolves when the watcher stopped by itself: the seat went to another device. */ ended: Promise<string> }
+export interface Watch {
+  relay: string; close(): Promise<void>; idle(): Promise<void>; /** Resolves when the watcher stopped by itself: the seat went to another device. */ ended: Promise<string>;
+  /** The contacts, as the carrier lists them; a send on the watcher's session. */
+  contacts(): WatchContact[]; send(to: string, text: string, label?: string): Promise<{ status: string; detail?: string }>;
+}
 
 // The same stored message: by its id; an item kept by an earlier version has none, and its sender,
 // signing time, label and content tell it apart.
@@ -145,17 +159,20 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
       if (tier === 'own') {
         const { tier: _t, ...rest } = kept;
         const msgId = lib.messageId(kept), item = { ...rest, id: msgId };
+        let one = true;                            // taken once handed on: this one message
+        const takeIt = (): void => { carrier.take((x) => { if (!one || !same(x, kept)) return false; one = false; return true; }); };
+        if (o.route !== undefined && await o.route({ ...item, sender: String(name) } as Routed)) { takeIt(); return; }
         if (!pushes) { say(`own ${name}: ${textOf(m)}`); return; }
         if (spool !== null) {
           const f = spooled(msgId, item);
           if (f === null) return;
           say(`own ${name}: ${msgId} → ${f} (answer: sigelo-agent reply --to ${msgId} <text>)`);
+          o.told?.({ name: String(name), where: 'spool' });
         } else {
           const env = { ...base, SIGELO_TYPE: m.type === 'file' ? 'file' : 'message', SIGELO_FROM: m.from, SIGELO_NAME: String(name), SIGELO_TIER: tier, SIGELO_MSG_ID: msgId, ...(m.path !== undefined && { SIGELO_PATH: m.path }) };
           if (!(await run(o.onMessage!, item, env))) return;
         }
-        let one = true;                            // taken once handed on: this one message
-        carrier.take((x) => { if (!one || !same(x, kept)) return false; one = false; return true; });
+        takeIt();
         return;
       }
       if (tier === 'friend') notice(m.from, String(name));
@@ -182,6 +199,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
             const count = box.filter((x) => x.from === from && x.tier === 'friend').length;
             if (count === 0) continue;
             const n = { from, name, tier: 'friend', count };
+            o.told?.({ name, where: 'inbox', count });
             if (o.onNotice === undefined) say(`friend ${name}: ${count} new message${count === 1 ? '' : 's'} (not shown: sigelo-agent inbox)`);
             else await run(o.onNotice, n, { ...base, SIGELO_TYPE: 'notice', SIGELO_FROM: from, SIGELO_NAME: name, SIGELO_TIER: 'friend' });
           }
@@ -234,7 +252,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
           const env = { ...base, SIGELO_TYPE: 'group', SIGELO_FROM: i.from, SIGELO_NAME: i.name, SIGELO_TIER: i.tier, SIGELO_GROUP: i.group.gid, SIGELO_MSG_ID: gm };
           // Taken once handed on; a hook that failed or was stopped: offered again next round.
           const f = spool !== null ? spooled(gm, { ...i, id: gm }) : null;
-          if (spool !== null && f !== null) say(`own ${i.name} in ${i.group.name}: ${gm} → ${f} (answer in the group: sigelo-agent group send)`);
+          if (spool !== null && f !== null) { say(`own ${i.name} in ${i.group.name}: ${gm} → ${f} (answer in the group: sigelo-agent group send)`); o.told?.({ name: `${i.name} in ${i.group.name}`, where: 'spool' }); }
           if (spool !== null ? f !== null : await run(o.onMessage!, { ...i, id: gm }, env)) G.unread({ carrier, file, pick: (x) => x.group.gid === i.group.gid && x.mid === i.mid });
           else pushed.delete(gm);
         } else if (i.tier === 'friend') {
@@ -296,6 +314,8 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
     let closed = false;
     return {
       relay: carrier.relay, ended,
+      contacts: () => carrier.contacts().contacts,
+      send: (to, text, label = '') => carrier.send(to, text, { label }),
       idle: async () => { await new Promise((r) => setTimeout(r, NOTICE_MS + 50)); await queue; },
       async close() {
         if (closed) return;
