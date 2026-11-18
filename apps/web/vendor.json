@@ -291,11 +291,11 @@
   },
   "vendor/ui.css": {
    "from": "apps/agent/ui.css",
-   "sha256": "6d5ed871e5a2cce5fd8130064d9d1ce0fe8580c395821070a6dcf4b200cc2260"
+   "sha256": "398b64992a8f418713c6e522fb450ac9fa4679d1726b3ea9f9bf564cc968ba61"
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "1a4ff9573c700e813844cae7a270a31dbc9587571e8dae1192657cb72e4c13cc"
+   "sha256": "ab3a92d04170246540bede02a3fed031b1811ec25134e40388791d735d51ed48"
   }
  }
 }

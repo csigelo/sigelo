@@ -224,7 +224,19 @@ video.scan { display: block; width: 100%; max-height: 50vh; border-radius: var(-
 .msg .text { white-space: pre-wrap; unicode-bidi: plaintext; }
 .msg .meta { display: block; font-size: 12px; color: var(--text-2); text-align: right; margin-top: 2px; }
 .msg .path { font-size: 12px; color: var(--text-2); word-break: break-all; }
-.msg[role="button"] { cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.msg.in[data-n] { cursor: pointer; }
+button.meta { width: 100%; min-height: 24px; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; cursor: pointer; }
+/* 0.1.19: the text selects and copies like any text; the controls around it (the signature, a quote, the time, Copy) do not take the selection. */
+.msg .text { user-select: text; -webkit-user-select: text; }
+.msg .sig, .msg .quote, .msg .meta, .msg .copycode { user-select: none; -webkit-user-select: none; }
+/* 0.1.19: fenced code (Copy at its top right, scrolled sideways), inline code, lists */
+.msg code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); border-radius: 4px; padding: 0 3px; }
+.msg .codeblock { position: relative; margin: var(--s1) 0; background: var(--surface-2); border-radius: 8px; white-space: normal; }
+.msg .codeblock pre { margin: 0; padding: 30px var(--s3) var(--s2); overflow-x: auto; white-space: pre; overflow-wrap: normal; word-break: normal; font: 13px/1.45 var(--mono); unicode-bidi: isolate; direction: ltr; text-align: left; }
+.msg .codeblock pre code { background: none; padding: 0; font-size: inherit; }
+.msg .copycode { position: absolute; top: 2px; right: 2px; min-height: 28px; padding: 0 var(--s2); border: 0; border-radius: 6px; background: none; color: var(--link); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.msg .text ul, .msg .text ol { margin: 2px 0; padding-left: 1.4em; white-space: normal; }
+.msg .text li { white-space: pre-wrap; }
 .msg .meta .seen { color: var(--link); }
 .big-ok { font-weight: 600; font-size: 20px; margin: 0; }
 .notice { align-self: center; text-align: center; font-size: 14px; color: var(--text-2); max-width: 90%; padding: var(--s2) var(--s3); background: var(--surface-2); border-radius: 12px; }

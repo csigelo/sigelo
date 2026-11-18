@@ -1147,6 +1147,110 @@
     if (at < String(t).length) out.push(String(t).slice(at));
     return out;
   }
+  // A message's text as it shows (0.1.19: "some markdown feature so I could copy code"): a small Markdown subset, built
+  // as elements and text nodes, never HTML from the sender (the wire stays plain text, sigelo-msg/0 unchanged). Fenced
+  // code (``` with an optional language word) is a <pre> with its own Copy; `code`, **bold**, *italic*, "- " and "1. "
+  // lists; [label](url) shows as "label (url)", a link only as any https:// in a text is. Nothing else (no headings,
+  // images or HTML); a line that is none of these shows as before. → the nodes for a .text element.
+  const FENCE = /^ {0,3}```\s*([\w+#.-]{0,20})\s*$/, FENCE_END = /^ {0,3}```\s*$/, ITEM = /^ {0,3}(?:(-)|(\d{1,3})\.) +(\S.*)$/;
+  function mdText(t) {
+    const lines = String(t ?? '').replace(/\r\n?/g, '\n').split('\n'), out = [];
+    let para = [];
+    const flush = () => { if (para.length) out.push(...inlineMd(para.join('\n'))); para = []; };
+    for (let i = 0; i < lines.length; i++) {
+      const f = FENCE.exec(lines[i]);
+      if (f) {
+        const body = [];
+        let j = i + 1;
+        while (j < lines.length && !FENCE_END.test(lines[j])) body.push(lines[j++]);
+        flush(); out.push(codeBlock(body.join('\n'), f[1])); i = j;
+        continue;
+      }
+      const it = ITEM.exec(lines[i]);
+      if (it) {
+        const ol = !it[1], items = [];
+        let j = i;
+        for (let m; j < lines.length && (m = ITEM.exec(lines[j])) && !m[1] === ol; j++) items.push(m[3]);
+        flush(); out.push(h(ol ? 'ol' : 'ul', ol && it[2] !== '1' ? { start: String(Number(it[2])) } : null, items.map((x) => h('li', null, inlineMd(x))))); i = j - 1;
+        continue;
+      }
+      para.push(lines[i]);
+    }
+    flush();
+    return out;
+  }
+  // `code` first (its inside stays as typed), then **bold**, *italic* (not inside a word: `rm *.log` or a*b stay), [label](url).
+  const INLINE_MD = /`([^`\n]+)`|\*\*(\S(?:[^*\n]*\S)?)\*\*|(^|[^\w*])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![\w*])|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  function inlineMd(s) {
+    const out = [];
+    let at = 0;
+    for (const m of s.matchAll(INLINE_MD)) {
+      const from = m.index + (m[3]?.length ?? 0);
+      if (from > at) out.push(...richText(s.slice(at, from)));
+      out.push(m[1] !== undefined ? h('code', null, m[1]) : m[2] !== undefined ? h('b', null, richText(m[2])) : m[4] !== undefined ? h('i', null, richText(m[4])) : richText(`${m[5]} (${m[6]})`));
+      at = m.index + m[0].length;
+    }
+    if (at < s.length) out.push(...richText(s.slice(at)));
+    return out.flat();
+  }
+  /** A fenced block: the code as sent, scrolled sideways, and Copy for exactly it (every line break kept). */
+  function codeBlock(body, lang) {
+    return h('div', { class: 'codeblock' },
+      h('button', { type: 'button', class: 'copycode', 'aria-label': lang ? `Copy the ${lang} code` : 'Copy the code', onclick: (ev) => { ev.stopPropagation?.(); return copy(safeText(body)); } }, 'Copy'),
+      h('pre', null, h('code', lang ? { 'data-lang': lang } : null, body)));
+  }
+  // Copying keeps every line break (0.1.19: a three-line command pasted from a bubble came out as one line). Each
+  // message's text element keeps the text as written; a copy of all of it puts that on the clipboard, a copy of a part
+  // the text nodes it covers, a line break between blocks (lines, list items, code), the controls (Copy, the signature,
+  // a quote, the time) left out. The copy event (the phone's Copy, Ctrl+C) and the signed-message screen's Copy text.
+  const SRC = new WeakMap();
+  function msgText(t, tag = 'div', md = true) {
+    const el = h(tag, { class: 'text' }, md ? mdText(t) : t);
+    SRC.set(el, safeText(String(t ?? '').replace(/\r\n?/g, '\n')));
+    return el;
+  }
+  const NOCOPY = /\b(meta|sig|quote|copycode)\b/, BLOCK = /^(DIV|P|PRE|UL|OL|LI)$/;
+  function plainOf(root, r) {
+    let out = '';
+    const nl = () => { if (out && !out.endsWith('\n')) out += '\n'; };
+    const visit = (n) => {
+      if (r && !r.intersectsNode(n)) return;
+      if (!n.tagName) {
+        const s = String(n.data ?? '');
+        out += s.slice(r?.startContainer === n ? r.startOffset : 0, r?.endContainer === n ? r.endOffset : s.length);
+        return;
+      }
+      if (n.tagName === 'BUTTON' || NOCOPY.test(String(n.className ?? ''))) return;
+      if (n.tagName === 'BR') { out += '\n'; return; }
+      const block = BLOCK.test(n.tagName);
+      if (block) nl();
+      if (n.tagName === 'LI') {
+        const list = n.parentNode, i = [...(list?.childNodes ?? [])].filter((c) => c.tagName === 'LI').indexOf(n);
+        out += list?.tagName === 'OL' ? `${Number(list.getAttribute?.('start') ?? 1) + i}. ` : '- ';
+      }
+      for (const c of n.childNodes ?? []) visit(c);
+      if (block) nl();
+    };
+    visit(root);
+    return out.replace(/\n+$/, '');
+  }
+  /** The text a copy of this range puts on the clipboard, or null when it is not in the chat (the browser's own copy). */
+  function copiedText(r) {
+    const up = (n, ok) => { for (let e = n; e; e = e.parentNode) if (ok(e)) return e; return null; };
+    const inThread = (n) => up(n, (e) => /\bmsg\b/.test(String(e.className ?? '')));
+    if (!r || (!inThread(r.startContainer) && !inThread(r.endContainer))) return null;
+    const one = up(r.commonAncestorContainer, (e) => SRC.has(e));
+    if (one && plainOf(one, r) === plainOf(one, null)) return SRC.get(one);
+    return plainOf(r.commonAncestorContainer, r);
+  }
+  document.addEventListener?.('copy', (ev) => {
+    const sel = globalThis.getSelection?.();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !ev?.clipboardData) return;
+    const t = copiedText(sel.getRangeAt(0));
+    if (t === null) return;
+    ev.clipboardData.setData('text/plain', t);
+    ev.preventDefault?.();
+  });
   // A chat's unsent text, kept per profile and chat on this device (prefs: localStorage) across screens and restarts
   // (0.1.17: "keep the text if I change the screen"); gone once sent. At most DRAFT_MAX characters are kept.
   const DRAFT_MAX = 20000;
@@ -1277,7 +1381,12 @@
       first = false;
       // A message of theirs, tapped: who signed it (task 11: the chat, then the message). Every one is signed by
       // their key inside the envelope, checked before it was shown.
-      const check = (m) => () => (String(globalThis.getSelection?.() ?? '') ? undefined : go('signed', { did, n: m.n }));
+      // (0.1.19: "the text selector from the signed messages is buggy": a tap to move the selection opened this screen; the
+      // bubble was a role=button, whose text a reader takes as one label.) A tap with a selection, then or as the finger
+      // came down, keeps the selection; the time is the button a keyboard or a screen reader reaches.
+      const selNow = () => String(globalThis.getSelection?.() ?? '') !== '';
+      const check = (m) => (ev) => (selNow() || ev?.currentTarget?.selAtDown ? undefined : go('signed', { did, n: m.n }));
+      const tapOf = (m) => ({ onclick: check(m), onpointerdown: (ev) => { if (ev?.currentTarget) ev.currentTarget.selAtDown = selNow(); } });
       // A payment of mine told in this chat (UI-API.md "Wallet": `pay` on my message): shown as the payment, its state from History.
       const payState = (p) => { const t = S.hist?.entries?.find((x) => x.txid === p.txid); return t ? (txStatus(t) ?? 'confirmed') : 'sent'; };
       const payBubble = (m) => h('div', { class: 'msg out pay', 'data-pay': m.pay.txid }, h('span', { class: 'tag' }, 'You paid'), h('b', null, `${xmr(m.pay.amount)} XMR`),
@@ -1286,17 +1395,18 @@
       // A signed statement (UI-API.md "Signed statements"): the text as signed, and "Signed by … · check" (task 11: the chat, the link).
       const stBubble = (m) => {
         const v = m.statement, by = v?.by, who = !v?.valid ? null : by?.kind === 'me' ? 'you' : by?.name ? by.name.split(' ')[0] : 'someone you don\'t know';
-        return h('div', { class: `msg ${m.dir}`, 'data-statement': String(m.n) }, h('div', { class: 'text' }, v?.valid ? v.text : m.text),
+        return h('div', { class: `msg ${m.dir}`, 'data-statement': String(m.n) }, msgText(v?.valid ? v.text : m.text, 'div', false),
           h('button', { type: 'button', class: `sig${v?.valid ? '' : ' bad'}`, onclick: () => go('statement', { text: m.text }) }, icon('shield'), v?.valid ? `Signed by ${who} · check` : 'Signature not valid · check'),
           h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
       };
       const pick = (m) => () => { RQ.set({ n: m.n, who: m.dir === 'out' ? 'You' : c.name, text: String(m.text).split('\n')[0].slice(0, 120) }); C.text.focus?.(); };
-      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && { role: 'button', tabindex: '0', title: 'Check who signed it', onclick: check(m), onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault?.(); void check(m)(); } } }) },
+      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && tapOf(m)) },
         m.re ? quoteIn(m.re.dir === 'out' ? 'You' : c.name, m.re.text, m.re.n === null ? null : ['data-n', String(m.re.n)]) : null,
         m.label && m.label !== 'sigelo-file/0' && !m.re ? h('span', { class: 'who' }, m.label) : null,
-        m.label === 'sigelo-file/0' ? fileText(m.text) : h('div', { class: 'text' }, richText(m.text)),
+        m.label === 'sigelo-file/0' ? fileText(m.text) : msgText(m.text),
         m.link ? h('span', { class: 'help' }, `Introduced: ${m.link.purpose}`) : null,
-        h('span', { class: 'meta' }, hhmm(m.at), ticks(m))), pick(m))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'));
+        m.dir === 'in' ? h('button', { type: 'button', class: 'meta', 'aria-label': `${hhmm(m.at)}. Check who signed it`, onclick: (ev) => { ev?.stopPropagation?.(); void go('signed', { did, n: m.n }); } }, hhmm(m.at))
+          : h('span', { class: 'meta' }, hhmm(m.at), ticks(m))), pick(m))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'));
       if (end) toEnd();
     };
   });
@@ -1320,7 +1430,8 @@
           : 'Not changed since they signed it. Compare four words with them to know the key is theirs.')),
         c.words_checked || !c.words || c.local ? null : btn('Compare four words', () => go('compare', c.did), { kind: 'pri' }),
         h('div', { class: 'list' }, kv('Signed', at), kv('By', [c.name, c.words ? ` · ${words4(c.words).join(' ')}` : ''].join(''))),
-        h('div', { class: 'card' }, m.label === 'sigelo-file/0' ? fileText(m.text) : h('p', { class: 'text' }, m.text)),
+        h('div', { class: 'card' }, m.label === 'sigelo-file/0' ? fileText(m.text) : msgText(m.text, 'p', false)),
+        m.label === 'sigelo-file/0' ? null : btn('Copy the text', () => copy(safeText(String(m.text).replace(/\r\n?/g, '\n'))), { kind: 'ghost' }),
         btn('Check another message', () => go('check')));
     };
   });
@@ -1851,7 +1962,7 @@
       put(thread, made, threadOf(r.messages, (m) => replyable(h('div', { class: `msg ${m.mine ? 'out' : 'in'}${m.mentioned ? ' mentioned' : ''}`, 'data-mid': m.mid },
         m.re ? quoteIn(byMid.get(m.re)?.mine ? 'You' : byMid.get(m.re)?.name ?? 'A member', byMid.get(m.re) ? String(byMid.get(m.re).text).split('\n')[0].slice(0, 120) : null, ['data-mid', m.re]) : null,
         m.mine ? null : h('span', { class: 'who' }, m.name, m.role === 'agent' ? (workerOf(m.from) || contactBy(m.from)?.ours ? ' · your agent' : contactBy(m.from)?.link?.linked_by && contactBy(contactBy(m.from).link.linked_by) ? ` · ${contactBy(contactBy(m.from).link.linked_by).name}'s agent` : ' · agent') : '', m.tier !== 'own' && m.note ? [' · ', h('span', { class: 'warn' }, m.note)] : null, m.via ? ' · via the creator' : null),
-        m.mentioned ? h('span', { class: 'help' }, 'Mentions you') : null, m.photo ? groupPhoto(m, grecs, g) : m.voice ? groupVoice(m, grecs, g) : h('div', { class: 'text' }, richText(m.text)), h('span', { class: 'meta' }, hhmm(m.at))), gpick(m))),
+        m.mentioned ? h('span', { class: 'help' }, 'Mentions you') : null, m.photo ? groupPhoto(m, grecs, g) : m.voice ? groupVoice(m, grecs, g) : msgText(m.text), h('span', { class: 'meta' }, hhmm(m.at))), gpick(m))),
       brake, !r.messages.length && !made ? h('span', { class: 'day' }, 'No messages yet.') : null);
       if (end) toEnd();
     };
