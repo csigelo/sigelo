@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **app:** code blocks: text between triple-backtick fences shows monospace, scrolls sideways, with Copy (the block exactly, every line break); inline code, bold, italic, lists. Built as text: never HTML from the sender.
+- **app:** copying from a chat keeps every line break (a whole message gives the text as written); a tap that ends a selection no longer opens the message; Signed message has Copy the text.
 - **ci:** the Android builds survive Maven Central's 429s: Gradle's downloads cached between runs, and Google's Central mirror tried first (an init script, not in the tree); the APK's bytes unchanged.
 - **agent:** `host claude`: `working: <tool>: …` lines during a turn (one per 20 s, eight a turn; `--quiet-progress`); `--others data`: contacts' messages to Claude as marked data; `sdk install` checks it loads.
 

@@ -797,6 +797,71 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       && h1() !== 'Signed message' && calls.length === views0 && root.all().some((e) => e.className === 'text' && e.textContent === 'Menu: https://example.org/menu?day=fri. Or ftp://x.example, javascript:alert(1)'),
       `a message's https:// link: tappable, to a new window, its tap kept from the bubble; ftp: and javascript: stay text (${anchors.map((a) => a.attrs.href)})`);
     MSGS[bo.did].pop(); sandbox.seq += 1; await poll(); await poll();
+    // Code blocks, a small Markdown subset, copies that keep every line break (0.1.19: a three-line command pasted from a
+    // bubble came out as one line). Built as elements and text: what the sender typed never becomes markup.
+    {
+      const CMD = 'cd /tmp\ncurl -fsSLO https://example.org/a.tgz\nsha256sum a.tgz';
+      const MD = `Run this:\n\`\`\`sh\n${CMD}\n\`\`\`\nThen **done** and *ok*, \`ls -l\`, rm *.log and a*b*c\n- one\n- two\n3. third\n4. fourth\n<img src=x onerror=alert(1)> [click](javascript:alert(1)) <script>x</script>`;
+      MSGS[bo.did].push(m(5, 'in', MD, null), m(6, 'in', '```\n<script>alert(1)</script>\n```', null), m(7, 'in', CMD, null));
+      sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
+      const bub = (n) => root.all().find((e) => e.attrs['data-n'] === String(n)), textOf = (n) => bub(n)?.all().find((e) => e.className === 'text');
+      const b5 = bub(5), tags = (el, t) => el.all().filter((e) => e.tagName === t);
+      const pre = tags(b5, 'PRE')[0], copyBtn = b5.all().find((e) => e.tagName === 'BUTTON' && e.className === 'copycode');
+      ok(pre && pre.all().find((e) => e.tagName === 'CODE')?.attrs['data-lang'] === 'sh' && pre.textContent === CMD && copyBtn?.textContent === 'Copy' && !tags(pre, 'A').length,
+        `a fenced block: a <pre><code> with the text as sent (no link inside), and a Copy button (${JSON.stringify(pre?.textContent)})`);
+      sandbox.copied = null;
+      const views0 = calls.length;
+      await copyBtn.click();
+      const toasted = [root, body].some((r) => r.all().some((e) => e.className === 'toast' && e.textContent === 'Copied'));
+      ok(sandbox.copied === CMD && sandbox.copied.split('\n').length === 3 && toasted && h1() !== 'Signed message' && calls.length === views0,
+        `the block's Copy: exactly its text, three lines, "Copied", the bubble not opened (${JSON.stringify(sandbox.copied)})`);
+      const inl = tags(b5, 'CODE').filter((e) => e.parent?.tagName !== 'PRE');
+      ok(tags(b5, 'B')[0]?.textContent === 'done' && tags(b5, 'I')[0]?.textContent === 'ok' && inl.length === 1 && inl[0].textContent === 'ls -l' && tags(b5, 'I').length === 1 && textOf(5).textContent.includes('rm *.log and a*b*c'),
+        'Markdown: **bold**, *italic*, `code`; a * in a command or inside a word stays text');
+      const ul = tags(b5, 'UL')[0], ol = tags(b5, 'OL')[0];
+      ok(ul && tags(ul, 'LI').map((e) => e.textContent).join() === 'one,two' && ol && ol.attrs.start === '3' && tags(ol, 'LI').map((e) => e.textContent).join() === 'third,fourth',
+        'Markdown: "- " and "1. " lists (an ordered list keeps its first number)');
+      const hostile = b5.all().filter((e) => ['IMG', 'SCRIPT', 'IFRAME'].includes(e.tagName) || (e.tagName === 'A' && !/^https:/.test(e.attrs.href ?? '')));
+      ok(!hostile.length && !tags(b5, 'A').length && textOf(5).textContent.includes('<img src=x onerror=alert(1)> click (javascript:alert(1)) <script>x</script>')
+        && !tags(bub(6), 'SCRIPT').length && tags(bub(6), 'PRE')[0]?.textContent === '<script>alert(1)</script>',
+        'hostile text stays inert text: <img onerror>, a javascript: link (shown as "label (url)", not a link), <script> in a fence or out of one');
+      ok(textOf(7).kids.every((k) => !k.tagName || k.tagName === 'A') && textOf(7).textContent === CMD && tags(bub(7), 'A').length === 1,
+        'a message with no Markdown renders as before: its text, its https:// link');
+      // The system's Copy (the copy event): all of a bubble's text → the text as written; a part of a block → that part.
+      const copyEv = async (r) => {
+        sandbox.getSelection = () => ({ isCollapsed: false, rangeCount: 1, getRangeAt: () => r, toString: () => 'x' });
+        let put = null;
+        for (const f of docLis.get('copy') ?? []) f({ clipboardData: { setData: (_t, v) => { put = v; } }, preventDefault() {} });
+        sandbox.getSelection = undefined;
+        return put;
+      };
+      const whole = (el) => ({ commonAncestorContainer: el, startContainer: el, startOffset: 0, endContainer: el, endOffset: el.kids.length, intersectsNode: (n) => el.contains(n) || !!n.contains?.(el) });
+      const c7 = await copyEv(whole(textOf(7))), c5 = await copyEv(whole(textOf(5)));
+      const tn = pre.all().find((e) => e.tagName === 'CODE').kids[0];
+      const part = await copyEv({ commonAncestorContainer: tn, startContainer: tn, startOffset: 3, endContainer: tn, endOffset: tn.data.length - 4, intersectsNode: (n) => n === tn || !!n.contains?.(tn) });
+      const across = await copyEv({ commonAncestorContainer: b5, startContainer: b5, startOffset: 0, endContainer: b5, endOffset: b5.kids.length, intersectsNode: (n) => b5.contains(n) || !!n.contains?.(b5) });
+      ok(c7 === CMD && c7.split('\n').length === 3 && c5 === MD && part === CMD.slice(3, -4) && part.split('\n').length === 3
+        && across?.startsWith('Run this:\ncd /tmp\ncurl') && across.includes('\n- one\n- two\n3. third\n4. fourth\n') && !across.includes('Copy'),
+        `copy (the phone's Copy, Ctrl+C): a whole three-line message → three lines; a Markdown one → as written; a part of a block → that part, its line breaks; the bubble → its lines, lists numbered, no Copy (${JSON.stringify([c7, part, across])})`);
+      // The selection: a tap while text is selected (or was, as the finger came down) keeps it; the bubble is no role=button.
+      const b7 = bub(7);
+      sandbox.getSelection = () => ({ toString: () => 'sha256sum' });
+      for (const f of b7.on.pointerdown ?? []) f({ currentTarget: b7, clientX: 10, clientY: 10 });
+      sandbox.getSelection = () => ({ toString: () => '' });
+      for (const f of b7.on.click ?? []) await f({ currentTarget: b7 });
+      await settle();
+      sandbox.getSelection = undefined;
+      const meta = b7.all().find((e) => e.tagName === 'BUTTON' && e.className === 'meta');
+      ok(h1() !== 'Signed message' && b7.attrs.role === undefined && b7.attrs.tabindex === undefined && meta?.attrs['aria-label']?.endsWith('Check who signed it'),
+        'selection: a tap that ends a selection does not open the message; the bubble is no button (its text selects), its time is the button to who signed it');
+      await meta.click(); await settle(); await poll();
+      const copyText = btn('Copy the text');
+      sandbox.copied = null;
+      await copyText?.click();
+      ok(h1() === 'Signed message' && has('sha256sum a.tgz') && sandbox.copied === CMD, `Signed message: Copy the text puts the message on the clipboard, its three lines (${JSON.stringify(sandbox.copied)})`);
+      await back();
+      MSGS[bo.did].splice(-3); sandbox.seq += 1; await poll(); await poll();
+    }
     // Reply to one message (0.1.17): a double click (a swipe on a phone) quotes it above the box, × drops it; Send carries
     // re (its n); a reply shows its quote, which goes to the message answered.
     const bub1 = root.all().find((e) => e.attrs['data-n'] === '1');

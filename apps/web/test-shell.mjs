@@ -160,9 +160,12 @@ const same = (a, b) => Buffer.from(a).equals(Buffer.from(b));
     return out;
   };
   async function raw(answer, { after = [], maxPayload, closeMs, split = false, end = false } = {}) {
-    let got = Buffer.alloc(0), sock = null;
+    let got = Buffer.alloc(0), sock = null, gone;
+    // The server's side of the socket closed: every byte the client wrote before its end has been read
+    // (its close event comes once its last write is handed to the stream, not once the server has it).
+    const closed = new Promise((y) => { gone = y; });
     const srv = netServer((c) => {
-      sock = c; c.on('error', () => {});
+      sock = c; c.on('error', () => {}); c.on('close', gone);
       let head = '';
       c.on('data', (d) => {
         if (!head.includes('\r\n\r\n')) {
@@ -180,7 +183,7 @@ const same = (a, b) => Buffer.from(a).equals(Buffer.from(b));
     const p = await listen(srv);
     const s = WS.wsOverStream(dial(p), { url: `wss://relay.test:${p}/mqtt`, protocols: ['mqtt'], ...(maxPayload && { maxPayload }), ...(closeMs && { closeMs }) });
     const e = watch(s);
-    return { s, e, srv, sent: () => framesOf(got), request: () => null, done: async (ms = 3000) => { await until(() => e.close, ms); sock?.destroy(); srv.close(); return e; } };
+    return { s, e, srv, sent: () => framesOf(got), request: () => null, done: async (ms = 3000) => { await until(() => e.close, ms); await new Promise((y) => { const t = setTimeout(y, ms); closed.then(() => { clearTimeout(t); y(); }); }); sock?.destroy(); srv.close(); return e; } };
   }
   const head = (key, extra = '') => `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptOf(key)}\r\nSec-WebSocket-Protocol: mqtt\r\n${extra}\r\n`;
   const fails1 = async (name, answer, o, want = 1006, sentCode) => {
