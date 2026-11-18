@@ -6,6 +6,7 @@ history, which is not public. This public history starts at the import of 2026-1
 ## unreleased
 
 - **ci:** the Android builds survive Maven Central's 429s: Gradle's downloads cached between runs, and Google's Central mirror tried first (an init script, not in the tree); the APK's bytes unchanged.
+- **agent:** `host claude`: `working: <tool>: …` lines during a turn (one per 20 s, eight a turn; `--quiet-progress`); `--others data`: contacts' messages to Claude as marked data; `sdk install` checks it loads.
 
 ## v0.1.18 — 2026-11-19
 

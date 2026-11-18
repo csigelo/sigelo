@@ -93,13 +93,16 @@ line `<check>: what failed, what to do`; 2 usage, no identity; 3 `inbox --expect
 
 `sigelo-agent host claude [--cwd DIR] [--permission-mode MODE] [--model M] [--approve-timeout S]` holds one
 Claude session (Claude Agent SDK) for this identity: your operator's messages land in it live, the answer
-goes back over sigelo, secrets redacted. Tool approvals arrive as `approve K7F3? Bash: ls`, answered
-`yes K7F3` or `no K7F3` (300 s, then denied); `--dangerously-skip-permissions`: none. Others' messages are
-data: spooled, never a turn. Anthropic receives the session: the operator's messages, tool output, files
-Claude reads; the relay still sees ciphertext; no telemetry. Claude unavailable (no SDK, failing, login
-expired): host keeps listening, keeps the operator's messages, replays them once back; `login` from the
-operator relays the sign-in link and takes the code back. As a service: `service install --host claude`
-(one unit per identity). SDK: `sigelo-agent sdk install`.
+goes back over sigelo, secrets redacted. During a turn the operator sees `working: Bash: npm test` (one per
+20 s, eight a turn, then `(+N more)`; `still working` after a quiet minute; `--quiet-progress`: none). Tool
+approvals arrive as `approve K7F3? Bash: ls`, answered `yes K7F3` or `no K7F3` (300 s, then denied);
+`--dangerously-skip-permissions`: none. Others' messages are data: spooled, never the operator's turn;
+`--others data` also gives them, and own contacts' in your groups, to Claude as marked data, never an
+approval. Anthropic receives the session: the operator's messages, tool output, files Claude reads; the
+relay still sees ciphertext; no telemetry. Claude unavailable (no SDK, failing, login expired): host keeps
+listening, keeps the operator's messages, replays them once back; `login` from the operator relays the
+sign-in link and takes the code back. As a service: `service install --host claude` (one unit per identity).
+SDK: `sigelo-agent sdk install` (checked; skipped by npm: `~/.local/share/sigelo-agent/sdk`).
 
 ## Operating it
 

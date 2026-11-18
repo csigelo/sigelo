@@ -272,6 +272,8 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
       && bh.env['PATH'] === '/usr/bin:/x' && !('SIGELO_SECRET_THING' in bh.env) && S.unitOf(ph).includes('(sigelo-agent host claude)') && !('PATH' in back.env), JSON.stringify(bh));
   const ps = S.planFor(id, undefined, {} as NodeJS.ProcessEnv, CLI, { host: 'claude', cwd: H, skipPermissions: true });
   ok('service --host claude --dangerously-skip-permissions: the flag in the unit, before --quiet', S.parseUnit(S.unitOf(ps)).exec.slice(-2).join(' ') === '--dangerously-skip-permissions --quiet');
+  const pq = S.planFor(id, undefined, {} as NodeJS.ProcessEnv, CLI, { host: 'claude', cwd: H, quietProgress: true, others: 'data' });
+  ok('service --host claude --quiet-progress --others data: passed through into the unit', S.parseUnit(S.unitOf(pq)).exec.slice(-4).join(' ') === '--quiet-progress --others data --quiet');
   ok('service: one name per identity: 8 hex of its path\'s sha256 (unit, LaunchAgent label, task); another file, another name',
     /^sigelo-watch-[0-9a-f]{8}\.service$/.test(S.namesOf(id).unit) && S.namesOf(id).label === `io.sigelo.watch.${S.tagOf(id)}` && S.namesOf(id).task === `sigelo-watch-${S.tagOf(id)}` && S.tagOf(id) !== S.tagOf(`${id}2`) && S.plistOf(p).includes(`<string>io.sigelo.watch.${S.tagOf(id)}</string>`));
   {

@@ -21,7 +21,7 @@
  *
  * `service install --host claude [--cwd DIR]`: the unit runs `sigelo-agent host claude` instead (sigelo-agent-host.ts: the
  * operator's messages go into a Claude session it holds), in DIR (default: where install ran), PATH kept so
- * the SDK finds `claude`; --dangerously-skip-permissions written into it (host claude's flag).
+ * the SDK finds `claude`; --dangerously-skip-permissions, --quiet-progress and --others data written into it (host claude's flags).
  *
  * SIGELO_SERVICE_DIR: where the unit or plist is written (tests); SIGELO_SERVICE_DRY=1: nothing is run
  * (no systemctl, launchctl): what would run is printed; SIGELO_SERVICE_OS: linux, darwin or win32 instead of
@@ -48,16 +48,16 @@ const note = (s: string): void => { process.stderr.write(`sigelo-agent: ${s}\n`)
 const say = (s: string): void => { process.stdout.write(`${s}\n`); };
 
 /** What the service runs: node, this CLI, watch for `identity` spooling to `spool`; the environment it keeps. */
-export interface Plan { node: string; cli: string; identity: string; spool: string; env: Record<string, string>; host?: 'claude'; cwd?: string; skipPermissions?: boolean }
+export interface Plan { node: string; cli: string; identity: string; spool: string; env: Record<string, string>; host?: 'claude'; cwd?: string; skipPermissions?: boolean; quietProgress?: boolean; others?: 'data' }
 // The variables a watcher needs as this shell has them (the relay, the key's provider); never a secret.
 const KEPT = ['SIGELO_RELAY', 'SIGELO_RELAY_ENDPOINTS', 'SIGELO_RELAY_TRANSPORT', 'SIGELO_SHORT_RELAY', 'SIGELO_KEY_PROVIDER', 'SIGELO_KEY_AGENT', 'SIGELO_NAME', 'HTTPS_PROXY', 'NO_PROXY'];
-export function planFor(identity: string, spool?: string, env: NodeJS.ProcessEnv = process.env, cli = process.argv[1] ?? '', o: { host?: 'claude'; cwd?: string; skipPermissions?: boolean } = {}): Plan {
+export function planFor(identity: string, spool?: string, env: NodeJS.ProcessEnv = process.env, cli = process.argv[1] ?? '', o: { host?: 'claude'; cwd?: string; skipPermissions?: boolean; quietProgress?: boolean; others?: 'data' } = {}): Plan {
   const id = resolve(identity);
   const kept = Object.fromEntries([...KEPT, ...(o.host ? ['PATH'] : [])].filter((k) => typeof env[k] === 'string' && env[k] !== '').map((k) => [k, env[k]!]));
   return { node: process.execPath, cli: resolve(cli), identity: id, spool: resolve(spool ?? `${id.replace(/\.json$/, '')}.spool`), env: { SIGELO_IDENTITY: id, ...kept },
-    ...(o.host && { host: o.host, cwd: resolve(o.cwd ?? process.cwd()), ...(o.skipPermissions && { skipPermissions: true }) }) };
+    ...(o.host && { host: o.host, cwd: resolve(o.cwd ?? process.cwd()), ...(o.skipPermissions && { skipPermissions: true }), ...(o.quietProgress && { quietProgress: true }), ...(o.others && { others: o.others }) }) };
 }
-export const argsOf = (p: Plan): string[] => [p.node, p.cli, ...(p.host ? ['host', p.host] : ['watch']), '--identity', p.identity, '--spool', p.spool, ...(p.host && p.cwd ? ['--cwd', p.cwd] : []), ...(p.host && p.skipPermissions ? ['--dangerously-skip-permissions'] : []), '--quiet'];
+export const argsOf = (p: Plan): string[] => [p.node, p.cli, ...(p.host ? ['host', p.host] : ['watch']), '--identity', p.identity, '--spool', p.spool, ...(p.host && p.cwd ? ['--cwd', p.cwd] : []), ...(p.host && p.skipPermissions ? ['--dangerously-skip-permissions'] : []), ...(p.host && p.quietProgress ? ['--quiet-progress'] : []), ...(p.host && p.others ? ['--others', p.others] : []), '--quiet'];
 const what = (p: Plan): string => (p.host ? `sigelo-agent host ${p.host}` : 'sigelo-agent watch');
 
 // systemd: a word with a space, a quote or a backslash in double quotes, escaped; % doubled (a specifier otherwise).
@@ -145,7 +145,7 @@ function run(cmd: string, args: string[]): { ok: boolean; out: string } {
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim() || (r.error?.message ?? '') };
 }
 
-export const USAGE = `service install [--spool <dir>] [--host claude [--cwd <dir>] [--dangerously-skip-permissions]] | service status | service remove
+export const USAGE = `service install [--spool <dir>] [--host claude [--cwd <dir>] [--dangerously-skip-permissions] [--quiet-progress] [--others data]] | service status | service remove
       the listener as a service of this machine, one per identity (systemd user unit sigelo-watch-<tag>; macOS LaunchAgent;
       Windows: the step printed): sigelo-agent watch --spool <dir> --quiet for this identity, restarted always; inbox and
       the MCP read its spool; --host claude: it runs host claude instead (a Claude session in <dir>, default here, fed the
@@ -155,15 +155,17 @@ export const USAGE = `service install [--spool <dir>] [--host claude [--cwd <dir
 export async function main(path: string, rest: string[]): Promise<number> {
   const [sub, ...more] = rest, os = platformOf();
   const f: Record<string, string> = {};
-  let skip = false;
+  let skip = false, quietProgress = false;
   for (let i = 0; i < more.length; i += 2) {
     const k = more[i]!, v = more[i + 1];
     if (k === '--dangerously-skip-permissions' && sub === 'install' && !skip) { skip = true; i--; continue; }
-    if (!['--spool', '--host', '--cwd'].includes(k) || v === undefined || f[k] !== undefined || sub !== 'install') { note(`usage: ${USAGE}`); return 2; }
+    if (k === '--quiet-progress' && sub === 'install' && !quietProgress) { quietProgress = true; i--; continue; }
+    if (!['--spool', '--host', '--cwd', '--others'].includes(k) || v === undefined || f[k] !== undefined || sub !== 'install') { note(`usage: ${USAGE}`); return 2; }
     f[k] = v;
   }
-  if (!['install', 'status', 'remove'].includes(sub ?? '') || (f['--host'] !== undefined && f['--host'] !== 'claude') || ((f['--cwd'] !== undefined || skip) && f['--host'] === undefined)) { note(`usage: ${USAGE}`); return 2; }
-  const p = planFor(path, f['--spool'], process.env, process.argv[1] ?? '', f['--host'] ? { host: 'claude', cwd: f['--cwd'], skipPermissions: skip } : {}), dir = dirFor(os);
+  if (!['install', 'status', 'remove'].includes(sub ?? '') || (f['--host'] !== undefined && f['--host'] !== 'claude') || (f['--others'] !== undefined && !['spool', 'data'].includes(f['--others']))
+    || ((f['--cwd'] !== undefined || f['--others'] !== undefined || skip || quietProgress) && f['--host'] === undefined)) { note(`usage: ${USAGE}`); return 2; }
+  const p = planFor(path, f['--spool'], process.env, process.argv[1] ?? '', f['--host'] ? { host: 'claude', cwd: f['--cwd'], skipPermissions: skip, quietProgress, ...(f['--others'] === 'data' && { others: 'data' as const }) } : {}), dir = dirFor(os);
   const u = unitFor(dir, os, p.identity), n = namesOf(p.identity), uid = process.getuid?.() ?? 0;
   const short = u.name.replace(/\.service$/, '');
   if (sub === 'install') {
@@ -177,7 +179,7 @@ export async function main(path: string, rest: string[]): Promise<number> {
       return 0;
     }
     mkdirSync(dir, { recursive: true });
-    const what_ = `${what(p)}${p.skipPermissions ? ' --dangerously-skip-permissions' : ''}`;
+    const what_ = `${what(p)}${p.skipPermissions ? ' --dangerously-skip-permissions' : ''}${p.quietProgress ? ' --quiet-progress' : ''}${p.others ? ` --others ${p.others}` : ''}`;
     const again = existsSync(u.file);
     if (os === 'linux') {
       writeFileSync(u.file, unitOf(p), { mode: 0o644 });
