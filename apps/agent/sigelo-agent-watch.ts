@@ -83,6 +83,8 @@ export interface WatchOptions {
   syncMs?: number;
   /** An own direct message, before --spool or --on-message: true takes it (handled there), false leaves it to them. */
   route?: (m: Routed) => boolean | Promise<boolean>;
+  /** An own contact's group message just spooled (--spool), before told (sigelo-agent-host.ts --others data). */
+  group?: (i: GroupItem) => void;
   /** Told when a message waits for someone else to read: spooled (own, not routed), or a friend's in the inbox. */
   told?: (t: { name: string; where: 'spool' | 'inbox'; count?: number }) => void;
 }
@@ -252,7 +254,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
           const env = { ...base, SIGELO_TYPE: 'group', SIGELO_FROM: i.from, SIGELO_NAME: i.name, SIGELO_TIER: i.tier, SIGELO_GROUP: i.group.gid, SIGELO_MSG_ID: gm };
           // Taken once handed on; a hook that failed or was stopped: offered again next round.
           const f = spool !== null ? spooled(gm, { ...i, id: gm }) : null;
-          if (spool !== null && f !== null) { say(`own ${i.name} in ${i.group.name}: ${gm} → ${f} (answer in the group: sigelo-agent group send)`); o.told?.({ name: `${i.name} in ${i.group.name}`, where: 'spool' }); }
+          if (spool !== null && f !== null) { say(`own ${i.name} in ${i.group.name}: ${gm} → ${f} (answer in the group: sigelo-agent group send)`); o.group?.(i); o.told?.({ name: `${i.name} in ${i.group.name}`, where: 'spool' }); }
           if (spool !== null ? f !== null : await run(o.onMessage!, { ...i, id: gm }, env)) G.unread({ carrier, file, pick: (x) => x.group.gid === i.group.gid && x.mid === i.mid });
           else pushed.delete(gm);
         } else if (i.tier === 'friend') {

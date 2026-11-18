@@ -122,7 +122,7 @@ if (cmd === 'enrol') await contact.exit(await enrol.main(rest));
 if (cmd === 'keeper') await contact.exit(await enrol.keeperMain(rest));
 if (cmd === 'watch') await contact.exit(await watch.main(rest));
 if (cmd === 'host') await contact.exit(await host.main(rest));
-if (cmd === 'sdk') await contact.exit(host.sdkMain(rest));
+if (cmd === 'sdk') await contact.exit(await host.sdkMain(rest));
 if (cmd === 'device') await contact.exit(await device.main(rest));
 if (cmd === 'group') await contact.exit(await group.main(rest));
 if (cmd === 'transfer') await contact.exit(await transfer.main(rest));
