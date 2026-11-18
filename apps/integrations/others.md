@@ -126,5 +126,5 @@ that only runs shell commands gets `apps/integrations/skills-cli/sigelo/SKILL.md
 (2025-11-25 back to 2024-11-05), so old and new clients both connect.
 
 Check, for any of them: run
-`printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | npx -y sigelo-mcp@0.1.17 | grep -o '"name":"sigelo_[a-z_]*"' | wc -l`;
-it prints `28`. With the CLI: `sigelo-agent --version` prints `0.1.17`.
+`printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | npx -y sigelo-mcp@0.1.18 | grep -o '"name":"sigelo_[a-z_]*"' | wc -l`;
+it prints `28`. With the CLI: `sigelo-agent --version` prints `0.1.18`.

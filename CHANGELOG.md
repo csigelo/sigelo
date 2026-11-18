@@ -5,6 +5,9 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+## v0.1.18 — 2026-11-19
+
+- **This release:** enrolment that completes and can be cancelled; reply, drafts, links, photo preview and voice messages; Stay connected on Android; `host claude` and the listener as a service.
 - **agent:** `host claude` stays up when Claude is not (no SDK, failing, login gone): keeps and replays the operator's messages; `login` over sigelo; `--dangerously-skip-permissions`; `sdk install`; a unit per identity.
 - **agent:** `host claude`: one Claude session (Agent SDK) fed the operator's messages live; approvals by `yes CODE`/`no CODE` over sigelo; others' messages spooled, never turns; `service install --host claude`.
 - **android:** Stay connected (Settings, on by default): a foreground service keeps the app and its relay connection alive while minimised, with a quiet notification; permissions asked at first use, re-askable.
