@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # DID -> current key for a sigelo peer, for an A2A delegation hook (Tenuo's pinned public_key_b64).
-# SPEC §9 runs in the sigelo-verify binary ($SIGELO_VERIFY, default on PATH); the rest is stdlib.
+# SPEC §9 runs in the sigelo-verify binary (verifier=, else $SIGELO_VERIFY, else on PATH); the rest is stdlib.
 # card_lookup's signature check needs `cryptography`.
 #   python3 sigelo_lookup.py bundle.json | --card card.json [--now N]
 import base64, hashlib, json, os, subprocess, sys, time
 
 URI = 'https://github.com/csigelo/sigelo/tree/main/integrations/a2a'  # as verify.mjs
 LISTS = ('rotations', 'bindings', 'attestations', 'issuers')
+MAX_DEPTH = 512  # SPEC §3
+MAX_BYTES = 4 << 20  # the most JSON handed to the verifier
 B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
 
@@ -17,23 +19,55 @@ class LookupRefused(Exception):
         self.check, self.message = check, message
 
 
-def jcs(o, depth=0):
-    """RFC 8785 bytes, as SPEC §3 asks: UTF-16 key order, integers only (±2^53-1)."""
-    return _jcs(o, depth).encode('utf-8')
+def jcs(o):
+    """RFC 8785 bytes, as SPEC §3 asks: UTF-16 key order, integers only (±2^53-1), 512 levels at most.
+    A work list, not recursion (as ts/src/jcs.ts): a deep value is a ValueError, never a RecursionError."""
+    out, todo, level = [], [o], 0
+    while todo:
+        x = todo.pop()
+        if isinstance(x, _Lit):
+            if x in (']', '}'): level -= 1
+            out.append(x)
+        elif isinstance(x, (list, dict)):
+            level += 1
+            if level > MAX_DEPTH: raise ValueError(f'nested deeper than {MAX_DEPTH}')
+            if isinstance(x, list):
+                out.append('['); todo.append(_Lit(']'))
+                for n in range(len(x) - 1, -1, -1):
+                    todo.append(x[n])
+                    if n: todo.append(_Lit(','))
+            else:
+                out.append('{'); todo.append(_Lit('}'))
+                if not all(isinstance(k, str) for k in x): raise ValueError('object key not a string')
+                ks = sorted(x, key=lambda k: k.encode('utf-16-be', 'surrogatepass'))
+                for n in range(len(ks) - 1, -1, -1):
+                    todo += [x[ks[n]], _Lit((',' if n else '') + json.dumps(ks[n], ensure_ascii=False) + ':')]
+        else: out.append(_scalar(x))
+    return ''.join(out).encode('utf-8')
 
 
-def _jcs(o, depth):
-    if depth > 512: raise ValueError('nested deeper than 512')
+class _Lit(str): pass  # output queued between a container's values
+
+
+def _scalar(o):
     if o is None or isinstance(o, bool): return {None: 'null', True: 'true', False: 'false'}[o]
     if isinstance(o, int):
         if abs(o) > 2 ** 53 - 1: raise ValueError('integer out of range')
         return str(o)
     if isinstance(o, str): return json.dumps(o, ensure_ascii=False)
-    if isinstance(o, list): return '[' + ','.join(_jcs(x, depth + 1) for x in o) + ']'
-    if isinstance(o, dict):
-        ks = sorted(o, key=lambda k: k.encode('utf-16-be'))
-        return '{' + ','.join(json.dumps(k, ensure_ascii=False) + ':' + _jcs(o[k], depth + 1) for k in ks) + '}'
     raise ValueError(f'not signable: {type(o).__name__}')  # floats included (SPEC §3)
+
+
+def depth(o):
+    """Levels of nesting of arrays and objects, combined (SPEC §3: the outermost is level 1), without recursion."""
+    deepest, todo = 0, [(o, 1)]
+    while todo:
+        x, d = todo.pop()
+        if isinstance(x, (list, tuple, dict)):
+            deepest = max(deepest, d)
+            if deepest > MAX_DEPTH: break
+            todo += [(v, d + 1) for v in (x.values() if isinstance(x, dict) else x)]
+    return deepest
 
 
 def b58(b):
@@ -53,25 +87,39 @@ def did_of(genesis):  # SPEC §4: a DID is the digest of its genesis, not a key
     return 'did:sigelo:z' + b58(hashlib.sha256(jcs(genesis)).digest())
 
 
-def verify(bundle, now):
-    """SPEC §9 by the sigelo-verify binary -> the §9.1 result, or LookupRefused('bundle', <its REJECT>)."""
-    exe = os.environ.get('SIGELO_VERIFY', 'sigelo-verify')
-    try:
-        text = json.dumps(bundle, ensure_ascii=False, separators=(',', ':')).encode()
-        p = subprocess.run([exe, '-', '--now', str(int(now))], input=text, capture_output=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired, TypeError, ValueError) as e:
+def _did(genesis):
+    try: return did_of(genesis)
+    except ValueError: return None
+
+
+def verify(bundle, now, verifier=None):
+    """SPEC §9 by the sigelo-verify binary -> the §9.1 result, or LookupRefused('bundle', <its REJECT>).
+    The binary: `verifier`, else $SIGELO_VERIFY, else sigelo-verify on PATH."""
+    exe = verifier or os.environ.get('SIGELO_VERIFY') or 'sigelo-verify'
+    if depth(bundle) > MAX_DEPTH: raise LookupRefused('bundle', f'nested deeper than {MAX_DEPTH} (SPEC §3)')
+    try: text = json.dumps(bundle, separators=(',', ':')).encode('ascii')  # \u escapes: a lone surrogate stays one item's fault (SPEC §3.1)
+    except (TypeError, ValueError, RecursionError) as e: raise LookupRefused('shape', f'not JSON: {e}') from e
+    if len(text) > MAX_BYTES: raise LookupRefused('size', f'bundle is {len(text)} bytes, over {MAX_BYTES}')
+    try: p = subprocess.run([exe, '-', '--now', str(int(now))], input=text, capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired, TypeError, ValueError, OverflowError) as e:
         raise LookupRefused('verifier', f'cannot run {exe}: {e}') from e
-    if p.returncode == 1: raise LookupRefused('bundle', p.stderr.decode().strip().removeprefix('REJECT: ') or 'REJECT')
-    if p.returncode != 0: raise LookupRefused('verifier', p.stderr.decode().strip() or f'{exe} exited {p.returncode}')
-    return json.loads(p.stdout)
+    err = p.stderr.decode('utf-8', 'replace').strip()
+    if p.returncode == 1: raise LookupRefused('bundle', err.removeprefix('REJECT: ') or 'REJECT')
+    if p.returncode != 0: raise LookupRefused('verifier', err or f'{exe} exited {p.returncode}')
+    try: r = json.loads(p.stdout)
+    except (ValueError, RecursionError) as e: raise LookupRefused('verifier', f'{exe} printed no JSON result') from e
+    ok = isinstance(r, dict) and isinstance(r.get('did'), str) and isinstance(r.get('chain'), list) and r['chain'][-1:] == [r['did']] \
+        and all(isinstance(d, str) for d in r['chain']) and (r.get('recovery') is None or isinstance(r['recovery'], str))
+    if not ok: raise LookupRefused('verifier', f'{exe} printed no SPEC §9.1 result')
+    return r
 
 
-def lookup(bundle, now=None):
+def lookup(bundle, now=None, verifier=None):
     """{did, key, key_b64, chain, recovery} of the bundle's current identity, or LookupRefused."""
     if not isinstance(bundle, dict) or bundle.get('typ') != 'bundle': raise LookupRefused('shape', 'not a sigelo bundle')
-    r = verify(bundle, int(time.time()) if now is None else now)
-    nodes = [bundle['genesis']] + [x['next_genesis'] for x in bundle['rotations']]
-    key = next((g['key'] for g in nodes if did_of(g) == r['did']), None)  # from the bundle, never a claimed field
+    r = verify(bundle, int(time.time()) if now is None else now, verifier)
+    nodes = [bundle.get('genesis')] + [x.get('next_genesis') for x in bundle.get('rotations') or [] if isinstance(x, dict)]
+    key = next((g.get('key') for g in nodes if isinstance(g, dict) and _did(g) == r['did']), None)  # from the bundle, never a claimed field
     try: raw = unb58(key)
     except ValueError: raw = b''
     if len(raw) != 34 or raw[:2] != b'\xed\x01': raise LookupRefused('key', f'no Ed25519 key for {r["did"]}')
@@ -82,9 +130,10 @@ def merge(pinned, served):
     """The pinned bundle plus what `served` adds; exact duplicates (same JCS) dropped, nothing pinned dropped.
     Run lookup() on the result: a fork in the union refuses there (SPEC §7.3)."""
     for b in (pinned, served):
-        if not isinstance(b, dict) or b.get('typ') != 'bundle' or not all(isinstance(b.get(k), list) for k in LISTS):
-            raise LookupRefused('shape', 'not a sigelo bundle')
-    try: same = did_of(pinned['genesis']) == did_of(served['genesis'])
+        if not isinstance(b, dict) or b.get('typ') != 'bundle' or not isinstance(b.get('genesis'), dict) \
+                or not all(isinstance(b.get(k), list) for k in LISTS):
+            raise LookupRefused('shape', 'not a sigelo bundle (SPEC §8: a genesis and four lists)')
+    try: same = did_of(pinned.get('genesis')) == did_of(served.get('genesis'))
     except (ValueError, TypeError): same = False
     if not same: raise LookupRefused('genesis', 'the served bundle names another identity (its first DID differs)')
     out = dict(pinned)
@@ -109,25 +158,45 @@ def card_body(card, ext):
     return {'v': 'sigelo/0', 'typ': 'a2a-card', 'did': params.get('did'), 'card': 'sha256:' + hashlib.sha256(jcs(unsigned)).hexdigest()}
 
 
-def card_lookup(card, now=None):
+def card_lookup(card, now=None, verifier=None):
     """lookup() of the bundle in a sigelo-signed A2A card, after the card signature checks under the current key."""
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    try: from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError as e: raise LookupRefused('cryptography', 'card_lookup needs the cryptography package') from e
     caps = card.get('capabilities') if isinstance(card, dict) else None
-    exts = [e for e in (caps or {}).get('extensions') or [] if isinstance(e, dict) and e.get('uri') == URI]
+    if not isinstance(caps, dict) or not isinstance(caps.get('extensions'), list):
+        raise LookupRefused('extension', 'no capabilities.extensions list')
+    exts = [e for e in caps['extensions'] if isinstance(e, dict) and e.get('uri') == URI]
     if len(exts) != 1 or not isinstance(exts[0].get('params'), dict): raise LookupRefused('extension', 'not exactly one sigelo extension')
     p = exts[0]['params']
-    r = lookup(p.get('bundle'), now)
+    r = lookup(p.get('bundle'), now, verifier)
     if p.get('did') != r['did']: raise LookupRefused('did', "params.did is not the bundle's current DID")
     try: Ed25519PublicKey.from_public_bytes(base64.b64decode(r['key_b64'])).verify(unb58(p.get('sig')), b'sigelo\n' + jcs(card_body(card, exts[0])))
     except Exception as e: raise LookupRefused('sig', 'the card signature does not verify under the current key') from e
     return r
 
 
-def _load(path):
+def parse(text):
+    """JSON text (str, or UTF-8 bytes) -> objects for lookup/card_lookup, or LookupRefused('parse', ...).
+    SPEC §3: a duplicate key or `__proto__` anywhere, invalid UTF-8, a BOM, NaN, or nesting past 512
+    refuses the whole text; parsed objects cannot show the first two to the verifier."""
     def strict(pairs):
-        if len({k for k, _ in pairs}) != len(pairs): raise ValueError('duplicate key')
+        keys = [k for k, _ in pairs]
+        if len(set(keys)) != len(keys): raise ValueError('duplicate key')
+        if '__proto__' in keys: raise ValueError('forbidden key "__proto__"')
         return dict(pairs)
-    with open(path, encoding='utf-8') as f: return json.load(f, object_pairs_hook=strict)
+    def no_constant(c): raise ValueError(f'{c} is not JSON')
+    try:
+        if isinstance(text, (bytes, bytearray)): text = bytes(text).decode('utf-8')
+        if not isinstance(text, str): raise ValueError('not text')
+        if text.startswith('\ufeff'): raise ValueError('byte-order mark')
+        o = json.loads(text, object_pairs_hook=strict, parse_constant=no_constant)
+    except (ValueError, RecursionError) as e: raise LookupRefused('parse', str(e)) from None
+    if depth(o) > MAX_DEPTH: raise LookupRefused('parse', f'nested deeper than {MAX_DEPTH}')
+    return o
+
+
+def _load(path):
+    with open(path, 'rb') as f: return parse(f.read())
 
 
 if __name__ == '__main__':

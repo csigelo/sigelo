@@ -8,7 +8,8 @@
     "A3": "did:sigelo:z8TRWcsmt4hPxSC3EMxnMCegK5eXP3C1SEqz6ciV1HWb2",
     "T": "did:sigelo:zD5UsX73uLxZmETD88iQa5jMus5k9nt3Q946auYrGCLWb",
     "X": "did:sigelo:zGSBiBxooEKo6AudPbEm6D798UzVexoQNZxqhh43rufdM",
-    "B0": "did:sigelo:z6zGiPUXpYJPbtag8hkf86CetjUSvoVYyZ7aDTZ3bzVGS"
+    "B0": "did:sigelo:z6zGiPUXpYJPbtag8hkf86CetjUSvoVYyZ7aDTZ3bzVGS",
+    "F": "did:sigelo:z21kRJYfXh3FxsrjmAx6eJey14Ff7XrCXMfPhFVHikSt1"
   },
   "keys": {
     "A0": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
@@ -17,7 +18,8 @@
     "A3": "z6Mkk7k5R4upfqBN69guD2TKtz173DeJCFF4pJaQGnV1ReRj",
     "T": "z6MkniKx97vfNq9aSK4hi5gEA3kS1biqvzTbgztoq5QJaa6V",
     "X": "z6MkgRC3piqVJEag1rnESx3WLCdUtMevwJyCrabLzy2ETjTV",
-    "B0": "z6MkpuWdCk15CPuWxzzPMUC3xevW4K7XffTPiPxxKawQtaMB"
+    "B0": "z6MkpuWdCk15CPuWxzzPMUC3xevW4K7XffTPiPxxKawQtaMB",
+    "F": "z6MktjSnFmnRPnjjTkcVRDxb3umZniZuvU4CTM7rddZHxbLD"
   },
   "bundles": {
     "genesis": {
@@ -412,6 +414,43 @@
         "nonce": "zGWvr7DwY8YPC1jGeGt95ie"
       },
       "rotations": [],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    },
+    "fork_at_genesis": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+        "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+      },
+      "rotations": [
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "next": "did:sigelo:z21kRJYfXh3FxsrjmAx6eJey14Ff7XrCXMfPhFVHikSt1",
+            "iat": 1789998000,
+            "reason": "voluntary"
+          },
+          "sig": "z2jcPWMmguev9iZsUEyFVbaz18s5UTr6LybCta7DzTiXR45qDBrt1n3qenDSCdwuCmb2XwbBWfew6pqrn6gB4Se23",
+          "sig_next": "z2L1ix4GkQcr1LuC5Ryj943BGWgBt8wM6G71Kexo5mxSdRNKTzyxS65M3qbZJWxjnoE25pcCEQHZxYpZKLM6FnRAU",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MktjSnFmnRPnjjTkcVRDxb3umZniZuvU4CTM7rddZHxbLD",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zPJya9c5YBcqRZCerg9nvPJ"
+          }
+        }
+      ],
       "bindings": [],
       "attestations": [],
       "issuers": []
