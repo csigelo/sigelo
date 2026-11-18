@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **ci:** the Android builds survive Maven Central's 429s: Gradle's downloads cached between runs, and Google's Central mirror tried first (an init script, not in the tree); the APK's bytes unchanged.
+
 ## v0.1.18 — 2026-11-19
 
 - **This release:** enrolment that completes and can be cancelled; reply, drafts, links, photo preview and voice messages; Stay connected on Android; `host claude` and the listener as a service.
