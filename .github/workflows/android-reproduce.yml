@@ -46,6 +46,31 @@ jobs:
         if: startsWith(matrix.jdk, 'temurin-')
         continue-on-error: true
         with: { distribution: temurin, java-version: "${{ matrix.jdk == 'temurin-17' && '17' || '21' }}" }
+      # Gradle's downloads (wrapper, plugin, its dependencies) kept between runs, and Google's mirror of
+      # Maven Central tried first: Central rate-limits GitHub runners (429s, 2026-11-19). The mirror is
+      # an init script in ~/.gradle, not in settings.gradle: F-Droid's scanner rejects a maven repository
+      # it does not know. Neither changes the APK: the same artifacts by checksum, and a repository URL
+      # is not a build input (the verdict below checks it;
+      # the Debian builds get ~/.gradle as /root/.gradle).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (tag v6)
+        continue-on-error: true
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/android/**/*.gradle*', 'apps/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Google's Central mirror before mavenCentral (an init script, CI only)
+        continue-on-error: true
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/central-mirror.gradle <<'EOF'
+          def mirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          beforeSettings { s ->
+              s.pluginManagement.repositories { maven { name = 'CentralMirror'; url = mirror } }
+              s.dependencyResolutionManagement.repositories { maven { name = 'CentralMirror'; url = mirror } }
+          }
+          EOF
       - name: the page into the APK's assets (as the recipe's prebuild and build)
         continue-on-error: true
         run: |
@@ -66,14 +91,14 @@ jobs:
             (cd apps/android && ./gradlew --no-daemon --stacktrace assembleRelease)
           else
             suite=trixie; [ "$JDK" = debian-17 ] && suite=bookworm
-            docker run --rm -v "$GITHUB_WORKSPACE:/w" -v "$ANDROID_HOME:/sdk" -e ANDROID_HOME=/sdk \
+            docker run --rm -v "$GITHUB_WORKSPACE:/w" -v "$ANDROID_HOME:/sdk" -v "$HOME/.gradle:/root/.gradle" -e ANDROID_HOME=/sdk \
               -e LC_ALL=C.UTF-8 -e TZ=Etc/UTC -e SOURCE_DATE_EPOCH="$sde" -e OWNER="$(id -u):$(id -g)" \
               -w /w/apps/android/app "debian:$suite" bash -euxc '
                 apt-get update -qq
                 apt-get install -y -qq --no-install-recommends default-jdk-headless ca-certificates >/dev/null
                 java -version 2>&1; javac -version 2>&1
                 ../gradlew --no-daemon --stacktrace -Dorg.gradle.java.installations.auto-download=false assembleRelease
-                chown -R "$OWNER" /w/apps/android'
+                chown -R "$OWNER" /w/apps/android /root/.gradle'
           fi
       - name: the APK, its SHA-256 and the JDK
         continue-on-error: true

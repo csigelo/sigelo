@@ -184,7 +184,7 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
 const settings = read(HERE, 'settings.gradle'), root = read(HERE, 'build.gradle'), app = read(HERE, 'app', 'build.gradle'), props = read(HERE, 'gradle.properties');
 ok([settings, root, app].every((t) => balanced(code(t))), 'gradle: braces and brackets balanced (outside strings and comments)');
 ok(new RegExp(`id 'com\\.android\\.application' version '${AGP.replace(/\./g, '\\.')}' apply false`).test(root) && (code(root).match(/\bid\b/g) ?? []).length === 1, `gradle: one plugin, the Android Gradle Plugin, pinned (${AGP})`);
-ok(/include ':app'/.test(settings) && /FAIL_ON_PROJECT_REPOS/.test(settings) && !/maven\s*\{/.test(code(settings)) && !/jcenter/.test(settings), 'settings.gradle: one module; repositories google() and mavenCentral() only, none per project');
+ok(/include ':app'/.test(settings) && /FAIL_ON_PROJECT_REPOS/.test(settings) && !/maven\s*\{/.test(code(settings)) && !/jcenter/.test(settings), 'settings.gradle: one module; repositories google() and mavenCentral() only, none per project (F-Droid\'s scanner rejects another maven repo: CI\'s Central mirror is an init script, android.yml)');
 const num = (k) => Number(new RegExp(`\\b${k}\\s+(\\d+)`).exec(app)?.[1]);
 ok(num('minSdk') === 28 && num('targetSdk') === 35 && num('compileSdk') === 35, `app/build.gradle: minSdk 28, targetSdk 35, compileSdk 35 (${num('minSdk')}, ${num('targetSdk')}, ${num('compileSdk')})`);
 ok(/namespace 'io\.sigelo\.app'/.test(app) && /applicationId 'io\.sigelo\.app'/.test(app), 'app/build.gradle: io.sigelo.app');

@@ -40,6 +40,28 @@ jobs:
       # between majors, and F-Droid publishes our signed APK only if its build matches (FDROID.md).
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with: { distribution: temurin, java-version: '21' }
+      # Gradle's downloads (wrapper, plugin, its dependencies) kept between runs, and Google's mirror of
+      # Maven Central tried first: Central rate-limits GitHub runners (429s, 2026-11-19). The mirror is
+      # an init script in ~/.gradle, not in settings.gradle: F-Droid's scanner rejects a maven repository
+      # it does not know. Neither changes the APK: the same artifacts by checksum, and a repository URL
+      # is not a build input (the two builds compared below, and android-reproduce.yml, check it).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (tag v6)
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/android/**/*.gradle*', 'apps/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Google's Central mirror before mavenCentral (an init script, CI only)
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/central-mirror.gradle <<'EOF'
+          def mirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          beforeSettings { s ->
+              s.pluginManagement.repositories { maven { name = 'CentralMirror'; url = mirror } }
+              s.dependencyResolutionManagement.repositories { maven { name = 'CentralMirror'; url = mirror } }
+          }
+          EOF
       - name: the page's sources (ts/dist; contact, relay and adapter dependencies)
         run: |
           (cd ts && npm ci --ignore-scripts && npx tsc)
