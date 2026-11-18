@@ -43,7 +43,7 @@ export function checkOperator(op, chain, now) {
   return { did: r.did, chain: r.chain, exp: b.exp };
 }
 
-/** Throws on any failure (`.check` names it); returns the SPEC §9.1 result plus `operator` ({did, chain, exp} or null). */
+/** Throws on any failure (`.check` names it); returns the SPEC §9.1 result plus `key` (the current public key, multibase) and `operator` ({did, chain, exp} or null). */
 export function verifyCard(card, now = Math.floor(Date.now() / 1000)) {
   if (exts(card).length !== 1) throw new Error('a2a-card: not exactly one sigelo extension');
   const { did: claimed, bundle, sig, operator } = exts(card)[0].params ?? {};
@@ -51,7 +51,7 @@ export function verifyCard(card, now = Math.floor(Date.now() / 1000)) {
   if (r.did !== claimed) throw new Error("a2a-card: did is not the bundle's current DID");
   const g = nodes(bundle).find((x) => did(x) === r.did);
   if (!verifySig(g.key, cardBody(card), sig)) throw new Error('a2a-card: bad signature');
-  return { ...r, operator: operator === undefined ? null : checkOperator(operator, r.chain, now) };
+  return { ...r, key: g.key, operator: operator === undefined ? null : checkOperator(operator, r.chain, now) };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) console.log(JSON.stringify(verifyCard(parse(readFileSync(process.argv[2], 'utf8'))), null, 2));
