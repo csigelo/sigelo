@@ -64,12 +64,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
         with: { persist-credentials: false }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (tag v7)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.0.0 (tag v7)
         with: { node-version: '22', package-manager-cache: false }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
         with: { go-version-file: go/go.mod, cache: false }
       - run: sh release/build.sh "$RUNNER_TEMP/dist"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (tag v7)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.1 (tag v7)
         with:
           name: dist-${{ matrix.runner }}
           path: ${{ runner.temp }}/dist/
@@ -89,7 +89,7 @@ jobs:
       DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
       V: ${{ needs.check.outputs.version }}
     steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v7.0.0 (tag v7)
         with: { pattern: 'dist-*', path: '${{ runner.temp }}/builds' }
       - id: cmp
         name: the two SHA256SUMS, byte for byte
@@ -139,9 +139,9 @@ jobs:
     env:
       V: ${{ needs.check.outputs.version }}
     steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v7.0.0 (tag v7)
         with: { name: dist-ubuntu-24.04, path: '${{ runner.temp }}/dist' }
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v7.0.0 (tag v7)
         with: { name: sigelo-android, path: '${{ runner.temp }}/apk' }
       - name: the subjects (SHA256SUMS, its files, the unsigned APK)
         shell: bash
@@ -172,7 +172,7 @@ jobs:
           cp "$BUNDLE" "$RUNNER_TEMP/proofs/sigelo-$V.intoto.jsonl"
           cosign sign-blob --yes --bundle "$RUNNER_TEMP/proofs/SHA256SUMS.sigstore.json" "$RUNNER_TEMP/dist/SHA256SUMS"
           ls -l "$RUNNER_TEMP/proofs"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (tag v7)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.1 (tag v7)
         with:
           name: proofs
           path: ${{ runner.temp }}/proofs/
@@ -192,9 +192,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
         with: { persist-credentials: false }
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v7.0.0 (tag v7)
         with: { name: dist-ubuntu-24.04, path: '${{ runner.temp }}/dist' }
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (tag v7)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v7.0.0 (tag v7)
         with: { name: proofs, path: '${{ runner.temp }}/dist' }
       - name: gh release create (pre-release)
         shell: bash
