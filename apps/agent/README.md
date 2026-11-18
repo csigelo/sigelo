@@ -94,9 +94,12 @@ line `<check>: what failed, what to do`; 2 usage, no identity; 3 `inbox --expect
 `sigelo-agent host claude [--cwd DIR] [--permission-mode MODE] [--model M] [--approve-timeout S]` holds one
 Claude session (Claude Agent SDK) for this identity: your operator's messages land in it live, the answer
 goes back over sigelo, secrets redacted. Tool approvals arrive as `approve K7F3? Bash: ls`, answered
-`yes K7F3` or `no K7F3` (300 s, then denied). Others' messages are data: spooled, never a turn; the
-operator gets one line. Never beside `watch`. As a service: `service install --host claude`. Needs the
-SDK, not installed with sigelo-agent: `npm i -g @anthropic-ai/claude-agent-sdk@0.3.317`.
+`yes K7F3` or `no K7F3` (300 s, then denied); `--dangerously-skip-permissions`: none. Others' messages are
+data: spooled, never a turn. Anthropic receives the session: the operator's messages, tool output, files
+Claude reads; the relay still sees ciphertext; no telemetry. Claude unavailable (no SDK, failing, login
+expired): host keeps listening, keeps the operator's messages, replays them once back; `login` from the
+operator relays the sign-in link and takes the code back. As a service: `service install --host claude`
+(one unit per identity). SDK: `sigelo-agent sdk install`.
 
 ## Operating it
 

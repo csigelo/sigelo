@@ -6,20 +6,24 @@
 // in-process relay (SKIP without relay/ and its node_modules): an agent whose operator attested it,
 // the operator and a third contact as CLI children, the host in this process.
 //   node test-host.ts   → ALL PASS test-host.ts (n ok)
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { attest, did, type Genesis } from 'sigelo';
-import { cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
+import { CLI, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
 import * as H from './sigelo-agent-host.ts';
 
 const TOKEN = 'abcdefghijklmnopqrstuvwx', HEX = 'ab'.repeat(32);
 // ── the fake SDK ──────────────────────────────────────────────────────────────────────────────────
 const turns: string[] = [];
-let queries = 0;
+let queries = 0, authGate: (() => boolean) | null = null;
+const seen: Record<string, unknown>[] = [];
 type Opts = Parameters<H.Sdk['query']>[0]['options'];
 const result = (text: string): H.SdkMsg => ({ type: 'result', subtype: 'success', is_error: false, result: text });
 async function* script(text: string, o: Opts): AsyncGenerator<H.SdkMsg> {
   const signal = new AbortController().signal;
+  // A login gone: what Claude Code answers then (an error result, the assistant message's error).
+  if (authGate?.()) { yield { type: 'assistant', parent_tool_use_id: null, error: 'authentication_failed', message: { content: [{ type: 'text', text: 'Invalid API key · Please run /login' }] } }; yield { type: 'result', subtype: 'success', is_error: true, result: 'Invalid API key · Please run /login' }; return; }
   if (text === 'hello') { yield { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'thinking' }] } }; yield result('hi operator'); return; }
   if (text === 'run ls') {
     const d = await o.canUseTool('Bash', { command: 'ls -la /tmp', description: 'list' }, { signal });
@@ -40,6 +44,7 @@ async function* script(text: string, o: Opts): AsyncGenerator<H.SdkMsg> {
 const fake: H.Sdk = {
   query({ prompt, options }) {
     queries++;
+    seen.push(options);
     const it = prompt[Symbol.asyncIterator]();
     async function* run(): AsyncGenerator<H.SdkMsg> {
       for (;;) {
@@ -111,11 +116,166 @@ const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e
   const slow = H.hostCore({ sdk: fake, tell: async (t) => { late.push(t); }, approveMs: 300, backoff: [30, 60], log: () => {} });
   slow.input('run ls');
   ok('no answer within the approve timeout → denied, the model told why', await until(() => late.some((t) => t.startsWith('ran: deny (no answer from the operator within 0 s: not run'))), JSON.stringify(late));
-  const c = /^approve (\w{4})/.exec(late[0]!)![1]!;
+  const c = /^approve (\w{4})/.exec(late.find((t) => t.startsWith('approve'))!)![1]!;
   ok('…and its code, answered late, is stale', slow.input(`yes ${c}`) === 'stale');
   slow.input('ask');
   ok('a question unanswered in time → denied too', await until(() => late.some((t) => t.startsWith('no answer (no answer from the operator within'))));
   await slow.close();
+}
+
+// ── slice 2: the listener is the fallback, the login, skip-permissions (hostCore) ─────────────────
+// A fake `claude` on a temp PATH stands for `claude auth login`: it prints what the real one prints
+// (an OSC 8 link among it), reads the code on stdin, records it and its arguments, and says it worked
+// (or "Login failed" for a code starting "wrong"). The real CLI is never run here.
+const FAKE = tmpHome('host-claude'), BIN = join(FAKE, 'bin');
+mkdirSync(BIN);
+writeFileSync(join(BIN, 'claude'), `#!/bin/sh
+d=$(dirname "$0")
+echo "$@" > "$d/args"
+echo 'Opening browser to sign in…'
+printf "If the browser didn't open, visit: \\033]8;;https://claude.ai/oauth/authorize?code=true&state=xyz\\007https://claude.ai/oauth/authorize?code=true&state=xyz\\033]8;;\\007\\n"
+printf 'Paste code here if prompted > '
+read line
+printf '%s' "$line" >> "$d/code"
+case "$line" in wrong*) echo 'Login failed: Request failed with status code 400' >&2; exit 1;; esac
+echo 'Login successful.'
+touch "$d/loggedin"
+`);
+chmodSync(join(BIN, 'claude'), 0o755);
+process.env['PATH'] = `${BIN}:${process.env['PATH'] ?? ''}`;
+const LINK = 'https://claude.ai/oauth/authorize?code=true&state=xyz';
+{
+  ok('host: the auth table: an expired or refused login in the texts Claude Code and the SDK give; ordinary errors not',
+    ['authentication_failed', 'Invalid API key · Please run /login', 'OAuth token has expired. Please obtain a new token or refresh your existing token.', 'Failed to authenticate. API Error: 401 {"type":"error"}', 'Your session has expired. Please run /login to sign in again.', 'Not logged in']
+      .every(H.isAuthFailure) && !['rate_limit', 'API Error: 529 overloaded', 'the CLI went away', 'error_max_turns'].some(H.isAuthFailure));
+  ok('host: the sign-in link out of what the login printed, terminal escapes and the OSC 8 wrapper dropped',
+    H.urlIn(`Opening…\nIf the browser didn't open, visit: \x1b]8;;${LINK}\x07${LINK}\x1b]8;;\x07\nPaste code here if prompted > `) === LINK && H.urlIn('nothing') === null);
+  ok('host: the login code shape: <code>#<state>, one piece', H.LOGIN_CODE.test('abcdEFGH12#stateXYZ99') && !H.LOGIN_CODE.test('abcdEFGH12') && !H.LOGIN_CODE.test('ab#cd') && !H.LOGIN_CODE.test('abcdEFGH12 #stateXYZ99'));
+}
+{
+  // The SDK missing → unavailable, told once, held; installed → back, replayed in order.
+  let have = false;
+  const sent: string[] = [];
+  const has = (f: (t: string) => boolean): Promise<boolean> => until(() => sent.some(f));
+  const core = H.hostCore({ load: async () => { if (!have) throw Object.assign(new Error(H.SDK_MISSING), { missing: true }); return fake; }, tell: async (t) => { sent.push(t); }, retry: [100, 400], upMs: 150, backoff: [30, 60], log: () => {} });
+  ok('host: the SDK missing → not an exit: one line to the operator, why and that their messages are kept',
+    await has((t) => t === 'Claude is unavailable here: the Claude Agent SDK is not installed (on this machine: sigelo-agent sdk install); your messages are kept until it is back') && core.down() !== null, JSON.stringify(sent));
+  turns.length = 0;
+  ok('…the operator\'s messages held, not turns', core.input('hello', 'a1') === 'held' && core.input('what', 'a2') === 'held' && turns.length === 0);
+  await new Promise((r) => setTimeout(r, 700));
+  ok('…retried (1 min doubling to 30 min; here ms) and said once, not at each retry', sent.filter((t) => t.startsWith('Claude is unavailable')).length === 1 && sent.length === 1, JSON.stringify(sent));
+  have = true;
+  ok('back: one line, then the held messages go into the session in order, answered',
+    await has((t) => t === 'Claude is back on this machine: your 2 kept messages go in now, in order') && await has((t) => t === 'echo: what') && turns.join() === 'hello,what'
+      && sent.indexOf('hi operator') > sent.indexOf('Claude is back on this machine: your 2 kept messages go in now, in order') && core.down() === null, JSON.stringify(sent));
+  ok('…and the mode said once, at the first session that runs', sent.filter((t) => t.startsWith('Claude session started')).length === 1 && sent.includes(H.modeLine(false)));
+  ok('…then messages are turns again', core.input('hello') === 'turn' && await until(() => sent.filter((t) => t === 'hi operator').length === 2));
+  await core.close();
+}
+{
+  // More than REPLAY_MAX held → counted, not replayed.
+  let have = false;
+  const sent: string[] = [], kept = H.memKept();
+  const core = H.hostCore({ load: async () => { if (!have) throw new Error('boom'); return fake; }, tell: async (t) => { sent.push(t); }, kept, retry: [100, 200], upMs: 100, backoff: [30, 60], log: () => {} });
+  await until(() => sent.length > 0);
+  turns.length = 0;
+  for (let i = 0; i < H.REPLAY_MAX + 1; i++) core.input(`m${i}`, `id${i}`);
+  have = true;
+  ok('back with more than 20 held (or older than 24 h): the operator told how many wait in the spool, none replayed',
+    await until(() => sent.some((t) => t.startsWith('Claude is back on this machine; 21 of your messages wait in the spool'))) && turns.length === 0 && kept.list().length === 0 && sent[0] === 'Claude is unavailable here: boom; your messages are kept until it is back', JSON.stringify(sent));
+  await core.close();
+}
+{
+  // Claude cannot start: failing FAIL_N times in a row → unavailable; started again with a held message.
+  let broken = true;
+  const sent: string[] = [];
+  const crashy: H.Sdk = { query(p) { if (broken) throw new Error('spawn claude ENOENT'); return fake.query(p); } };
+  const core = H.hostCore({ sdk: crashy, tell: async (t) => { sent.push(t); }, retry: [100, 400], upMs: 100, backoff: [20, 40], log: () => {} });
+  ok('host: Claude cannot start 3 times in a row → unavailable, said once (after one "session restarted")',
+    await until(() => sent.some((t) => t.startsWith('Claude is unavailable here: the session failed: spawn claude ENOENT 3 times in a row'))) && sent.filter((t) => t === 'session restarted').length === 1 && core.sessions() >= 3, JSON.stringify(sent));
+  turns.length = 0;
+  ok('…a message held', core.input('hello', 'b1') === 'held');
+  broken = false;
+  ok('…started again: the held message tries it, answered, back in one line', await until(() => sent.includes('hi operator')) && sent.includes('Claude is back on this machine: your 1 kept message goes in now, in order') && turns.join() === 'hello', JSON.stringify(sent));
+  await core.close();
+}
+{
+  // The login gone → named, not "session restarted" in a loop; "login" from the operator signs in again.
+  rmSync(join(BIN, 'loggedin'), { force: true }); rmSync(join(BIN, 'code'), { force: true });
+  authGate = () => !existsSync(join(BIN, 'loggedin'));
+  const sent: string[] = [];
+  const has = (f: (t: string) => boolean): Promise<boolean> => until(() => sent.some(f));
+  const core = H.hostCore({ sdk: fake, tell: async (t) => { sent.push(t); }, retry: [60_000, 60_000], backoff: [20, 40], log: () => {} });
+  turns.length = 0;
+  core.input('hello');
+  ok('host: an authentication failure → one line: Claude\'s login expired on this machine (how to sign in again), no restart loop',
+    await has((t) => t === H.AUTH_LINE) && !sent.some((t) => t.startsWith('session restarted')) && core.down() !== null, JSON.stringify(sent));
+  ok('…the next message held (the one that met the expired login is kept too)', core.input('what', 'c1') === 'held' && core.input('login') === 'login');
+  ok('"login" → claude auth login runs; its link to the operator: open, sign in, send the code', await has((t) => t === `open this link, sign in, and send me the code it shows (or "cancel"):\n${LINK}`)
+    && readFileSync(join(BIN, 'args'), 'utf8').trim() === 'auth login', JSON.stringify(sent));
+  ok('…a message that is not a code: said, not fed to it', core.input('what code?') === 'login' && await has((t) => t.startsWith('that is not the code the sign-in page shows')) && !existsSync(join(BIN, 'code')));
+  ok('…the code, spaces stripped, fed to it; it worked: one line; the held messages go in, the first first',
+    core.input(' abcdEFGH12 # stateXYZ99\n') === 'login' && await has((t) => t === 'Claude\'s login works again on this machine') && readFileSync(join(BIN, 'code'), 'utf8') === 'abcdEFGH12#stateXYZ99'
+      && await has((t) => t === 'echo: what') && sent.includes('Claude is back on this machine: your 2 kept messages go in now, in order') && turns.slice(-2).join() === 'hello,what' && core.down() === null, JSON.stringify(sent));
+  rmSync(join(BIN, 'loggedin'), { force: true });
+  core.input('/login');
+  await has((t) => t.startsWith('open this link') && sent.filter((x) => x.startsWith('open this link')).length === 2);
+  ok('"/login" any time; a wrong code: the login says so in one line', core.input('wrongCODE12#stateXYZ99') === 'login' && await has((t) => t === 'the login did not work: Login failed: Request failed with status code 400'), JSON.stringify(sent));
+  core.input('/login');
+  await until(() => sent.filter((x) => x.startsWith('open this link')).length === 3);
+  ok('…"cancel" stops it', core.input('cancel') === 'login' && await has((t) => t === 'the login did not work: cancelled'));
+  await core.close();
+  authGate = null;
+  const none: string[] = [];
+  const c2 = H.hostCore({ sdk: fake, tell: async (t) => { none.push(t); }, login: () => H.claudeLogin(5000, ['claude-not-on-this-path', 'auth', 'login']), log: () => {} });
+  c2.input('/login');
+  ok('…no claude command: said', await until(() => none.includes('the login did not work: no claude-not-on-this-path command on this machine\'s PATH')), JSON.stringify(none));
+  await c2.close();
+}
+{
+  // --dangerously-skip-permissions: bypassPermissions, no approval messages; said once at the start.
+  const sent: string[] = [];
+  seen.length = 0;
+  const core = H.hostCore({ sdk: fake, tell: async (t) => { sent.push(t); }, skipPermissions: true, backoff: [30, 60], log: () => {} });
+  core.input('run ls');
+  ok('host --dangerously-skip-permissions: the session runs bypassPermissions (allowDangerouslySkipPermissions), the tool runs, no approval message, the mode said',
+    await until(() => sent.includes('ran: allow')) && !sent.some((t) => t.startsWith('approve')) && seen[0]?.['permissionMode'] === 'bypassPermissions' && seen[0]?.['allowDangerouslySkipPermissions'] === true
+      && sent[0] === H.modeLine(true) && H.modeLine(true).includes('permissions skipped'), JSON.stringify(sent));
+  await core.close();
+  seen.length = 0;
+  const s2: string[] = [];
+  const c2 = H.hostCore({ sdk: fake, tell: async (t) => { s2.push(t); }, backoff: [30, 60], log: () => {} });
+  c2.input('run ls');
+  ok('…without it: permissionMode default, the approval asked, the mode said (ask)', await until(() => s2.some((t) => t.startsWith('approve'))) && seen[0]?.['permissionMode'] === 'default' && !('allowDangerouslySkipPermissions' in seen[0]!) && s2[0] === H.modeLine(false));
+  await c2.close();
+}
+{
+  // sdk install: the npm install that resolves for this sigelo-agent, --ignore-scripts; a fake npm on PATH.
+  const N = tmpHome('host-npm'), nb = join(N, 'bin');
+  mkdirSync(nb);
+  writeFileSync(join(nb, 'npm'), `#!/bin/sh\nd=$(dirname "$0")\nif [ "$1" = root ]; then echo "${join(N, 'g', 'lib', 'node_modules')}"; exit 0; fi\necho "$(pwd) $*" >> "$d/ran"\n[ -f "$d/fail" ] && exit 3\nexit 0\n`);
+  chmodSync(join(nb, 'npm'), 0o755);
+  const pkgAt = (d: string): string => { mkdirSync(join(d, 'dist'), { recursive: true }); writeFileSync(join(d, 'package.json'), '{"name":"sigelo-agent"}'); return join(d, 'dist'); };
+  const PATH0 = process.env['PATH'];
+  process.env['PATH'] = `${nb}:${PATH0}`;
+  try {
+    const g = H.sdkPlan(pkgAt(join(N, 'g', 'lib', 'node_modules', 'sigelo-agent'))), p = H.sdkPlan(pkgAt(join(N, 'proj', 'node_modules', 'sigelo-agent'))), c = H.sdkPlan(pkgAt(join(N, 'checkout', 'apps', 'agent')));
+    const spec = `${H.SDK_MODULE}@${H.SDK_VERSION}`;
+    ok('sdk install plan: global → npm install -g --ignore-scripts; in a project → npm install there; a checkout → --no-save in it',
+      g.where === 'global' && g.args.join(' ') === `install -g --ignore-scripts ${spec}` && p.where === 'project' && p.cwd === join(N, 'proj') && p.args.join(' ') === `install --ignore-scripts ${spec}`
+        && c.where === 'checkout' && c.cwd === join(N, 'checkout', 'apps', 'agent') && c.args.join(' ') === `install --no-save --ignore-scripts ${spec}`, JSON.stringify([g, p, c]));
+    const said: string[] = [];
+    ok('sdk install: runs it, says what it ran and that it is done', H.sdkInstall((l) => said.push(l), p) === 0 && readFileSync(join(nb, 'ran'), 'utf8').trim() === `${join(N, 'proj')} install --ignore-scripts ${spec}`
+      && said[0] === `sdk install: npm install --ignore-scripts ${spec} (in the project ${join(N, 'proj')})` && said[1]!.startsWith('sdk install: done'), JSON.stringify(said));
+    writeFileSync(join(nb, 'fail'), '');
+    const f: string[] = [];
+    ok('…npm failing: exit 1, said', H.sdkInstall((l) => f.push(l), g) === 1 && f[1] === 'sdk install: npm exited 3: the SDK is not installed', JSON.stringify(f));
+    rmSync(join(nb, 'fail'));
+    const r = await cliIn({ PATH: `${nb}:${PATH0}`, HOME: N }, N)('sdk', 'install');
+    ok('sigelo-agent sdk install (this checkout): npm install --no-save --ignore-scripts in apps/agent, said', r.status === 0 && r.stderr.includes(`sdk install: npm install --no-save --ignore-scripts ${spec} (in this checkout`)
+      && readFileSync(join(nb, 'ran'), 'utf8').includes(`${import.meta.dirname} install --no-save --ignore-scripts ${spec}`), r.stderr);
+    ok('sigelo-agent sdk (no install) → exit 2; the no-SDK line names sdk install', (await cliIn({ PATH: `${nb}:${PATH0}`, HOME: N }, N)('sdk')).status === 2 && H.SDK_MISSING.includes('sigelo-agent sdk install'));
+  } finally { process.env['PATH'] = PATH0; }
 }
 
 // ── on the relay: the operator, a third contact, the lock ─────────────────────────────────────────
@@ -154,7 +314,8 @@ try {
   ok('…and with a pal, filed own (pushed in full, as the operator\'s are)', acc2.status === 0 && (await cv('tier', 'pal', 'own')).status === 0, acc2.stderr);
   const noOp = await cp('host', 'claude');
   ok('host claude on an identity without an operator → exit 2, said', noOp.status === 2 && noOp.stderr.includes('has no operator'), noOp.stderr);
-  ok('host: an unknown host or bypassPermissions → exit 2', (await cv('host', 'codex')).status === 2 && (await cv('host', 'claude', '--permission-mode', 'bypassPermissions')).status === 2);
+  const bp = await cv('host', 'claude', '--permission-mode', 'bypassPermissions');
+  ok('host: an unknown host or --permission-mode bypassPermissions → exit 2, the refusal pointing at --dangerously-skip-permissions', (await cv('host', 'codex')).status === 2 && bp.status === 2 && bp.stderr.includes('--dangerously-skip-permissions'), bp.stderr);
 
   turns.length = 0;
   const SPOOL = join(V, 'spool');
@@ -163,7 +324,7 @@ try {
   const w = await cv('watch');
   ok('the host holds the watch lock: a watch beside it → exit 1, busy', lock.endsWith(' watch ' + SPOOL) && w.status === 1 && w.stderr.includes('is watched by sigelo-agent watch'), lock + w.stderr);
   const h2 = await cv('host', 'claude');
-  ok('…and a second host → exit 1 (busy; or, the SDK not installed here, refused before the lock)', h2.status === 1 && (h2.stderr.includes('is watched by') || h2.stderr.includes(H.SDK_MISSING)), h2.stderr);
+  ok('…and a second host → exit 1 (busy: the lock, whether or not the SDK is installed here)', h2.status === 1 && h2.stderr.includes('is watched by'), h2.stderr);
 
   await cw('send', 'agent', 'hello');
   ok('the operator\'s message → a turn in the live session; the answer comes back over sigelo, labelled reply', await opGets((s) => s === 'hi operator') !== undefined
@@ -190,10 +351,42 @@ try {
   await host.close();
   host = null;
   ok('stopped: the lock gone', !existsSync(join(V, '.config', 'moadim', 'sigelo.local.ui.pid')));
-  // The CLI child has no seam: where the real SDK does not resolve from this checkout, it says how to install it.
+  // The login over sigelo: the operator's messages alone reach it; a contact's code-shaped text is data.
+  rmSync(join(BIN, 'loggedin'), { force: true }); rmSync(join(BIN, 'code'), { force: true });
+  authGate = () => !existsSync(join(BIN, 'loggedin'));
+  host = await H.startHost({ identity: file(V), spool: SPOOL, approveTimeout: 60, backoff: [50, 100], retry: [60_000, 60_000], quiet: true });
+  got.length = 0;
+  await cw('send', 'agent', 'hello');
+  ok('host: the login expired → the operator told in one line over sigelo', await opGets((s) => s === H.AUTH_LINE) !== undefined, JSON.stringify(got));
+  await cw('send', 'agent', 'again');
+  await cw('send', 'agent', 'login');
+  ok('…"login" from the operator → the sign-in link to them', await opGets((s) => s === `open this link, sign in, and send me the code it shows (or "cancel"):\n${LINK}`) !== undefined, JSON.stringify(got));
+  await cp('send', 'agent', 'palCODE1234#palSTATE123');
+  const kept = (t: string): boolean => readdirSync(SPOOL).some((f) => { try { return JSON.parse(readFileSync(join(SPOOL, f), 'utf8')).content === t; } catch { return false; } });
+  ok('host: a contact\'s code-shaped message never reaches the login process (spooled, the operator told)', await opGets((s) => s === 'a message from pal waits in the spool') !== undefined
+    && !existsSync(join(BIN, 'code')) && kept('palCODE1234#palSTATE123'), JSON.stringify(got));
+  ok('…the operator\'s message while Claude is unavailable: kept in the spool, no "waits in the spool" line for it', kept('again') && !got.some((m) => m.content === 'a message from operator waits in the spool'));
+  await cw('send', 'agent', 'abcdEFGH12#stateXYZ99');
+  ok('…the operator\'s code goes to it: login works again, the kept messages answered in order, out of the spool',
+    await opGets((s) => s === 'Claude\'s login works again on this machine') !== undefined && readFileSync(join(BIN, 'code'), 'utf8') === 'abcdEFGH12#stateXYZ99'
+      && await opGets((s) => s === 'echo: again') !== undefined && got.some((m) => m.content === 'hi operator') && !kept('again') && !kept('hello'), JSON.stringify(got));
+  await host.close();
+  host = null;
+  authGate = null;
+  // The CLI child has no seam: where the real SDK does not resolve from this checkout, host stays up as the listener.
   if (await import(H.SDK_MODULE).then(() => false, () => true)) {
-    const m = await cv('host', 'claude');
-    ok('host claude without the SDK installed → exit 1, one line: npm i -g @anthropic-ai/claude-agent-sdk@0.3.317', m.status === 1 && m.stderr.trim().split('\n').length === 1 && m.stderr.includes(H.SDK_MISSING), m.stderr);
+    got.length = 0;
+    const c = spawn('node', [CLI, 'host', 'claude', '--quiet'], { env: env(V), cwd: V });
+    let err = '';
+    c.stderr.on('data', (d) => { err += d; });
+    const exit = new Promise<number | null>((r) => c.on('close', r));
+    const line = await opGets((s) => s.startsWith('Claude is unavailable here'));
+    ok('host claude without the SDK installed → no exit: the operator told why in one line', line === 'Claude is unavailable here: the Claude Agent SDK is not installed (on this machine: sigelo-agent sdk install); your messages are kept until it is back', `${line} ${err}`);
+    await cw('send', 'agent', 'for later');
+    const sp = file(V).replace(/\.json$/, '.spool');
+    ok('…the operator\'s messages spooled as watch --spool does', await until(() => existsSync(sp) && readdirSync(sp).some((f) => JSON.parse(readFileSync(join(sp, f), 'utf8')).content === 'for later'), 40000), err);
+    c.kill('SIGTERM');
+    ok('…stopped: exit 0', await exit === 0, err);
   } else console.log('SKIP host claude without the SDK: it is installed here');
 } finally {
   await host?.close();

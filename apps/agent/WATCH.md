@@ -62,8 +62,9 @@ through operator hints (apps/contact/carrier.mjs): blinded, so other contacts le
 An enrolled agent must always get its owner's messages: `sigelo-agent service install` runs
 `watch --spool <identity>.spool --quiet` as a service of the machine (Linux: a systemd user unit,
 `Restart=always`; `loginctl enable-linger` keeps it after logout; macOS: a LaunchAgent; Windows: the
-`schtasks` step is printed). `service status` says whether a watcher holds the file, `service remove`
-undoes it. Beside it, `inbox` and the MCP `sigelo_inbox` take what it spooled (the files deleted) instead
+`schtasks` step is printed), one per identity (`sigelo-watch-<tag>`, the tag from the file's path; an
+earlier install's `sigelo-watch` is kept). `service status` says whether a watcher holds the file and lists
+every sigelo unit here, `service remove` undoes it. Beside it, `inbox` and the MCP `sigelo_inbox` take what it spooled (the files deleted) instead
 of logging in. `init --enrol <code> --service` installs it once placed.
 
 ## One process per identity file
