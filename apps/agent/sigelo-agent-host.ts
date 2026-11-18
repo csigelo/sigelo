@@ -27,10 +27,11 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes, randomInt } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { actingFile, debug, duration, noIdentity, safeJson, safeText } from './sigelo-agent-contact.ts';
 import { operatorsOf } from './sigelo-agent-device.ts';
+import { notFound, pathFor, samePath, spawnArgs, stop, which } from './sigelo-agent-exec.ts';
 import { startWatch, WATCH_BACKOFF, type Routed, type Watch, type WatchContact } from './sigelo-agent-watch.ts';
 
 export const APPROVE_S = 300, PART_MAX = 3500, SUMMARY_MAX = 120, HEALTHY_MS = 60_000;
@@ -137,7 +138,13 @@ export async function loadSdk(spec = SDK_MODULE): Promise<Sdk> {
 /** What `sdk install` runs: npm with these arguments in cwd; where: which install of sigelo-agent this is. */
 export interface SdkPlan { where: 'global' | 'project' | 'checkout'; cwd: string; args: string[] }
 const isAgentPkg = (d: string): boolean => { try { return (JSON.parse(readFileSync(join(d, 'package.json'), 'utf8')) as { name?: string }).name === 'sigelo-agent'; } catch { return false; } };
-const npm = (args: string[], o: { cwd?: string; inherit?: boolean } = {}) => spawnSync('npm', args, { cwd: o.cwd, encoding: 'utf8', stdio: o.inherit ? 'inherit' : 'pipe', shell: process.platform === 'win32' });
+// npm on PATH (npm.cmd on Windows, through the shell); not there: an error, as spawnSync gives one.
+const npm = (args: string[], o: { cwd?: string; inherit?: boolean } = {}): { status: number | null; stdout: string; error?: Error } => {
+  const f = which('npm');
+  if (f === null) return { status: null, stdout: '', error: new Error('npm is not on this machine\'s PATH') };
+  const a = spawnArgs(f, args), r = spawnSync(a.cmd, a.args, { cwd: o.cwd, encoding: 'utf8', stdio: o.inherit ? 'inherit' : 'pipe', shell: a.shell });
+  return notFound(r.status, r.error as { code?: string } | undefined) ? { status: null, stdout: '', error: new Error('npm is not on this machine\'s PATH') } : { status: r.status, stdout: r.stdout ?? '', ...(r.error && { error: r.error }) };
+};
 /** npm's global node_modules (npm root -g), null when npm does not answer. */
 export const npmGlobalRoot = (): string | null => { const r = npm(['root', '-g']); return r.status === 0 && r.stdout.trim() !== '' ? r.stdout.trim() : null; };
 /**
@@ -145,14 +152,17 @@ export const npmGlobalRoot = (): string | null => { const r = npm(['root', '-g']
  * node_modules) → npm install -g; in a project's node_modules → npm install in that project; else a
  * checkout → npm install --no-save in its package directory. Always --ignore-scripts.
  */
-export function sdkPlan(from = import.meta.dirname, root: () => string | null = npmGlobalRoot): SdkPlan {
-  let pkg = resolve(from);
-  for (let d = pkg; ; d = dirname(d)) { if (isAgentPkg(d)) { pkg = d; break; } if (dirname(d) === d) break; }
-  const spec = `${SDK_MODULE}@${SDK_VERSION}`, parent = dirname(pkg);
-  if (basename(parent) === 'node_modules') {
+// Windows: backslashes, drive letters, any case, 8.3 short names (samePath: realpath, then case-folded).
+export function sdkPlan(from = import.meta.dirname, root: () => string | null = npmGlobalRoot, platform: NodeJS.Platform = process.platform, isPkg: (d: string) => boolean = isAgentPkg): SdkPlan {
+  const P = pathFor(platform);
+  let pkg = P.resolve(from);
+  if (platform === process.platform) try { pkg = realpathSync.native(pkg); } catch {}
+  for (let d = pkg; ; d = P.dirname(d)) { if (isPkg(d)) { pkg = d; break; } if (P.dirname(d) === d) break; }
+  const spec = `${SDK_MODULE}@${SDK_VERSION}`, parent = P.dirname(pkg);
+  if (P.basename(parent).toLowerCase() === 'node_modules') {
     const g = root();
-    if (g !== null && resolve(g) === resolve(parent)) return { where: 'global', cwd: pkg, args: ['install', '-g', '--ignore-scripts', spec] };
-    return { where: 'project', cwd: dirname(parent), args: ['install', '--ignore-scripts', spec] };
+    if (g !== null && samePath(g, parent, platform)) return { where: 'global', cwd: pkg, args: ['install', '-g', '--ignore-scripts', spec] };
+    return { where: 'project', cwd: P.dirname(parent), args: ['install', '--ignore-scripts', spec] };
   }
   return { where: 'checkout', cwd: pkg, args: ['install', '--no-save', '--ignore-scripts', spec] };
 }
@@ -210,19 +220,25 @@ export interface LoginProc { url: Promise<string | null>; code(c: string): void;
 export function claudeLogin(ms = LOGIN_MS, cmd = LOGIN_CMD): LoginProc {
   let buf = '', why: string | null = null, gotUrl: (u: string | null) => void = () => {};
   const url = new Promise<string | null>((r) => { gotUrl = r; });
-  const c = spawn(cmd[0]!, cmd.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+  const missing = `no ${cmd[0]} command on this machine's PATH`;
+  // Found on PATH first (PATHEXT on Windows: claude.cmd, claude.exe): our one line, never the shell's.
+  const f = which(cmd[0]!);
+  if (f === null) return { url: Promise.resolve(null), done: Promise.resolve({ ok: false, detail: missing }), code: () => {}, kill: () => {} };
+  const a = spawnArgs(f, cmd.slice(1));
+  const c = spawn(a.cmd, a.args, { stdio: ['pipe', 'pipe', 'pipe'], shell: a.shell });
+  const end = (): void => stop(c.pid, () => c.kill('SIGTERM'));
   const read = (d: Buffer): void => { buf = (buf + d.toString()).slice(-65536); const u = urlIn(buf); if (u !== null) gotUrl(u); };
   c.stdout.on('data', read); c.stderr.on('data', read); c.stdin.on('error', () => {});
-  const t = setTimeout(() => { why = `no code within ${Math.round(ms / 60000)} min`; c.kill('SIGTERM'); }, ms);
+  const t = setTimeout(() => { why = `no code within ${Math.round(ms / 60000)} min`; end(); }, ms);
   const done = new Promise<{ ok: boolean; detail: string }>((r) => {
-    c.on('error', (e) => { clearTimeout(t); gotUrl(null); r({ ok: false, detail: (e as { code?: string }).code === 'ENOENT' ? `no ${cmd[0]} command on this machine's PATH` : e.message }); });
+    c.on('error', (e) => { clearTimeout(t); gotUrl(null); r({ ok: false, detail: notFound(null, e as { code?: string }) ? missing : e.message }); });
     c.on('close', (code) => {
       clearTimeout(t); gotUrl(null);
       const last = buf.replace(ESC, '').replace(/Paste code here(?: if prompted)? > /g, '\n').split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? '';
-      r({ ok: code === 0 && why === null, detail: why ?? (last || `exit ${code}`) });
+      r({ ok: code === 0 && why === null, detail: why ?? (notFound(code) ? missing : last || `exit ${code}`) });
     });
   });
-  return { url, done, code: (s) => { c.stdin.write(`${s}\n`); }, kill: () => { why ??= 'cancelled'; c.kill('SIGTERM'); } };
+  return { url, done, code: (s) => { c.stdin.write(`${s}\n`); }, kill: () => { why ??= 'cancelled'; end(); } };
 }
 
 // ── the session ───────────────────────────────────────────────────────────────────────────────────

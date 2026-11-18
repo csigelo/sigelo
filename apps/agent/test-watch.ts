@@ -3,9 +3,9 @@
 //   node test-watch.ts   (SKIPs without relay/ and its node_modules)
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
+import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
 
 // ── tiers and watch (apps/contact/store.mjs tiers, sigelo-agent-watch.ts, WATCH.md) ───────────────
 // Against the in-process relay: alice makes three codes, then runs `watch` with no hook; three
@@ -274,16 +274,26 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
   ok('service --host claude --dangerously-skip-permissions: the flag in the unit, before --quiet', S.parseUnit(S.unitOf(ps)).exec.slice(-2).join(' ') === '--dangerously-skip-permissions --quiet');
   ok('service: one name per identity: 8 hex of its path\'s sha256 (unit, LaunchAgent label, task); another file, another name',
     /^sigelo-watch-[0-9a-f]{8}\.service$/.test(S.namesOf(id).unit) && S.namesOf(id).label === `io.sigelo.watch.${S.tagOf(id)}` && S.namesOf(id).task === `sigelo-watch-${S.tagOf(id)}` && S.tagOf(id) !== S.tagOf(`${id}2`) && S.plistOf(p).includes(`<string>io.sigelo.watch.${S.tagOf(id)}</string>`));
-  if (process.platform !== 'win32') {
+  {
     // A fake systemctl and launchctl on a temp PATH (no SIGELO_SERVICE_DRY): each call recorded; is-active answers
     // active for the units named in $D/active; launchctl print answers for the labels in it.
-    const env0 = { PATH: process.env['PATH'] ?? '', HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_SERVICE_DIR: join(H, 'units') };
+    // SIGELO_SERVICE_OS=linux: the systemd branch on any machine (Windows too); the fakes are Node scripts (fakeExe).
+    const env0 = { PATH: process.env['PATH'] ?? '', HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_SERVICE_DIR: join(H, 'units'), SIGELO_SERVICE_OS: 'linux' };
     const fb = join(H, 'fakebin');
     mkdirSync(fb, { recursive: true });
-    for (const t of ['systemctl', 'launchctl']) writeFileSync(join(fb, t), `#!/bin/sh\nd=$(dirname "$0")\necho "${t} $*" >> "$d/calls"\nlast=$(eval echo \\$$#)\ncase "$*" in *is-active*|*print*) n=$(basename "$last"); if grep -qx "$n" "$d/active" 2>/dev/null; then echo active; exit 0; fi; echo inactive; exit 3;; esac\nexit 0\n`, { mode: 0o755 });
+    for (const t of ['systemctl', 'launchctl']) fakeExe(fb, t, `const fs = require('fs'), path = require('path'), d = __dirname, a = process.argv.slice(2);
+fs.appendFileSync(path.join(d, 'calls'), ${JSON.stringify(t)} + ' ' + a.join(' ') + '\\n');
+if (a.includes('is-active') || a.includes('print')) {
+  let on = [];
+  try { on = fs.readFileSync(path.join(d, 'active'), 'utf8').split('\\n'); } catch {}
+  const n = a[a.length - 1].split('/').pop();
+  console.log(on.includes(n) ? 'active' : 'inactive');
+  process.exit(on.includes(n) ? 0 : 3);
+}
+`);
     const calls = (): string => { try { return readFileSync(join(fb, 'calls'), 'utf8'); } catch { return ''; } };
     const A = join(H, 'a.local.json'), B = join(H, 'b.local.json');
-    const runA = cliIn({ ...env0, PATH: `${fb}:${env0.PATH}`, SIGELO_IDENTITY: A }, H), runB = cliIn({ ...env0, PATH: `${fb}:${env0.PATH}`, SIGELO_IDENTITY: B }, H);
+    const runA = cliIn({ ...env0, PATH: `${fb}${delimiter}${env0.PATH}`, SIGELO_IDENTITY: A }, H), runB = cliIn({ ...env0, PATH: `${fb}${delimiter}${env0.PATH}`, SIGELO_IDENTITY: B }, H);
     await runA('init', '--no-recovery'); await runB('init', '--no-recovery');
     // An install from before: the legacy fixed name, for A.
     mkdirSync(join(H, 'units'), { recursive: true });
@@ -305,7 +315,7 @@ import { CLI, RELAY, ROOT, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, 
       && calls().includes('systemctl --user disable --now sigelo-watch.service') && calls().includes(`systemctl --user disable --now ${nb}`), ra.stdout + rb.stdout);
     ok('service remove with nothing installed: said, exit 0', (await runA('service', 'remove')).stdout.includes('nothing removed'));
     // macOS, on this machine (SIGELO_SERVICE_OS=darwin): the LaunchAgent per identity, launchctl faked.
-    const runM = cliIn({ ...env0, PATH: `${fb}:${env0.PATH}`, SIGELO_IDENTITY: A, SIGELO_SERVICE_OS: 'darwin' }, H), la = S.namesOf(A).label;
+    const runM = cliIn({ ...env0, PATH: `${fb}${delimiter}${env0.PATH}`, SIGELO_IDENTITY: A, SIGELO_SERVICE_OS: 'darwin' }, H), la = S.namesOf(A).label;
     const im = await runM('service', 'install');
     writeFileSync(join(fb, 'active'), `${la}\n`);
     const sm = JSON.parse((await runM('service', 'status')).stdout) as { unit: string; active: boolean; units: { name: string }[] };
