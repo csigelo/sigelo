@@ -1,0 +1,547 @@
+{
+  "v": "sigelo-a2a-lookup/0",
+  "now": 1790000000,
+  "dids": {
+    "A0": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+    "A1": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+    "A2": "did:sigelo:z3SicLtuenyvJjQEtisRfSBH1R6q6RPio2EoxDK5bAdrd",
+    "A3": "did:sigelo:z8TRWcsmt4hPxSC3EMxnMCegK5eXP3C1SEqz6ciV1HWb2",
+    "T": "did:sigelo:zD5UsX73uLxZmETD88iQa5jMus5k9nt3Q946auYrGCLWb",
+    "X": "did:sigelo:zGSBiBxooEKo6AudPbEm6D798UzVexoQNZxqhh43rufdM",
+    "B0": "did:sigelo:z6zGiPUXpYJPbtag8hkf86CetjUSvoVYyZ7aDTZ3bzVGS"
+  },
+  "keys": {
+    "A0": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+    "A1": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+    "A2": "z6MkrXzKTCvRKVhdyX7BbAxrzNSnDqfUjYgPiwNwWMoBNfVk",
+    "A3": "z6Mkk7k5R4upfqBN69guD2TKtz173DeJCFF4pJaQGnV1ReRj",
+    "T": "z6MkniKx97vfNq9aSK4hi5gEA3kS1biqvzTbgztoq5QJaa6V",
+    "X": "z6MkgRC3piqVJEag1rnESx3WLCdUtMevwJyCrabLzy2ETjTV",
+    "B0": "z6MkpuWdCk15CPuWxzzPMUC3xevW4K7XffTPiPxxKawQtaMB"
+  },
+  "bundles": {
+    "genesis": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+        "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+      },
+      "rotations": [],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    },
+    "rotated": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+        "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+      },
+      "rotations": [
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "next": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "iat": 1789991000,
+            "reason": "voluntary"
+          },
+          "sig": "zKVpGH5DBzfSxXpg8rxp2PWgZWfDUH9wDWGAfNNDHjcvN1gJgkAh8VLG1g72DHtGwzeA3LtxS7SBg4tQZTbGDSum",
+          "sig_next": "z5aNmAxnawti5KVk3TYHoCTbBNhaHFfvzAHoSQJsikHLt31jChTXRD7Cs5yGMfC3YqrtaPR8URma621LpkNXweTS7",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zJRvZjzr4Xe6SE4PCwyMMEN"
+          }
+        }
+      ],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    },
+    "thief": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+        "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+      },
+      "rotations": [
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "next": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "iat": 1789991000,
+            "reason": "voluntary"
+          },
+          "sig": "zKVpGH5DBzfSxXpg8rxp2PWgZWfDUH9wDWGAfNNDHjcvN1gJgkAh8VLG1g72DHtGwzeA3LtxS7SBg4tQZTbGDSum",
+          "sig_next": "z5aNmAxnawti5KVk3TYHoCTbBNhaHFfvzAHoSQJsikHLt31jChTXRD7Cs5yGMfC3YqrtaPR8URma621LpkNXweTS7",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zJRvZjzr4Xe6SE4PCwyMMEN"
+          }
+        },
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "next": "did:sigelo:zD5UsX73uLxZmETD88iQa5jMus5k9nt3Q946auYrGCLWb",
+            "iat": 1789995000,
+            "reason": "voluntary"
+          },
+          "sig": "z3DtXMQEZ8fGvPTeXDnQp6pymHZTUcaeda8tLVJAhRasroPrd6V4dynPJwQq4jE4nEauTus5AL5aTn3oiGh8JDVFP",
+          "sig_next": "z2joXWLodDJiw4QVNoEabWxM7JGuprXDnU5rieHYD78fT2c9obWaN3gWztYjqctriWHMYeQ4kBZvMgzexeNgu1kou",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkniKx97vfNq9aSK4hi5gEA3kS1biqvzTbgztoq5QJaa6V",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "z2GdBfeVRsDGx1U5mHNrFSK"
+          }
+        }
+      ],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    },
+    "recovered": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+        "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+      },
+      "rotations": [
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "next": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "iat": 1789991000,
+            "reason": "voluntary"
+          },
+          "sig": "zKVpGH5DBzfSxXpg8rxp2PWgZWfDUH9wDWGAfNNDHjcvN1gJgkAh8VLG1g72DHtGwzeA3LtxS7SBg4tQZTbGDSum",
+          "sig_next": "z5aNmAxnawti5KVk3TYHoCTbBNhaHFfvzAHoSQJsikHLt31jChTXRD7Cs5yGMfC3YqrtaPR8URma621LpkNXweTS7",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zJRvZjzr4Xe6SE4PCwyMMEN"
+          }
+        },
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "next": "did:sigelo:zD5UsX73uLxZmETD88iQa5jMus5k9nt3Q946auYrGCLWb",
+            "iat": 1789995000,
+            "reason": "voluntary"
+          },
+          "sig": "z3DtXMQEZ8fGvPTeXDnQp6pymHZTUcaeda8tLVJAhRasroPrd6V4dynPJwQq4jE4nEauTus5AL5aTn3oiGh8JDVFP",
+          "sig_next": "z2joXWLodDJiw4QVNoEabWxM7JGuprXDnU5rieHYD78fT2c9obWaN3gWztYjqctriWHMYeQ4kBZvMgzexeNgu1kou",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkniKx97vfNq9aSK4hi5gEA3kS1biqvzTbgztoq5QJaa6V",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "z2GdBfeVRsDGx1U5mHNrFSK"
+          }
+        },
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "next": "did:sigelo:z3SicLtuenyvJjQEtisRfSBH1R6q6RPio2EoxDK5bAdrd",
+            "iat": 1789994000,
+            "reason": "recovery",
+            "recovery_key": "z6MkhUTzFJjjry3YK3WQCW1zzhTcLHrXbJiDk4t1eGf88giy"
+          },
+          "sig": "z2bJz4qu3wk4YpGGFndPdkCYJNRqKqp4GZnpRKfpzYCQGMTF5bE1gNucJJ7Rtzy3ZTV1EMHGLsroXcuv5k5Nw96YB",
+          "sig_next": "z5kqcxeQ6hb6YCNDfuEY1c8iMbfoeLVd7VnXQukMZ6Q9CfgTeRduyFDT7oYJqCz4FRPcUrMwprb1WxfSnHTFZ3t6e",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkrXzKTCvRKVhdyX7BbAxrzNSnDqfUjYgPiwNwWMoBNfVk",
+            "recovery": "sha256:ab6c5ad9fc19fd440acb07d26cde401e454e20a5e9784284171a743bb90b68c5",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "z4xbG4pqDC6wxAqpNQ5MkdM"
+          }
+        }
+      ],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    },
+    "recovered_at_thief": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+        "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+      },
+      "rotations": [
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "next": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "iat": 1789991000,
+            "reason": "voluntary"
+          },
+          "sig": "zKVpGH5DBzfSxXpg8rxp2PWgZWfDUH9wDWGAfNNDHjcvN1gJgkAh8VLG1g72DHtGwzeA3LtxS7SBg4tQZTbGDSum",
+          "sig_next": "z5aNmAxnawti5KVk3TYHoCTbBNhaHFfvzAHoSQJsikHLt31jChTXRD7Cs5yGMfC3YqrtaPR8URma621LpkNXweTS7",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zJRvZjzr4Xe6SE4PCwyMMEN"
+          }
+        },
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "next": "did:sigelo:zD5UsX73uLxZmETD88iQa5jMus5k9nt3Q946auYrGCLWb",
+            "iat": 1789995000,
+            "reason": "voluntary"
+          },
+          "sig": "z3DtXMQEZ8fGvPTeXDnQp6pymHZTUcaeda8tLVJAhRasroPrd6V4dynPJwQq4jE4nEauTus5AL5aTn3oiGh8JDVFP",
+          "sig_next": "z2joXWLodDJiw4QVNoEabWxM7JGuprXDnU5rieHYD78fT2c9obWaN3gWztYjqctriWHMYeQ4kBZvMgzexeNgu1kou",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkniKx97vfNq9aSK4hi5gEA3kS1biqvzTbgztoq5QJaa6V",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "z2GdBfeVRsDGx1U5mHNrFSK"
+          }
+        },
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:zD5UsX73uLxZmETD88iQa5jMus5k9nt3Q946auYrGCLWb",
+            "next": "did:sigelo:z8TRWcsmt4hPxSC3EMxnMCegK5eXP3C1SEqz6ciV1HWb2",
+            "iat": 1789997000,
+            "reason": "recovery",
+            "recovery_key": "z6MkhUTzFJjjry3YK3WQCW1zzhTcLHrXbJiDk4t1eGf88giy"
+          },
+          "sig": "z5CqBbv1TVxZDg7ohUGWp4BWb1sDyJZKhwCqnx4NSqcJ7f51pbtgAZvDRUzFLiaeMGvxfS8QFUSArnRWSbJZwS96x",
+          "sig_next": "z3JkhYwzALjjMsWj7py9eBLk8moty8h9cDjzbzQqiwYGP9NRwKWb2TN8HX2WTEPGkoZNpT3HUeoN4YfUg9p7kc6Cp",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6Mkk7k5R4upfqBN69guD2TKtz173DeJCFF4pJaQGnV1ReRj",
+            "recovery": "sha256:ab6c5ad9fc19fd440acb07d26cde401e454e20a5e9784284171a743bb90b68c5",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zNyZ7fdJgZtWjgC58Kzo6mc"
+          }
+        }
+      ],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    },
+    "fork_other": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+        "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+      },
+      "rotations": [
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "next": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "iat": 1789991000,
+            "reason": "voluntary"
+          },
+          "sig": "zKVpGH5DBzfSxXpg8rxp2PWgZWfDUH9wDWGAfNNDHjcvN1gJgkAh8VLG1g72DHtGwzeA3LtxS7SBg4tQZTbGDSum",
+          "sig_next": "z5aNmAxnawti5KVk3TYHoCTbBNhaHFfvzAHoSQJsikHLt31jChTXRD7Cs5yGMfC3YqrtaPR8URma621LpkNXweTS7",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zJRvZjzr4Xe6SE4PCwyMMEN"
+          }
+        },
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "next": "did:sigelo:zGSBiBxooEKo6AudPbEm6D798UzVexoQNZxqhh43rufdM",
+            "iat": 1789996000,
+            "reason": "voluntary"
+          },
+          "sig": "z668BWh1oi6vPc2MrLrpQFSha4dct5s5w46WUkkNWwgpZCjUYYHZHmCqDNb1e6JvijAFrVzZA3k3nkhAhPtrns4MT",
+          "sig_next": "zLM7K9sRTo8vL3GcSgGfayqYqnNSYdufDjDP4fMZx4auNYZB2tstqyL5EwWJh4BqvBi9XYQFZYrWdsYaoWjFDaAV",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkgRC3piqVJEag1rnESx3WLCdUtMevwJyCrabLzy2ETjTV",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "z3YCwQJErhVssEuJ6fxdvJY"
+          }
+        }
+      ],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    },
+    "duplicate": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+        "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+      },
+      "rotations": [
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "next": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "iat": 1789991000,
+            "reason": "voluntary"
+          },
+          "sig": "zKVpGH5DBzfSxXpg8rxp2PWgZWfDUH9wDWGAfNNDHjcvN1gJgkAh8VLG1g72DHtGwzeA3LtxS7SBg4tQZTbGDSum",
+          "sig_next": "z5aNmAxnawti5KVk3TYHoCTbBNhaHFfvzAHoSQJsikHLt31jChTXRD7Cs5yGMfC3YqrtaPR8URma621LpkNXweTS7",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zJRvZjzr4Xe6SE4PCwyMMEN"
+          }
+        },
+        {
+          "body": {
+            "v": "sigelo/0",
+            "typ": "rotation",
+            "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "next": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "iat": 1789991000,
+            "reason": "voluntary"
+          },
+          "sig": "zKVpGH5DBzfSxXpg8rxp2PWgZWfDUH9wDWGAfNNDHjcvN1gJgkAh8VLG1g72DHtGwzeA3LtxS7SBg4tQZTbGDSum",
+          "sig_next": "z5aNmAxnawti5KVk3TYHoCTbBNhaHFfvzAHoSQJsikHLt31jChTXRD7Cs5yGMfC3YqrtaPR8URma621LpkNXweTS7",
+          "next_genesis": {
+            "v": "sigelo/0",
+            "typ": "genesis",
+            "key": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+            "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+            "created": "2026-11-01T00:00:00Z",
+            "nonce": "zJRvZjzr4Xe6SE4PCwyMMEN"
+          }
+        }
+      ],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    },
+    "other_genesis": {
+      "v": "sigelo/0",
+      "typ": "bundle",
+      "genesis": {
+        "v": "sigelo/0",
+        "typ": "genesis",
+        "key": "z6MkpuWdCk15CPuWxzzPMUC3xevW4K7XffTPiPxxKawQtaMB",
+        "recovery": "sha256:6218d9000c08f8cd1257b7830ef26862e32b92408225cec6a08684ceb4a6f9af",
+        "created": "2026-11-01T00:00:00Z",
+        "nonce": "zGWvr7DwY8YPC1jGeGt95ie"
+      },
+      "rotations": [],
+      "bindings": [],
+      "attestations": [],
+      "issuers": []
+    }
+  },
+  "card": {
+    "name": "Alice",
+    "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+    "version": "1.0.0",
+    "supportedInterfaces": [
+      {
+        "url": "https://alice.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "capabilities": {
+      "streaming": true,
+      "extensions": [
+        {
+          "uri": "urn:other",
+          "required": false
+        },
+        {
+          "uri": "https://github.com/csigelo/sigelo/tree/main/integrations/a2a",
+          "description": "sigelo identity: DID, bundle, card signature (profile draft)",
+          "required": false,
+          "params": {
+            "did": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+            "bundle": {
+              "v": "sigelo/0",
+              "typ": "bundle",
+              "genesis": {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+                "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+                "created": "2026-11-01T00:00:00Z",
+                "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+              },
+              "rotations": [],
+              "bindings": [],
+              "attestations": [],
+              "issuers": []
+            },
+            "sig": "z5pfSZ4Z9avH6vERW2UWsP24fX22iJHfTM738VaP7bFwV11dqkcNf4gJWmF6vVtdksWJHcB8hStRMi9ifVHmURpx1"
+          }
+        }
+      ]
+    },
+    "defaultInputModes": [
+      "text/plain"
+    ],
+    "defaultOutputModes": [
+      "text/plain"
+    ],
+    "skills": []
+  },
+  "card_rotated": {
+    "name": "Alice",
+    "description": "Hermes Agent — a general-purpose agent reachable over A2A.",
+    "version": "1.0.0",
+    "supportedInterfaces": [
+      {
+        "url": "https://alice.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "capabilities": {
+      "streaming": true,
+      "extensions": [
+        {
+          "uri": "urn:other",
+          "required": false
+        },
+        {
+          "uri": "https://github.com/csigelo/sigelo/tree/main/integrations/a2a",
+          "description": "sigelo identity: DID, bundle, card signature (profile draft)",
+          "required": false,
+          "params": {
+            "did": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+            "bundle": {
+              "v": "sigelo/0",
+              "typ": "bundle",
+              "genesis": {
+                "v": "sigelo/0",
+                "typ": "genesis",
+                "key": "z6Mkj8zwVu6hiAjwonFYpaLyruUyepCkkQhbYTmzsuktYWA1",
+                "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+                "created": "2026-11-01T00:00:00Z",
+                "nonce": "zC1GDC1YgFkR2incjBwVL8n"
+              },
+              "rotations": [
+                {
+                  "body": {
+                    "v": "sigelo/0",
+                    "typ": "rotation",
+                    "id": "did:sigelo:z6ooBsLG1NSeLE5Z2Pb54ekfRJ2d6asx88x6ZoJy2f4F6",
+                    "next": "did:sigelo:zAqshiW1FfUoy4haAqcCtWjpemb5Y2RGzQLueFnnVQ5k5",
+                    "iat": 1789991000,
+                    "reason": "voluntary"
+                  },
+                  "sig": "zKVpGH5DBzfSxXpg8rxp2PWgZWfDUH9wDWGAfNNDHjcvN1gJgkAh8VLG1g72DHtGwzeA3LtxS7SBg4tQZTbGDSum",
+                  "sig_next": "z5aNmAxnawti5KVk3TYHoCTbBNhaHFfvzAHoSQJsikHLt31jChTXRD7Cs5yGMfC3YqrtaPR8URma621LpkNXweTS7",
+                  "next_genesis": {
+                    "v": "sigelo/0",
+                    "typ": "genesis",
+                    "key": "z6MkqRrayHkjaHSQqKTDWFA6a5q2LH5JondeBHLcsYcysibk",
+                    "recovery": "sha256:71e888f9c29c7fad7b95091ab899b4decc4e32305878ffdc1178e9dab7bff40b",
+                    "created": "2026-11-01T00:00:00Z",
+                    "nonce": "zJRvZjzr4Xe6SE4PCwyMMEN"
+                  }
+                }
+              ],
+              "bindings": [],
+              "attestations": [],
+              "issuers": []
+            },
+            "sig": "zJtL45Sqii3dHq7xpHHqhgqDZ3CXdtnJatVGGFXazbqTeXrEg4xY64NNzHfPKyjqMtFvpjkYzuQ1DRyw7H2DBZGs"
+          }
+        }
+      ]
+    },
+    "defaultInputModes": [
+      "text/plain"
+    ],
+    "defaultOutputModes": [
+      "text/plain"
+    ],
+    "skills": []
+  }
+}

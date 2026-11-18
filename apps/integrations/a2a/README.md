@@ -42,6 +42,8 @@ offline, `did` = the bundle's current DID, `key` = that DID's public key (what `
 to trust is the caller's call. `sign.mjs` signs through sigelo-agent's signer for `$SIGELO_IDENTITY`
 (file, keychain or key agent).
 
+[python/](python/README.md): the DID → key lookup and bundle merge for a delegation hook (Tenuo).
+
 ## Who stands behind it
 
 `operator` (optional) is the `sigelo-relay/operator` attestation sigelo-agent's enrol writes, plus
