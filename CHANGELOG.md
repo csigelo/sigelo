@@ -5,6 +5,7 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **agent:** `host claude`: one Claude session (Agent SDK) fed the operator's messages live; approvals by `yes CODE`/`no CODE` over sigelo; others' messages spooled, never turns; `service install --host claude`.
 - **android:** Stay connected (Settings, on by default): a foreground service keeps the app and its relay connection alive while minimised, with a quiet notification; permissions asked at first use, re-askable.
 - **android:** permissions are asked at the moment of need, never at a start: notifications from a card that says why; refused, a tap asks again; once Android asks no more, the tap opens sigelo's settings page.
 - **agent:** `service install | status | remove`: the listener as a service (systemd user unit, macOS LaunchAgent), so an enrolled agent always gets its owner's messages; `inbox` and the MCP read its spool.
