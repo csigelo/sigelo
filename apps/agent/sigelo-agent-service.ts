@@ -33,6 +33,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { lockHolder } from './sigelo-agent-contact.ts';
+import { notFound, spawnArgs, which } from './sigelo-agent-exec.ts';
 
 /** The legacy fixed names (one identity per machine, before 2026-11-19); RESTART_S. */
 export const UNIT = 'sigelo-watch.service', LABEL = 'io.sigelo.watch', TASK = 'sigelo-watch', RESTART_S = 15;
@@ -137,7 +138,10 @@ const dirFor = (os: string): string => process.env['SIGELO_SERVICE_DIR'] || (os 
 const dry = (): boolean => process.env['SIGELO_SERVICE_DRY'] === '1';
 function run(cmd: string, args: string[]): { ok: boolean; out: string } {
   if (dry()) { note(`(dry run) ${[cmd, ...args].join(' ')}`); return { ok: true, out: '' }; }
-  const r = spawnSync(cmd, args, { encoding: 'utf8' });
+  const f = which(cmd);
+  if (f === null) return { ok: false, out: `${cmd} is not on this machine's PATH` };
+  const a = spawnArgs(f, args), r = spawnSync(a.cmd, a.args, { encoding: 'utf8', shell: a.shell });
+  if (notFound(r.status, r.error as { code?: string } | undefined)) return { ok: false, out: `${cmd} is not on this machine's PATH` };
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim() || (r.error?.message ?? '') };
 }
 

@@ -7,11 +7,12 @@
 // the operator and a third contact as CLI children, the host in this process.
 //   node test-host.ts   → ALL PASS test-host.ts (n ok)
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
 import { attest, did, type Genesis } from 'sigelo';
-import { CLI, cliIn, done, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
+import { CLI, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
 import * as H from './sigelo-agent-host.ts';
+import * as X from './sigelo-agent-exec.ts';
 
 const TOKEN = 'abcdefghijklmnopqrstuvwx', HEX = 'ab'.repeat(32);
 // ── the fake SDK ──────────────────────────────────────────────────────────────────────────────────
@@ -129,27 +130,43 @@ const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e
 // (or "Login failed" for a code starting "wrong"). The real CLI is never run here.
 const FAKE = tmpHome('host-claude'), BIN = join(FAKE, 'bin');
 mkdirSync(BIN);
-writeFileSync(join(BIN, 'claude'), `#!/bin/sh
-d=$(dirname "$0")
-echo "$@" > "$d/args"
-echo 'Opening browser to sign in…'
-printf "If the browser didn't open, visit: \\033]8;;https://claude.ai/oauth/authorize?code=true&state=xyz\\007https://claude.ai/oauth/authorize?code=true&state=xyz\\033]8;;\\007\\n"
-printf 'Paste code here if prompted > '
-read line
-printf '%s' "$line" >> "$d/code"
-case "$line" in wrong*) echo 'Login failed: Request failed with status code 400' >&2; exit 1;; esac
-echo 'Login successful.'
-touch "$d/loggedin"
-`);
-chmodSync(join(BIN, 'claude'), 0o755);
-process.env['PATH'] = `${BIN}:${process.env['PATH'] ?? ''}`;
 const LINK = 'https://claude.ai/oauth/authorize?code=true&state=xyz';
+fakeExe(BIN, 'claude', `const fs = require('fs'), path = require('path'), d = __dirname;
+fs.writeFileSync(path.join(d, 'args'), process.argv.slice(2).join(' ') + '\\n');
+process.stdout.write('Opening browser to sign in…\\n');
+process.stdout.write(${JSON.stringify(`If the browser didn't open, visit: \x1b]8;;${'LINK'}\x07${'LINK'}\x1b]8;;\x07\n`)}.replace(/LINK/g, ${JSON.stringify('https://claude.ai/oauth/authorize?code=true&state=xyz')}));
+process.stdout.write('Paste code here if prompted > ');
+let buf = '';
+process.stdin.on('data', (c) => {
+  buf += c;
+  const i = buf.indexOf('\\n');
+  if (i < 0) return;
+  const line = buf.slice(0, i).replace(/\\r$/, '');
+  fs.appendFileSync(path.join(d, 'code'), line);
+  if (line.startsWith('wrong')) { process.stderr.write('Login failed: Request failed with status code 400\\n'); process.exit(1); }
+  process.stdout.write('Login successful.\\n');
+  fs.writeFileSync(path.join(d, 'loggedin'), '');
+  process.exit(0);
+});
+`);
+process.env['PATH'] = `${BIN}${delimiter}${process.env['PATH'] ?? ''}`;
 {
   ok('host: the auth table: an expired or refused login in the texts Claude Code and the SDK give; ordinary errors not',
     ['authentication_failed', 'Invalid API key · Please run /login', 'OAuth token has expired. Please obtain a new token or refresh your existing token.', 'Failed to authenticate. API Error: 401 {"type":"error"}', 'Your session has expired. Please run /login to sign in again.', 'Not logged in']
       .every(H.isAuthFailure) && !['rate_limit', 'API Error: 529 overloaded', 'the CLI went away', 'error_max_turns'].some(H.isAuthFailure));
   ok('host: the sign-in link out of what the login printed, terminal escapes and the OSC 8 wrapper dropped',
     H.urlIn(`Opening…\nIf the browser didn't open, visit: \x1b]8;;${LINK}\x07${LINK}\x1b]8;;\x07\nPaste code here if prompted > `) === LINK && H.urlIn('nothing') === null);
+  // A Windows file system (any case); an extensionless npm (the POSIX script npm ships) is not run there.
+  const files = new Set(['c:\\b\\claude.cmd', 'c:\\b\\npm.cmd', 'c:\\tools\\npm']);
+  const w = (c: string, env: NodeJS.ProcessEnv): string | null => X.which(c, env, 'win32', (f) => files.has(f.toLowerCase()));
+  ok('which on Windows (simulated): PATH (any case of the name) split at ";", PATHEXT tried, a quoted entry; none → null',
+    w('claude', { Path: 'C:\\a;"C:\\b"', PATHEXT: '.EXE;.CMD' }) === 'C:\\b\\claude.CMD' && w('npm', { PATH: 'C:\\tools;C:\\b' }) === 'C:\\b\\npm.CMD' && w('claude', { PATH: 'C:\\a' }) === null
+      && X.which('ls', { PATH: '/nope:/bin:/usr/bin' }, 'linux', (f) => f === '/bin/ls') === '/bin/ls');
+  const sa = X.spawnArgs('C:\\Program Files\\nodejs\\npm.cmd', ['install', '-g', '@anthropic-ai/claude-agent-sdk@0.3.317', 'a b'], 'win32');
+  ok('spawnArgs on Windows: a .cmd through the shell, its path and a spaced argument quoted; an .exe and POSIX: directly',
+    sa.shell && sa.cmd === '"C:\\Program Files\\nodejs\\npm.cmd"' && sa.args.join(' ') === 'install -g @anthropic-ai/claude-agent-sdk@0.3.317 "a b"' && !X.spawnArgs('C:\\b\\claude.exe', [], 'win32').shell && !X.spawnArgs('/bin/claude', [], 'linux').shell);
+  ok('notFound: ENOENT, 127 (sh), 9009 (cmd.exe); not an ordinary exit', X.notFound(null, { code: 'ENOENT' }) && X.notFound(127) && X.notFound(9009) && !X.notFound(1) && !X.notFound(0));
+  ok('samePath on Windows: case, separators, a trailing one', X.samePath('C:\\Users\\RUNNER~1\\x\\', 'c:/users/runner~1/X', 'win32') && !X.samePath('C:\\a', 'D:\\a', 'win32'));
   ok('host: the login code shape: <code>#<state>, one piece', H.LOGIN_CODE.test('abcdEFGH12#stateXYZ99') && !H.LOGIN_CODE.test('abcdEFGH12') && !H.LOGIN_CODE.test('ab#cd') && !H.LOGIN_CODE.test('abcdEFGH12 #stateXYZ99'));
 }
 {
@@ -253,29 +270,43 @@ const LINK = 'https://claude.ai/oauth/authorize?code=true&state=xyz';
   // sdk install: the npm install that resolves for this sigelo-agent, --ignore-scripts; a fake npm on PATH.
   const N = tmpHome('host-npm'), nb = join(N, 'bin');
   mkdirSync(nb);
-  writeFileSync(join(nb, 'npm'), `#!/bin/sh\nd=$(dirname "$0")\nif [ "$1" = root ]; then echo "${join(N, 'g', 'lib', 'node_modules')}"; exit 0; fi\necho "$(pwd) $*" >> "$d/ran"\n[ -f "$d/fail" ] && exit 3\nexit 0\n`);
-  chmodSync(join(nb, 'npm'), 0o755);
+  fakeExe(nb, 'npm', `const fs = require('fs'), path = require('path'), d = __dirname, a = process.argv.slice(2);
+if (a[0] === 'root') { console.log(${JSON.stringify(join(N, 'g', 'lib', 'node_modules'))}); process.exit(0); }
+fs.appendFileSync(path.join(d, 'ran'), JSON.stringify({ cwd: process.cwd(), args: a.join(' ') }) + '\\n');
+process.exit(fs.existsSync(path.join(d, 'fail')) ? 3 : 0);
+`);
+  const ran = (): { cwd: string; args: string }[] => readFileSync(join(nb, 'ran'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { cwd: string; args: string });
   const pkgAt = (d: string): string => { mkdirSync(join(d, 'dist'), { recursive: true }); writeFileSync(join(d, 'package.json'), '{"name":"sigelo-agent"}'); return join(d, 'dist'); };
   const PATH0 = process.env['PATH'];
-  process.env['PATH'] = `${nb}:${PATH0}`;
+  process.env['PATH'] = `${nb}${delimiter}${PATH0}`;
   try {
     const g = H.sdkPlan(pkgAt(join(N, 'g', 'lib', 'node_modules', 'sigelo-agent'))), p = H.sdkPlan(pkgAt(join(N, 'proj', 'node_modules', 'sigelo-agent'))), c = H.sdkPlan(pkgAt(join(N, 'checkout', 'apps', 'agent')));
     const spec = `${H.SDK_MODULE}@${H.SDK_VERSION}`;
     ok('sdk install plan: global → npm install -g --ignore-scripts; in a project → npm install there; a checkout → --no-save in it',
-      g.where === 'global' && g.args.join(' ') === `install -g --ignore-scripts ${spec}` && p.where === 'project' && p.cwd === join(N, 'proj') && p.args.join(' ') === `install --ignore-scripts ${spec}`
-        && c.where === 'checkout' && c.cwd === join(N, 'checkout', 'apps', 'agent') && c.args.join(' ') === `install --no-save --ignore-scripts ${spec}`, JSON.stringify([g, p, c]));
+      g.where === 'global' && g.args.join(' ') === `install -g --ignore-scripts ${spec}` && p.where === 'project' && X.samePath(p.cwd, join(N, 'proj')) && p.args.join(' ') === `install --ignore-scripts ${spec}`
+        && c.where === 'checkout' && X.samePath(c.cwd, join(N, 'checkout', 'apps', 'agent')) && c.args.join(' ') === `install --no-save --ignore-scripts ${spec}`, JSON.stringify([g, p, c]));
     const said: string[] = [];
-    ok('sdk install: runs it, says what it ran and that it is done', H.sdkInstall((l) => said.push(l), p) === 0 && readFileSync(join(nb, 'ran'), 'utf8').trim() === `${join(N, 'proj')} install --ignore-scripts ${spec}`
-      && said[0] === `sdk install: npm install --ignore-scripts ${spec} (in the project ${join(N, 'proj')})` && said[1]!.startsWith('sdk install: done'), JSON.stringify(said));
+    ok('sdk install: runs it, says what it ran and that it is done', H.sdkInstall((l) => said.push(l), p) === 0 && ran().length === 1 && X.samePath(ran()[0]!.cwd, join(N, 'proj')) && ran()[0]!.args === `install --ignore-scripts ${spec}`
+      && said[0] === `sdk install: npm install --ignore-scripts ${spec} (in the project ${p.cwd})` && said[1]!.startsWith('sdk install: done'), JSON.stringify(said));
     writeFileSync(join(nb, 'fail'), '');
     const f: string[] = [];
     ok('…npm failing: exit 1, said', H.sdkInstall((l) => f.push(l), g) === 1 && f[1] === 'sdk install: npm exited 3: the SDK is not installed', JSON.stringify(f));
     rmSync(join(nb, 'fail'));
-    const r = await cliIn({ PATH: `${nb}:${PATH0}`, HOME: N }, N)('sdk', 'install');
+    const r = await cliIn({ PATH: `${nb}${delimiter}${PATH0}`, HOME: N }, N)('sdk', 'install');
     ok('sigelo-agent sdk install (this checkout): npm install --no-save --ignore-scripts in apps/agent, said', r.status === 0 && r.stderr.includes(`sdk install: npm install --no-save --ignore-scripts ${spec} (in this checkout`)
-      && readFileSync(join(nb, 'ran'), 'utf8').includes(`${import.meta.dirname} install --no-save --ignore-scripts ${spec}`), r.stderr);
-    ok('sigelo-agent sdk (no install) → exit 2; the no-SDK line names sdk install', (await cliIn({ PATH: `${nb}:${PATH0}`, HOME: N }, N)('sdk')).status === 2 && H.SDK_MISSING.includes('sigelo-agent sdk install'));
+      && ran().some((x) => X.samePath(x.cwd, import.meta.dirname) && x.args === `install --no-save --ignore-scripts ${spec}`), r.stderr + JSON.stringify(ran()));
+    ok('sigelo-agent sdk (no install) → exit 2; the no-SDK line names sdk install', (await cliIn({ PATH: `${nb}${delimiter}${PATH0}`, HOME: N }, N)('sdk')).status === 2 && H.SDK_MISSING.includes('sigelo-agent sdk install'));
+    process.env['PATH'] = join(N, 'nowhere');
+    const nn: string[] = [];
+    ok('…npm not on PATH: said in our own line', H.sdkInstall((l) => nn.push(l), p) === 1 && nn[1] === 'sdk install: npm did not run (npm is not on this machine\'s PATH): the SDK is not installed', JSON.stringify(nn));
   } finally { process.env['PATH'] = PATH0; }
+  // Windows, simulated (the platform is a parameter): a global install under %APPDATA%\npm, any case, short names.
+  const isPkg = (d: string): boolean => /\\sigelo-agent$/i.test(d);
+  const wg = H.sdkPlan('C:\\Users\\RUNNER~1\\AppData\\Roaming\\npm\\node_modules\\sigelo-agent\\dist', () => 'c:\\users\\runner~1\\appdata\\roaming\\npm\\Node_Modules\\', 'win32', isPkg);
+  const wp = H.sdkPlan('D:\\work\\app\\node_modules\\sigelo-agent\\dist', () => 'C:\\Users\\RUNNER~1\\AppData\\Roaming\\npm\\node_modules', 'win32', isPkg);
+  const wc = H.sdkPlan('D:\\src\\sigelo\\apps\\sigelo-agent\\dist', () => null, 'win32', isPkg);
+  ok('sdk install plan on Windows (simulated): backslashes, drive letters, case and a trailing separator: global, project, checkout',
+    wg.where === 'global' && wp.where === 'project' && wp.cwd === 'D:\\work\\app' && wc.where === 'checkout' && wc.cwd === 'D:\\src\\sigelo\\apps\\sigelo-agent', JSON.stringify([wg, wp, wc]));
 }
 
 // ── on the relay: the operator, a third contact, the lock ─────────────────────────────────────────

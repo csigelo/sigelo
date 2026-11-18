@@ -5,7 +5,7 @@
 // `npm test` runs them all (test-all.ts). Every CLI child gets SIGELO_KEY_PROVIDER=file: `init`'s default
 // is the OS keychain where one answers (a desktop session, Windows), and test identities stay files.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -32,6 +32,20 @@ export function done(file: string): never {
 }
 
 export const tmpHome = (tag: string): string => mkdtempSync(join(tmpdir(), `sigelo-moadim-${tag}-`));
+/**
+ * A fake executable `name` in dir, its body a CommonJS Node script (__dirname is dir; the arguments in
+ * process.argv.slice(2)): on POSIX an executable file with a node shebang, on Windows <name>.js and a
+ * <name>.cmd shim that runs it with this node (PATHEXT finds the .cmd). Put dir first on PATH (delimiter).
+ */
+export function fakeExe(dir: string, name: string, body: string): void {
+  if (process.platform === 'win32') {
+    writeFileSync(join(dir, `${name}.js`), body);
+    writeFileSync(join(dir, `${name}.cmd`), `@"${process.execPath}" "%~dp0${name}.js" %*\r\n`);
+    return;
+  }
+  writeFileSync(join(dir, name), `#!${/\s/.test(process.execPath) ? '/usr/bin/env node' : process.execPath}\n${body}`, { mode: 0o755 });
+  chmodSync(join(dir, name), 0o755);
+}
 export interface Ran { status: number | null; stdout: string; stderr: string }
 /** sigelo-agent in a child, with this env, without blocking this process (an in-process relay answers it). */
 export const cliIn = (env: Record<string, string | undefined>, cwd: string) => (...args: string[]): Promise<Ran> => new Promise((resolve) => {
