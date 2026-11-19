@@ -100,6 +100,7 @@
     file: ['M6 3h8l4 4v14H6z', 'M14 3v4h4'], image: [['rect', { x: 3, y: 5, width: 18, height: 14, rx: 2 }], ['circle', { cx: 9, cy: 10, r: 1.5 }], 'M21 16l-5-5-8 8'], camera: ['M4 8h3.5l2-3h5l2 3H20v11H4z', ['circle', { cx: 12, cy: 13, r: 3.5 }]], 'arrow-in': ['M12 4v12M6 11l6 6 6-6M5 20h14'], 'arrow-out': ['M12 20V8M6 13l6-6 6 6M5 4h14'],
     finger: ['M12 11v4M8.5 9a4 4 0 017 0v6M6 8.5a7 7 0 0112 0v5M9 13v3a3 3 0 006 0'],
     mic: [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], 'M5 11a7 7 0 0014 0M12 18v3'], play: ['M8 5l11 7-11 7z'], pause: ['M8 5v14M16 5v14'],
+    search: [['circle', { cx: 11, cy: 11, r: 6 }], 'M20 20l-4.5-4.5'],
   };
   const SVG = 'http://www.w3.org/2000/svg';
   /** An icon as inline SVG (aria-hidden: the control around it carries the label); null where there is no SVG. */
@@ -789,6 +790,10 @@
     if (typeof c.via.public === 'string') return h('p', { class: 'help', 'data-via': 'mine' }, 'Came by your public code · not compared');
     return h('p', { class: c.via.words === 'checked' ? 'ok' : 'help', 'data-via': 'theirs' }, c.via.words === 'checked' ? '✓ By their public code · words match their page' : 'By their public code · not checked against their page');
   }
+  /** A busy mark (UI-API.md "Busy marks"): a turning ring; reduced motion, the word instead (ui.css). */
+  const spinner = () => h('span', { class: 'spin', 'aria-hidden': 'true' });
+  const busyLine = () => h('span', { class: 'busyline' }, spinner(), 'working…');
+  const busyBubble = () => h('div', { class: 'msg in busy', role: 'status', 'aria-label': 'Working', 'data-busy': '' }, spinner(), h('span', { class: 'word' }, 'working…'));
   /** What a chat's row says under its name: the tier decides (own: the text; friend: a count; quiet: nothing). */
   function contactLine(c) {
     const unread = unreadOf(c), agent = kindOf(c) === 'agent';
@@ -799,6 +804,8 @@
     if (c.not_collected) return [lead, 'Not collected yet'];
     if (c.tier === 'quiet') return agent ? h('span', { class: 'kind' }, 'Agent') : '';
     if (c.tier === 'friend') return unread ? [lead, `${unread} new message${unread === 1 ? '' : 's'}`] : agent ? h('span', { class: 'kind' }, 'Agent') : '';
+    // Their agent works on a turn (UI-API.md "Busy marks"): the small wheel in place of the last message; no count, no badge.
+    if (c.busy) return [lead, busyLine()];
     // Mine waiting (offline, or no reader yet): said after it, as the mock's offline list does.
     const wait = c.last?.dir === 'out' && c.last.status === 'queued' ? ' · waiting to send' : '';
     return c.last ? [lead, `${c.last.dir === 'out' ? 'You: ' : ''}${c.last.text}${wait}`] : agent ? h('span', { class: 'kind' }, 'Agent') : '';
@@ -830,7 +837,7 @@
   }
   screen('chats', { tab: 'chats' }, () => {
     const head = h('div'), lst = h('div');
-    mount(page({ title: 'Chats', tab: 'chats', actions: [ibtn('scan', 'Scan a QR', () => go('scan'))], body: [head, lst], fab: fabBtn('New chat', openNewChat) }));
+    mount(page({ title: 'Chats', tab: 'chats', actions: [ibtn('search', 'Search messages', () => go('search')), ibtn('scan', 'Scan a QR', () => go('scan'))], body: [head, lst], fab: fabBtn('New chat', openNewChat) }));
     return async () => {
       put(head, statusCards(), noteCard());
       if (!S.snap) { put(lst, S.fatal ? null : h('p', { class: 'pad muted' }, 'Loading…')); return; }
@@ -1358,10 +1365,11 @@
     const heading = h('h1', { class: 'sr' });
     // The bar: Back, the name (avatar and name, one control: the chat settings, or my agent's page), Pay with the Wallet on.
     const payBtn = tbtn('Pay', () => pay(did)), payAt = h('span', null, walletOn() ? payBtn : null);
-    mount(page({ who, actions: [payAt], body: [heading, alerts, thread], after: C.el }));
+    mount(page({ who, actions: [ibtn('search', 'Search this chat', () => go('search', { contact: did })), payAt], body: [heading, alerts, thread], after: C.el }));
     notifyOut({ tag: tagOfChat(did), cancel: true });   // its notification, if one is up: read now
     let first = true;
     const asked = new Map();   // a payment request answered in this chat: what it says after (the mock's "Done. scout was told.")
+    const answered = new Map();   // an approval or question answered here (n → the text sent), until the history shows it
     return async () => {
       const c = contactBy(did);
       await workersNow();
@@ -1395,10 +1403,10 @@
       if (c.not_collected) al.push(h('div', { class: 'card' }, h('p', null, 'Not collected yet: their side has not been online since.'), h('div', { class: 'btns' }, btn('Retry now', () => act(() => backend.call('POST', '/api/sync'))))));
       if (!c.words_checked && c.words && !c.local) al.push(h('div', { class: 'card warn' }, h('p', null, 'Compare four words with them to know it\'s really them.'), h('div', { class: 'btns' }, btn('Compare four words', () => go('compare', did), { kind: 'pri' }))));
       put(alerts, ...al.filter(Boolean));
-      // Again when the history moved, or their seen receipt did (the ticks).
+      // Again when the history moved, their seen receipt did (the ticks), or their busy mark (the wheel).
       // A photo's full file moves on its own: its state in the mark too.
       const tl = S.photosHere ? await transfersNow() : null;
-      const mark = `${S.snap.seq} ${c.seen_upto ?? ''} ${tl ? photoMark(tl) : ''}`;
+      const mark = `${S.snap.seq} ${c.seen_upto ?? ''} ${c.busy ? 'busy' : ''} ${tl ? photoMark(tl) : ''}`;
       if (mark === S.msgsSeq) return;
       S.msgsSeq = mark;
       const r = await backend.call('GET', `/api/messages?contact=${encodeURIComponent(did)}`).catch(() => null);
@@ -1427,15 +1435,31 @@
           h('button', { type: 'button', class: `sig${v?.valid ? '' : ' bad'}`, onclick: () => go('statement', { text: m.text }) }, icon('shield'), v?.valid ? `Signed by ${who} · check` : 'Signature not valid · check'),
           h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
       };
+      // A hosted agent's approval or question (UI-API.md GET /api/messages `approval`, `question`), from an own contact: Allow /
+      // Deny or the options as buttons; a tap sends the text the host reads (`yes CODE`, the option) as a reply to it. Answered:
+      // by a later message of mine (`yes|no CODE` after it; a question's: a reply to it) or the tap here; past exp: Expired.
+      const promptBubble = (m) => {
+        const a = m.approval, q = m.question, said = answered.get(m.n) ?? r.messages.find((x) => x.dir === 'out' && x.n > m.n
+          && (a ? new RegExp(`^\\s*(yes|y|no|n)\\s+${a.code}\\s*[.!]?\\s*$`, 'i').test(String(x.text)) : x.re?.n === m.n))?.text ?? null;
+        const send = (text) => act(() => backend.call('POST', '/api/send', { to: did, text, re: m.n }), () => { answered.set(m.n, text); S.msgsSeq = -1; });
+        let end;
+        if (a) {
+          const gone = said === null && a.exp <= relayNow();
+          end = said !== null ? h('p', { class: 'help' }, /^\s*y/i.test(String(said)) ? 'Allowed' : 'Denied')
+            : [gone ? h('p', { class: 'help' }, 'Expired') : null, h('div', { class: 'btns' }, btn('Allow', () => send(`yes ${a.code}`), { kind: 'pri', disabled: gone }), btn('Deny', () => send(`no ${a.code}`), { disabled: gone }))];
+        } else end = said !== null ? h('p', { class: 'help' }, `Answered: ${String(said).split('\n')[0].slice(0, 120)}`) : q.options ? h('div', { class: 'btns' }, q.options.map((o) => btn(o, () => send(o)))) : null;
+        return h('div', { class: 'msg in prompt', 'data-prompt': String(m.n) }, a ? [h('b', null, a.tool), msgText(a.summary, 'div', false)] : msgText(q.question), end, h('span', { class: 'meta' }, hhmm(m.at)));
+      };
       const pick = (m) => () => { RQ.set({ n: m.n, who: m.dir === 'out' ? 'You' : c.name, text: String(m.text).split('\n')[0].slice(0, 120) }); C.text.focus?.(); };
-      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : m.file ? fileBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && tapOf(m)) },
+      put(thread, r.messages.length ? threadOf(r.messages, (m) => (m.approval || m.question) && c.tier === 'own' ? promptBubble(m) : m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : m.file ? fileBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && tapOf(m)) },
         m.re ? quoteIn(m.re.dir === 'out' ? 'You' : c.name, m.re.text, m.re.n === null ? null : ['data-n', String(m.re.n)]) : null,
         m.label && m.label !== 'sigelo-file/0' && !m.re ? h('span', { class: 'who' }, m.label) : null,
         m.label === 'sigelo-file/0' ? fileText(m.text) : msgText(m.text),
         m.link ? h('span', { class: 'help' }, `Introduced: ${m.link.purpose}`) : null,
         m.dir === 'in' ? h('button', { type: 'button', class: 'meta', 'aria-label': `${hhmm(m.at)}. Check who signed it`, onclick: (ev) => { ev?.stopPropagation?.(); void go('signed', { did, n: m.n }); } }, hhmm(m.at))
-          : h('span', { class: 'meta' }, hhmm(m.at), ticks(m))), pick(m))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'));
+          : h('span', { class: 'meta' }, hhmm(m.at), ticks(m))), pick(m))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'), c.busy ? busyBubble() : null);
       if (end) toEnd();
+      seekIn(did, thread);
       J.saw(r.messages.filter((m) => m.dir === 'in').map((m) => m.n), end);
     };
   });
@@ -1982,7 +2006,7 @@
     C.el.append(J.el);
     const foot = h('div', null, chips, C.el);
     const heading = h('h1', { class: 'sr' });
-    mount(page({ who, body: [heading, alerts, thread], after: foot }));
+    mount(page({ who, actions: [ibtn('search', 'Search this chat', () => go('search', { group: gid }))], body: [heading, alerts, thread], after: foot }));
     if (S.made?.gid === gid) setTimeout(() => C.text.focus?.(), 0);
     // @ from a team's page: the name typed, ready to ask.
     if (S.mention?.gid === gid) { C.text.value = `@${S.mention.name} `; S.mention = null; setTimeout(() => { C.fit(); C.text.focus?.(); }, 0); }
@@ -2028,9 +2052,73 @@
         m.mentioned ? h('span', { class: 'help' }, 'Mentions you') : null, m.photo ? groupPhoto(m, grecs, g) : m.voice ? groupVoice(m, grecs, g) : msgText(m.text), h('span', { class: 'meta' }, hhmm(m.at))), gpick(m))),
       brake, !r.messages.length && !made ? h('span', { class: 'day' }, 'No messages yet.') : null);
       if (end) toEnd();
+      seekIn(gid, thread);
       J.saw(r.messages.filter((m) => !m.mine).map((m) => m.mid), end);
     };
   });
+
+  // Search (0.1.20, UI-API.md "Search"): the texts this device holds (GET /api/search: nothing leaves it), in every chat or,
+  // from a chat's bar, in that one (arg {contact} or {group}). Asked 250 ms after the last key, or at once on Enter (the
+  // focus stays); Escape goes back. A hit's row: who, the snippet with the hit marked, when; its tap opens the chat (the
+  // one under this screen when it is that chat) at the message: S.seek, taken by seekIn once that chat is drawn.
+  screen('search', {}, (arg) => {
+    const scope = arg?.contact ? `&contact=${encodeURIComponent(arg.contact)}` : arg?.group ? `&group=${encodeURIComponent(arg.group)}` : '';
+    const where = arg?.contact ? contactBy(arg.contact)?.name : arg?.group ? groupBy(arg.group)?.name : null;
+    const q = input({ type: 'search', class: 'box find', 'aria-label': where ? `Search in ${where}` : 'Search messages', placeholder: where ? `Search in ${where}` : 'Search messages', enterkeyhint: 'search', 'data-keep': '' });
+    const out = h('div', { 'aria-live': 'polite' });
+    // Back from a hit's chat: the same query and hits again (SEARCHED, per scope, for the page's life).
+    const was = SEARCHED.get(scope);
+    let timer = null, asked = was?.asked ?? '', R = was?.R ?? null;   // R: the answer to asked, {hits} or {error}
+    q.value = asked;
+    const draw = () => {
+      if (!R) { put(out, h('p', { class: 'help pad' }, 'Two letters or more. Searched on this device only.')); return; }
+      if (R.error) { put(out, inlineError(R.error)); return; }
+      if (!R.hits.length) { put(out, empty('No messages found', `Nothing here says “${asked}”.`)); return; }
+      put(out, sec(`${R.hits.length === 1 ? 'One message' : `${R.hits.length} messages`}`), list(R.hits.map((x) => row({
+        start: avatar(x.kind === 'group' ? 'group' : kindOf(contactBy(x.chat) ?? {}), x.name, null, x.chat), title: x.name,
+        sub: h('span', null, x.snippet.slice(0, x.mark[0]), h('mark', null, x.snippet.slice(x.mark[0], x.mark[1])), x.snippet.slice(x.mark[1])), subCls: 'wrap snip',
+        end: h('small', null, when(x.at)), onclick: () => openHit(x), attrs: { 'data-hit': `${x.chat} ${x.n}` } }))));
+    };
+    const run = async () => {
+      const t = q.value.trim();
+      if (t === asked) return;
+      asked = t;
+      if ([...t].length < 2) { R = null; SEARCHED.delete(scope); draw(); return; }
+      const r = await backend.call('GET', `/api/search?q=${encodeURIComponent(t)}${scope}`).then((x) => ({ hits: x.hits }), (e) => ({ error: e }));
+      if (asked === t) { R = r; SEARCHED.set(scope, { asked, R }); draw(); }
+    };
+    q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 250); });
+    q.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault?.(); clearTimeout(timer); void run(); }
+      else if (ev.key === 'Escape') { ev.preventDefault?.(); clearTimeout(timer); void back(); }
+    });
+    mount(page({ title: where ? `Search in ${where}` : 'Search', body: [h('div', { class: 'pad' }, q), out] }));
+    setTimeout(() => q.focus?.(), 0);
+    draw();
+    return () => (R?.hits?.length ? draw() : undefined);
+  });
+  const SEARCHED = new Map();
+  function openHit(x) {
+    const view = x.kind === 'group' ? 'group' : 'chat', below = S.stack.at(-2);
+    S.seek = { t: Date.now(), chat: x.chat, n: String(x.n), attrs: x.kind === 'group' ? ['data-mid'] : ['data-n', 'data-statement'] };
+    return below?.view === view && below.arg === x.chat ? back() : go(view, x.chat);
+  }
+  /**
+   * A search hit's message in the chat just drawn (S.seek, for this chat only, once): scrolled to the middle and flashed
+   * for 1.2 s (.msg.found; under reduced motion an outline, no flash). One older than the chat shows (its newest 200) is said.
+   */
+  function seekIn(chat, thread) {
+    const k = S.seek;
+    if (k && Date.now() - k.t > 15000) S.seek = null;   // a hit not followed (the chat never drawn): dropped
+    if (!S.seek || k.chat !== chat) return;
+    S.seek = null;
+    const walk = (el) => [el, ...[...(el.childNodes ?? [])].flatMap(walk)];
+    const el = walk(thread).find((e) => /(^| )msg( |$)/.test(String(e.className ?? '')) && k.attrs.some((a) => e.getAttribute?.(a) === k.n));
+    if (!el) { toast('That message is older than this chat shows'); return; }
+    el.scrollIntoView?.({ block: 'center' });
+    el.className += ' found';
+    setTimeout(() => { el.className = String(el.className).replace(/ found\b/g, ''); }, 1200);
+  }
 
   // Group info: people and agents, Add people, rename, the brake, leave; a member's changes are the creator's.
   screen('group-info', {}, (gid) => {
@@ -4228,6 +4316,80 @@
     return h('div', { class: 'card', 'data-notify-ask': N.denied ?? 'first' }, row({ title: 'Notifications', sub: why, subCls: 'wrap',
       end: [tbtn(N.denied === 'blocked' ? 'Open settings' : 'Allow', () => void notifyAsk()), N.denied ? null : tbtn('Not now', () => { prefs.set('notify-asked', '1'); N.denied = null; void refresh(); })] }));
   }
+
+  // ================================================================ SHARE INTO SIGELO (the Android app, 0.1.20: another app's share)
+  // A text, a link, a photo or a file shared from another app (sigeloLocal.shared: the shell's ACTION_SEND; after the lock and the
+  // profile, as any start): "Share to…" shows it (the text, or the file's name and size) above the chats (contacts and live groups,
+  // as the Chats tab, with a filter); a tap sends it there and opens that chat: a text by POST /api/send or /api/groups/send, a file
+  // by POST /api/transfers/send {to | group, doc} as a picked one goes (a picture with its preview; the same size rules). Cancel,
+  // Back or any other screen drops it. One at a time: a second replaces the first, on this screen too. GTK: later (plan-2026-11).
+  const SH = { cur: null };
+  /** The share dropped here and in the shell (a file already taken is a doc of this profile: nothing held there). */
+  function dropShare(s = SH.cur) {
+    if (!s || SH.cur !== s) return;
+    SH.cur = null;
+    if (!s.taken) void Promise.resolve(LOCAL?.shared?.drop?.()).catch(() => {});
+  }
+  /** The share to one chat ({to} or {group}): taken from the shell (a file: a doc), sent, then that chat. A refusal stays on the screen. */
+  async function shareSend(target, who) {
+    const s = SH.cur;
+    if (!s || s.busy) return;
+    s.busy = true; S.note = null;
+    try {
+      if (!s.taken) { Object.assign(s, await LOCAL.shared.take()); s.taken = true; }
+      if (typeof s.text === 'string') {
+        await backend.call('POST', target.group ? '/api/groups/send' : '/api/send', target.group ? { group: target.group, text: s.text } : { to: target.to, text: s.text });
+        S.msgsSeq = -1; S.groups = null;
+      } else {
+        await sendDoc(target, s, who, /^image\/(jpeg|png|webp)$/i.test(s.type ?? ''));
+        if (S.note) return;
+      }
+      if (SH.cur === s) SH.cur = null;
+      await swap(target.group ? 'group' : 'chat', target.group ?? target.to);
+    } catch (e) { S.note = e; } finally { s.busy = false; if (SH.cur === s) void refresh(); }
+  }
+  /** The chats a share can go to, newest first, as the Chats tab lists them; filtered by name. */
+  function shareRows(filter) {
+    const f = filter.trim().toLowerCase(), items = [];
+    for (const c of allContacts()) {
+      items.push({ at: c.last?.at ?? 0, name: c.name, row: () => row({ start: avatar(kindOf(c), c.name, null, c.did), title: c.name, sub: contactLine(c), attrs: { 'data-share': c.did },
+        onclick: () => shareSend({ to: c.did }, c.name) }) });
+    }
+    for (const g of (S.groups?.groups ?? []).filter((x) => liveGroup(x) && x.status !== 'pending')) {
+      items.push({ at: g.last?.at ?? 0, name: g.name, row: () => row({ start: avatar('group', g.name, null, g.gid), title: g.name, sub: [h('span', { class: 'kind' }, isTeam(g) ? 'Team' : 'Group'), ` · ${g.members.length} members`],
+        attrs: { 'data-share': g.gid }, onclick: () => shareSend({ group: g.gid }, g.name) }) });
+    }
+    return items.filter((x) => !f || String(x.name).toLowerCase().includes(f)).sort((a, b) => b.at - a.at || String(a.name).localeCompare(String(b.name))).map((x) => x.row());
+  }
+  screen('share-to', {}, () => {
+    const mine = SH.cur, pre = h('div', { class: 'pad' }), say = h('div', { class: 'pad' }), lst = h('div');
+    const q = input({ type: 'search', placeholder: 'Filter', 'aria-label': 'Filter chats' });
+    const draw = () => { const r = shareRows(q.value); put(lst, r.length ? h('div', { class: 'list' }, r) : h('p', { class: 'pad muted' }, q.value.trim() ? 'No chat by that name.' : 'No chats yet: pair with someone first.')); };
+    q.addEventListener('input', draw);
+    mount(page({ title: 'Share to…', close: true, onBack: () => { dropShare(mine); back(); }, body: [pre, h('div', { class: 'pad' }, q), say, lst],
+      foot: mine ? btn('Cancel', () => { dropShare(mine); back(); }) : null }));
+    // Left by any way but a send (Back, a tab, a notification's chat): dropped. A second share replacing it is not dropped.
+    S.leave = () => dropShare(mine);
+    return async () => {
+      if (!mine || SH.cur !== mine) { q.hidden = true; put(pre, empty('Nothing to share', 'Share a text, a link, a photo or a file from another app, then choose sigelo.')); put(lst); return; }
+      const text = typeof mine.text === 'string';
+      put(pre, h('div', { class: 'card', 'data-share-preview': text ? 'text' : 'file' }, text
+        ? h('p', { class: 'wrap' }, mine.text.length > 280 ? `${mine.text.slice(0, 280)}…` : mine.text)
+        : row({ title: mine.name, sub: `${mbOf(mine.size)}${mine.type ? ` · ${mine.type}` : ''}` })));
+      put(say, S.note ? inlineError(S.note) : null);
+      if (!S.snap) { put(lst, h('p', { class: 'pad muted' }, 'Loading…')); return; }
+      await groupsNow();
+      draw();
+    };
+  });
+  LOCAL?.shared?.on?.((x) => {
+    if (x?.error) { toast(plain(x.error)); return; }
+    const s = { ...x };
+    SH.cur = s;
+    // The page's own lock first (the words password, a tab's); the Android screen lock hides the whole page meanwhile.
+    const show = () => { if (SH.cur !== s) return; if (L.locked) { setTimeout(show, 500); return; } void (S.view === 'share-to' ? swap('share-to') : go('share-to')); };
+    show();
+  });
 
   // ================================================================ POLLING and the start
   let polling = false;

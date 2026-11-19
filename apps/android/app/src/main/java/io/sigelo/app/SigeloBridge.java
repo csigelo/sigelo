@@ -125,6 +125,12 @@ import javax.net.ssl.SSLSocketFactory;
  *          to play, RECORD_AUDIO asked at the first (refused mic_permission, remembered), the app's settings page.
  *   The shell's own event, no id: {ev:"open", tag} when one of our notifications is tapped (MainActivity
  *          onNewIntent; at a start by the tap, kept until the page's port is open, then posted once).
+ *   share-take, share-drop   share into sigelo (MainActivity's ACTION_SEND, shared below): one share held here, a second
+ *          replacing it, told to the page as {ev:"share", text} or {ev:"share", name, type, size} (at once, and again to each
+ *          new port while it is held), or {ev:"share", error:{check, message}} when refused here (a file:// or this app's own
+ *          URI, a text over SHARE_TEXT_MAX, a file whose size the provider does not say). share-take {profile} → {text} | as
+ *          big-pick plus type (the URI a doc of that profile, BigFiles.shared: sent as a picked file is, with its limits);
+ *          the share is gone from here then. share-drop: gone (the page's Cancel). Nothing shared: refused "share".
  */
 public final class SigeloBridge {
     static final String SHELL = "sigelo-shell/0", PORT_MESSAGE = "sigelo-bridge/0";
@@ -159,6 +165,14 @@ public final class SigeloBridge {
     final BigFiles big;
     private WebMessagePort port;   // the main thread's: the page's current port
     private String pendingOpen;    // the main thread's: a tapped notification's tag waiting for the page's port
+    /** The main thread's: a share waiting for the page (text, or a uri and its type), its event, the latest share's number. */
+    private String shareText;
+    private Uri shareUri;
+    private String shareType;
+    private JSONObject shareEv;
+    private int shareSeq;
+    /** A shared text at most this long: the page's limit for a message (apps/contact/page.mjs TEXT_MAX). */
+    static final int SHARE_TEXT_MAX = 100_000;
 
     SigeloBridge(MainActivity activity, WebView web) {
         this.activity = activity;
@@ -234,6 +248,109 @@ public final class SigeloBridge {
             pendingOpen = null;
             postOpen(mine, tag);
         }
+        // A share still held (a start by it, or a reload before the page took it): told to this page too; a refusal once.
+        if (shareEv != null) {
+            post(mine, shareEv);
+            if (shareText == null && shareUri == null) shareEv = null;
+        }
+    }
+
+    // ---------------------------------------------------------------- share into sigelo (MainActivity, main thread)
+
+    /**
+     * A share (ACTION_SEND) from another app. A file: EXTRA_STREAM, a content URI of another app only: never file:// and never
+     * this app's own authorities, which this process may read and the sending app may not (a hostile app sharing them would
+     * have the page send this app's private files). Its name and size are read off this thread. Else the text (EXTRA_TEXT, else
+     * the subject: a link from a browser). One at a time: the latest share wins, even over one still being read.
+     */
+    @SuppressWarnings("deprecation")   // getParcelableExtra(String): the one form API 28 to 35 share
+    void shared(Intent i) {
+        Object stream = i.getParcelableExtra(Intent.EXTRA_STREAM);
+        try {
+            if (stream instanceof Uri) {
+                final int seq = ++shareSeq;
+                final Uri u = (Uri) stream;
+                if (!foreign(u)) {
+                    holdShare(seq, null, null, null, refusedShare("share", "this file cannot be shared into sigelo"));
+                    return;
+                }
+                String t = i.getType();
+                if (t == null || t.equals("*/*")) t = activity.getContentResolver().getType(u);
+                final String type = t == null ? "application/octet-stream" : t;
+                spawn(() -> {
+                    JSONObject ev;
+                    try {
+                        ev = big.peek(u).put("ev", "share").put("type", type);
+                    } catch (Refused e) {
+                        ev = refusedShare(e.check, e.getMessage());
+                    } catch (Exception e) {
+                        ev = refusedShare("share", "the shared file cannot be read");
+                    }
+                    final JSONObject done = ev;
+                    main.post(() -> holdShare(seq, null, done.has("error") ? null : u, type, done));
+                });
+                return;
+            }
+            CharSequence t = i.getCharSequenceExtra(Intent.EXTRA_TEXT);
+            if (t == null || t.toString().trim().isEmpty()) t = i.getCharSequenceExtra(Intent.EXTRA_SUBJECT);
+            if (t == null || t.toString().trim().isEmpty()) return;   // nothing in it: the share before stays
+            final int seq = ++shareSeq;
+            String text = t.toString();
+            if (text.length() > SHARE_TEXT_MAX) holdShare(seq, null, null, null, refusedShare("share", "the text is too long for a message (at most " + SHARE_TEXT_MAX + " characters)"));
+            else holdShare(seq, text, null, null, new JSONObject().put("ev", "share").put("text", text));
+        } catch (JSONException e) {
+            // nothing to say it with
+        }
+    }
+
+    /** A content URI another app gave: not this app's own (its package's authorities), never a file. */
+    private boolean foreign(Uri u) {
+        String a = u.getAuthority(), pkg = activity.getPackageName();
+        return "content".equals(u.getScheme()) && a != null && !a.equals(PhotoProvider.AUTHORITY) && !a.equals(pkg) && !a.startsWith(pkg + ".");
+    }
+
+    private static JSONObject refusedShare(String check, String message) {
+        try {
+            return new JSONObject().put("ev", "share").put("error", new JSONObject().put("check", check).put("message", message));
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** The share held (or its refusal), unless a later one came meanwhile; told to the page now when its port is open. */
+    private void holdShare(int seq, String text, Uri uri, String type, JSONObject ev) {
+        if (seq != shareSeq) return;
+        shareText = text;
+        shareUri = uri;
+        shareType = type;
+        shareEv = ev;
+        if (port != null) {
+            post(port, ev);
+            if (text == null && uri == null) shareEv = null;
+        }
+    }
+
+    /** share-take: the held share for the page's profile (a file: a doc of that profile, BigFiles.shared); gone from here. */
+    private void shareTake(WebMessagePort to, int id, JSONObject m) {
+        String text = shareText, type = shareType;
+        Uri u = shareUri;
+        if (text == null && u == null) {
+            fail(to, id, "share", "nothing shared");
+            return;
+        }
+        final String profile;
+        try {
+            profile = BigFiles.profileOf(m);
+        } catch (Refused e) {
+            fail(to, id, e.check, e.getMessage());
+            return;
+        }
+        shareText = null;
+        shareUri = null;
+        shareType = null;
+        shareEv = null;
+        if (text != null) answer(to, id, () -> ok(id).put("text", text));
+        else answer(to, id, () -> big.shared(profile, u).put("type", type).put("id", id));
     }
 
     /** A notification of ours tapped (MainActivity, main thread): to the page now, or once its port is open. */
@@ -496,6 +613,16 @@ public final class SigeloBridge {
                 break;
             case "big-awake":
                 big.awake(m.optBoolean("on", false));
+                post(to, ok(id));
+                break;
+            case "share-take":
+                shareTake(to, id, m);
+                break;
+            case "share-drop":
+                shareText = null;
+                shareUri = null;
+                shareType = null;
+                shareEv = null;
                 post(to, ok(id));
                 break;
             case "app-settings":

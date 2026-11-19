@@ -75,6 +75,7 @@ import java.util.regex.Pattern;
  *              in the cache beside the photos, under its name → {doc, name, size, mtime, url}: sent as a photo is
  *   big-url    a file that landed (a content URI of the media store) as a doc the page reads → {doc, name, size, mtime, url}:
  *              a voice message played in the page (read back by range)
+ *   shared     a file shared into sigelo from another app (SigeloBridge share-take) as a doc of the profile: → as big-pick
  *   mic        RECORD_AUDIO asked at a tap on Voice (before the page's getUserMedia, the only dialog: MainActivity grants
  *              the WebView's own ask once the permission exists) → {granted: true}; refused mic_permission (the next tap
  *              asks again); once Android no longer shows the dialog (refused twice, "don't ask again") mic_blocked at
@@ -488,6 +489,27 @@ final class BigFiles {
         prefs.edit().putString("name." + file, name).apply();
         keepDoc(profile, doc, "f:" + file);
         return describe(profile, doc, "f:" + file);
+    }
+
+    /** A shared file's name and size (SigeloBridge.shared, off the main thread), before a profile holds it as a doc. */
+    JSONObject peek(Uri u) throws SigeloBridge.Refused, JSONException {
+        String where = "u:" + u;
+        return new JSONObject().put("name", nameOf(where)).put("size", statOf(where)[0]);
+    }
+
+    /**
+     * A file shared into sigelo (SigeloBridge share-take) as a doc of this profile, sent as a picked one is (big-hash, ranges).
+     * The sending app's grant lasts while this activity does; kept for good when it was given persistable (rarely).
+     */
+    JSONObject shared(String profile, Uri u) throws SigeloBridge.Refused, JSONException {
+        try {
+            activity.getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            // not persistable: it reads while the grant lasts (a resume after a restart: file_changed)
+        }
+        String doc = newToken();
+        keepDoc(profile, doc, "u:" + u);
+        return describe(profile, doc, "u:" + u);
     }
 
     /** A file that landed (the media store's content URI) as a doc the page reads by its URL: one doc per URI. */

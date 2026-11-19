@@ -12,7 +12,7 @@
 //                           mqtt, indexedDB?, storage (localStorage), session (sessionStorage), reload(), seal?, download? (a tab's
 //                           save of a file: (name, bytes) → name; by default an <a download>) }
 //   app.local               what ui.js reads as globalThis.sigeloLocal: { call, onChange, mode, share, unlock, secure, profiles, computers, words,
-//                           lock, notify, openSettings, onOpen, reload, bars, powEngine }
+//                           lock, notify, openSettings, onOpen, shared, reload, bars, powEngine }
 //   app.ready               → the backend (rejects while there is none: the first run, the connect view)
 //
 // local.profiles (ui.js: the Profiles sheet, Settings → Profiles): list() → { active, limit, profiles }; use(id) the switch: the lock
@@ -45,6 +45,10 @@
 // local.stay (the Android app only; else undefined): Settings → Stay connected, the shell's switch for the phone (not per profile):
 // get() → { on, exempt, asked, notify, notifyAsked, notifyBlocked }, set({ on }), battery(yes), notifications(yes) (platform-android.mjs stay).
 // The shell's nudge ({ev:"nudge"}: its alarm, the end of Doze) reaches the running carrier's wake().
+// local.shared (the Android app only; else undefined): share into sigelo (another app's ACTION_SEND, held by the shell): on(fn)
+// fn({ text } | { name, type, size } | { error: { check, message } }) at each share (one at a start: once the bridge is connected; a
+// second replaces the first); take() → { text } | { doc, name, size, mtime, url, type } for the profile in use (a doc POST
+// /api/transfers/send takes), gone from the shell then; drop() Cancel.
 // local.bars (the Android app only; else undefined): bars("#rrggbb") the system bars in the page's background (no action bar).
 // local.powEngine() (ui.js Settings → About): the proof of work's engine, 'wasm' | 'js' (both in a Worker) | null (none here).
 import { did as didOf, parseBytes } from 'sigelo';
@@ -312,6 +316,19 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
       if (!shell || typeof fn !== 'function') return;
       rawP.then((r) => r.onEvent((m) => { if (m.ev === 'open' && typeof m.tag === 'string' && TAG.test(m.tag)) fn(m.tag); }), () => {});
     },
+    // Share into sigelo (ui.js "share-to"): what another app shared, told once the bridge is up; taken for the profile in use.
+    shared: shell ? Object.freeze({
+      on(fn) {
+        if (typeof fn !== 'function') return;
+        rawP.then((r) => r.onEvent((m) => {
+          if (m.error && typeof m.error === 'object') fn({ error: { check: String(m.error.check ?? 'share'), message: String(m.error.message ?? 'not shared') } });
+          else if (typeof m.text === 'string') fn({ text: m.text });
+          else if (typeof m.name === 'string') fn({ name: m.name, type: String(m.type ?? ''), size: Number(m.size) });
+        }, 'share'), () => {});
+      },
+      take: async () => (await shellOf()).shareTake((await profP).id),
+      drop: async () => (await shellOf()).shareDrop(),
+    }) : undefined,
     // Settings → About's "Reload the app": the shell loads the page again from its start; a tab reloads itself.
     async reload() { if (shell) await (await shellOf()).reload(); else reload?.(); },
     // Settings → About's "Proof of work": 'wasm' | 'js' (in a Worker) | null (no search here); undefined: no platform here (a computer's page).

@@ -544,8 +544,9 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       ok('ui e2e: /api/tier back to friend; a bad tier → 400; no contact → 404', tf['tier'] === 'friend' && (await A.call('POST', '/api/tier', { contact: bob!.did, tier: 'vip' }))['http'] === 400
         && (await A.call('POST', '/api/tier', { contact: 'did:sigelo:zNope', tier: 'quiet' }))['http'] === 404);
       // Presence: bob's page lets alice see when bob is online; alice's state shows it, then nothing once denied.
-      const bobAt = async () => ((await A.call('GET', '/api/state'))['groups'].contacts as { did: string; online: boolean | null; last_seen: number | null; presence: string }[]).find((c) => c.did === bob!.did);
+      const bobAt = async () => ((await A.call('GET', '/api/state'))['groups'].contacts as { did: string; online: boolean | null; last_seen: number | null; presence: string; busy: boolean }[]).find((c) => c.did === bob!.did);
       const p0 = await bobAt();
+      ok('ui busy marks: a contact\'s record carries busy (UI-API.md "Busy marks"), false without a mark', p0?.busy === false, JSON.stringify(p0));
       ok('ui presence: by default alice reads nothing of bob (online null), and bob sees nothing of her (presence deny)', p0?.online === null && p0?.last_seen === null && p0?.presence === 'deny', JSON.stringify(p0));
       const pa = await B.call('POST', '/api/presence', { contact: acc['contact'].did, allow: true });
       const on = await until(async () => ((await bobAt())?.online === true ? true : undefined));
@@ -767,6 +768,30 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       ok('ui pictures: a contact not known to read pictures (my agent bot: no receipt from it) gets none; bob does', Boolean(sentTo[bob!.did]) && sentTo[(group.mine[0] as unknown as { did: string }).did] === undefined, JSON.stringify(sentTo));
       const botStore = JSON.parse(readFileSync(join(A.dir, 'me.local.contacts.json'), 'utf8')) as { contacts: Record<string, { name: string; tier: string; tier_by: string }> };
       ok('ui e2e: written to the store: own, auto', Object.values(botStore.contacts).some((c) => c.name === 'bot' && c.tier === 'own' && c.tier_by === 'auto'));
+      // A hosted agent's approval and question (sigelo-agent-host.ts "Approvals"): from my agent bot's carrier, labelled objects;
+      // the page keeps their fields (approval, question) beside a one-line text, and a `re` answer goes back as the text.
+      {
+        const { lib } = await (await import('./sigelo-agent-contact.ts')).contactLib(), I = await import('./sigelo-agent.ts'), { signer } = await import('./sigelo-agent-keys.ts');
+        const bc = new lib.Carrier({ identity: () => { const s = I.load(bot); return { sign: signer(bot, s).sign, bundle: I.bundleOf(s) }; }, ...lib.pathsFor(bot), relay: 'relay.test', shortRelay: 'relay.test', registry: false, endpoints }) as any;
+        try {
+          const op = (bc.contacts().contacts as { did: string; name: string }[]).find((c) => c.name === 'operator')!.did, exp = Math.floor(Date.now() / 1000) + 300, bd = (group.mine[0] as unknown as { did: string }).did;
+          await bc.send(op, { code: 'AB2C', tool: 'Bash', summary: 'ls -la /tmp', exp, text: 'approve AB2C? Bash: ls -la /tmp\nanswer: yes AB2C or no AB2C' }, { label: 'sigelo-approval/0' });
+          await bc.send(op, { question: 'Which colour?', options: ['red', 'blue'], text: 'question:\nWhich colour?' }, { label: 'sigelo-question/0' });
+          await bc.send(op, { code: 'TOOLONG', tool: 'Bash', summary: 'x', exp, text: 'x' }, { label: 'sigelo-approval/0' });
+          type PM = { n: number; dir: string; text: string; label: string; approval?: Record<string, unknown>; question?: Record<string, unknown>; re?: { n: number | null; dir: string } };
+          const pm = async (): Promise<PM[]> => ((await A.call('GET', `/api/messages?contact=${encodeURIComponent(bd)}`))['messages'] ?? []) as PM[];
+          const all = await until(async () => { const l = await pm(); return l.filter((m) => m.label.startsWith('sigelo-')).length >= 3 ? l : undefined; });
+          const ap = all?.find((m) => m.approval), qu = all?.find((m) => m.question), bad = all?.find((m) => m.label === 'sigelo-approval/0' && !m.approval);
+          ok('ui approvals: GET /api/messages → approval {code, tool, summary, exp} and a one-line text; question {question, options}; a malformed one: no field, its JSON as text',
+            JSON.stringify(ap?.approval) === JSON.stringify({ code: 'AB2C', tool: 'Bash', summary: 'ls -la /tmp', exp }) && ap?.text === 'approval AB2C: Bash: ls -la /tmp (yes AB2C / no AB2C)'
+              && JSON.stringify(qu?.question) === '{"question":"Which colour?","options":["red","blue"]}' && bad !== undefined && bad.text.includes('TOOLONG'), JSON.stringify(all));
+          const ans = await A.call('POST', '/api/send', { to: bd, text: 'yes AB2C', re: ap?.n });
+          const out = (await pm()).find((m) => m.dir === 'out' && m.text === 'yes AB2C');
+          const back = await until(async () => ((await bc.inbox({ wait: 2 })).messages as { content: unknown; label: string }[]).find((m) => m.content === 'yes AB2C'));
+          ok('ui approvals: Allow = POST /api/send {text: "yes CODE", re: n} → a reply quoting it (re.n the approval); the agent receives the text "yes AB2C"',
+            ans['http'] === 200 && String(ans['label']).startsWith('re/') && out?.re?.n === ap?.n && out?.re?.dir === 'in' && back !== undefined && String(back.label).startsWith('re/'), JSON.stringify([ans, out, back]));
+        } finally { await bc.stop(); }
+      }
       const taken = await A.call('POST', '/api/rename', { contact: group.mine[0] && (group.mine[0] as unknown as { did: string }).did, name: 'Bob B' });
       ok('ui e2e: rename to another contact\'s name → 409 name_taken', taken['http'] === 409 && taken['error']?.check === 'name_taken', JSON.stringify(taken));
       // ---- links through the page: A links its agent bot to Bob (not A's: external); Bob's page answers.
@@ -987,6 +1012,48 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
     }
   }
   rmSync(H, { recursive: true, force: true });
+}
+
+// ── search (UI-API.md "Search", 0.1.20 item 1): GET /api/search over a page whose carrier is a stand-in that notes every
+// call made of it (only contacts() and the files are real): hits across two contacts and a group, newest first, the
+// limit, case and accents, the snippet and its mark, a signed message by its text (not its signature line), photos and a
+// contact gone left out, the scope, 400 on a short query; and no call of the carrier at all: nothing sent, no relay.
+{
+  type Hit = { chat: string; kind: string; name: string; n: number | string; dir: string; at: number; text: string; snippet: string; mark: [number, number] };
+  type Page = { dispatch(m: string, u: URL, b?: unknown): Promise<[number, { hits: Hit[]; error?: { check: string } }]> };
+  const { contactModule } = await import('./sigelo-agent-contact.ts');
+  const P = await contactModule<{ makePage(o: object): Page; foldMap(t: string): { f: string }; matchIn(t: string, want: string): { snippet: string; mark: [number, number] } | null }>('page');
+  const A = 'did:sigelo:zAna', B = 'did:sigelo:zBo', GID = 'a'.repeat(32), called: string[] = [];
+  const person = (d: string, name: string) => ({ did: d, name, chain: [d], revoked: false, pair: null });
+  const real: Record<string, unknown> = { contacts: () => ({ contacts: [person(A, 'ana'), person(B, 'bo')], invites: [] }), platform: { files: { read: (f: string) => (f === 'groups.json' ? '{}' : null) } }, relay: 'relay.test' };
+  const carrier = new Proxy(real, { get: (t, k) => (typeof k !== 'string' ? undefined : k in t ? t[k] : () => { called.push(k); }) });
+  const G = { list: () => [{ gid: GID, name: 'Trip', status: 'member' }],
+    history: () => [{ mid: 'm1', content: 'Cafe at noon', mine: false, name: 'cy', received: 30 }, { mid: 'm2', content: 'no match here', mine: true, received: 50 }] };
+  const long = `${'x'.repeat(150)} the CAFÉ by the river ${'y'.repeat(150)}`;
+  const st = 'Café deal, signed\n-- Signed with sigelo by able baker charlie delta. Check it in the sigelo app.\nsigelo-statement/0 Y2FmZWNhZmU';
+  const lines = [{ n: 1, at: 10, kind: 'in', did: A, text: 'café on Friday?' }, { n: 2, at: 20, kind: 'out', did: B, text: 'the CAFE is closed' }, { n: 3, at: 25, kind: 'in', did: A, text: 'Photo cafe', label: 'sigelo-photo/0', photo: {} },
+    { n: 4, at: 35, kind: 'in', did: A, text: st, label: 'sigelo-statement/0' }, { n: 5, at: 40, kind: 'in', did: B, text: long }, { n: 6, at: 60, kind: 'in', did: 'did:sigelo:zGone', text: 'cafe' }];
+  const page = P.makePage({ makeCarrier: () => carrier, link: {}, linksFile: 'links.json', groups: G, groupsFile: 'groups.json', enrolFile: null, codeKind: () => 'invite', unlogged: /^$/,
+    store: { readHistory: () => lines.map((l) => JSON.stringify(l) + '\n').join(''), append() {}, clearHistory() {}, readData: () => null, writeData() {} },
+    hooks: { me: () => ({ did: 'did:sigelo:zMe', original: 'did:sigelo:zMe', chain: ['did:sigelo:zMe'] }), defer() {}, every() {} } });
+  const find = async (qs: string) => { const [status, body] = await page.dispatch('GET', new URL(`http://127.0.0.1/api/search?${qs}`)); return { status, hits: body.hits ?? [], check: body.error?.check }; };
+  const all = await find('q=CAF%C3%89'), keys = all.hits.map((x) => `${x.kind}:${x.n}`).join(' ');
+  ok('search: hits across two contacts and a group, newest first; a photo and a contact gone left out', all.status === 200 && keys === 'contact:5 contact:4 group:m1 contact:2 contact:1', keys);
+  const h5 = all.hits[0]!, h4 = all.hits[1]!, g1 = all.hits[2]!;
+  ok('search: a hit says its chat, kind, name, n, dir, at and text', h5.chat === B && h5.name === 'bo' && h5.dir === 'in' && h5.at === 40 && h5.text === long
+    && g1.chat === GID && g1.kind === 'group' && g1.name === 'Trip' && g1.n === 'm1' && g1.dir === 'in', JSON.stringify([h5.chat, g1]));
+  ok('search: the snippet ≤ 120 characters around the first hit, … where cut, mark on the hit as written', h5.snippet.length <= 120 && h5.snippet.startsWith('…') && h5.snippet.endsWith('…')
+    && h5.snippet.slice(...h5.mark) === 'CAFÉ' && all.hits[3]!.snippet.slice(...all.hits[3]!.mark) === 'CAFE' && all.hits[4]!.snippet.slice(...all.hits[4]!.mark) === 'café', h5.snippet);
+  ok('search: a signed message by its text, never its signature line', h4.snippet === 'Café deal, signed' && (await find('q=y2fmz')).hits.length === 0 && (await find('q=charlie')).hits.length === 0, h4.snippet);
+  ok('search: case and accents folded both ways (cafe, CAFÉ, Café the same)', (await find('q=cafe')).hits.length === 5 && (await find('q=Caf%C3%A9')).hits.length === 5);
+  const two = await find('q=cafe&limit=2'), one = await find(`q=cafe&contact=${encodeURIComponent(A)}`), grp = await find(`q=cafe&group=${GID}`);
+  ok('search: limit, and scoped to one contact or one group', two.hits.map((x) => x.n).join() === '5,4' && one.hits.map((x) => x.n).join() === '4,1' && grp.hits.map((x) => x.n).join() === 'm1', JSON.stringify([two.hits.length, one.hits.map((x) => x.n)]));
+  const short = await find('q=c'), blank = await find('q=%20%20'), none = await find('q='), bad = await find('q=cafe&limit=0'), who = await find('q=cafe&contact=did:sigelo:zGone'), nog = await find(`q=cafe&group=${'b'.repeat(32)}`);
+  ok('search: a query under 2 characters → 400 query; limit 0 → 400; a stranger → 404 not_contact; no such group → 404 group_unknown',
+    [short, blank, none].every((x) => x.status === 400 && x.check === 'query') && bad.status === 400 && who.status === 404 && who.check === 'not_contact' && nog.status === 404 && nog.check === 'group_unknown');
+  ok('search: nothing asked of the carrier (no send, no sync, no receipt, no relay)', called.length === 0, called.join());
+  ok('search: foldMap and matchIn as units (İ, a decomposed é, an emoji cut whole)', P.foldMap('İstanbul').f.startsWith('i') && P.matchIn('café x', P.foldMap('CAFÉ').f)?.mark.join() === '0,5'
+    && !/^…[\udc00-\udfff]/.test(P.matchIn('😀'.repeat(100) + 'hit', 'hit')?.snippet ?? ''));
 }
 
 done(import.meta.filename);

@@ -76,11 +76,17 @@
 //   → {op:"mic", id, profile}                     ← {id, granted:true}  RECORD_AUDIO asked at the first; refused "mic_permission"
 //                                                 (a refusal remembered: no second dialog, refused at once until allowed in Settings)
 //   → {op:"app-settings", id}                     ← {id}         the app's page in the system settings (to allow the microphone)
+//   → {op:"share-take", id, profile}              ← {id, text} | {id, doc, name, size, mtime, url, type}  the share held by the shell
+//                                                 (another app's ACTION_SEND), gone from it then: a text, or a file as a doc of this profile
+//                                                 (sent as a picked one is, its limits too); nothing held: refused "share"
+//   → {op:"share-drop", id}                       ← {id}         the share held dropped (the page's Cancel)
 //   any ← {id, error:{check, message}}
 // Events, the shell's own (no id; never an answer): ← {ev:"open", tag} one of our notifications tapped (the app running: at
 // once; started by the tap: kept by the shell until the page's port is open, then posted once); ← {ev:"nudge"} Stay
-// connected's alarm (at most every 15 minutes) or the end of Doze: the carrier reconnects, with its backoff, when down. Kept here until a listener
-// is set (bridge.onEvent).
+// connected's alarm (at most every 15 minutes) or the end of Doze: the carrier reconnects, with its backoff, when down;
+// ← {ev:"share", text} | {ev:"share", name, type, size} | {ev:"share", error:{check, message}} something shared into sigelo from
+// another app (MainActivity's ACTION_SEND: at once, and to each new page while held; one at a time, the latest wins), or why the
+// shell refused it (a file:// or the app's own URI, a text too long). Kept here until a listener is set (bridge.onEvent).
 // https: https:// to any host; http:// only to a private IPv4 address (a computer's `ui --remote`
 // on the LAN, sealed in the page). tls: certificate and host name checked by the system's trust
 // store. Nothing is sent but what the request names: no Origin, no cookie, no redirect followed.
@@ -93,7 +99,7 @@ import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 export const BRIDGE = 'sigelo-bridge/0';
 export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'bars', 'reload', 'open-settings', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify', 'stay',
   'big-pick', 'big-photo', 'big-hash', 'big-stat', 'big-write', 'big-flush', 'big-digest', 'big-drop', 'big-free', 'big-land', 'big-open', 'big-awake',
-  'big-keep', 'big-url', 'mic', 'app-settings']);
+  'big-keep', 'big-url', 'mic', 'app-settings', 'share-take', 'share-drop']);
 /** A notification's tag (SigeloBridge.TAG): what it is about, given back when it is tapped. */
 export const TAG = /^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/;
 /** The app lock's choices of minutes away (SigeloBridge.LOCK_AFTER). */
@@ -229,7 +235,14 @@ function makeBridge(info, port) {
     },
     /** This app's page in the system settings, where a permission Android no longer asks for is switched on. */
     async openSettings() { await request('open-settings', {}); },
-    /** fn(event) for the shell's events ({ ev: "open", tag }, { ev: "nudge" }), or those of kind ev only; those it takes that came before it, at once. → stop(). */
+    /** The share the shell holds, for this profile → { text } | { doc, name, size, mtime, url, type }; gone from the shell then. */
+    async shareTake(profile = 'p1') {
+      const x = await request('share-take', { profile });
+      return typeof x.text === 'string' ? { text: x.text } : { doc: String(x.doc), name: String(x.name), size: Number(x.size), mtime: Number(x.mtime), url: String(x.url), type: String(x.type ?? '') };
+    },
+    /** The share the shell holds dropped (Cancel). */
+    async shareDrop() { await request('share-drop'); },
+    /** fn(event) for the shell's events ({ ev: "open", tag }, { ev: "nudge" }, { ev: "share", … }), or those of kind ev only; those it takes that came before it, at once. → stop(). */
     onEvent(fn, ev) {
       const l = { fn, ev };
       listeners.add(l);

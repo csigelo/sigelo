@@ -92,6 +92,10 @@
 // (SPEC §9): the chain, the DID in it, the signature. In a chat: a message labelled STATEMENT_LABEL whose text is the
 // portable form (an earlier version shows the text as it is). No protocol object: a chat-layer body.
 //
+// A hosted agent's approval and question (apps/agent sigelo-agent-host.ts "Approvals"): APPROVAL_LABEL {code, tool,
+// summary, exp, text}, QUESTION_LABEL {question, options?, text}; checked (promptOf), kept as `approval` / `question`
+// beside a one-line text; the page's buttons answer with a reply's text (`yes CODE`, an option). Malformed: shown as data.
+//
 // The public invite (UI-API.md "Public invite"): a public code (sigelo-public/0, carrier.mjs invitePublic), PUB-…
 // with the four words and a link, for 1, 6 or 12 months, Pro only, kept in the contact store; each use a request to
 // approve (/api/public/approve, /refuse) unless open; Pause and the cap: /api/public/set; Stop for good (Revoke for
@@ -154,6 +158,23 @@ export function pictureBytes(type, data) {
   if ((type === 'image/jpeg' && !jpeg) || (type === 'image/webp' && !webp)) refuse(400, 'picture', `not a ${type === 'image/jpeg' ? 'JPEG' : 'WebP'} picture`);
   return b;
 }
+export const APPROVAL_LABEL = 'sigelo-approval/0', QUESTION_LABEL = 'sigelo-question/0';
+/** A received approval or question's content: {key, value, text} (value checked, text its one line), or null (not one, or malformed). */
+export function promptOf(label, c) {
+  if (typeof c !== 'object' || c === null || Array.isArray(c)) return null;
+  const str = (v, max) => typeof v === 'string' && v.length <= max, one = (v) => v.replace(/\s+/g, ' ').trim();
+  if (label === APPROVAL_LABEL) {
+    if (!str(c.code, 4) || !/^[A-Za-z0-9]{4}$/.test(c.code) || !str(c.tool, 200) || !str(c.summary, 1000) || !Number.isSafeInteger(c.exp)) return null;
+    const value = { code: c.code.toUpperCase(), tool: one(c.tool), summary: one(c.summary), exp: c.exp };
+    return { key: 'approval', value, text: `approval ${value.code}: ${value.tool}: ${value.summary} (yes ${value.code} / no ${value.code})` };
+  }
+  if (label === QUESTION_LABEL) {
+    if (!str(c.question, 4000) || (c.options !== undefined && (!Array.isArray(c.options) || c.options.length > 20 || !c.options.every((o) => str(o, 200) && o.trim() !== '')))) return null;
+    const value = { question: c.question, ...(c.options?.length && { options: c.options }) };
+    return { key: 'question', value, text: `question: ${c.question}${value.options ? `\n${value.options.map((o, i) => `  ${i + 1}) ${o}`).join('\n')}` : ''}` };
+  }
+  return null;
+}
 const chainOnly = (b) => ({ v: 'sigelo/0', typ: 'bundle', genesis: b.genesis, rotations: b.rotations ?? [], bindings: [], attestations: [], issuers: [] });
 const SIGNED_LINE = /\n-- Signed with sigelo by [a-z]+ [a-z]+ [a-z]+ [a-z]+\. Check it in the sigelo app\.\s*$/;
 /** A statement signed now by identity id ({sign | secret, bundle}, the carrier's): → its portable text. */
@@ -191,6 +212,39 @@ export function checkStatement(portable, now) {
   const shown = t.slice(0, m.index).replace(SIGNED_LINE, '').trim();
   return { valid: true, text: body.text, iat: body.iat, did: body.did, original: r.chain[0], chain: r.chain, current: r.did === body.did, created: bundle.genesis.created ?? null,
     edited: shown !== '' && shown !== body.text.trim() };
+}
+
+// ---- search (UI-API.md "Search"): a substring of the texts this device holds, case and accents folded. Each code point is
+// folded alone (NFD, marks dropped, lower case) so that a hit in the folded text maps back to the text as written: at[i]
+// is where the folded character i came from (at[f.length]: the end).
+/** t folded for search → { f, at }. */
+export function foldMap(t) {
+  let f = '';
+  const at = [];
+  for (let i = 0; i < t.length;) {
+    const cp = t.codePointAt(i), x = String.fromCodePoint(cp).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+    for (let k = 0; k < x.length; k++) at.push(i);
+    f += x; i += cp > 0xffff ? 2 : 1;
+  }
+  at.push(t.length);
+  return { f, at };
+}
+export const SNIPPET_MAX = 120;
+/**
+ * The first hit of want (folded already) in t → { snippet, mark: [from, to] } or null: at most SNIPPET_MAX characters
+ * around the hit (… where cut, line breaks as spaces), mark the hit's place in the snippet (cut at its end if long).
+ */
+export function matchIn(t, want) {
+  const { f, at } = foldMap(t), i = f.indexOf(want);
+  if (i < 0 || want === '') return null;
+  const s = at[i], e = at[i + want.length];
+  let from = Math.max(0, Math.min(s - 40, t.length - (SNIPPET_MAX - 1)));
+  if (/[\udc00-\udfff]/.test(t[from] ?? '')) from++;
+  let to = Math.min(t.length, from + SNIPPET_MAX - (from > 0 ? 1 : 0));
+  if (to < t.length) to--;
+  if (/[\ud800-\udbff]/.test(t[to - 1] ?? '')) to--;
+  const pre = from > 0 ? '…' : '', body = t.slice(from, to).replace(/[\r\n\t]/g, ' ');
+  return { snippet: pre + body + (to < t.length ? '…' : ''), mark: [s - from + pre.length, Math.min(e, to) - from + pre.length] };
 }
 
 export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, groupsFile = null, enrolFile = null, codeKind, unlogged, store, hooks = {}, relayFixed = null }) {
@@ -290,7 +344,11 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         record({ kind: 'in', did: m['from'], name: m['contact'], label: m['label'], text: `file ${String(m['name'])} (${String(m['size'])} bytes), saved at ${String(m['path'])}`,
           file: { name: String(m['name']), size: Number(m['size']), sha256: String(m['sha256'] ?? ''), via: lane, transfer: m['transfer'] ?? null }, ...iat, ...link });
       }
-      else record({ kind: 'in', did: m['from'], name: m['name'], text: m['content'], label: m['label'], ...iat, ...link });
+      else {
+        // A hosted agent's approval or question (promptOf): its fields beside a one-line text, which a reply quotes.
+        const pr = promptOf(m['label'], m['content']);
+        record({ kind: 'in', did: m['from'], name: m['name'], text: pr ? pr.text : m['content'], label: m['label'], ...(pr && { [pr.key]: pr.value }), ...iat, ...link });
+      }
     }
     const named = new Set();
     for (const e of b.events) {
@@ -380,7 +438,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
           if (e['check'] === 'pow_confirm') live.powConfirm = { relay: String(e['relay']), detail: String(e['detail']).replace(/^pow_confirm: /, '') };
           keepOffline();
           break;
-        case 'notice': case 'presence': case 'group_tier': break;   // presence, the group tier: the state says it, nothing to take
+        case 'notice': case 'presence': case 'group_tier': case 'busy': break;   // presence, the group tier, a busy mark: the state says it, nothing to take
         case 'seen': defer(() => { receipt(String(e['from']), true); picturesDue(); }); break;
         // A new contact told its name (carrier.mjs "Names"): my groups that list it under the made-up one are sent again.
         case 'named': if (G && groupsFile) defer(() => serial(() => G.refreshNames({ carrier, file: groupsFile, did: String(e['did']) })).catch(() => {})); break;   // the contact's receipt: contacts() has it; answered once; it reads pictures
@@ -688,6 +746,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         local: agent?.name ?? null, mine, unread: msgs.filter((r) => r.kind === 'in' && r.n > read).length,
         last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: statusOf(last, x.seen_upto) } : null,
         notify: notifyOf(x.did), seen_upto: x.seen_upto ?? null,
+        // A busy mark (carrier.mjs "Busy marks"): their agent works on a turn; the chat's wheel, never a message.
+        busy: x.busy === true,
         picture: picRev(picOf(x.did) ?? ''), picture_local: data.pics[`l:${x.did}`] !== undefined,
         waiting, not_collected: queued.length, queued: x.queued,
         status: x.re_pair ? 'pair_again' : waiting ? 'waiting' : queued.length ? 'not_collected' : 'ok', ours: x.ours === true || mine !== null, tier,
@@ -917,6 +977,36 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     changed();
     return { ...r, public: true };
   }
+  // GET /api/search (UI-API.md "Search"): the contacts' histories (texts and signed messages; photos, voice and files are
+  // not text) and the groups' (G.history, as GET /api/groups/history reads it), newest first. A read of what is here only:
+  // no carrier call, no read mark, no receipt.
+  const searchText = (r) => (r.label === STATEMENT_LABEL ? textOf(r.text).replace(/(?:^|\n)sigelo-statement\/0\s[\s\S]*$/, '').replace(SIGNED_LINE, '') : textOf(r.text));
+  function search(q) {
+    const want = foldMap(String(q.get('q') ?? '').trim()).f;
+    if ([...want].length < 2) refuse(400, 'query', 'q: at least 2 characters');
+    const lim = q.get('limit') === null ? 50 : Number(q.get('limit'));
+    if (!Number.isSafeInteger(lim) || lim < 1 || lim > 200) refuse(400, 'body', 'limit: 1 to 200');
+    const one = q.get('contact'), grp = q.get('group'), hits = [];
+    if (one !== null && grp !== null) refuse(400, 'body', 'contact or group, not both');
+    const hit = (base, t) => { const m = matchIn(t, want); if (m) hits.push({ ...base, text: t.slice(0, 1000), ...m }); };
+    if (grp === null) {
+      const by = new Map((one !== null ? [contactOf(one)] : carrier.contacts().contacts.filter((x) => !x.revoked && !hidden(x))).map((c) => [c.did, c]));
+      for (const r of recs) {
+        if ((r.kind !== 'in' && r.kind !== 'out') || !by.has(r.did) || r.photo || r.voice || r.file || [PHOTO_LABEL, VOICE_LABEL, FILE_LABEL].includes(r.label)) continue;
+        hit({ chat: r.did, kind: 'contact', name: by.get(r.did).name, n: r.n, dir: r.kind, at: r.at }, searchText(r));
+      }
+    }
+    if (one === null) {
+      const gs = G && groupsFile && carrier.platform.files.read(groupsFile) !== null ? G.list({ carrier, file: groupsFile }).filter((g) => grp === null || g.gid === grp) : [];
+      if (grp !== null && !gs.length) refuse(404, 'group_unknown', `no group ${grp} here`);
+      for (const g of gs) {
+        let items = [];
+        try { items = G.history({ carrier, file: groupsFile, group: g.gid }); } catch {}
+        for (const i of items) if (!i.photo && !i.voice) hit({ chat: g.gid, kind: 'group', name: g.name, n: i.mid, dir: i.mine ? 'out' : 'in', at: i.received ?? i.iat }, textOf(i.content));
+      }
+    }
+    return { hits: hits.reverse().sort((a, b) => b.at - a.at).slice(0, lim) };
+  }
   const routes = {
     'GET /api/state': async (_, q) => { if (draining) await draining; return state(Number(q.get('since') ?? 0) || 0); },
     'GET /api/me': () => {
@@ -1137,6 +1227,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       }
       return record({ kind: 'out', did: c.did, id: r.id, text, status: r.status, code: r.code, detail: r.detail, at, ...lab });
     }),
+    'GET /api/search': (_, q) => search(q),
     'GET /api/messages': (_, q) => {
       const x = contactOf(q.get('contact')), d = x.did, since = Number(q.get('since') ?? 0) || 0;
       const msgs = recs.filter((r) => (r.kind === 'in' || r.kind === 'out') && r.did === d && r.n > since).slice(-200);
@@ -1154,7 +1245,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       receipt(d);
       return { seq, messages: msgs.map((r) => ({ n: r.n, dir: r.kind, at: r.at, iat: r.iat ?? null, text: textOf(r.text), label: r.label ?? '', status: statusOf(r, x.seen_upto), code: r.code ?? null, detail: r.detail ?? null, link: r.link ?? null,
         ...(RE_LABEL.test(r.label ?? '') && { re: reOf(r) }),
-        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }), ...(r.voice && { voice: r.voice }), ...(r.file && { file: r.file }) })) };
+        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }), ...(r.voice && { voice: r.voice }), ...(r.file && { file: r.file }),
+        ...(r.approval && { approval: r.approval }), ...(r.question && { question: r.question }) })) };
     },
     'POST /api/sync': () => serial(async () => { await carrier.sync(); return { synced: true }; }),
     'POST /api/history/clear': (b) => serial(async () => {

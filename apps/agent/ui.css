@@ -238,6 +238,13 @@ button.meta { width: 100%; min-height: 24px; padding: 0; border: 0; background: 
 .msg .text ul, .msg .text ol { margin: 2px 0; padding-left: 1.4em; white-space: normal; }
 .msg .text li { white-space: pre-wrap; }
 .msg .meta .seen { color: var(--link); }
+/* Busy marks (UI-API.md): their agent works on a turn: one turning ring after the thread, never a message; reduced motion: the word. */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { display: inline-block; flex: none; box-sizing: border-box; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; vertical-align: middle; animation: spin .9s linear infinite; }
+.msg.busy { display: flex; align-items: center; min-height: 40px; }
+.msg.busy .word { display: none; font-size: 14px; color: var(--text-2); }
+.busyline .spin { width: 12px; height: 12px; border-width: 2px; margin-right: 6px; }
+@media (prefers-reduced-motion: reduce) { .msg.busy .spin, .busyline .spin { display: none; } .msg.busy .word { display: inline; } }
 .big-ok { font-weight: 600; font-size: 20px; margin: 0; }
 .notice { align-self: center; text-align: center; font-size: 14px; color: var(--text-2); max-width: 90%; padding: var(--s2) var(--s3); background: var(--surface-2); border-radius: 12px; }
 .composer { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s2); padding: var(--s2); border-top: 1px solid var(--border); background: var(--bg); }
@@ -333,6 +340,8 @@ button.meta { width: 100%; min-height: 24px; padding: 0; border: 0; background: 
 .row .end b, .kv span + span { font-variant-numeric: tabular-nums; }
 button.card.tap.flex { display: flex; align-items: center; gap: var(--s3); }
 button.card.tap.flex .mid small { color: var(--text-2); }
+.msg.prompt { border-color: var(--accent); max-width: 90%; }
+.msg.prompt .btns { flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); } .msg.prompt .btns > .btn { flex: 1 1 40%; }
 .msg.pay { background: var(--surface); border: 1px solid var(--border); }
 .msg.pay b { display: block; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .msg .tag { display: block; font-size: 14px; color: var(--text-2); }
@@ -377,6 +386,12 @@ header.top.plain { border-bottom: 0; }
 .quote { display: block; text-align: left; font: inherit; color: inherit; background: none; border: 0; border-left: 3px solid var(--link); padding: 2px 8px; margin: 0 0 4px; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .quote b { display: block; font-size: .85em; }
 .msg.hl { outline: 2px solid var(--link); }
+/* Search (0.1.20): the hit marked in its row; the message a hit opened, flashed for 1.2 s (an outline only under reduced motion). */
+.mid > small.snip { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.row .snip mark { background: var(--accent-soft); color: inherit; border-radius: 2px; padding: 0 1px; }
+.msg.found { outline: 2px solid var(--link); animation: found 1.2s ease-out; }
+@keyframes found { from { box-shadow: 0 0 0 6px var(--link); } }
+@media (prefers-reduced-motion: reduce) { .msg.found { animation: none; } }
 
 /* A voice message (design/transfer.md "Voice"): play/pause, the waveform over its progress, the length; the recorder's sheet. */
 .voice { display: flex; align-items: center; gap: var(--s2); min-width: 200px; }

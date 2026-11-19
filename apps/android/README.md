@@ -126,6 +126,9 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
   at `/.big/<doc>` (409 once it changed); `big-write` / `big-flush` / `big-digest` / `big-drop` a partial in
   private storage; `big-land` moves it into Downloads (MediaStore, pending until whole; Android 9 asks the storage
   permission); `big-open`; `big-awake` keeps the screen on while a transfer moves.
+- Share into sigelo (0.1.20): a share target (`ACTION_SEND`: text, pictures, any file; no new permission). The shell holds one share,
+  the latest winning, and tells the page `{ev:"share"}` (behind the lock); `share-take` makes a file a doc of the profile, sent as a
+  picked one is; `share-drop`. A `file://` or this app's own URI is refused.
 
 The page comes from the APK at `https://appassets.androidplatform.net/` (served by the app, never
 fetched); nothing else loads, links open in the browser. JavaScript on, file access off, mixed content

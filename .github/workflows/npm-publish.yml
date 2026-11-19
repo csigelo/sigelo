@@ -110,6 +110,7 @@ jobs:
             echo "DONE=1" >> "$GITHUB_ENV"
           else
             echo "to publish:$left"
+            echo "LEFT=$left" >> "$GITHUB_ENV"
           fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 (tag v7)
         if: env.DONE != '1'
@@ -137,20 +138,66 @@ jobs:
           cmp "$RUNNER_TEMP/rel/SHA256SUMS" "$OUT/SHA256SUMS" || {
             diff "$RUNNER_TEMP/rel/SHA256SUMS" "$OUT/SHA256SUMS" || true
             echo "::error title=SHA256SUMS differ::this build of $TAG is not the released one; nothing published. Only sigelo-verify lines differ: the release's go/go.mod toolchain line decides the Go version"; exit 1; }
-      # trusted publishing needs npm >= 11.5.1; node 22 ships npm 10. After the build, so the build
-      # runs with the same npm as conformance.yml's release-build.
-      - run: npm install -g npm@11 --no-audit --no-fund && npm --version
+      # Before the first publish: npm's OIDC exchange (the one `npm publish` makes) for every package
+      # still to publish. A package with no trusted publisher on npmjs (a new one, such as
+      # sigelo-key-agent before its first manual publish, release/RELEASE.md step 8) stops the job
+      # here with nothing published, not after the packages before it went out.
+      - name: every package left has a trusted publisher
         if: env.DONE != '1'
+        run: |
+          node -e '
+            (async () => {
+              const u = process.env.ACTIONS_ID_TOKEN_REQUEST_URL + "&audience=" + encodeURIComponent("npm:registry.npmjs.org");
+              const tok = (await (await fetch(u, { headers: { authorization: "bearer " + process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN } })).json()).value;
+              let bad = 0;
+              for (const p of process.argv.slice(1)) {
+                const r = await fetch(`https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(p)}`, { method: "POST", headers: { authorization: `Bearer ${tok}`, "content-type": "application/json", "npm-command": "publish" }, body: "{}" });
+                const body = (await r.text()).replace(/"token":"[^"]+"/, "\"token\":\"<redacted>\"").slice(0, 300);
+                if (r.ok) { console.log(`${p}: trusted publisher ok (${r.status})`); continue; }
+                console.log(`::error title=no trusted publisher::${p}: ${r.status} ${body}. Nothing published. A new package: publish it once by hand (release/RELEASE.md step 8), add the trusted publisher, re-run`);
+                bad++;
+              }
+              process.exit(bad ? 1 : 0);
+            })().catch((e) => { console.log(`::error title=oidc::${e.message}`); process.exit(1); });' $LEFT
+      # Trusted publishing needs npm >= 11.5.1; node 22 ships npm 10. One exact version: 11.21.1
+      # published v0.1.11-v0.1.14 green; 11.21.3 (out the day of the v0.1.18 run) bundles the same
+      # sigstore 4.1.1, so the version did not cause the 409, but a floating npm@11 is not reviewed.
+      # After the build: the build keeps the npm that conformance.yml's release-build uses.
+      - name: npm 11.21.1
+        if: env.DONE != '1'
+        run: |
+          npm install -g npm@11.21.1 --no-audit --no-fund
+          [ "$(npm --version)" = 11.21.1 ] || { echo "::error title=npm::npm is $(npm --version), not 11.21.1"; exit 1; }
+      # The Rekor 409 (v0.1.18, run 44385385994): sigstore-js wrote the provenance entry, its HTTP
+      # call to rekor.sigstore.dev then failed retryably, the automatic retry got 409 "an equivalent
+      # entry already exists" and npm stops, since sigstore builds its Rekor client with
+      # fetchOnConflict false (npm/cli#10078, sigstore/sigstore-js#1708; npm 11 and 12 alike). The
+      # package was never sent. A new `npm publish` signs with a fresh key and certificate, so its
+      # entry is a new one: retry that, at most three times. Any other error fails with npm's lines.
       - name: publish (sigelo first, the others depend on it)
         if: env.DONE != '1'
         run: |
+          log="$RUNNER_TEMP/publish.log"
           for p in $PKGS; do
             t="$OUT/$p-$V.tgz"
-            if [ "$(npm view "$p@$V" version 2>/dev/null || true)" = "$V" ]; then
-              echo "skip $p@$V: already on the registry"
-            else
-              npm publish "$t" --provenance --access public
-            fi
+            for n in 1 2 3 4; do
+              if [ "$(npm view "$p@$V" version 2>/dev/null || true)" = "$V" ]; then
+                echo "skip $p@$V: on the registry"; break
+              fi
+              [ "$n" = 4 ] && { echo "::error title=$p publish::three Rekor 409s in a row; nothing more published"; exit 1; }
+              npm publish "$t" --provenance --access public 2>&1 | tee "$log" && break
+              errs=$(grep '^npm error' "$log" | head -n 6 | tr '\n' ' ')
+              if grep -q 'TLOG_CREATE_ENTRY_ERROR' "$log" && grep -q '(409)' "$log"; then
+                echo "::warning title=$p Rekor 409::try $n: $errs; not published, signing again"
+                sleep 20
+              elif grep -Eq 'code (E409|EPUBLISHCONFLICT)' "$log"; then
+                # the registry has this version already (an earlier write that answered late):
+                # the integrity check below decides whether it is these bytes
+                echo "$p@$V: the registry says already published"; break
+              else
+                echo "::error title=$p publish::$errs"; exit 1
+              fi
+            done
             want=$(node -p '"sha512-" + require("crypto").createHash("sha512").update(require("fs").readFileSync(process.argv[1])).digest("base64")' "$t")
             # The registry shows a fresh version late at times (v0.1.11: over two minutes for two
             # packages, with the publish itself done): wait up to ten minutes before calling it wrong.

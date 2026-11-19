@@ -45,7 +45,7 @@ import { existsSync, mkdirSync, renameSync, rmSync, unwatchFile, watchFile, writ
 import { join, resolve } from 'node:path';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
-import { actingFile, contactLib, contactModule, debug, duration, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
+import { actingFile, contactLib, promptLine, contactModule, debug, duration, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
 import type { GroupItem, GroupLib } from './sigelo-agent-group.ts';
 import { takeLock } from './sigelo-agent-ui.ts';
 import { deviceRound, seatGate } from './sigelo-agent-device.ts';
@@ -64,8 +64,9 @@ interface Car {
   start(): Promise<void>; stop(): Promise<void>; sync(o?: { wait?: number }): Promise<void>;
   peek(): Item[]; take(pick: (m: Item, tier: string) => boolean): Item[];
   contacts(): { contacts: WatchContact[] };
-  send(to: string, content: string, o?: { label?: string }): Promise<{ status: string; detail?: string }>;
+  send(to: string, content: string | Record<string, unknown>, o?: { label?: string }): Promise<{ status: string; detail?: string }>;
   read(items: unknown[], o?: { local?: boolean }): Promise<{ to: string; error?: string }[]>;
+  busy(to: string, on: boolean, o?: { local?: boolean }): Promise<{ status: string }>;
 }
 /** A contact as the carrier lists it (the fields a host reads). */
 export interface WatchContact { name: string; did: string; current_did?: string; chain: string[]; revoked?: boolean; tier?: string }
@@ -92,9 +93,11 @@ export interface WatchOptions {
 export interface Watch {
   relay: string; close(): Promise<void>; idle(): Promise<void>; /** Resolves when the watcher stopped by itself: the seat went to another device. */ ended: Promise<string>;
   /** The contacts, as the carrier lists them; a send on the watcher's session. */
-  contacts(): WatchContact[]; send(to: string, text: string, label?: string): Promise<{ status: string; detail?: string }>;
+  contacts(): WatchContact[]; send(to: string, text: string | Record<string, unknown>, label?: string): Promise<{ status: string; detail?: string }>;
   /** Read marks on the watcher's session (carrier.mjs read): the senders of these items get a seen receipt, once per message. */
   read(items: unknown[]): Promise<void>;
+  /** A busy mark on the watcher's session (carrier.mjs busy): skipped for a contact that never said it reads them. */
+  busy(to: string, on: boolean): Promise<{ status: string }>;
 }
 
 // The same stored message: by its id; an item kept by an earlier version has none, and its sender,
@@ -103,7 +106,7 @@ const same = (a: Item, b: Item): boolean => (a.id !== undefined && b.id !== unde
   && JSON.stringify(a.content ?? null) === JSON.stringify(b.content ?? null) && a.path === b.path);
 const textOf = (m: Item): string => {
   if (m.type === 'file') return `file ${m.name ?? ''} (${m.size ?? 0} bytes) → ${m.path ?? ''}`;
-  const t = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+  const t = promptLine(m.label, m.content) ?? (typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
   // One line on a terminal: cut, and said so, with where the whole is (the message stays for inbox).
   return t.length > TEXT_MAX ? `${t.slice(0, TEXT_MAX)}… (${t.length - TEXT_MAX} more characters: sigelo-agent inbox)` : t;
 };
@@ -333,6 +336,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
       contacts: () => carrier.contacts().contacts,
       send: (to, text, label = '') => carrier.send(to, text, { label }),
       read: mark,
+      busy: (to, on) => carrier.busy(to, on),
       idle: async () => { await new Promise((r) => setTimeout(r, NOTICE_MS + 50)); await queue; },
       async close() {
         if (closed) return;
