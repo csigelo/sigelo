@@ -16,6 +16,10 @@
  * Approvals: canUseTool sends the operator one message, a 4-character code, the tool and a one-line
  * summary of its input (≤ SUMMARY_MAX); no answer within --approve-timeout (APPROVE_S): denied, and
  * the model is told why. AskUserQuestion is asked the same way; the operator's next message answers.
+ * In the app they are buttons (2026-11-19): the approval goes labelled APPROVAL_LABEL, {code, tool, summary, exp, text}
+ * (exp unix s; text the line as before, what an older app or CLI reads), a question QUESTION_LABEL, {question, options?,
+ * text}; the answer is still the text (`yes CODE`, an option's), the app's sent as a reply to it (`re`). Without tellObj,
+ * or longer than one part: the line alone, as before.
  * One session per process; a session that ends or fails is started again after a backoff (the
  * watcher's: 7.5 to 15 s, doubling to 120 s, back to the start once a session ran HEALTHY_MS), and
  * the operator is told "session restarted".
@@ -28,6 +32,10 @@
  * Progress (slice 3): each tool use the session reports (assistant tool_use blocks) → "working: <tool>:
  * <summary>" to the operator, at most one per PROGRESS[0] ms and PROGRESS[1] a turn, the rest counted at
  * the end ("working: … (+N more)"); PROGRESS[2] ms without one → "still working" once. --quiet-progress: none.
+ * Busy marks (always, --quiet-progress or not): carrier.mjs busy() to the operator, never a message: on at a
+ * turn's start, again every BUSY_REFRESH_MS while it runs (not while an approval or a question waits: the
+ * mark lapses there, BUSY_TTL_S), off right before its reply and when the session ends or goes down mid-turn.
+ * The app shows one turning wheel while it is on. Sent in order, a failure logged, never waited for.
  * The SDK seam: setSdk(fake) before startHost/hostCore; tests never load the real SDK or a model.
  */
 import { spawn, spawnSync } from 'node:child_process';
@@ -37,7 +45,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { actingFile, debug, duration, noIdentity, safeJson, safeText } from './sigelo-agent-contact.ts';
+import { actingFile, APPROVAL_LABEL, debug, duration, noIdentity, QUESTION_LABEL, safeJson, safeText } from './sigelo-agent-contact.ts';
 import { operatorsOf } from './sigelo-agent-device.ts';
 import { notFound, pathFor, samePath, spawnArgs, stop, which } from './sigelo-agent-exec.ts';
 import { startWatch, WATCH_BACKOFF, type Routed, type Watch, type WatchContact } from './sigelo-agent-watch.ts';
@@ -119,6 +127,8 @@ export function asData(m: { from: string; name: string; text: string; group?: st
 
 /** Progress lines: [ms between two, at most a turn, ms without a tool use before "still working"]; a summary's length. */
 export const PROGRESS: [number, number, number] = [20_000, 8, 60_000], PROGRESS_SUMMARY = 80;
+/** A running turn's busy mark is sent again so often (the receiver drops it after carrier.mjs BUSY_TTL_S, 45 s). */
+export const BUSY_REFRESH_MS = 20_000;
 /** One progress line for a tool use: Bash its command's first words, Read/Edit/Write the file's name, else the tool's name; redacted, the summary ≤ PROGRESS_SUMMARY. */
 export function progressLine(tool: string, input: Record<string, unknown>): string {
   const f = input['file_path'], c = input['command'];
@@ -347,6 +357,8 @@ export interface CoreOptions {
   sdk?: Sdk; load?: () => Promise<Sdk>;
   /** Sends one text to the operator (already redacted and cut); throws when it cannot. */
   tell(text: string, label?: string): Promise<void>;
+  /** Sends one object (canonical JSON: strings, integers) labelled (APPROVAL_LABEL, QUESTION_LABEL); none: the line by tell. */
+  tellObj?(content: Record<string, string | number | string[]>, label: string): Promise<void>;
   cwd?: string; permissionMode?: string; model?: string;
   /** --dangerously-skip-permissions: bypassPermissions, no approval messages (questions still asked). */
   skipPermissions?: boolean;
@@ -361,6 +373,8 @@ export interface CoreOptions {
   login?: () => LoginProc;
   /** Progress lines (PROGRESS, as [every ms, max, still ms]); false: none (--quiet-progress). */
   progress?: false | [number, number, number];
+  /** The busy mark to the operator (on: a turn runs); throws when it cannot. busyMs: its refresh (BUSY_REFRESH_MS). */
+  busy?: (on: boolean) => Promise<void>; busyMs?: number;
   /** A turn from the operator begins (its message id, the watcher's or the spool's): the read mark (0.1.19). */
   read?(id: string): void;
   /** Nothing starts before it resolves (the relay connection); rejected: nothing starts. */
@@ -430,6 +444,13 @@ export function hostCore(o: CoreOptions): Core {
   const approvals = new Map<string, Waiter<boolean>>(), questions: Waiter<string>[] = [];
   const say = async (text: string, label = ''): Promise<void> => { for (const p of parts(plain(redact(text)))) await o.tell(p, label); };
   const tellQuietly = (text: string): Promise<void> => say(text).catch((e: Error) => log(`host: ${e.message}`));
+  // An approval or a question with buttons in the app: its fields redacted, `text` the line as say sends it.
+  const ask = async (line: string, label: string, f: Record<string, string | number | string[]>): Promise<void> => {
+    const text = plain(redact(line));
+    if (o.tellObj === undefined || text.length > PART_MAX) return say(line);
+    const red = (v: string | number | string[]): string | number | string[] => (typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(redact) : v);
+    await o.tellObj({ ...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, red(v)])), text }, label);
+  };
   const mine = (l: Turn[]): Turn[] => l.filter((t) => t.data === undefined);
 
   // Progress: one turn's (begun when the prompt gives the session a turn, ended at its result); sent in order, before the reply.
@@ -476,6 +497,30 @@ export function hostCore(o: CoreOptions): Core {
     }, Math.max(0, p.last + every - now));
   }
 
+  // Busy marks (the header's): in order, so an off never overtakes an on still in flight (one goes at once when
+  // none is); never awaited by a reply.
+  const busyMs = o.busyMs ?? BUSY_REFRESH_MS;
+  let busyTimer: NodeJS.Timeout | null = null, busyOn = false, bq: Promise<void> = Promise.resolve(), bn = 0;
+  const busySay = (on: boolean): void => {
+    const f = o.busy;
+    if (f === undefined) return;
+    const go = (): Promise<void> => { let p: Promise<void>; try { p = f(on); } catch (e) { p = Promise.reject(e); } return p.catch((e: Error) => log(`host: busy: ${e.message}`)).finally(() => { bn--; }); };
+    bq = ++bn === 1 ? go() : bq.then(go);
+  };
+  const busyArm = (): void => {
+    busyTimer = setTimeout(() => {
+      // Waiting for the operator is not Claude working: the mark lapses at their end until the turn goes on.
+      if (!(approvals.size > 0 || questions.length > 0)) busySay(true);
+      busyArm();
+    }, busyMs);
+  };
+  const busyStart = (): void => { busyStop(); if (o.busy === undefined) return; busyOn = true; busySay(true); busyArm(); };
+  function busyStop(): void {
+    if (busyTimer) clearTimeout(busyTimer);
+    busyTimer = null;
+    if (busyOn) { busyOn = false; busySay(false); }
+  }
+
   // Waits for the operator: v, or null when the time ran out, the turn was aborted or the session ended.
   function wait<T>(put: (w: Waiter<T>) => void, drop: () => void, signal: AbortSignal): Promise<T | null> {
     return new Promise((ok) => {
@@ -493,7 +538,9 @@ export function hostCore(o: CoreOptions): Core {
       let w!: Waiter<string>;
       const got = wait<string>((x) => { w = x; questions.push(x); }, () => { const i = questions.indexOf(w); if (i >= 0) questions.splice(i, 1); }, signal);
       const text = qs.map((q, i) => `${qs.length > 1 ? `${i + 1}. ` : ''}${q.question ?? ''}${(q.options ?? []).length ? `\n${(q.options ?? []).map((x, j) => `  ${j + 1}) ${x.label ?? ''}`).join('\n')}` : ''}`).join('\n');
-      try { await say(`question:\n${text}\nanswer with your next message${qs.length > 1 ? ', one line per question' : ''} (a number picks an option)`); } catch (e) { w.done(null); return { behavior: 'deny', message: `the question could not reach the operator: ${(e as Error).message}` }; }
+      // One question: its options as buttons; more: the text, answered in lines.
+      const opts = qs.length === 1 ? (qs[0]!.options ?? []).map((x) => String(x.label ?? '')).filter(Boolean) : [];
+      try { await ask(`question:\n${text}\nanswer with your next message${qs.length > 1 ? ', one line per question' : ''} (a number picks an option)`, QUESTION_LABEL, { question: qs.length === 1 ? String(qs[0]!.question ?? '') : text, ...(opts.length > 0 && { options: opts }) }); } catch (e) { w.done(null); return { behavior: 'deny', message: `the question could not reach the operator: ${(e as Error).message}` }; }
       const a = await got;
       return a === null ? { behavior: 'deny', message: `${late}: decide yourself or end the turn saying what you need` } : { behavior: 'allow', updatedInput: { ...input, answers: answersFor(qs, a) } };
     }
@@ -501,7 +548,8 @@ export function hostCore(o: CoreOptions): Core {
     if (skip) return { behavior: 'allow', updatedInput: input };
     const code = newCode(new Set(approvals.keys()));
     const got = wait<boolean>((x) => { approvals.set(code, x); }, () => { approvals.delete(code); }, signal);
-    try { await say(`approve ${code}? ${tool}: ${summary(input)}\nanswer: yes ${code} or no ${code}`); } catch (e) { approvals.get(code)?.done(null); return { behavior: 'deny', message: `the approval could not reach the operator: ${(e as Error).message}` }; }
+    const s = summary(input), exp = Math.floor((Date.now() + approveMs) / 1000);
+    try { await ask(`approve ${code}? ${tool}: ${s}\nanswer: yes ${code} or no ${code}`, APPROVAL_LABEL, { code, tool, summary: s, exp }); } catch (e) { approvals.get(code)?.done(null); return { behavior: 'deny', message: `the approval could not reach the operator: ${(e as Error).message}` }; }
     const yes = await got;
     return yes === true ? { behavior: 'allow', updatedInput: input }
       : yes === false ? { behavior: 'deny', message: 'the operator said no' }
@@ -516,7 +564,7 @@ export function hostCore(o: CoreOptions): Core {
     while (alive.on && !stopped) {
       const t = waiting.shift();
       if (t !== undefined) {
-        inTurn = t; progStart();
+        inTurn = t; progStart(); busyStart();
         const k = t.mark ?? t.id;
         if (t.data === undefined && k !== undefined) try { o.read?.(k); } catch {}
         yield { type: 'user', message: { role: 'user', content: t.text }, parent_tool_use_id: null };
@@ -534,7 +582,7 @@ export function hostCore(o: CoreOptions): Core {
     out = { kind, reason }; probing = false;
     // What the session had not answered is held, oldest first.
     for (const t of mine([...(inTurn ? [inTurn] : []), ...waiting.splice(0)])) kept.hold(t.text, t.id);
-    inTurn = null; progStop();
+    inTurn = null; progStop(); busyStop();
     log(`host: Claude is unavailable: ${reason}; tried again in ${Math.round(retryMs / 1000)} s`);
     if (fresh) await tellQuietly(kind === 'auth' ? AUTH_LINE : downLine(reason));
   }
@@ -586,11 +634,12 @@ export function hostCore(o: CoreOptions): Core {
         said = [];
         if (t?.id !== undefined) kept.done(t.id);
         if (probing) await back(probe && t !== null);
+        busyStop();
         try { await say(text || '(no text)', 'reply'); } catch (e) { log(`host: the answer did not reach the operator: ${(e as Error).message}`); }
       }
     } catch (e) { const msg = (e as Error).message; if (isAuthFailure(msg)) end = 'auth'; else end = 'failed'; why = `failed: ${msg}`; }
     if (upTimer) clearTimeout(upTimer);
-    progStop();
+    progStop(); busyStop();
     alive.on = false; (wake as (() => void) | null)?.();
     try { current?.close?.(); } catch {}
     current = null;
@@ -709,9 +758,9 @@ export interface HostOptions {
   quietProgress?: boolean;
   /** --others: anyone else's message spooled (default), or also given to the model as data. */
   others?: string;
-  /** Tests: carrier options, the backoffs, the round, the login. */
+  /** Tests: carrier options, the backoffs, the round, the login, the busy mark's refresh. */
   carrier?: Record<string, unknown>; backoff?: [number, number]; retry?: [number, number]; upMs?: number; failN?: number;
-  syncMs?: number; print?: (l: string) => void; login?: () => LoginProc; progress?: [number, number, number];
+  syncMs?: number; print?: (l: string) => void; login?: () => LoginProc; progress?: [number, number, number]; busyMs?: number;
 }
 export interface Host { relay: string; core: Core; watch: Watch; close(): Promise<void>; ended: Promise<string> }
 
@@ -748,6 +797,18 @@ export async function startHost(o: HostOptions): Promise<Host> {
     const c = op();
     if (c === null) throw new Error('no operator contact to send to (pair with the operator first)');
     const r = await w!.send(c.did, text, label);
+    if (r.status !== 'sent') note(`host: to ${c.name}: ${r.status}${r.detail ? ` (${r.detail})` : ''}`);
+  };
+  // The busy mark (carrier.mjs busy): skipped by the carrier for an operator app that never said it reads them.
+  const busy = async (on: boolean): Promise<void> => {
+    const c = op();
+    if (c === null) throw new Error('no operator contact to send to (pair with the operator first)');
+    await w!.busy(c.did, on);
+  };
+  const tellObj = async (content: Record<string, string | number | string[]>, label: string): Promise<void> => {
+    const c = op();
+    if (c === null) throw new Error('no operator contact to send to (pair with the operator first)');
+    const r = await w!.send(c.did, content, label);
     if (r.status !== 'sent') note(`host: to ${c.name}: ${r.status}${r.detail ? ` (${r.detail})` : ''}`);
   };
   // The operator's messages held while Claude is unavailable: the ids of what the watcher spooled for
@@ -787,7 +848,7 @@ export async function startHost(o: HostOptions): Promise<Host> {
     if (w !== null) void w.read([{ from: m.from, iat: m.iat }]);
   };
   const core = hostCore({
-    load: () => loadSdk(), tell, kept, start: started, read: readMark, login: o.login, cwd: o.cwd === undefined ? undefined : resolve(o.cwd), permissionMode: o.permissionMode, model: o.model,
+    load: () => loadSdk(), tell, tellObj, busy, busyMs: o.busyMs, kept, start: started, read: readMark, login: o.login, cwd: o.cwd === undefined ? undefined : resolve(o.cwd), permissionMode: o.permissionMode, model: o.model,
     skipPermissions: o.skipPermissions, approveMs: approve * 1000, backoff: o.backoff, retry: o.retry, upMs: o.upMs, failN: o.failN,
     progress: o.quietProgress ? false : o.progress,
   });
@@ -846,7 +907,8 @@ export const USAGE = `host claude [--identity <file>] [--cwd <dir>] [--permissio
   one Claude session (the Claude Agent SDK) for this identity, held until stopped: the operator's messages
   are turns in it, the answers go back to them; approvals reach them as "approve CODE? tool: …", answered
   "yes CODE" or "no CODE" (--approve-timeout, default 300 s: denied); --dangerously-skip-permissions: none
-  asked; "working: <tool>: …" lines while a turn runs (--quiet-progress: none). Anyone else's: spooled, the
+  asked; "working: <tool>: …" lines while a turn runs (--quiet-progress: none), and always a busy mark
+  (the app's turning wheel, never a message). Anyone else's: spooled, the
   operator told (--others data: also given to Claude as marked data, never an instruction). Claude unavailable (no SDK, failing, login expired): the
   operator told once, their messages kept and replayed when it is back; "login" from them signs in again.
   A watcher: never beside a watch or a page on the same file.`;

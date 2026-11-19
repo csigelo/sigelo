@@ -254,7 +254,9 @@ const same = (a, b) => Buffer.from(a).equals(Buffer.from(b));
 // private or loopback IPv4 address, no redirect followed, no header but Content-Type), tls (the
 // certificate and name checked against `ca`), streams, the keystore (AES-256-GCM, a key per alias;
 // "full" can be locked: cancelled), the form and the wipe, the app lock's settings, notifications (shown: state.notes) and
-// their open event (open(tag) now; pendingOpen: posted once right after the next connect, as a start by a tap).
+// their open event (open(tag) now; pendingOpen: posted once right after the next connect, as a start by a tap), and a share
+// from another app (share({text} | {name, type, bytes} | {uri}): held as SigeloBridge.shared holds it, told now and to each new
+// connect while held; a uri not another app's content refused; share-take makes the file a doc of the profile named).
 // hosts: name → { port: local port }.
 const PRIVATE = (h) => { const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h); if (!m) return false; const [a, b] = [Number(m[1]), Number(m[2])]; return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254); };
 function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
@@ -307,6 +309,15 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
         B.micRefusals = (B.micRefusals ?? 0) + 1; throw Object.assign(new Error('the microphone is off for sigelo: tap Voice again to allow it'), { check: 'mic_permission' });
       }
       case 'app-settings': B.settingsOpened = (B.settingsOpened ?? 0) + 1; return {};
+      // Share into sigelo (SigeloBridge share-take, share-drop): the share held, gone once taken or dropped.
+      case 'share-take': {
+        const h = state.share;
+        if (!h?.held) throw Object.assign(new Error('nothing shared'), { check: 'share' });
+        const profile = profileOf(m);
+        state.share = null;
+        return h.text !== undefined ? { text: h.text } : { ...newDoc(profile, h.name, h.bytes), type: h.type };
+      }
+      case 'share-drop': state.share = null; return {};
       default: throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
     }
   }
@@ -431,7 +442,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             }
             post({ id: m.id, ...st, notify: state.granted, notifyBlocked: state.denials >= 2 });
           }
-          else if (m.op.startsWith('big-') || m.op === 'mic' || m.op === 'app-settings') post({ id: m.id, ...bigOp(m) });
+          else if (m.op.startsWith('big-') || m.op.startsWith('share-') || m.op === 'mic' || m.op === 'app-settings') post({ id: m.id, ...bigOp(m) });
           else if (m.op === 'unlock') { state.forced.push(m.force === true); state.unlocks = (state.unlocks ?? 0) + 1; if (state.locked) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); post({ id: m.id }); }
           else throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
         } catch (e) { if (m.id !== undefined) post({ id: m.id, error: { check: e.check ?? 'connect', message: e.message } }); }
@@ -439,13 +450,23 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
       setTimeout(() => {
         target.dispatchEvent(new MessageEvent('message', { data: 'sigelo-bridge/0', ports: [port2] }));
         if (state.pendingOpen) { post({ ev: 'open', tag: state.pendingOpen }); state.pendingOpen = null; }
+        if (state.share) { post(state.share.ev); if (!state.share.held) state.share = null; }
       });
     },
   };
   const open = (tag) => current?.postMessage(JSON.stringify({ ev: 'open', tag }));
   const nudge = () => current?.postMessage(JSON.stringify({ ev: 'nudge' }));
+  // An app's share (MainActivity's ACTION_SEND → SigeloBridge.shared): the latest held, told to the page now when it is connected.
+  const share = ({ text, name, type = 'application/octet-stream', bytes, uri } = {}) => {
+    const own = uri !== undefined && !/^content:\/\/(?!io\.sigelo\.app(\.|\/|$))/.test(uri);
+    const ev = own ? { ev: 'share', error: { check: 'share', message: 'this file cannot be shared into sigelo' } }
+      : text !== undefined ? (text.length > 100_000 ? { ev: 'share', error: { check: 'share', message: 'the text is too long for a message (at most 100000 characters)' } } : { ev: 'share', text })
+        : { ev: 'share', name, type, size: bytes.length };
+    state.share = { ev, held: !ev.error, text: ev.error ? undefined : text, name, type, bytes };
+    if (current) { current.postMessage(JSON.stringify(ev)); if (ev.error) state.share = null; }
+  };
   const cut = () => { for (const s of live) s.destroy(); };
-  return { shell, target, state, log, keys, open, nudge, cut, bigFetch, connect: () => A.connectBridge({ shell, target }) };
+  return { shell, target, state, log, keys, open, nudge, share, cut, bigFetch, connect: () => A.connectBridge({ shell, target }) };
 }
 
 
@@ -1387,7 +1408,7 @@ try {
     const sh = fakeShell({ hosts: globalThis.HOSTS, ca: globalThis.CA }), b = await sh.connect();
     const platform = await A.androidPlatform({ bridge: b, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())), env: { relay: HOST } });
     const router = makeRouter({ platform, identity: () => a.store, options: { ...relayOpts, endpoints: appEnds, ...(transport && { transport }) } });
-    return { sh, router, call: (m, path, body) => router.call(m, path, body) };
+    return { sh, b, router, call: (m, path, body) => router.call(m, path, body) };
   }
   const ADA = agent('ada'), BO = agent('bo'), CY = agent('cy');
   const node = new nodeLib.Carrier({ identity: () => ({ secret: CY.secret, bundle: { v: 'sigelo/0', typ: 'bundle', genesis: CY.store.genesis, rotations: [], bindings: [], attestations: [], issuers: [] } }),
@@ -1432,6 +1453,25 @@ try {
     const back = await until(async () => X.sh.log.streams.length > s0 && (await X.call('GET', '/api/state')).body.me.online);
     await sleep(600);
     ok(quiet && back && X.sh.log.streams.length === s0 + 1, `wake: nothing while up; after a cut one reconnection, with the backoff, none beside it (${s0} → ${X.sh.log.streams.length})`);
+    // Share into sigelo (0.1.20), the page's path (ui.js share-to over the router): a text shared from another app lands as a
+    // message in the chat chosen; a file as a transfer offered there, its doc taken for this profile.
+    const shared = [];
+    X.b.onEvent((m) => shared.push(m), 'share');
+    X.sh.share({ text: 'shared from the browser https://example.org/x' });
+    await until(() => shared.length === 1, 2000);
+    const st = await X.b.shareTake('p1'), sent = await X.call('POST', '/api/send', { to: CY.did, text: st.text });
+    read = [];
+    ok(sent.status === 200 && await until(async () => { read.push(...(await node.inbox({ wait: 0.5 })).messages); return read.some((m) => m.content === 'shared from the browser https://example.org/x'); }),
+      `share → a text: the event, share-take, POST /api/send to the chat chosen → the Node agent reads it (${sent.status})`);
+    const fbytes = new TextEncoder().encode('a shared file\n'.repeat(500));
+    X.sh.share({ name: 'notes.txt', type: 'text/plain', bytes: fbytes });
+    await until(() => shared.length === 2, 2000);
+    // The first file to cy asks about direct first (ui.js transferCall's question), then goes as answered.
+    const sf = await X.b.shareTake('p1'), ask = await X.call('POST', '/api/transfers/send', { to: CY.did, doc: sf.doc }), tr = await X.call('POST', '/api/transfers/send', { to: CY.did, doc: sf.doc, direct: true });
+    const outs = (await X.call('GET', '/api/transfers')).body.out ?? [];
+    ok(shared[1].name === 'notes.txt' && shared[1].size === fbytes.length && ask.body.error?.check === 'direct_ask' && tr.status === 200 && /^[0-9a-f]{32}$/.test(tr.body.id ?? '')
+      && outs.some((r) => r.id === tr.body.id && r.name === 'notes.txt' && r.size === fbytes.length && r.sha256 === createHash('sha256').update(fbytes).digest('hex')),
+      `share → a file: the event (name, size), share-take → a doc, POST /api/transfers/send {to, doc} → a transfer to that chat (${tr.status} ${JSON.stringify(tr.body).slice(0, 160)})`);
     ok(browser.refused === 0 && browser.headers.length > 3 && browser.headers.every((h) => h.origin === undefined && h['sec-fetch-site'] === undefined),
       `the relay's browser rule (Origin, Sec-Fetch-Site → 403) never hit: ${browser.headers.length} requests, ${browser.refused} refused`);
   } finally {
@@ -1736,6 +1776,59 @@ try {
   ok((await big.hash(kept.doc)).sha256 === createHash('sha256').update(audio).digest('hex'), 'voice: the kept recording hashed in the shell as any file sent');
   const lu = await big.url(landed.uri);
   ok(lu.name === 'film.mkv' && lu.size === 2097152 && await checkOf(() => big.url('file:///etc/passwd')) === 'big', 'voice: a landed file as a doc to read back (content://media/ only)');
+}
+
+// ================================================================ share into sigelo (0.1.20; SigeloBridge share-take, share-drop,
+// {ev:"share"}; boot.mjs local.shared): held by the shell, told at a start and while running, the latest wins, taken for a profile
+{
+  const F = fakeShell({ mode: 'self' });
+  F.share({ text: 'cold start https://example.org/a' });
+  const bridge = await F.connect(), got = [];
+  await sleep(50);
+  bridge.onEvent((m) => got.push(m), 'share');
+  ok(A.OPS.includes('share-take') && A.OPS.includes('share-drop') && got.length === 1 && got[0].text === 'cold start https://example.org/a',
+    `share: a start by a share → {ev:"share", text} once the page's port is open, kept until a listener is set (${JSON.stringify(got)})`);
+  const bytes = new Uint8Array(70000).map((_, i) => i & 255);
+  F.share({ name: 'report.pdf', type: 'application/pdf', bytes });
+  await until(() => got.length === 2, 2000);
+  ok(got[1].name === 'report.pdf' && got[1].type === 'application/pdf' && got[1].size === 70000 && got[1].text === undefined, `share: a file while running → {ev:"share", name, type, size} at once (${JSON.stringify(got[1])})`);
+  // A new page (a reload) is told again while it is held; taken, nothing more.
+  const b2 = await F.connect(), got2 = [];
+  await sleep(50);
+  b2.onEvent((m) => got2.push(m), 'share');
+  const d = await A.profileBridge(b2, 'p2').shareTake('p2'), big2 = A.bigFiles(A.profileBridge(b2, 'p2'), { fetch: F.bigFetch });
+  ok(got2.length === 1 && got2[0].name === 'report.pdf' && /^[0-9a-f]{32}$/.test(d.doc) && d.name === 'report.pdf' && d.size === 70000 && d.type === 'application/pdf' && d.url.includes('profile=p2')
+    && (await big2.hash(d.doc)).sha256 === createHash('sha256').update(bytes).digest('hex') && await checkOf(() => A.bigFiles(b2, { fetch: F.bigFetch }).hash(d.doc)) === 'file',
+    'share: held across a reload (told to the new page); share-take → a doc of the profile named (hashed as a picked file), no file of another profile');
+  ok(await checkOf(() => b2.shareTake('p2')) === 'share', 'share: taken once; a second take refused "share" (nothing held)');
+  // The latest wins; Cancel drops it; the shell refuses another app's file:// and the app's own URIs, and a text over the limit.
+  F.share({ text: 'first' }); F.share({ text: 'second' });
+  ok((await b2.shareTake('p1')).text === 'second', 'share: a second share replaces the first');
+  F.share({ text: 'dropped' }); await b2.shareDrop();
+  ok(await checkOf(() => b2.shareTake('p1')) === 'share', 'share: share-drop (Cancel) → nothing held');
+  const n0 = got2.length;
+  F.share({ uri: 'file:///data/data/io.sigelo.app/files/identity.sealed' }); F.share({ uri: 'content://io.sigelo.app.photos/x.jpg' }); F.share({ text: 'x'.repeat(100_001) });
+  await until(() => got2.length === n0 + 6, 2000);
+  const errs = got2.slice(n0).filter((m) => m.error).map((m) => m.error.check);
+  ok(errs.length === 3 && errs.every((c) => c === 'share') && await checkOf(() => b2.shareTake('p1')) === 'share', `share: file://, the app's own provider and a text over 100 000 characters refused by the shell, nothing held (${errs})`);
+  // boot.mjs local.shared: on(fn) at a start by a share (set before the bridge is up), take() for the profile in use, drop().
+  const B = await import(pathToFileURL(join(HERE, 'boot.mjs')).href);
+  const memStore = () => { const m = new Map(); return { get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+  const F3 = fakeShell({ mode: 'self' });
+  F3.share({ name: 'IMG_1.jpg', type: 'image/jpeg', bytes: new Uint8Array(10).fill(7) });
+  const app = B.boot({ shell: F3.shell, target: F3.target, mqtt: mqttEsm, indexedDB: new FakeIDB(), storage: memStore(), session: memStore(), reload() {}, pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
+  app.ready.catch(() => {});
+  const seen = [];
+  app.local.shared.on((x) => seen.push(x));
+  await until(() => seen.length === 1, 3000);
+  const t = await app.local.shared.take();
+  ok(seen[0]?.name === 'IMG_1.jpg' && seen[0].type === 'image/jpeg' && seen[0].size === 10 && t.name === 'IMG_1.jpg' && t.url.includes('profile=p1') && F3.state.big.docs.has(`p1/${t.doc}`),
+    `local.shared: a start by a share → on(fn) gets {name, type, size}; take() → a doc of the profile in use (${JSON.stringify(seen)})`);
+  F3.share({ uri: 'file:///sdcard/x' }); F3.share({ text: 'hi' });
+  await until(() => seen.length === 3, 2000);
+  await app.local.shared.drop();
+  ok(seen[1]?.error?.check === 'share' && seen[2]?.text === 'hi' && F3.state.share === null && B.boot({ storage: memStore(), session: memStore(), indexedDB: new FakeIDB() }).local.shared === undefined,
+    'local.shared: a refusal as {error}, a text as {text}; drop() empties the shell; a page without the shell has no local.shared');
 }
 
 report();

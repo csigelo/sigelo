@@ -14,11 +14,34 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (tag v7)
+      # The registry refuses a version whose npm package is not there yet (2026-11-18: dispatched
+      # before npm-publish.yml, "version '0.1.18' was not found"). Wait up to 15 minutes for it;
+      # a version already in the MCP Registry is done, so a re-run is harmless.
+      - name: npm has the package, the registry not yet
+        run: |
+          v=$(node -p 'require("./apps/integrations/mcp/server.json").packages[0].version')
+          s=$(node -p 'encodeURIComponent(require("./apps/integrations/mcp/server.json").name)')
+          code=$(curl -sS --retry 3 -o /dev/null -w '%{http_code}' "https://registry.modelcontextprotocol.io/v0/servers/$s/versions/$v")
+          case $code in
+            200) echo "::notice title=nothing to publish::the MCP Registry has $v"; echo "DONE=1" >> "$GITHUB_ENV"; exit 0 ;;
+            404) ;;
+            *) echo "::error title=mcp registry::HTTP $code for $v"; exit 1 ;;
+          esac
+          for i in $(seq 1 30); do
+            code=$(curl -sS --retry 3 -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/sigelo-mcp/$v")
+            [ "$code" = 200 ] && { echo "sigelo-mcp@$v is on npm"; exit 0; }
+            [ "$code" = 404 ] || { echo "::error title=npm::sigelo-mcp@$v: HTTP $code"; exit 1; }
+            echo "waiting for sigelo-mcp@$v on npm ($i/30)"; sleep 30
+          done
+          echo "::error title=no npm package::sigelo-mcp@$v is not on npm after 15 minutes; run npm-publish.yml for v$v first"; exit 1
       - name: install mcp-publisher
+        if: env.DONE != '1'
         run: |
           curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" | tar xz mcp-publisher
           ./mcp-publisher --version
       - name: login (OIDC)
+        if: env.DONE != '1'
         run: ./mcp-publisher login github-oidc
       - name: publish
+        if: env.DONE != '1'
         run: ./mcp-publisher publish apps/integrations/mcp/server.json

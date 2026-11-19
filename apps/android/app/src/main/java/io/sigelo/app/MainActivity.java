@@ -72,6 +72,9 @@ import java.util.regex.Pattern;
  * the tag; the tag goes to the page as {ev:"open", tag} (onNewIntent; a start by the tap: once the
  * page's port is open). POST_NOTIFICATIONS is asked when the page asks (Android 13+).
  *
+ * Share into sigelo (the manifest's ACTION_SEND filter; SigeloBridge "share-take", "share-drop"): one text or one file
+ * from another app, at a start or onNewIntent, held by the bridge for the page as {ev:"share"} (a start: once its port is open).
+ *
  * Stay connected (StayConnected, SigeloBridge "stay"): with the switch on, the foreground service is started as the
  * app leaves the screen (onPause, still in front: allowed) and keeps this process, this WebView and its relay
  * connection alive; Back on the first screen then moves the task back instead of finishing it.
@@ -147,6 +150,8 @@ public final class MainActivity extends Activity {
         web.loadUrl(START);
         // Started by a tap on one of our notifications (not a restart that brings back the same intent).
         if (saved == null) opened(getIntent());
+        // Started by a share from another app (ACTION_SEND): held for the page (a restart does not bring it twice).
+        if (saved == null) shared(getIntent());
     }
 
     @Override
@@ -154,6 +159,7 @@ public final class MainActivity extends Activity {
         super.onNewIntent(i);
         setIntent(i);
         opened(i);
+        shared(i);
     }
 
     /** A notification's tap: its tag (checked: this activity is the launcher's, any app can start it) to the page, once. */
@@ -162,6 +168,17 @@ public final class MainActivity extends Activity {
         String tag = i.getStringExtra(SigeloBridge.EXTRA_OPEN);
         i.removeExtra(SigeloBridge.EXTRA_OPEN);
         bridge.opened(tag);
+    }
+
+    /**
+     * A share from another app (the manifest's ACTION_SEND filter): to the bridge, which holds one at a time (a second replaces
+     * it) and tells the page. The lock is asked as at any start or return (onStart): the page stays hidden until then.
+     */
+    private void shared(Intent i) {
+        if (i == null || !Intent.ACTION_SEND.equals(i.getAction()) || bridge == null) return;
+        // Opened again from the recent apps, the task's first intent comes back with it: that share was handled then.
+        if ((i.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return;
+        bridge.shared(i);
     }
 
     /** Set by the bridge (secure, door) while a new identity's words are on screen: Back does nothing then. Else Back is the page's. */

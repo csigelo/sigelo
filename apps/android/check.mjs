@@ -118,10 +118,17 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   ok(app['android:allowBackup'] === 'false' && app['android:dataExtractionRules'] === '@xml/data_extraction_rules' && app['android:debuggable'] === undefined && app['android:usesCleartextTraffic'] === undefined,
     'manifest: no backup, no transfer (data extraction rules), not debuggable by the manifest');
   const acts = all(man, 'activity');
-  ok(acts.length === 1 && acts[0].attrs['android:name'] === '.MainActivity' && acts[0].attrs['android:exported'] === 'true'
-    && all(acts[0], 'action').some((a) => a.attrs['android:name'] === 'android.intent.action.MAIN') && all(acts[0], 'category').some((a) => a.attrs['android:name'] === 'android.intent.category.LAUNCHER'),
-  'manifest: one activity, MainActivity, exported for the launcher only');
-  ok(all(man, 'receiver').length === 0 && all(acts[0], 'data').length === 0 && !perms.includes('android.permission.RECEIVE_BOOT_COMPLETED'), 'manifest: no receiver (none at boot), no URL handler');
+  // Two filters: the launcher's, and share into sigelo (0.1.20: ACTION_SEND alone, text, pictures, any file; no SEND_MULTIPLE).
+  const filters = acts.length === 1 ? all(acts[0], 'intent-filter') : [];
+  const names = (f, k) => all(f, k).map((a) => a.attrs['android:name']).join();
+  ok(acts.length === 1 && acts[0].attrs['android:name'] === '.MainActivity' && acts[0].attrs['android:exported'] === 'true' && filters.length === 2
+    && names(filters[0], 'action') === 'android.intent.action.MAIN' && names(filters[0], 'category') === 'android.intent.category.LAUNCHER' && all(filters[0], 'data').length === 0,
+  'manifest: one activity, MainActivity, exported: the launcher\'s filter and the share filter only');
+  const send = filters[1] ?? { kids: [] };
+  ok(names(send, 'action') === 'android.intent.action.SEND' && names(send, 'category') === 'android.intent.category.DEFAULT'
+    && all(send, 'data').map((d) => Object.keys(d.attrs).join() + '=' + d.attrs['android:mimeType']).join() === 'android:mimeType=text/plain,android:mimeType=image/*,android:mimeType=*/*',
+  'manifest: share into sigelo: ACTION_SEND (not SEND_MULTIPLE), category DEFAULT, mime types text/plain, image/*, */* only (no scheme, host or path)');
+  ok(all(man, 'receiver').length === 0 && all(man, 'data').every((d) => Object.keys(d.attrs).join() === 'android:mimeType') && !perms.includes('android.permission.RECEIVE_BOOT_COMPLETED'), 'manifest: no receiver (none at boot), no URL handler (no data but mime types)');
   // Stay connected (StayConnected.java): one foreground service of type specialUse, its subtype said, not exported, ending with the task.
   const sv = all(man, 'service'), prop = sv.length === 1 ? all(sv[0], 'property') : [];
   ok(sv.length === 1 && sv[0].attrs['android:name'] === '.StayConnected' && sv[0].attrs['android:exported'] === 'false' && sv[0].attrs['android:foregroundServiceType'] === 'specialUse'
@@ -266,6 +273,20 @@ ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\
     && /if \(port != null\) postOpen\(port, tag\);\s*else pendingOpen = tag;/.test(jbl) && /if \(pendingOpen != null\) \{\s*String tag = pendingOpen;\s*pendingOpen = null;\s*postOpen\(mine, tag\);/.test(jbl) && /put\("ev", "open"\)\.put\("tag", tag\)/.test(jbl)
     && /if \(typeof m\?\.ev === 'string'\) \{[\s\S]{0,400}?return;\n\s*\}\n\s*const w = waiting\.get\(m\?\.id\);/.test(pa),
     'open event: a tap (onNewIntent, or the start\'s intent) posts {ev:"open", tag}, kept until the page\'s port is open and posted once; the page routes ev messages to their listeners, never to a request waiting');
+}
+{
+  // Share into sigelo (0.1.20): ACTION_SEND at a start or onNewIntent to the bridge; a file another app's content URI only (never
+  // file://, never this app's own authorities: it would send the app's private files); one held, the latest wins; told to every new port.
+  const bf = java['BigFiles.java'];
+  ok(/setIntent\(i\);\s*opened\(i\);\s*shared\(i\);/.test(ma) && /if \(saved == null\) shared\(getIntent\(\)\);/.test(ma) && /Intent\.ACTION_SEND\.equals\(i\.getAction\(\)\)/.test(ma)
+    && /FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY\) != 0\) return;/.test(ma) && !/ACTION_SEND_MULTIPLE/.test(code(ma) + code(jbl)),
+    'share: ACTION_SEND handed to the bridge at a start (not a restart, not from the recent apps) and onNewIntent; SEND_MULTIPLE nowhere');
+  ok(/return "content"\.equals\(u\.getScheme\(\)\) && a != null && !a\.equals\(PhotoProvider\.AUTHORITY\) && !a\.equals\(pkg\) && !a\.startsWith\(pkg \+ "\."\);/.test(jbl)
+    && /if \(!foreign\(u\)\) \{\s*holdShare\(seq, null, null, null, refusedShare\(/.test(jbl) && /if \(seq != shareSeq\) return;/.test(jbl)
+    && /if \(shareEv != null\) \{\s*post\(mine, shareEv\);/.test(jbl) && /static final int SHARE_TEXT_MAX = 100_000;/.test(jbl) && /TEXT_MAX = 100_000/.test(read(REPO, 'apps', 'contact', 'page.mjs'))
+    && /JSONObject shared\(String profile, Uri u\)[\s\S]*?keepDoc\(profile, doc, "u:" \+ u\);\s*return describe\(profile, doc, "u:" \+ u\);/.test(bf)
+    && /case "share-take":\s*shareTake\(to, id, m\);/.test(jbl) && /if \(text == null && u == null\) \{\s*fail\(to, id, "share", "nothing shared"\);/.test(jbl),
+    'share: a file only another app\'s content URI (file:// and the app\'s own authorities refused), the latest share wins, told again to each new page; a text at most the page\'s TEXT_MAX; share-take makes the URI a doc of the profile named (as big-pick), refused "share" when nothing is held');
 }
 {
   // Stay connected (StayConnected.java; design/push.md §A): the process kept, not a socket of its own; no wake lock, no exact alarm, no boot start.

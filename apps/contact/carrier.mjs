@@ -39,7 +39,8 @@
 //                                            each contact with its four words (fingerprint),
 //                                            pair id, chain, ours (an operator attestation of mine marks it), tier, seen_upto
 //                                            (their newest seen receipt: my messages sealed at or before it were shown; null: none) and
-//                                            seen_peer (a receipt came: they read receipts), tier
+//                                            seen_peer (a receipt came: they read receipts), busy (their busy mark is on) and
+//                                            busy_peer (they take busy marks), tier
 //                                            (store.mjs: own, friend, quiet) and tier_by, prekeys: its
 //                                            bundle is here (false: messages wait for it), waiting: why they wait, or null;
 //                                            failed: pairing_failed events (code_expired: an answer that outlived its code) until inbox
@@ -76,6 +77,8 @@
 //                                            contact's link record (store.mjs setLink)
 //   await c.seen(to, upto)                 a seen receipt (SEEN_LABEL, the header's "Seen receipts") to contact to: every message of
 //                                            theirs sealed at or before upto (their iat, unix seconds; 0: none yet) was shown → as send
+//   await c.busy(to, on, { local })        a busy mark (BUSY_LABEL, the header's "Busy marks") to contact to: on (a turn runs)
+//                                            or off → as send, or { status: 'skipped' } for a contact that never said it takes them
 //   await c.read(items, { local })         read marks: a seen receipt to each sender of these inbox items, once per message
 //                                            (own contacts always, others as the app does) → [{ to, upto, status | error }]
 //   c.takeGroups()                         group.mjs's: the sigelo-group/1 messages received (never in inbox(), the
@@ -245,6 +248,13 @@
 //     known to read them, further ones only once one came back). A contact on an earlier version takes
 //     the first as a message with that label, and never sends one: its messages stay at one tick.
 //     Once paired, each side also sends one {seen: 0, name}: its display name (the "Names" below).
+//     Every receipt (the name's too) carries busy: true: this side takes busy marks (below).
+//   - Busy marks (label BUSY_LABEL, inside the envelope; 2026-11-19): {busy: true|false}, a hosted agent's "I am
+//     working on it" (sigelo-agent-host.ts): on at a turn's start and every 20 s while it runs, off before its reply.
+//     Taken here, never an inbox message, never logged, never an event `message`: the contact's busy_until (now +
+//     BUSY_TTL_S, 0 for off; any message or file of theirs ends it too), contacts() busy, an event `busy`. Sent
+//     only through busy() (BUSY_SEND), with expires now + BUSY_TTL_S (a stale one goes unsent), and only to a
+//     contact whose receipt said busy: true (busy_peer): an earlier version would show it as a message.
 //   - Presence (design/transfer.md §8 T0): a started carrier sets the will $sigelo/presence on its
 //     CONNECT and publishes, to each contact that may see it (store.mjs presenceOf: own agents
 //     always, others when the owner allowed them), one marker on presenceTopic(K, own original DID,
@@ -350,8 +360,8 @@ const EVENTS_MAX = 1000, INBOX_MAX = 1000;
 // newest is kept whatever its size). Labels it never holds: enrolment's, one of which carries a key,
 // devices', and links' (a live invite code).
 export const LOG_MAX = 500, LOG_BYTES = 4 * 1024 * 1024;
-// Labels whose messages carry keys, device material or a live code (enrol, device, link): never logged.
-export const UNLOGGED = /^sigelo-(identity|enrol|device|link|transfer)\//;
+// Labels whose messages carry keys, device material or a live code (enrol, device, link), and busy marks: never logged.
+export const UNLOGGED = /^sigelo-(identity|enrol|device|link|transfer|busy)\//;
 // Links (link.mjs, sigelo-link/1): never an inbox message. Kept apart in the state (st.links, at most
 // LINKS_MAX, the oldest go) for link.mjs handle(), which takeLinks() them; sent only by link.mjs
 // (send's internal: LINK_SEND), so a caller's label (an MCP client's, a model's) cannot forge one.
@@ -372,6 +382,8 @@ export const TRANSFER_LABEL = 'sigelo-transfer/0', TRANSFER_SEND = Symbol('sigel
 const TRANSFERS_MAX = 256;
 // Seen receipts (the header's): sent only with SEEN_SEND, never an inbox message.
 export const SEEN_LABEL = 'sigelo-seen/0', SEEN_SEND = Symbol('sigelo-seen send');
+// Busy marks (the header's): sent only with BUSY_SEND, never an inbox message; one is good for BUSY_TTL_S seconds.
+export const BUSY_LABEL = 'sigelo-busy/0', BUSY_SEND = Symbol('sigelo-busy send'), BUSY_TTL_S = 45;
 // Names (0.1.17: "the system allocated some random text" for a new contact). Once paired, each side tells the other its
 // display name (selfName) in a seen receipt {seen: 0, name}: an existing message older clients take as a receipt and
 // whose extra member they ignore (no new label, no new typ). The receiver files the contact under it only while the
@@ -1285,7 +1297,7 @@ export class Carrier {
     let n = null;
     try { n = theirName(this.#selfName()); } catch {}
     if (n === null) return;
-    this.#entry(st, did).outbox.push({ id: randomId(), label: SEEN_LABEL, content: { seen: 0, name: n } });
+    this.#entry(st, did).outbox.push({ id: randomId(), label: SEEN_LABEL, content: { seen: 0, name: n, busy: true } });
   }
 
   #note(st, now, ev) {
@@ -1559,6 +1571,8 @@ export class Carrier {
     } else if (r.body.label === SEEN_LABEL) {
       // A seen receipt (the header's): the highest kept; one malformed is counted, never an inbox message.
       const n = r.body.content?.seen, nm = theirName(r.body.content?.name);
+      // busy: true: they take busy marks (the header's "Busy marks").
+      if (r.body.content?.busy === true) this.#entry(st, c.did).busy_peer = true;
       if (nm !== null) {
         const all = store.load().s.contacts, rec = all[c.did];
         if (rec && (rec.name_from === 'auto' || rec.name_from === 'them') && rec.name !== nm) {
@@ -1576,6 +1590,11 @@ export class Carrier {
         e.seen_upto = Math.max(e.seen_upto ?? 0, n);
         events.push({ type: 'seen', from: c.did, name: c.name, upto: e.seen_upto });
       }
+    } else if (r.body.label === BUSY_LABEL) {
+      // A busy mark (the header's): good for BUSY_TTL_S, never an inbox message nor logged.
+      const e = this.#entry(st, c.did), on = r.body.content?.busy === true;
+      e.busy_until = on ? now + BUSY_TTL_S : 0;
+      events.push({ type: 'busy', from: c.did, name: c.name, on });
     } else if (r.body.label === DEVICE_LABEL) {
       // A device message (device.mjs): kept for the `device` verbs, never for inbox() nor onEvent's readers.
       const l = (st.devices ??= []);
@@ -1588,6 +1607,8 @@ export class Carrier {
       const id = idOf('sigelo-msg-id/0', c.did, r.epoch, r.n);
       const m = { id, from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now, last_resort: r.last_resort };
       received(st, id, c.did, now);
+      // A message ends the contact's busy mark (its reply is here).
+      this.#entry(st, c.did).busy_until = 0;
       // Plaintext at rest: kept only for inbox() (keep), and only so many (the header).
       if (this.keep) {
         st.inbox.push(m);
@@ -1723,6 +1744,7 @@ export class Carrier {
     const item = { type: 'file', id, from: c.did, contact: c.name, current_did: r.body.from, label: FILE_LABEL, name: p.name, size: p.size, sha256: p.sha256, path,
       iat: r.body.iat, received: now, last_resort: r.last_resort };
     received(st, id, c.did, now);
+    this.#entry(st, c.did).busy_until = 0;
     // Kept for inbox() as a message is (#onPeer), and so many at most.
     if (this.keep) {
       st.inbox.push(item);
@@ -3339,7 +3361,8 @@ export class Carrier {
             prekeys: pair !== null && theirPrekeys(c, e?.session, pair, now), waiting: e?.waiting ?? null, link: c.link ?? null,
             // Presence (the header's): what this contact sees of mine, and theirs as read now (null: not known).
             presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null,
-            seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true, via: c.via ?? null, name_from: c.name_from ?? null };
+            seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true,
+            busy: (e?.busy_until ?? 0) > now, busy_peer: e?.busy_peer === true, via: c.via ?? null, name_from: c.name_from ?? null };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay,
           ...(typeof p.short === 'string' && { short: p.short, short_exp: p.short_exp }), ...(p.renew && { renew: p.renew }) })),
@@ -3372,7 +3395,15 @@ export class Carrier {
   // A seen receipt (the header's "Seen receipts"): every message of to's sealed at or before upto was shown.
   async seen(to, upto, { local = false } = {}) {
     if (!Number.isSafeInteger(upto) || upto < 0) fail('body', 'upto: unix seconds, 0 for none yet');
-    return this.send(to, { seen: upto }, { label: SEEN_LABEL, local, internal: SEEN_SEND });
+    return this.send(to, { seen: upto, busy: true }, { label: SEEN_LABEL, local, internal: SEEN_SEND });
+  }
+
+  // A busy mark (the header's "Busy marks"): on, a turn runs for to; off, it ended. Only to a contact that
+  // said it takes them (busy_peer), else { status: 'skipped' }; unsent past BUSY_TTL_S.
+  async busy(to, on, { local = false } = {}) {
+    const peer = this.#read(({ store, st }) => st.peers[this.#resolve(store, to).did]?.busy_peer === true);
+    if (!peer) return { status: 'skipped', to, detail: 'this contact never said it takes busy marks' };
+    return this.send(to, { busy: on === true }, { label: BUSY_LABEL, local, internal: BUSY_SEND, expires: this.clock() + BUSY_TTL_S });
   }
 
   // Read marks (the header's "Seen receipts", 0.1.19): an agent's reader took these items (inbox, the MCP, a hook,
@@ -3416,6 +3447,7 @@ export class Carrier {
     if (label.startsWith('sigelo-group/') && internal !== GROUP_SEND) fail('body', `the label ${JSON.stringify(label)} is the group handler's own (sigelo-agent group send)`);
     if (label.startsWith('sigelo-transfer/') && internal !== TRANSFER_SEND) fail('body', `the label ${JSON.stringify(label)} is the transfer engine's own (sigelo-agent transfer)`);
     if (label.startsWith('sigelo-seen/') && internal !== SEEN_SEND) fail('body', `the label ${JSON.stringify(label)} is the seen receipts' own`);
+    if (label.startsWith('sigelo-busy/') && internal !== BUSY_SEND) fail('body', `the label ${JSON.stringify(label)} is the busy marks' own`);
     if (label.startsWith('sigelo-device/') && internal !== DEVICE_SEND) fail('body', `the label ${JSON.stringify(label)} is the device verbs' own (sigelo-agent device)`);
     if (!Array.isArray(contents) || contents.length === 0) fail('body', 'at least one message');
     for (const content of contents) {

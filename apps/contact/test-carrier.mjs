@@ -47,7 +47,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { connect } from 'mqtt';
 import { canonicalize, keygen, rotate, sign, verify, verifySig } from 'sigelo';
-import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_COST, POW_MAX, POW_MAX_OTHER, POW_SEARCHES, SEEN_LABEL, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, powCost, prekeysKey, retentionOf, seal, solvePow, unseal } from './carrier.mjs';
+import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_COST, POW_MAX, POW_MAX_OTHER, POW_SEARCHES, SEEN_LABEL, BUSY_LABEL, BUSY_TTL_S, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, powCost, prekeysKey, retentionOf, seal, solvePow, unseal } from './carrier.mjs';
 import { MAX_ENVELOPE, header, pad } from './envelope.mjs';
 import { V as STORE_V, answerId, buildAnswer, checkAnswer, checkReply, inviteKeys, makeInvite, parseInvite } from './invite.mjs';
 import { isoWeek, pairId, topic } from './kdf.mjs';
@@ -764,6 +764,41 @@ try {
     await alice.inbox();
     ok(bobAt().seen_upto === now && !alice.history({ since: 0 }).messages.some((m) => m.label === SEEN_LABEL), 'an older receipt keeps the highest; none in the log');
     await refuses(() => bob.seen(A.original, 1.5), 'body', 'a receipt\'s time not whole seconds');
+  }
+
+  // ================================================================ busy marks (the header's): inside the envelope, never a message
+  {
+    const aliceAt = () => bob.contacts().contacts.find((x) => x.did === A.original), busyEv = () => events.bob.filter((e) => e.type === 'busy');
+    await refuses(() => alice.send('bob', { busy: true }, { label: BUSY_LABEL }), 'body', 'send under the busy marks\' label (busy() only)');
+    const sk = await bob.busy(A.original, true);
+    ok(sk.status === 'skipped' && stateOf(B).peers[A.original].outbox.length === 0 && bob.contacts().contacts.find((x) => x.did === A.original).busy_peer === false,
+      `busy(): skipped to a contact that never said it takes them (alice sent no receipt: ${sk.status})`);
+    ok(alice.contacts().contacts.find((x) => x.did === B.original).busy_peer === true, 'bob\'s seen receipt said busy: true: alice has him as busy_peer');
+    const e0 = busyEv().length, m0 = events.bob.filter((e) => e.type === 'message').length;
+    const r = await alice.busy('bob', true), got = await bob.inbox();
+    ok(r.status === 'sent' && got.messages.length === 0 && aliceAt().busy === true && busyEv().length === e0 + 1 && busyEv().at(-1).on === true && busyEv().at(-1).from === A.original
+      && events.bob.filter((e) => e.type === 'message').length === m0 && !bob.history({ since: 0 }).messages.some((m) => m.label === BUSY_LABEL),
+      'busy(true): sent; bob files it (contacts busy, event busy), no inbox message, no event message, nothing in the log');
+    await alice.busy('bob', false);
+    await bob.inbox();
+    ok(aliceAt().busy === false && busyEv().at(-1).on === false, 'busy(false): off at once');
+    await alice.busy('bob', true);
+    await bob.inbox();
+    const was = aliceAt().busy;
+    await alice.send('bob', say('the reply'));
+    const rep = (await bob.inbox()).messages;
+    ok(was === true && rep.length === 1 && aliceAt().busy === false, 'a message from alice ends her busy mark (her reply is here)');
+    await alice.busy('bob', true);
+    await bob.inbox();
+    const on = aliceAt().busy;
+    now += BUSY_TTL_S + 1;
+    ok(on === true && aliceAt().busy === false, `a mark not refreshed lapses after BUSY_TTL_S (${BUSY_TTL_S} s)`);
+    const q = await alice.busy('bob', true, { local: true });
+    now += BUSY_TTL_S + 1;
+    const e1 = busyEv().length;
+    await alice.inbox();
+    await bob.inbox();
+    ok(q.status === 'queued' && stateOf(A).peers[B.original].outbox.length === 0 && busyEv().length === e1 && aliceAt().busy === false, 'a mark queued past its expires: dropped unsent');
   }
 
   // ================================================================ read marks (0.1.19): what an agent's reader took, marked by code

@@ -291,6 +291,9 @@ else {
     await bcall('POST', '/api/send', { to: acc.contact.did, text: 'to the phone' });
     const back = await until(async () => ((await call('GET', `/api/messages?contact=${encodeURIComponent(bob!.did)}`)).body.messages as { text: string }[]).find((m) => m.text === 'to the phone'));
     ok('remote e2e: the other page gets it; its answer read through GET /api/messages, sealed', got !== undefined && back !== undefined);
+    // Search (scope read, UI-API.md "Search"): the page's own history, found through the control, sealed.
+    const found = await call('GET', `/api/search?q=${encodeURIComponent('TO THE phone')}&contact=${encodeURIComponent(bob!.did)}`);
+    ok('remote e2e: GET /api/search sealed, the answer found by its text in that chat', found.status === 200 && (found.body.hits as { text: string; dir: string }[]).some((x) => x.text === 'to the phone' && x.dir === 'in'), JSON.stringify(found.body).slice(0, 300));
     const inv2 = await bcall('POST', '/api/invite', { name: 'alice2' });
     const acc2 = await call('POST', '/api/accept', { code: inv2.short });
     const inv3 = await call('POST', '/api/invite', { name: 'later', long: true }), cancel = await call('POST', '/api/invite/cancel', { id: inv3.body.id });

@@ -330,6 +330,22 @@ export async function contactModule<T = Record<string, unknown>>(name: 'device' 
 const escape = (re: RegExp) => (s: string): string => s.replace(re, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 export const safeJson = escape(/[\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g);
 export const safeText = escape(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g);
+
+// A hosted agent's approval and question (sigelo-agent-host.ts "Approvals"): buttons in the app, one line here.
+export const APPROVAL_LABEL = 'sigelo-approval/0', QUESTION_LABEL = 'sigelo-question/0';
+/** One of them as one line (inbox, watch): `approval CODE: <tool>: <summary> (yes CODE / no CODE)`, `question: <q> [a | b]`; else null. */
+export function promptLine(label: unknown, content: unknown): string | null {
+  if (typeof content !== 'object' || content === null || Array.isArray(content)) return null;
+  const x = content as Record<string, unknown>, one = (v: unknown): string => String(v).replace(/\s+/g, ' ').trim();
+  if (label === APPROVAL_LABEL && typeof x['code'] === 'string' && /^[A-Za-z0-9]{4}$/.test(x['code']) && typeof x['tool'] === 'string' && typeof x['summary'] === 'string') {
+    return `approval ${x['code']}: ${one(x['tool'])}: ${one(x['summary'])} (yes ${x['code']} / no ${x['code']})`;
+  }
+  if (label === QUESTION_LABEL && typeof x['question'] === 'string') {
+    const opts = Array.isArray(x['options']) ? x['options'].filter((o): o is string => typeof o === 'string') : [];
+    return `question: ${one(x['question'])}${opts.length ? ` [${opts.map(one).join(' | ')}]` : ''}`;
+  }
+  return null;
+}
 const out = (x: unknown): void => console.log(safeJson(JSON.stringify(x, null, 2)));
 const note = (s: string): void => console.error(`sigelo-agent: ${safeText(s)}`);
 
@@ -887,7 +903,9 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         } catch (e) { putBack(held, got); throw e; }
         // Voice messages (sigelo-voice/0, a group msg's voice): their fields checked, one line each ([voice 0:42 name]).
         const V = await contactModule<{ voiceItems<B>(b: B): B }>('voice');
-        const r = V.voiceItems(merge(takeHeld(held), fresh));
+        const v0 = V.voiceItems(merge(takeHeld(held), fresh));
+        // A hosted agent's approval or question: its one line as `text` (promptLine).
+        const r = { ...v0, messages: (v0.messages as { label?: unknown; content?: unknown }[]).map((m) => { const l = promptLine(m?.label, m?.content); return l === null ? m : { ...m, text: l }; }) };
         if (!(await printInbox(r))) {
           putBack(held, r);
           note(`stdout: the inbox did not arrive (the reader went away); its ${r.messages.length} message(s) are kept for the next inbox`);

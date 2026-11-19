@@ -135,7 +135,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "b5fbfb7aadb0331b3e724bf1175d4d7b79c9929b24f5bdeb5732661398222d2f"
+   "sha256": "d9760ed750a88c4d380f34e474aba204a4791b78d20ac5f7683c7995fda52928"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
@@ -179,7 +179,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "21dda46f5685967d1707198a547220fc3d121a159030d9b19f519ad5bcf122af"
+   "sha256": "87ba533ef49ad6e0b6e023edc75328f58cda49ded1979e9ed455f0c2a45a93eb"
   },
   "vendor/contact/photo.mjs": {
    "from": "apps/contact/photo.mjs",
@@ -291,11 +291,11 @@
   },
   "vendor/ui.css": {
    "from": "apps/agent/ui.css",
-   "sha256": "9f6e93b98b645a2c354e1919f260232bd691e479e4f1801b8260a3dde45d272e"
+   "sha256": "137461dbe10e53f2aab183512c935c17ce5d56795c756d83f8d746e5d6b18eef"
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "6607eacd93f16ff055b7791ac65ec66dda2f960342682cb05011859b01094ee8"
+   "sha256": "b08c7b43009822557301ef6d2c539d54b50a90fbc10997bf7047c9e7067c7803"
   }
  }
 }

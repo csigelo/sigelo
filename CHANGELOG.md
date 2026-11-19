@@ -5,6 +5,11 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **ci:** npm publish survives Rekor's 409 on its own retried entry (npm/cli#10078): signs again, ≤ 3 tries; npm pinned to 11.21.1; no trusted publisher stops it before any publish; mcp-registry waits for npm.
+- **agent:** `host claude` shows it works as one turning wheel in the operator's chat (`sigelo-busy/0` busy marks: on, refreshed every 20 s, off before the reply); never a message, a count or a notification.
+- **app:** a hosted agent's approval is a card with Allow / Deny (`sigelo-approval/0`; Allowed, Denied or Expired after), a question's options are buttons (`sigelo-question/0`); a tap sends `yes CODE` as a reply.
+- **android:** share into sigelo: a text, link, photo or file shared from another app opens Share to… (the chats, a filter); a tap sends it there as a message or a file transfer, with the usual size rules.
+- **app:** search: in every chat (Chats) or one (its bar), on this device only (`GET /api/search`); case and accents ignored, the hit marked; a tap opens the chat at the message, flashed.
 - **agent:** `service install` (and `--host`) stops, disables and removes an earlier `sigelo-watch` service and timer of the same identity first; `status` shows two units on one identity; `remove` clears both.
 - **transfers:** a file ≤ 8 MiB to an own or compared contact that finds no direct path, or drops for 20 s, goes over the relay lane (`sigelo-file/0`) by itself; the receiver's record ends `relayed`, no ghost.
 - **transfers:** `transfer resume` takes an active-but-dropped transfer again; one stuck 10 minutes lists as interrupted; a channel silent 30 s counts as dropped.

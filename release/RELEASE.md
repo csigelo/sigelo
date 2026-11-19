@@ -34,10 +34,9 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never the p
    `gh workflow run macos.yml -R csigelo/sigelo --ref v<v>` (re-run if cancelled); record both.
 
 
-8. npm: the tag push runs `.github/workflows/npm-publish.yml` (OIDC;
-   trusted publishing): rebuilds the tag, waits ≤ 30 min for step 5, publishes
-   only if SHA256SUMS equals the release's; idempotent. Re-run:
-   `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`. No trusted publisher (a new
+8. npm: dispatch `gh workflow run npm-publish.yml -R csigelo/sigelo -f tag=v<v>`
+   (OIDC, npm 11.21.1): rebuilds the tag, waits ≤ 30 min for step 5, publishes
+   only if SHA256SUMS equals the release's; idempotent; a Rekor 409 re-signs. No trusted publisher (a new
    package): before step 4's push, `npm publish $S/a/<pkg>-<v>.tgz` (temporary-userconfig token;
    `sigelo` first, `sigelo-contact` second).
 9. `gh workflow run mcp-registry.yml -R csigelo/sigelo`; `site/deploy/mirror-release.sh v<v>

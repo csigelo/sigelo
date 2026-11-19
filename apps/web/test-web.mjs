@@ -470,6 +470,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     addEventListener(t, f) { (this.on[t] ??= []).push(f); }
     focus() { focus.el = this; }
     getContext() { return null; }
+    scrollIntoView(o) { (scroll.into ??= []).push([this, o]); }
     all() { return [this, ...this.kids.filter((k) => k instanceof El).flatMap((k) => k.all())]; }
     async click() { const ev = { preventDefault() {}, stopImmediatePropagation() {}, target: this }; for (const f of this.on.click ?? []) await f(ev); }
   }
@@ -754,16 +755,29 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   const chatRow = (n) => root.all().find((e) => e.tagName === 'BUTTON' && e.attrs['data-chat']?.startsWith(`did:sigelo:z${n}`));
   ok(chatRow('ana')?.textContent.includes('Agent') && chatRow('bo')?.textContent.includes('2 new messages') && !chatRow('bo').textContent.includes('secret') && chatRow('bo').all().some((e) => e.className === 'count' && e.textContent === '2') && chatRow('cy'),
     'Chats: a row per contact; my agent marked Agent; a friend\'s row a count only (2 new messages, the text not shown)');
+  {
+    // Busy marks (UI-API.md): my agent works on a turn: the small wheel and "working…" on its row, one wheel in its chat; no count.
+    const ana = G_.mine.find((c) => c.name === 'ana'), spins = (e) => e?.all().some((x) => x.className === 'spin') === true, counts = () => root.all().filter((e) => e.className === 'count').length;
+    const n0 = counts();
+    ana.busy = true; await poll();
+    ok(chatRow('ana')?.textContent.includes('working…') && spins(chatRow('ana')) && counts() === n0, `busy: my agent's row shows the wheel and "working…", no count (${chatRow('ana')?.textContent})`);
+    await sandbox.ui.go('chat', ana.did); await settle(); await poll();
+    const wheel = () => root.all().filter((e) => e.className === 'msg in busy');
+    ok(wheel().length === 1 && wheel()[0].attrs['aria-label'] === 'Working' && wheel()[0].attrs.role === 'status' && spins(wheel()[0]), 'busy: its chat shows one wheel after the thread (role status, "Working")');
+    ana.busy = false; await poll(); await poll();
+    ok(wheel().length === 0, 'busy off: the wheel goes');
+    await back();
+  }
   await chatRow('bo').click(); await settle(); await poll();
   ok(root.all().some((e) => e.className === 'who' && e.textContent.includes('bo') && e.textContent.includes('last seen 5 min ago')) && aria('Message', 'TEXTAREA') && aria('Send', 'BUTTON') && aria('Attach', 'BUTTON') && !btn('Pay'),
     'a chat: the name and "last seen 5 min ago" in the top bar; the composer (Attach, Message, Send); no Pay with the Wallet off');
-  // The bar: Back, the name (its avatar inside the one control), Pay with the Wallet on; nothing else to tap.
+  // The bar: Back, the name (its avatar inside the one control), Search this chat (0.1.20), Pay with the Wallet on; nothing else to tap.
   const barTaps = () => root.all().find((e) => e.tagName === 'HEADER').all().filter((e) => e.tagName === 'BUTTON');
   const bar0 = barTaps().map((e) => e.className);
   SET.wallet = true; await poll();
   const bar1 = barTaps().map((e) => e.attrs['aria-label'] ?? e.textContent.slice(0, 2));
-  ok(bar0.length === 2 && bar0[1] === 'who' && bar1.length === 3 && btn('Pay') && barTaps()[1].all().some((e) => /^av/.test(e.className)),
-    `a chat's bar: Back, the name (the avatar in it); Pay only with the Wallet on (${JSON.stringify([bar0, bar1])})`);
+  ok(bar0.length === 3 && bar0[1] === 'who' && bar1.length === 4 && bar1[2] === 'Search this chat' && btn('Pay') && barTaps()[1].all().some((e) => /^av/.test(e.className)),
+    `a chat's bar: Back, the name (the avatar in it), Search this chat; Pay only with the Wallet on (${JSON.stringify([bar0, bar1])})`);
   SET.wallet = false; await poll();
   ok(!btn('Pay'), 'the Wallet off again: no Pay');
   await root.all().find((e) => e.className === 'who').click(); await settle(); await poll();
@@ -805,6 +819,39 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       ok(hid0 === true && shown && counted && landed && back0 && jump().hidden === true && jump().parent?.className === 'composer',
         `jump to latest: hidden at the bottom; scrolled up a screen, shown; 2 new → its count, the view kept; a tap → the bottom, hidden, the count cleared (${JSON.stringify([hid0, shown, counted, landed, back0, W.scrollY])})`);
       MSGS[bo.did].splice(-2); delete body.scrollHeight; W.scrollY = 0; sandbox.seq += 1; await poll(); await poll();
+    }
+    // Search (0.1.20): the chat's bar opens the search in this chat; typed, asked once after the pause (GET /api/search with
+    // contact=), a hit's row with the hit marked; its tap goes back to the chat at the message (scrolled to, flashed 1.2 s);
+    // from Chats, the search in every chat, and Escape goes back.
+    {
+      const hit = { chat: bo.did, kind: 'contact', name: 'bo', n: 1, dir: 'in', at: t + 1, text: 'Dinner on Friday?', snippet: 'Dinner on Friday?', mark: [0, 6] };
+      routes['GET /api/search'] = (b, path) => ({ hits: /q=dinner/.test(path) ? [hit] : [] });
+      await aria('Search this chat', 'BUTTON').click(); await settle(); await poll();
+      const field = aria('Search in bo', 'INPUT'), asked = () => calls.filter(([, p]) => p.startsWith('/api/search'));
+      const opened = h1() === 'Search in bo' && focus.el === field && has('Two letters or more');
+      for (const v of ['d', 'di', 'dinner']) { field.value = v; fire(field, 'input'); }
+      await settle(); await settle();
+      const once = asked().length === 1 && asked()[0][1] === `/api/search?q=dinner&contact=${encodeURIComponent(bo.did)}`;
+      const row1 = root.all().find((e) => e.attrs['data-hit'] === `${bo.did} 1`), mk = row1?.all().find((e) => e.tagName === 'MARK');
+      for (const f of field.on.keydown ?? []) f({ key: 'Enter', preventDefault() {} });
+      await settle();
+      const kept = focus.el === field && asked().length === 1;
+      const T0 = sandbox.setTimeout, timers = [];
+      sandbox.setTimeout = (f, ms) => { timers.push([ms, scroll.into?.at(-1)?.[0]?.className]); return T0(f, ms); };
+      await row1.click(); await settle(); await poll(); await settle();
+      sandbox.setTimeout = T0;
+      const [el, how] = scroll.into?.at(-1) ?? [];
+      ok(opened && once && mk?.textContent === 'Dinner' && row1.textContent.includes('bo') && kept && h1() !== 'Search in bo' && aria('Search this chat', 'BUTTON')
+        && el?.attrs['data-n'] === '1' && how?.block === 'center' && timers.some(([ms, cls]) => ms === 1200 && / found$/.test(cls)) && !/found/.test(el.className),
+        `search: from the chat's bar, focus in the field, one ask after the pause (contact=), the hit marked; Enter keeps the focus; the hit → back in the chat at message 1, scrolled to the middle and flashed 1.2 s (${JSON.stringify([opened, once, mk?.textContent, kept, el?.attrs, timers.filter(([ms]) => ms === 1200)])})`);
+      await back();
+      await aria('Search messages', 'BUTTON').click(); await settle(); await poll();
+      const all1 = h1() === 'Search' && aria('Search messages', 'INPUT');
+      for (const f of aria('Search messages', 'INPUT').on.keydown ?? []) f({ key: 'Escape', preventDefault() {} });
+      await settle(); await poll();
+      ok(all1 && h1() === 'Chats', `search: from Chats, in every chat; Escape goes back (${h1()})`);
+      delete routes['GET /api/search'];
+      await chatRow('bo').click(); await settle(); await poll();
     }
     // A link in a message (0.1.17: "the link still doesn't work": it was plain text): an anchor to a new window (the shells
     // send it to the system's browser), the trailing full stop left out; its tap does not open "who signed it".
@@ -2138,6 +2185,62 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     G6.sb.sigeloOpen?.(`chat:${bo.did}`); await settle(); await sleep(30); await G6.poll();
     ok(gp.length === 1 && gp[0].tag === `chat:${cy.did}` && gp[0].title === cy.name && gp[0].text === 'New message' && !JSON.stringify(gp).includes('secret') && typeof G6.sb.sigeloOpen === 'function'
       && G6.r.all().some((e) => e.className === 'who' && e.textContent.includes(bo.name)), `the GTK app: the bridge's notify op (name only), a tap through sigeloOpen opens the chat (${JSON.stringify(gp)})`);
+
+    // Share into sigelo (0.1.20; sigeloLocal.shared, the Android shell's ACTION_SEND): "Share to…" over the chats, a tap sends and
+    // opens that chat; a text by POST /api/send or /api/groups/send, a file by POST /api/transfers/send {to | group, doc}; Cancel drops.
+    {
+      const SHR = { on: null, taken: 0, drops: 0, next: null };
+      const S6 = mk({ shared: { on: (f) => { SHR.on = f; }, take: async () => { SHR.taken++; return SHR.next; }, drop: async () => { SHR.drops++; } } });
+      const sendWas = routes['POST /api/send'], tsendWas = routes['POST /api/transfers/send'], SENT = [];
+      routes['POST /api/send'] = (b) => { SENT.push(['send', b]); return { n: 97, at: now(), kind: 'out', did: b.to, id: 'x', text: b.text, status: 'sent' }; };
+      routes['POST /api/transfers/send'] = (b) => { SENT.push(['transfer', b]); return { id: 'ef'.repeat(16), state: 'offered' }; };
+      const bo = G_.contacts[0], cy = G_.contacts[1], scr = () => S6.r.all().find((e) => e.attrs['data-screen'])?.attrs['data-screen'];
+      const rowsOf = () => S6.r.all().filter((e) => e.attrs['data-share'] !== undefined).map((e) => e.attrs['data-share']);
+      await settle(); await S6.poll();
+      ok(typeof SHR.on === 'function', 'share: ui.js listens to sigeloLocal.shared');
+      // A text (a link from the browser): the screen, its preview, every chat; the filter; a tap → POST /api/send, then that chat.
+      SHR.next = { text: 'look https://example.org/a' };
+      SHR.on({ text: 'look https://example.org/a' }); await settle(); await sleep(20); await S6.poll();
+      const all0 = rowsOf(), q6 = S6.K.aria('Filter chats', 'INPUT');
+      ok(scr() === 'share-to' && S6.K.h1() === 'Share to…' && S6.r.all().some((e) => e.attrs['data-share-preview'] === 'text' && e.textContent.includes('look https://example.org/a'))
+        && all0.includes(bo.did) && all0.includes(cy.did) && q6 && S6.K.btn('Cancel'), `share: a text opens Share to…: the text above, the chats (contacts and groups), a filter, Cancel (${all0.length} rows)`);
+      q6.value = cy.name; fire(q6, 'input'); await settle();
+      ok(rowsOf().join() === cy.did, `share: the filter keeps the chats by that name (${rowsOf()})`);
+      q6.value = ''; fire(q6, 'input'); await settle();
+      await S6.r.all().find((e) => e.attrs['data-share'] === bo.did).click(); await settle(); await sleep(20); await S6.poll();
+      ok(SHR.taken === 1 && SENT.at(-1)?.[0] === 'send' && SENT.at(-1)[1].to === bo.did && SENT.at(-1)[1].text === 'look https://example.org/a' && scr() === 'chat' && SHR.drops === 0,
+        `share: a tap on a chat → taken, POST /api/send {to, text}, then that chat opens (${JSON.stringify(SENT.at(-1))}, ${scr()})`);
+      // A file to a group: a second share replaces the first; the tap → POST /api/transfers/send {group, doc}, then the group.
+      GR.groups.push({ gid: 'c'.repeat(32), name: 'Lisbon', status: 'member', ver: 1, brake: 20, creator: ME, creator_name: null, mine: true, foreign: false, run: 0, unread: 0, quiet: false, last: null,
+        members: [{ did: ME, name: 'me', role: 'human', me: true, contact: false }, { did: bo.did, name: bo.name, role: 'human', me: false, contact: true }] });
+      bump();
+      SHR.on({ text: 'replaced' }); await settle(); await sleep(20);
+      SHR.next = { doc: 'ab'.repeat(16), name: 'report.pdf', size: 2_400_000, mtime: 1, url: 'https://app.invalid/.big/r', type: 'application/pdf' };
+      SHR.on({ name: 'report.pdf', type: 'application/pdf', size: 2_400_000 }); await settle(); await sleep(20); await S6.poll();
+      ok(scr() === 'share-to' && S6.r.all().some((e) => e.attrs['data-share-preview'] === 'file' && e.textContent.includes('report.pdf') && e.textContent.includes('2.4 MB')) && !S6.K.has('replaced')
+        && rowsOf().includes('c'.repeat(32)) && SHR.drops === 0, 'share: a second share replaces the first on the screen (not dropped: the shell holds the new one); a file: its name and size above');
+      await S6.r.all().find((e) => e.attrs['data-share'] === 'c'.repeat(32)).click(); await settle(); await sleep(20); await S6.poll();
+      ok(SENT.at(-1)?.[0] === 'transfer' && SENT.at(-1)[1].group === 'c'.repeat(32) && SENT.at(-1)[1].doc === 'ab'.repeat(16) && SENT.at(-1)[1].to === undefined && scr() === 'group',
+        `share: a file to a group → POST /api/transfers/send {group, doc}, then that group (${JSON.stringify(SENT.at(-1))}, ${scr()})`);
+      // A refused send stays on the screen with why; Cancel (and Back) drops the share in the shell; nothing pending: nothing to share.
+      routes['POST /api/transfers/send'] = () => ({ __error: { check: 'too_large', message: 'report.mkv is larger than the relay lane takes' } });
+      SHR.next = { doc: 'cd'.repeat(16), name: 'report.mkv', size: 9_000_000_000, mtime: 1, url: 'https://app.invalid/.big/m', type: 'video/x-matroska' };
+      SHR.on({ name: 'report.mkv', type: 'video/x-matroska', size: 9_000_000_000 }); await settle(); await sleep(20); await S6.poll();
+      await S6.r.all().find((e) => e.attrs['data-share'] === bo.did).click(); await settle(); await sleep(20); await S6.poll();
+      const refused = scr() === 'share-to' && S6.K.has('report.mkv is larger than the relay lane takes');
+      await S6.K.btn('Cancel').click(); await settle(); await S6.poll();
+      ok(refused && SHR.drops === 0 && scr() !== 'share-to', `share: a refused file says why and stays; Cancel leaves (a file already taken: nothing held in the shell to drop) (${scr()})`);
+      SHR.on({ text: 'never mind' }); await settle(); await sleep(20); await S6.poll();
+      await S6.sb.ui.back(); await settle(); await S6.poll();
+      await S6.sb.ui.go('share-to'); await settle(); await S6.poll();
+      ok(SHR.drops === 1 && S6.K.has('Nothing to share') && scr() === 'share-to', `share: Back drops a share not taken (share-drop); the screen with nothing pending says so (${SHR.drops})`);
+      // (The sandbox's timers are cut to 10 ms: the toast looked for at once.)
+      SHR.on({ error: { check: 'share', message: 'this file cannot be shared into sigelo' } });
+      ok(body.all().some((e) => e.className === 'toast' && e.textContent === 'this file cannot be shared into sigelo'), 'share: a refusal by the shell said in a toast');
+      GR.groups.pop(); bump();
+      if (sendWas) routes['POST /api/send'] = sendWas; else delete routes['POST /api/send'];
+      if (tsendWas) routes['POST /api/transfers/send'] = tsendWas; else delete routes['POST /api/transfers/send'];
+    }
     delete routes['POST /api/wallet/send'];
   }
 
@@ -2474,7 +2577,7 @@ try {
   const paired = await until(async () => (await call(A, 'GET', '/api/state')).body.groups.contacts.some((c) => c.did === CY.did));
   const cyRow = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
   ok(paired && cyRow.name === 'cy' && cyRow.words === node.contacts().contacts[0].fingerprint, `pair: the Node agent accepted the app's short code; both hold the same four words (${acc.status})`);
-  ok(Object.keys(cyRow).sort().join() === 'current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,name_from,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
+  ok(Object.keys(cyRow).sort().join() === 'busy,current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,name_from,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
     `a contact in groups: UI-API.md's keys (${Object.keys(cyRow).sort()})`);
   ok(await until(async () => (await call(A, 'GET', '/api/state')).body.me.online), 'GET /api/state: online once paired, the session up (MQTT.js over WebSocket, proof of work in the worker)');
   ok((await call(A, 'GET', '/api/state')).body.pending.paired.some((x) => x.id === inv.body.id && x.paired === CY.did), 'GET /api/state: pending.paired names the invite that paired');
@@ -2512,6 +2615,14 @@ try {
   await node.seen('ada', Math.floor(Date.now() / 1000));
   ok(await until(async () => (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages[0].status === 'seen'),
     'seen receipts: a receipt from the agent → the page\'s message seen (✓✓)');
+  // Busy marks (UI-API.md): the page's receipt said busy: true, so the agent's marks go; the page shows busy, never a message.
+  const cyAt = async () => (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
+  const nIn = async () => (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.length, m0 = await nIn();
+  const b1 = await node.busy('ada', true);
+  ok(nodeSide?.busy_peer === true && b1.status === 'sent' && await until(async () => (await cyAt())?.busy === true) && await nIn() === m0 && (await cyAt()).unread === 0,
+    `busy marks: the agent's busy(true) → the page's contact busy, no message, no unread (${b1.status})`);
+  await node.busy('ada', false);
+  ok(await until(async () => (await cyAt())?.busy === false), 'busy marks: busy(false) → off');
   ok((await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did).unread === 0, 'read once shown: unread 0');
   // Read marks (0.1.19, carrier.mjs read): the agent's reader took the page's message, so its carrier sends the mark by
   // code, once; the page shows ✓✓ on it.
