@@ -45,6 +45,8 @@ sigelo-agent reply --to <id> --status          # queued, published (in the conta
 
   `reply` goes to the message's sender, through the watcher if one runs. It is known for 30 days.
   "Fetched" is never known: sigelo/0 has no read receipt.
+- **Read marks** (0.1.19): an own message taken by a hook, or by `inbox`, the MCP or `host claude`
+  from the spool, sends its sender one seen receipt, by code, once: the operator's app shows ✓✓.
 - **The message id** is the carrier's, the same at every offer and in `inbox`, `history` and the
   MCP tools: 32 hex digits from SHA-256 of the sender's DID and the envelope's epoch and number (a
   file: its file id; a group message: `<gid>.<mid>`, answered in the group). Nothing of it is sent.
@@ -62,9 +64,11 @@ through operator hints (apps/contact/carrier.mjs): blinded, so other contacts le
 An enrolled agent must always get its owner's messages: `sigelo-agent service install` runs
 `watch --spool <identity>.spool --quiet` as a service of the machine (Linux: a systemd user unit,
 `Restart=always`; `loginctl enable-linger` keeps it after logout; macOS: a LaunchAgent; Windows: the
-`schtasks` step is printed), one per identity (`sigelo-watch-<tag>`, the tag from the file's path; an
-earlier install's `sigelo-watch` is kept). `service status` says whether a watcher holds the file and lists
-every sigelo unit here, `service remove` undoes it. Beside it, `inbox` and the MCP `sigelo_inbox` take what it spooled (the files deleted) instead
+`schtasks` step is printed), one per identity (`sigelo-watch-<tag>`, the tag from the file's path). An
+earlier fixed-name `sigelo-watch` (and its `sigelo-watch.timer`) running the same identity is stopped, disabled
+and removed first, one running another identity left and said: never two units on one identity file.
+`service status` says whether a watcher holds the file, lists every sigelo unit here with its identity and
+any two that claim one (a conflict); `service remove` undoes it, the earlier unit of that identity too. Beside it, `inbox` and the MCP `sigelo_inbox` take what it spooled (the files deleted) instead
 of logging in. `init --enrol <code> --service` installs it once placed.
 
 ## One process per identity file

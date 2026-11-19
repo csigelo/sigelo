@@ -76,6 +76,8 @@
 //                                            contact's link record (store.mjs setLink)
 //   await c.seen(to, upto)                 a seen receipt (SEEN_LABEL, the header's "Seen receipts") to contact to: every message of
 //                                            theirs sealed at or before upto (their iat, unix seconds; 0: none yet) was shown → as send
+//   await c.read(items, { local })         read marks: a seen receipt to each sender of these inbox items, once per message
+//                                            (own contacts always, others as the app does) → [{ to, upto, status | error }]
 //   c.takeGroups()                         group.mjs's: the sigelo-group/1 messages received (never in inbox(), the
 //                                            log or onEvent: a `group` event without content says one came), taken
 //   c.groupTier                            what this agent's relay told its last login of its group tier ($sigelo/notice
@@ -3371,6 +3373,37 @@ export class Carrier {
   async seen(to, upto, { local = false } = {}) {
     if (!Number.isSafeInteger(upto) || upto < 0) fail('body', 'upto: unix seconds, 0 for none yet');
     return this.send(to, { seen: upto }, { label: SEEN_LABEL, local, internal: SEEN_SEND });
+  }
+
+  // Read marks (the header's "Seen receipts", 0.1.19): an agent's reader took these items (inbox, the MCP, a hook,
+  // a host turn), so their senders get a seen receipt, by code, never the agent's own. Per contact the newest iat of
+  // its direct messages (group items and ones without iat: none); once per message (the state's read_sent). An own
+  // contact (its tier) always; anyone else as the app does: a first one, more only once theirs came (seen_peer).
+  // → [{ to, upto, status | error }], one per receipt sent; local: queued for a started carrier elsewhere.
+  async read(items, { local = false } = {}) {
+    const due = this.#locked(({ now, store, st }) => {
+      const tiers = store.tiers(now), newest = new Map(), out = [];
+      for (const m of Array.isArray(items) ? items : []) {
+        if (m === null || typeof m !== 'object' || typeof m.from !== 'string' || m.group !== undefined || !Number.isSafeInteger(m.iat) || m.iat <= 0) continue;
+        newest.set(m.from, Math.max(newest.get(m.from) ?? 0, m.iat));
+      }
+      for (const [from, upto] of newest) {
+        let c = null;
+        try { c = store.lookup(from); } catch {}
+        if (!c || c.revoked) continue;
+        const e = this.#entry(st, c.did);
+        if (upto <= (e.read_sent ?? 0)) continue;
+        if (tiers.get(c.did) !== 'own' && !e.seen_peer && e.read_told) continue;
+        e.read_sent = upto; e.read_told = true;
+        out.push({ to: c.did, upto });
+      }
+      return out;
+    });
+    const r = [];
+    for (const x of due) {
+      try { r.push({ ...x, status: (await this.seen(x.to, x.upto, { local }))?.status ?? null }); } catch (e) { r.push({ ...x, error: e.message }); }
+    }
+    return r;
   }
 
   // spool: every content after the first waits on disk (#spool), as a file's chunks do. local: queued

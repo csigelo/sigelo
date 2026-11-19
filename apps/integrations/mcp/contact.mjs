@@ -205,7 +205,7 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
     const sizes = r.messages.map((m) => JSON.stringify(m).length);
     let n = 0, len = JSON.stringify({ ...r, messages: [], more: sizes.length }).length;
     while (n < sizes.length && (n === 0 || len + 1 + sizes[n] <= PAGE)) len += (n > 0 ? 1 : 0) + sizes[n++];
-    return { text: JSON.stringify({ ...r, messages: r.messages.slice(0, n), more: sizes.length - n }), rest: r.messages.slice(n) };
+    return { text: JSON.stringify({ ...r, messages: r.messages.slice(0, n), more: sizes.length - n }), shown: r.messages.slice(0, n), rest: r.messages.slice(n) };
   };
   // What did not fit waits in the held inbox (a 0600 file beside the identity), so a restart between
   // two calls loses nothing. Nothing new is taken from the carrier until it is out. The file is read
@@ -262,8 +262,10 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
       held.putBack(file, { messages: all.messages.filter((m) => m?.from !== from), events: [], dropped: {} });
       all = { ...all, messages: all.messages.filter((m) => m?.from === from) };
     }
-    const { text, rest } = page(all);
+    const { text, shown, rest } = page(all);
     held.putBack(file, { messages: rest, events: [], dropped: {} });
+    // Read marks (0.1.19): what goes to the model is read; its senders' apps show ✓✓, by code (beside a watcher, queued for it).
+    try { const r = (await carrier(path).read?.(shown, { local })) ?? []; if (local && r.length > 0) held.kick(path); } catch (e) { console.error(`sigelo-mcp: read marks: ${e.message}`); }
     return { text, isError: false };
   };
   // A contact by name or DID → its original DID; else usage.

@@ -249,6 +249,8 @@ contact whose receipt came (`seen_peer`), or once to one not known to read them 
 (`seen: 0` when off). A contact on an earlier version takes that first one as a message labelled `sigelo-seen/0`, once, and never
 sends one: mine stay at one tick. Off (`seen_receipts: false`) sends none; theirs still show. A message of mine is `seen` when its
 `at` (taken before the send) is at or before the contact's `seen_upto`. Kept in `.ui.json` `seen` (`{sent, told}` per contact).
+An agent sends the same receipt by code (carrier.mjs `read`, 0.1.19), once per message, for what its reader took: `inbox`, the MCP's
+`sigelo_inbox`, a `watch` hook, a `host claude` turn; to its own contacts always, to others by the rule above. Its chat shows ✓✓.
 
 **Pictures** (design/ux1/notes.md "Decided"): mine per profile (`of: "me"`), a local one for any contact or group. Mine travels to each paired
 contact known to read pictures (its seen receipt came, or its own picture did) as one more end-to-end message, body `{label: "sigelo-picture/0",

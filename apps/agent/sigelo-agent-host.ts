@@ -361,6 +361,8 @@ export interface CoreOptions {
   login?: () => LoginProc;
   /** Progress lines (PROGRESS, as [every ms, max, still ms]); false: none (--quiet-progress). */
   progress?: false | [number, number, number];
+  /** A turn from the operator begins (its message id, the watcher's or the spool's): the read mark (0.1.19). */
+  read?(id: string): void;
   /** Nothing starts before it resolves (the relay connection); rejected: nothing starts. */
   start?: Promise<unknown>;
   log?(s: string): void;
@@ -417,7 +419,8 @@ export function hostCore(o: CoreOptions): Core {
   const load = o.load ?? (o.sdk !== undefined ? async () => o.sdk! : () => loadSdk());
   const kept = o.kept ?? memKept(), skip = o.skipPermissions === true;
   // data: a contact's message (asData), named for the reply; never held, replayed or said lost.
-  type Turn = { text: string; id?: string; data?: string };
+  // mark: the operator's message id for its read mark at the turn's start (id: a kept one's, done when answered).
+  type Turn = { text: string; id?: string; data?: string; mark?: string };
   const waiting: Turn[] = [];
   let wake: (() => void) | null = null, stopped = false, started = 0, inTurn: Turn | null = null, sleeping: (() => void) | null = null;
   let current: { close?(): void } | null = null;
@@ -512,7 +515,13 @@ export function hostCore(o: CoreOptions): Core {
   async function* prompt(alive: { on: boolean }): AsyncGenerator<SdkUser> {
     while (alive.on && !stopped) {
       const t = waiting.shift();
-      if (t !== undefined) { inTurn = t; progStart(); yield { type: 'user', message: { role: 'user', content: t.text }, parent_tool_use_id: null }; continue; }
+      if (t !== undefined) {
+        inTurn = t; progStart();
+        const k = t.mark ?? t.id;
+        if (t.data === undefined && k !== undefined) try { o.read?.(k); } catch {}
+        yield { type: 'user', message: { role: 'user', content: t.text }, parent_tool_use_id: null };
+        continue;
+      }
       await new Promise<void>((r) => { wake = r; });
       wake = null;
     }
@@ -661,7 +670,7 @@ export function hostCore(o: CoreOptions): Core {
       if (a !== null) { void tellQuietly(`no approval ${a.code} waits (answered, timed out, or from an earlier session)`); return 'stale'; }
       const q = questions[0];
       if (q !== undefined) { q.done(text); return 'answer'; }
-      waiting.push({ text }); wake?.();
+      waiting.push({ text, ...(id !== undefined && { mark: id }) }); wake?.();
       return 'turn';
     },
     data(m) {
@@ -767,8 +776,18 @@ export async function startHost(o: HostOptions): Promise<Host> {
     done(id) { rmSync(join(spool, `${id}.json`), { force: true }); const i = held.indexOf(id); if (i >= 0) held.splice(i, 1); },
     forget() { held.length = 0; },
   };
+  // Read marks (0.1.19): the operator's message read once its turn starts, or once it answered an approval, a
+  // question or the login; by code (the watcher's session), never the model's. Its sender and time: as routed, or
+  // the spool's file (a kept one replayed).
+  const routed = new Map<string, { from: string; iat?: number }>();
+  const readMark = (id: string): void => {
+    let m = routed.get(id);
+    routed.delete(id);
+    if (m === undefined) try { m = JSON.parse(readFileSync(join(spool, `${id}.json`), 'utf8')) as { from: string; iat?: number }; } catch { return; }
+    if (w !== null) void w.read([{ from: m.from, iat: m.iat }]);
+  };
   const core = hostCore({
-    load: () => loadSdk(), tell, kept, start: started, login: o.login, cwd: o.cwd === undefined ? undefined : resolve(o.cwd), permissionMode: o.permissionMode, model: o.model,
+    load: () => loadSdk(), tell, kept, start: started, read: readMark, login: o.login, cwd: o.cwd === undefined ? undefined : resolve(o.cwd), permissionMode: o.permissionMode, model: o.model,
     skipPermissions: o.skipPermissions, approveMs: approve * 1000, backoff: o.backoff, retry: o.retry, upMs: o.upMs, failN: o.failN,
     progress: o.quietProgress ? false : o.progress,
   });
@@ -796,7 +815,11 @@ export async function startHost(o: HostOptions): Promise<Host> {
       asTurn(m.id, m.sender, { from: m.from, name, text: dataText(m) });
       return false;
     }
-    return core.input(turnText(m), m.id) !== 'held';
+    if (routed.size > 1000) routed.clear();
+    routed.set(m.id, { from: m.from, iat: m.iat });
+    const r = core.input(turnText(m), m.id);
+    if (r === 'held') routed.delete(m.id); else if (r !== 'turn') readMark(m.id);
+    return r !== 'held';
   };
   try {
     w = await startWatch({

@@ -501,9 +501,14 @@ try {
   const h2 = await cv('host', 'claude');
   ok('…and a second host → exit 1 (busy: the lock, whether or not the SDK is installed here)', h2.status === 1 && h2.stderr.includes('is watched by'), h2.stderr);
 
+  const t0 = t();
   await cw('send', 'agent', 'hello');
   ok('the operator\'s message → a turn in the live session; the answer comes back over sigelo, labelled reply', await opGets((s) => s === 'hi operator') !== undefined
     && got.find((m) => m.content === 'hi operator')?.label === 'reply' && turns.join() === 'hello', JSON.stringify(got));
+  // Read marks (0.1.19): the agent's newest seen receipt as the operator's carrier has it (contacts' seen_upto).
+  const uptoAt = async (run: typeof cw): Promise<number | null> => (JSON.parse((await run('contacts')).stdout || '{}') as { contacts?: { name: string; seen_upto: number | null }[] }).contacts?.find((c) => c.name === 'agent')?.seen_upto ?? null;
+  const u1 = await uptoAt(cw);
+  ok('host read marks (0.1.19): the turn\'s start sent the operator a seen receipt at the message\'s time, by code (the fake model makes no call)', u1 !== null && u1 >= t0 && u1 <= t(), String(u1));
   await cw('send', 'agent', 'run ls');
   const ask = await opGets((s) => s.startsWith('approve '));
   const ac = /^approve (\w{4})\? Bash: ls -la \/tmp/.exec(ask ?? '')?.[1];
@@ -516,6 +521,10 @@ try {
       && turns.join() === 'hello,run ls' && readdirSync(SPOOL).some((f) => JSON.parse(readFileSync(join(SPOOL, f), 'utf8')).content === `yes ${ac}`), JSON.stringify(got.slice(n0)) + turns.join());
   await cw('send', 'agent', `yes ${ac}`);
   ok('host: the operator\'s "yes CODE" answers the approval and is not a turn', await opGets((s) => s === 'ran: allow') !== undefined && turns.join() === 'hello,run ls', turns.join());
+  await opGets(() => false, 4000);
+  await cp('inbox', '--wait', '2');
+  const u3 = await uptoAt(cw), up = await uptoAt(cp);
+  ok('host read marks: the operator\'s "yes CODE" read too (a newer receipt); none to the pal (its messages only spooled)', u3 !== null && u1 !== null && u3 > u1 && up === null, JSON.stringify([u1, u3, up]));
   await cw('send', 'agent', 'leak');
   const leak = await opGets((s) => s.startsWith('tool said:'));
   ok('a token in the answer: redacted on the wire', leak !== undefined && !leak.includes(TOKEN) && !leak.includes(HEX) && !leak.includes('hunter2222') && leak.includes('[redacted]'), leak);

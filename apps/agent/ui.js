@@ -488,7 +488,7 @@
     S.drawn = key;
     S.leave?.(); S.leave = null;   // a screen that showed the words hides them
     dropSheet();
-    S.view = e.view; S.note = null; S.msgsSeq = -1; S.chip = null; S.tabs = null;
+    S.view = e.view; S.note = null; S.msgsSeq = -1; S.chip = null; S.tabs = null; S.jump = null;
     S.update = def.build(e.arg) ?? (() => {});
     if (!same) window.scrollTo?.(0, 0);
     // A new screen: the focus on its heading (said first by a screen reader), unless its update puts it in a field.
@@ -1126,6 +1126,32 @@
   }
   const atEnd = () => (window.innerHeight ?? 0) + (window.scrollY ?? 0) >= (document.body?.scrollHeight ?? 0) - 80;
   const toEnd = () => window.scrollTo?.(0, document.body?.scrollHeight ?? 0);
+  // Jump to latest (0.1.19: long agent chats): a round button above the composer once a chat is scrolled up by more than
+  // a screen, with how many messages came since; a tap lands on the newest and hides it, as reaching the bottom does. New
+  // messages while scrolled up bump the count and never move the view. J.el goes in the composer; J.saw(keys, end) after
+  // each draw: the keys of the messages from others, end whether the view went to the bottom.
+  function jumpLatest() {
+    const n = h('span', { class: 'n', hidden: true });
+    const J = { count: 0, known: null };
+    const far = () => (document.body?.scrollHeight ?? 0) - (window.innerHeight ?? 0) - (window.scrollY ?? 0) > (window.innerHeight ?? 0);
+    const show = () => {
+      if (atEnd()) J.count = 0;
+      J.el.hidden = atEnd() || !(far() || J.count > 0);
+      n.hidden = J.count === 0; n.textContent = J.count > 99 ? '99+' : String(J.count);
+      J.el.setAttribute('aria-label', J.count ? `To the newest message, ${J.count} new` : 'To the newest message');
+    };
+    J.el = h('button', { type: 'button', class: 'jump', hidden: true, 'aria-label': 'To the newest message', onclick: () => { J.count = 0; toEnd(); show(); } }, icon('down'), n);
+    J.saw = (keys, end) => {
+      const fresh = J.known === null ? [] : keys.filter((k) => !J.known.has(k));
+      J.known = new Set(keys);
+      if (!end) J.count += fresh.length;
+      show();
+    };
+    J.check = show;
+    S.jump = J;
+    return J;
+  }
+  window.addEventListener?.('scroll', () => { try { S.jump?.check(); } catch {} }, { passive: true });
   // A message's text with its https:// (and http://) addresses tappable (0.1.17: "the link still doesn't work": they were
   // plain text). Each opens outside the app: a tab's new window; the Android shell and the GTK app send a link elsewhere to
   // the system's browser. The tap does not reach the bubble (its "who signed it"). Nothing else is markup: text stays text.
@@ -1327,6 +1353,8 @@
     const mine = () => kindOf(contactBy(did) ?? {}) === 'agent' && workerOf(did);
     const lead = h('span'), M = plusMenu(), RQ = quoteBar();
     const C = composer('Message', (t, clear) => act(() => backend.call('POST', '/api/send', { to: did, text: t, ...(RQ.get() && { re: RQ.get().n }) }), () => { clear(); RQ.set(null); S.msgsSeq = -1; }), lead, [RQ.el, M.tray], `c:${did}`);
+    const J = jumpLatest();
+    C.el.append(J.el);
     const heading = h('h1', { class: 'sr' });
     // The bar: Back, the name (avatar and name, one control: the chat settings, or my agent's page), Pay with the Wallet on.
     const payBtn = tbtn('Pay', () => pay(did)), payAt = h('span', null, walletOn() ? payBtn : null);
@@ -1408,6 +1436,7 @@
         m.dir === 'in' ? h('button', { type: 'button', class: 'meta', 'aria-label': `${hhmm(m.at)}. Check who signed it`, onclick: (ev) => { ev?.stopPropagation?.(); void go('signed', { did, n: m.n }); } }, hhmm(m.at))
           : h('span', { class: 'meta' }, hhmm(m.at), ticks(m))), pick(m))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'));
       if (end) toEnd();
+      J.saw(r.messages.filter((m) => m.dir === 'in').map((m) => m.n), end);
     };
   });
 
@@ -1949,6 +1978,8 @@
     }, glead, [RQ.el, GM.tray], `g:${gid}`);
     C.text.addEventListener('input', () => { const at = /(^|\s)@[^\s@]*$/.test(C.text.value); if (chips.hidden === at) { chips.hidden = !at; void refresh(); } });
     const mention = (name) => { C.text.value = C.text.value.replace(/@[^\s@]*$/, '') + `@${name} `; chips.hidden = true; C.fit(); C.text.focus?.(); void refresh(); };
+    const J = jumpLatest();
+    C.el.append(J.el);
     const foot = h('div', null, chips, C.el);
     const heading = h('h1', { class: 'sr' });
     mount(page({ who, body: [heading, alerts, thread], after: foot }));
@@ -1997,6 +2028,7 @@
         m.mentioned ? h('span', { class: 'help' }, 'Mentions you') : null, m.photo ? groupPhoto(m, grecs, g) : m.voice ? groupVoice(m, grecs, g) : msgText(m.text), h('span', { class: 'meta' }, hhmm(m.at))), gpick(m))),
       brake, !r.messages.length && !made ? h('span', { class: 'day' }, 'No messages yet.') : null);
       if (end) toEnd();
+      J.saw(r.messages.filter((m) => !m.mine).map((m) => m.mid), end);
     };
   });
 
