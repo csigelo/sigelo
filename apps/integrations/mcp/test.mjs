@@ -509,6 +509,11 @@ ${code.slice(60)}
       ok(!r.isError && r.data.messages.length === 0, 'relay: sigelo_inbox {tiers: [own, friend]}: not the quiet contact\'s', r.text);
       r = await a.call('sigelo_inbox', { tiers: ['quiet'] });
       ok(r.data?.messages.map((m) => m.content).join() === 'from a quiet contact', 'relay: sigelo_inbox {tiers: [quiet]}: it waited', r.text);
+      // Read marks (0.1.19): what sigelo_inbox handed the model gets its sender a seen receipt, by code, once.
+      const qIat = r.data?.messages[0]?.iat;
+      r = await b.call('sigelo_inbox', { wait: 3 });
+      const aliceAt = (await b.call('sigelo_contacts')).data?.contacts?.find((c) => c.did === aDid);
+      ok(Number.isSafeInteger(qIat) && aliceAt?.seen_upto === qIat && aliceAt.seen_peer === true && r.data?.messages.length === 0, 'read marks: the message sigelo_inbox gave the model → a seen receipt to bob at its iat, no message', JSON.stringify([qIat, aliceAt?.seen_upto, r.text]));
       ok((await a.call('sigelo_set_tier', { contact: bDid, tier: 'friend' })).data?.tier === 'friend', 'relay: sigelo_set_tier by DID, back to friend');
       // Presence: off by default, allowed and denied by name; listed by sigelo_contacts.
       ok(ac?.presence === 'deny' && ac?.online === null && 'last_seen' in ac, 'relay: sigelo_contacts lists presence (deny by default), online (null: not known) and last_seen', JSON.stringify(ac));

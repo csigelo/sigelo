@@ -2,7 +2,7 @@
 // sigelo-agent watch and the tiers (WATCH.md, apps/contact/store.mjs).
 //   node test-watch.ts   (SKIPs without relay/ and its node_modules)
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTestRelay, tmpHome } from './test-helpers.ts';
@@ -30,6 +30,15 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
       return w;
     };
     const until = async (f: () => boolean, ms = 30000): Promise<boolean> => { const e = Date.now() + ms; while (!f() && Date.now() < e) await new Promise((r) => setTimeout(r, 200)); return f(); };
+    // Alice's newest seen receipt as n has it (read marks, 0.1.19: contacts' seen_upto), n's inbox run until it is want.
+    const uptoOf = async (n: string, want: unknown, ms = 20000): Promise<unknown> => {
+      let u: unknown = null;
+      for (const end = Date.now() + ms; u !== want && Date.now() < end;) {
+        await cli(n, 'inbox', '--wait', '2');
+        u = (JSON.parse((await cli(n, 'contacts')).stdout || '{}') as { contacts?: { name: string; seen_upto: unknown }[] }).contacts?.find((c) => c.name === 'alice')?.seen_upto ?? null;
+      }
+      return u;
+    };
     const lines = (f: string): Record<string, unknown>[] => (existsSync(join(OUT, f)) ? readFileSync(join(OUT, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>) : []);
     let w1: ReturnType<typeof watcher> | null = null, w2: ReturnType<typeof watcher> | null = null;
     try {
@@ -88,6 +97,8 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
         && lines('pairing.jsonl')[0]!['type'] === 'paired' && lines('pairing.jsonl')[0]!['name'] === 'late' && /^\w+ \w+ \w+ \w+$/.test(String(lines('pairing.jsonl')[0]!['fingerprint'])), JSON.stringify(lines('pairing.jsonl')));
       for (const n of ['mine', 'pal', 'hotel']) await cli(n, 'send', 'alice', `again from ${n}`);
       ok('watch, --on-message: a new own message pushed in full', await until(() => lines('message.jsonl').length === 2) && lines('message.jsonl')[1]!['content'] === 'again from mine', JSON.stringify(lines('message.jsonl')));
+      const iats = lines('message.jsonl').map((m) => m['iat']), hu = await uptoOf('mine', iats[1]);
+      ok('watch read marks (0.1.19): an own message a hook took → a seen receipt to its sender, its time, by code (mine\'s seen_upto)', typeof iats[1] === 'number' && hu === iats[1], JSON.stringify([hu, iats]));
       ok('watch, --on-notice: the friend\'s, now 2 waiting, no content', await until(() => lines('notice.jsonl').length === 2) && lines('notice.jsonl')[1]!['count'] === 2
         && !readFileSync(join(OUT, 'notice.jsonl'), 'utf8').includes('from pal'), readFileSync(join(OUT, 'notice.jsonl'), 'utf8'));
       await new Promise((r) => setTimeout(r, 2000));
@@ -182,6 +193,8 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
       ok('inbox beside the spooling watcher: the spooled message, taken (its file deleted), said', fs1.length === 1 && fs1[0]!.id === task.id && fs1[0]!.content === 'a task for later' && spooled().length === 0
         && fromSpool.stderr.includes('from the watcher\'s spool') && w2.c.exitCode === null, fromSpool.stdout + fromSpool.stderr);
       ok('and a second inbox has none left', (JSON.parse((await cli('alice', 'inbox', '--tier', 'own')).stdout) as { messages: unknown[] }).messages.length === 0);
+      const su = await uptoOf('mine', (task as { iat?: number }).iat);
+      ok('watch --spool read marks: the spooled message read by inbox → its seen receipt, queued for the watcher, sent by it', typeof su === 'number' && su === (task as { iat?: number }).iat, JSON.stringify([su, task]));
       const rq = await cli('alice', 'reply', '--to', task.id, 'done:', 'the task');
       ok('reply --to <id> beside the watcher: queued for it (exit 0)', rq.status === 0 && (JSON.parse(rq.stdout) as { status: string; msg_id: string }).status === 'queued'
         && (JSON.parse(rq.stdout) as { msg_id: string }).msg_id === task.id && rq.stderr.includes('reply: queued for sigelo-agent watch'), rq.stdout + rq.stderr);
@@ -277,14 +290,15 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
   ok('service: one name per identity: 8 hex of its path\'s sha256 (unit, LaunchAgent label, task); another file, another name',
     /^sigelo-watch-[0-9a-f]{8}\.service$/.test(S.namesOf(id).unit) && S.namesOf(id).label === `io.sigelo.watch.${S.tagOf(id)}` && S.namesOf(id).task === `sigelo-watch-${S.tagOf(id)}` && S.tagOf(id) !== S.tagOf(`${id}2`) && S.plistOf(p).includes(`<string>io.sigelo.watch.${S.tagOf(id)}</string>`));
   {
-    // A fake systemctl and launchctl on a temp PATH (no SIGELO_SERVICE_DRY): each call recorded; is-active answers
-    // active for the units named in $D/active; launchctl print answers for the labels in it.
+    // A fake systemctl, launchctl and schtasks on a temp PATH (no SIGELO_SERVICE_DRY): each call recorded; is-active answers
+    // active for the units named in $D/active; launchctl print answers for the labels in it; schtasks /Query from $D/task-<name>.xml.
     // SIGELO_SERVICE_OS=linux: the systemd branch on any machine (Windows too); the fakes are Node scripts (fakeExe).
     const env0 = { PATH: process.env['PATH'] ?? '', HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_SERVICE_DIR: join(H, 'units'), SIGELO_SERVICE_OS: 'linux' };
     const fb = join(H, 'fakebin');
     mkdirSync(fb, { recursive: true });
-    for (const t of ['systemctl', 'launchctl']) fakeExe(fb, t, `const fs = require('fs'), path = require('path'), d = __dirname, a = process.argv.slice(2);
+    for (const t of ['systemctl', 'launchctl', 'schtasks']) fakeExe(fb, t, `const fs = require('fs'), path = require('path'), d = __dirname, a = process.argv.slice(2);
 fs.appendFileSync(path.join(d, 'calls'), ${JSON.stringify(t)} + ' ' + a.join(' ') + '\\n');
+if (a[0] === '/Query') { try { console.log(fs.readFileSync(path.join(d, 'task-' + a[2] + '.xml'), 'utf8')); } catch { console.error('ERROR: The system cannot find the file specified.'); process.exit(1); } process.exit(0); }
 if (a.includes('is-active') || a.includes('print')) {
   let on = [];
   try { on = fs.readFileSync(path.join(d, 'active'), 'utf8').split('\\n'); } catch {}
@@ -297,28 +311,56 @@ if (a.includes('is-active') || a.includes('print')) {
     const A = join(H, 'a.local.json'), B = join(H, 'b.local.json');
     const runA = cliIn({ ...env0, PATH: `${fb}${delimiter}${env0.PATH}`, SIGELO_IDENTITY: A }, H), runB = cliIn({ ...env0, PATH: `${fb}${delimiter}${env0.PATH}`, SIGELO_IDENTITY: B }, H);
     await runA('init', '--no-recovery'); await runB('init', '--no-recovery');
-    // An install from before: the legacy fixed name, for A.
-    mkdirSync(join(H, 'units'), { recursive: true });
-    writeFileSync(join(H, 'units', 'sigelo-watch.service'), S.unitOf(S.planFor(A, undefined, {} as NodeJS.ProcessEnv, CLI)));
-    const ia = await runA('service', 'install'), ib = await runB('service', 'install', '--host', 'claude', '--cwd', H, '--dangerously-skip-permissions');
-    const nb = S.namesOf(B).unit;
-    ok('service install: A\'s legacy unit kept under its name (rewritten, restarted); B gets its own, sigelo-watch-<tag>.service, the skip flag in it',
-      ia.status === 0 && ia.stdout.includes('sigelo-watch.service (the name of an earlier install, kept)') && !existsSync(join(H, 'units', S.namesOf(A).unit)) && calls().includes('systemctl --user enable --now sigelo-watch.service')
-        && calls().includes('systemctl --user restart sigelo-watch.service') && ib.status === 0 && existsSync(join(H, 'units', nb)) && calls().includes(`systemctl --user enable --now ${nb}`)
-        && S.parseUnit(readFileSync(join(H, 'units', nb), 'utf8')).exec.includes('--dangerously-skip-permissions') && ib.stdout.includes(`journalctl --user -u ${nb.replace('.service', '')}`), ia.stdout + ia.stderr + ib.stdout + ib.stderr);
+    // An install from before: the legacy fixed name for A (its path spelled through a symlink) and the timer that
+    // restarted it; installing A retires both (stopped, disabled, removed), then enables A's own unit.
+    const U = join(H, 'units'), na = S.namesOf(A).unit, nb = S.namesOf(B).unit;
+    mkdirSync(U, { recursive: true });
+    let A2 = join(H, 'a-link.json');
+    try { symlinkSync(A, A2); } catch { A2 = A; } // no symlink right (Windows): the same spelling
+    const legacy = (who: string): void => { writeFileSync(join(U, 'sigelo-watch.service'), S.unitOf(S.planFor(who, undefined, {} as NodeJS.ProcessEnv, CLI))); writeFileSync(join(U, 'sigelo-watch.timer'), '[Timer]\nOnBootSec=60\n'); };
+    legacy(A2);
+    const ia = await runA('service', 'install'), c1 = calls();
+    ok('service install: A\'s legacy sigelo-watch.service and .timer (same file, another path) retired before A\'s own unit is enabled; one line says so',
+      ia.status === 0 && ia.stdout.includes('retired the earlier sigelo-watch.timer and sigelo-watch.service') && !existsSync(join(U, 'sigelo-watch.service')) && !existsSync(join(U, 'sigelo-watch.timer'))
+        && c1.indexOf('systemctl --user disable --now sigelo-watch.timer') >= 0 && c1.indexOf('systemctl --user disable --now sigelo-watch.service') >= 0
+        && c1.indexOf('systemctl --user disable --now sigelo-watch.service') < c1.indexOf(`systemctl --user enable --now ${na}`) && existsSync(join(U, na)), ia.stdout + ia.stderr + c1);
+    // A legacy install of B: A's install leaves it and says so; B's (--host claude) retires it and gets its own unit.
+    legacy(B);
+    const ia2 = await runA('service', 'install'), c2 = calls();
+    ok('service install: a legacy unit of another identity left alone (no disable), said with its identity',
+      ia2.status === 0 && ia2.stdout.includes(`left the earlier sigelo-watch.timer and sigelo-watch.service: it runs another identity (${B})`) && existsSync(join(U, 'sigelo-watch.service'))
+        && c2.slice(c1.length).split('\n').every((l) => !l.includes('disable --now sigelo-watch')), ia2.stdout + c2.slice(c1.length));
+    const ib = await runB('service', 'install', '--host', 'claude', '--cwd', H, '--dangerously-skip-permissions');
+    ok('service install --host claude: B\'s legacy unit and timer retired, B\'s own sigelo-watch-<tag>.service enabled, the skip flag in it',
+      ib.status === 0 && ib.stdout.includes('retired the earlier sigelo-watch.timer and sigelo-watch.service') && existsSync(join(U, nb)) && calls().includes(`systemctl --user enable --now ${nb}`) && !existsSync(join(U, 'sigelo-watch.timer'))
+        && S.parseUnit(readFileSync(join(U, nb), 'utf8')).exec.includes('--dangerously-skip-permissions') && ib.stdout.includes(`journalctl --user -u ${nb.replace('.service', '')}`), ib.stdout + ib.stderr);
+    // A conflict, made by hand: the legacy unit and timer for A beside A's own unit.
+    legacy(A);
     writeFileSync(join(fb, 'active'), `${nb}\n`);
-    const st = await runA('service', 'status'), sj = JSON.parse(st.stdout) as { unit: string; legacy: boolean; installed: boolean; active: string; units: { name: string; identity: string; runs: string; legacy: boolean; active: string; mine: boolean }[] };
-    ok('service status: every sigelo unit listed (the legacy one, B\'s), each with its identity, what it runs, active or not; A\'s marked',
-      st.status === 3 && sj.unit === 'sigelo-watch.service' && sj.legacy && sj.installed && sj.active === 'inactive' && sj.units.length === 2
-        && sj.units.some((x) => x.name === 'sigelo-watch.service' && x.legacy && x.identity === A && x.runs === 'watch' && x.mine && x.active === 'inactive')
-        && sj.units.some((x) => x.name === nb && !x.legacy && x.identity === B && x.runs === 'host claude' && !x.mine && x.active === 'active'), st.stdout + st.stderr);
-    const ra = await runA('service', 'remove'), rb = await runB('service', 'remove');
-    ok('service remove: A\'s legacy unit removed (the one that exists), B\'s own; disable --now each', ra.status === 0 && rb.status === 0 && readdirSync(join(H, 'units')).length === 0
-      && calls().includes('systemctl --user disable --now sigelo-watch.service') && calls().includes(`systemctl --user disable --now ${nb}`), ra.stdout + rb.stdout);
+    const st = await runA('service', 'status'), sj = JSON.parse(st.stdout) as { unit: string; installed: boolean; active: string; units: { name: string; identity: string; runs: string; legacy: boolean; active: string; mine: boolean; timer?: string }[]; conflicts: { identity: string; units: string[] }[] };
+    ok('service status: every sigelo unit with its identity, what it runs, active or not; the legacy one with its timer; the conflict on A listed and said',
+      st.status === 3 && sj.unit === na && sj.installed && sj.active === 'inactive' && sj.units.length === 3
+        && sj.units.some((x) => x.name === 'sigelo-watch.service' && x.legacy && x.identity === A && x.runs === 'watch' && x.mine && x.timer === 'sigelo-watch.timer')
+        && sj.units.some((x) => x.name === nb && !x.legacy && x.identity === B && x.runs === 'host claude' && !x.mine && x.active === 'active')
+        && sj.conflicts.length === 1 && sj.conflicts[0]!.identity === A && sj.conflicts[0]!.units.sort().join(' ') === [na, 'sigelo-watch.service'].sort().join(' ')
+        && st.stderr.includes('service: conflict: ') && st.stderr.includes(`all run ${A}`), st.stdout + st.stderr);
+    const sb = JSON.parse((await runB('service', 'status')).stdout) as { conflicts: unknown[] };
+    const ra = await runA('service', 'remove'), c3 = calls();
+    const rb = await runB('service', 'remove');
+    ok('service remove: A\'s own unit and its legacy service and timer gone (disable --now each); B\'s own; B\'s status saw the same conflict (machine-wide)',
+      ra.status === 0 && rb.status === 0 && readdirSync(U).length === 0 && ra.stdout.includes(`removed ${join(U, na)}`) && ra.stdout.includes('retired the earlier sigelo-watch.timer and sigelo-watch.service')
+        && c3.includes(`systemctl --user disable --now ${na}`) && c3.includes('systemctl --user disable --now sigelo-watch.timer') && calls().includes(`systemctl --user disable --now ${nb}`) && sb.conflicts.length === 1, ra.stdout + rb.stdout + JSON.stringify(sb));
     ok('service remove with nothing installed: said, exit 0', (await runA('service', 'remove')).stdout.includes('nothing removed'));
+    ok('service: a legacy unit without --identity or SIGELO_IDENTITY runs the default identity (as sigelo-agent picks it); --identity wins',
+      S.identityOfRun(['node', 'cli', 'watch', '--quiet'], {}) === join(process.env['XDG_CONFIG_HOME'] && process.env['XDG_CONFIG_HOME'].startsWith('/') ? process.env['XDG_CONFIG_HOME'] : join(process.env['HOME'] ?? '', '.config'), 'moadim', 'sigelo.local.json')
+        && S.identityOfRun(['node', 'cli', 'watch'], { SIGELO_IDENTITY: A }) === A && S.identityOfRun(['node', 'cli', 'watch', '--identity', B], { SIGELO_IDENTITY: A }) === B && S.identityOfRun([], {}) === null);
     // macOS, on this machine (SIGELO_SERVICE_OS=darwin): the LaunchAgent per identity, launchctl faked.
     const runM = cliIn({ ...env0, PATH: `${fb}${delimiter}${env0.PATH}`, SIGELO_IDENTITY: A, SIGELO_SERVICE_OS: 'darwin' }, H), la = S.namesOf(A).label;
+    writeFileSync(join(U, 'io.sigelo.watch.plist'), S.plistOf(S.planFor(A, undefined, {} as NodeJS.ProcessEnv, CLI), 'io.sigelo.watch'));
     const im = await runM('service', 'install');
+    ok('service on macOS: A\'s legacy LaunchAgent io.sigelo.watch retired (bootout, removed) before A\'s own is bootstrapped, said',
+      im.stdout.includes('retired the earlier io.sigelo.watch') && !existsSync(join(U, 'io.sigelo.watch.plist')) && calls().indexOf(`launchctl bootout gui/${process.getuid?.() ?? 0}/io.sigelo.watch\n`) >= 0
+        && calls().indexOf(`launchctl bootout gui/${process.getuid?.() ?? 0}/io.sigelo.watch\n`) < calls().indexOf(`launchctl bootstrap gui/${process.getuid?.() ?? 0} ${join(U, `${la}.plist`)}`), im.stdout + im.stderr);
     writeFileSync(join(fb, 'active'), `${la}\n`);
     const sm = JSON.parse((await runM('service', 'status')).stdout) as { unit: string; active: boolean; units: { name: string }[] };
     const rm2 = await runM('service', 'remove');
@@ -326,7 +368,19 @@ if (a.includes('is-active') || a.includes('print')) {
       im.status === 0 && calls().includes(`launchctl bootstrap gui/${process.getuid?.() ?? 0} ${join(H, 'units', `${la}.plist`)}`) && sm.unit === la && sm.active === true && sm.units.length === 1
         && rm2.status === 0 && calls().includes(`launchctl bootout gui/${process.getuid?.() ?? 0}/${la}`) && !existsSync(join(H, 'units', `${la}.plist`)), im.stdout + im.stderr + JSON.stringify(sm));
     const w = await cliIn({ ...env0, SIGELO_IDENTITY: A, SIGELO_SERVICE_OS: 'win32' }, H)('service', 'install');
-    ok('service on Windows: the schtasks step printed with the identity\'s task name', w.status === 0 && w.stdout.includes(`/TN ${S.namesOf(A).task} /TR`), w.stdout);
+    ok('service on Windows: the schtasks step printed with the identity\'s task name', w.status === 0 && w.stdout.includes(`/TN ${S.namesOf(A).task} /TR`) && !w.stdout.includes('earlier task'), w.stdout);
+    // Windows with a legacy task (the fake schtasks answers /Query /XML from $D/task-<name>.xml): A's is to be retired
+    // first (the steps printed), B's is left and said; status lists it with its identity.
+    const task = (who: string): void => writeFileSync(join(fb, 'task-sigelo-watch.xml'), `<Task><Actions><Exec><Command>${process.execPath}</Command><Arguments>&quot;${CLI}&quot; watch --identity &quot;${who}&quot; --quiet</Arguments></Exec></Actions></Task>`);
+    const runW = cliIn({ ...env0, PATH: `${fb}${delimiter}${env0.PATH}`, SIGELO_IDENTITY: A, SIGELO_SERVICE_OS: 'win32' }, H);
+    task(A);
+    const wa = await runW('service', 'install'), wr = await runW('service', 'remove'), ws = JSON.parse((await runW('service', 'status')).stdout) as { units: { name: string; identity: string; legacy: boolean; mine: boolean }[] };
+    task(B);
+    const wb = await runW('service', 'install');
+    ok('service on Windows: a legacy task of this identity: its end and delete printed before the new task (install, remove); of another: left, said; status lists it',
+      wa.status === 0 && wa.stdout.indexOf('First retire the earlier task sigelo-watch, it runs this identity: schtasks /End /TN sigelo-watch, then schtasks /Delete /TN sigelo-watch /F') === 0
+        && wr.stdout.includes('the earlier task runs this identity too: schtasks /End /TN sigelo-watch') && ws.units.length === 1 && ws.units[0]!.legacy && ws.units[0]!.identity === A && ws.units[0]!.mine
+        && wb.stdout.includes(`The earlier task sigelo-watch is left: it runs another identity (${B})`) && wb.stdout.includes(`/TN ${S.namesOf(A).task} /TR`), wa.stdout + wr.stdout + wb.stdout + JSON.stringify(ws));
   }
   if (process.platform === 'linux') {
     const env = { PATH: process.env['PATH'] ?? '', HOME: H, SIGELO_KEY_PROVIDER: 'file', SIGELO_IDENTITY: join(H, 'svc.local.json'), SIGELO_SERVICE_DIR: join(H, 'units'), SIGELO_SERVICE_DRY: '1' };

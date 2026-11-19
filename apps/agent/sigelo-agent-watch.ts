@@ -65,6 +65,7 @@ interface Car {
   peek(): Item[]; take(pick: (m: Item, tier: string) => boolean): Item[];
   contacts(): { contacts: WatchContact[] };
   send(to: string, content: string, o?: { label?: string }): Promise<{ status: string; detail?: string }>;
+  read(items: unknown[], o?: { local?: boolean }): Promise<{ to: string; error?: string }[]>;
 }
 /** A contact as the carrier lists it (the fields a host reads). */
 export interface WatchContact { name: string; did: string; current_did?: string; chain: string[]; revoked?: boolean; tier?: string }
@@ -92,6 +93,8 @@ export interface Watch {
   relay: string; close(): Promise<void>; idle(): Promise<void>; /** Resolves when the watcher stopped by itself: the seat went to another device. */ ended: Promise<string>;
   /** The contacts, as the carrier lists them; a send on the watcher's session. */
   contacts(): WatchContact[]; send(to: string, text: string, label?: string): Promise<{ status: string; detail?: string }>;
+  /** Read marks on the watcher's session (carrier.mjs read): the senders of these items get a seen receipt, once per message. */
+  read(items: unknown[]): Promise<void>;
 }
 
 // The same stored message: by its id; an item kept by an earlier version has none, and its sender,
@@ -153,6 +156,15 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
     const later = (fn: () => Promise<unknown> | unknown): void => { queue = queue.then(fn).catch((e) => note(`watch: ${(e as Error).message}`)); };
 
     let carrier: Car;
+    // Queued in the outbox and sent on this session (a round now): a direct send while the session is still
+    // connecting (start() does not wait for it) would log in a second one, and the relay keeps one.
+    const mark = async (items: unknown[]): Promise<void> => {
+      try {
+        const r = await carrier.read(items, { local: true });
+        for (const x of r) if (x.error) note(`watch: read mark to ${x.to}: ${x.error}`);
+        if (r.length > 0) void carrier.sync().catch(() => {});
+      } catch (e) { note(`watch: read marks: ${(e as Error).message}`); }
+    };
     const tierOf = (m: Item): Item | undefined => carrier.peek().find((x) => same(x, m));
     async function onMessage(m: Item): Promise<void> {
       const kept = tierOf(m);
@@ -175,6 +187,8 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
           if (!(await run(o.onMessage!, item, env))) return;
         }
         takeIt();
+        // A hook that took it read it (0.1.19): the read mark, by code. A spooled one: when a reader takes it (inbox, MCP, host).
+        if (spool === null) await mark([item]);
         return;
       }
       if (tier === 'friend') notice(m.from, String(name));
@@ -318,6 +332,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
       relay: carrier.relay, ended,
       contacts: () => carrier.contacts().contacts,
       send: (to, text, label = '') => carrier.send(to, text, { label }),
+      read: mark,
       idle: async () => { await new Promise((r) => setTimeout(r, NOTICE_MS + 50)); await queue; },
       async close() {
         if (closed) return;

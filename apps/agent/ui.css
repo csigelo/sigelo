@@ -243,6 +243,10 @@ button.meta { width: 100%; min-height: 24px; padding: 0; border: 0; background: 
 .composer { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s2); padding: var(--s2); border-top: 1px solid var(--border); background: var(--bg); }
 .row-with { display: flex; align-items: center; gap: var(--s2); padding-right: var(--s2); }
 .row-with > .row { flex: 1; min-width: 0; }
+/* Jump to latest (0.1.19): round, at the bottom right above the composer; the count of new messages on it. */
+.composer .jump { position: absolute; right: var(--s4); bottom: calc(100% + var(--s3)); z-index: 3; display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text); cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.composer .jump:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.composer .jump .n { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 600; line-height: 20px; text-align: center; }
 .composer .tray { order: -1; flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: var(--s2); }
 .composer .tray .pick { display: inline-flex; align-items: center; gap: var(--s2); min-height: 48px; padding: 0 var(--s4); border: 1px solid var(--border); border-radius: 24px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
 .composer .tray .pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

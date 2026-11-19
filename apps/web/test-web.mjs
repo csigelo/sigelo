@@ -554,7 +554,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     Node: Node_, location: { hash: '', pathname: '/', protocol: 'https:', href: 'https://app.invalid/index.html' },
     // The version beside ui.js (vendor/package.json, apps/agent/package.json as copy.mjs vendors it): About reads it.
     fetch: async (url) => { sandbox.fetched = [...(sandbox.fetched ?? []), String(url)]; return String(url) === 'https://app.invalid/package.json' ? { ok: true, json: async () => JSON.parse(readFileSync(join(HERE, 'vendor', 'package.json'), 'utf8')) } : { ok: false, json: async () => null }; }, history: { replaceState() {} }, sessionStorage: { getItem: () => null, setItem() {} },
-    window: { innerHeight: 800, innerWidth: 400, scrollY: 0, scrollTo(_x, y) { this.scrollY = y; (sandbox.scrolls ??= []).push(y); } }, navigator: { clipboard: { writeText: async (t) => { sandbox.copied = t; } } },
+    window: { innerHeight: 800, innerWidth: 400, scrollY: 0, scrollTo(_x, y) { this.scrollY = y; (sandbox.scrolls ??= []).push(y); }, on: {}, addEventListener(t, f) { (this.on[t] ??= []).push(f); } }, navigator: { clipboard: { writeText: async (t) => { sandbox.copied = t; } } },
     setInterval: (f, ms) => { intervals.push([f, ms]); return intervals.length; }, clearInterval() {}, setTimeout: (f, ms) => setTimeout(f, Math.min(ms ?? 0, 10)), clearTimeout,
     console, Date, Promise, Object, Array, String, Number, JSON, Math, Map, Set, Error, encodeURIComponent, URL, Blob, atob, btoa,
     sigeloUiTest: (t) => { sandbox.ui = t; },
@@ -786,6 +786,26 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const outs = root.all().filter((e) => e.className === 'msg out');
     ok(outs.length === 3 && outs[0].textContent.endsWith('✓✓') && outs[0].all().some((e) => e.attrs['aria-label'] === 'Seen') && outs[1].textContent.endsWith(' ✓') && outs[1].all().some((e) => e.attrs['aria-label'] === 'Delivered to the relay')
       && outs[2].textContent.endsWith('waiting to send') && has('Today'), `a chat: a day line; ✓✓ seen, ✓ at the relay, waiting said in words (${outs.map((e) => e.textContent).join(' | ')})`);
+    // Jump to latest (0.1.19: long agent chats): scrolled up by more than a screen, a round button above the composer; new
+    // messages then bump its count and leave the view where it is; a tap lands at the bottom and hides it.
+    {
+      const W = sandbox.window, jump = () => root.all().find((e) => e.tagName === 'BUTTON' && e.className === 'jump');
+      const scrolled = (y) => { W.scrollY = y; for (const f of W.on.scroll ?? []) f({}); };
+      const hid0 = jump()?.hidden;
+      body.scrollHeight = 5000; scrolled(1000);
+      const shown = jump()?.hidden === false && jump().all().find((e) => e.className === 'n')?.hidden === true && jump().attrs['aria-label'] === 'To the newest message';
+      MSGS[bo.did].push(m(5, 'in', 'one more', null), m(6, 'in', 'and another', null));
+      sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
+      const n = jump()?.all().find((e) => e.className === 'n');
+      const counted = n?.hidden === false && n.textContent === '2' && jump().attrs['aria-label'] === 'To the newest message, 2 new' && W.scrollY === 1000;
+      await jump().click(); await settle();
+      const landed = W.scrollY === 5000 && jump().hidden === true && n.hidden === true;
+      scrolled(1000); const back0 = jump().hidden === false && n.hidden === true;
+      scrolled(4200);
+      ok(hid0 === true && shown && counted && landed && back0 && jump().hidden === true && jump().parent?.className === 'composer',
+        `jump to latest: hidden at the bottom; scrolled up a screen, shown; 2 new → its count, the view kept; a tap → the bottom, hidden, the count cleared (${JSON.stringify([hid0, shown, counted, landed, back0, W.scrollY])})`);
+      MSGS[bo.did].splice(-2); delete body.scrollHeight; W.scrollY = 0; sandbox.seq += 1; await poll(); await poll();
+    }
     // A link in a message (0.1.17: "the link still doesn't work": it was plain text): an anchor to a new window (the shells
     // send it to the system's browser), the trailing full stop left out; its tap does not open "who signed it".
     MSGS[bo.did].push(m(5, 'in', 'Menu: https://example.org/menu?day=fri. Or ftp://x.example, javascript:alert(1)', null));
@@ -2493,6 +2513,15 @@ try {
   ok(await until(async () => (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages[0].status === 'seen'),
     'seen receipts: a receipt from the agent → the page\'s message seen (✓✓)');
   ok((await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did).unread === 0, 'read once shown: unread 0');
+  // Read marks (0.1.19, carrier.mjs read): the agent's reader took the page's message, so its carrier sends the mark by
+  // code, once; the page shows ✓✓ on it.
+  await call(A, 'POST', '/api/send', { to: CY.did, text: 'read me' });
+  const rm = [];
+  await until(async () => { rm.push(...(await node.inbox({ wait: 0.5 })).messages); return rm.some((m) => m.content === 'read me'); });
+  const mk1 = await node.read(rm), mk2 = await node.read(rm);
+  ok(mk1.length === 1 && mk1[0].upto === rm.find((m) => m.content === 'read me').iat && mk2.length === 0
+    && await until(async () => (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.find((m) => m.text === 'read me')?.status === 'seen'),
+    `read marks: the agent's carrier marks what its reader took, once (a second read sends none); the page's message seen (✓✓) (${JSON.stringify([mk1, mk2])})`);
   const s1 = (await call(A, 'GET', '/api/state')).body, s2 = (await call(A, 'GET', `/api/state?since=${s1.seq}`)).body;
   ok(s1.events.some((e) => e.type === 'paired') && s2.events.length === 0, 'GET /api/state?since: events after since only');
   ok((await call(A, 'POST', '/api/tag', { contact: CY.did, tags: ['#work'] })).body.tags.join() === 'work' && (await call(A, 'POST', '/api/rename', { contact: CY.did, name: 'cyrus' })).body.name === 'cyrus'

@@ -67,6 +67,11 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui.js: a control to confirm under Requests (the four words, Confirm / Refuse → POST /api/controls/confirm), a pushed state cut short ("The newest … are shown", "Show all" → full=1), a linked contact\'s message marked',
     js.body.includes('wants to control this computer') && js.body.includes('/api/controls/confirm') && js.body.includes("btn('Confirm'") && js.body.includes("btn('Refuse'")
     && js.body.includes('The newest ${cut.kept}') && js.body.includes("btn('Show all'") && js.body.includes('full=1') && js.body.includes('m.link ? h(\'span\', { class: \'help\' }, `Introduced: ${m.link.purpose}`)'));
+  // Jump to latest (0.1.19): the computer page serves the same ui.js as the phone and GTK (test-web.mjs drives it in a DOM).
+  const css = await http(P, 'GET', '/ui.css', {});
+  ok('ui.js: jump to latest in the chat and the group chat (a round button in the composer, the count, the view kept), its style served',
+    (js.body.match(/jumpLatest\(\)/g) ?? []).length === 3 && (js.body.match(/J\.saw\(r\.messages/g) ?? []).length === 2 && js.body.includes("class: 'jump'") && js.body.includes('To the newest message')
+    && css.status === 200 && css.body.includes('.composer .jump {') && css.body.includes('border-radius: 50%'), String((js.body.match(/jumpLatest\(\)/g) ?? []).length));
   // The keeper of this computer (UI-API.md "Keeper", sigelo-agent-spend.ts): a sigelo-spend directory registered on this host,
   // its policy read and written field by field, a pending request (signed by the keeper) approved with the human's key at the
   // keeper's own /approve (a stand-in that checks the signature as the keeper does), refused here, restart refused without systemd.

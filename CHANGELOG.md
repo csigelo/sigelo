@@ -5,12 +5,15 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **agent:** `service install` (and `--host`) stops, disables and removes an earlier `sigelo-watch` service and timer of the same identity first; `status` shows two units on one identity; `remove` clears both.
 - **transfers:** a file ≤ 8 MiB to an own or compared contact that finds no direct path, or drops for 20 s, goes over the relay lane (`sigelo-file/0`) by itself; the receiver's record ends `relayed`, no ghost.
 - **transfers:** `transfer resume` takes an active-but-dropped transfer again; one stuck 10 minutes lists as interrupted; a channel silent 30 s counts as dropped.
 - **app:** a file you send shows in your chat (name, size, the lane: direct or via relay), kept after a restart, a tap opens it; one that did not go offers Send over the relay (≤ 8 MiB) or Retry.
 - **app:** code blocks: text between triple-backtick fences shows monospace, scrolls sideways, with Copy (the block exactly, every line break); inline code, bold, italic, lists. Built as text: never HTML from the sender.
 - **app:** copying from a chat keeps every line break (a whole message gives the text as written); a tap that ends a selection no longer opens the message; Signed message has Copy the text.
 - **ci:** the Android builds survive Maven Central's 429s: Gradle's downloads cached between runs, and Google's Central mirror tried first (an init script, not in the tree); the APK's bytes unchanged.
+- **agent:** read receipts by sigelo, not the agent: what `inbox`, the MCP's `sigelo_inbox`, a `watch` hook or a `host claude` turn takes gets one seen receipt per message, by code; agent chats show ✓✓. No wire change.
+- **app:** jump to latest: a chat scrolled up by more than a screen shows a round button above the composer, with how many messages came since; a tap lands on the newest; new ones never move the view.
 - **agent:** `host claude`: `working: <tool>: …` lines during a turn (one per 20 s, eight a turn; `--quiet-progress`); `--others data`: contacts' messages to Claude as marked data; `sdk install` checks it loads.
 
 ## v0.1.18 — 2026-11-19

@@ -176,6 +176,8 @@ interface Carrier {
   sendAll(to: string, texts: string[], o: { label?: string; local?: boolean }): Promise<{ status: string }[]>;
   sendFile(to: string, path: string, o?: { local?: boolean }): Promise<{ status: string; name: string; detail?: string; file: FileSent }>;
   inbox(o: { wait?: number; tiers?: string[]; local?: boolean }): Promise<Batch>;
+  /** Read marks (carrier.mjs read): a seen receipt to each sender of these items, once per message, by code. */
+  read(items: unknown[], o?: { local?: boolean }): Promise<{ to: string; upto: number; status?: string | null; error?: string }[]>;
   history(o: { since?: number }): { messages: unknown[] };
   forget(did: string): Promise<unknown>;
   redeemGift(code: string): Promise<{ exp: number; months: number }>;
@@ -465,6 +467,15 @@ export function lockHolder(identity: string): { pid: number; kind: 'ui' | 'watch
     const pid = Number(m?.[1]);
     return m && Number.isSafeInteger(pid) && pid > 0 && alive(pid) ? { pid, kind: m[2] ? 'watch' : 'ui', ...(m[3] && { spool: m[3] }) } : null;
   } catch { return null; }
+}
+/** Read marks (carrier.mjs read, 0.1.19): the items a reader took get their senders' seen receipts, by code; beside a
+ *  watcher (watched: the identity) queued for it and kicked. Never fails the read: a mark not sent is said on stderr. */
+export async function readMarks(c: { read(items: unknown[], o?: { local?: boolean }): Promise<{ to: string; error?: string }[]> }, items: unknown[], watched: string | null): Promise<void> {
+  try {
+    const r = await c.read(items, { local: watched !== null });
+    if (watched !== null && r.length > 0) kick(watched);
+    for (const x of r) if (x.error) note(`read mark to ${x.to}: ${x.error}`);
+  } catch (e) { note(`read marks: ${(e as Error).message}`); }
 }
 /** What a watcher with --spool wrote (WATCH.md; the service, sigelo-agent-service.ts): each <dir>/<id>.json taken
  *  (read, then deleted), oldest first; a file that does not parse is left for a human. inbox and the MCP sigelo_inbox
@@ -882,6 +893,8 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
           note(`stdout: the inbox did not arrive (the reader went away); its ${r.messages.length} message(s) are kept for the next inbox`);
           return 1;
         }
+        // Read marks (0.1.19): printed is read; the senders' apps show ✓✓, by code, no agent's (beside a watcher, it sends them).
+        await readMarks(c, r.messages, w ? path : null);
         // Files received: saved, never opened; where each is.
         for (const f of r.messages as FileItem[]) if (f?.type === 'file') note(`📎 ${f.name} ${sizeText(f.size)} → ${f.path} (from ${f.contact ?? f.from})`);
         for (const v of r.messages as { voice?: unknown; text?: string; name?: string; from?: string }[]) if (v?.voice && v.text) note(`${v.text} from ${v.name ?? v.from}: the recording comes as a transfer (transfer list)`);

@@ -137,7 +137,8 @@ const until = async (cond, ms = 8000) => { const end = Date.now() + ms; while (D
 const refuses = async (f, check, what) => {
   try { await f(); ok(false, `${what}: accepted, expected ${check}`); } catch (e) { ok(e.check === check, `${what}: ${e.check ?? 'exception'} (${e.message}), expected ${check}`); }
 };
-setTimeout(() => { console.log(`FAIL the run did not finish in 300 s (${count} checks so far)`); process.exit(1); }, 300000).unref();
+// A phone-class machine needs about 300 s for the whole run; the deadline catches a hang, not a slow device.
+setTimeout(() => { console.log(`FAIL the run did not finish in 600 s (${count} checks so far)`); process.exit(1); }, 600000).unref();
 
 const HOST = 'relay.test', DAY = 86400, CREATED = '2026-10-01T00:00:00Z';
 const dir = mkdtempSync(join(tmpdir(), 'sigelo-carrier-'));
@@ -763,6 +764,28 @@ try {
     await alice.inbox();
     ok(bobAt().seen_upto === now && !alice.history({ since: 0 }).messages.some((m) => m.label === SEEN_LABEL), 'an older receipt keeps the highest; none in the log');
     await refuses(() => bob.seen(A.original, 1.5), 'body', 'a receipt\'s time not whole seconds');
+  }
+
+  // ================================================================ read marks (0.1.19): what an agent's reader took, marked by code
+  {
+    const aliceAt = () => bob.contacts().contacts.find((x) => x.did === A.original), sentBy = (r) => r.map((x) => `${x.to === A.original ? 'alice' : x.to}@${x.upto - now}:${x.status ?? x.error}`).join();
+    await alice.send('bob', say('read me'));
+    const [m1] = (await bob.inbox()).messages;
+    const r1 = await bob.read([m1]), r2 = await bob.read([m1]);
+    await alice.inbox();
+    const at1 = alice.contacts().contacts.find((x) => x.did === B.original).seen_upto;
+    ok(sentBy(r1) === 'alice@0:sent' && r2.length === 0 && at1 === m1.iat, `read(): the first mark to a contact not known to read them goes, once; a second read of the same sends none (${sentBy(r1)} | ${sentBy(r2)})`);
+    now += 10;
+    await alice.send('bob', say('and me'));
+    const [m2] = (await bob.inbox()).messages;
+    const r3 = await bob.read([m2, { ...m2, iat: m2.iat + 5, group: { gid: 'g' } }, { from: A.original }]);
+    ok(r3.length === 0 && aliceAt().seen_peer === false, 'read(): no more to one that never sent a receipt (the app\'s rule); group items and ones without iat: never');
+    await alice.seen(B.original, now);
+    await bob.inbox();
+    const r4 = await bob.read([m2]);
+    ok(aliceAt().seen_peer === true && sentBy(r4) === 'alice@0:sent', `read(): once theirs came, each newer one goes (${sentBy(r4)})`);
+    const r5 = await bob.read([m1, m2]);
+    ok(r5.length === 0, 'read(): an older or the same message again: nothing');
   }
 
   // ================================================================ several messages, one login
