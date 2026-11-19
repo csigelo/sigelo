@@ -439,7 +439,8 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
       const o = { carrier: c, identity: path, local: w !== null, ...(via !== undefined && { via }), ...(direct !== undefined && { direct }) };
       let r;
       if (action === 'send') r = await X.send({ ...o, to: text(to, 'to'), path: resolve(text(file, 'path')) });
-      else if (action === 'accept' || action === 'resume') r = X.accept({ ...o, id: text(id, 'id') });
+      else if (action === 'accept') r = X.accept({ ...o, id: text(id, 'id') });
+      else if (action === 'resume') r = X.resume({ ...o, id: text(id, 'id') });
       else if (action === 'decline') r = await X.decline({ ...o, id: text(id, 'id') });
       else r = await X.cancel({ ...o, id: text(id, 'id'), engine: engines.get(path)?.e ?? null });
       if (w) held.kick(path); else if (action !== 'decline' && action !== 'cancel') await keepLive(path);

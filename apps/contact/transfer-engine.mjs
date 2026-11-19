@@ -21,8 +21,17 @@
 // ours) and from friends whose four words were compared (compared(did), the page's), when the disk has
 // room and direct is allowed for that contact; larger, or from anyone else (words not compared, a
 // public-code joiner, quiet), it is asked.
+//
+// The relay lane (0.1.19): a file of at most RELAY_MAX (8 MiB, send-file's) to an own agent or contact, or to a friend
+// whose words were compared, that cannot go direct (no path, no Tor: the end no_path) or whose channel dropped and did
+// not come back within fallbackMs (20 s), goes over sigelo-file/0 instead, once, without a question (Engine.relay): the
+// receiver is told `end relay` first (its record: relayed, the partial dropped) and, where a page runs, its record is
+// done once the file comes (Engine.superseded). Larger, or to anyone else: as before; the page offers Retry (retry) or,
+// up to 8 MiB, Send over the relay. A channel that moves no byte for stallMs (30 s) counts as dropped; a receiver's
+// record active with nothing for STALE_S (10 minutes) is listed as interrupted, and resume takes it again.
+import { concatBytes } from '@noble/hashes/utils.js';
 import { TRANSFER_SEND } from './carrier.mjs';
-import { FILE_LABEL, safeName } from './file.mjs';
+import { FILE_LABEL, MAX_FILE, safeName, sha256Hex } from './file.mjs';
 import { MsgError, fail } from './kdf.mjs';
 import {
   ANSWER_WAIT, AUTO_MB, CHUNK, DAY, GATHER_MS, ICE_MS, MANIFEST_TTL, MAX_SIZE, Have, Pull, Serve, TRANSFER_LABEL, WAIT_ALL, WAIT_CONTACT,
@@ -33,7 +42,9 @@ export const FILE_V = 'sigelo-transfers/1';
 export { TRANSFER_LABEL };
 const KEPT = 30 * DAY, RETRIES_AUTO = 3, RETRY_MS = 5000, STUN_PORT = 3478;
 export const FREE_MARGIN = 64 * CHUNK;
-export const STATES_LIVE_IN = ['accepted', 'offering', 'active'], STATES_LIVE_OUT = ['active'];
+export const RELAY_MAX = MAX_FILE, FALLBACK_MS = 20_000, STALL_MS = 30_000, STALE_S = 600;
+export const STATES_LIVE_IN = ['accepted', 'offering', 'active'], STATES_LIVE_OUT = ['active', 'relaying'];
+const ENDED = ['done', 'declined', 'cancelled', 'failed', 'expired', 'relayed'];
 const nowS = (carrier) => (carrier?.clock ? carrier.clock() : Math.floor(Date.now() / 1000));
 const later = (f) => setTimeout(f, 0);
 
@@ -50,7 +61,7 @@ export function state(io, now, fn = () => undefined) {
       s.direct ??= {}; s.settings ??= {}; s.auto ??= {};
     }
     const before = JSON.stringify(s);
-    for (const side of ['out', 'in']) for (const [k, r] of Object.entries(s[side])) if (['done', 'declined', 'cancelled', 'failed', 'expired'].includes(r.state) && r.at + KEPT < now) delete s[side][k];
+    for (const side of ['out', 'in']) for (const [k, r] of Object.entries(s[side])) if (ENDED.includes(r.state) && r.at + KEPT < now) delete s[side][k];
     const out = fn(s);
     if (JSON.stringify(s) !== before) io.write(JSON.stringify(s, null, 2));
     return out;
@@ -165,6 +176,46 @@ export function accept({ carrier, io, id, direct, via }) {
     return { ...r };
   });
 }
+/**
+ * The receiver's resume: accept's, and also a transfer that is accepted, offering or active but stuck (the channel
+ * went and nothing came back, 0.1.19: it answered "is active (drop)" and did nothing): offered again (restart: the
+ * engine drops what it holds of it first); only the chunks missing are asked.
+ */
+export function resume({ carrier, io, id, direct, via }) {
+  const now = nowS(carrier);
+  const live = state(io, now, (s) => STATES_LIVE_IN.includes(recIn(s, id).state));
+  if (!live) return accept({ carrier, io, id, direct, via });
+  return state(io, now, (s) => {
+    const r = recIn(s, id);
+    if (r.exp <= now) fail('transfer_expired', `the offer of ${r.name} expired`);
+    decideDirect(s, contactOf(carrier, r.from), direct);
+    if (via === 'tor' || via === 'auto') r.via = via;
+    Object.assign(r, { state: 'accepted', restart: true, auto: 0, at: now });
+    delete r.reason; delete r.detail; delete r.retryAt;
+    return { ...r };
+  });
+}
+/** Stuck: active with no byte for STALE_S (an offer unanswered lapses on its own, ANSWER_WAIT). */
+const stale = (r, now) => r.state === 'active' && now - Math.max(r.last ?? 0, r.offerAt ?? 0, r.at ?? 0) > STALE_S;
+const staleDetail = () => `nothing came for over ${STALE_S / 60} minutes: resume it`;
+/**
+ * The sender's Retry: the transfer ended here or there (failed, expired, a drop), so the file is offered afresh: the
+ * old one cancelled (the receiver told), the file read again (it must still be there), a new manifest. → the new record.
+ */
+export async function retry({ carrier, io, id, local = false, engine = null }) {
+  const now = nowS(carrier);
+  const r = state(io, now, (s) => {
+    const x = s.out[id] ?? fail('transfer_unknown', `no transfer ${id} sent from here`);
+    if (['done', 'relaying', 'cancelled', 'declined'].includes(x.state)) fail('transfer_state', `transfer ${id} is ${x.state}`);
+    return { ...x };
+  });
+  const f = await io.prepare({ path: r.file, doc: r.file });
+  engine?.drop(id, 'cancelled');
+  state(io, now, (s) => { if (s.out[id]) Object.assign(s.out[id], { state: 'cancelled', at: now, retried: true }); });
+  await sendMsg(carrier, r.to, { typ: 'end', id, reason: 'cancelled' }, local).catch(() => {});
+  const c = contactOf(carrier, r.to);
+  return sendPrepared({ carrier, io, c, f, via: r.via ?? 'auto', local, group: r.group ?? null, now });
+}
 /** The receiver's no: the sender is told declined; nothing was written. */
 export async function decline({ carrier, io, id, local = false }) {
   const now = nowS(carrier);
@@ -215,7 +266,7 @@ export function list({ carrier, io, engine = null }) {
     const sort = (a, b) => b.at - a.at;
     return {
       out: Object.values(s.out).map((r) => { const { file: _f, ...x } = live(r); return x; }).sort(sort),
-      in: Object.values(s.in).map(live).sort(sort),
+      in: Object.values(s.in).map((r) => (stale(r, now) && !engine?.attempts.get(r.id)?.channel ? { ...live(r), state: 'interrupted', reason: 'stalled', detail: staleDetail(r) } : live(r))).sort(sort),
       direct: { ...s.direct },
       auto: { ...s.auto },
       settings: settingsOf(s),
@@ -263,10 +314,13 @@ export class Engine {
    * carrier: started (it holds the session); io (above); rtc: () → the direct path's module ({ peer }) or null;
    * stun: a list, or null for stunFor(env); pro: () → whether this agent's pool is Pro; compared(did): the four
    * words of that contact were compared (the accept rule); maxServe: transfers served at once (the rest wait,
-   * their offers kept); onEvent(e): {type: 'transfer', what, id, …}.
+   * their offers kept); onEvent(e): {type: 'transfer', what, id, …}; fallbackMs: a drop not picked up again within it goes
+   * over the relay lane (up to 8 MiB, own and compared); stallMs: a channel with no byte for so long counts as dropped.
    */
-  constructor({ carrier, io, rtc = async () => null, stun = null, env = {}, pro = () => false, compared = () => false, maxServe = Infinity, onEvent = () => {}, retryMs = RETRY_MS, torConnectMs = 120_000, timer = true }) {
-    Object.assign(this, { carrier, io, rtcLoad: rtc, stun, env, pro, compared, maxServe, onEvent, retryMs, torConnectMs });
+  constructor({ carrier, io, rtc = async () => null, stun = null, env = {}, pro = () => false, compared = () => false, maxServe = Infinity, onEvent = () => {}, retryMs = RETRY_MS, torConnectMs = 120_000, timer = true,
+    fallbackMs = FALLBACK_MS, stallMs = STALL_MS }) {
+    Object.assign(this, { carrier, io, rtcLoad: rtc, stun, env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, fallbackMs, stallMs });
+    this.relaying = new Set();   // ids going over the relay lane from this process (relay)
     this.attempts = new Map();   // id → { role, attempt, peer, channel, proto, onion, server, got, sent, path }
     this.held = [];              // offers waiting for a free slot (maxServe)
     this.chain = Promise.resolve(); this.again = false; this.running = false; this.closed = false;
@@ -336,12 +390,14 @@ export class Engine {
         this.emit('refused', { from: m.from, check: e.check, detail: e.message });
       }
     }
-    const now = this.now();
+    const now = this.now(), relay = [];
     const todo = this.st((s) => {
       const out = [];
       for (const r of Object.values(s.in)) {
         if (r.state === 'asked' && r.exp <= now) { r.state = 'expired'; r.at = now; }
-        if (r.state === 'accepted' && !this.attempts.has(r.id)) out.push(r.id);
+        if (r.state === 'accepted' && (!this.attempts.has(r.id) || r.restart)) { delete r.restart; out.push(r.id); }
+        // Stuck for STALE_S (an attempt this process holds that moves nothing, or none): interrupted, resume says so.
+        if (stale(r, now) && !this.attempts.get(r.id)?.channel) { this.drop(r.id, 'stalled'); Object.assign(r, { state: 'interrupted', reason: 'stalled', detail: staleDetail(r), last: now }); }
         if ((r.state === 'offering' || r.state === 'active') && !this.attempts.has(r.id)) { r.state = 'interrupted'; r.reason = 'drop'; r.retryAt = 0; }
         if (r.state === 'offering' && r.offerAt + ANSWER_WAIT < now) { r.state = 'interrupted'; r.reason = 'lapsed'; r.detail = 'no answer within 10 minutes: is the sender online? transfer resume'; this.drop(r.id, 'lapsed'); }
         if (r.state === 'interrupted' && r.reason === 'drop' && (r.auto ?? 0) < RETRIES_AUTO && !this.attempts.has(r.id) && (r.retryAt ?? 0) <= Date.now()) { r.auto = (r.auto ?? 0) + 1; r.state = 'accepted'; out.push(r.id); }
@@ -349,11 +405,22 @@ export class Engine {
       }
       for (const r of Object.values(s.out)) {
         if (r.state === 'offered' && r.exp <= now) { r.state = 'expired'; r.at = now; }
-        if (r.state === 'active' && !this.attempts.has(r.id)) r.state = 'offered';
+        if (r.state === 'active' && !this.attempts.has(r.id)) { r.state = 'offered'; if (!pick) r.dropAt ??= Date.now(); }
+        // Over the relay lane when a process went mid-way: said, the page offers it again.
+        if (!pick && r.state === 'relaying' && !this.relaying.has(r.id)) Object.assign(r, { state: 'failed', reason: 'relay', detail: 'stopped while it went over the relay: send it over the relay again', at: now });
+        if (!pick && r.state === 'offered' && r.dropAt && Date.now() - r.dropAt >= this.fallbackMs && !this.attempts.has(r.id)) relay.push(r.id);
       }
       return out;
     });
     if (pick) return;   // intake: no session here
+    for (const id of relay) this.fallback(id);
+    // A channel that moves nothing for stallMs: dropped here (not stopped: the other side is not told cancelled).
+    for (const [id, a] of [...this.attempts]) {
+      if (!a.channel || Date.now() - (a.moved ?? Date.now()) < this.stallMs) continue;
+      this.attempts.delete(id); a.stopped = 'stalled'; this.closeAttempt(a);
+      if (a.role === 'in') this.interrupt(id, 'drop', `nothing came for ${Math.round(this.stallMs / 1000)} s: resumed with a new offer`);
+      else { this.st((s) => { const r = s.out[id]; if (r?.state === 'active') Object.assign(r, { state: 'offered', dropAt: Date.now() }); }); this.emit('interrupted', { id, side: 'out' }); }
+    }
     // Offers held for a free slot (maxServe), oldest first.
     while (this.held.length && this.serving() < this.maxServe) { const h = this.held.shift(); void this.#onOffer(h.r, h.x, h.m).catch((e) => this.emit('error', { id: h.r.id, detail: e.message })); }
     for (const id of todo) await this.#offer(id).catch((e) => this.fail('in', id, e.check ?? 'offer', e.message));
@@ -361,7 +428,7 @@ export class Engine {
   serving() { let n = 0; for (const a of this.attempts.values()) if (a.role === 'out') n++; return n; }
 
   fail(side, id, reason, detail) {
-    this.st((s) => { const r = s[side][id]; if (r && !['done', 'cancelled', 'declined'].includes(r.state)) Object.assign(r, { state: 'failed', reason, detail, at: this.now() }); });
+    this.st((s) => { const r = s[side][id]; if (r && !['done', 'cancelled', 'declined', 'relayed', 'relaying'].includes(r.state)) Object.assign(r, { state: 'failed', reason, detail, at: this.now() }); });
     this.emit('failed', { id, side, reason, detail });
   }
 
@@ -417,13 +484,91 @@ export class Engine {
       this.emit('done', { id: r.id, side, name: r.name });
       return;
     }
+    if (x.reason === 'relay') {
+      // The sender sends it over sigelo-file/0 instead: this record stops, no ghost left active.
+      if (side !== 'in') return;
+      if (a) { this.attempts.delete(r.id); a.stopped = 'relay'; this.closeAttempt(a); }
+      this.st((s) => { const y = s.in[r.id]; if (y && y.state !== 'done') { Object.assign(y, { state: 'relayed', at: this.now(), detail: `${y.name} comes over the relay lane (sigelo-file/0) instead` }); delete y.reason; } });
+      dropPartial(this.io, r.id);
+      this.emit('relayed', { id: r.id, side, name: r.name });
+      return;
+    }
     if (a && x.attempt !== undefined && x.attempt !== a.attempt) return;
     if (a) { this.attempts.delete(r.id); a.stopped = x.reason; try { a.proto?.stop(x.reason); } catch {} this.closeAttempt(a); }
     this.held = this.held.filter((h) => h.r.id !== r.id);
     const st = x.reason === 'declined' ? 'declined' : x.reason === 'cancelled' ? 'cancelled' : 'failed';
-    this.st((s) => { const y = s[side][r.id]; if (y && !['done'].includes(y.state)) Object.assign(y, { state: st, ...(st === 'failed' && { reason: x.reason, detail: x.reason === 'no_path' ? noPath(y.contact) : `the other side ended it: ${x.reason}` }), at: this.now() }); });
+    this.st((s) => { const y = s[side][r.id]; if (y && !['done', 'relaying', 'relayed'].includes(y.state)) Object.assign(y, { state: st, ...(st === 'failed' && { reason: x.reason, detail: x.reason === 'no_path' ? noPath(y.contact) : `the other side ended it: ${x.reason}` }), at: this.now() }); });
     if (side === 'in' && ['cancelled', 'chunk_hash', 'file_changed'].includes(x.reason)) dropPartial(this.io, r.id);
     this.emit(st, { id: r.id, side, reason: x.reason });
+    if (side === 'out' && x.reason === 'no_path') this.fallback(r.id);
+  }
+
+  // ---- the relay lane (0.1.19)
+  /** May transfer id (sent from here) go over the relay lane by itself: at most 8 MiB, not yet, to own or compared. */
+  relayable(r) {
+    if (!r || r.size > RELAY_MAX || r.relay || ['done', 'relaying', 'cancelled', 'declined'].includes(r.state)) return false;
+    let c;
+    try { c = contactOf(this.carrier, r.to); } catch { return false; }
+    return trustOf(c, this.compared) !== 'other';
+  }
+  /** The direct lane failed or dropped: over the relay lane, once, when relayable. */
+  fallback(id) {
+    const r = this.st((s) => (s.out[id] ? { ...s.out[id] } : null));
+    if (!this.relayable(r)) return false;
+    void this.relay(id).catch((e) => this.emit('error', { id, detail: e.message }));
+    return true;
+  }
+  /**
+   * Transfer id, sent from here, over sigelo-file/0 (carrier.sendFile, at most 8 MiB): the receiver told `end relay`
+   * first, the file read whole and checked against the manifest's SHA-256. manual: the page's "Send over the relay"
+   * (any contact, and again after a failure). → the record (done, path_used relay), or failed with reason relay.
+   */
+  async relay(id, { manual = false } = {}) {
+    const now = this.now();
+    const r = this.st((s) => {
+      const x = s.out[id] ?? fail('transfer_unknown', `no transfer ${id} sent from here`);
+      if (['done', 'relaying', 'cancelled', 'declined'].includes(x.state)) fail('transfer_state', `transfer ${id} is ${x.state}`);
+      if (x.size > RELAY_MAX) fail('file_too_large', `${x.name} is ${x.size} bytes: the relay lane carries at most ${RELAY_MAX} (8 MiB)`);
+      if (!manual && x.relay) return null;
+      Object.assign(x, { state: 'relaying', relay: (x.relay ?? 0) + 1, at: now });
+      delete x.reason; delete x.detail; delete x.dropAt;
+      return { ...x };
+    });
+    if (!r) return null;
+    this.relaying.add(id);
+    const a = this.attempts.get(id);
+    if (a) { this.attempts.delete(id); a.stopped = 'relay'; this.closeAttempt(a); }
+    this.held = this.held.filter((h) => h.r.id !== id);
+    try {
+      await sendMsg(this.carrier, r.to, { typ: 'end', id, reason: 'relay' }, false).catch(() => {});
+      if (await this.io.changed(r)) fail('file_changed', `${r.name} changed or went since it was offered: send it again`);
+      const src = await this.io.source(r), parts = [];
+      try { for (let i = 0; i < r.chunks; i++) parts.push(await src.read(i)); } finally { await src.close().catch(() => {}); }
+      const bytes = concatBytes(...parts);
+      if (sha256Hex(bytes) !== r.sha256) fail('file_changed', `${r.name} is not the file offered any more: send it again`);
+      const x = await this.carrier.sendFile(r.to, { bytes, name: r.name });
+      const done = this.st((s) => { const y = s.out[id]; if (y) Object.assign(y, { state: 'done', path_used: 'relay', relay_status: x.status, sent: r.size, at: this.now() }); return y ? { ...y } : null; });
+      this.emit('done', { id, side: 'out', name: r.name, via: 'relay' });
+      return done;
+    } catch (e) {
+      this.st((s) => { const y = s.out[id]; if (y && y.state === 'relaying') Object.assign(y, { state: 'failed', reason: e.check === 'file_changed' ? 'file_changed' : 'relay', detail: `over the relay: ${e.message}`, at: this.now() }); });
+      this.emit('failed', { id, side: 'out', reason: 'relay', detail: e.message });
+      throw e;
+    } finally { this.relaying.delete(id); }
+  }
+  /**
+   * A file that came over sigelo-file/0 (an inbox item: from, sha256, path): a transfer of the same file from the same
+   * contact is done by it (it went over the relay instead), its partial and attempt dropped. → the ids superseded.
+   */
+  superseded(item) {
+    if (!item || item.type !== 'file' || item.transfer || typeof item.sha256 !== 'string') return [];
+    const ids = this.st((s) => {
+      const hit = Object.values(s.in).filter((r) => r.from === item.from && r.sha256 === item.sha256 && r.state !== 'done');
+      for (const r of hit) { Object.assign(r, { state: 'done', got: r.size, at: this.now(), saved: item.path ?? null, path_used: 'relay' }); delete r.reason; delete r.detail; }
+      return hit.map((r) => r.id);
+    });
+    for (const id of ids) { this.drop(id, 'relay'); dropPartial(this.io, id); this.emit('done', { id, side: 'in', via: 'relay', path: item.path ?? null }); }
+    return ids;
   }
 
   // ---- the receiver: an attempt is an offer
@@ -457,7 +602,8 @@ export class Engine {
     const a = this.attempts.get(r.id);
     if (!a || a.attempt !== x.attempt || a.answered) return;
     a.answered = true; a.peerTor = x.tor;
-    this.st((s) => { if (s.in[r.id]) s.in[r.id].state = 'active'; });
+    // Active again: the reason of an earlier drop goes (0.1.19: "active: drop" stayed for good).
+    this.st((s) => { const y = s.in[r.id]; if (y) { y.state = 'active'; y.last = this.now(); delete y.reason; delete y.detail; } });
     if (a.order[0] === 'direct' && x.sdp !== null && a.peer) {
       try {
         await a.peer.accept(x.sdp);
@@ -496,6 +642,8 @@ export class Engine {
     // The record as it is now (a held offer waited).
     const r = this.st((s) => (s.out[r0.id] ? { ...s.out[r0.id] } : null));
     if (!r) return;
+    // Gone over the relay lane: said again (an offer of the receiver's that crossed the end relay).
+    if (r.state === 'relaying' || r.path_used === 'relay') { await sendMsg(this.carrier, m.from, { typ: 'end', id: r.id, reason: 'relay' }, false).catch(() => {}); return; }
     if (['done', 'cancelled', 'declined', 'expired'].includes(r.state)) { await sendMsg(this.carrier, m.from, { typ: 'end', id: r.id, reason: r.state === 'done' ? 'done' : 'cancelled' }, false).catch(() => {}); return; }
     if (x.attempt <= (r.attempt ?? 0)) return;
     const prev = this.attempts.get(r.id);
@@ -528,7 +676,8 @@ export class Engine {
 
   // ---- the bytes
   serve(r, a, ch) {
-    a.channel = ch;
+    a.channel = ch; a.moved = Date.now();
+    this.st((s) => { if (s.out[r.id]) delete s.out[r.id].dropAt; });
     const hashes = this.io.list.read(r.id, 'out');
     let src = null;
     const t0 = Date.now();
@@ -536,7 +685,7 @@ export class Engine {
     this.emit('active', { id: r.id, side: 'out', path: a.path });
     a.proto = new Serve({
       m: { ...r }, hashes, channel: ch, read,
-      onProgress: (n) => { a.sent = n; a.rate = n / 1e6 / Math.max(0.001, (Date.now() - t0) / 1000); },
+      onProgress: (n) => { a.sent = n; a.moved = Date.now(); a.rate = n / 1e6 / Math.max(0.001, (Date.now() - t0) / 1000); },
       onEnd: (reason, o) => {
         void src?.close().catch(() => {});
         if (this.attempts.get(r.id) !== a) return;
@@ -548,7 +697,7 @@ export class Engine {
           this.fail('out', r.id, reason, `ended: ${reason}`);
         } else {
           // A drop or a stop on the channel: the receiver resumes with a new offer; a cancel comes as an end message.
-          this.st((s) => { if (s.out[r.id]?.state === 'active') s.out[r.id].state = 'offered'; });
+          this.st((s) => { if (s.out[r.id]?.state === 'active') Object.assign(s.out[r.id], { state: 'offered', dropAt: Date.now() }); });
           this.emit('interrupted', { id: r.id, side: 'out' });
         }
         void this.kick();   // a slot is free: a held offer goes
@@ -557,7 +706,7 @@ export class Engine {
     a.proto.start();
   }
   pull(r, a, ch) {
-    a.channel = ch;
+    a.channel = ch; a.moved = Date.now();
     const io = this.io, id = r.id;
     const have = haveOf(io, r);
     let known = io.list.read(id, 'in');
@@ -579,7 +728,7 @@ export class Engine {
         });
       },
       onList: (h) => { try { io.list.write(id, 'in', h); } catch {} },
-      onProgress: (n) => { a.got += n; a.rate = (a.got - start) / 1e6 / Math.max(0.001, (Date.now() - t0) / 1000); },
+      onProgress: (n) => { a.got += n; a.moved = Date.now(); a.rate = (a.got - start) / 1e6 / Math.max(0.001, (Date.now() - t0) / 1000); },
       onEnd: (reason, o) => { void opened.then(() => this.#pulled(r, a, part, have, reason, o), (e) => this.#pulled(r, a, null, have, 'cancelled', { gone: true, error: e })); },
     });
     a.proto.start();

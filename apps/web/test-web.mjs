@@ -1691,6 +1691,30 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await larger?.click(); await settle();
     ok(larger && sheet() && sh1() === 'IMG_3.jpg' && has('Full size · 2.1 MB · coming') && root.all().some((e) => e.className === 'pad stack photo-view'), 'a photo still coming: a tap shows the preview large in a sheet, and that the full size is coming');
     await aria('Close', 'BUTTON')?.click(); await settle();
+    // (0.1.19) Files in a chat: mine has its own bubble (name, size, the lane, its state); one that did not go offers the relay
+    // lane up to 8 MiB exactly, Retry past it; theirs over the relay says so; a tap on mine opens it.
+    {
+      const F1 = 'f1'.repeat(32), F2 = 'f2'.repeat(32), F3 = 'f3'.repeat(32), F4 = 'f4'.repeat(32), M8 = 8 * 1024 * 1024;
+      const fm = (n, dir, sha, name, size, via = null) => ({ n, dir, at: now(), iat: now(), text: dir === 'out' ? `File: ${name}` : `file ${name} (${size} bytes), saved at /files/bo/${name}`, label: 'sigelo-file/0', status: dir === 'out' ? 'sent' : null, code: null, detail: null, link: null, file: { name, size, sha256: sha, via, transfer: null } });
+      MSGS[bo.did] = [...MSGS[bo.did], fm(11, 'out', F1, 'sigelo.apk', 1_000_003), fm(12, 'out', F2, 'eight.bin', M8), fm(13, 'out', F3, 'big.bin', M8 + 1), fm(14, 'in', F4, 'notes.pdf', 12, 'relay')];
+      TL.out.push({ id: 'a1'.repeat(16), to: bo.did, contact: 'bo', name: 'sigelo.apk', size: 1_000_003, sha256: F1, state: 'done', path_used: 'relay', sent: 1_000_003 },
+        { id: 'a2'.repeat(16), to: bo.did, contact: 'bo', name: 'eight.bin', size: M8, sha256: F2, state: 'failed', reason: 'no_path' },
+        { id: 'a3'.repeat(16), to: bo.did, contact: 'bo', name: 'big.bin', size: M8 + 1, sha256: F3, state: 'failed', reason: 'no_path' });
+      routes['POST /api/transfers/relay'] = (b) => { sandbox.relayed = b; return { id: b.id, state: 'relaying' }; };
+      routes['POST /api/transfers/retry'] = (b) => { sandbox.retried = b; return { id: 'b3'.repeat(16), state: 'offered' }; };
+      sandbox.seq += 1; await poll(); await poll();
+      const fb_ = (sha) => root.all().find((e) => e.attrs['data-file'] === sha);
+      ok(fb_(F1)?.className === 'msg out file' && fb_(F1).textContent.includes('sigelo.apk') && fb_(F1).textContent.includes('977 KB') && fb_(F1).textContent.includes('via relay · delivered'),
+        `my file's own bubble: name, size, the lane and its state (${fb_(F1)?.textContent})`);
+      const bt = (sha, l) => fb_(sha)?.all().find((e) => e.tagName === 'BUTTON' && e.textContent === l);
+      ok(bt(F2, 'Send over the relay') && !bt(F2, 'Retry') && bt(F3, 'Retry') && !bt(F3, 'Send over the relay'), 'one that did not go: exactly 8 MiB offers Send over the relay; 8 MiB + 1 byte offers Retry');
+      await bt(F2, 'Send over the relay').click(); await settle();
+      await bt(F3, 'Retry').click(); await settle();
+      ok(sandbox.relayed?.id === 'a2'.repeat(16) && sandbox.retried?.id === 'a3'.repeat(16), 'Send over the relay → POST /api/transfers/relay; Retry → POST /api/transfers/retry');
+      ok(fb_(F4)?.className === 'msg in file' && fb_(F4).textContent.includes('notes.pdf') && fb_(F4).textContent.includes('via relay · saved'), `theirs over the relay: its bubble says so (${fb_(F4)?.textContent})`);
+      await aria('Open sigelo.apk', 'BUTTON')?.click(); await settle();
+      ok(sandbox.opened?.id === 'a1'.repeat(16), 'a tap on my own file → POST /api/transfers/open, its transfer');
+    }
     // Drafts kept (0.1.17): the unsent text stays per chat across screens, on this device (localStorage, restarts too); sent, it goes.
     let box = aria('Message', 'TEXTAREA');
     box.value = 'half a thought'; fire(box, 'input'); await settle();
@@ -2748,6 +2772,48 @@ try {
         ok(pa.status === 200 && pa.body.type === 'audio/ogg' && Buffer.from(pa.body.data, 'base64').toString('latin1').startsWith('OggS') && pn.status === 409 && pn.body.error.check === 'transfer_state',
           `phone: GET /api/transfers/audio: a landed voice message's bytes (read back from the shell by range), 409 before it lands (${pa.status} ${pn.status})`);
       }
+      // (0.1.19) The relay lane: no direct path here (no RTCPeerConnection, the Node agent none either), so a file under
+      // 8 MiB between own or compared contacts goes over sigelo-file/0 by itself; both bubbles name the lane, the
+      // sender's own bubble survives a restart and opens the file picked; 8 MiB + 1 byte offers Retry, not the relay.
+      let P2 = null;
+      const DE = new TX.Engine({ carrier: dee, identity: deeId, rtc: async () => null, tor: null, stun: [], retryMs: 300 });
+      try {
+        dee.setTier('eli', 'own');
+        const msgsOf = async (x) => (await call(x, 'GET', `/api/messages?contact=${encodeURIComponent(DEE.did)}`)).body.messages;
+        const outRec = async (x, id) => (await call(x, 'GET', '/api/transfers')).body.out.find((r) => r.id === id);
+        const apk = new Uint8Array(1_000_003).fill(9), dApk = fb.add('sigelo.apk', apk);
+        const sf = await call(P, 'POST', '/api/transfers/send', { to: DEE.did, doc: dApk.doc });
+        const mine = (await msgsOf(P)).find((m) => m.dir === 'out' && m.file?.sha256 === sf.body.sha256);
+        ok(sf.status === 200 && mine?.label === 'sigelo-file/0' && mine.file.name === 'sigelo.apk' && mine.file.size === apk.length && mine.file.transfer === sf.body.id,
+          `phone: a file sent makes its own bubble at once (name, size, its transfer) (${JSON.stringify(mine)})`);
+        ok(await until(async () => (await outRec(P, sf.body.id))?.path_used === 'relay', 60000), 'phone → agent, no direct path: the file went over the relay lane by itself', JSON.stringify(await outRec(P, sf.body.id)));
+        let got2 = [];
+        ok(await until(async () => { got2.push(...(await dee.inbox({ wait: 0.5 })).messages); return got2.some((m) => m.type === 'file' && m.label === 'sigelo-file/0' && m.sha256 === sf.body.sha256 && !m.transfer); }, 60000), 'the agent has it, over sigelo-file/0');
+        ok(await until(() => TX.list({ carrier: dee, identity: deeId }).in.find((r) => r.id === sf.body.id)?.state === 'relayed'), 'the agent\'s transfer record: relayed (no ghost left active)');
+        // Agent → phone: asked here (the contact's own size: always ask), yes, no path: over the relay; the phone's record done by the file.
+        const f3 = join(dir, 'notes.pdf'); writeFileSync(f3, 'a short note');
+        const t3 = await TX.send({ carrier: dee, identity: deeId, to: 'eli', path: f3 });
+        ok(await until(async () => (await call(P, 'GET', '/api/transfers')).body.in.some((r) => r.id === t3.id && r.state === 'asked')), 'phone: the agent\'s file asked');
+        await call(P, 'POST', '/api/transfers/accept', { id: t3.id });
+        ok(await until(async () => (await msgsOf(P)).some((m) => m.dir === 'in' && m.file?.sha256 === t3.sha256 && m.file.via === 'relay'), 60000), 'phone: the file came over the relay lane, its bubble says via relay');
+        ok(await until(async () => { const r = (await call(P, 'GET', '/api/transfers')).body.in.find((x) => x.id === t3.id); return r?.state === 'done' && r.path_used === 'relay'; }), 'phone: its transfer record done by the file (via relay), not left active');
+        // A restart: the sender's bubble and the lane come back; a tap opens the file picked.
+        await P.router.stop(); await P.platform.flush();
+        P2 = await webApp(ELI, P.idb, 'phone', fb);
+        await P2.router.start();
+        const back = (await msgsOf(P2)).find((m) => m.dir === 'out' && m.file?.sha256 === sf.body.sha256);
+        ok(back?.file.name === 'sigelo.apk' && (await outRec(P2, sf.body.id))?.path_used === 'relay', 'after a restart: the sender\'s own file bubble, and via relay');
+        const op2 = await call(P2, 'POST', '/api/transfers/open', { id: sf.body.id });
+        ok(op2.status === 200 && fb.opened.at(-1)?.uri === dApk.doc && fb.opened.at(-1).name === 'sigelo.apk', `a tap on my own file: the shell opens the file picked (${JSON.stringify(fb.opened.at(-1))})`);
+        // 8 MiB + 1 byte: not over the relay; Send over the relay refused; Retry offers it afresh.
+        const dBig = fb.add('big.bin', new Uint8Array(8 * 1024 * 1024 + 1).fill(3));
+        const sb2 = await call(P2, 'POST', '/api/transfers/send', { to: DEE.did, doc: dBig.doc });
+        ok(await until(async () => (await outRec(P2, sb2.body.id))?.reason === 'no_path', 60000), 'phone, 8 MiB + 1 byte, no path: failed no_path', JSON.stringify(await outRec(P2, sb2.body.id)));
+        await new Promise((r) => setTimeout(r, 1500));
+        const rb = await outRec(P2, sb2.body.id), rl = await call(P2, 'POST', '/api/transfers/relay', { id: sb2.body.id }), rt = await call(P2, 'POST', '/api/transfers/retry', { id: sb2.body.id });
+        ok(rb.state === 'failed' && !rb.relay && rl.status === 409 && rl.body.error.check === 'file_too_large', 'not fallen back; Send over the relay: 409 file_too_large');
+        ok(rt.status === 200 && rt.body.id !== sb2.body.id && rt.body.state === 'offered' && (await outRec(P2, sb2.body.id)).state === 'cancelled', 'Retry: offered afresh under a new id, the old one cancelled');
+      } finally { await DE.close().catch(() => {}); await P2?.router.stop().catch(() => {}); }
     } finally { await P.router.stop().catch(() => {}); await dee.stop?.(); }
   }
 

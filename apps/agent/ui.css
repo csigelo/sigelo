@@ -364,6 +364,7 @@ header.top.plain { border-bottom: 0; }
 .msg.photo { padding: 4px 4px 6px; }
 .msg img.photo { display: block; max-width: 100%; height: auto; border-radius: 10px; }
 .msg .ph { display: block; padding: 0; border: 0; background: none; cursor: pointer; }
+.msg .fl { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer; }
 .photo-view img.photo { display: block; width: 100%; height: auto; border-radius: 10px; }
 .msg.photo .tag, .msg.photo .meta { padding: 0 6px; }
 .msg a.link { color: inherit; text-decoration: underline; overflow-wrap: anywhere; }

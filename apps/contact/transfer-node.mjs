@@ -159,8 +159,10 @@ export const prepare = (o) => E.prepare({ ...o, io: ioOf(o) });
 export const sendTo = (o) => E.sendTo({ ...o, io: ioOf(o) });
 export const fanOut = (o) => E.fanOut({ ...o, io: ioOf(o) });
 export const accept = (o) => E.accept({ ...o, io: ioOf(o) });
-/** A verb's resume: a stopped transfer offered again (the engine makes the offer; only what .have lacks is asked). */
-export const resume = accept;
+/** A verb's resume: a stopped transfer offered again, a stuck one too (the engine makes the offer; only what .have lacks is asked). */
+export const resume = (o) => E.resume({ ...o, io: ioOf(o) });
+/** The sender's Retry: the file offered afresh under a new id, the old transfer cancelled. */
+export const retry = (o) => E.retry({ ...o, io: ioOf(o) });
 export const decline = (o) => E.decline({ ...o, io: ioOf(o) });
 export const cancel = (o) => E.cancel({ ...o, io: ioOf(o) });
 export const forget = (o) => E.forget({ ...o, io: ioOf(o) });
@@ -178,8 +180,8 @@ export const intake = ({ carrier, identity, compared }) => E.intake({ carrier, i
 
 /** The engine on this machine: E.Engine over nodeIo, with Tor when a tor daemon is configured. */
 export class Engine extends E.Engine {
-  constructor({ carrier, identity, rtc = loadRtc, tor = torConfig(), stun = null, pro, compared, maxServe, onEvent, retryMs, torConnectMs = TOR_CONNECT_MS, timer }) {
-    super({ carrier, io: nodeIo(identity, carrier.filesDir, tor, carrier.logPath ?? null), rtc, stun, env: process.env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, timer });
+  constructor({ carrier, identity, rtc = loadRtc, tor = torConfig(), stun = null, pro, compared, maxServe, onEvent, retryMs, torConnectMs = TOR_CONNECT_MS, timer, fallbackMs, stallMs }) {
+    super({ carrier, io: nodeIo(identity, carrier.filesDir, tor, carrier.logPath ?? null), rtc, stun, env: process.env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, timer, fallbackMs, stallMs });
     this.identity = identity; this.torCfg = tor;
   }
 }

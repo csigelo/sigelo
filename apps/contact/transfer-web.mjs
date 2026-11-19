@@ -69,7 +69,7 @@ export function webTransfers(io, { compared = () => false, rtc = null } = {}) {
   const w = (f) => (o) => f({ ...o, io });
   return {
     io,
-    send: w(E.send), accept: w(E.accept), resume: w(E.accept), decline: w(E.decline), cancel: w(E.cancel), forget: w(E.forget),
+    send: w(E.send), accept: w(E.accept), resume: w(E.resume), retry: w(E.retry), decline: w(E.decline), cancel: w(E.cancel), forget: w(E.forget),
     list: w(E.list), setDirect: w(E.setDirect), setAuto: w(E.setAuto), settings: ({ patch, now } = {}) => E.settings({ io, patch, ...(now !== undefined && { now }) }),
     prepare: w(E.prepare), sendTo: w(E.sendTo), fanOut: w(E.fanOut), contactOf: E.contactOf, trustOf: E.trustOf,
     intake: ({ carrier }) => E.intake({ carrier, io, compared }),

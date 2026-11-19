@@ -45,7 +45,7 @@ const ALL = [...CHAT, 'POST /api/forget', 'POST /api/tier', 'POST /api/presence'
   'POST /api/groups/remove', 'POST /api/groups/leave', 'POST /api/groups/role', 'POST /api/groups/brake',
   'POST /api/link', 'POST /api/unlink', 'POST /api/links/allow', 'GET /api/settings', 'POST /api/settings', 'GET /api/relays', 'POST /api/relays/test',
   'POST /api/agents/enrol-code', 'POST /api/agents/enrol-words', 'POST /api/agents/cancel', 'POST /api/agents/revoke', 'POST /api/agents/rename',
-  'POST /api/transfers/accept', 'POST /api/transfers/decline', 'POST /api/transfers/cancel', 'POST /api/transfers/resume', 'POST /api/transfers/forget', 'POST /api/transfers/direct', 'POST /api/transfers/auto',
+  'POST /api/transfers/accept', 'POST /api/transfers/decline', 'POST /api/transfers/cancel', 'POST /api/transfers/resume', 'POST /api/transfers/relay', 'POST /api/transfers/retry', 'POST /api/transfers/forget', 'POST /api/transfers/direct', 'POST /api/transfers/auto',
   'GET /api/transfers/settings', 'POST /api/transfers/settings', 'POST /api/kind',
   'GET /api/keeper', 'POST /api/keeper/agent', 'POST /api/keeper/policy', 'POST /api/keeper/approvers', 'POST /api/keeper/approve', 'POST /api/keeper/refuse', 'POST /api/keeper/restart',
   'POST /api/wallet/review', 'POST /api/wallet/send', 'GET /api/wallet/services', 'POST /api/wallet/service', 'GET /api/wallet/nodes', 'POST /api/wallet/node',

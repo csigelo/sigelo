@@ -37,7 +37,7 @@ export const USAGE = `sigelo-agent transfer — big files agent to agent (TRANSF
   transfer accept <id> [--direct on|off]   yes to a file offered to you (free disk checked); nothing is
        [--via tor] [--wait <s>]            written before it; saved as send-file saves, one inbox item
   transfer decline <id> | cancel <id>      no to an offer; stop one either side (partials go)
-  transfer resume <id> [--wait <s>]        after a drop or a lapsed offer: only the chunks missing
+  transfer resume <id> [--wait <s>]        after a drop, a lapsed offer, or stuck: only the chunks missing
   transfer forget <id>                     the record and its partials gone, here
   transfer direct <contact> on|off         the direct switch for that contact
   transfer auto <contact> <MB>|default     that contact's size for landing without a question (0: always ask)
@@ -68,9 +68,10 @@ const onOff = (v: string | undefined, name: string): boolean | undefined => {
 export function line(r: Rec, side: 'in' | 'out'): string {
   const who = side === 'in' ? `from ${r.contact}` : `to ${r.contact}`, size = mb(r.size);
   const prog = r.live ? `, ${mb(side === 'in' ? r.got ?? 0 : r.sent ?? 0)} of ${size}${r.rate ? `, ${r.rate.toFixed(2)} MB/s` : ''} (${r.live})` : '';
-  const why = r.reason ? `: ${r.reason}${r.detail ? ` (${r.detail})` : ''}` : '';
+  const why = r.reason ? `: ${r.reason}${r.detail ? ` (${r.detail})` : ''}` : r.state === 'relayed' && r.detail ? `: ${r.detail}` : '';
+  const lane = r.state === 'done' && r.path_used ? `, ${r.path_used === 'relay' ? 'via relay' : r.path_used}` : '';
   const next = side === 'in' && r.state === 'asked' ? ` · sigelo-agent transfer accept ${r.id} | decline ${r.id}` : side === 'in' && r.state === 'interrupted' ? ` · transfer resume ${r.id}` : '';
-  return `transfer ${r.id} ${who}: ${r.name}, ${size}, ${r.state}${prog}${why}${r.saved ? ` → ${r.saved}` : ''}${next}`;
+  return `transfer ${r.id} ${who}: ${r.name}, ${size}, ${r.state}${lane}${prog}${why}${r.saved ? ` → ${r.saved}` : ''}${next}`;
 }
 
 /** `sigelo-agent transfer <sub> …` → 0 done (or queued, asked), 1 refused or failed, 2 usage or no identity. */
@@ -165,7 +166,8 @@ export async function main(rest: string[]): Promise<number> {
         return live(r.id, 'out');
       }
       case 'accept': case 'resume': {
-        const r = await ask((d) => X.accept({ ...o, id: args[0]!, ...(via && { via }), ...(d !== undefined && { direct: d }) }));
+        // resume (0.1.19): a stuck transfer (accepted, offering, active with nothing moving) is taken again too.
+        const r = await ask((d) => (sub === 'resume' ? X.resume : X.accept)({ ...o, id: args[0]!, ...(via && { via }), ...(d !== undefined && { direct: d }) }));
         note(`transfer ${r.id}: ${sub === 'accept' ? 'accepted' : 'resumed'}, ${r.name} from ${r.contact}`);
         return live(r.id, 'in');
       }

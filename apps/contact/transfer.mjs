@@ -12,6 +12,8 @@
 //   answer    sender → receiver   {typ, id, attempt, sdp, tor}
 //   onion     the side that serves {typ, id, attempt, onion (56 base32), port, auth (x25519 client key, base64, or null), token (64 hex)}
 //   end       either side          {typ, id, reason, attempt?}   reason one of REASONS
+// End `relay` (0.1.19): the sender sends the file over sigelo-file/0 instead (file.mjs, at most 8 MiB); the receiver's
+// record stops there (relayed), its partial dropped.
 // The receiver offers because it pulls. Offer and answer ride signed envelopes naming id and attempt,
 // so the two identities authenticate the DTLS fingerprints and the onion address: the relay cannot sit
 // in the middle. Data channel label: `sigelo-transfer/0 <id> <attempt>`; any other is closed.
@@ -41,7 +43,7 @@ export const WAIT_CONTACT = 8, WAIT_ALL = 64;
 // The accept rule's default (design §10.2, decided 2026-11-13): files up to 25 MB land without a question
 // from own agents and contacts and from friends whose words were compared.
 export const AUTO_MB = 25;
-export const REASONS = ['done', 'declined', 'cancelled', 'no_path', 'try_tor', 'chunk_hash', 'file_changed', 'busy'];
+export const REASONS = ['done', 'declined', 'cancelled', 'no_path', 'try_tor', 'chunk_hash', 'file_changed', 'busy', 'relay'];
 export const TYPS = ['manifest', 'offer', 'answer', 'onion', 'end'];
 export const T = { LIST: 1, WANT: 2, DATA: 3, END: 4, TOKEN: 5 };
 export const NAME_MAX_IN = 1024, SDP_MAX = 16384, ATTEMPT_MAX = 1000;
