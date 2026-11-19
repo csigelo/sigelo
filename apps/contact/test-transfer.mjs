@@ -351,8 +351,11 @@ try {
   const r6 = await send(file('np.bin', seeded('np', 10)));
   await until(() => B.rec('in', r6.id)?.state === 'asked');
   X.accept({ carrier: B.c, identity: B.identity, id: r6.id }); B.e.kick();
-  ok(await until(() => B.rec('in', r6.id)?.reason === 'no_path' && A.rec('out', r6.id)?.reason === 'no_path'), 'direct off and no Tor: no_path on both sides');
-  ok(/No direct path to alice .* and no Tor\. Up to 8 MiB: send-file/.test(B.rec('in', r6.id).detail ?? ''), 'the refusal names send-file', B.rec('in', r6.id).detail);
+  const np = () => B.events.find((e) => e.what === 'failed' && e.id === r6.id && e.reason === 'no_path');
+  ok(await until(() => np() && A.events.some((e) => e.what === 'failed' && e.id === r6.id && e.reason === 'no_path')), 'direct off and no Tor: no_path on both sides');
+  ok(/No direct path to alice .* and no Tor\. Up to 8 MiB: send-file/.test(np()?.detail ?? ''), 'the refusal names send-file', np()?.detail);
+  // (0.1.19) An own contact, under 8 MiB: the sender then sends it over the relay lane by itself; the receiver's record relayed.
+  ok(await until(() => A.rec('out', r6.id)?.path_used === 'relay' && B.rec('in', r6.id)?.state === 'relayed'), 'and it goes over the relay lane: done via relay, the receiver\'s record relayed', JSON.stringify([A.rec('out', r6.id), B.rec('in', r6.id)]));
   X.settings({ identity: B.identity, patch: { tor: true } });
 
   // ============================================================ Tor, against a fake tor (or a real one: SIGELO_TEST_TOR)

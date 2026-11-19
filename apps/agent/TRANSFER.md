@@ -26,7 +26,7 @@ for it; beside a page they refuse (`busy`): use its Files view.
 | `list` | both sides: state, MB, MB/s, path (direct or Tor), reason |
 | `accept <id> [--direct on\|off] [--via tor]` | free disk checked; nothing is written before it |
 | `decline <id>`, `cancel <id>`, `forget <id>` | no; stop either side; drop the record and partials here |
-| `resume <id>` | after a drop or a lapsed offer: only the missing chunks |
+| `resume <id>` | after a drop, a lapsed offer, or stuck: only the missing chunks |
 | `direct <contact> on\|off` | may this contact see your addresses |
 | `auto <contact> <MB>\|default` | that contact's size for landing unasked (0: always ask) |
 | `settings [--tor on\|off] [--prefer fast\|private] [--auto <MB>]` | the Tor checkbox; Pro's order; the size |
@@ -44,22 +44,20 @@ as an event `{type: "transfer", what: "asked", id, file, size}`. Page: the Files
   receiver's operator (CLI, page) or its agent (MCP, told by the operator) says yes. At most 8 wait
   per contact, 64 in all; more are answered `busy`. A manifest lives 7 days.
 - **Direct shows the contact your public and LAN addresses.** On for your own agents; asked once for
-  every other contact (`direct_ask` until you say on or off; a terminal asks y/N). Off: Tor, else no
+  every other contact (`direct_ask` until you say on or off). Off: Tor, else no
   path.
 - **Tor is a checkbox** (`settings --tor`), on by default, used only when a tor daemon answers:
   `SIGELO_TOR="<control host:port>[,<socks host:port>]"` (default `127.0.0.1:9051,127.0.0.1:9050`;
   `off`), `SIGELO_TOR_PASSWORD` for a hashed control password; a readable cookie or no auth works
-  without it. Nothing is ever installed for it.
+  without it. Nothing is installed for it.
 
 ## Paths
 
-Free: direct, then Tor, else refused: "No direct path to bob from these two networks, and no Tor.
-Up to 8 MiB: send-file. Tor on both sides, or Pro, carries larger files." `--via tor`: Tor only. Pro:
-`prefer fast` (direct, then relayed TURN, then Tor) or `private` (Tor first); TURN is not built yet,
-so `fast` goes direct, then Tor.
+Free: direct, then Tor, else no path (up to 8 MiB: the relay lane). `--via tor`: Tor only. Pro:
+`prefer fast` (direct, then Tor; relayed TURN later) or `private` (Tor first).
 
-**Direct:** WebRTC data channel (ICE, DTLS, SCTP) on werift in the separate package
-`sigelo-transfer` (pure TypeScript, no native code). Candidates are gathered for 3 s and sent whole
+**Direct:** WebRTC data channel (ICE, DTLS, SCTP) on werift in the package
+`sigelo-transfer` (no native code). Candidates are gathered for 3 s and sent whole
 inside the signed offer and answer, so the relay never sees them and the identities authenticate the
 DTLS fingerprints. STUN: port 3478 of your relay host and the contact's (`SIGELO_STUN`, `host:port`
 list; empty: local candidates only). An offer waits 10 minutes for its answer; ICE gets 30 s.
@@ -83,9 +81,13 @@ set once checked and flushed), `.list`. Done: placed as `send-file` places one,
 manifest. The sender reads the file in place and ends `file_changed` if its size or time moved.
 Partials go 7 days after the last byte, or at `forget`. State: `<identity>.transfers.json` (0600).
 
+**The relay lane:** up to 8 MiB, to an own agent or a compared friend, no path or a drop not back in 20 s
+sends it over `sigelo-file/0` once, unasked; the receiver's record ends `relayed`. The chat names
+the lane, else offers Retry.
+
 ## The phone app
 
-It sends and receives by itself, direct only, while open (a lock may cut it; it resumes on return).
+It sends and receives by itself while open (a lock may cut it; it resumes on return).
 Files come from the system's picker or camera and land in Downloads. A photo's preview
 (`sigelo-photo/0`, ≤ 64 KB) goes at once; location tags are removed unless Settings keeps them. A
 group: one transfer per member you are paired with.
@@ -99,5 +101,5 @@ group: one transfer per member you are paired with.
 | The relay host's STUN port | both public addresses, seconds before | nothing |
 | Size, duration | nobody but the two | nobody but the two |
 
-THREAT-MODEL §2.18, §3.14–§3.16. Measured on a phone-class computer, both ends on it over loopback:
+THREAT-MODEL §2.18, §3.14–§3.16. Measured on a phone-class computer over loopback:
 2.6 MB/s direct; across real networks, not yet.

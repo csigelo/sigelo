@@ -63,7 +63,7 @@
 //   → {op:"big-write", id, profile, part, offset, data} | big-flush | big-digest | big-drop {part} | big-free ← {id} | {id, sha256} | {id, free}
 //   → {op:"big-land", id, profile, part, name}    ← {id, uri, name}  the partial moved into Downloads (MediaStore; Android 9: the storage
 //                                                 permission asked at the first); refused "land" with why (no permission, no room)
-//   → {op:"big-open", id, uri, name}              ← {id}         a file that landed, in the system's viewer
+//   → {op:"big-open", id, uri | doc, name}        ← {id}         a file that landed (uri) or one this phone sent (doc), in the system's viewer
 //   → {op:"big-awake", id, on}                    ← {id}         FLAG_KEEP_SCREEN_ON while a transfer moves
 //   → {op:"stay", id, on?, battery?, notifications?} ← {id, on, exempt, asked, notify, notifyAsked, notifyBlocked}  Stay connected
 //                                                 (StayConnected.java): on kept for the phone (default true; not per profile), the foreground
@@ -275,7 +275,8 @@ export function bigFiles(bridge, { profile = bridge.profile ?? 'p1', fetch: get 
     async free() { return Number((await req('big-free')).free); },
     /** The partial moved into Downloads → { uri, name }; refused `land` with why (no permission, no room). */
     async land(part, name) { const x = await req('big-land', { part: id(part, 'part'), name: String(name) }); return { uri: String(x.uri), name: String(x.name) }; },
-    async open(uri, name) { await req('big-open', { uri: String(uri), name: String(name ?? '') }); },
+    // (0.1.19) A doc (32 hex: a file this phone sent) opens where it is; anything else is a landed file's URI.
+    async open(uri, name) { await req('big-open', { ...(/^[0-9a-f]{32}$/.test(String(uri)) ? { doc: String(uri) } : { uri: String(uri) }), name: String(name ?? '') }); },
     async awake(on) { await req('big-awake', { on: on === true }); },
     // Voice messages (apps/contact/voice-web.mjs): the recording written as a partial (write), kept as a file to send.
     /** The partial <part> kept as a file under name → { doc, name, size, mtime, url }: sent as a photo is. */

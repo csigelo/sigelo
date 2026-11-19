@@ -377,11 +377,11 @@ else {
     ok('remote e2e agents: Cancel enrolling, sealed → 200, cancelled', ec4.status === 200 && cn.status === 200 && cn.body.cancelled === true, JSON.stringify([ec4, cn]).slice(0, 600));
     // Transfers: the list and the settings answer 200; the verbs on a transfer or a contact answer by the route itself (none here: 404).
     const tl = await call('GET', '/api/transfers'), ts = await call('GET', '/api/transfers/settings'), tp = await call('POST', '/api/transfers/settings', { prefer: 'private' });
-    const BY_ID = ['accept', 'decline', 'cancel', 'resume', 'forget'].map((v) => `POST /api/transfers/${v}`);
+    const BY_ID = ['accept', 'decline', 'cancel', 'resume', 'relay', 'retry', 'forget'].map((v) => `POST /api/transfers/${v}`);
     const byId = await Promise.all(BY_ID.map((x) => call('POST', x.split(' ')[1]!, { id: 'ab'.repeat(16) })));
     const td = await call('POST', '/api/transfers/direct', { contact: 'did:sigelo:zNope', on: true });
     const ta = await call('POST', '/api/transfers/auto', { contact: 'did:sigelo:zNope', mb: 0 }), tk = await call('POST', '/api/transfers/photo', {});
-    ok('remote e2e transfers: the list and settings sealed → 200; accept, decline, cancel, resume, forget of an unknown id → 404 transfer_unknown; direct and auto of no contact → 404; the phone\'s photo never remote (403)', tl.status === 200 && ts.status === 200 && tp.body.prefer === 'private'
+    ok('remote e2e transfers: the list and settings sealed → 200; accept, decline, cancel, resume, relay, retry, forget of an unknown id → 404 transfer_unknown; direct and auto of no contact → 404; the phone\'s photo never remote (403)', tl.status === 200 && ts.status === 200 && tp.body.prefer === 'private'
       && byId.every((x) => x.status === 404 && x.body.error.check === 'transfer_unknown') && td.status === 404 && ta.status === 404 && tk.status === 403 && tk.body.error.check === 'remote', JSON.stringify([tl, tp, byId, td, ta, tk]).slice(0, 900));
     for (const x of [...BY_ID, 'POST /api/transfers/direct', 'POST /api/transfers/auto']) done_.set(x, 200);
     // A contact's kind and the keeper (scope all): no such contact → 404; no keeper on this computer → none, its writes 409 keeper_none.

@@ -117,6 +117,7 @@ import { signAs } from './kdf.mjs';
 import * as E from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
 import { didWords } from './short.mjs';
+import { FILE_LABEL } from './file.mjs';
 import { PHOTO_LABEL, checkPhoto } from './photo.mjs';
 import { VOICE_LABEL, VOICE_SIZE_MAX, checkVoice } from './voice.mjs';
 
@@ -281,7 +282,14 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       const link = m['link'] ? { link: m['link'] } : {};
       // iat: the sender's time of it, what a seen receipt names (Seen receipts, above).
       const iat = Number.isSafeInteger(m['iat']) ? { iat: m['iat'] } : {};
-      if (m['type'] === 'file') record({ kind: 'in', did: m['from'], name: m['contact'], label: m['label'], text: `file ${String(m['name'])} (${String(m['size'])} bytes), saved at ${String(m['path'])}`, ...iat, ...link });
+      if (m['type'] === 'file') {
+        // (0.1.19) The lane it came by, for the bubble: a transfer's (direct, tor), else the relay (sigelo-file/0), which also
+        // ends a transfer of the same file from them that is still open here (Engine.superseded: no ghost left active).
+        const lane = m['transfer'] ? (m['via'] ?? null) : 'relay';
+        if (!m['transfer']) { try { transfers?.engine.superseded?.(m); } catch {} }
+        record({ kind: 'in', did: m['from'], name: m['contact'], label: m['label'], text: `file ${String(m['name'])} (${String(m['size'])} bytes), saved at ${String(m['path'])}`,
+          file: { name: String(m['name']), size: Number(m['size']), sha256: String(m['sha256'] ?? ''), via: lane, transfer: m['transfer'] ?? null }, ...iat, ...link });
+      }
       else record({ kind: 'in', did: m['from'], name: m['name'], text: m['content'], label: m['label'], ...iat, ...link });
     }
     const named = new Set();
@@ -1146,7 +1154,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       receipt(d);
       return { seq, messages: msgs.map((r) => ({ n: r.n, dir: r.kind, at: r.at, iat: r.iat ?? null, text: textOf(r.text), label: r.label ?? '', status: statusOf(r, x.seen_upto), code: r.code ?? null, detail: r.detail ?? null, link: r.link ?? null,
         ...(RE_LABEL.test(r.label ?? '') && { re: reOf(r) }),
-        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }), ...(r.voice && { voice: r.voice }) })) };
+        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }), ...(r.voice && { voice: r.voice }), ...(r.file && { file: r.file }) })) };
     },
     'POST /api/sync': () => serial(async () => { await carrier.sync(); return { synced: true }; }),
     'POST /api/history/clear': (b) => serial(async () => {
@@ -1471,6 +1479,10 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
         try { [x] = await carrier.sendAll(c.did, [ph], { label: PHOTO_LABEL }); } catch (e) { if (!/queued/.test(e.message)) throw e; }
         record({ kind: 'out', did: c.did, id: x?.id ?? null, text: 'Photo', label: PHOTO_LABEL, photo: ph, status: x?.status ?? 'queued', code: x?.code, detail: x?.detail, at });
       }
+      if (!shot && !vo) {
+        // (0.1.19) Any other file: its own bubble in this chat (name, size; the lane and state from its transfer), kept in the history.
+        record({ kind: 'out', did: c.did, id: null, text: `File: ${r.name}`, label: FILE_LABEL, file: { name: r.name, size: r.size, sha256: r.sha256, via: null, transfer: r.id }, status: 'sent', at: Math.floor(Date.now() / 1000) });
+      }
       if (vo) {
         // The voice message beside the manifest, as a photo's preview goes.
         const v = fullVoice(vo, f, r.name), at = Math.floor(Date.now() / 1000);
@@ -1507,7 +1519,15 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
       return { id, type: AUDIO[/\.([a-z0-9]+)$/i.exec(r.name)?.[1]?.toLowerCase() ?? ''] ?? 'application/octet-stream', data: b64(bytes) };
     }) }),
     ...(typeof host.open === 'function' && { 'POST /api/transfers/open': (b) => call(async () => {
-      const r = X.list({ carrier, identity }).in.find((x) => x.id === idOf(b)) ?? refuse(404, 'transfer_unknown', 'no such file here');
+      const id = idOf(b), L = X.list({ carrier, identity });
+      // (0.1.19) A file I sent: the one picked (the record keeps it; the list leaves it out).
+      if (L.out.some((x) => x.id === id)) {
+        const f = engine.st((s) => (s.out[id] ? { ...s.out[id] } : null));
+        if (!f?.file) refuse(409, 'transfer_state', 'that file is not on this device any more');
+        await host.open(f.file, f.name);
+        return { opened: id };
+      }
+      const r = L.in.find((x) => x.id === id) ?? refuse(404, 'transfer_unknown', 'no such file here');
       if (r.state !== 'done' || !r.saved) refuse(409, 'transfer_state', `${r.name} has not landed yet`);
       await host.open(r.saved, r.name);
       return { opened: r.id };
@@ -1522,7 +1542,10 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
       void engine.kick();
       return r;
     })),
-    'POST /api/transfers/resume': (b) => serial(() => call(async () => { const r = X.accept({ carrier, identity, id: idOf(b), ...(directOf(b) !== undefined && { direct: directOf(b) }) }); void engine.kick(); return r; })),
+    'POST /api/transfers/resume': (b) => serial(() => call(async () => { const r = (X.resume ?? X.accept)({ carrier, identity, id: idOf(b), ...(directOf(b) !== undefined && { direct: directOf(b) }) }); void engine.kick(); return r; })),
+    // (0.1.19) The sender's choices on a file that did not go: over the relay lane (at most 8 MiB), or offered afresh.
+    'POST /api/transfers/relay': (b) => serial(() => call(async () => strip(await engine.relay(idOf(b), { manual: true })))),
+    'POST /api/transfers/retry': (b) => serial(() => call(async () => { const r = strip(await X.retry({ carrier, identity, id: idOf(b), engine })); void engine.kick(); return r; })),
     'POST /api/transfers/decline': (b) => serial(() => call(async () => X.decline({ carrier, identity, id: idOf(b) }))),
     'POST /api/transfers/cancel': (b) => serial(() => call(async () => strip(await X.cancel({ carrier, identity, id: idOf(b), engine })))),
     'POST /api/transfers/forget': (b) => serial(() => call(async () => strip(X.forget({ carrier, identity, id: idOf(b), engine })))),

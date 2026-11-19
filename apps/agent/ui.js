@@ -1375,7 +1375,7 @@
       S.msgsSeq = mark;
       const r = await backend.call('GET', `/api/messages?contact=${encodeURIComponent(did)}`).catch(() => null);
       if (!r) return;
-      S.photosHere = r.messages.some((m) => m.photo || m.voice);
+      S.photosHere = r.messages.some((m) => m.photo || m.voice || m.file);
       const recs = S.photosHere ? tl ?? await transfersNow() : null;
       const end = first || atEnd();
       first = false;
@@ -1400,7 +1400,7 @@
           h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
       };
       const pick = (m) => () => { RQ.set({ n: m.n, who: m.dir === 'out' ? 'You' : c.name, text: String(m.text).split('\n')[0].slice(0, 120) }); C.text.focus?.(); };
-      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && tapOf(m)) },
+      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : m.file ? fileBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && tapOf(m)) },
         m.re ? quoteIn(m.re.dir === 'out' ? 'You' : c.name, m.re.text, m.re.n === null ? null : ['data-n', String(m.re.n)]) : null,
         m.label && m.label !== 'sigelo-file/0' && !m.re ? h('span', { class: 'who' }, m.label) : null,
         m.label === 'sigelo-file/0' ? fileText(m.text) : msgText(m.text),
@@ -1568,7 +1568,19 @@
       return backend.call('POST', path, { ...body, direct: yes });
     }
   }
-  const TSTATE = { asked: 'waiting for your answer', offered: 'waiting for their answer', accepted: 'starting', offering: 'connecting', active: 'moving', interrupted: 'stopped', done: 'done', declined: 'declined', cancelled: 'cancelled', failed: 'failed', expired: 'expired' };
+  const TSTATE = { asked: 'waiting for your answer', offered: 'waiting for their answer', accepted: 'starting', offering: 'connecting', active: 'moving', interrupted: 'stopped', done: 'done', declined: 'declined', cancelled: 'cancelled', failed: 'failed', expired: 'expired',
+    relaying: 'going over the relay', relayed: 'came over the relay instead' };
+  // (0.1.19) The relay lane (sigelo-file/0) carries at most 8 MiB: a file that did not go direct, up to that, is offered
+  // "Send over the relay"; a larger one "Retry". The lane a file took, in a word.
+  const RELAY_MAX = 8 * 1024 * 1024;
+  const laneText = (v) => (v === 'relay' ? 'via relay' : v === 'direct' ? 'direct' : v === 'tor' ? 'over Tor' : null);
+  /** A file of mine that did not go: whether the bubble offers the relay lane or a retry (null: neither). */
+  const stuckOut = (r) => r && (['failed', 'expired'].includes(r.state) || (r.state === 'offered' && r.dropAt)) ? (r.size <= RELAY_MAX ? 'relay' : 'retry') : null;
+  const relayOrRetry = (r, who) => {
+    const k = stuckOut(r);
+    return k === 'relay' ? tbtn('Send over the relay', () => act(() => backend.call('POST', '/api/transfers/relay', { id: r.id })))
+      : k === 'retry' ? tbtn('Retry', () => act(() => transferCall('/api/transfers/retry', { id: r.id }, who))) : null;
+  };
   // The phone (design/transfer.md §10.1): no Tor, no relayed path yet.
   const NO_DIRECT = 'Could not connect directly; try from your computer, or wait for the Pro relay path.';
   /** What a transfer is doing, in a person's words: the sender waits for a yes or for them to come online. */
@@ -1591,9 +1603,10 @@
     if (['asked', 'offered', 'accepted', 'offering', 'active', 'interrupted'].includes(r.state) && !(side === 'in' && r.state === 'asked')) {
       btns.push(btn('Stop', async () => { if (await ask({ title: `Stop ${r.name}?`, text: 'The contact is told; what came so far is deleted.', yes: 'Stop it' })) void act(() => backend.call('POST', '/api/transfers/cancel', { id: r.id })); }, { kind: 'danger' }));
     }
-    if (['done', 'declined', 'cancelled', 'failed', 'expired'].includes(r.state)) btns.push(btn('Remove', () => act(() => backend.call('POST', '/api/transfers/forget', { id: r.id }))));
+    if (side === 'out') { const k = stuckOut(r); if (k) btns.push(btn(k === 'relay' ? 'Send over the relay' : 'Retry', () => act(() => (k === 'relay' ? backend.call('POST', '/api/transfers/relay', { id: r.id }) : transferCall('/api/transfers/retry', { id: r.id }, r.contact))))); }
+    if (['done', 'declined', 'cancelled', 'failed', 'expired', 'relayed'].includes(r.state)) btns.push(btn('Remove', () => act(() => backend.call('POST', '/api/transfers/forget', { id: r.id }))));
     return h('div', { class: 'card' }, h('p', null, h('b', null, `${side === 'in' ? 'From' : 'To'} ${r.contact}: `), h('span', { class: 'text' }, r.name), ` · ${mbOf(r.size)}`),
-      h('p', { class: r.state === 'failed' ? 'warn' : 'help' }, [tstate(r, side), r.group ? `group ${groupBy(r.group)?.name ?? ''}`.trim() : null, r.path_used ?? (live && r.live !== 'waiting' ? r.live : null), r.rate ? `${r.rate.toFixed(2)} MB/s` : null].filter(Boolean).join(' · ')),
+      h('p', { class: r.state === 'failed' ? 'warn' : 'help' }, [tstate(r, side), r.group ? `group ${groupBy(r.group)?.name ?? ''}`.trim() : null, laneText(r.path_used) ?? r.path_used ?? (live && r.live !== 'waiting' ? r.live : null), r.rate ? `${r.rate.toFixed(2)} MB/s` : null].filter(Boolean).join(' · ')),
       live || r.state === 'interrupted' ? [h('div', { class: 'meter' }, bar), h('p', { class: 'help' }, `${mbOf(got)} of ${mbOf(r.size)}`)] : null,
       r.reason === 'no_path' && S.transferSettings?.pick ? h('p', { class: 'help' }, NO_DIRECT) : r.detail ? h('p', { class: 'help' }, r.detail) : null,
       r.saved && /^content:/.test(r.saved) ? h('p', { class: 'help' }, 'In Downloads, where your other apps see it.') : r.saved ? h('p', { class: 'help' }, 'Saved at ', h('span', { class: 'mono' }, r.saved), ' (not opened).') : null,
@@ -1876,6 +1889,25 @@
   }
   /** Their voice message's state before it plays: "receiving…" (or the transfer's own words), "Get it" when asked. */
   const voiceState = (r, dir) => (dir === 'out' ? photoState(r, 'out') : !r || ['accepted', 'offering', 'active', 'offered'].includes(r.state) ? (r?.live && r.size ? `receiving… ${Math.min(99, Math.round((100 * (r.got ?? 0)) / r.size))} %` : 'receiving…') : photoState(r, 'in'));
+  /**
+   * A file in a chat (0.1.19: the sender's own showed no bubble): name and size, the lane that carried it (direct, via
+   * relay, over Tor) and its state; mine that did not go offers the relay lane or a retry; a tap opens it where this app can.
+   */
+  function fileBubble(m, L, did, name) {
+    const f = m.file, out = m.dir === 'out';
+    const r = out ? L?.out.find((x) => x.sha256 === f.sha256 && x.to === did) ?? L?.out.find((x) => x.id === f.transfer)
+      : (f.transfer && L?.in.find((x) => x.id === f.transfer)) || L?.in.find((x) => x.sha256 === f.sha256 && x.from === did && x.state === 'done');
+    const lane = laneText(f.via) ?? laneText(r?.state === 'done' || r?.state === 'relaying' ? r.path_used ?? (r.state === 'relaying' ? 'relay' : null) : null);
+    const st = out ? (r ? photoState(r, 'out') : null) : 'saved';
+    const open = S.transferSettings?.open && r && (out ? r.state !== 'cancelled' : r.state === 'done') ? () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })) : null;
+    const where = !out ? /, saved at (.+)$/s.exec(String(m.text ?? ''))?.[1] : null;
+    const body = [h('div', { class: 'text' }, h('b', null, f.name), ` · ${kb(f.size)}`), h('span', { class: 'tag' }, [lane, st].filter(Boolean).join(' · '))];
+    return h('div', { class: `msg ${m.dir} file`, 'data-file': f.sha256 },
+      open ? h('button', { type: 'button', class: 'fl', 'aria-label': `Open ${f.name}`, onclick: open }, ...body) : h('div', null, ...body),
+      where && !open ? h('div', { class: 'path' }, 'Saved on this machine: ', where) : null,
+      out ? relayOrRetry(r, name) : null,
+      h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
+  }
   /** A voice message in a chat (sigelo-voice/0). */
   function voiceBubble(m, L, did, name) {
     const v = m.voice, r = m.dir === 'out' ? L?.out.find((x) => x.sha256 === v.sha256 && x.to === did) : L?.in.find((x) => x.sha256 === v.sha256 && x.from === did);

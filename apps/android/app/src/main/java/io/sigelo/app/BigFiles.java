@@ -69,7 +69,7 @@ import java.util.regex.Pattern;
  *   big-land   the partial moved into Downloads (MediaStore, IS_PENDING until the copy is whole, a 1 MiB
  *              buffer; Android 9: the public folder, WRITE_EXTERNAL_STORAGE asked at the first) → {uri, name};
  *              refused "land" with why (no permission, no room): the page says it, the partial kept
- *   big-open   a file that landed opened by the system's viewer (ACTION_VIEW, a read grant)
+ *   big-open   a file that landed (uri), or one this phone sent (doc), opened by the system's viewer (ACTION_VIEW, a read grant)
  *   big-awake  FLAG_KEEP_SCREEN_ON while a transfer moves
  *   big-keep   a recording the page wrote into <part>.part (a voice message, apps/contact/voice-web.mjs) kept as a file
  *              in the cache beside the photos, under its name → {doc, name, size, mtime, url}: sent as a photo is
@@ -754,14 +754,24 @@ final class BigFiles {
         out.flush();
     }
 
-    /** A file that landed (a content URI of the media store), in the system's viewer. */
-    void openFile(JSONObject m, Reply r) {
-        String s = m.optString("uri");
-        if (!s.startsWith("content://media/")) {
-            r.no("big", "uri: a file that landed in Downloads");
-            return;
+    /**
+     * A file that landed (a content URI of the media store), in the system's viewer; or, with doc (0.1.19: the sender's
+     * own bubble), a file this phone sent: the one picked (its URI, the read grant kept) or taken (the photos provider).
+     */
+    void openFile(JSONObject m, Reply r) throws SigeloBridge.Refused {
+        Uri u;
+        if (m.has("doc")) {
+            String where = docOf(profileOf(m), hex32(m, "doc"));
+            u = where.startsWith("f:") ? PhotoProvider.uriOf(where.substring(2)) : Uri.parse(where.substring(2));
+        } else {
+            String s = m.optString("uri");
+            if (!s.startsWith("content://media/")) {
+                r.no("big", "uri: a file that landed in Downloads");
+                return;
+            }
+            u = Uri.parse(s);
         }
-        Intent i = new Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(s), typeOf(clean(m.optString("name")))).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        Intent i = new Intent(Intent.ACTION_VIEW).setDataAndType(u, typeOf(clean(m.optString("name")))).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try {
             activity.startActivity(Intent.createChooser(i, null));
             r.ok(new JSONObject());
