@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One tick of the scripted soak agent (ROADMAP T6). Run by sigelo-soak-agent.timer every 30 min.
+// One tick of the scripted soak agent. Run by sigelo-soak-agent.timer every 30 min.
 //
 // Every tick, as soak-root:  balance · pay bob 0.00008 "soak <n>" · the same again (ALREADY PAID)
 // Every 6 h:                 pay carol 0.00025 "rent <k>" → WAITING FOR APPROVAL → approve-request,

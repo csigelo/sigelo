@@ -16,7 +16,7 @@
  *
  * `ceremony` is §4.5: `S` never reaches stdout or a file other than the Owner's encrypted
  * backup (src/ceremony.ts) — and, with `--human`, the human's own terminal: the 25 words go to
- * /dev/tty, opened here, and a run without one is refused (ROADMAP §2 M4). `--import` makes
+ * /dev/tty, opened here, and a run without one is refused. `--import` makes
  * the root of existing words only with `--i-know-this-seed-was-cold`. `restore` is the Owner's:
  * it decrypts with age (or reads the 25 words from a file or stdin, never argv, where `ps`
  * shows them), re-derives, checks the fingerprint and prints it with each keeper root `K_j`. `new`/`derive` are the manual

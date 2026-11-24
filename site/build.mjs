@@ -112,7 +112,7 @@ export const PAGES = [
   // index.json's pages. nginx serves it for a miss once its helper allows error_page (nginx.conf).
   { slug: '404', src: 'site/src/404.md', type: 'NotFound', noindex: true },
 ];
-// Dark pages (ROADMAP §15 R1): pages written ahead of the Owner's go, in site/src/dark/<slug>.md with the
+// Dark pages: pages written ahead of the maintainer's go, in site/src/dark/<slug>.md with the
 // same front matter as site/src. While DISCLOSED is false they are built OUTSIDE the site, into
 // <out>-dark/ (site/dist-dark/), as noindex pages to read locally: never into dist/ (so no deploy carries
 // them), in no nav, sitemap, index.json or llms.txt; release/publish.sh leaves site/src/dark/ out of the

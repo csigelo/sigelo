@@ -19,7 +19,7 @@ once by `sigelo-agent keeper --from-words` (ENROL.md); refused inside the agents
 `.history.jsonl` (what the carrier's `inbox()` hands over: messages, pairing events), `.ui.json` (tags, words checked, read marks, seen receipts sent, settings), `.pictures/` (0700, one file 0600 per picture: "Pictures"),
 `.ui.pid` (one page or `watch` per file, the only process logged in as it: beside a page every CLI verb and
 MCP tool that would log in refuses, `busy`; WATCH.md). **Known limitation:** history and `.ui.json` are plaintext (0600) until the
-keychain unlock (K2, ROADMAP §7); "clear" (`POST /api/history/clear`) is the only mitigation (THREAT-MODEL §3.9).
+keychain unlock (K2); "clear" (`POST /api/history/clear`) is the only mitigation (THREAT-MODEL §3.9).
 
 ## Routes
 

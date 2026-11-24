@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
-// release/prepack.mjs — what a tarball needs that the package directory lacks (ROADMAP T4).
+// release/prepack.mjs — what a tarball needs that the package directory lacks.
 //
 //   node <repo>/release/prepack.mjs pre     (the package's `prepack`)
 //   node <repo>/release/prepack.mjs post    (the package's `postpack`)

@@ -35,8 +35,8 @@
 // Kept by a re-pair, a merge and a rename, as the tier is.
 // short, short_exp: the short code parked for an invite of mine (carrier.mjs invite) and the relay's
 // exp of it, so a cancel by the short code finds the invite and the state shows it. renew (an invite's
-// series id, and the series in `renew`): a one-person code that renews itself (ROADMAP "Invite codes:
-// auto-renew and cancel"): when its invite is taken (answered, well or not) the series is due, and the
+// series id, and the series in `renew`): a one-person code that renews itself:
+// when its invite is taken (answered, well or not) the series is due, and the
 // carrier parks a fresh code for it (carrier.mjs #renewDue) with the series' name (numbered: n), ttl
 // and relay (null: the defaults). used: the codes of it that were used, the latest RENEW_USED. claim:
 // when a process began a renewal (two processes of one identity park one code); retry, error: a

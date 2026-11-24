@@ -17,7 +17,8 @@
  *   any other request from the agent (fs/*, terminal/*) → -32601, never served (not offered at initialize)
  *   the child exits, or a start step fails or times out → the query throws: the host's "session restarted",
  *                      then unavailable after FAIL_N, exactly as for the SDK
- *   close()          → session/cancel when a turn runs, stdin ended, the child stopped
+ *   close()          → session/cancel when a turn runs, stdin ended, the child stopped: SIGTERM after a grace
+ *                      (CLOSE_GRACE_MS, its exit ends it early), SIGKILL CLOSE_KILL_MS later; the query awaits the exit
  * No cancel on a new operator message: the SDK plug queues it as the next turn, and so does this one.
  */
 import { spawn } from 'node:child_process';
@@ -27,7 +28,7 @@ import { version } from './sigelo-agent-contact.ts';
 import { spawnArgs, stop, which } from './sigelo-agent-exec.ts';
 
 const agentVersion = (): string => { try { return version(); } catch { return '0'; } };
-export const ACP_VERSION = 1, ACP_START_MS = 120_000, TITLE_MAX = 80;
+export const ACP_VERSION = 1, ACP_START_MS = 120_000, TITLE_MAX = 80, CLOSE_GRACE_MS = 500, CLOSE_KILL_MS = 3000;
 type Rpc = { jsonrpc?: string; id?: number | string | null; method?: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: { code?: number; message?: string } };
 type Tool = { title?: string; kind?: string; rawInput?: unknown; status?: string; shown?: boolean };
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -78,6 +79,8 @@ function acpQuery(cmd: string[], env: NodeJS.ProcessEnv, prompt: AsyncIterable<S
   if (f === null) { fail(new Error(`the ACP agent: no ${cmd[0]} command on this machine's PATH`)); }
   const a = f === null ? null : spawnArgs(f, cmd.slice(1));
   const child = a === null ? null : spawn(a.cmd, a.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], shell: a.shell });
+  // exited: the child's end (or it never started), what close() waits for.
+  const exited = child === null ? Promise.resolve() : new Promise<void>((r) => { child.on('exit', () => r()); child.on('error', () => { if (child.pid === undefined) r(); }); });
   const send = (m: Rpc): void => { if (child !== null && gone === null && child.stdin.writable) child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...m })}\n`); };
   const request = (method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> => new Promise((ok, no) => {
     if (gone !== null) { no(gone); return; }
@@ -159,8 +162,13 @@ function acpQuery(cmd: string[], env: NodeJS.ProcessEnv, prompt: AsyncIterable<S
     if (closed) return;
     closed = true;
     if (turn !== null) { send({ method: 'session/cancel', params: { sessionId: sid } }); turn.abort(); }
-    if (child !== null) { child.stdin.end(); if (child.exitCode === null && child.signalCode === null) stop(child.pid, () => child.kill('SIGTERM')); }
-    else fail(new Error('the ACP agent was stopped'));
+    if (child === null) { fail(new Error('the ACP agent was stopped')); return; }
+    child.stdin.end();
+    // A grace for the cancel (and stdin's end) to be read, the exit ending it early; then SIGTERM, then SIGKILL.
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    let t2: NodeJS.Timeout | undefined;
+    const t = setTimeout(() => { stop(child.pid, () => child.kill('SIGTERM')); t2 = setTimeout(() => child.kill('SIGKILL'), CLOSE_KILL_MS); }, CLOSE_GRACE_MS);
+    void exited.then(() => { clearTimeout(t); clearTimeout(t2); });
   };
   async function* run(): AsyncGenerator<SdkMsg> {
     try {
@@ -198,7 +206,7 @@ function acpQuery(cmd: string[], env: NodeJS.ProcessEnv, prompt: AsyncIterable<S
         me.abort();
         if (turn === me) turn = null;
       }
-    } finally { close(); }
+    } finally { close(); await exited; }
   }
   return Object.assign(run(), { close });
 }

@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# release/pack-test.sh — the release artifacts, installed and run where no clone is (ROADMAP T4).
+# release/pack-test.sh — the release artifacts, installed and run where no clone is.
 #
 #   release/pack-test.sh [dist]      dist: a release/build.sh output; default: build one now
 #                                    (from HEAD) into a temporary directory

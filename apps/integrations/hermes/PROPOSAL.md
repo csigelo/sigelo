@@ -1,14 +1,6 @@
-Posted: https://github.com/NousResearch/hermes-agent/issues/131484 (2026-10-02)
-Reply to Larry-Osakwe posted 2026-11-24: https://github.com/NousResearch/hermes-agent/issues/131484#issuecomment-7131577740 ; branch https://github.com/csigelo/hermes-agent/tree/a2a-peer-authenticator
-
 <!-- SPDX-License-Identifier: MIT -->
-<!-- Draft. Not posted anywhere. -->
-<!-- HOW TO POST (Owner):
-1. Venue: a Feature Request issue, https://github.com/NousResearch/hermes-agent/issues/new?template=feature_request.yml — Discussions are disabled on the repo (CONTRIBUTING's "GitHub Discussions" line is stale) and there is no RFC directory; a sigelo directory under apps/plugins/ would be closed (CONTRIBUTING: third-party integrations ship as standalone plugins), and the core hook is exactly the "feature request to widen the generic plugin surface" CONTRIBUTING asks for.
-2. Title: "[Feature]: pluggable A2A peer authenticator, so a peer can prove a key-based identity instead of holding a bearer token"
-3. Labels: the template adds `enhancement`; outsiders cannot set others. Triage will likely add type/feature, comp/plugins, area/auth (what #56434, #80534 and #86061 carry).
-4. Template fields: Problem → "Problem or Use Case"; Proposal, What it is not, Smallest step, Open question → "Proposed Solution"; Alternatives: "per-peer tokens (today), asserted headers (#101731)"; Scope: small; tick "I'd like to implement this myself".
-5. Attach nothing: link config.yaml and test.py from the public export instead (replace the two https://github.com/csigelo/sigelo links below), and post only from the Owner's account. -->
+
+Posted: https://github.com/NousResearch/hermes-agent/issues/131484 (2026-10-02); follow-up 2026-11-24: https://github.com/NousResearch/hermes-agent/issues/131484#issuecomment-7131577740 ; branch https://github.com/csigelo/hermes-agent/tree/a2a-peer-authenticator
 
 ## Problem
 

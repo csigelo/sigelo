@@ -776,7 +776,7 @@ sigelo-offline restore  --words <file|-> [--keepers N] [--fingerprint <dir>/fing
 age is a shelled-out `age` or `rage` (no npm dependency; the step is an injectable interface
 in `ceremony.ts`); a missing binary or a bad recipient exits 2 and writes nothing.
 
-**The human step** (ROADMAP §2 M4). The 25 words must reach a human without entering an
+**The human step**. The 25 words must reach a human without entering an
 agent's context. Two ways, both the human's: (a) **`ceremony --human`**, run by the human at a
 terminal: after step 5 the words, numbered, go to `/dev/tty`, which the program opens itself,
 and never to stdout or stderr, so a redirect or an agent's pipe never carries them. Without a
@@ -1180,7 +1180,7 @@ the pure parts (`policy.ts`, `tree.ts`, `approval.ts`) testable without a wallet
 | C3 | Hot side: `export_outputs`, `transfer`, request file, `submit_transfer` | 100 | 15 |
 | C4 | Stagenet end-to-end through C2, plus a forged-description refusal | script | — |
 
-**Later: FCMP++/Carrot** (checked 2026-09-29; ROADMAP §2 M6 has the sources). Carrot keeps
+**Later: FCMP++/Carrot** (checked 2026-09-29). Carrot keeps
 legacy `a = H_s(b)` wallets, their subaddresses and address formats working for sending and
 receiving: no wallet key migration, so the 25-word root and every derived wallet stand. The
 reference wallet (seraphis-migration stressnet v0.19.0.0-beta.3.0, 2026-09-25) still creates and

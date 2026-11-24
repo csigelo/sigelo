@@ -1,7 +1,7 @@
 # Keeper soak
 
-ROADMAP §6 step 10, items T6 (two or more weeks of scripted agents against a real keeper and
-wallet: restarts, lock waits, approval races) and T14 (incident rehearsal). Stagenet by default
+The soak (two or more weeks of scripted agents against a real keeper and
+wallet: restarts, lock waits, approval races) and the incident rehearsal. Stagenet by default
 (`setup.sh --mainnet`: real coins, small amounts). On stagenet the coins are worthless; the rest is real: the keeper, the wallet, the two-phase relay,
 approvals, delegation and sweeps.
 
@@ -132,11 +132,11 @@ ticks straight, so rent 2 was abandoned. 0.00042 leaves 0.000022: a fee up to ~0
 (amount + fee), not a keeper defect; the soak just has to ask for less.
 It happened again from 2026-11-07: the self-paying wallet had fragmented to 128 outputs of
 ~0.0000386 each, carol needed 5–13 inputs (fee 0.000085–0.000196, measured) and every rent from
-55 to 73 was abandoned. Owner-decided 2026-11-13: ask for less, not raise the cap. Since then
+55 to 73 was abandoned. Decided 2026-11-13: ask for less, not raise the cap. Since then
 carol is **0.00025**, bob 0.00008, the delegate 0.00028, and `approval_above` **0.0002** so carol
 still asks for approval; the worst 13-input fee (0.0002) keeps carol at 0.00045, the funding at
 0.00048 and the delegate's bob at 0.00028, all within the caps. The fragmentation itself is
-normal Monero behaviour. Swept 2026-11-13 (Owner: "consolidate"): `sweep_all` to its own address with
+normal Monero behaviour. Consolidated 2026-11-13: `sweep_all` to its own address with
 `subaddr_indices: [0]` (without it wallet-rpc sweeps ONE random non-empty subaddress, index 0 last: the
 first try moved 0.0004 from two others), 1 transaction, ~80 inputs, 0.00334 out, fee 0.0011; outputs
 under the per-input fee (~45 of them, 0.0004 in all) are skipped by the wallet as not worth spending
@@ -353,8 +353,8 @@ then the keeper, which reads `policy.json` at start.
 
 ## Host reboot
 
-User units start at boot only with lingering on (`loginctl show-user user -p Linger` → `yes`;
-already on here, otherwise `doas loginctl enable-linger user`). After a reboot: wallet-rpc and
+User units start at boot only with lingering on (`loginctl show-user "$USER" -p Linger` → `yes`;
+otherwise `loginctl enable-linger "$USER"` as root). After a reboot: wallet-rpc and
 keeper start by themselves. The keeper may start before the wallet has synced; it answers TRY
 LATER until then. A `kill -9`/power loss/reboot leaves `spend.lock` behind; the next start takes
 it over (dead pid, reused pid or earlier boot — see Incidents #1). A write cut off by the
@@ -400,7 +400,7 @@ the tooling did not notice.** *Symptom*: from tick 154 every pay and fund was TR
 wallet height froze at 2217326, 0 successful payments on 09-29 before 11:30Z; `check.mjs` said
 HEALTHY throughout. *Cause*: the host, not sigelo. At 02:54:43Z the test host lost its network for 32 h because
 its network manager stopped auto-connecting after a failed handshake and nothing could
-re-authorise it unattended: 0 connection attempts for 32 h. The Owner re-authorised it at
+re-authorise it unattended: 0 connection attempts for 32 h. An operator re-authorised it at
 11:03:14Z, it connected in 4 s, and wallet-rpc resynced on its own (2217326 → 2218206 by
 11:08Z); tick 219 at 11:30Z paid and funded. *What held*: nothing was sent while offline (spend.log
 has no intent for the stuck ticks), 379/379 lines verify, intent = relayed, 0 UNCERTAIN, drop vs
@@ -421,7 +421,7 @@ a critical `notify-send` notification within the hour of UNHEALTHY (with the rul
 here, instead of 32 h later by chance); the keeper no longer depends on one node (`SIGELO_DAEMONS`
 fallback — would not have helped this outage, which had no network at all, but closes the "their
 node is down" case); and no tick runs on an unsynced clock (the agent unit's `ExecCondition`).
-Still open, the Owner's: the host's network itself, and redeploying `app/` so the live soak runs any of it.
+Still open, the operator's: the host's network itself, and redeploying `app/` so the live soak runs any of it.
 
 **Wrong-clock risk (found in #4, not triggered).** At every crash-boot the host's clock reads the
 system's build epoch (2026-01-10/11) for 20–45 s until NTP; no tick ran in that window (the

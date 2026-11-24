@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# The release artifacts (ROADMAP T4, §5.5) and their SHA256SUMS:
+# The release artifacts and their SHA256SUMS:
 #
 #   release/build.sh [outdir]          default outdir: release/dist
 #
@@ -13,7 +13,7 @@
 #   test-vectors.json                  the conformance target (`sigelo-verify --conformance`)
 #   sigelo-<v>.cdx.json                the CycloneDX SBOM of all of it (release/sbom.mjs; same commit, same bytes)
 #
-# release/pack-test.sh installs all of it in an empty directory and runs it. At D1 (ROADMAP §7),
+# release/pack-test.sh installs all of it in an empty directory and runs it. At D1,
 # once the npm account and the repository exist, the maintainer publishes exactly these files:
 #
 #   for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do npm publish "$out/$t-<v>.tgz"; done

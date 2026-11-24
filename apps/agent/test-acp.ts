@@ -65,7 +65,9 @@ ok('pick: allow → allow_once, else allow_always; deny → reject_once, else re
   c.input('slow');
   await until(() => logged().some((m) => m.method === 'session/prompt' && JSON.stringify(m.params).includes('"slow"')));
   await c.close();
-  ok('close mid-turn: session/cancel sent, the child stopped', logged().some((m) => m.method === 'session/cancel' && m.params?.['sessionId'] === 'sess-1') && await until(() => fakes() === 0), String(fakes()));
+  // The fake logs what it reads: wait for the line (a slow runner), then for the child's end.
+  const cancelled = await until(() => logged().some((m) => m.method === 'session/cancel' && m.params?.['sessionId'] === 'sess-1'), 2000);
+  ok('close mid-turn: session/cancel sent (read by the agent before it stops), the child stopped', cancelled && await until(() => fakes() === 0), `${cancelled} ${fakes()}`);
 }
 {
   const { c, sent, has } = core({ progress: [0, 8, 60_000] });

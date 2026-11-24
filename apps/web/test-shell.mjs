@@ -1086,7 +1086,7 @@ class FakeEl {
 }
 
 // ================================================================ 1e2. the backup file (backup.mjs, boot.mjs local.backup, the first run's "Restore from
-// a backup"; ROADMAP "encrypted backup and restore") over the fake shell: Back up this profile asks the lock and the words password
+// a backup") over the fake shell: Back up this profile asks the lock and the words password
 // (a wrong one after the gate's delay), writes the file into Downloads through the shell; on a new phone (another keystore) the
 // first run restores it: the same identity, its words kept under the same password; the same DID as another profile refused;
 // a remote profile has nothing to back up.

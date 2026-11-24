@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# ROADMAP T12: cross-check sigelo's primitives against third-party code and vectors.
+# Cross-check sigelo's primitives against third-party code and vectors.
 #
 #   crosscheck/run.sh              full run (~10 min on the test host), writes results/latest/
 #   crosscheck/run.sh --quick      10 % of the random cases

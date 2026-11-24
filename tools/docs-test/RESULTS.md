@@ -46,7 +46,7 @@ to contact `bob` → `PAID`, txid
   "x/10", and the exact docs each agent saw were not kept. The scores cannot be re-derived.
 - **One model family.** Claude only, one run per cell. No variance, no other vendor.
 
-## Round 3 needs (ROADMAP R3, T5)
+## Round 3 needs
 
 1. A **docs snapshot** frozen at a tag, with the SHA-256 of every file the agent may read
    recorded here beside each result.

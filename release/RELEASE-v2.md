@@ -1,6 +1,6 @@
 # Release v2: one tag, supply chain hardened
 
-Design, 2026-11-11 (ROADMAP R1). It replaces RELEASE.md after stage 5; until then RELEASE.md is the procedure. "The maintainer" is the agent that runs releases; "the owner" is the human who holds the offline keys.
+Design, 2026-11-11. It replaces RELEASE.md after stage 5; until then RELEASE.md is the procedure. "The maintainer" is the agent that runs releases; "the owner" is the human who holds the offline keys.
 
 ## 1. Goals and non-goals
 

@@ -64,7 +64,7 @@ const report = () => {
   for (let i = 0; i < 1000; i++) seen.add(makeShort());
   ok(seen.size === 1000 && [...seen].every((s) => /^[0-9A-HJKMNP-TV-Z]{8}$/.test(s)), 'makeShort: 1,000 codes from the CSPRNG, all 8 Crockford digits, no repeat');
   ok(SHORT_TTL === 600, 'a short code lives 10 minutes');
-  // Relay tags (ROADMAP §9.3): the first 20 bits of SHA-256("sigelo-relay-tag/0" ‖ relay), 4 characters.
+  // Relay tags: the first 20 bits of SHA-256("sigelo-relay-tag/0" ‖ relay), 4 characters.
   ok(TAG_LABEL === 'sigelo-relay-tag/0' && relayTag('corp.example.com') === 'FNK5'
     && createHash('sha256').update('sigelo-relay-tag/0corp.example.com').digest('hex').slice(0, 5) === '7d665', 'relay tag vector: corp.example.com → SHA-256 prefix 7d665 → FNK5');
   for (const t of F.relay_tags) ok(relayTag(t.relay) === t.tag, `relay tag ${t.relay}: ${relayTag(t.relay)}, expected ${t.tag}`);

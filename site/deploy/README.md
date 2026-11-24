@@ -17,7 +17,7 @@ site/deploy/deploy.sh sigelo@sigelo.io --rollback  # serve the previous upload a
 | `sigelo-nginx-apply` | root helper: allowlist check, install, `nginx -t` (restores the old file on failure), reload | server: `/usr/local/sbin/`, via one sudo rule |
 | `server-setup.sh` | ONE-TIME server preparation, as root, by hand; `--relay` prepares the relay's host instead ("The relay host") | server |
 | `stats-agents.sh` | the agent/human split of the visits as `agents.txt` (≤ 40 lines, phone-sized); `server-setup.sh --stats` installs it with the 15-minute timer | server: `/usr/local/sbin/sigelo-stats-agents` |
-| `watch.sh` | the watchdog: reachability probes of sigelo.io (site, TLS, `/world/stats`, `/mcp`) and sigelo.ai (front page, `/challenge`, MQTT, TLS), notify when down, throttled | the Owner's phone: `~/.local/bin/sigelo-watch` + `sigelo-watch.timer` (user) |
+| `watch.sh` | the watchdog: reachability probes of sigelo.io (site, TLS, `/world/stats`, `/mcp`) and sigelo.ai (front page, `/challenge`, MQTT, TLS), notify when down, throttled | the operator's phone: `~/.local/bin/sigelo-watch` + `sigelo-watch.timer` (user) |
 | `apache.conf` | the same behaviour for Apache 2.4; install by hand, deploy with `--no-config` | server |
 | `mirror-release.sh` | `<tag> [user@host]`: `gh release download` → every file against SHA256SUMS → upload to `releases/<tag>/` (never changed once there) → `releases/index.json`, `latest` → re-download over HTTPS and compare | your machine (gh, node, ssh) |
 
@@ -63,7 +63,7 @@ commit leaves `dist.prev` pointing at the real previous version.
 | `sigelo.io` | A | the server's IPv4 |
 | `sigelo.io` | AAAA | the server's IPv6 (omit if it has none — nginx.conf listens on `[::]`; drop those lines if the kernel has IPv6 disabled) |
 | `www.sigelo.io` | A, AAAA | the same addresses (or a CNAME to `sigelo.io`) |
-| `sigelo.net`, `www.sigelo.net` | A, AAAA | the same addresses; both names 301 to `https://sigelo.ai` and sit on the same certificate (the Owner holds `.net` too) |
+| `sigelo.net`, `www.sigelo.net` | A, AAAA | the same addresses; both names 301 to `https://sigelo.ai` and sit on the same certificate (the project holds `.net` too) |
 | `sigelo.online`, `www.sigelo.online` | A | the same IPv4 as `sigelo.io`; both 301 to `https://sigelo.ai`, same certificate (see "More held domains"); `sigelo.dev` is reserved for a code forge and `sigelo.org` parked: no record here |
 | `sigelo.ai`, `www.sigelo.ai`, `relay.sigelo.ai` | A, AAAA | the relay's host, not this one ("The relay host") |
 | `sigelo.io` | CAA (optional) | `0 issue "letsencrypt.org"` — only Let's Encrypt may issue for the domain |
@@ -200,7 +200,7 @@ node site/deploy/check.mjs                              # their redirects: ok, o
 `--certs` is idempotent: it resolves every name through DNS (node, not `/etc/hosts`), compares the
 answers with the server's own interface addresses, re-issues the one lineage (`--cert-name
 sigelo.io`) only when a pointed name is missing from it, and prints each skipped name with what it
-resolves to. Rerun it whenever the Owner has pointed another domain.
+resolves to. Rerun it whenever another domain has been pointed.
 
 ## The first deploy, then HSTS
 
@@ -243,7 +243,7 @@ kept, `--anonymize-ip` as a second cut, the hosts panel off) and `agents.txt` (`
 AI agents by name, programmatic clients, crawlers, browsers, `Accept: text/markdown`, the agent
 funnel `/llms.txt` → `/adopt.md` → `/index.json` → `/examples/world.mjs`, top paths for agents and
 for humans). Both are served at `https://sigelo.io/_stats/` behind basic auth (user `owner`; the
-password lives only on the Owner's phone, the server keeps its SHA-512 crypt hash), `noindex`,
+password lives only on the operator's phone, the server keeps its SHA-512 crypt hash), `noindex`,
 `no-store`, not in the sitemap; `check.mjs` checks the 401 and the sitemap.
 
 **Own traffic is excluded.** Every request the project makes to its own site — `check.mjs`
@@ -308,7 +308,7 @@ failing unit (nginx only after `nginx -t`) and logs to `journalctl -u sigelo-sel
 (daily 03:30 Europe/Berlin) tars `/var/lib/sigelo-world` (issuer key, attestations, nonces),
 `/etc/sigelo-world.env`, the nginx config and stats password file, `/etc/letsencrypt`, the sigelo
 units, helpers, sudo rule and logrotate file, `/var/backups/sigelo-nginx`, the release mirror and
-the stats, encrypted with age to a recipient whose identity is only on the Owner's phone
+the stats, encrypted with age to a recipient whose identity is only on the operator's phone
 (`~/.config/sigelo/vps-backup.key`): `/home/csigelo/backup/vps-state-<stamp>.tgz.age`, csigelo
 0600, 7 kept. The server cannot read its own backups. The phone's nightly `sigelo-backup` (04:00)
 pulls the newest into `~/.local/share/sigelo-vps-state/`, which its own passphrase-encrypted

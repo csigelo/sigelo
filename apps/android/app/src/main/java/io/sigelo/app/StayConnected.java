@@ -30,7 +30,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Stay connected (design/push.md §A, ROADMAP B1): a foreground service of type specialUse while the switch is on
+ * Stay connected (design/push.md §A): a foreground service of type specialUse while the switch is on
  * (SigeloBridge "stay", SharedPreferences "stay_on", default on: one setting for the phone, not per profile).
  *
  * It owns no socket. The relay's connection is the page's: the carrier (MQTT, its keepalive and backoff) runs in

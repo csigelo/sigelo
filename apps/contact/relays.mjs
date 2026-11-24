@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Which relay a 12-character short code was made on (ROADMAP §9 items 3 and 4): its relay tag
+// Which relay a 12-character short code was made on: its relay tag
 // (short.mjs relayTag) resolved to a host. No network here but loadRegistry's one fetch, which the
 // carrier passes in; nothing in pairing by long code or in verification calls this file.
 //

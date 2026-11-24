@@ -1169,7 +1169,7 @@ try {
   rejects('ceremony refuses to write into a non-empty directory', () => ceremony({ net: 'stagenet', recipient: RCPT, out, age: fakeAge }), 'not empty');
   rejects('ceremony refuses keeper 0 as the treasury keeper (one keeper = one wallet)', () => ceremony({ net: 'stagenet', recipient: RCPT, out: join(cerTmp, 'tk'), keepers: 2, treasuryKeeper: 0, age: fakeAge }), 'treasury-keeper');
 
-  // --- M4 (ROADMAP §2): --human's tty sink, the refused import, restore from the words.
+  // --- M4: --human's tty sink, the refused import, restore from the words.
   // Wordlist tokens of a text, and "a window of two consecutive words of m appears in s".
   const wordTokens = (s: string): Set<string> => new Set(s.toLowerCase().split(/[^a-z]+/).filter((w) => MONERO_WORDS.includes(w)));
   const pairLeak = (s: string, m: string): boolean => { const w = m.split(' '), flat = s.toLowerCase().split(/[^a-z]+/).join(' ');

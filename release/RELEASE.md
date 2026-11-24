@@ -5,7 +5,7 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never the p
 
 1. Private repo: every package.json, lockfile and `apps/integrations/mcp/server.json` at `<v>`; go/go.mod
    `toolchain` at the latest Go patch (build.sh enforces it);
-   CHANGELOG.md `## v<v> — <date>`; VERSIONING.md status line; ROADMAP §6 step 8; site
+   CHANGELOG.md `## v<v> — <date>`; VERSIONING.md status line; site
    footnotes; apps/android/app/build.gradle `versionName '<v>'`, `versionCode` + 1 (apps/android/FDROID.md).
    `node site/build.mjs && node site/test/run.mjs`, `node apps/plugins/build.mjs --check` and
    `sh release/test-release.sh` pass. Commit.
@@ -80,5 +80,5 @@ SIGELO_AUTHOR="$A" sh release/publish.sh --relay ../sigelo-relay-public
 GIT_SSH_COMMAND='ssh -i ~/.ssh/sigelo_ed25519 -o IdentitiesOnly=yes' git -C ../sigelo-public push
 ```
 
-Never exported: planning, journal and commercial files.
+Never exported: internal planning files.
 `--relay` exports `relay/` alone (csigelo/sigelo-relay), pushed the same way.

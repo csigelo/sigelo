@@ -1,4 +1,4 @@
-# The weekly wallet-rpc canary (ROADMAP §5.5 "wallet-rpc canary", §6 step 4).
+# The weekly wallet-rpc canary.
 #
 # apps/keeper/canary.ts pins the monero-wallet-rpc interface the keeper depends on: method names, the
 # parameters it sends, the result fields it reads, and an RPC version range (RPC_RANGE: 1.30, the
