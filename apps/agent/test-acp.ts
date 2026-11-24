@@ -5,7 +5,7 @@
 //   node test-acp.ts   → ALL PASS test-acp.ts (n ok)
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { done, ok, tmpHome } from './test-helpers.ts';
 import * as A from './sigelo-agent-acp.ts';
 import * as H from './sigelo-agent-host.ts';
@@ -39,7 +39,7 @@ ok('pick: allow → allow_once, else allow_always; deny → reject_once, else re
   ok('…the agent: one child process', fakes() === (process.platform === 'win32' ? 0 : 1), String(fakes()));
   const init = logged().find((m) => m.method === 'initialize'), nw = logged().find((m) => m.method === 'session/new'), pr = logged().filter((m) => m.method === 'session/prompt');
   ok('…initialize: protocol version 1, no fs or terminal offered; session/new: an absolute cwd, no MCP servers',
-    init?.params?.['protocolVersion'] === 1 && JSON.stringify(init.params['clientCapabilities']) === '{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}' && typeof nw?.params?.['cwd'] === 'string' && (nw.params['cwd'] as string).startsWith('/') && JSON.stringify(nw.params['mcpServers']) === '[]', JSON.stringify(logged().slice(0, 2)));
+    init?.params?.['protocolVersion'] === 1 && JSON.stringify(init.params['clientCapabilities']) === '{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}' && typeof nw?.params?.['cwd'] === 'string' && isAbsolute(nw.params['cwd'] as string) && JSON.stringify(nw.params['mcpServers']) === '[]', JSON.stringify(logged().slice(0, 2)));
   const first = (pr[0]?.params?.['prompt'] ?? []) as { text: string }[];
   ok('…the first turn of a session carries the hosting note first (ACP has no system prompt to count on)', first.length === 2 && first[0]!.text.startsWith('You are hosted by sigelo-agent') && first[1]!.text === 'hello', JSON.stringify(first));
   ok('…later turns: the message alone', c.input('what') === 'turn' && await has((t) => t === 'echo: what (1 blocks)'), JSON.stringify(sent));

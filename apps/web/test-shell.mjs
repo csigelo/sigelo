@@ -1513,11 +1513,16 @@ try {
     const back9 = await until(async () => X.sh.log.streams.length > s0 + 1 && (await X.call('GET', '/api/state')).body.me.online);
     ok(back9 && Date.now() - t9 < 3000 && X.sh.log.streams.length === s0 + 2, `push wake: after a cut, one login at once (${Date.now() - t9} ms)`);
     // The carrier registers the shell's endpoint at the relay over the shell's TLS stream (sigelo-push/0), and removes it.
-    const pushRows = () => relay.db.raw.prepare('SELECT count(*) AS n FROM push').get().n;
-    X.router.carrier.setPush({ endpoint: 'https://push.example.org/upAda?up=1', p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' });
-    ok(await until(() => X.router.carrier.pushStatus().state === 'registered') && pushRows() === 1, `push: the app's carrier registers its endpoint at the relay (${JSON.stringify(X.router.carrier.pushStatus())})`);
-    X.router.carrier.setPush(null);
-    ok(await until(() => X.router.carrier.pushStatus().state === 'off') && pushRows() === 0, 'push: setPush(null): removed at the relay');
+    // A relay checkout from before sigelo-push/0 (CI's pinned csigelo/sigelo-relay commit, until the relay export with push)
+    // has no push table: these two are skipped there, and said.
+    const relayPush = (() => { try { relay.db.raw.prepare('SELECT count(*) AS n FROM push').get(); return true; } catch { return false; } })();
+    if (relayPush) {
+      const pushRows = () => relay.db.raw.prepare('SELECT count(*) AS n FROM push').get().n;
+      X.router.carrier.setPush({ endpoint: 'https://push.example.org/upAda?up=1', p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' });
+      ok(await until(() => X.router.carrier.pushStatus().state === 'registered') && pushRows() === 1, `push: the app's carrier registers its endpoint at the relay (${JSON.stringify(X.router.carrier.pushStatus())})`);
+      X.router.carrier.setPush(null);
+      ok(await until(() => X.router.carrier.pushStatus().state === 'off') && pushRows() === 0, 'push: setPush(null): removed at the relay');
+    } else skipped += ': SKIP push registration (this relay checkout has no sigelo-push/0)';
     // Share into sigelo (0.1.20), the page's path (ui.js share-to over the router): a text shared from another app lands as a
     // message in the chat chosen; a file as a transfer offered there, its doc taken for this profile.
     const shared = [];
