@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=sigelo
+Name=Sigelo
 Comment=Your sigelo page: this phone's, or a computer's
 Exec=sigelo-app
 Icon=io.sigelo.App

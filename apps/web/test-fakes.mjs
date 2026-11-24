@@ -100,5 +100,5 @@ export class FakeBig {
   async keep(part, name) { const b = this.parts.get(part); if (!b) throw Object.assign(new Error('no recording written for this part'), { check: 'voice' }); this.parts.delete(part); this.kept = [...(this.kept ?? []), name]; return this.add(name, b); }
   async url(uri) { const i = Number(/\/(\d+)$/.exec(String(uri))?.[1]) - 1, l = this.landed[i]; if (!l) throw Object.assign(new Error('uri: a file that landed in Downloads'), { check: 'big' }); return this.add(l.name, l.bytes); }
   async appSettings() { this.settingsOpened = (this.settingsOpened ?? 0) + 1; }
-  async mic() { this.micAsked = (this.micAsked ?? 0) + 1; if (this.micBlocked) throw Object.assign(new Error('Android no longer asks'), { check: 'mic_blocked' }); if (this.micDenied) throw Object.assign(new Error('the microphone is not allowed for sigelo'), { check: 'mic_permission' }); return true; }
+  async mic() { this.micAsked = (this.micAsked ?? 0) + 1; if (this.micBlocked) throw Object.assign(new Error('Android no longer asks'), { check: 'mic_blocked' }); if (this.micDenied) throw Object.assign(new Error('the microphone is not allowed for Sigelo'), { check: 'mic_permission' }); return true; }
 }

@@ -85,12 +85,30 @@ export const path = { join, dirname, resolve };
 // One lock file per name: every change is load, change, save inside it, so a CLI verb and a
 // long-running carrier on the same identity cannot undo each other. As
 // apps/agent/sigelo-agent-monero.ts withLock. who: the processes named in the refusal.
+// The lock holds its process's pid: a lock whose process is gone (a CLI killed holding it, the agent-setup feedback
+// point 9: every verb then waited and failed until a human deleted the file) is removed, with one line.
+// Read twice before removal, so a lock taken over in between is never removed; an empty one (being
+// written, or an older client's) waits as before.
 const LOCK_TRIES = 200, LOCK_MS = 25;
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+export function staleLock(lock, say = (l) => console.error(l)) {
+  const held = () => { try { return readFileSync(lock, 'utf8').trim(); } catch { return null; } };
+  const t = held();
+  if (!t || !/^\d+$/.test(t) || Number(t) === process.pid || pidAlive(Number(t)) || held() !== t) return false;
+  rmSync(lock, { force: true });
+  say(`sigelo: removed the stale lock ${lock} (its process ${t} is gone)`);
+  return true;
+}
+export function takeLockFile(lock) {
+  const fd = openSync(lock, 'wx', 0o600);
+  try { writeSync(fd, `${process.pid}\n`); } finally { closeSync(fd); }
+}
 export function transact(name, fn, who = 'sigelo-contact') {
   const lock = `${name}.lock`, idle = new Int32Array(new SharedArrayBuffer(4));
   for (let i = 0; ; i++) {
-    try { closeSync(openSync(lock, 'wx', 0o600)); break; } catch (e) {
+    try { takeLockFile(lock); break; } catch (e) {
       if (e.code !== 'EEXIST') throw e;
+      if (staleLock(lock)) continue;
       if (i === LOCK_TRIES) fail('lock', `${lock} is still held after ${(LOCK_TRIES * LOCK_MS) / 1000} s: another ${who} process holds it, or one was killed holding it; delete the file to continue`);
       Atomics.wait(idle, 0, 0, LOCK_MS);
     }

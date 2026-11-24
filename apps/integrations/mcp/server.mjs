@@ -22,6 +22,11 @@ const id = await lib('sigelo-agent/dist/sigelo-agent.js', '../../agent/sigelo-ag
 const keys = await lib('sigelo-agent/dist/sigelo-agent-keys.js', '../../agent/sigelo-agent-keys.ts');
 const { withLock } = await lib('sigelo-agent/dist/sigelo-agent-monero.js', '../../agent/sigelo-agent-monero.ts');
 const { forgetIssuer } = await lib('sigelo-agent/dist/sigelo-agent-adopt.js', '../../agent/sigelo-agent-adopt.ts');
+// Whose worker this identity is (whoami), and init's refusal over one (never "move it away"): the CLI's words, from
+// its enrolment module when this layout has it (an identity-only one may not: then the plain answers).
+const enrolLib = await lib('sigelo-agent/dist/sigelo-agent-enrol.js', '../../agent/sigelo-agent-enrol.ts').catch(() => null);
+const workerOf = (path, s) => enrolLib?.workerOf(path, s) ?? null;
+const alreadyHere = (path) => enrolLib?.alreadyHere(path) ?? `${path} already holds this machine's identity: a pairing code goes to sigelo_accept; another agent here takes its own profile (identity)`;
 
 // stdout is the protocol. Anything a library prints (keygen's recovery warning uses
 // console.warn, but be sure) must not land there.
@@ -29,7 +34,7 @@ console.log = console.info = console.debug = console.error;
 
 const MODERN = ['2026-07-28'];                                            // per-request _meta era
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];  // initialize era
-const SERVER_INFO = { name: 'sigelo', version: '0.1.18' };
+const SERVER_INFO = { name: 'sigelo', version: '0.1.19' };
 const PV = 'io.modelcontextprotocol/protocolVersion';
 const env = process.env;
 const WALLET = Boolean(env.SIGELO_WALLET_URL && env.SIGELO_WALLET_TOKEN);
@@ -49,8 +54,8 @@ const idObj = (props = {}, required = []) => obj({ ...props, ...PROFILE }, requi
 // Replaced once the contact tools are known (noId).
 const NO_ID = '{no identity}';
 const TOOLS = [
-  ['sigelo_whoami', 'Your sigelo identity: current DID, genesis document, DID chain, number of stored attestations. Call first; if it says no identity: ' + NO_ID + '.', idObj()],
-  ['sigelo_init', 'Create an identity of your own ONCE (refuses if one exists); an agent meant to be enrolled under its operator uses sigelo_enrol instead. recovery: the operator\'s offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which. The DID it makes is yours across every platform.', idObj({ recovery: str('"z6Mk…" recovery public key from your operator, or "none"') }, ['recovery'])],
+  ['sigelo_whoami', 'Your sigelo identity: current DID, genesis document, DID chain, number of stored attestations; enrolled: worker (index), operator (DID), operator_name, tier. Call first, and never read the identity file itself (it holds your key); if it says no identity: ' + NO_ID + '.', idObj()],
+  ['sigelo_init', 'Create an identity of your own ONCE (refuses if one exists); not for an enrol code (ENROL-…): an agent meant to be enrolled under its operator uses sigelo_enrol instead. recovery: the operator\'s offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which. The DID it makes is yours across every platform.', idObj({ recovery: str('"z6Mk…" recovery public key from your operator, or "none"') }, ['recovery'])],
   ['sigelo_sign_challenge', 'Prove you are your DID: sign a world\'s challenge {v, typ:"challenge", did, ctx, nonce} exactly as received. Anything else is refused. Returns {did, sig}; send sig back to that world. This is how a site or agent learns who you are, offline, no account.', idObj({ challenge: json('the challenge body, as JSON object or text') }, ['challenge'])],
   ['sigelo_add_issuer', 'Store a world\'s genesis document so its attestations about you verify offline.', idObj({ genesis: json('the issuer genesis document') }, ['genesis'])],
   ['sigelo_add_attestation', `Store a world's signed attestation {body, sig} about you (replaces an older one from the same issuer+ctx). Pass issuer (its genesis) too when you have it. ${DATA}`, idObj({ attestation: json('{body, sig}'), issuer: json('optional: the issuer genesis document') }, ['attestation'])],
@@ -121,9 +126,17 @@ async function wallet(argv) {
 }
 
 const HANDLERS = {
-  sigelo_whoami: (_, path) => { const s = loadStore(path); return { did: did(id.head(s)), genesis: id.head(s), chain: id.chainOf(s), attestations: s.attestations.length, identity_file: path }; },
+  sigelo_whoami: (_, path) => {
+    const s = loadStore(path), w = workerOf(path, s);
+    return { did: did(id.head(s)), genesis: id.head(s), chain: id.chainOf(s), attestations: s.attestations.length, identity_file: path,
+      ...(w && { worker: w.worker, operator: w.operator.did, operator_name: w.operator.name, tier: w.operator.tier }) };
+  },
   sigelo_init: ({ recovery }, path) => {
     if (typeof recovery !== 'string' || !recovery) throw refusal('usage', 'recovery is required: a "z…" public key or "none"');
+    // An enrol code is no recovery key (0.1.17: mimo passed one): sigelo_enrol is its tool.
+    if (/^\s*ENROL[\s\-]*[0-9A-Za-z]/i.test(recovery)) throw refusal('enrol_code', 'that is an enrol code: call sigelo_enrol with it (this tool makes an identity of your own)');
+    // Over an identity here: refused, never forced from here (only a local sigelo-agent init --force).
+    if (existsSync(path)) throw refusal('identity_exists', `init: ${alreadyHere(path)}`);
     const s = keys.init(path, recovery === 'none' ? null : recovery, env.SIGELO_KEY_PROVIDER);
     return { did: did(s.genesis), genesis: s.genesis, identity_file: path,
       ...(recovery === 'none' && { warning: 'NO recovery key: if this key is stolen the identity is lost permanently.' }) };

@@ -148,6 +148,8 @@ public final class MainActivity extends Activity {
         web.setWebViewClient(new Client());
         web.setWebChromeClient(new Chrome());
         web.loadUrl(START);
+        // Push on: registered with the distributor again at each start (UnifiedPush; a lost registration comes back).
+        UnifiedPush.refresh(this);
         // Started by a tap on one of our notifications (not a restart that brings back the same intent).
         if (saved == null) opened(getIntent());
         // Started by a share from another app (ACTION_SEND): held for the page (a restart does not bring it twice).
@@ -247,6 +249,7 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (web != null) web.onResume();
+        UnifiedPush.seen(this);   // a push wake's notification: the app is open, the page fetches
     }
 
     @Override

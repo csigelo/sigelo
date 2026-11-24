@@ -597,9 +597,9 @@ export function build({ out = DIST, disclosed = DISCLOSED, darkDir = DARK_DIR } 
 
 > The CLI is the npm package \`sigelo-agent\`; the MCP server is \`sigelo-mcp\`; the package \`sigelo\` is the library and has no CLI.
 >
-> One identity your agent owns (a DID; it holds the key). A site or agent asks who you are: answer its challenge, offline, no server, no account. You leave a platform: your attestations (reputation) go with you; a stolen key is recovered (offline recovery key), DID kept. You get paid or pay: Monero, no wallet key (keeper: small amounts). A human wants you to reach their other agent: pair by an 8-character code, end-to-end encrypted. Experimental: wire sigelo/0 not frozen.
+> One identity your agent owns (a DID; it holds the key). A site or agent asks who you are: answer its challenge, offline, no server, no account. You leave a platform: your attestations (reputation) go with you; a stolen key is recovered (offline recovery key), DID kept. You get paid or pay: Monero, no wallet key (keeper: small amounts). Reach a human's other agent: pair by an 8-character code, end-to-end encrypted. Experimental: wire sigelo/0 not frozen.
 
-How: the DID is a genesis hash; worlds sign attestations; bundles verify offline.
+How: the DID is a genesis hash; bundles verify offline. Never cat the identity file: run whoami.
 
 ## Docs
 

@@ -90,6 +90,8 @@
 //   c.takeTransfers(), c.deliver(item)     transfer-node.mjs's: the sigelo-transfer/0 messages received (never in inbox(),
 //                                            the log or onEvent: a `transfer` event without content says one came), taken;
 //                                            a file a transfer saved whole, as an inbox item (kept as #onFile keeps one)
+//   c.takeCalls()                          call.mjs's: the sigelo-call/0 messages received (never in inbox(), the log or
+//                                            onEvent: a `call` event without content says one came), taken
 //   c.freshEpochs({ only, retire })        every session (or only's) afresh, as after a rotation (a snapshot's
 //                                            state imported where the seat moved, devices.md §4.3) → the DIDs
 //   c.answeredBy(nonce)                    the original DID that paired through this agent's code `nonce`, or null
@@ -103,9 +105,11 @@
 //   c.clockOffset(), await c.checkClock()  → { relay, offset, checked } | null: the relay's clock less this one's, seconds
 //   await c.start(), c.sync(), c.stop()    stay connected, reconnecting with backoff; events reach onEvent
 //   await c.tryNow({ confirmed })          the human's "Try now": a login at each relay in use not connected
-//   c.wake()                               a nudge from outside (the Android app's Stay connected: its alarm, the end of
+//   c.wake({ now })                        a nudge from outside (the Android app's Stay connected: its alarm, the end of
 //                                          Doze): a started carrier retries, with its backoff, each relay in use that is
-//                                          down with no try already waiting; nothing else
+//                                          down with no try already waiting; nothing else. now (a push wake): at once
+//   c.setPush(reg | null), c.pushStatus()  the phone's UnifiedPush endpoint and keys registered at this agent's own relay
+//                                          (sigelo-push/0 on $sigelo/push, relay/push.mjs) at every login; null removes it
 //   started: 'user' | 'confirmed'          (start, invite, accept, tryNow) a search the human started: past
 //                                          POW_SEARCHES a day it is never refused, it asks (pow_confirm),
 //                                          and 'confirmed' goes on; without it (automatic retries) the cap holds
@@ -301,7 +305,7 @@ import { PUBLIC_CAP, PUBLIC_TTL_MAX, REQUEST_TTL, SEEN_KEEP, checkCap, formatPub
 import { MsgError, checkNow, fail, hex, isoWeek, pairId, signAs, topic } from './kdf.mjs';
 import { Prekeys, exact, kemDecapsulate, kemEncapsulate, kemKey } from './prekeys.mjs';
 import { Contacts, OPERATOR_CTX, TIERS } from './store.mjs';
-import { SHORT_TTL, SHORT_TTL_MAX, SHORT_TTL_MIN, codeHash, codeKind, didWords, fingerprint, formatShort, giftHash, makeShort, normaliseShort, relayTag, tagOf } from './short.mjs';
+import { ENROL_TTL_MAX, SHORT_TTL, SHORT_TTL_MAX, SHORT_TTL_MIN, codeHash, codeKind, didWords, fingerprint, formatShort, giftHash, isEnrolCode, makeShort, normaliseShort, relayTag, stripEnrol, tagOf } from './short.mjs';
 import { REGISTRY_URL, RELEASE_DID, loadRegistry, readTable, remember, resolveTag } from './relays.mjs';
 import { FILE_LABEL, MAX_FILE, assemble, checkChunk, checkManifest, chunkHead, isManifest, safeName, splitFile } from './file.mjs';
 // Every file, lock, network and CPU call goes through a platform (design/apps.md §4.2): Node's by default.
@@ -380,8 +384,16 @@ const DEVICES_MAX = 16;
 // engine, never logged (an offer carries addresses, an onion message a client key); sent only with TRANSFER_SEND.
 export const TRANSFER_LABEL = 'sigelo-transfer/0', TRANSFER_SEND = Symbol('sigelo-transfer send');
 const TRANSFERS_MAX = 256;
+// Calls (call.mjs, sigelo-call/0; design/calls.md §2): the signalling of a voice call. The same: kept apart in st.calls
+// (at most CALLS_MAX) for the page's Line (page.mjs) or watch's answer, never logged (an offer carries addresses); sent
+// only with CALL_SEND.
+export const CALL_LABEL = 'sigelo-call/0', CALL_SEND = Symbol('sigelo-call send');
+const CALLS_MAX = 64;
 // Seen receipts (the header's): sent only with SEEN_SEND, never an inbox message.
 export const SEEN_LABEL = 'sigelo-seen/0', SEEN_SEND = Symbol('sigelo-seen send');
+// UnifiedPush (design/push.md, relay/push.mjs): the phone's endpoint and keys, registered with this agent's own
+// relay over its session (setPush), where GET /challenge says the relay takes them.
+export const PUSH_TOPIC = '$sigelo/push', PUSH_V = 'sigelo-push/0';
 // Busy marks (the header's): sent only with BUSY_SEND, never an inbox message; one is good for BUSY_TTL_S seconds.
 export const BUSY_LABEL = 'sigelo-busy/0', BUSY_SEND = Symbol('sigelo-busy send'), BUSY_TTL_S = 45;
 // Names (0.1.17: "the system allocated some random text" for a new contact). Once paired, each side tells the other its
@@ -446,16 +458,17 @@ const STABLE_MS = 60000;
 const ENDED_LASTS = 300000;
 const ENDED_RETRY = new Set(['rate', 'relay_full', 'connect', 'timeout']);
 // Login refusals no retry can fix.
-const PERMANENT = new Set(['password', 'bundle', 'sig', 'retired_recovery', 'client_id', 'closed', 'challenge', 'relay', 'identity']);
+const PERMANENT = new Set(['password', 'bundle', 'sig', 'retired_recovery', 'client_id', 'closed', 'challenge', 'relay', 'identity', 'client_old']);
 // A refusal by one of these is this process failing, not a message: the delivery is not acknowledged.
 const INTERNAL = new Set(['lock', 'state', 'store', 'identity', 'time']);
 // The login checks relay/auth.mjs names on POST /check. Any other word from the relay is `connect`:
 // a check name decides what this client does next, so a relay cannot pick one.
-const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challenge_expired', 'bundle', 'sig', 'retired_recovery', 'client_id', 'closed', 'pow', 'relay_full']);
+// client_old: a client of the dropped SHA-256 proof of work (relay/pow.mjs CLIENT_OLD); this one never is.
+const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challenge_expired', 'bundle', 'sig', 'retired_recovery', 'client_id', 'closed', 'pow', 'relay_full', 'client_old']);
 // Refusals of an invite reply that a later round may get past: the reply stays queued.
 const REPLY_RETRY = new Set(['rate', 'relay_full', 'quota_messages']);
 // $sigelo/notice codes that refuse the publish, or the SUBSCRIBE, in flight (relay-plan §3 "Errors").
-const PUBLISH_CODES = new Set(['too_large', 'quota_storage', 'quota_messages', 'rate', 'relay_full', 'pow', 'no_reader', 'presence_taken', 'presence_will', 'presence_full', 'public_cap', 'public_paused', 'public_revoked', 'public_once']);
+const PUBLISH_CODES = new Set(['push', 'too_large', 'quota_storage', 'quota_messages', 'rate', 'relay_full', 'pow', 'no_reader', 'presence_taken', 'presence_will', 'presence_full', 'public_cap', 'public_paused', 'public_revoked', 'public_once']);
 // A contact's envelope this agent cannot open for want of its epoch asks the writer for a new epoch
 // by a fresh prekey bundle (RESYNC_CHECKS), at most once in this many seconds per contact after
 // the last such bundle: the check comes before any decryption, so a relay can make one up. A
@@ -937,7 +950,7 @@ const rePairWhy = (c) => (c.re_pair === 'contact_recovery'
 // (`accept --name`): then that name. The inviter's `invite --name` names a new contact only: the
 // code may be answered by anyone, and a re-key code's name is the contact's own. → the contact.
 function renamed(store, c, entry) {
-  if (entry.named === true && c.name !== entry.name) { c.name = entry.name; store.save(); }
+  if (entry.named === true && c.name !== entry.name) { c.name = store.freeName(entry.name, c.did); store.save(); }
   return c;
 }
 
@@ -1088,11 +1101,16 @@ export class Carrier {
   #claimed = new Set(); #refusedTopics = new Map(); #handshakes = new Map(); #soon = new Set();
   #renewing = false;
   #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #powWaits = new Set(); #ask = false; #spare = new Map();
+  #push = undefined; #pushState = { state: 'none' };   // setPush: undefined = never set (nothing sent), null = off
   #mineMemo = null; #clocks = new Map(); #selfName = () => null;
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
     onEvent, keep, backoff = BACKOFF, tick = TICK, files, log, transport = 'auto', shortRelay = DEFAULT_RELAY, registry = REGISTRY_URL, registryPin = RELEASE_DID, relays, registryFile,
-    platform = nodePlatform, selfName = null }) {
+    platform = nodePlatform, selfName = null, enrolHash = null }) {
+    // enrolHash: the enrolment code this (temporary) identity holds, as its park hash: its first login asks
+    // GET /challenge?…&enrol=<hash>, and a relay states the base proof of work for it (relay/park.mjs enrolGrace).
+    if (enrolHash !== null && !(typeof enrolHash === 'string' && /^[0-9a-f]{64}$/.test(enrolHash))) throw new TypeError('enrolHash: 64 hex (short.mjs codeHash), or null');
+    this.enrolHash = enrolHash;
     // This side's display name, told to each new contact once paired (the header's "Names"): a string or a function → one, or null.
     if (selfName !== null && typeof selfName !== 'string' && typeof selfName !== 'function') throw new TypeError('selfName: a string, a function → a string or null, or null');
     this.#selfName = typeof selfName === 'function' ? selfName : () => selfName;
@@ -1568,6 +1586,12 @@ export class Carrier {
       l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
       if (l.length > TRANSFERS_MAX) { st.dropped.transfers_full = (st.dropped.transfers_full ?? 0) + l.length - TRANSFERS_MAX; l.splice(0, l.length - TRANSFERS_MAX); }
       events.push({ type: 'transfer', from: c.did, name: c.name });
+    } else if (r.body.label === CALL_LABEL) {
+      // A call's signalling (call.mjs): kept for the page's Line, never for inbox() nor onEvent's readers.
+      const l = (st.calls ??= []);
+      l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
+      if (l.length > CALLS_MAX) { st.dropped.calls_full = (st.dropped.calls_full ?? 0) + l.length - CALLS_MAX; l.splice(0, l.length - CALLS_MAX); }
+      events.push({ type: 'call', from: c.did, name: c.name });
     } else if (r.body.label === SEEN_LABEL) {
       // A seen receipt (the header's): the highest kept; one malformed is counted, never an inbox message.
       const n = r.body.content?.seen, nm = theirName(r.body.content?.name);
@@ -2451,8 +2475,50 @@ export class Carrier {
     if (stale.length > 0 && link.quiet) await this.#unsubscribe(link, stale);
     if (!link.up) return;
     await this.#presence(link);
+    if (!link.up) return;
+    await this.#pushOut(link);
     await this.#flush(link);
   }
+
+  // The push registration (setPush) at this agent's own relay, once per connection and again when it
+  // changes: the JSON {v, endpoint, p256dh, auth}, or an empty payload (off). A relay that does not
+  // say it takes them is sent nothing (state unsupported); a refusal is kept, not retried this connection.
+  async #pushOut(link) {
+    if (this.#push === undefined || !link.own) return;
+    const bytes = this.#push === null ? '' : canonicalize({ v: PUSH_V, ...this.#push });
+    if (link.pushSent === bytes) return;
+    link.pushSent = bytes;
+    if (!link.push) { this.#pushSays({ state: 'unsupported', relay: link.relay }); return; }
+    await this.#throttle(link);
+    const r = await this.#publish(link, PUSH_TOPIC, utf8ToBytes(bytes));
+    if (r) { this.#emit({ type: 'notice', relay: link.relay, code: r.code, detail: r.detail }); this.#pushSays({ state: 'refused', relay: link.relay, code: r.code, detail: r.detail }); return; }
+    this.#pushSays({ state: this.#push === null ? 'off' : 'registered', relay: link.relay, at: this.clock() });
+  }
+  #pushSays(x) { this.#pushState = x; this.#emit({ type: 'push', ...x }); }
+
+  /**
+   * The phone's UnifiedPush registration for this agent's own relay (design/push.md, relay/push.mjs): { endpoint (https),
+   * p256dh, auth (base64url) } to register, null to remove it there; sent at once when connected, else at the next login,
+   * and again at every login. Never called: nothing is sent (a computer, the GTK app). → pushStatus().
+   */
+  setPush(reg) {
+    if (reg !== null) {
+      const fine = reg && typeof reg === 'object' && Object.keys(reg).sort().join() === 'auth,endpoint,p256dh'
+        && typeof reg.endpoint === 'string' && /^https:\/\//.test(reg.endpoint) && reg.endpoint.length <= 1024 && [reg.p256dh, reg.auth].every((x) => typeof x === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(x));
+      if (!fine) fail('push', 'a push registration is {endpoint: an https URL, p256dh, auth: base64url}, or null');
+      reg = { endpoint: reg.endpoint, p256dh: reg.p256dh, auth: reg.auth };
+    }
+    const same = canonicalize(reg) === canonicalize(this.#push ?? null) && this.#push !== undefined;
+    this.#push = reg;
+    if (!same) {
+      this.#pushState = { state: 'pending', relay: this.relay };
+      if (this.#links.get(this.relay)?.up) this.#refreshSoon(this.relay);
+    }
+    return this.pushStatus();
+  }
+
+  /** → { state: 'none' (never set) | 'pending' | 'registered' | 'off' | 'refused' | 'unsupported', relay?, at?, code?, detail? }. */
+  pushStatus() { return { ...this.#pushState }; }
 
   // Presence at one relay (the header's "Presence"): each contact's marker toward this agent read
   // (QoS 0: a marker is never queued); this agent's published toward those who may see it, once
@@ -2549,7 +2615,7 @@ export class Carrier {
     const { me, proven } = this.#read(({ me, st }) => ({ me, proven: st.relays[relay]?.proven === true }));
     const powMax = relay === this.relay ? POW_MAX : POW_MAX_OTHER;
     const issued = Date.now();
-    const r = await http(this.platform, `${ep.http}/challenge?did=${encodeURIComponent(me.current_did)}`);
+    const r = await http(this.platform, `${ep.http}/challenge?did=${encodeURIComponent(me.current_did)}${!proven && this.enrolHash ? `&enrol=${this.enrolHash}` : ''}`);
     this.#clockFrom(relay, r);
     if (r.status === 429) refuse('rate', `the relay ${relay} turned the login away: too many logins from this network (${relaySays(r.body?.error ?? r.body?.detail)}): ${retryIn(r, 'a minute')}, then try again`, r);
     // Any other status is no answer about this agent (nginx says 502 while the relay restarts):
@@ -2610,7 +2676,7 @@ export class Carrier {
     }
     const password = canonicalize({ v: LOGIN_V, nonce: ch.nonce, sig, bundle: loginBundle(me.bundle, relay), ...(pow !== undefined && { pow }) });
     // until: this login's nonce is good till about then (#dial keeps it for a retry after "rate").
-    return { username: me.current_did, clientId: clientIdOf(me.did), password, pow, until: issued + POW_MS };
+    return { username: me.current_did, clientId: clientIdOf(me.did), password, pow, until: issued + POW_MS, push: r.body?.push === PUSH_V };
   }
 
   // How long this agent's own relay keeps a message on the free tier (relay.json, plan §11), when
@@ -2691,7 +2757,7 @@ export class Carrier {
     if (!link.client.connected) throw link.cut ?? new MsgError('connect', 'the relay closed the connection');
     // Deliveries are counted from here (quiet), not from before the login: a proof-of-work search
     // of seconds would read as a drained queue, and give up stale claims before what they hold came.
-    link.since = Date.now(); link.onlineAt = this.clock();
+    link.since = Date.now(); link.onlineAt = this.clock(); link.push = creds.push === true;
     if (creds.pow !== undefined) this.#locked(({ st }) => { (st.relays[relay] ??= { proven: false, claims: {} }).proven = true; });
     link.client.on('error', () => {});   // a close follows
     link.client.on('close', () => this.#closed(link));
@@ -2885,9 +2951,15 @@ export class Carrier {
   // identity's next login (a device added offline, device.mjs), so connect once before it answers.
   // renew: true begins a series of renewing codes (store.mjs renew); a series id continues one (#renewDue).
   // named: false when the caller made the name up (a placeholder): the contact takes the name the other side tells.
-  async invite({ name, ttl, short = false, relay, local = false, started, renew = false, named = name !== undefined } = {}) {
+  // enrol: an enrolment code (enrol.mjs issue): parked with enrol: true (relay/park.mjs: up to ENROL_TTL_MAX,
+  // fetched until the grant); an older relay that refuses the field gets a plain park, when ttl allows one.
+  async invite({ name, ttl, short = false, relay, local = false, started, renew = false, named = name !== undefined, enrol = false } = {}) {
     const at = relay === undefined ? this.relay : relayArg(relay);
-    if (short && ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < SHORT_TTL_MIN || ttl > SHORT_TTL_MAX)) {
+    if (enrol && (!short || renew !== false || local)) fail('invite', 'an enrolment code is a short code, parked once: not long, renewing or local');
+    if (enrol && ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < SHORT_TTL_MIN || ttl > ENROL_TTL_MAX)) {
+      fail('ttl', `an enrolment code lives ${SHORT_TTL_MIN} s to a day (${ENROL_TTL_MAX} s), not ${JSON.stringify(ttl)}`);
+    }
+    if (short && !enrol && ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < SHORT_TTL_MIN || ttl > SHORT_TTL_MAX)) {
       fail('ttl', `a short code lives ${SHORT_TTL_MIN} to ${SHORT_TTL_MAX} seconds (default ${SHORT_TTL}), not ${JSON.stringify(ttl)}; longer: the long code (invite --long --ttl)`);
     }
     if (renew !== false && (!short || local)) fail('invite', 'a code that renews itself is a short one, parked at the relay: not with --long or local');
@@ -2914,8 +2986,16 @@ export class Carrier {
       if (!short) return { code: code.text, did: code.did, relay: code.relay, exp: code.exp };
       // Eight characters on the public relay; on any other, twelve: the last four its relay tag.
       const s = makeShort(undefined, code.relay === this.shortRelay ? null : relayTag(code.relay)), exp = Math.min(checkNow(this.clock()) + (ttl ?? SHORT_TTL), code.exp), ep = endpointOf(code.relay, this.endpoints);
-      const creds = await this.#credentials(code.relay, ep, started);
-      const r = await http(this.platform, `${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: codeHash(s), invite: code.text, exp }) });
+      const parkOnce = async (asEnrol) => {
+        const creds = await this.#credentials(code.relay, ep, started);
+        return http(this.platform, `${ep.http}/park`, { method: 'POST', body: JSON.stringify({ username: creds.username, client_id: creds.clientId, password: creds.password, code_hash: codeHash(s), invite: code.text, exp, ...(asEnrol && { enrol: true }) }) });
+      };
+      let r = await parkOnce(enrol);
+      // An older relay (no enrolment codes) answers 400 to the field: parked as an invite (fetched once), within its hour.
+      if (enrol && r.status === 400) {
+        if (exp - checkNow(this.clock()) > SHORT_TTL_MAX) refuse('park', `the relay ${code.relay} keeps no enrolment code longer than an hour (an older relay): --ttl 1h or less`, r);
+        r = await parkOnce(false);
+      }
       const check = typeof r.body?.check === 'string' ? r.body.check : null;
       if (r.status === 429) refuse('rate', `the relay ${code.relay} parks no more short codes from this network for now (${relaySays(r.body?.detail)}): ${retryIn(r, 'up to an hour')}, or use the long code (invite --long)`, r);
       if ((r.status === 404 || r.status === 405) && check === null) refuse('park', `the relay ${code.relay} takes no short codes: use the long code (invite --long)`, r);
@@ -2931,7 +3011,7 @@ export class Carrier {
       const held = Number.isSafeInteger(r.body.exp) && r.body.exp > 0 ? r.body.exp : exp;
       // Kept with the invite: a cancel by the short code finds it; a renewing series has its fresh code.
       this.#locked(({ store }) => { store.setShort(code.nonce, formatShort(s), held); if (series !== null && renew !== true) store.renewDone(series); });
-      return { code: code.text, did: code.did, relay: code.relay, exp: code.exp, short: formatShort(s), short_exp: held, ...(series !== null && { renew: series }) };
+      return { code: code.text, did: code.did, relay: code.relay, exp: code.exp, short: formatShort(s), short_exp: held, ...(series !== null && { renew: series }), ...(enrol && { enrol: r.body.enrol === true, short_hash: codeHash(s) }) };
     } catch (e) {
       // A renewal that failed leaves its series due (taken: store.mjs take), tried again (#renewDue).
       try { this.#locked(({ now, store }) => (series !== null && renew !== true ? store.take('invites', code.nonce, now) : store.cancelInvite(code.nonce))); } catch {}
@@ -3024,6 +3104,7 @@ export class Carrier {
   async unparkFrom(text, { relay } = {}) { return this.#unpark(text, relay); }
 
   async #unpark(text, relay) {
+    text = stripEnrol(text);
     const { relay: at, from } = await this.relayForShort(text, { relay });
     const shown = formatShort(normaliseShort(text)), ep = endpointOf(at, this.endpoints);
     const r = await http(this.platform, `${ep.http}/park/${codeHash(text)}`);
@@ -3035,7 +3116,15 @@ export class Carrier {
     if (r.status !== 200) refuse('connect', `${at}: ${statusWhy(r, 'GET /park')}`, r);
     if (r.body?.ok !== true || typeof r.body.invite !== 'string') refuse('connect', `${at}: GET /park answered 200 without a parked code: try again later; SIGELO_DEBUG=1 shows the answer`, r);
     if (from === 'named' && tagOf(normaliseShort(text)) !== null) try { remember(this.relaysPath, at, this.platform.files); } catch {}
-    return { invite: r.body.invite, relay: at };
+    // enrol: the relay parked it as an enrolment code (relay/park.mjs): init --enrol takes no other.
+    return { invite: r.body.invite, relay: at, enrol: r.body.enrol === true };
+  }
+
+  // The operator's grant has gone (enrol.mjs): its enrolment code spent at the relay that parks it
+  // (DELETE /park/<hash>, the parker's login), so nobody fetches it again. Best effort → { unparked, … }.
+  async unparkHash(hash, relay = this.relay) {
+    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) fail('park', 'a code hash: 64 hex');
+    return this.#unparkCancel(relayArg(relay), hash);
   }
 
   // A public code's long code: GET /park/<public hash> (relay/park.mjs), not spent there. → { invite, relay }.
@@ -3072,6 +3161,9 @@ export class Carrier {
   // relay: the relay a short code was parked at (unpark), and the one a code must name (a long
   // code names its own: one naming another is refused code_relay).
   async accept(text, opts = {}) {
+    // An enrolment code (ENROL-…, short.mjs) is for init --enrol on a new machine: refused here before any
+    // fetch, so it is not spent and its operator is never made a contact of this identity by it.
+    if (isEnrolCode(typeof text === 'string' ? text : '')) fail('enrol_code', 'that is an enrol code: run init --enrol CODE (sigelo-agent init --enrol, or sigelo_enrol), on a machine with no identity yet');
     // A public code's link carries its code and the four words to check (public.mjs readLink).
     const link = readLink(typeof text === 'string' ? text.trim() : text);
     if (link) { text = link.code; opts = { ...opts, words: opts.words ?? link.words ?? undefined }; }
@@ -3286,7 +3378,7 @@ export class Carrier {
   // device of this identity) is cancelled at the relay only. A renewing code's series ends with it.
   // → { cancelled: true, name, short?, unparked?, detail? }.
   async cancelInvite(code, { relay: named, started } = {}) {
-    const text = typeof code === 'string' ? code.trim() : '';
+    const text = stripEnrol(typeof code === 'string' ? code.trim() : '');
     // A public code (its id, PUB code, sgl2 code or hash): Revoke for all (public.mjs).
     const pkey = isPub(text) ? formatPub(normalisePub(text)) : text.startsWith('sgl2') ? (() => { try { return parsePublicCode(text, checkNow(this.clock())).nonce; } catch { return null; } })() : text;
     const pub = pkey ? this.#read(({ store }) => store.findPublic(pkey, (sh) => publicHash(sh))) : null;
@@ -3446,6 +3538,7 @@ export class Carrier {
     if (label.startsWith('sigelo-link/') && internal !== LINK_SEND) fail('body', `the label ${JSON.stringify(label)} is the link handler's own (sigelo-agent link)`);
     if (label.startsWith('sigelo-group/') && internal !== GROUP_SEND) fail('body', `the label ${JSON.stringify(label)} is the group handler's own (sigelo-agent group send)`);
     if (label.startsWith('sigelo-transfer/') && internal !== TRANSFER_SEND) fail('body', `the label ${JSON.stringify(label)} is the transfer engine's own (sigelo-agent transfer)`);
+    if (label.startsWith('sigelo-call/') && internal !== CALL_SEND) fail('body', `the label ${JSON.stringify(label)} is the calls' own (the page's call screen)`);
     if (label.startsWith('sigelo-seen/') && internal !== SEEN_SEND) fail('body', `the label ${JSON.stringify(label)} is the seen receipts' own`);
     if (label.startsWith('sigelo-busy/') && internal !== BUSY_SEND) fail('body', `the label ${JSON.stringify(label)} is the busy marks' own`);
     if (label.startsWith('sigelo-device/') && internal !== DEVICE_SEND) fail('body', `the label ${JSON.stringify(label)} is the device verbs' own (sigelo-agent device)`);
@@ -3675,6 +3768,7 @@ export class Carrier {
   takeGroups() { return this.#locked(({ st }) => { const l = st.groups ?? []; st.groups = []; return l; }); }
   takeDevices() { return this.#locked(({ st }) => { const l = st.devices ?? []; st.devices = []; return l; }); }
   // pick(message) → take it (default all); the rest stay for a later take (an engine's).
+  takeCalls(pick = () => true) { return this.#locked(({ st }) => { const l = st.calls ?? [], took = l.filter((m) => pick(m)); st.calls = l.filter((m) => !took.includes(m)); return took; }); }
   takeTransfers(pick = () => true) { return this.#locked(({ st }) => { const l = st.transfers ?? [], took = l.filter((m) => pick(m)); st.transfers = l.filter((m) => !took.includes(m)); return took; }); }
   // A file a transfer saved whole (transfer-node.mjs): an inbox item as #onFile makes one, kept for
   // inbox() (keep) and handed to onEvent. item: { type: 'file', from, contact, name, size, sha256, path, … }.
@@ -3788,9 +3882,14 @@ export class Carrier {
   }
 
   /** A nudge from outside (the phone woke): each relay in use down and not already waiting, a retry with the backoff; automatic (no proof-of-work confirmation). */
-  wake() {
+  // now (a push wake: mail waits at the relay): at once, past a backoff's wait already set.
+  wake({ now = false } = {}) {
     if (!this.#started) return;
-    for (const r of this.#relaysInUse()) if (!this.#links.get(r)?.up && !this.#timers.has(r) && !this.#connecting.has(r)) this.#retry(r);
+    for (const r of this.#relaysInUse()) {
+      if (this.#links.get(r)?.up || this.#connecting.has(r)) continue;
+      if (now && this.#timers.has(r) && !this.#powWaits.has(r)) { clearTimeout(this.#timers.get(r)); this.#timers.delete(r); }
+      if (!this.#timers.has(r)) this.#retry(r, now ? 0 : undefined);
+    }
   }
 
   /**

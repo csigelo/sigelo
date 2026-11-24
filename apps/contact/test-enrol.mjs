@@ -16,10 +16,10 @@ import { canonicalize, decodeKey, did as didOf, keygen, verify } from 'sigelo';
 import { agentIdentitySeed, identitySeed, keeperRoot, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { makeInvite } from './invite.mjs';
 import {
-  DAY, ENROL_V, LABEL_ENROL, LABEL_IDENTITY, OPERATOR_CTX, OPERATOR_DAYS, PENDING_TTL, PINNED_CREATED, TYP_IDENTITY, TYP_REQUEST, accept as joinEnrol, checkIdentity, complete,
+  resumeAnswer, DAY, ENROL_V, LABEL_ENROL, LABEL_IDENTITY, OPERATOR_CTX, OPERATOR_DAYS, PENDING_TTL, PINNED_CREATED, TYP_IDENTITY, TYP_REQUEST, accept as joinEnrol, checkIdentity, complete,
   enrolKey, enrolPath, identityMessage, IDENTITY_PATH, issue, matches, operatorAttestation, operatorChain, operatorIdentity, operatorLabel, pending, proofOf, readStatus, request, statusMessage, workerChain, workerGenesis, workerIdentity,
 } from './enrol.mjs';
-import { fingerprint } from './short.mjs';
+import { codeHash, fingerprint, isEnrolCode } from './short.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let count = 0;
@@ -141,6 +141,8 @@ setTimeout(() => { console.log(`FAIL the run did not finish in 420 s (${count} c
 const HOST = 'relay.test';
 const dir = mkdtempSync(join(tmpdir(), 'sigelo-enrol-'));
 const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, clock: () => Math.floor(Date.now() / 1000), diskUsed: () => 0.1,
+  // One network (loopback): an enrolment's park, its fetches and its spend at the grant each count as a lookup.
+  park: { lookups: { n: 1000, window: 600 }, parks: { n: 1000, window: 3600 }, lookupsAll: { n: 8000, window: 600 } },
   log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 // An agent in memory: its identity file's content (sigelo-agent's Store) and a carrier on it.
@@ -363,6 +365,57 @@ try {
     && r4.delivered[0]?.did === w7.did && pending(fileOf(owner), NOW(), (x) => x.issued[inv8.id]?.needs_send) === undefined && r5.placed[0]?.did === w7.did && r6.placed[0]?.did === w7.did,
     `the identity refused (no_reader): kept needs_send, not again within 60 s, sent again at the operator's next round after, placed, filed (${JSON.stringify([r2.refused, r4.refused, r5.refused])})`);
   ok(r2.told[0]?.check === 'no_reader' && r5.status.some((x) => x.check === 'no_reader' && /tries again within a minute/.test(x.detail) && !/did:sigelo/.test(x.detail)), `and the machine was told why the key had not come (${JSON.stringify(r5.status)})`);
+  // the agent-setup feedback, points 2, 5 and the enrolment boundary (THREAT-MODEL §2.11a): an enrolment code is
+  // ENROL-…, parked as one, refused by accept unspent, fetched again until the grant, and a machine joining
+  // strictly takes only it; a grant for another code than the one answered is refused.
+  {
+    const invE = await issue({ carrier: co, file: fileOf(owner), i: 8, n: 0, name: 'strict', keeper });
+    const parked = relay.park.isEnrol(codeHash(invE.short));
+    const byAccept = await failure(() => eve.carrier.accept(invE.enrol_code, { name: 'owner', wait: 1 }));
+    ok(isEnrolCode(invE.enrol_code) && invE.enrol_code.endsWith(invE.short) && parked && byAccept.check === 'enrol_code' && /init --enrol CODE/.test(byAccept.message) && relay.park.isEnrol(codeHash(invE.short)),
+      `issue: an enrol code ${invE.enrol_code}, parked as one; accept refuses it before any fetch (${byAccept.check}), and it stays at the relay`);
+    const plain = await mallory.carrier.invite({ name: 'not-an-operator', short: true }), st = agent('strict-temp');
+    const asPair = await failure(() => joinEnrol({ carrier: st.carrier, file: fileOf(st), code: plain.short, wait: 1, temp: 'strict-temp', strict: true }));
+    const asLong = await failure(() => joinEnrol({ carrier: st.carrier, file: fileOf(st), code: plain.code, wait: 1, temp: 'strict-temp', strict: true }));
+    ok(asPair.check === 'enrol_not' && /pairing code/.test(asPair.message) && asLong.check === 'enrol_not' && pending(fileOf(st), NOW(), (x) => Object.keys(x.joining).length === 0),
+      `a contact's pairing code can never start an enrolment: a short one the relay parked as an invite, and any long code: enrol_not, nothing pending (${asPair.message})`);
+    // Fetched again before the grant: a first try that failed fetches the same code again (relay/park.mjs).
+    const t1 = agent('retry-temp');
+    const first = await joinEnrol({ carrier: t1.carrier, file: fileOf(t1), code: invE.enrol_code, wait: 1, temp: 'retry-temp', strict: true }).catch((e) => e);
+    const again2 = await t1.carrier.unparkFrom(invE.enrol_code);
+    const jn = pending(fileOf(t1), NOW(), (x) => Object.values(x.joining)[0]);
+    ok(again2.enrol === true && jn?.long === again2.invite && jn.short_hash === codeHash(invE.short) && jn.temp === 'retry-temp',
+      `before the grant the code is fetched again, and the joining entry keeps the long code, the code's hash and its temporary identity (${first?.check ?? first?.status})`);
+    // An answer withdrawn (as by a refused proof of work): resumeAnswer sends it again from the entry.
+    pending(fileOf(t1), NOW(), (x) => { for (const j of Object.values(x.joining)) j.answered = false; });
+    const opE = complete({ carrier: co, file: fileOf(owner), keeper, wait: 60, until: (o) => o.placed.some((x) => x.id === invE.id) });
+    const re = await resumeAnswer({ carrier: t1.carrier, file: fileOf(t1), temp: 'retry-temp', wait: 20 });
+    const mE = await complete({ carrier: t1.carrier, file: fileOf(t1), temp: 'retry-temp', wait: 60, place: placer('strict'), until: (o) => o.placed.length > 0 });
+    const oE = await opE;
+    ok(re >= 0 && mE.placed[0]?.did === workerChain(K, 8, 0, RECOVERY).did && oE.placed.some((x) => x.id === invE.id), `taken up from the pending entry: answered, placed, filed (${JSON.stringify(mE.refused)})`);
+    ok(!relay.park.isEnrol(codeHash(invE.short)) && pending(fileOf(owner), NOW(), (x) => x.issued[invE.id]?.unparked) === true,
+      'the grant went: the operator spent the code at the relay (unparked), nobody fetches it again');
+    const burnt = await failure(() => joinEnrol({ carrier: eve.carrier, file: fileOf(eve), code: invE.enrol_code, wait: 1, temp: 'eve', strict: true }));
+    ok(burnt.check === 'park_unknown', `an attacker with the burnt code after the grant: park_unknown (${burnt.check})`);
+    // A grant for another code than the one this machine answered (an old one, or another enrolment's).
+    const opC = { did: owner.did, current_did: owner.did, current_key: owner.s.genesis.key, name: 'owner' };
+    const att = operatorAttestation({ secret: Buffer.from(owner.s.secret, 'hex'), iss: owner.did, sub: workerChain(K, 9, 0, RECOVERY).original, relay: HOST, now: NOW() });
+    const grant = identityMessage(workerIdentity({ K, i: 9, n: 0, recovery: RECOVERY, attestation: att, issuer: owner.s.genesis }), (await co.invite({ name: 'g', local: true })).code, 9, null, 'the-old-code');
+    const replay = await failure(() => checkIdentity(grant, { operator: opC, relay: HOST, now: NOW(), id: 'this-code' }));
+    const right = await failure(() => checkIdentity(grant, { operator: opC, relay: HOST, now: NOW(), id: 'the-old-code' }));
+    ok(replay.check === 'enrol_replay' && right.check === 'accepted', `a grant naming another code: enrol_replay; for this code: taken (${replay.message})`);
+    for (const a of [st, t1]) await a.carrier.stop();
+  }
+  // the agent-setup feedback, point 9: two contacts never share a name (send <name> refused both): the second gets -2.
+  {
+    const t1 = await co.invite({ name: 'twin' }), t2 = await co.invite({ name: 'twin' }), ta = agent('twin-a'), tb = agent('twin-b');
+    await co.start();
+    const pa = await ta.carrier.accept(t1.code, { name: 'owner', wait: 20 }), pb = await tb.carrier.accept(t2.code, { name: 'owner', wait: 20 });
+    await co.stop();
+    const names = Object.values(storeOf(owner).contacts).filter((c) => [ta.did, tb.did].includes(c.did)).map((c) => c.name).sort();
+    ok(names.join() === 'twin,twin-2', `a second contact named like the first is filed as name-2 (${names.join()}; ${pa.status}, ${pb.status})`);
+    for (const a of [ta, tb]) await a.carrier.stop();
+  }
   for (const a of [ls, rf]) await a.carrier.stop();
   for (const a of [alice, real, pl, hd]) await a.carrier.stop();
   for (const a of [owner, vps, eve, mallory, vps2, lz, ...Object.values(workers)]) await a.carrier.stop();

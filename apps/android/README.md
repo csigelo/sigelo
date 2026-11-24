@@ -101,6 +101,37 @@ stops asking (two refusals), opens the app's page in the system's settings. Noti
 service runs all the same; Android 13+ then shows its notice only in the quick settings' list of
 active apps. Not yet measured on a phone: the battery cost, Doze, vendor task killers.
 
+## Push (UnifiedPush)
+
+Settings → Notifications chooses the wake mode for the phone: Stay connected (above), Push, or Off. Push
+(design/push.md §1 B) hands the connection to the user's UnifiedPush app (a "distributor": ntfy from F-Droid,
+NextPush, Sunup, Conversations), which holds one for all its apps; ntfy users without a server of their own
+set it to `push.sigelo.ai` (relay/deploy/ntfy/README.md). UnifiedPush.java is the connector, written against
+the spec (AND_3) without the library (no Kotlin, no Tink, no AndroidX): it finds the distributors (receivers
+of `org.unifiedpush.android.distributor.REGISTER`, the manifest's `<queries>`), registers with a random
+token, takes NEW_ENDPOINT, REGISTRATION_FAILED, UNREGISTERED, TEMP_UNAVAILABLE and MESSAGE only when they name
+that token, acknowledges each message, and offers RAISE_TO_FOREGROUND (UnifiedPush$Raise). WebPush.java opens
+RFC 8291 messages with platform crypto; its P-256 key and auth secret are sealed under the keystore key
+`sigelo-push` (no user authentication: a wake opens while the phone is locked) and erased when push is
+turned off. The page gives the endpoint and keys to its carrier, which registers them at its relay
+(`sigelo-push/0`); the relay sends a 32-byte encrypted wake when mail waits and no session is open.
+
+A wake that opens to the relay's 32 bytes: with the page alive (minimised, its process kept), StayConnected
+runs for 60 s (the wake window) and the page's carrier logs in at once and fetches; its own notifications
+follow, with names. With no page (swiped away, or not opened since the phone started), one notification,
+"sigelo · New activity", no name, no count; a tap opens the app, which fetches. A call rings only once the
+app is open. No push app installed: Settings says so, with what to install, and offers Stay connected. Not
+yet measured on a phone: the delay of a wake, a distributor's own battery cost.
+
+Choices where design/push.md left one: the wake's 32 bytes are `"sigelo-push/0 wake"` and zeros, compared after
+opening; the relay always sends VAPID (RFC 8292) and the connector gives no VAPID key at REGISTER (optional in AND_3);
+the registration rides the MQTT session (`$sigelo/push`, offered by GET /challenge), sealed at rest under a key file
+beside the relay's database, 90 days; one wake per gap, a later one at least 5 s after the last (held, not dropped).
+One registration per phone, given to the relay of each profile that runs: an inactive profile's mail wakes the
+phone, which fetches for the active profile only (as without push). Departure from the design: Stay connected keeps
+the process, not the WebView, so a wake with no page alive cannot open the identity and fetch in the background; it
+shows "New activity" and the app fetches when opened.
+
 ## The bridge (SigeloBridge.java)
 
 The page sees one object, `SigeloShell` (`info()`, `connect()`), and gets a message port for this
@@ -133,8 +164,12 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
 The page comes from the APK at `https://appassets.androidplatform.net/` (served by the app, never
 fetched); nothing else loads, links open in the browser. JavaScript on, file access off, mixed content
 never. The camera: asked at the first scan, for this origin and video only. A file input opens the
-system picker. Permissions: INTERNET, CAMERA, POST_NOTIFICATIONS, and WRITE_EXTERNAL_STORAGE on Android 9 only
-(Downloads; later versions need none). One provider, not exported: the photo a camera app writes.
+system picker. Permissions: INTERNET, CAMERA, RECORD_AUDIO (asked at the first voice message or call), POST_NOTIFICATIONS,
+and WRITE_EXTERNAL_STORAGE on Android 9 only (Downloads; later versions need none); without a prompt, Stay connected's
+FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE and REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, and a call's
+FOREGROUND_SERVICE_MICROPHONE (the microphone kept with the screen locked), MODIFY_AUDIO_SETTINGS (earpiece, speaker),
+WAKE_LOCK (the proximity screen-off at the ear), VIBRATE (the ring) and ACCESS_NETWORK_STATE (Wi-Fi to mobile data
+restarts the call's path). One provider, not exported: the photo a camera app writes.
 
 ## Build (on CI)
 
@@ -177,7 +212,9 @@ node apps/android/assets.mjs --check
 node apps/web/test-shell.mjs    # the page side over a fake shell in Node
 ```
 
-`check.mjs`: the manifest and resources (well-formed, four permissions (storage up to Android 9), one provider not exported, no backup, references, the
+`node apps/android/test-push.mjs` runs WebPush.java's RFC 8291 vectors on a desktop JDK (`SIGELO_JDK` or `JAVA_HOME`; SKIP without one).
+
+`check.mjs`: the manifest and resources (well-formed, thirteen permissions (storage up to Android 9), one provider not exported, the push receiver and its service, no backup, references, the
 icon as `assets/brand/app-icon.svg`), Gradle (versions, no dependency), the wrapper by SHA-256, the Java (the
 bridge's operations as the page sends them, the WebView's settings, every asset type served, the lock,
 notifications and their open event), the version (build.gradle's = `apps/agent/package.json`'s, shipped as

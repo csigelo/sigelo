@@ -441,6 +441,12 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui voice: the recorder (voice-web.mjs) and its checks (voice.mjs), sigelo-contact\'s byte for byte, served as JavaScript; settings say voice (the computer keeps recordings), no mic (no shell)',
     vw.status === 200 && String(vw.headers['content-type']).startsWith('text/javascript') && vw.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'voice-web.mjs'), 'utf8')
     && vv.status === 200 && vv.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'voice.mjs'), 'utf8') && JSON.parse(vs.body).voice === true && JSON.parse(vs.body).mic === false, vs.body.slice(0, 200));
+  const cj = await http(P, 'GET', '/call.mjs', {}), cs = await http(P, 'GET', '/api/calls', T), st2 = await http(P, 'GET', '/api/state', T);
+  const ghost = await http(P, 'POST', '/api/calls/start', W, { to: 'did:sigelo:zNobody', sdp: 'v=0' });
+  ok('ui calls: the page\'s Phone (call.mjs, sigelo-contact\'s byte for byte) served as JavaScript; GET /api/calls answers no call, no speaker, no mic, no ring (no shell); state has call: null; a call to no contact refused 404',
+    cj.status === 200 && String(cj.headers['content-type']).startsWith('text/javascript') && cj.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'call.mjs'), 'utf8')
+    && cs.status === 200 && JSON.parse(cs.body).call === null && JSON.stringify(JSON.parse(cs.body).can) === '{"speaker":false,"mic":false,"ring":false}'
+    && (JSON.parse(st2.body) as { call?: unknown }).call === null && ghost.status === 404, `${cs.body.slice(0, 200)} ${ghost.status} ${ghost.body.slice(0, 120)}`);
   ok('ui devices: the page has a Devices view: camera by getUserMedia (feature-detected), an image file, paste; BarcodeDetector first, jsQR after', /getUserMedia/.test(js.body) && /enumerateDevices/.test(js.body)
     && /createImageBitmap/.test(js.body) && /BarcodeDetector/.test(js.body) && /\/qr-decode\.mjs/.test(js.body) && /\/api\/devices\/scan/.test(js.body));
   if (posixModes) {
@@ -945,8 +951,8 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
         ok('ui agents: the CLI\'s enrol beside the page → busy (the page enrols)', busyCli.status === 1 && /busy|open in sigelo-agent ui/.test(busyCli.out), busyCli.out.slice(-300));
         const ec = await A.call('POST', '/api/agents/enrol-code', { name: 'vps', tier: 'friend' });
         const KA = keeperRoot(rootFromMnemonic(A.words), 1);
-        ok('ui agents: enrol-code → worker 3 (after the roster\'s), an 8-character code for 10 minutes, the command for the agent\'s machine, tier friend', ec['http'] === 200 && ec['worker'] === 3
-          && /^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(String(ec['code'])) && ec['state'] === 'code' && Math.abs(ec['exp'] - Date.now() / 1000 - 600) < 30
+        ok('ui agents: enrol-code → worker 3 (after the roster\'s), an enrol code (ENROL-, 8 characters) for 10 minutes, the command for the agent\'s machine, tier friend', ec['http'] === 200 && ec['worker'] === 3
+          && /^ENROL-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(String(ec['code'])) && ec['state'] === 'code' && Math.abs(ec['exp'] - Date.now() / 1000 - 600) < 30
           && ec['command'] === `SIGELO_RELAY=relay.test sigelo-agent init --enrol ${ec['code']}` && ec['tier'] === 'friend' && typeof ec['did'] === 'string', JSON.stringify(ec));
         const st0 = await A.call('GET', '/api/state');
         ok('ui agents: the code\'s own invite is not among the page\'s pending invites (it shows in Agents)', !(st0['pending'].invites as { name: string }[]).some((x) => x.name.includes('(enrolling)')), JSON.stringify(st0['pending']));

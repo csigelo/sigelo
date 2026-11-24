@@ -43,7 +43,12 @@ GTK 4, libadwaita, WebKitGTK 6.0, libsoup 3, libsecret (optional); node for "Thi
 ## Rules the app keeps
 
 - Pages come from `sigelo-app://app/` (the files of `web/` by name, CSP `default-src 'self'`) or this phone's `ui`
-  address; any other link opens in the browser. Camera for scanning only (`apps/contact/qr-decode.mjs`); the microphone only for a voice message on this phone's own page.
+  address; any other link opens in the browser. Camera for scanning only (`apps/contact/qr-decode.mjs`); the microphone only for a voice message or a call on this phone's own page.
+- Calls (design/calls.md §4): WebRTC is switched on (`enable-webrtc`) where WebKitGTK has the setting, and the page offers
+  Call only where `RTCPeerConnection` exists. some distributions build WebKitGTK 2.48 without WebRTC (checked 2026-11-24:
+  `RTCPeerConnection` undefined with the setting on), so this app shows no Call button; a call to this phone's identity
+  is answered `unavailable` (the caller sees "No answer", this side "Missed call"). A computer's page in a browser tab, or
+  the Android app, takes the call. The remote form (`sigelo-app://`) never calls: signalling over the relay at a poll's pace.
 - The bridge (`webkit.messageHandlers.sigelo`, `postMessage({op, ...})` → `{ok, ...}`): the start page all but `call`
   and `notify`; `ui.html` (a computer's page) `call`, the profile operations and `notify`; this phone's page the
   profile operations and `notify`.

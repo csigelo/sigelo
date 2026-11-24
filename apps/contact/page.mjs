@@ -12,6 +12,7 @@
 //   await p.start(), await p.halt()  timers, the carrier's session, the first drain; halt: timers off, links done (then carrier.stop())
 //   p.serial(fn), p.refuse(status, check, message), p.contactOf(did), p.cleanName(v, what), p.record(r), p.seen(did),
 //   p.data, p.saveData(), p.live, p.recs, p.onChange(fn)       for the host's own routes and its banners
+//   p.line                           the calls' Line (call.mjs): the host's Hang up from outside the page (a notification)
 //
 // store: the page's two files, the host's way: readHistory() → text | null, append(line) (a JSON
 // line and "\n"), clearHistory(), readData() → text | null, writeData(text). The history is every
@@ -56,6 +57,14 @@
 // shows it at once, then the full file by the transfer whose manifest has its sha256. A voice message (VOICE_LABEL,
 // voice.mjs) goes the same way, its fields as the message and the recording as the file, where the host records
 // (hooks.transfers.rec: write(rec, offset, bytes), keep(rec, name) → { doc } | { path }, read(saved) → bytes).
+//
+// Calls (UI-API.md "Calls", design/calls.md, call.mjs): one Line over this carrier, always; the media is the page's (ui.js's
+// Phone), which reaches it by /api/calls*. hooks.calls, where the host has a shell: { alert({on, id, did, name}) the ring
+// (the phone app: ringtone, vibration, a heads-up; the seam the push build wires to a full-screen ring), audio({on, id,
+// name}) the call's audio mode (CallService), speaker(on), mic(), micSettings() }. "Can call me" (decision 2026-11-17):
+// data.calls[did] true | false, else the default: off for a quiet contact, else data.settings.calls (default on).
+// A call's chat line is a history record { kind: in | out, label CALL_LABEL, text "Call · 3:12" | "Missed call" | …,
+// call: { id, state, secs } }; only a missed one counts as unread (a call taken or made here was seen).
 //
 // Proof of work (design/profiles.md §6): what the human starts here (the page's start, a code, an
 // answer, "Try now") passes the carrier's `started: 'user'`; past the day's three the route answers
@@ -116,7 +125,8 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
-import { DEFAULT_RELAY, POW_COST, POW_EVAL_MS, RE_LABEL, quoteHash, reLabel } from './carrier.mjs';
+import { CALL_LABEL, CALL_SEND, DEFAULT_RELAY, POW_COST, POW_EVAL_MS, RE_LABEL, quoteHash, reLabel } from './carrier.mjs';
+import { Line, callRoutes, stunOf } from './call.mjs';
 import { signAs } from './kdf.mjs';
 import * as E from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
@@ -381,7 +391,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     if (draining) { again = true; return draining; }
     draining = (async () => {
       try {
-        do { again = false; const t0 = Date.now(), up = live.online.size > 0; take(await carrier.inbox({ local: true })); await groupRound(); if (up && live.online.size > 0) drainedOnline = t0; } while (again);
+        do { again = false; const t0 = Date.now(), up = live.online.size > 0; take(await carrier.inbox({ local: true })); callRound(); await groupRound(); if (up && live.online.size > 0) drainedOnline = t0; } while (again);
         // Device messages: wiped answers, a standby asking for the seat (it goes, and this page stops logging in as you).
         if (live.seatGone === null && hooks.deviceRound) {
           const r = await hooks.deviceRound();
@@ -406,6 +416,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   };
   const onEvent = (e) => {
     if (e.type === 'transfer') defer(() => void transfers?.engine.kick());
+    if (e.type === 'call') { defer(callRound); return; }
     if (e.type === 'link' || e.type === 'paired') defer(() => void linkRound());
     try {
       const d = e['did'] ?? e['from'] ?? e['peer'];
@@ -459,6 +470,20 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   // The accept rule's "words compared": the pairing's words as the human checked them here (Chats → the four words).
   const compared = (did) => { const x = carrier.contacts().contacts.find((c) => c.did === did); return Boolean(x && x.pair !== null && x.pair !== undefined && data.checked?.[did] === x.pair); };
   const transfers = hooks.transfers ? { lib: hooks.transfers.lib, engine: hooks.transfers.make(carrier, onTransfer, { compared }) } : null;
+  // ---- calls (the header's): the Line, its messages taken from the carrier at each `call` event and each drain.
+  data.calls ??= {};
+  const liveContact = (d) => carrier.contacts().contacts.find((c) => c.did === d && !c.revoked) ?? null;
+  const canCall = (c) => (typeof data.calls[c.did] === 'boolean' ? data.calls[c.did] : c.tier === 'quiet' ? false : data.settings.calls !== false);
+  const CH = hooks.calls ?? {};
+  const line = new Line({
+    send: (to, content) => carrier.send(to, content, { label: CALL_LABEL, internal: CALL_SEND, local: false }),
+    contact: liveContact, allowed: canCall, shares: (c) => c.presence === 'allow' || c.presence === 'own', me: () => hooks.me().original,
+    line: ({ did, dir, text, call }) => { record({ kind: dir, did, name: liveContact(did)?.name ?? null, text, label: CALL_LABEL, call }); },
+    alert: (x) => { try { CH.alert?.(x); } catch {} },
+    audio: (x) => { try { void Promise.resolve(CH.audio?.(x)).catch(() => {}); } catch {} },
+    changed: () => changed(),
+  });
+  const callRound = () => { try { for (const m of carrier.takeCalls()) line.receive(m); } catch (err) { live.error = `calls: ${err.message}`; } };
   // The relay new codes name, as the precedence says.
   const newCodes = () => relayFixed ?? kept() ?? DEFAULT_RELAY;
   // added: the relays taken here by name (Settings → Relay → Another relay), newest first, so that one stays in the list once another is in use.
@@ -507,7 +532,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   const publicInvite = (c) => c.publics?.[0] ?? null;
   const walletSet = () => ({ wallet: data.settings.wallet === true, prices: data.settings.prices === true, currency: CURRENCIES.includes(data.settings.currency) ? data.settings.currency : null });
   const settingsAll = () => ({ ...settings(), seen_receipts: receiptsOn(), notify: data.settings.notify !== false,
-    new_tier: TIER_NEW.has(data.settings.new_tier) ? data.settings.new_tier : 'friend', new_presence: data.settings.new_presence === true, ...walletSet() });
+    new_tier: TIER_NEW.has(data.settings.new_tier) ? data.settings.new_tier : 'friend', new_presence: data.settings.new_presence === true, calls: data.settings.calls !== false, ...walletSet() });
 
   // ---- pictures (the header's): mine to the contacts that read them, theirs kept, a local one beside
   const picFile = (key) => (key === 'me' ? 'me' : `${key[0]}-${bytesToHex(sha256(utf8ToBytes(key.slice(2)))).slice(0, 16)}`);
@@ -562,6 +587,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     for (const t of timers) clearInterval(t);
     await linking.catch(() => {});
     await transfers?.engine.close().catch(() => {});
+    line.close();
   }
 
 
@@ -743,8 +769,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         words_checked: pair !== null && data.checked[x.did] === pair, tags: data.tags[x.did] ?? [],
         // Came by a public code (carrier.mjs via): mine ({public: id}, nobody compared) or theirs ({public: true, words}).
         via: x.via ?? null,
-        local: agent?.name ?? null, mine, unread: msgs.filter((r) => r.kind === 'in' && r.n > read).length,
-        last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: statusOf(last, x.seen_upto) } : null,
+        local: agent?.name ?? null, mine, unread: msgs.filter((r) => r.kind === 'in' && r.n > read && (!r.call || r.call.state === 'missed')).length,
+        last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: statusOf(last, x.seen_upto), ...(last.call && { call: last.call.state }) } : null,
         notify: notifyOf(x.did), seen_upto: x.seen_upto ?? null,
         // A busy mark (carrier.mjs "Busy marks"): their agent works on a turn; the chat's wheel, never a message.
         busy: x.busy === true,
@@ -754,6 +780,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         link: x.link ? { id: x.link.id, purpose: x.link.purpose, linked_by: x.link.linked_by, expires: x.link.expires ?? null } : null,
         // Presence (carrier.mjs): theirs as read now (online true, false, null: not known), and what they see of mine.
         online: x.online ?? null, online_since: x.online_since ?? null, last_seen: x.last_seen ?? null, presence: x.presence ?? 'deny',
+        // Calls: may it ring here ("Can call me"), and whether that is my choice for it or the default.
+        can_call: canCall(x), can_call_set: typeof data.calls[x.did] === 'boolean',
         ...kindOf(x, mine, roles),
       };
     });
@@ -794,6 +822,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       pending: { invites: pendingInvites, paired, answers: c.answers, failed, public: publicInvite(c), publics: c.publics ?? [] },
       introductions: introductions(c.contacts),
       transfers: transferCounts(),
+      // The live call (GET /api/calls has the rest), or null: the page's call screen and its poll.
+      call: (({ id, did, name, dir, state } = {}) => (id ? { id, did, name, dir, state } : null))(line.view() ?? undefined),
       events: recs.filter((r) => r.kind === 'event' && r.n > since).slice(-50),
     };
   }
@@ -1245,7 +1275,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       receipt(d);
       return { seq, messages: msgs.map((r) => ({ n: r.n, dir: r.kind, at: r.at, iat: r.iat ?? null, text: textOf(r.text), label: r.label ?? '', status: statusOf(r, x.seen_upto), code: r.code ?? null, detail: r.detail ?? null, link: r.link ?? null,
         ...(RE_LABEL.test(r.label ?? '') && { re: reOf(r) }),
-        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }), ...(r.voice && { voice: r.voice }), ...(r.file && { file: r.file }),
+        ...(r.label === STATEMENT_LABEL && { statement: statementOf(r) }), ...(r.photo && { photo: r.photo }), ...(r.voice && { voice: r.voice }), ...(r.file && { file: r.file }), ...(r.call && { call: r.call }),
         ...(r.approval && { approval: r.approval }), ...(r.question && { question: r.question }) })) };
     },
     'POST /api/sync': () => serial(async () => { await carrier.sync(); return { synced: true }; }),
@@ -1278,8 +1308,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     'GET /api/settings': () => settingsAll(),
     // Any of: relay, seen_receipts, notify, new_tier, new_presence (Settings → Chats); wallet, prices, currency (Settings → Wallet); each checked before any is kept.
     'POST /api/settings': (b) => serial(async () => {
-      const v = b['relay'], flags = ['seen_receipts', 'notify', 'new_presence', 'wallet', 'prices'].filter((k) => b[k] !== undefined), t = b['new_tier'], cur = b['currency'];
-      if (v === undefined && flags.length === 0 && t === undefined && cur === undefined) refuse(400, 'body', 'relay: a host[:port], or "" for the default (or seen_receipts, notify, new_tier, new_presence, wallet, prices, currency)');
+      const v = b['relay'], flags = ['seen_receipts', 'notify', 'new_presence', 'wallet', 'prices', 'calls'].filter((k) => b[k] !== undefined), t = b['new_tier'], cur = b['currency'];
+      if (v === undefined && flags.length === 0 && t === undefined && cur === undefined) refuse(400, 'body', 'relay: a host[:port], or "" for the default (or seen_receipts, notify, new_tier, new_presence, wallet, prices, currency, calls)');
       for (const k of flags) if (typeof b[k] !== 'boolean') refuse(400, 'body', `${k}: true or false`);
       if (t !== undefined && !TIER_NEW.has(t)) refuse(400, 'body', 'new_tier: own, friend or quiet');
       if (cur !== undefined && cur !== null && !CURRENCIES.includes(cur)) refuse(400, 'body', `currency: one of ${CURRENCIES.join(', ')}`);
@@ -1292,6 +1322,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (b['seen_receipts'] !== undefined) data.settings.seen = b['seen_receipts'];
       if (b['notify'] !== undefined) data.settings.notify = b['notify'];
       if (b['new_presence'] !== undefined) data.settings.new_presence = b['new_presence'];
+      if (b['calls'] !== undefined) data.settings.calls = b['calls'];
       if (t !== undefined) data.settings.new_tier = t;
       if (b['wallet'] !== undefined) data.settings.wallet = b['wallet'];
       if (b['prices'] !== undefined) data.settings.prices = b['prices'];
@@ -1312,7 +1343,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     'POST /api/agents/enrol-code': (b) => serial(async () => {
       seatHere();
       if (!enrolFile) refuse(404, 'route', 'no enrolment here');
-      const name = b['name'], tier = b['tier'], relay = b['relay'], words = b['confirm_words'], label = b['operator_name'];
+      const name = b['name'], tier = b['tier'], relay = b['relay'], words = b['confirm_words'], label = b['operator_name'], ttl = b['ttl'];
+      // The code's life the app picked (enrol --ttl's): 10 minutes (the default), an hour or a day.
+      if (ttl !== undefined && ![600, 3600, 86400].includes(ttl)) refuse(400, 'body', 'ttl: 600, 3600 or 86400 seconds (10 minutes, an hour, a day)');
       if (typeof name !== 'string' || !AGENT_NAME.test(name)) refuse(400, 'body', 'name: lowercase letters, digits, _ and -, at most 64');
       if (words !== undefined && typeof words !== 'boolean') refuse(400, 'body', 'confirm_words: true or false (default false: checked by its DID)');
       if (label !== undefined && label !== null && label !== '' && E.operatorLabel(label) === null) refuse(400, 'body', 'operator_name: how the agent files you, 1 to 64 characters');
@@ -1326,14 +1359,16 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       const root = await K.root(k);
       let r;
       try {
-        r = await E.issue({ carrier, file: enrolFile, i, n: 0, name, keeper: root, relay: at, started: startedBy(b), confirmWords: words === true,
+        r = await E.issue({ carrier, file: enrolFile, i, n: 0, name, keeper: root, relay: at, started: startedBy(b), confirmWords: words === true, ...(ttl !== undefined && { ttl }),
           ...(typeof label === 'string' && label !== '' && { operatorName: label }) });
       } finally { root.K.fill(0); }
       // What this page shows of it, kept with the enrolment so a restart brings the code screen back (look()).
-      const until = pend((x) => { const y = x.issued[r.id]; if (y) y.page = { short: r.short, short_exp: r.short_exp, tier: tier ?? 'own' }; return y?.attestation?.body?.exp ?? null; });
+      // The code as an agent is given it: ENROL-K7F3-Q9ZP (enrol.mjs enrol_code), so it is never taken for a pairing code.
+      const shown = r.enrol_code ?? r.short;
+      const until = pend((x) => { const y = x.issued[r.id]; if (y) y.page = { short: shown, short_exp: r.short_exp, tier: tier ?? 'own' }; return y?.attestation?.body?.exp ?? null; });
       await K.update((x) => { x.workers[i] = { name, n: 0, did: r.did, original: r.original, placed: 'remote', at: nowS(), ...(until && { until }) }; });
       if (tier === 'friend' || tier === 'quiet') carrier.presetTier(r.original, tier);
-      const e = { id: r.id, worker: i, name, short: r.short, code: r.code, exp: r.short_exp, relay: r.relay, tier: tier ?? 'own', state: 'code', did: r.did, original: r.original, confirmWords: words === true };
+      const e = { id: r.id, worker: i, name, short: shown, code: shown, exp: r.short_exp, relay: r.relay, tier: tier ?? 'own', state: 'code', did: r.did, original: r.original, confirmWords: words === true };
       enrolling.set(e.id, e);
       changed();
       return { worker: i, name, did: r.did, original: r.original, tier: e.tier, ...pub(e) };
@@ -1485,6 +1520,23 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     },
   };
   // Transfers: the routes exist only where the host moves files (hooks.transfers).
+  // Calls (UI-API.md "Calls"): the Line's routes; a person present, never an agent (agents calling: later). Every write is
+  // refused once the seat went to another device (it would log in as you beside it).
+  const callRouteSet = callRoutes({
+    line, contactOf: (v) => { const x = contactOf(v); return liveContact(x.did) ?? refuse(404, 'not_contact', 'not a contact'); },
+    callable: (c) => {
+      if (data.kind[c.did] === 'agent' || (data.kind[c.did] !== 'person' && (c.ours === true || workerDids.has(c.did)))) return { check: 'call_agent', message: 'agents take no calls (later)' };
+      if (c.re_pair) return { check: 'call_pairing', message: 'pair again first' };
+      if (c.online !== true) return { check: 'call_offline', message: `${c.name} is not online now` };
+      return true;
+    },
+    stun: (c) => stunOf(carrier.relay, c?.relay),
+    can: { speaker: typeof CH.speaker === 'function', mic: typeof CH.mic === 'function', ring: typeof CH.alert === 'function' },
+    hooks: { speaker: CH.speaker, mic: CH.mic, micSettings: CH.micSettings },
+    allow: (c, on) => { if (on === null) delete data.calls[c.did]; else data.calls[c.did] = on; saveData(); changed(); },
+    allowOf: (c) => canCall(c),
+  });
+  for (const [k, f] of Object.entries(callRouteSet)) routes[k] = k.startsWith('POST ') ? (b, q) => gone(() => f(b, q))() : f;
   if (transfers) Object.assign(routes, transferRoutes({ X: transfers.lib, engine: transfers.engine, host: hooks.transfers, carrier, identity: hooks.transfers.identity, serial, contactOf, changed, record, groups: G && groupsFile ? { G, file: groupsFile, list: groupsList } : null }));
   if (G) Object.assign(routes, groupRoutes);
   // One handler for every listener: the route's answer as [status, JSON value].
@@ -1496,7 +1548,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     }
   }
   return {
-    carrier, routes, dispatch, start, halt, serial, refuse, contactOf, cleanName, record, seen, data, saveData, live, recs, linkRound, drain,
+    carrier, routes, dispatch, start, halt, serial, refuse, contactOf, cleanName, record, seen, data, saveData, live, recs, linkRound, drain, line,
     setDevices: (d) => { devices = d; },
     onChange: (f) => { watchers.add(f); return () => watchers.delete(f); },
   };

@@ -120,7 +120,19 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
         got.push(...(JSON.parse((await cli('pal', 'inbox', '--wait', '5')).stdout || '{"messages":[]}') as { messages: typeof got }).messages);
       }
       ok('the watcher sent both, well before its 60 s round: pal gets the message and the file', got.some((m) => m.content === 'reply while watched') && got.some((m) => m.type === 'file' && m.name === 'note.txt'), JSON.stringify(got));
-      for (const args of [['invite'], ['accept', 'K7F3-Q9ZP'], ['forget', D.pal], ['pro', 'redeem', 'PRO-K7F3-Q9ZP']]) {
+      // the agent-setup feedback, point 4: invite and accept beside the watcher go through it (never "stop it first"); the
+      // watcher keeps its one session. A fresh zed: alice invites through the watcher, zed accepts; zed invites, alice
+      // accepts through the watcher.
+      await cli('zed', 'init', '--no-recovery');
+      const wi = await cli('alice', 'invite', '--name', 'zed');
+      const zc = wi.stdout.trim(), za = await cli('zed', 'accept', zc, '--name', 'alice', '--wait', '30');
+      ok('invite beside the watcher: exit 0, a code, made through the watcher; the other side pairs with it', wi.status === 0 && /^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(zc) && wi.stderr.includes(`through sigelo-agent watch (pid ${w2.c.pid})`)
+        && !/Ctrl-C|stop it/.test(wi.stderr) && za.status === 0 && (JSON.parse(za.stdout) as { status: string }).status === 'connected', wi.stderr + za.stderr);
+      const yc = (await cli('zed', 'invite', '--name', 'alice2')).stdout.trim(), wa = await cli('alice', 'accept', yc, '--name', 'zed2', '--wait', '5');
+      ok('accept beside the watcher: exit 0, answered through the watcher', wa.status === 0 && wa.stderr.includes('through sigelo-agent watch') && ['connected', 'waiting'].includes((JSON.parse(wa.stdout) as { status: string }).status), wa.stdout + wa.stderr);
+      const we = await cli('alice', 'accept', 'ENROL-K7F3-Q9ZP');
+      ok('accept of an enrol code beside the watcher: exit 2, "that is an enrol code", nothing asked of the watcher', we.status === 2 && we.stderr.includes('that is an enrol code'), we.stderr);
+      for (const args of [['forget', D.pal], ['pro', 'redeem', 'PRO-K7F3-Q9ZP']]) {
         const b = await cli('alice', ...args);
         ok(`${args[0]} beside the watcher: exit 1, busy, saying who holds the session`, b.status === 1 && b.stderr.includes(`is watched by sigelo-agent watch (pid ${w2.c.pid})`), b.stderr);
       }

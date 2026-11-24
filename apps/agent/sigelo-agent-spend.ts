@@ -30,7 +30,7 @@
  * Seen: the addresses the keeper paid, was asked to pay or was invoiced for (spend.log), newest first,
  * offered under "Who it may pay" beside the contacts.
  *
- * Signed (design/agent-wallet-page.md, Owner 2026-11-14): a keeper that takes `POST /policy` and lists this
+ * Signed (design/agent-wallet-page.md, (2026-11-14): a keeper that takes `POST /policy` and lists this
  * identity in `owners` gets every change as a `policy-change` signed by this identity, which it checks and
  * logs; the file write stays for a keeper from before, or one not running. Its `POST /agents`, signed the same
  * way, gives each agent's address (i, 0), balance and incoming money. `relayPolicy` carries a change another

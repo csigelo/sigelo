@@ -32,7 +32,8 @@
  * encapsulation, and must find a match among 2^44: months on one core, hours to days on GPUs
  * (THREAT-MODEL.md §2.10). The JSON keeps the 32-digit id (`pair`) for all 128 bits.
  */
-import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -70,7 +71,7 @@ const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, numb
 for (const [v, x] of Object.entries(SPEC)) if (v !== 'recovery-key') Object.assign(x.flags, { '--identity': true, '--operator': false });
 export const VERBS = Object.keys(SPEC);
 
-export const USAGE = `sigelo-agent contacts — talk to other agents through a relay
+export const USAGE = `Pairing with other agents, and talking to them through a relay (the verbs below; "contacts" only lists them)
 
   invite [--name <n>] [--json] [--long]    prints a short code (K7F3-Q9ZP, 10 minutes, once) to say or
        [--ttl <s|10m|1h>] [--relay <host>] send to another agent's operator; --ttl: 60 s to 1 h for a slow
@@ -315,7 +316,7 @@ export async function contactDependency(spec: string): Promise<unknown> {
 }
 
 /** Another module of the same sigelo-contact (device, qr, qr-decode, page), from the directory contactLib checks. */
-export async function contactModule<T = Record<string, unknown>>(name: 'device' | 'qr' | 'qr-decode' | 'page' | 'control' | 'invite' | 'group' | 'transfer-node' | 'voice'): Promise<T> {
+export async function contactModule<T = Record<string, unknown>>(name: 'device' | 'qr' | 'qr-decode' | 'page' | 'control' | 'invite' | 'group' | 'transfer-node' | 'voice' | 'call'): Promise<T> {
   await contactLib();
   try { return await import(pathToFileURL(join(contactDir(), `${name}.mjs`)).href) as T; } catch (e) {
     if (absent(e)) throw notFound(`sigelo-contact is incomplete: ${(e as Error).message.split('\n')[0]}`);
@@ -462,10 +463,64 @@ export const lockPath = (identity: string): string => resolve(identity).replace(
 export const kickPath = (identity: string): string => resolve(identity).replace(/\.json$/, '') + '.ui.kick';
 /** Tell the watcher on this file that something waits to be sent. */
 export function kick(identity: string): void { try { writeFileSync(kickPath(identity), `${Date.now()}\n`, { mode: 0o600 }); } catch {} }
+// Asked of the watcher (the agent-setup feedback, point 4: models killed the supervisor's watcher to run accept): a CLI or
+// MCP accept, invite (and its --cancel) beside a running watch goes to it as a request file in `<identity>.ui.ask/`
+// (0600, written whole: <id>.json), kicked; the watcher runs it on its own session (serveAsks, the watch queue)
+// and writes <id>.done.json, which the asker reads and deletes. The asker waits as long as the verb would have.
+export const askDir = (identity: string): string => resolve(identity).replace(/\.json$/, '') + '.ui.ask';
+export const ASKS = ['invite', 'accept', 'cancelInvite', 'invitePublic'] as const;
+export type Ask = typeof ASKS[number];
+/** Ask the watcher on `identity` to run `op` with `args` on its session → its result, or its refusal rethrown (check kept). */
+export async function askWatcher(identity: string, op: Ask, args: unknown[], waitMs: number): Promise<unknown> {
+  const dir = askDir(identity), id = randomBytes(8).toString('hex'), f = join(dir, `${id}.json`), done = join(dir, `${id}.done.json`);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(`${f}.tmp`, JSON.stringify({ op, args }), { mode: 0o600, flag: 'wx' });
+  renameSync(`${f}.tmp`, f);
+  kick(identity);
+  const end = Date.now() + waitMs;
+  for (;;) {
+    if (existsSync(done)) {
+      const r = JSON.parse(readFileSync(done, 'utf8')) as { ok: boolean; result?: unknown; error?: { check?: string; message: string; kept?: boolean } };
+      rmSync(done, { force: true });
+      if (r.ok) return r.result;
+      throw Object.assign(new Error(r.error!.message), { check: r.error!.check ?? 'watch', ...(r.error!.kept && { kept: true }) });
+    }
+    if (Date.now() > end) {
+      // Not taken in time: withdrawn, unless the watcher took it already (then its answer is the watcher's to give).
+      try { rmSync(f); } catch { throw Object.assign(new Error(`the watcher took the ${op} but gave no answer within ${Math.round(waitMs / 1000)} s: see sigelo-agent contacts (and the watcher's output)`), { check: 'watch_slow' }); }
+      throw Object.assign(new Error(`the watcher on ${identity} did not take the ${op} within ${Math.round(waitMs / 1000)} s: is it stuck? nothing was done`), { check: 'watch_slow' });
+    }
+    await new Promise((ok) => setTimeout(ok, 200));
+  }
+}
+/** The watcher's side: each request waiting in the ask directory, run with `run(op, args)`, answered once. */
+export async function serveAsks(identity: string, run: (op: Ask, args: unknown[]) => Promise<unknown>): Promise<number> {
+  const dir = askDir(identity);
+  let names: string[] = [];
+  try { names = readdirSync(dir).filter((x) => /^[0-9a-f]{16}\.json$/.test(x)); } catch { return 0; }
+  let n = 0;
+  for (const name of names) {
+    const f = join(dir, name), taken = `${f}.taken`, done = join(dir, name.replace(/\.json$/, '.done.json'));
+    try { renameSync(f, taken); } catch { continue; }   // withdrawn, or another round took it
+    let answer: { ok: boolean; result?: unknown; error?: { check?: string; message: string; kept?: boolean } };
+    try {
+      const q = JSON.parse(readFileSync(taken, 'utf8')) as { op: Ask; args: unknown[] };
+      if (!ASKS.includes(q.op) || !Array.isArray(q.args)) throw Object.assign(new Error('not a request this watcher runs'), { check: 'watch_ask' });
+      answer = { ok: true, result: await run(q.op, q.args) };
+    } catch (e) {
+      answer = { ok: false, error: { check: (e as { check?: string }).check, message: (e as Error).message, ...((e as { kept?: boolean }).kept && { kept: true }) } };
+    }
+    writeFileSync(`${done}.tmp`, JSON.stringify(answer), { mode: 0o600 });
+    renameSync(`${done}.tmp`, done);
+    rmSync(taken, { force: true });
+    n++;
+  }
+  return n;
+}
 /** Why `what` may not log in on this file while h holds it. */
 export const busyText = (identity: string, h: { pid: number; kind: 'ui' | 'watch' }, what: string): string => (h.kind === 'ui'
   ? `${identity} is open in sigelo-agent ui (pid ${h.pid}): ${what} would take its relay session and its messages. Use the page, or stop it (Ctrl-C) first`
-  : `${identity} is watched by sigelo-agent watch (pid ${h.pid}): ${what} would take its relay session (send, send-file and inbox go through it). Stop it (Ctrl-C) first`);
+  : `${identity} is watched by sigelo-agent watch (pid ${h.pid}): ${what} would take its relay session. send, send-file, inbox, accept, invite and group join go through it; this one needs the session itself`);
 /** The single-owner rule for one verb: → null (no holder: log in), the watcher when the verb works
  *  through it (`through`: queue or read, no session); else throws, check busy. */
 export function holderFor(identity: string, what: string, through = false): { pid: number; kind: 'ui' | 'watch'; spool?: string } | null {
@@ -474,7 +529,7 @@ export function holderFor(identity: string, what: string, through = false): { pi
   throw Object.assign(new Error(busyText(identity, h, what)), { check: 'busy' });
 }
 // The contact verbs that log in, and those of them that go through a watcher.
-const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'reply', 'inbox', 'forget', 'pro', 'link', 'unlink', 'presence', 'public'], THROUGH = ['send', 'send-file', 'reply', 'inbox', 'presence'];
+const SESSION_VERBS = ['invite', 'accept', 'send', 'send-file', 'reply', 'inbox', 'forget', 'pro', 'link', 'unlink', 'presence', 'public'], THROUGH = ['send', 'send-file', 'reply', 'inbox', 'presence', 'invite', 'accept'];
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch (e) { return (e as { code?: string }).code === 'EPERM'; } };
 /** The live process holding the lock on this identity file, or null. */
 export function lockHolder(identity: string): { pid: number; kind: 'ui' | 'watch'; spool?: string } | null {
@@ -678,6 +733,15 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
         else if (e.type === 'pow_done') note(`proof of work done in ${((e.ms ?? 0) / 1000).toFixed(1)} s`);
       },
     });
+    // Beside a watcher, accept and invite go to it (askWatcher): the verbs below run as they are, their session the watcher's.
+    if (w?.kind === 'watch' && (cmd === 'accept' || cmd === 'invite')) {
+      const viaWatch = (op: Ask, ms: number) => async (...a: unknown[]): Promise<never> => {
+        note(`${cmd}: through sigelo-agent watch (pid ${w!.pid}), which holds the relay session`);
+        return await askWatcher(path, op, a, ms) as never;
+      };
+      const waitS = Number(flags.get('--wait') ?? 10);
+      Object.assign(c, { accept: viaWatch('accept', ((Number.isFinite(waitS) ? waitS : 10) + 330) * 1000), invite: viaWatch('invite', 330_000), cancelInvite: viaWatch('cancelInvite', 330_000), invitePublic: viaWatch('invitePublic', 330_000) });
+    }
     // The pairing id of a live contact, from the pairing key in the contact store (store.mjs);
     // null once revoked, when the key is gone.
     const pairOf = (peer: string): string | null => {

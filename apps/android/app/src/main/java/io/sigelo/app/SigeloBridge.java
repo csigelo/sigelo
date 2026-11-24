@@ -121,8 +121,17 @@ import javax.net.ssl.SSLSocketFactory;
  *          notifyBlocked}; on kept for the phone (default true), the foreground service follows; battery and notifications
  *          ask the system at each tap while Android still shows its prompt, then open the app's page in its settings. Its event, no id: {ev:"nudge"} (its alarm, the end of Doze): the page's carrier
  *          reconnects when down.
+ *   push          UnifiedPush (UnifiedPush.java, design/push.md §1 B): {on?, distributor?} → {on, state (off | none | pick |
+ *          registering | ok | failed | unregistered | unavailable), reason, distributors: [{id, name}], distributor, endpoint,
+ *          p256dh, auth}; anything else refused "push". Its events, no id: {ev:"push", …the same} when the distributor answers,
+ *          {ev:"wake"} at a push wake: the page's carrier logs in at once (carrier.wake({now: true})).
  *   big-keep, big-url, mic, app-settings   voice messages (BigFiles): a recording kept as a file to send, a landed one
  *          to play, RECORD_AUDIO asked at the first (refused mic_permission, remembered), the app's settings page.
+ *   call, call-speaker, call-ring   a voice call's audio (CallService: the foreground service of type microphone and its
+ *          ongoing-call notification, audio mode, focus, earpiece or speaker, the proximity lock; the ring of a call coming
+ *          while the app runs); {on, name?}, booleans only, a name of 1 to NOTE_MAX characters. Its event, no id:
+ *          {ev:"hangup"} (the notification's Hang up): the page ends the live call; {ev:"network"} (the default network changed
+ *          during a call): the caller restarts ICE.
  *   The shell's own event, no id: {ev:"open", tag} when one of our notifications is tapped (MainActivity
  *          onNewIntent; at a start by the tap, kept until the page's port is open, then posted once).
  *   share-take, share-drop   share into sigelo (MainActivity's ACTION_SEND, shared below): one share held here, a second
@@ -231,6 +240,15 @@ public final class SigeloBridge {
     private void openPort() {
         String url = web.getUrl();
         if (url == null || !MainActivity.ours(Uri.parse(url))) return;
+        // A page before this one (a reload): its call ended with it, so its ring and the call's audio stop too.
+        if (port != null) {
+            try {
+                CallService.ring(activity, false, null);
+                CallService.call(activity, false, null);
+            } catch (Refused e) {
+                // nothing on
+            }
+        }
         closePort();
         WebMessagePort[] ch = web.createWebMessageChannel();
         final WebMessagePort mine = ch[0];
@@ -271,7 +289,7 @@ public final class SigeloBridge {
                 final int seq = ++shareSeq;
                 final Uri u = (Uri) stream;
                 if (!foreign(u)) {
-                    holdShare(seq, null, null, null, refusedShare("share", "this file cannot be shared into sigelo"));
+                    holdShare(seq, null, null, null, refusedShare("share", "this file cannot be shared into Sigelo"));
                     return;
                 }
                 String t = i.getType();
@@ -375,8 +393,14 @@ public final class SigeloBridge {
         port = null;
     }
 
-    /** The app ends: every stream closed, no thread left. */
+    /** The app ends: every stream closed, no thread left; a call's audio and ring with it (its page is gone). */
     void close() {
+        try {
+            CallService.ring(activity, false, null);
+            CallService.call(activity, false, null);
+        } catch (Refused e) {
+            // nothing on
+        }
         if (StayConnected.page == this) StayConnected.page = null;
         closePort();
         big.close();
@@ -577,6 +601,15 @@ public final class SigeloBridge {
                     fail(to, id, "stay", "no answer");
                 }
                 break;
+            case "push":
+                try {
+                    post(to, UnifiedPush.op(activity, m).put("id", id));
+                } catch (Refused e) {
+                    fail(to, id, e.check, e.getMessage());
+                } catch (JSONException e) {
+                    fail(to, id, "push", "no answer");
+                }
+                break;
             case "big-pick":
             case "big-photo":
             case "big-land":
@@ -624,6 +657,11 @@ public final class SigeloBridge {
                 shareType = null;
                 shareEv = null;
                 post(to, ok(id));
+                break;
+            case "call":
+            case "call-speaker":
+            case "call-ring":
+                callOp(to, id, m, op);
                 break;
             case "app-settings":
                 try {
@@ -725,6 +763,54 @@ public final class SigeloBridge {
         else save.run();
     }
 
+    // ---------------------------------------------------------------- calls (CallService)
+
+    /** call, call-speaker, call-ring: {on} a boolean, name (on only) 1 to NOTE_MAX characters; else refused "call". */
+    private void callOp(WebMessagePort to, int id, JSONObject m, String op) {
+        Object v = m.opt("on");
+        if (!(v instanceof Boolean)) {
+            fail(to, id, "call", "on: true or false");
+            return;
+        }
+        boolean on = (Boolean) v;
+        String name = m.has("name") ? line(m, "name") : null;
+        if (m.has("name") && name == null) {
+            fail(to, id, "call", "name: 1 to " + NOTE_MAX + " characters");
+            return;
+        }
+        try {
+            if (op.equals("call")) CallService.call(activity, on, name);
+            else if (op.equals("call-speaker")) CallService.speaker(activity, on);
+            else CallService.ring(activity, on, name);
+            post(to, ok(id));
+        } catch (Refused e) {
+            fail(to, id, e.check, e.getMessage());
+        } catch (RuntimeException e) {
+            // Android refused the foreground service or the audio route (started from the background, say): said, not thrown.
+            fail(to, id, "call", String.valueOf(e.getMessage()));
+        }
+    }
+
+    /** The default network changed during a call (CallService, main thread): {ev:"network"}; the caller restarts ICE. */
+    void network() {
+        if (port == null) return;
+        try {
+            post(port, new JSONObject().put("ev", "network"));
+        } catch (JSONException e) {
+            // nothing to say it with
+        }
+    }
+
+    /** The call notification's Hang up (CallService, main thread): {ev:"hangup"} to the page, whose Line ends the call. */
+    void hangup() {
+        if (port == null) return;
+        try {
+            post(port, new JSONObject().put("ev", "hangup"));
+        } catch (JSONException e) {
+            // nothing to say it with
+        }
+    }
+
     // ---------------------------------------------------------------- notifications
 
     /** StayConnected's nudge (main thread): {ev:"nudge"} to the page, whose carrier reconnects, with its backoff, when down. */
@@ -735,6 +821,22 @@ public final class SigeloBridge {
         } catch (JSONException e) {
             // nothing to say it with
         }
+    }
+
+    /** A push wake (UnifiedPush, main thread): {ev:"wake"} to the page, whose carrier logs in at once. → false: no page to tell. */
+    boolean wake() {
+        if (port == null) return false;
+        try {
+            post(port, new JSONObject().put("ev", "wake"));
+            return true;
+        } catch (JSONException e) {
+            return false;
+        }
+    }
+
+    /** The distributor's answer (UnifiedPush, main thread): {ev:"push", …the state} to the page. */
+    void pushChanged(JSONObject state) throws JSONException {
+        if (port != null) post(port, state.put("ev", "push"));
     }
 
     /** A string field of 1 to NOTE_MAX characters, else null. */

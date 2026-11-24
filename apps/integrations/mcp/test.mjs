@@ -128,7 +128,7 @@ try {
   ok(!r.isError && r.data.did.startsWith('did:sigelo:') && !r.data.warning, 'init with recovery pubkey');
   const agentDid = r.data.did, genesis = r.data.genesis;
   r = await c.call('sigelo_init', { recovery: 'none' });
-  ok(r.isError && /refusing to overwrite/.test(r.text), 'second init refused');
+  ok(r.isError && r.structured?.code === 'identity_exists' && /already holds this machine's identity/.test(r.text) && /accept CODE/.test(r.text) && !/move|delete/i.test(r.text), 'second init refused: the identity named, never "move it" (k\'s third list, point 3)', r.text);
   r = await c.call('sigelo_whoami');
   ok(r.data.did === agentDid && r.data.chain.length === 1 && r.data.attestations === 0, 'whoami after init');
 
@@ -441,6 +441,8 @@ ${code.slice(60)}
     const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
     const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
     const relay = await startRelay({ host: 'relay.test', db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, log: () => {},
+      // One network (loopback): parks, fetches and an enrolment's spend at its grant are each a lookup (relay/test/run.mjs has the brakes).
+      park: { lookups: { n: 1000, window: 600 }, parks: { n: 1000, window: 3600 }, lookupsAll: { n: 8000, window: 600 } },
       policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } }, freeQueue: 64 * 1024 * 1024 }) });
     const env = { SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: JSON.stringify({ 'relay.test': { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } }) };
     const a = client({ ...env, SIGELO_IDENTITY: join(dir, 'alice.local.json') }), b = client({ ...env, SIGELO_IDENTITY: join(dir, 'bob.local.json') });
@@ -642,7 +644,20 @@ ${code.slice(60)}
       r = await a.call('sigelo_send', { to: 'bob', text: 'queued while watched' });
       ok(!r.isError && r.data.status === 'queued' && existsSync(kicks) && (await a.call('sigelo_contacts')).data?.contacts[0]?.queued === 1,
         'relay: sigelo_send beside a watcher: queued for it (no login), its kick file touched', r.text);
-      for (const [tool, args] of [['sigelo_invite', {}], ['sigelo_accept', { code: 'K7F3-Q9ZP' }], ['sigelo_forget_contact', { did: bDid }]]) {
+      // the agent-setup feedback, point 4: sigelo_invite and sigelo_accept go through the watcher (askWatcher): the request
+      // file, answered here as the watcher's serveAsks answers it; sigelo_forget_contact still needs the session (busy).
+      {
+        const { serveAsks } = await import('../../agent/sigelo-agent-contact.ts'), asked = [];
+        const serve = async () => { for (let i = 0; i < 100 && asked.length === 0; i++) { await serveAsks(join(dir, 'alice.local.json'), async (op, args) => { asked.push([op, args]); return op === 'invite' ? { short: 'K7F3-Q9ZP', code: 'sgl1stub', via: 'watcher' } : { status: 'connected', via: 'watcher' }; }); await new Promise((res) => setTimeout(res, 100)); } };
+        const [ri] = await Promise.all([a.call('sigelo_invite', { name: 'zed' }), serve()]);
+        ok(!ri.isError && ri.data?.via === 'watcher' && asked[0]?.[0] === 'invite' && asked[0][1][0].name === 'zed', 'relay: sigelo_invite beside a watcher: asked of it, its answer returned (not busy)', ri.text);
+        asked.length = 0;
+        const [ra] = await Promise.all([a.call('sigelo_accept', { code: 'K7F3-Q9ZP', name: 'zed' }), serve()]);
+        ok(!ra.isError && ra.data?.via === 'watcher' && asked[0]?.[0] === 'accept' && asked[0][1][0] === 'K7F3-Q9ZP', 'relay: sigelo_accept beside a watcher: asked of it (not busy)', ra.text);
+      }
+      r = await a.call('sigelo_accept', { code: 'ENROL-K7F3-Q9ZP' });
+      ok(r.isError && r.structured?.code === 'enrol_code' && r.text.includes('that is an enrol code: run init --enrol CODE') && r.text.includes('sigelo_enrol'), 'relay: sigelo_accept of an enrol code: refused before anything, pointing to init --enrol (sigelo_enrol)', r.text);
+      for (const [tool, args] of [['sigelo_forget_contact', { did: bDid }]]) {
         r = await a.call(tool, args);
         ok(r.isError && r.structured?.code === 'busy' && r.text.includes(`is watched by sigelo-agent watch (pid ${process.pid})`), `relay: ${tool} beside a watcher: busy`, r.text);
       }
@@ -739,7 +754,9 @@ ${code.slice(60)}
         op.stderr.on('data', (d) => { opErr += d; });
         const opDone = new Promise((res) => op.on('close', res));
         for (let i = 0; i < 1200 && !code; i++) await new Promise((res) => setTimeout(res, 100));
-        ok(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(code) && opErr.includes('good for 30 minutes'), `task loop: enrol --ttl 30m prints a code good for 30 minutes (${code})`, opErr);
+        // Its line on stderr comes just after the code on stdout: waited for, not raced.
+        for (let i = 0; i < 100 && !opErr.includes('good for'); i++) await new Promise((res) => setTimeout(res, 100));
+        ok(/^ENROL-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(code) && opErr.includes('good for 30 minutes'), `task loop: enrol --ttl 30m prints an enrol code good for 30 minutes (${code})`, opErr);
         const wk = client({ ...env, SIGELO_IDENTITY: join(dir, 'worker.local.json') });
         await wk.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } });
         r = await wk.call('sigelo_enrol', { code: 'K7F3-Q9Z' });
@@ -749,10 +766,15 @@ ${code.slice(60)}
         ok(!r.isError && placed?.status === 'done' && /^did:sigelo:z/.test(placed.result?.did ?? '') && placed.notes.some((l) => l.includes('identity replaced')),
           'task loop: sigelo_enrol {code}: this machine is the operator\'s worker now (done, its DID, the notes)', r.text.slice(0, 1500));
         r = await wk.call('sigelo_whoami');
-        ok(r.data?.did === placed?.result?.did, 'task loop: sigelo_whoami: the worker\'s DID', r.text);
+        ok(r.data?.did === placed?.result?.did && r.data.worker === 0 && /^did:sigelo:z/.test(r.data.operator ?? '') && r.data.operator_name === 'operator' && r.data.tier === 'own',
+          'task loop: sigelo_whoami: the worker\'s DID, its index, its operator (DID, name), the tier (k\'s third list, point 6)', r.text);
+        r = await wk.call('sigelo_init', { recovery: 'none' });
+        ok(r.isError && r.structured?.code === 'identity_exists' && r.text.includes('this machine is already worker 0 of operator') && !/move|delete/i.test(r.text), 'task loop: sigelo_init on the worker: refused, "already worker 0 of operator", never "move it"', r.text);
+        r = await wk.call('sigelo_init', { recovery: code });
+        ok(r.isError && r.structured?.code === 'enrol_code' && r.text.includes('sigelo_enrol'), 'task loop: sigelo_init with an enrol code as the recovery: refused, pointing to sigelo_enrol', r.text);
         if (keyAgent) ok(JSON.parse(readFileSync(join(dir, 'worker.local.json'), 'utf8')).provider === 'agent', 'task loop, key agent mode: the worker\'s key went to the agent, its file holds none');
         r = await wk.call('sigelo_enrol', { code });
-        ok(r.isError && r.text.includes('already holds an identity'), 'task loop: sigelo_enrol again: refused, the identity exists', r.text);
+        ok(r.isError && r.text.includes('this machine is already worker 0 of operator') && !/move|delete/i.test(r.text), 'task loop: sigelo_enrol again: refused, "already worker 0 of <operator>", never "move it"', r.text);
         r = await wk.call('sigelo_enrol_finish', { wait: 5 });
         ok(!r.isError && ['nothing', 'done'].includes(r.data?.status), 'task loop: sigelo_enrol_finish: nothing pending, or done', r.text);
         const opCode = await opDone;

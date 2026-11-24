@@ -13,7 +13,7 @@
 //   node test-enrol.ts   → ALL PASS test-enrol.ts (n ok)
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, connect, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +43,8 @@ const { startRelay } = await import(pathToFileURL(join(RELAY, 'server.mjs')).hre
 const { relayPolicy } = await import(pathToFileURL(join(RELAY, 'allowance.mjs')).href) as { relayPolicy(ctx: unknown, o: object): unknown };
 const D = mkdtempSync(join(tmpdir(), 'sigelo-moadim-enrol-'));
 const relay = await startRelay({ host: 'relay.test', db: join(D, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, log: () => {},
+  // One network (loopback): each enrolment's park, fetches and spend at the grant count as lookups (relay/test/run.mjs has the brakes).
+  park: { lookups: { n: 1000, window: 600 }, parks: { n: 1000, window: 3600 }, lookupsAll: { n: 8000, window: 600 } },
   policy: (ctx: unknown) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
 const seen: Buffer[] = [];
 const proxy = (port: number): Promise<{ s: Server; port: number }> => new Promise((done) => {
@@ -133,12 +135,12 @@ try {
   // Remote: worker 0 on the server.
   const w0 = derived(0, 0);
   const e1 = await enrolOn(SRV, ['--name', 'vps'], ['--name', 'owner']);
-  ok(`enrol prints a short code on stdout (${e1.code})`, /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(e1.code));
+  ok(`enrol prints an enrol code on stdout (${e1.code}): ENROL-, then the short code`, /^ENROL-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(e1.code));
   const res = JSON.parse(e1.m.stdout || '{}') as { did: string; operator: string; worker: number };
   ok('init --enrol: exit 0; the server is worker 0, the DID derived directly from the same root', e1.m.status === 0 && res.did === w0.did && res.worker === 0 && res.operator === opDid, e1.m.stderr);
-  ok('the server says it: paired, then replaced its identity with the operator\'s', e1.m.stderr.includes(`replaced this machine's identity with the operator's: worker 0 (${w0.did}), run by ${opDid}`), e1.m.stderr);
-  ok('enrol --wait: exit 0, "paired, then replaced its identity with yours: worker 0", checked by its derived DID; no four words asked on either side', e1.op.status === 0
-    && e1.op.stderr.includes(`paired, then replaced its identity with yours: worker 0 (${w0.did}), run by you`) && e1.op.stderr.includes('Checked: its DID is worker 0 derived here from your words')
+  ok('the server says it: enrolled, its identity replaced with the operator\'s', e1.m.stderr.includes(`enrolled: this machine's identity replaced with the operator's: worker 0 (${w0.did}), run by ${opDid}`), e1.m.stderr);
+  ok('enrol --wait: exit 0, "enrolled, its identity replaced with yours: worker 0", checked by its derived DID; no four words asked on either side', e1.op.status === 0
+    && e1.op.stderr.includes(`enrolled, its identity replaced with yours: worker 0 (${w0.did}), run by you`) && e1.op.stderr.includes('Checked: its DID is worker 0 derived here from your words')
     && words4(e1.op.stderr) === undefined && words4(e1.m.stderr) === undefined, e1.op.stderr + e1.m.stderr);
   const uiData = JSON.parse(readFileSync(human.replace(/\.json$/, '.ui.json'), 'utf8')) as { checked: Record<string, string> };
   ok('the worker is words-checked for the page (ui.json checked), without a tap', typeof uiData.checked[w0.did] === 'string' && uiData.checked[w0.did]!.length === 32, JSON.stringify(uiData));
@@ -162,6 +164,50 @@ try {
     && (!existsSync(join(OTHER, '.config', 'moadim')) || !readdirSync(join(OTHER, '.config', 'moadim')).some((f) => f.includes('sigelo.local'))), again.stderr);
   ok('init --enrol with --recovery: refused, exit 2', (await cli(OTHER, ['init', '--enrol', 'K7F3-Q9ZP', '--no-recovery'])).status === 2);
   ok('enrol --finish on the server, nothing pending: exit 0, says so', ((r) => r.status === 0 && r.stderr.includes('nothing pending'))(await cli(SRV, ['enrol', '--finish'])));
+  // the agent-setup feedback points 3, 5, 6, 7, 9 and the enrolment boundary (THREAT-MODEL §2.11a), on the CLI.
+  {
+    const who = await cli(SRV, ['whoami']), wj = JSON.parse(who.stdout || '{}') as { worker?: number; operator?: string; operator_name?: string; tier?: string };
+    ok('whoami on a worker: its index, its operator\'s DID and name, the tier', who.status === 0 && wj.worker === 0 && wj.operator === opDid && wj.operator_name === 'operator' && wj.tier === 'own'
+      && who.stderr.includes(`worker 0 of operator (${opDid})`), who.stdout + who.stderr);
+    // A second operator's code (or any enrol code) on an enrolled worker: refused, never "move it away".
+    let other = '';
+    const op2 = cli(OP, ['enrol', '--name', 'second', '--ttl', '60'], { onLine: (l) => { other = l.trim(); } });
+    await op2;
+    const over = await cli(SRV, ['init', '--enrol', other, '--wait', '2']), plain = await cli(SRV, ['init', '--no-recovery']);
+    const line = `this machine is already worker 0 of operator (${opDid})`;
+    ok('init --enrol on an enrolled worker: exit 2, "already worker 0 of <operator>", where a pairing code goes, nothing about moving the key; the key unchanged',
+      over.status === 2 && over.stderr.includes(line) && over.stderr.includes('accept CODE') && !/move|delete|remove/i.test(over.stderr)
+      && (JSON.parse(readFileSync(sfile, 'utf8')) as { secret: string }).secret === Buffer.from(w0.seed).toString('hex'), over.stderr);
+    ok('plain init on it: the same refusal, exit 2', plain.status === 2 && plain.stderr.includes(line) && !/move|delete|remove/i.test(plain.stderr), plain.stderr);
+    const acc = await cli(SRV, ['accept', other]), pairAlias = await cli(SRV, ['pair', other]);
+    ok('accept (and its alias pair) with an enrol code: exit 2, "that is an enrol code: run init --enrol CODE", nothing fetched', acc.status === 2 && acc.stderr.includes('that is an enrol code: run init --enrol CODE')
+      && pairAlias.status === 2 && pairAlias.stderr.includes('that is an enrol code'), acc.stderr + pairAlias.stderr);
+    const listed = await cli(OP, ['enrol', '--list']), rows = JSON.parse(listed.stdout || '[]') as { name: string; state: string }[];
+    ok('enrol --list: the pending enrolment, waiting', listed.status === 0 && rows.some((r) => r.name === 'second' && r.state === 'waiting'), listed.stdout + listed.stderr);
+    const cancelled = await cli(OP, ['enrol', '--cancel', other]);
+    const late = await cli(FOURTH, ['init', '--enrol', other, '--wait', '2']);
+    ok('enrol --cancel <code>: cancelled, the index free again; the code then gives park_unknown at the relay', cancelled.status === 0 && cancelled.stderr.includes('the index is free again')
+      && late.status === 1 && late.stderr.includes('park_unknown') && !existsSync(agentFile(FOURTH)), cancelled.stderr + late.stderr);
+    // A contact's pairing code given to init --enrol: refused, nothing pending, no identity.
+    const inv = await cli(OP, ['invite', '--name', 'a-friend'], { extra: { SIGELO_IDENTITY: human } });
+    const pc = inv.stdout.trim().split('\n')[0]!, asEnrol = await cli(FOURTH, ['init', '--enrol', pc, '--wait', '2']);
+    ok('a pairing code at init --enrol: refused (enrol_not, "that is a pairing code"), no identity, nothing pending', asEnrol.status === 1 && asEnrol.stderr.includes('that is a pairing code')
+      && !existsSync(agentFile(FOURTH)) && !readdirSync(join(FOURTH, '.config', 'moadim')).some((f) => f.includes('.enrol-')), asEnrol.stderr);
+    await cli(OP, ['invite', '--cancel', pc], { extra: { SIGELO_IDENTITY: human } });
+    const dotted = await cli(OP, ['enrol', '--name', 'k.bench-1', '--ttl', '60']), dottedHere = await cli(OP, ['enrol', '--name', 'k.bench-2', '--here']);
+    ok('enrol --name with dots: taken for a code; refused with --here (it names a file) in one line, not the whole help', dotted.status === 0 && dottedHere.status === 2 && dottedHere.stderr.split('\n').filter(Boolean).length === 1, dotted.stderr + dottedHere.stderr);
+    ok('enrol --cancel by name', (await cli(OP, ['enrol', '--cancel', 'k.bench-1'])).status === 0);
+    const guess = await cli(SRV, ['enrol', '--enrol', other]), typo = await cli(SRV, ['acept', 'X']);
+    ok('enrol --enrol: refused, names init --enrol; a typo of a verb: "did you mean accept?"', guess.status === 2 && guess.stderr.includes('init --enrol') && typo.status === 2 && typo.stderr.includes('did you mean accept?'), guess.stderr + typo.stderr);
+    // A lock left by a killed CLI (its pid gone): removed with one line, the verb goes on (the agent-setup feedback, point 9).
+    const dead = spawnSync('node', ['-e', '0']).pid, lockF = sfile.replace(/\.json$/, '') + '.carrier.json.lock';
+    writeFileSync(lockF, `${dead}\n`);
+    const unlocked = await cli(SRV, ['contacts']);
+    ok('a stale carrier lock (its process gone): removed, said in one line, the verb runs', unlocked.status === 0 && unlocked.stderr.includes(`removed the stale lock ${lockF}`) && !existsSync(lockF), unlocked.stderr);
+    const help = await cli(SRV, ['--help']);
+    ok('--help starts with "You were given a code?": enrol code → init --enrol, pairing code → accept, giving one → invite', /^sigelo-agent — [^\n]*\n\nYou were given a code\?/.test(help.stderr)
+      && /ENROL-K7F3-Q9ZP.*init --enrol/.test(help.stderr) && /from a contact.*accept <code>/.test(help.stderr) && /You give a contact a code.*invite/.test(help.stderr), help.stderr.slice(0, 600));
+  }
   ok('enrol --index 0 again: refused (enrol_index), points to --restore', ((r) => r.status === 1 && r.stderr.includes('enrol --restore 0'))(await cli(OP, ['enrol', '--name', 'x', '--index', '0'])));
 
   // --here: worker 1 into the agents' directory; a sub-agent runs a verb on it.
@@ -193,13 +239,16 @@ try {
   // `enrol --finish` on each side in turn, each run doing its part, until both are done.
   const w2 = derived(2, 0);
   let lazyCode = '';
-  // enrol --ttl: the code's life, 60 s to an hour (a slow machine fetches it late); else exit 2, nothing issued.
-  for (const [args, what] of [[['--ttl', '30'], '--ttl 30'], [['--ttl', '2h'], '--ttl 2h'], [['--here', '--ttl', '10m'], '--here --ttl 10m']] as const) {
+  // enrol --ttl: the code's life, 60 s to 24 hours (a slow machine fetches it late); else exit 2, nothing issued.
+  for (const [args, what] of [[['--ttl', '30'], '--ttl 30'], [['--ttl', '25h'], '--ttl 25h'], [['--here', '--ttl', '10m'], '--here --ttl 10m']] as const) {
     const u = await cli(OP, ['enrol', '--name', 'lazy', ...args]);
     ok(`enrol ${what}: refused, exit 2`, u.status === 2 && u.stderr.includes('--ttl'), u.stderr);
   }
   const lop = await cli(OP, ['enrol', '--name', 'lazy', '--ttl', '1h'], { onLine: (l) => { lazyCode = l.trim(); } });
   const lm = await cli(FIFTH, ['init', '--enrol', lazyCode, '--wait', '2']);
+  const lm2 = await cli(FIFTH, ['init', '--enrol', lazyCode, '--wait', '1']);
+  ok('lazy: the same init --enrol again takes the pending enrolment up: nothing fetched twice, no second temporary identity, exit 3',
+    lm2.status === 3 && lm2.stderr.includes('pending here already') && readdirSync(join(FIFTH, '.config', 'moadim')).filter((f) => /\.enrol-[0-9a-f]{8}\.json$/.test(f)).length === 1, lm2.stderr);
   ok('lazy: enrol --ttl 1h exits 0 with the code, good for an hour; init --enrol exits 3, pending', lop.status === 0 && lop.stderr.includes('good for 1 hour') && lm.status === 3 && lm.stderr.includes('enrol --finish'), lop.stderr + lm.stderr);
   const runs: number[][] = [];
   for (let k = 0; k < 6; k++) {

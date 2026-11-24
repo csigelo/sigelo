@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: MIT
+name: sigelo-peer-auth
+version: 0.1.0
+description: "A2A peer authenticator: a remote agent proves its sigelo DID (SPEC §5.2 challenge + §9 bundle, verified offline) and gets a short-lived opaque Bearer token; the DID is the peer identity for a2a.trusted_peers, rate limiting and audit. Needs the A2A peer-authenticator hook (ctx.register_a2a_peer_authenticator)."
+author: sigelo
+license: MIT
+homepage: https://sigelo.io
+kind: standalone
+optional_env:
+  - name: SIGELO_VERIFY
+    description: "Path to the sigelo-verify binary (default: sigelo-verify on PATH). An https:// URL opts into a remote verifier (network at verify time)."
+    prompt: "sigelo-verify path"
+    password: false
+  - name: SIGELO_PEER_TOKEN_TTL
+    description: "Lifetime of a minted peer token, seconds (default 3600)."
+    prompt: "Peer token TTL (s)"
+    password: false
+  - name: SIGELO_REQUIRED_ATTESTATIONS
+    description: "Comma-separated issuer DIDs; when set, a peer is accepted only if its bundle carries a valid attestation from at least one."
+    prompt: "Required attestation issuers (DIDs, comma-separated)"
+    password: false
+  - name: SIGELO_PEER_CTX
+    description: "This Hermes's public host (e.g. a2a.example.com; default: the host of A2A_PUBLIC_URL, one of the two is required); the challenge ctx is <it>/<agent slug>, so a peer can check which verifier it signs for."
+    prompt: "Challenge ctx host"
+    password: false

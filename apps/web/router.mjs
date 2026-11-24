@@ -133,6 +133,11 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
           },
         }, mic: () => big.mic(), micSettings: () => big.appSettings() }),
       } }),
+      // Calls (design/calls.md): the shell's ring and audio mode where there is one (the Android app); the microphone as voice asks it.
+      ...(platform.calls && { calls: {
+        alert: (x) => void platform.calls.ring(x).catch(() => {}), audio: (x) => platform.calls.audio(x), speaker: (on) => platform.calls.speaker(on),
+        ...(big?.mic && { mic: () => big.mic(), micSettings: () => big.appSettings() }),
+      } }),
       meInfo: () => ({ identity_file: IDENTITY, recovery: headOf(identity()).recovery === null ? 'none' : 'set', key: 'browser',
         erase: 'On the machine holding the recovery key, with this identity\'s file: SIGELO_IDENTITY=<file> sigelo-agent erase-request --recovery-key <your recovery.key>',
         ...(seat?.restored() && { restored: seat.restored() }) }),

@@ -24,11 +24,12 @@ the computer pushes its state.
 
 Devices are never remote. `ui --revoke-control <name>` ends a control.
 
+**Closed app:** Settings → Notifications: Stay connected, Push or Off.
+
 ## Install
 
 - **Computer:** `npm i -g sigelo-agent`, then `sigelo-agent ui`.
-- **GTK app:** from a checkout, `sh apps/gtk/install.sh` (into `~/.local`; needs gjs, GTK 4,
-  libadwaita, WebKitGTK 6.0). See apps/gtk/README.md.
+- **GTK app:** from a checkout, `sh apps/gtk/install.sh`. See apps/gtk/README.md.
 - **Android app:** from a release that ships it, download `sigelo-<v>.apk` and `release.json`
   (https://sigelo.io/releases/ or GitHub), check them (below), then open the APK on the phone and
   allow installs from that app when asked.

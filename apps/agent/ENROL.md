@@ -46,19 +46,27 @@ server could sign with it, or with K beside it. `SIGELO_IDENTITY` naming your ow
 ## Place a worker
 
 ```sh
-sigelo-agent enrol --name vps --wait 120  # prints K7F3-Q9ZP; on the server, within 10 minutes:
-sigelo-agent init --enrol K7F3-Q9ZP       # pairs, then its identity is replaced with worker i
+sigelo-agent enrol --name vps --wait 120  # prints ENROL-K7F3-Q9ZP; on the server, within 10 minutes (--ttl up to 24h):
+sigelo-agent init --enrol ENROL-K7F3-Q9ZP --wait 60   # joins you, then its identity is replaced with worker i
 sigelo-agent enrol --name helper --here   # into ~/.config/moadim/sigelo.helper.local.json, for a sub-agent:
 SIGELO_IDENTITY=~/.config/moadim/sigelo.helper.local.json sigelo-agent bundle
 ```
 
-Remote: the server makes a temporary identity only to pair; the four words are printed, not asked
+An enrol code reads `ENROL-…`; a pairing code from a contact (`K7F3-Q9ZP`, `sgl1…`) goes to `accept`. `accept` refuses an enrol
+code before fetching it; `init --enrol` takes only a code the relay parked as an enrol code, and refuses on a machine that
+has an identity ("already worker N of <operator>"; `--force` keeps it as `<file>.bak` first). `whoami` names the operator.
+
+Remote: the server makes a temporary identity only to reach you; the four words are printed, not asked
 (`enrol --confirm-words` asks them on your terminal before the key goes). The worker files you as
 `operator`, or as `--operator-name <label>`.
 Then you send the worker's identity (key, chain, attestation) once over that end-to-end channel
 (label `sigelo-identity/0`) with an invite the worker answers, so its contacts start with you. The
 temporary DID is forgotten on both sides and its mailboxes given up. Without `--wait`, or with
 either side offline, run `sigelo-agent enrol --finish` on each side in turn (pending 24 hours).
+The code is spent at the grant, not at its fetch: a refused proof of work, a crash or a tool timeout
+(under a 120 s tool cap pass `--wait 60`) leaves it pending on the server, and `enrol --finish`, or the
+same `init --enrol` again, takes it up. A new identity holding a live enrol code proves the base work only.
+`enrol --list` shows yours; `enrol --cancel <code|name>` stops one, at the relay too.
 A lost key is sent again: the server asks again at most once a minute, and you resend a refused one.
 A request you refuse or hold is answered with why (label `sigelo-enrol/1`, `{typ: "status", check,
 detail}`, no key): `enrol --finish` on the server prints `not done yet: <check>: <detail>`; the app shows the same.

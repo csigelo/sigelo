@@ -1,4 +1,5 @@
 Posted: https://github.com/NousResearch/hermes-agent/issues/131484 (2026-10-02)
+Reply to Larry-Osakwe posted 2026-11-24: https://github.com/NousResearch/hermes-agent/issues/131484#issuecomment-7131577740 ; branch https://github.com/csigelo/hermes-agent/tree/a2a-peer-authenticator
 
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Draft. Not posted anywhere. -->
@@ -46,3 +47,26 @@ Add `ctx.register_a2a_peer_authenticator(provider)`, modelled on `register_dashb
 ## Open question
 
 The peer's DID can be taken back with a recovery key that the agent never holds. In your deployment model, who would hold it for a Hermes instance: the operator's machine, the profile, or nobody (`recovery none`, so a lost key means a new DID)?
+
+## v2 (2026-11-24, not posted)
+
+<!-- Draft, internal. Not posted. Built: peer-auth/ (sigelo side) + a local Hermes branch (core). -->
+
+The hook moves from "Hermes mints the token" to "the provider owns its credential", which also
+fits a per-request JWT provider (the Keycard comment on the thread). One duck-typed provider:
+
+```python
+class SigeloPeers:
+    name = "sigelo"
+    def authenticate(self, authorization, client_ip, agent):  # EVERY request, before static tokens
+        ...  # -> peer identity (str) | None: not mine, try next | raise PeerAuthError: 401, no fall-through
+    def challenge(self, did, agent):  # optional: GET  <agent>/peer-auth/challenge?did=
+        ...  # -> the §5.2 challenge, ctx = "<public host>/<agent slug>"; ValueError = 400
+    def accept(self, body, agent):    # optional: POST <agent>/peer-auth {challenge, did, sig, bundle}
+        ...  # -> {"identity": did, "token": "sgl1_...", "expires_in": 3600}
+```
+
+Core keeps no token store: it calls providers in registration order, serves the two routes only
+for a provider that has them (unauthenticated, rate limited per IP), counts a provider as a
+credential for bind safety, and passes the identity to `a2a.trusted_peers` unchanged. `agent` is
+the routed served-agent dict, so a token minted for one agent is refused on another.

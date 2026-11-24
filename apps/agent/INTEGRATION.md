@@ -43,7 +43,7 @@ Code lines: `grep -vE '^\s*(//|/\*|\*|$)' <file> | wc -l`.
 | **identity total** | **77** | |
 | `sigelo-agent-keys.ts`, `-keychain.ts`, `-keyclient.ts` | 117, 122, 49 | every signature, Web Bot Auth bases (`signHttp`); OS keychain; key agent client |
 | `apps/keyagent/` `agent.mjs`, `protocol.mjs`, `policy.mjs`, `store.mjs` | 163, 40, 27, 69 | the key agent, its own package |
-| `sigelo-agent-monero.ts` | 134 | the Monero verbs, apart: an identity-only install reads 77 |
+| `sigelo-agent-monero.ts` | 143 | the Monero verbs and the file lock (a dead holder's lock removed), apart: an identity-only install reads 77 |
 | `sigelo-agent-adopt.ts` | 56 | `adopt`, `forgetIssuer`, outside the core |
 | `sigelo-agent-contact.ts`, `-watch.ts` | 437, 160 | contact verbs, `watch`, recovery verbs' argv, output escaping |
 | `sigelo-agent-enrol.ts` | 413 | `keeper`, `enrol`, `init --enrol`: your identity and worker i from your seed ([ENROL.md](ENROL.md)) |

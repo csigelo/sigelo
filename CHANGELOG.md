@@ -5,6 +5,37 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+## v0.1.19 — 2026-11-25
+
+- **This release:** the app is named Sigelo; voice calls; Push through UnifiedPush; share into Sigelo, search, approval cards, code blocks; files fall back to the relay lane; read receipts and a busy wheel from agents.
+- **app:** the installed app is named Sigelo: Android launcher and F-Droid name, the web manifest, page titles, the GTK launcher and window, the wordmark; ids, packages and commands stay sigelo.
+- **android:** Settings → Notifications: Stay connected, Push or Off. Push uses your UnifiedPush app (ntfy, NextPush…): the relay wakes Sigelo when a message waits, even after a swipe-away; no Google.
+- **relay:** `sigelo-push/0`: a session registers its phone's push endpoint on `$sigelo/push`; mail for it while away sends one 32-byte encrypted wake (RFC 8291), no sender or content.
+- **relay:** ntfy beside the relay for phones without a push server (push.sigelo.ai, UnifiedPush topics only, rate limited per phone); `deploy/ntfy/`.
+- **app:** voice calls between two people: a Call button in a person's chat while they are online; Calling, Ringing, Accept or Decline, Mute, Hang up; "Call · 3:12" or "Missed call" in the chat; no audio kept.
+- **calls:** `sigelo-call/0` inside the pairing's envelopes, out of inbox, log and MCP; one sha-256 DTLS fingerprint per offer, a fresh key per call; media direct, STUN only; no path: "Could not connect directly".
+- **app:** "Can call me" per contact (on for own and friends, off for quiet) and its default in Settings → Chats and history; "Ringing…" goes only to contacts that see you online.
+- **android:** a call holds a microphone service with its notification (timer, Hang up), the earpiece, Speaker, the screen off at the ear; it rings while the app is open or Stay connected keeps it, not when closed.
+- **agent:** `watch`, and `ui` with no tab open, answer a call `unavailable` (the caller sees No answer, a Missed call here); a call rings only where a page that can take it is open.
+- **calls:** survive roaming: a dropped path or a network change restarts ICE within seconds ("Reconnecting…"), 30 s down ends "Connection lost"; Opus 8–16 kbit/s by loss, DTX, FEC; three signal bars.
+- **gtk:** WebRTC on where WebKitGTK has it; builds without it (WebKitGTK 2.48 on some distributions) show no Call button.
+- **app:** Delete this chat (Chat settings): this device's messages of it go, the contact stays, the other side is not told; out of Chats until a message comes or it is opened again from the contact.
+- **app:** Agents in two sections: Your agents, and Agents of your contacts (introduced to you, paired or offered); the second, empty, says how one comes.
+- **app:** two profiles of one name (a backup restored beside its original) show the first two of their four words, or their number, beside it: the chip, Profiles, Manage profiles.
+- **app:** Sigelo with a capital S where app copy names the app or the service; sigelo stays the protocol, commands and packages. "One code for all", "My code and my QR"; pairing, sign, vouch, restore lines reworded.
+- **relay:** a login with the dropped SHA-256 proof of work is refused `client_old`, one line: "client too old: npm i -g sigelo-agent@latest"; no grace for the old proof.
+- **enrol:** a code is spent at the operator's grant, not at its fetch; the machine keeps a pending entry, and `enrol --finish` or the same `init --enrol` resumes it after a refused proof of work or a crash.
+- **enrol:** `init` and `init --enrol` over an identity refuse: "this machine is already worker N of <operator>", a pairing code goes to `accept CODE`; only `--force` replaces it, keeping `<file>.bak`.
+- **agent:** beside a running `watch`, `accept` and `invite` (CLI and MCP) are asked of the watcher, which runs them on its session; `group join` kicks it; no more "stop it first" for them.
+- **mcp:** `sigelo_accept` and `accept` know an enrol code (`ENROL-…`) by its shape and point to `init --enrol` without fetching it; `sigelo_init` says it is not for an enrol code.
+- **agent:** `whoami` (and `sigelo_whoami`) shows a worker's index, its operator's name and DID, and the tier; the README and llms.txt say never to cat the identity file.
+- **agent:** `--help` and the pair page open with a "you were given a code" table (enrol code → `init --enrol`, pairing code → `accept`, giving one → `invite`); `pair` = `accept`; "did you mean" on typos.
+- **enrol:** `init --enrol` waits 60 s by default (under a 120 s tool cap) and names `enrol --finish`, which resumes from the pending entry.
+- **enrol:** `enrol --wait` up to `--ttl`; `enrol --list`, `enrol --cancel <code|name>`; `--name` takes dots; a duplicate contact name gets `-2`; a lock left by a killed process is removed, one line.
+- **relay:** a new identity naming a live enrol code at `GET /challenge?enrol=<hash>` proves the base work, not the load's; its pending enrolment survives a refusal.
+- **relay:** `quota_mailboxes` names the verb that frees one (`forget <did>`, `invite --cancel`); a waiting enrol code's answer topic is not counted.
+- **app:** the enrol screen picks how long the code works: 10 minutes, 1 hour or 24 hours (`enrol --ttl` up to 24 h; the relay keeps an enrol code up to a day).
+- **agent:** `host acp -- <command…>`: host mode with any Agent Client Protocol agent (JSON-RPC on its stdio): turns, `working:` lines, its permission requests as the approval cards.
 - **ci:** npm publish survives Rekor's 409 on its own retried entry (npm/cli#10078): signs again, ≤ 3 tries; npm pinned to 11.21.1; no trusted publisher stops it before any publish; mcp-registry waits for npm.
 - **agent:** `host claude` shows it works as one turning wheel in the operator's chat (`sigelo-busy/0` busy marks: on, refreshed every 20 s, off before the reply); never a message, a count or a notification.
 - **app:** a hosted agent's approval is a card with Allow / Deny (`sigelo-approval/0`; Allowed, Denied or Expired after), a question's options are buttons (`sigelo-question/0`); a tap sends `yes CODE` as a reply.

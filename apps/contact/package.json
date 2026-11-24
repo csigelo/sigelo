@@ -1,6 +1,6 @@
 {
   "name": "sigelo-contact",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "private": false,
   "description": "Agent contacts for sigelo identities: invite codes, a contact store, end-to-end encrypted envelopes with hybrid post-quantum key agreement, and an MQTT carrier. Client code (MIT); the relay server is csigelo/sigelo-relay (AGPL-3.0).",
   "keywords": [
@@ -86,6 +86,8 @@
     "./voice.mjs": "./voice.mjs",
     "./voice-web": "./voice-web.mjs",
     "./voice-web.mjs": "./voice-web.mjs",
+    "./call": "./call.mjs",
+    "./call.mjs": "./call.mjs",
     "./words-lock": "./words-lock.mjs",
     "./words-lock.mjs": "./words-lock.mjs",
     "./package.json": "./package.json"
@@ -121,6 +123,7 @@
     "photo.mjs",
     "voice.mjs",
     "voice-web.mjs",
+    "call.mjs",
     "public.mjs",
     "words-lock.mjs",
     "fixtures/carrier-v0.json",
@@ -149,13 +152,14 @@
     "test-transfer.mjs",
     "test-transfer-web.mjs",
     "test-relay-lane.mjs",
-    "test-voice.mjs"
+    "test-voice.mjs",
+    "test-push.mjs"
   ],
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-ws.mjs && node test-short.mjs && node test-renew.mjs && node test-public.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs && node test-presence.mjs && node test-ended.mjs && node test-link.mjs && node test-device.mjs && node test-platform.mjs && node test-group.mjs && node test-transfer.mjs && node test-transfer-web.mjs && node test-relay-lane.mjs && node test-voice.mjs",
+    "test": "node test-invite.mjs && node test-envelope.mjs && node test-carrier.mjs && node test-ws.mjs && node test-short.mjs && node test-renew.mjs && node test-public.mjs && node test-file.mjs && node test-enrol.mjs && node test-tier.mjs && node test-presence.mjs && node test-ended.mjs && node test-link.mjs && node test-device.mjs && node test-platform.mjs && node test-group.mjs && node test-transfer.mjs && node test-transfer-web.mjs && node test-relay-lane.mjs && node test-voice.mjs && node test-push.mjs && node test-call.mjs",
     "gen": "node gen-invite.mjs && node gen-envelope.mjs && node gen-carrier.mjs && node gen-short.mjs && node gen-device.mjs",
     "prepack": "node ../../release/prepack.mjs pre",
     "postpack": "node ../../release/prepack.mjs post",

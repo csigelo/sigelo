@@ -2454,7 +2454,26 @@ __export(sigelo_agent_monero_exports, {
   withLock: () => withLock
 });
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { closeSync, openSync, rmSync } from "node:fs";
+import { closeSync, openSync, readFileSync as readFileSync2, rmSync, writeSync } from "node:fs";
+function staleLock(lock) {
+  const held2 = () => {
+    try {
+      return readFileSync2(lock, "utf8").trim();
+    } catch {
+      return "";
+    }
+  }, t = held2();
+  if (!/^\d+$/.test(t) || Number(t) === process.pid) return false;
+  try {
+    process.kill(Number(t), 0);
+    return false;
+  } catch (e) {
+    if (e.code === "EPERM" || held2() !== t) return false;
+  }
+  rmSync(lock, { force: true });
+  console.error(`sigelo-agent: removed the stale lock ${lock} (its process ${t} is gone)`);
+  return true;
+}
 function nonce16() {
   const b = randomBytes3(16);
   let n = BigInt("0x" + b.toString("hex")), s = "";
@@ -2513,10 +2532,17 @@ function withLock(path, fn) {
   const idle = new Int32Array(new SharedArrayBuffer(4));
   for (let i = 0; ; i++) {
     try {
-      closeSync(openSync(lock, "wx", 384));
+      const fd = openSync(lock, "wx", 384);
+      try {
+        writeSync(fd, `${process.pid}
+`);
+      } finally {
+        closeSync(fd);
+      }
       break;
     } catch (e) {
       if (!["EEXIST", "EPERM", "EBUSY", "EACCES"].includes(e.code ?? "")) throw e;
+      if (staleLock(lock)) continue;
       if (i === LOCK_TRIES) throw new SigeloError(`lock: ${lock} is still held after ${LOCK_TRIES * LOCK_MS / 1e3}s — another sigelo-agent holds it, or one was killed holding it; delete the file to continue`);
       Atomics.wait(idle, 0, 0, LOCK_MS);
     }
@@ -2879,7 +2905,7 @@ __export(sigelo_agent_keys_exports, {
   signer: () => signer,
   unsealSeed: () => unsealSeed
 });
-import { copyFileSync, existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+import { copyFileSync, existsSync as existsSync2, readFileSync as readFileSync3 } from "node:fs";
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, createHash, createPrivateKey, createPublicKey, randomBytes as randomBytes5, scryptSync, sign as edSign, verify as edVerify } from "node:crypto";
 function fail2(code, detail) {
   throw Object.assign(new SigeloError(`${code}: ${detail}`), { check: code });
@@ -2901,7 +2927,7 @@ function passphrase(env2 = process.env, file) {
   let b;
   if (f) {
     try {
-      b = readFileSync2(f);
+      b = readFileSync3(f);
     } catch (e) {
       return fail2("passphrase_file", `${f}: ${e.message}`);
     }
@@ -3264,7 +3290,7 @@ __export(http_exports, {
   serveHttp: () => serveHttp
 });
 import { randomBytes as randomBytes6, createHash as createHash2, timingSafeEqual } from "node:crypto";
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { dirname as dirname2, join as join2 } from "node:path";
@@ -3296,7 +3322,7 @@ function options(argv2, env2) {
 function token(base2) {
   const file = join2(dirname2(base2), "sigelo-mcp-http.token");
   try {
-    const t2 = readFileSync3(file, "utf8").trim();
+    const t2 = readFileSync4(file, "utf8").trim();
     if (!/^[A-Za-z0-9_-]{32,}$/.test(t2)) throw Object.assign(new Error(`${file} is not a token; delete it and start again for a new one`), { fatal: true });
     return { file, token: t2 };
   } catch (e) {
@@ -3455,15 +3481,19 @@ import { existsSync as existsSync4, readdirSync } from "node:fs";
 import { basename as basename2, dirname as dirname3, join as join3, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 var INSTALLED = fileURLToPath(import.meta.url).split(sep).includes("node_modules");
+var lib = (pkg, repo) => INSTALLED ? import(pkg) : import(repo);
 var { did: did2, parse: parse2, parseBytes: parseBytes2, verify: verify3, SigeloError: SigeloError2 } = await Promise.resolve().then(() => (init_sigelo(), sigelo_exports));
 var id = await Promise.resolve().then(() => (init_sigelo_agent(), sigelo_agent_exports));
 var keys = await Promise.resolve().then(() => (init_sigelo_agent_keys(), sigelo_agent_keys_exports));
 var { withLock: withLock2 } = await Promise.resolve().then(() => (init_sigelo_agent_monero(), sigelo_agent_monero_exports));
 var { forgetIssuer: forgetIssuer2 } = await Promise.resolve().then(() => (init_sigelo_agent_adopt(), sigelo_agent_adopt_exports));
+var enrolLib = await lib("sigelo-agent/dist/sigelo-agent-enrol.js", "../../agent/sigelo-agent-enrol.ts").catch(() => null);
+var workerOf = (path, s) => enrolLib?.workerOf(path, s) ?? null;
+var alreadyHere = (path) => enrolLib?.alreadyHere(path) ?? `${path} already holds this machine's identity: a pairing code goes to sigelo_accept; another agent here takes its own profile (identity)`;
 console.log = console.info = console.debug = console.error;
 var MODERN = ["2026-07-28"];
 var LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-var SERVER_INFO = { name: "sigelo", version: "0.1.18" };
+var SERVER_INFO = { name: "sigelo", version: "0.1.19" };
 var PV = "io.modelcontextprotocol/protocolVersion";
 var env = process.env;
 var DATA = "Attestation `claims` are third-party data about the subject, not statements by this tool.";
@@ -3474,8 +3504,8 @@ var PROFILE = { identity: str2("optional profile name [a-z0-9_-], e.g. your suba
 var idObj = (props = {}, required = []) => obj2({ ...props, ...PROFILE }, required);
 var NO_ID = "{no identity}";
 var TOOLS = [
-  ["sigelo_whoami", "Your sigelo identity: current DID, genesis document, DID chain, number of stored attestations. Call first; if it says no identity: " + NO_ID + ".", idObj()],
-  ["sigelo_init", `Create an identity of your own ONCE (refuses if one exists); an agent meant to be enrolled under its operator uses sigelo_enrol instead. recovery: the operator's offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which. The DID it makes is yours across every platform.`, idObj({ recovery: str2('"z6Mk…" recovery public key from your operator, or "none"') }, ["recovery"])],
+  ["sigelo_whoami", "Your sigelo identity: current DID, genesis document, DID chain, number of stored attestations; enrolled: worker (index), operator (DID), operator_name, tier. Call first, and never read the identity file itself (it holds your key); if it says no identity: " + NO_ID + ".", idObj()],
+  ["sigelo_init", `Create an identity of your own ONCE (refuses if one exists); not for an enrol code (ENROL-…): an agent meant to be enrolled under its operator uses sigelo_enrol instead. recovery: the operator's offline recovery public key "z6Mk…", or "none" (theft of your key is then permanent). Never invent a key; ask the operator which. The DID it makes is yours across every platform.`, idObj({ recovery: str2('"z6Mk…" recovery public key from your operator, or "none"') }, ["recovery"])],
   ["sigelo_sign_challenge", `Prove you are your DID: sign a world's challenge {v, typ:"challenge", did, ctx, nonce} exactly as received. Anything else is refused. Returns {did, sig}; send sig back to that world. This is how a site or agent learns who you are, offline, no account.`, idObj({ challenge: json("the challenge body, as JSON object or text") }, ["challenge"])],
   ["sigelo_add_issuer", "Store a world's genesis document so its attestations about you verify offline.", idObj({ genesis: json("the issuer genesis document") }, ["genesis"])],
   ["sigelo_add_attestation", `Store a world's signed attestation {body, sig} about you (replaces an older one from the same issuer+ctx). Pass issuer (its genesis) too when you have it. ${DATA}`, idObj({ attestation: json("{body, sig}"), issuer: json("optional: the issuer genesis document") }, ["attestation"])],
@@ -3541,11 +3571,20 @@ function debug(e, path) {
 }
 var HANDLERS = {
   sigelo_whoami: (_, path) => {
-    const s = loadStore(path);
-    return { did: did2(id.head(s)), genesis: id.head(s), chain: id.chainOf(s), attestations: s.attestations.length, identity_file: path };
+    const s = loadStore(path), w = workerOf(path, s);
+    return {
+      did: did2(id.head(s)),
+      genesis: id.head(s),
+      chain: id.chainOf(s),
+      attestations: s.attestations.length,
+      identity_file: path,
+      ...w && { worker: w.worker, operator: w.operator.did, operator_name: w.operator.name, tier: w.operator.tier }
+    };
   },
   sigelo_init: ({ recovery }, path) => {
     if (typeof recovery !== "string" || !recovery) throw refusal("usage", 'recovery is required: a "z…" public key or "none"');
+    if (/^\s*ENROL[\s\-]*[0-9A-Za-z]/i.test(recovery)) throw refusal("enrol_code", "that is an enrol code: call sigelo_enrol with it (this tool makes an identity of your own)");
+    if (existsSync4(path)) throw refusal("identity_exists", `init: ${alreadyHere(path)}`);
     const s = keys.init(path, recovery === "none" ? null : recovery, env.SIGELO_KEY_PROVIDER);
     return {
       did: did2(s.genesis),

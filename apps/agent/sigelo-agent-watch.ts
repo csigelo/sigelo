@@ -37,6 +37,9 @@
  * and answers the offers and moves the bytes, at each `transfer` event, each round and each kick (a CLI
  * transfer verb beside it). A file offered → a line, or --on-notice CMD with {type: "transfer", id, from,
  * name, file, size}; nothing is written before the operator's `transfer accept`.
+ * Calls (design/calls.md §1, apps/contact/call.mjs): no page here takes a call, so a ring is answered `end unavailable`
+ * at once (the caller sees "No answer"; only a contact not quiet and shown this side's presence is answered) and said
+ * as a line, or --on-notice CMD with {type: "call", what: "missed", id, from, name}. Only `sigelo-agent ui` with a page open (or the phone app) rings.
  * Devices (DEVICES.md): device messages are handled by code at each `device` event and each round; on
  * the operator's file the watcher starts only at the seat, and stops once it gave the seat away.
  */
@@ -45,7 +48,7 @@ import { existsSync, mkdirSync, renameSync, rmSync, unwatchFile, watchFile, writ
 import { join, resolve } from 'node:path';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
-import { actingFile, contactLib, promptLine, contactModule, debug, duration, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, unreadable } from './sigelo-agent-contact.ts';
+import { actingFile, contactLib, promptLine, contactModule, debug, duration, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, serveAsks, unreadable, type Ask } from './sigelo-agent-contact.ts';
 import type { GroupItem, GroupLib } from './sigelo-agent-group.ts';
 import { takeLock } from './sigelo-agent-ui.ts';
 import { deviceRound, seatGate } from './sigelo-agent-device.ts';
@@ -67,9 +70,10 @@ interface Car {
   send(to: string, content: string | Record<string, unknown>, o?: { label?: string }): Promise<{ status: string; detail?: string }>;
   read(items: unknown[], o?: { local?: boolean }): Promise<{ to: string; error?: string }[]>;
   busy(to: string, on: boolean, o?: { local?: boolean }): Promise<{ status: string }>;
+  takeCalls(): { from: string; name: string; content: unknown }[];
 }
 /** A contact as the carrier lists it (the fields a host reads). */
-export interface WatchContact { name: string; did: string; current_did?: string; chain: string[]; revoked?: boolean; tier?: string }
+export interface WatchContact { name: string; did: string; current_did?: string; chain: string[]; revoked?: boolean; tier?: string; presence?: string }
 /** An own message offered to a router (sigelo-agent-host.ts): its id, sender, sender's name, text or file. */
 export type Routed = Item & { id: string; sender: string };
 export interface WatchOptions {
@@ -296,8 +300,30 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
         say(`transfer ${String(e['id'])}: ${what}${e['reason'] ? ` (${String(e['reason'])})` : ''}${e['path'] ? ` → ${String(e['path'])}` : ''}${typeof e['rate'] === 'number' ? `, ${(e['rate'] as number).toFixed(2)} MB/s` : ''}`);
       }
     };
+    // Calls: no page to ring here; each ring answered unavailable (the caller's "No answer"), and said.
+    const answered = new Map<string, number>();
+    const callTurn = (): void => later(async () => {
+      const C = await contactModule<{ CALL_LABEL: string; checkSignal(x: unknown): { typ: string; id: string } }>('call');
+      const send = (lib as unknown as { CALL_SEND: symbol }).CALL_SEND;
+      for (const m of carrier.takeCalls()) {
+        let x: { typ: string; id: string };
+        try { x = C.checkSignal(m.content); } catch { continue; }
+        if (x.typ !== 'ring') continue;
+        // A flood of rings costs at most one answer per contact per 30 s (call.mjs REPLY_MS).
+        const at = answered.get(m.from);
+        if (at !== undefined && Date.now() - at < 30000) continue;
+        answered.set(m.from, Date.now());
+        // The answer says this carrier runs: only to a contact that may ring and is shown this side's presence (call.mjs
+        // Line); a quiet one, or one not shown it, hears nothing and its call rings out.
+        const who = carrier.contacts().contacts.find((c) => c.did === m.from && c.revoked !== true);
+        if (who && who.tier !== 'quiet' && (who.presence === 'allow' || who.presence === 'own')) await (carrier.send as (to: string, c: object, o: object) => Promise<unknown>)(m.from, { typ: 'end', id: x.id, reason: 'unavailable' }, { label: C.CALL_LABEL, internal: send }).catch(() => {});
+        if (o.onNotice === undefined) say(`missed call from ${m.name}: calls ring where a page is open (sigelo-agent ui, the phone app)`);
+        else await run(o.onNotice, { type: 'call', what: 'missed', id: x.id, from: m.from, name: m.name }, { ...base, SIGELO_TYPE: 'call', SIGELO_FROM: m.from, SIGELO_NAME: m.name });
+      }
+    });
     const onEvent = (e: Ev): void => {
       if (e.type === 'transfer') void engine?.kick();
+      if (e.type === 'call') callTurn();
       if (e.type === 'group') groupTurn();
       if (e.type === 'link' || e.type === 'paired') linkRound();
       if (e.type === 'device') deviceTurn();
@@ -319,16 +345,23 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
     engine = new X.Engine({ carrier, identity: path, onEvent: onTransfer });
     // What waited before this start: own pushed, one notice per friend.
     for (const m of carrier.peek()) if (m.tier === 'own' || m.tier === 'friend') offer(m);
+    // A CLI or MCP accept or invite beside us (sigelo-agent-contact.ts askWatcher): run on this session, answered.
+    const askRound = (): void => later(async () => {
+      const n = await serveAsks(path, (op: Ask, args: unknown[]) => (carrier as unknown as Record<Ask, (...a: unknown[]) => Promise<unknown>>)[op](...args));
+      if (n > 0) linkRound();
+    });
     await carrier.start();
+    askRound();
     linkRound();
     deviceTurn();
+    callTurn();
     groupTurn();
     // Each round: an own message a hook left unread (it failed, or was stopped) is offered again.
     const again = (): void => { if (pushes) for (const m of carrier.peek()) if (m.tier === 'own') offer(m); };
-    const timer = setInterval(() => { carrier.sync().then(() => { again(); linkRound(); deviceTurn(); groupTurn(); void engine?.kick(); }, () => {}); }, o.syncMs ?? SYNC_MS);
+    const timer = setInterval(() => { carrier.sync().then(() => { again(); askRound(); linkRound(); deviceTurn(); groupTurn(); void engine?.kick(); }, () => {}); }, o.syncMs ?? SYNC_MS);
     timer.unref();
     // A CLI or MCP send beside us queued something: send it now.
-    const kicks = kickPath(path), onKick = (): void => { void engine?.kick(); carrier.sync().then(linkRound, () => {}); };
+    const kicks = kickPath(path), onKick = (): void => { void engine?.kick(); askRound(); carrier.sync().then(() => { linkRound(); groupTurn(); }, () => {}); };
     watchFile(kicks, { interval: KICK_MS, persistent: false }, onKick);
     let closed = false;
     return {

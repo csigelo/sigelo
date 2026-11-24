@@ -59,8 +59,8 @@ const TOOLS = [
       relay: str('optional relay host for this pairing, e.g. your company relay for a colleague (default SIGELO_RELAY); a short code made there is accepted with that relay'),
       renew: { type: 'boolean', description: 'true: the short code renews itself (a fresh one once it is used), until cancelled' },
       cancel: str('a code of yours to cancel instead (short, sgl1…, or its hash): nobody can use it after; a renewing one stops') })],
-  ['sigelo_accept', `Accept an invite code from another agent's operator: sends your answer (whoever holds the code learns your DID); pairs once the inviter's reply verifies against the code. Returns connected with the pairing id, or waiting until the inviter's agent next connects (sigelo_inbox then reports the pairing). ${CONFIRM} ${POW} ${RELAY_DATA}`,
-    obj({ code: str('the short code (K7F3-Q9ZP; case, I/L/O and dashes do not matter) or the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX),
+  ['sigelo_accept', `Accept a pairing code from another agent's operator (ENROL-… is sigelo_enrol's): sends your answer (its holder learns your DID); pairs once the inviter's reply verifies. Returns connected with the pairing id, or waiting (sigelo_inbox reports the pairing later). ${CONFIRM} ${POW} ${RELAY_DATA}`,
+    obj({ code: str('the pairing code (K7F3-Q9ZP; case, I/L/O and dashes do not matter) or the sgl1… code, exactly as received'), name: str('the name you will call this contact'), wait: int(`seconds to wait for the reply, default 10, at most ${WAIT_MAX}`, WAIT_MAX),
       tier: { type: 'string', enum: ['friend', 'quiet'], description: 'how its messages reach your operator: friend (default) or quiet; own is detected' },
       relay: str('the relay the inviter named, when a short code was made on a relay other than yours (SIGELO_RELAY)'),
       words: str('a public code (PUB-…): the four words printed beside it; another inviter\'s are refused, nothing paired') }, ['code'])],
@@ -91,9 +91,9 @@ const TOOLS = [
     obj({ timeout_s: int(`seconds to wait, default 60, at most ${LONG_WAIT_MAX}; keep it under your client's tool timeout`, LONG_WAIT_MAX), from: str('optional: a contact name or DID') })],
   ['sigelo_reply', `Answer a message you received earlier, by its id (msg_id, from sigelo_inbox or sigelo_wait_for_message, kept 30 days), to its sender: a slow task answered when done. Returns send's status with delivery {status: queued (here) | published (the relay holds it in the contact's mailbox) | refused, queued_at, published_at}. Without text: only that delivery status, again (status of your last reply to it). fetched stays null: the relay does not tell the sender when it is read. ${RELAY_DATA}`,
     obj({ msg_id: str('the message\'s id, 32 hex'), text: str('your answer; omit to read the delivery status only'), re: { type: 'boolean', description: 'true: your answer quotes that message (shown as a reply)' } }, ['msg_id'])],
-  ['sigelo_enrol', `This machine becomes your operator's worker agent (ENROL.md), by the one-time code from your operator's app (Agents → Enrol) or sigelo-agent enrol, in a fresh identity file (refused if one exists). Two calls: this one returns within seconds (status started, pending or done; a mistyped or spent code is refused here) while pairing goes on in the background (a first login's proof of work can take minutes); then sigelo_enrol_finish, again while it says pending (kept 24 hours). wait: only on a host with no limit on a call, all in this call. notes: what it said, the four words among them (show them to your operator only if it asks).`,
-    obj({ code: str('the enrolment code (K7F3-Q9ZP) or sgl1… code from your operator'), wait: int(`optional: seconds to wait in this call, at most ${WAIT_MAX}; omit under a host that caps a call (120 s)`, WAIT_MAX) }, ['code'])],
-  ['sigelo_enrol_finish', `Finish this machine's enrolment (after sigelo_enrol): waits up to wait for it (the background pairing, then as sigelo-agent enrol --finish). status done, pending (call again; notes and the operator's word on why it waits) or nothing (nothing pending here). notes: what it said. Keep wait under your host's limit on a call.`,
+  ['sigelo_enrol', `This machine becomes your operator's worker agent, by the one-time enrol code (ENROL-K7F3-Q9ZP) from your operator's app or sigelo-agent enrol, in a fresh identity file (refused if one exists; a contact's pairing code too: sigelo_accept). Two calls: this one returns within seconds (started, pending or done; a mistyped or spent code is refused here) while it goes on in the background (a first login's proof of work can take minutes); then sigelo_enrol_finish, again while it says pending (kept 24 hours; a cut-off call spends no code). wait: only on a host with no limit on a call, all in this call. notes: what it said, the four words among them (show them to your operator only if it asks).`,
+    obj({ code: str('the enrol code from your operator (ENROL-K7F3-Q9ZP)'), wait: int(`optional: seconds to wait in this call, at most ${WAIT_MAX}; omit under a host that caps a call (120 s)`, WAIT_MAX) }, ['code'])],
+  ['sigelo_enrol_finish', `Finish this machine's enrolment (after sigelo_enrol): waits up to wait for it (the background step, then as sigelo-agent enrol --finish). status done, pending (call again; notes and the operator's word on why it waits) or nothing (nothing pending here). notes: what it said. Keep wait under your host's limit on a call.`,
     obj({ wait: int(`seconds to wait, default 30, at most ${WAIT_MAX}`, WAIT_MAX) })],
   ['sigelo_public', `Public codes (Pro), only when your operator asks: one code many use, each a pairing request. make: a PUB code, the four words to publish beside it, a link. list: codes and requests waiting (inbox event public_request). approve, refuse {id}: your operator decides. pause, resume, cap, revoke (ends it for all; pairings stay). Joiners stay unchecked. ${POW} ${RELAY_DATA}`,
     obj({ action: { type: 'string', enum: ['make', 'list', 'approve', 'refuse', 'pause', 'resume', 'cap', 'revoke'], description: 'what to do' }, months: { type: 'integer', enum: [1, 6, 12], description: 'make: how long it lasts (default 6)' },
@@ -339,11 +339,13 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
       if (renew !== undefined && typeof renew !== 'boolean') throw usage('renew: true or false');
       if (cancel !== undefined && (name !== undefined || ttl !== undefined || long !== undefined || renew !== undefined)) throw usage('cancel: alone (relay may name where the code was made)');
       if (renew === true && long === true) throw usage('renew: a short code renews itself, not long: true');
-      holder(path, 'sigelo_invite');
-      await seat(path, 'sigelo_invite');
+      // Beside a watcher, through it (sigelo-agent-contact.ts askWatcher), as the CLI's invite: never refused busy.
+      const w = holder(path, 'sigelo_invite', true);
+      if (!w) await seat(path, 'sigelo_invite');
+      const go = (op, ...a) => (w ? held.askWatcher(path, op, a, 330000) : carrier(path)[op](...a));
       // "Cancel this code" (apps/contact/carrier.mjs cancelInvite): gone here and at the relay (DELETE /park).
-      if (cancel !== undefined) return carrier(path).cancelInvite(text(cancel, 'cancel'), { ...(relay !== undefined && { relay: text(relay, 'relay') }) });
-      return carrier(path).invite({ name, ttl, short: long !== true, ...(relay !== undefined && { relay: text(relay, 'relay') }), ...(renew === true && { renew: true }) });
+      if (cancel !== undefined) return go('cancelInvite', text(cancel, 'cancel'), { ...(relay !== undefined && { relay: text(relay, 'relay') }) });
+      return go('invite', { name, ttl, short: long !== true, ...(relay !== undefined && { relay: text(relay, 'relay') }), ...(renew === true && { renew: true }) });
     }),
     // A code never contains whitespace; one pasted from a wrapped mail line may, and a short one
     // typed as heard ("k7f3 q9zp"). carrier.accept tells the two apart by shape.
@@ -368,9 +370,13 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
     }),
     sigelo_accept: serial(async ({ code, name, wait, tier, relay, words }, path) => {
       if (tier !== undefined && tier !== 'friend' && tier !== 'quiet') throw usage('tier: friend or quiet (own is detected; sigelo_set_tier after)');
-      holder(path, 'sigelo_accept');
-      await seat(path, 'sigelo_accept');
-      const c = carrier(path), r = await c.accept(text(code, 'code').replace(/\s+/g, ''), { name, wait: seconds(wait, 'wait', 10), ...(tier && { tier }), ...(relay !== undefined && { relay: text(relay, 'relay') }), ...(words !== undefined && { words: text(words, 'words') }) });
+      // An enrol code (ENROL-…) is sigelo_enrol's: said here, nothing fetched (the agent-setup feedback, point 5).
+      if (/^\s*ENROL[\s\-\u2010-\u2015\u2212]*[0-9A-Za-z]/i.test(text(code, 'code'))) throw Object.assign(new Error('that is an enrol code: run init --enrol CODE (here: sigelo_enrol with it), on a machine with no identity yet; nothing was fetched'), { check: 'enrol_code' });
+      // Beside a watcher, through it (askWatcher), as the CLI's accept: never refused busy.
+      const w = holder(path, 'sigelo_accept', true);
+      if (!w) await seat(path, 'sigelo_accept');
+      const c = carrier(path), o = { name, wait: seconds(wait, 'wait', 10), ...(tier && { tier }), ...(relay !== undefined && { relay: text(relay, 'relay') }), ...(words !== undefined && { words: text(words, 'words') }) };
+      const typed = text(code, 'code').replace(/\s+/g, ''), r = w ? await held.askWatcher(path, 'accept', [typed, o], (o.wait + 330) * 1000) : await c.accept(typed, o);
       return r.contact ? { ...r, contact: { ...r.contact, pair: pairOf(path, r.contact.did), tier: c.contacts().contacts.find((x) => x.did === r.contact.did)?.tier } } : r;
     }),
     sigelo_contacts: (_, path) => { const r = carrier(path).contacts(); return { ...r, contacts: r.contacts.map((c) => ({ ...c, pair: pairOf(path, c.did) })) }; },
@@ -460,8 +466,11 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
     }),
     sigelo_enrol: serial(async ({ code, wait }, path) => {
       if (job && job.path === path && !job.done) throw Object.assign(new Error('enrol: an enrolment of this identity is running: call sigelo_enrol_finish'), { check: 'busy' });
-      // the refusal `init --enrol` gives, before a child runs
-      if (existsSync(path)) throw new Error(`enrol: ${path} already holds an identity — refusing to overwrite it`);
+      // the refusal `init --enrol` gives, before a child runs (never "move it away"; never --force from here)
+      if (existsSync(path)) {
+        const why = await import(installed ? 'sigelo-agent/dist/sigelo-agent-enrol.js' : '../../agent/sigelo-agent-enrol.ts').then((m) => m.alreadyHere(path), () => `${path} already holds this machine's identity: an enrol code is for a new machine`);
+        throw Object.assign(new Error(`enrol: ${why}`), { check: 'identity_exists' });
+      }
       const typed = text(code, 'code').replace(/\s+/g, '');
       // wait: the whole enrolment in this call, as before (hosts with no cap on a call).
       if (wait !== undefined) return enrolCli(['init', '--enrol', typed, '--identity', path, '--wait', String(seconds(wait, 'wait', 30))], path, seconds(wait, 'wait', 30));

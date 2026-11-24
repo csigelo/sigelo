@@ -19,13 +19,23 @@
  * needs of a receiver — not "I can spend it", which would need `b`.
  */
 import { randomBytes } from 'node:crypto';
-import { closeSync, openSync, rmSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import type { Binding, Bundle, Genesis, Proof } from 'sigelo';
 import { did, SigeloError, structure, verify, verifySig, VERSION } from 'sigelo';
 import type { Net } from 'sigelo/dist/monero.js';
 import { decodeAddress, sigeloMoneroSigAddr, subaddress, verifySigeloMoneroSigAddr } from 'sigelo/dist/monero.js';
 import { head, type Store } from './sigelo-agent.ts';
 import type { Signer } from './sigelo-agent-keys.ts';
+
+/** A lock whose pid's process is gone: removed, one line (read twice: one taken over meanwhile stays). */
+function staleLock(lock: string): boolean {
+  const held = (): string => { try { return readFileSync(lock, 'utf8').trim(); } catch { return ''; } }, t = held();
+  if (!/^\d+$/.test(t) || Number(t) === process.pid) return false;
+  try { process.kill(Number(t), 0); return false; } catch (e) { if ((e as { code?: string }).code === 'EPERM' || held() !== t) return false; }
+  rmSync(lock, { force: true });
+  console.error(`sigelo-agent: removed the stale lock ${lock} (its process ${t} is gone)`);
+  return true;
+}
 
 /** The view-only treasury, as it sits in the identity file. `next_minor` is per account. */
 export interface MoneroWallet { net: Net; a: string; B: string; address: string; next_minor: Record<string, number> }
@@ -140,10 +150,12 @@ export function withLock<T>(path: string, fn: () => T): T {
   const lock = `${path}.lock`;
   const idle = new Int32Array(new SharedArrayBuffer(4));
   for (let i = 0; ; i++) {
-    try { closeSync(openSync(lock, 'wx', 0o600)); break; } catch (e) {
+    try { const fd = openSync(lock, 'wx', 0o600); try { writeSync(fd, `${process.pid}\n`); } finally { closeSync(fd); } break; } catch (e) {
       // EEXIST: held. On Windows an open during the holder's delete can come back EPERM/EBUSY/EACCES
       // (the file is marked for deletion but still there): held too, retry.
       if (!['EEXIST', 'EPERM', 'EBUSY', 'EACCES'].includes((e as { code?: string }).code ?? '')) throw e;
+      // Its process gone (a killed CLI): removed with one line (apps/contact/platform-node.mjs staleLock).
+      if (staleLock(lock)) continue;
       if (i === LOCK_TRIES) throw new SigeloError(`lock: ${lock} is still held after ${(LOCK_TRIES * LOCK_MS) / 1000}s — another sigelo-agent holds it, or one was killed holding it; delete the file to continue`);
       Atomics.wait(idle, 0, 0, LOCK_MS);
     }

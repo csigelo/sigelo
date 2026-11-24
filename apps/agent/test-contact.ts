@@ -491,15 +491,15 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
       ok('SIGELO_IDENTITY = the operator file, with --operator: taken as the operator\'s (one line), not refused', sameEnv.status === 0 && listed(sameEnv).join() === revDid
         && sameEnv.stderr.includes('SIGELO_IDENTITY names your operator identity'), sameEnv.stderr);
       // The one-owner rule, the file named three ways: a watcher by --operator; send by --identity
-      // queues for it; inbox by SIGELO_HUMAN reads through it; invite refuses (busy).
+      // queues for it; inbox by SIGELO_HUMAN reads through it; invite is asked of it (the agent-setup feedback, point 4).
       w = spawn('node', [CLI, 'watch', '--operator', '--quiet'], { env, cwd: H });
       let werr = '';
       w.stderr!.on('data', (d) => { werr += d; });
       for (let i = 0; i < 150 && !werr.includes('connected to relay.test'); i++) await new Promise((r) => setTimeout(r, 200));
       const sq = await plain('send', 'rev', 'queued', '--identity', me), iq = await cli('inbox', '--operator'), bz = await plain('invite', '--identity', me);
-      ok('watch --operator owns the session: send --identity queues for it, inbox --operator reads through it, invite --identity refuses busy',
+      ok('watch --operator owns the session: send --identity queues for it, inbox --operator reads through it, invite --identity is asked of it',
         werr.includes('connected to relay.test') && sq.status === 0 && sq.stderr.includes('queued for sigelo-agent watch') && iq.status === 0
-        && iq.stderr.includes('holds the relay session') && bz.status === 1 && bz.stderr.includes('is watched by sigelo-agent watch'), werr + sq.stderr + iq.stderr + bz.stderr);
+        && iq.stderr.includes('holds the relay session') && bz.status === 0 && bz.stderr.includes('through sigelo-agent watch'), werr + sq.stderr + iq.stderr + bz.stderr);
       w.kill('SIGTERM'); await new Promise((r) => w!.once('close', r)); w = undefined;
       const inA = await cliIn({ ...base, SIGELO_IDENTITY: rev, SIGELO_HUMAN: join(H, 'agents', 'me.local.json') }, H)('contacts', '--operator');
       const inD = await cliIn({ ...base, SIGELO_IDENTITY: rev }, H)('tier', 'rev', 'own', '--operator', '--identity', join(H, '.config', 'moadim', 'me.local.json'));

@@ -75,8 +75,9 @@ of logging in. `init --enrol <code> --service` installs it once placed.
 
 While `watch` or `ui` (the page) runs on a file (`<identity>.ui.pid`), it is the only process logged
 in to the relay as that identity. Beside a watcher, `inbox` reads what it received, `send`,
-`send-file` and `reply` queue for it (it sends them within seconds), and `invite`, `accept`, `forget` and `enrol`
-refuse (exit 1, `busy`); beside a page, all of them refuse. The MCP tools follow the same rule.
+`send-file` and `reply` queue for it (it sends them within seconds), `accept` and `invite` are asked of
+it (`<identity>.ui.ask/`: it runs them on its session and answers; never kill it to run them), `group join`
+kicks it, and `forget` and `enrol` refuse (exit 1, `busy`); beside a page, all of them refuse. The MCP tools follow the same rule.
 The file is the owner however it is named: `watch --operator` (ENROL.md) and `send --identity
 ~/.config/sigelo/me.local.json` meet at the same lock. On `busy`: stop the watcher or page, or let it
 do the work (its hooks, `send`, `reply`); a second process that must log in itself needs its own

@@ -188,7 +188,7 @@ export function firstRun(box, api, { show = true } = {}) {
     const adv = api.advanced?.length ? fold('Advanced', ...api.advanced.map((a) => el('div', { className: 'bar' }, button(a.label, () => go(() => a.run(ui)))))) : null;
     box.replaceChildren(el('div', { className: 'welcome home' },
       api.leave ? el('header', { className: 'plain' }, el('button', { className: 'ib', attrs: { 'aria-label': api.leave.label, title: api.leave.label }, onclick: () => api.leave.run() }, icon('x') ?? '×')) : null,
-      el('h1', { className: 'wordmark', textContent: 'sigelo' }),
+      el('h1', { className: 'wordmark', textContent: 'Sigelo' }),
       el('p', { className: 'lead strong', textContent: 'One identity for you and your agents.' }),
       el('p', { className: 'lead', textContent: 'Chat with people and agents, privately. Let your agents act for you, within limits you set.' }),
       el('div', { className: 'choices' },
@@ -347,7 +347,7 @@ export function firstRun(box, api, { show = true } = {}) {
   function newLock() {
     const use = button('Use my phone\'s lock', null, true, 'finger');
     const s = screen({ title: 'Lock', steps: C.restored ? null : step(3), back: false,
-      body: [el('div', { className: 'lockicon' }, icon('finger')), el('h2', { className: 'big center', textContent: 'Lock sigelo with your fingerprint or PIN' }),
+      body: [el('div', { className: 'lockicon' }, icon('finger')), el('h2', { className: 'big center', textContent: 'Lock Sigelo with your fingerprint or PIN' }),
         el('p', { className: 'lead center', textContent: 'Asked only when you open the app, switch profile, pay above your limit or show your 25 words.' })], primary: use });
     use.onclick = busy(use, s, async () => { await api.lock(); go(newDone, { replace: true }); });
   }
@@ -358,7 +358,7 @@ export function firstRun(box, api, { show = true } = {}) {
       body: [el('div', { className: 'center' }, el('div', { className: 'lockicon' }, icon('check')), el('h2', { className: 'big', textContent: C.restored ? 'Your identity is back' : 'You\'re set' }),
         words.length ? [el('p', { className: 'lead', textContent: 'Your four words' }), el('div', { className: 'words4', attrs: { 'aria-label': `Four words: ${words.join(' ')}` } }, words.map((w) => el('span', { textContent: w })))] : null,
         el('p', { className: 'lead', textContent: 'They are your identity\'s fingerprint. They never change, and people you pair with see them.' }))],
-      primary: button('Open sigelo', () => void finish(), true) });
+      primary: button('Open Sigelo', () => void finish(), true) });
   }
 
   // ---- restore: one screen (the words, when they were made, main or spare), then Restoring, the lock, done
