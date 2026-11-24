@@ -2,7 +2,9 @@
 // The Android project checked without the SDK (design/apps.md §8): what can be known of it on a
 // machine with Node alone. The build itself runs on CI (.github/workflows/android.yml).
 //   node apps/android/check.mjs     → ALL PASS (n)
-// The manifest and resources (well-formed, eight permissions (storage on Android 9 only; the microphone for voice messages), one provider not exported, one service (Stay connected), no backup, references resolve, the
+// The manifest and resources (well-formed, thirteen permissions (storage on Android 9 only; the microphone for voice messages and calls; a call's
+// foreground service, audio, proximity lock and ring vibration), one provider not exported, three services (Stay connected, the push
+// connector's raise, a call), one receiver (push), no backup, references resolve, the
 // icon from assets/brand/app-icon.svg), the Gradle files (AGP pinned, minSdk 28, targetSdk 35, no
 // dependency, braces balanced), the wrapper (its jar by SHA-256, the distribution pinned), the Java
 // (the bridge's operations as platform-android.mjs sends them, the WebView's settings, every asset
@@ -107,8 +109,8 @@ ok(Object.values(xml).every(Boolean), `XML: ${xmlFiles.length} files well-formed
 const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
 {
   const perms = all(man, 'uses-permission').map((p) => p.attrs['android:name']).sort();
-  ok(perms.join() === 'android.permission.CAMERA,android.permission.FOREGROUND_SERVICE,android.permission.FOREGROUND_SERVICE_SPECIAL_USE,android.permission.INTERNET,android.permission.POST_NOTIFICATIONS,android.permission.RECORD_AUDIO,android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,android.permission.WRITE_EXTERNAL_STORAGE',
-    `manifest: INTERNET, CAMERA, POST_NOTIFICATIONS, RECORD_AUDIO (voice messages), WRITE_EXTERNAL_STORAGE, and for Stay connected FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS only (${perms})`);
+  ok(perms.join() === 'android.permission.ACCESS_NETWORK_STATE,android.permission.CAMERA,android.permission.FOREGROUND_SERVICE,android.permission.FOREGROUND_SERVICE_MICROPHONE,android.permission.FOREGROUND_SERVICE_SPECIAL_USE,android.permission.INTERNET,android.permission.MODIFY_AUDIO_SETTINGS,android.permission.POST_NOTIFICATIONS,android.permission.RECORD_AUDIO,android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,android.permission.VIBRATE,android.permission.WAKE_LOCK,android.permission.WRITE_EXTERNAL_STORAGE',
+    `manifest: INTERNET, CAMERA, POST_NOTIFICATIONS, RECORD_AUDIO (voice messages, calls), WRITE_EXTERNAL_STORAGE; for Stay connected FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; for calls FOREGROUND_SERVICE_MICROPHONE, MODIFY_AUDIO_SETTINGS, WAKE_LOCK, VIBRATE, ACCESS_NETWORK_STATE only (no USE_FULL_SCREEN_INTENT, no READ_PHONE_STATE, no MANAGE_OWN_CALLS) (${perms})`);
   ok(all(man, 'uses-feature').some((f) => f.attrs['android:name'] === 'android.hardware.microphone' && f.attrs['android:required'] === 'false'), 'manifest: a microphone not required (a phone without one still installs it)');
   const wes = all(man, 'uses-permission').find((p) => p.attrs['android:name'] === 'android.permission.WRITE_EXTERNAL_STORAGE');
   ok(wes?.attrs['android:maxSdkVersion'] === '28' && all(man, 'uses-permission').filter((p) => p !== wes).every((p) => p.attrs['android:maxSdkVersion'] === undefined),
@@ -128,21 +130,36 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   ok(names(send, 'action') === 'android.intent.action.SEND' && names(send, 'category') === 'android.intent.category.DEFAULT'
     && all(send, 'data').map((d) => Object.keys(d.attrs).join() + '=' + d.attrs['android:mimeType']).join() === 'android:mimeType=text/plain,android:mimeType=image/*,android:mimeType=*/*',
   'manifest: share into sigelo: ACTION_SEND (not SEND_MULTIPLE), category DEFAULT, mime types text/plain, image/*, */* only (no scheme, host or path)');
-  ok(all(man, 'receiver').length === 0 && all(man, 'data').every((d) => Object.keys(d.attrs).join() === 'android:mimeType') && !perms.includes('android.permission.RECEIVE_BOOT_COMPLETED'), 'manifest: no receiver (none at boot), no URL handler (no data but mime types)');
-  // Stay connected (StayConnected.java): one foreground service of type specialUse, its subtype said, not exported, ending with the task.
-  const sv = all(man, 'service'), prop = sv.length === 1 ? all(sv[0], 'property') : [];
+  // Push (UnifiedPush.java, design/push.md §1 B): one receiver, the distributor's five connector actions and nothing else
+  // (none at boot); exported, since the distributor is another app.
+  const rc = all(man, 'receiver'), up = 'org.unifiedpush.android.connector.';
+  ok(rc.length === 1 && rc[0].attrs['android:name'] === '.UnifiedPush' && rc[0].attrs['android:exported'] === 'true' && all(rc[0], 'intent-filter').length === 1
+    && all(rc[0], 'action').map((a) => a.attrs['android:name']).join() === ['NEW_ENDPOINT', 'REGISTRATION_FAILED', 'UNREGISTERED', 'TEMP_UNAVAILABLE', 'MESSAGE'].map((x) => up + x).join()
+    && all(man, 'data').every((d) => Object.keys(d.attrs).join() === 'android:mimeType') && !perms.includes('android.permission.RECEIVE_BOOT_COMPLETED'),
+  'manifest: one receiver, UnifiedPush: the five connector actions only (none at boot), no URL handler (no data but mime types)');
+  // Stay connected (StayConnected.java): a foreground service of type specialUse, its subtype said, not exported, ending with the task;
+  // the push connector's RAISE_TO_FOREGROUND, exported, no type (it does nothing but be bound); and a call's (below).
+  const svAll = all(man, 'service'), sv = svAll.filter((x) => x.attrs['android:name'] === '.StayConnected'), prop = sv.length === 1 ? all(sv[0], 'property') : [];
+  const raise = svAll.filter((x) => x.attrs['android:name'] === '.UnifiedPush$Raise');
+  ok(svAll.length === 3 && raise.length === 1 && raise[0].attrs['android:exported'] === 'true' && raise[0].attrs['android:foregroundServiceType'] === undefined
+    && all(raise[0], 'action').map((a) => a.attrs['android:name']).join() === up + 'RAISE_TO_FOREGROUND',
+  'manifest: three services: StayConnected, CallService and UnifiedPush$Raise (RAISE_TO_FOREGROUND, exported, no foreground type)');
   ok(sv.length === 1 && sv[0].attrs['android:name'] === '.StayConnected' && sv[0].attrs['android:exported'] === 'false' && sv[0].attrs['android:foregroundServiceType'] === 'specialUse'
     && sv[0].attrs['android:stopWithTask'] === 'true' && prop.length === 1 && prop[0].attrs['android:name'] === 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE'
     && /end-to-end messaging connection open/.test(prop[0].attrs['android:value'] ?? '') && all(sv[0], 'intent-filter').length === 0,
-    'manifest: one service, StayConnected: not exported, foregroundServiceType specialUse with its PROPERTY_SPECIAL_USE_FGS_SUBTYPE, stopWithTask, no intent filter');
+    'manifest: StayConnected: not exported, foregroundServiceType specialUse with its PROPERTY_SPECIAL_USE_FGS_SUBTYPE, stopWithTask, no intent filter');
+  // A call (CallService.java, design/calls.md §4): of type microphone, not exported, ending with the task, no filter.
+  const cs = all(man, 'service').find((x) => x.attrs['android:name'] === '.CallService');
+  ok(cs && cs.attrs['android:exported'] === 'false' && cs.attrs['android:foregroundServiceType'] === 'microphone' && cs.attrs['android:stopWithTask'] === 'true' && all(cs, 'intent-filter').length === 0 && all(cs, 'property').length === 0,
+    'manifest: CallService: not exported, foregroundServiceType microphone, stopWithTask, no intent filter');
   const pv = all(man, 'provider');
   ok(pv.length === 1 && pv[0].attrs['android:name'] === '.PhotoProvider' && pv[0].attrs['android:authorities'] === 'io.sigelo.app.photos' && pv[0].attrs['android:exported'] === 'false'
     && pv[0].attrs['android:grantUriPermissions'] === 'true' && all(pv[0], 'grant-uri-permission').length === 0 && all(pv[0], 'meta-data').length === 0,
     'manifest: one provider, PhotoProvider (io.sigelo.app.photos), not exported, reached only through the camera intent\'s grant');
   // Android 11+ package visibility: the camera intent declared, so resolveActivity sees a camera app (BigFiles cameraApp).
   const qs = all(man, 'queries');
-  ok(qs.length === 1 && all(qs[0], 'intent').length === 1 && all(qs[0], 'action').map((a) => a.attrs['android:name']).join() === 'android.media.action.IMAGE_CAPTURE' && all(qs[0], 'package').length === 0 && all(qs[0], 'provider').length === 0,
-    'manifest: <queries> names the camera intent alone (no package, no provider)');
+  ok(qs.length === 1 && all(qs[0], 'intent').length === 2 && all(qs[0], 'action').map((a) => a.attrs['android:name']).join() === 'android.media.action.IMAGE_CAPTURE,org.unifiedpush.android.distributor.REGISTER' && all(qs[0], 'package').length === 0 && all(qs[0], 'provider').length === 0,
+    'manifest: <queries> names the camera intent and UnifiedPush\'s REGISTER (the distributors) only (no package, no provider)');
   const dx = xml['apps/android/app/src/main/res/xml/data_extraction_rules.xml'];
   const domains = (k) => all(all(dx, k)[0] ?? { kids: [] }, 'exclude').map((e) => `${e.attrs.domain}:${e.attrs.path}`).sort().join();
   ok(all(dx, 'include').length === 0 && domains('cloud-backup') === 'database:.,external:.,file:.,root:.,sharedpref:.' && domains('device-transfer') === domains('cloud-backup'), 'data extraction: every domain excluded from backup and transfer');
@@ -211,7 +228,7 @@ ok(/storeType 'pkcs12'/.test(app) && /sigelo\.debugKeystore/.test(app) && /tasks
 
 // ================================================================ Java
 const java = Object.fromEntries(walk(JAVA).filter((f) => f.endsWith('.java')).map((f) => [f.slice(JAVA.length + 1), read(f)]));
-ok(Object.keys(java).sort().join() === 'BigFiles.java,MainActivity.java,PhotoProvider.java,SigeloBridge.java,StayConnected.java', `java: MainActivity, SigeloBridge, BigFiles, PhotoProvider and StayConnected (${Object.keys(java)})`);
+ok(Object.keys(java).sort().join() === 'BigFiles.java,CallService.java,MainActivity.java,PhotoProvider.java,SigeloBridge.java,StayConnected.java,UnifiedPush.java,WebPush.java', `java: MainActivity, SigeloBridge, BigFiles, PhotoProvider, StayConnected, CallService, UnifiedPush and WebPush (${Object.keys(java)})`);
 ok(Object.values(java).every((t) => balanced(code(t)) && /^package io\.sigelo\.app;$/m.test(t) && [...t.matchAll(/^import ([\w.]+);$/gm)].every((m) => /^(android|java|javax|org\.json)\./.test(m[1]))),
   'java: braces balanced, package io.sigelo.app, no import but the platform\'s (no AndroidX)');
 const A = await import(pathToFileURL(join(REPO, 'apps', 'web', 'platform-android.mjs')).href).catch(() => null);
@@ -257,8 +274,8 @@ ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\
     && /String title = line\(m, "title"\), text = line\(m, "text"\);/.test(nb) && !/setStyle|setTicker|setSubText|addAction|setLargeIcon|setContentInfo|MessagingStyle|BigTextStyle/.test(nb),
     'notify: the title and text the page gives, nothing else (no style, ticker, subtext, action)');
   ok(/\.setContentTitle\(activity\.getString\(R\.string\.app_name\)\)\s*\.setContentText\(activity\.getString\(R\.string\.notify_public\)\)/.test(nb) && /\.setVisibility\(Notification\.VISIBILITY_PRIVATE\)\s*\.setPublicVersion\(shown\)/.test(nb)
-    && strings.includes('<string name="app_name">sigelo</string>') && strings.includes('<string name="notify_public">New message</string>') && /<string name="notify_channel">[^<]+<\/string>/.test(strings),
-    'notify: private on the lock screen, its public version "sigelo" / "New message" (no name)');
+    && strings.includes('<string name="app_name">Sigelo</string>') && strings.includes('<string name="notify_public">New message</string>') && /<string name="notify_channel">[^<]+<\/string>/.test(strings),
+    'notify: private on the lock screen, its public version "Sigelo" / "New message" (no name)');
   ok(/PendingIntent\.getActivity\(activity, tag\.hashCode\(\), open, PendingIntent\.FLAG_IMMUTABLE \| PendingIntent\.FLAG_UPDATE_CURRENT\)/.test(nb) && !/FLAG_MUTABLE|getBroadcast|getService/.test(code(jbl))
     && /new Intent\(activity, MainActivity\.class\)\.setAction\(OPEN\)\.putExtra\(EXTRA_OPEN, tag\)\s*\.addFlags\(Intent\.FLAG_ACTIVITY_SINGLE_TOP \| Intent\.FLAG_ACTIVITY_CLEAR_TOP\)/.test(nb)
     && /\.setAutoCancel\(true\)/.test(nb) && /\.setCategory\(Notification\.CATEGORY_MESSAGE\)/.test(nb) && /nm\.notify\(tag, tag\.hashCode\(\), n\);/.test(nb) && /nm\.cancel\(tag, tag\.hashCode\(\)\);/.test(nb),
@@ -299,7 +316,7 @@ ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\
     && /ACTION_DEVICE_IDLE_MODE_CHANGED/.test(sc) && /!pm\.isDeviceIdleMode\(\)\) nudge\(\);/.test(sc) && /unregisterReceiver\(idle\);/.test(sc),
     'stay: an inexact alarm every 15 minutes (setAndAllowWhileIdle, immutable, explicit), cancelled at the end; the end of Doze nudges too');
   ok(/NotificationManager\.IMPORTANCE_LOW\)/.test(sc) && /\.setContentTitle\(getString\(R\.string\.stay_title\)\)/.test(sc) && !/setContentText|addAction|setStyle/.test(scc)
-    && strings.includes('<string name="stay_title">sigelo · connected</string>') && /PendingIntent\.getActivity\(this, 0, open, PendingIntent\.FLAG_IMMUTABLE/.test(sc) && /\.setOngoing\(true\)/.test(sc),
+    && strings.includes('<string name="stay_title">Sigelo · connected</string>') && /PendingIntent\.getActivity\(this, 0, open, PendingIntent\.FLAG_IMMUTABLE/.test(sc) && /\.setOngoing\(true\)/.test(sc),
     'stay: the notification "sigelo · connected", low importance, no text, no action; a tap opens the app (immutable)');
   ok(/prefs\(c\)\.getBoolean\(ON, true\)/.test(sc) && /if \(m\.has\(k\) && !\(m\.opt\(k\) instanceof Boolean\)\) throw new SigeloBridge\.Refused\("stay",/.test(sc)
     && /!open\(a, new Intent\(Settings\.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri\.parse\("package:" \+ a\.getPackageName\(\)\)\)\)\) \{\s*open\(a, new Intent\(Settings\.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS\)\);/.test(sc)
@@ -310,6 +327,70 @@ ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\
     'stay: started as the app leaves the screen (onPause), stopped when it finishes; Back on the first screen minimises while on (the page and its connection kept)');
   ok(/StayConnected\.page = this;/.test(jbl) && /if \(StayConnected\.page == this\) StayConnected\.page = null;/.test(jbl) && /put\("ev", "nudge"\)/.test(jbl) && /case "stay":\s*try \{\s*StayConnected\.op\(activity, m,/.test(jbl),
     'stay: the bridge answers "stay" through StayConnected.op and posts {ev:"nudge"} to the page; registered while open');
+}
+{
+  const strings = read(MAIN, 'res', 'values', 'strings.xml');
+  // Push (UnifiedPush.java, WebPush.java; design/push.md §1 B): the connector hand-rolled against AND_3, platform crypto only.
+  const u = java['UnifiedPush.java'], uc = code(u), w = java['WebPush.java'], sc = java['StayConnected.java'];
+  ok(![...w.matchAll(/^import ([\w.]+);$/gm)].some((m) => !/^(java|javax)\./.test(m[1])) && /"sigelo-push\/0 wake"/.test(w) && /Arrays\.copyOf\("sigelo-push\/0 wake"\.getBytes\(StandardCharsets\.UTF_8\), 32\)/.test(w)
+    && /KeyAgreement\.getInstance\("ECDH"\)/.test(w) && /Mac\.getInstance\("HmacSHA256"\)/.test(w) && /Cipher\.getInstance\("AES\/GCM\/NoPadding"\)/.test(w) && /"WebPush: info"/.test(w)
+    && /"Content-Encoding: aes128gcm"/.test(w) && /"Content-Encoding: nonce"/.test(w) && existsSync(join(HERE, 'test', 'WebPushTest.java')),
+  'push: WebPush is RFC 8291 in java.* and javax.* only (no Android import: test/WebPushTest.java runs its vectors on a JVM); WAKE is relay/push.mjs\'s 32 bytes');
+  ok(/if \(action == null \|\| token == null \|\| !token\.equals\(mine\)\) return;/.test(u) && uc.indexOf('!token.equals(mine)') < uc.indexOf('case NEW_ENDPOINT')
+    && /e == null \|\| !e\.startsWith\("https:\/\/"\) \|\| e\.length\(\) > ENDPOINT_MAX/.test(u)
+    && /new Intent\(ACK\)\.setPackage\(dist\)/.test(u) && /WebPush\.isWake\(body, \(ECPrivateKey\) k\[0\], pub, \(byte\[\]\) k\[1\]\)\) wake\(c\);/.test(u),
+  'push: every distributor broadcast must name our token first; an endpoint https only; a MESSAGE acknowledged, a wake only when it opens to WAKE under our keys');
+  ok([...uc.matchAll(/c\.sendBroadcast\(new Intent\((\w+)\)\.setPackage\((\w+)\)/g)].map((m) => m[1]).sort().join() === 'ACK,REGISTER,UNREGISTER' && (uc.match(/sendBroadcast\(/g) ?? []).length === 3
+    && /PendingIntent\.getBroadcast\(c, 0, new Intent\("org\.unifiedpush\.register\.dummy_app"\), PendingIntent\.FLAG_IMMUTABLE\)/.test(u)
+    && /queryBroadcastReceivers\(new Intent\(REGISTER\), 0\)/.test(u) && /UUID\.randomUUID\(\)/.test(u),
+  'push: REGISTER, UNREGISTER and MESSAGE_ACK only, each explicit to the distributor\'s package; pi immutable; distributors found by REGISTER receivers; a random token');
+  ok(/ALIAS = "sigelo-push"/.test(u) && /KeyGenerator\.getInstance\(KeyProperties\.KEY_ALGORITHM_AES, KEYSTORE\)/.test(u) && !/setUserAuthenticationRequired/.test(uc) && /ci\.updateAAD\(ALIAS/.test(u)
+    && /putString\(KEYS, b64\(blob\)\)/.test(u) && /\.remove\(KEYS\)\.remove\(PUB\)/.test(u) && /ks\.deleteEntry\(ALIAS\)/.test(u),
+  'push: the private key and auth sealed under keystore "sigelo-push" (AES-GCM, no user auth: a wake opens while locked); erased when push is turned off');
+  ok(/if \(b != null\) \{\s*StayConnected\.wake\(c\);\s*if \(b\.wake\(\)\) return;\s*\}/.test(u) && /\.setContentText\(c\.getString\(R\.string\.push_wake\)\)/.test(u) && !/setContentText\((?!c\.getString\(R\.string\.push_wake\))/.test(uc)
+    && strings.includes('<string name="push_wake">New activity</string>') && /nm\.cancel\(WAKE_TAG, WAKE_TAG\.hashCode\(\)\)/.test(u),
+  'push: a wake with the page alive → the wake window and {ev:"wake"}; else one notification "New activity" (no name, no count), cancelled when the app opens');
+  ok(/static final String WAKE = "io\.sigelo\.app\.WAKE";/.test(sc) && /WAKE_MS = 60_000L;/.test(sc) && /if \(!on\(this\)\) stopSelf\(\);/.test(sc) && /later\.postDelayed\(windowOver, WAKE_MS\);/.test(sc)
+    && /later\.removeCallbacks\(windowOver\);\s*AlarmManager am/.test(sc) && /c\.startForegroundService\(new Intent\(c, StayConnected\.class\)\.setAction\(WAKE\)\)/.test(sc),
+  'push: the wake window is StayConnected started with WAKE, stopped after 60 s unless the switch is on');
+  ok(/case "push":\s*try \{\s*post\(to, UnifiedPush\.op\(activity, m\)\.put\("id", id\)\);/.test(jbl) && /put\("ev", "wake"\)/.test(jbl) && /post\(port, state\.put\("ev", "push"\)\)/.test(jbl)
+    && /UnifiedPush\.refresh\(this\);/.test(ma) && /UnifiedPush\.seen\(this\);/.test(ma)
+    && /m\.has\("on"\) && !\(m\.opt\("on"\) instanceof Boolean\)\) throw new SigeloBridge\.Refused\("push",/.test(u),
+  'push: the bridge answers "push" through UnifiedPush.op (booleans and a package name only, refused "push"), posts {ev:"wake"} and {ev:"push"}; registered again at each start');
+  // Voice calls (CallService.java; design/calls.md §4, §5): the call's foreground service of type microphone, its ongoing-call
+  // notification, the audio mode and focus, the earpiece and the speaker, the proximity lock, the ring; nothing when closed (B1).
+  const cs = java['CallService.java'], csc = code(cs);
+  ok(/if \(Build\.VERSION\.SDK_INT >= 30\) startForeground\(NOTE_CALL, n, ServiceInfo\.FOREGROUND_SERVICE_TYPE_MICROPHONE\);\s*else startForeground\(NOTE_CALL, n\);/.test(cs) && /return START_NOT_STICKY;/.test(cs)
+    && /if \(c\.checkSelfPermission\(Manifest\.permission\.RECORD_AUDIO\) != PackageManager\.PERMISSION_GRANTED\) throw new SigeloBridge\.Refused\("mic_permission",/.test(cs)
+    && /app\.startForegroundService\(new Intent\(app, CallService\.class\)/.test(cs) && !/BOOT_COMPLETED|Socket|setExact/.test(csc),
+    'call: a foreground service of type microphone (Android 11+), started only once RECORD_AUDIO is granted, not sticky; no socket, no boot start');
+  ok(/b\.setStyle\(Notification\.CallStyle\.forOngoingCall\(new Person\.Builder\(\)\.setName\(who\)\.build\(\), hangUp\)\)/.test(cs) && /else b\.addAction\(new Notification\.Action\.Builder\(null, getString\(R\.string\.call_hangup\), hangUp\)\.build\(\)\);/.test(cs)
+    && /PendingIntent\.getService\(this, NOTE_CALL, new Intent\(this, CallService\.class\)\.setAction\(ACTION_HANGUP\), PendingIntent\.FLAG_IMMUTABLE/.test(cs)
+    && /\.setUsesChronometer\(true\)/.test(cs) && /\.setOngoing\(true\)/.test(cs) && /\.setVisibility\(Notification\.VISIBILITY_PRIVATE\)/.test(cs),
+    'call: the ongoing-call notification (CallStyle on Android 12+: the name, a timer, Hang up; an action before), private on the lock screen; Hang up an immutable explicit intent to this service');
+  ok(/am\.setMode\(AudioManager\.MODE_IN_COMMUNICATION\);/.test(cs) && /setUsage\(AudioAttributes\.USAGE_VOICE_COMMUNICATION\)/.test(cs) && /am\.requestAudioFocus\(focus\);/.test(cs)
+    && /am\.abandonAudioFocusRequest\(focus\);/.test(cs) && /am\.setMode\(modeBefore\);/.test(cs) && /on = true;\s*route\(app, false\);/.test(cs),
+    'call: audio mode IN_COMMUNICATION and voice-communication focus while it lasts, both given back at the end; the earpiece by default');
+  ok(/TYPE_BUILTIN_SPEAKER : AudioDeviceInfo\.TYPE_BUILTIN_EARPIECE/.test(cs) && /am\.setCommunicationDevice\(d\)/.test(cs) && /am\.setSpeakerphoneOn\(loud\);/.test(cs) && /am\.clearCommunicationDevice\(\);/.test(cs)
+    && /newWakeLock\(PowerManager\.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "sigelo:call"\)/.test(cs) && /proximity\.release\(PowerManager\.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY\)/.test(cs) && /hold\(app, !loud\);/.test(cs)
+    && !/PARTIAL_WAKE_LOCK|FULL_WAKE_LOCK|SCREEN_BRIGHT_WAKE_LOCK/.test(csc),
+    'call: the speaker toggle (setCommunicationDevice on Android 12+, setSpeakerphoneOn before); the proximity lock at the ear only (let go on the speaker and at the end); no other wake lock');
+  ok(/if \(mode == AudioManager\.RINGER_MODE_NORMAL\) \{/.test(cs) && /if \(mode != AudioManager\.RINGER_MODE_SILENT && app\.checkSelfPermission\(Manifest\.permission\.VIBRATE\)/.test(cs) && /r\.setLooping\(true\);/.test(cs)
+    && /setUsage\(AudioAttributes\.USAGE_NOTIFICATION_RINGTONE\)/.test(cs) && /NotificationManager\.IMPORTANCE_HIGH\)/.test(cs) && /ch\.setSound\(null, null\);/.test(cs) && /\.setCategory\(Notification\.CATEGORY_CALL\)/.test(cs)
+    && /\.setPublicVersion\(shown\)/.test(cs) && !/setFullScreenIntent|USE_FULL_SCREEN_INTENT/.test(csc) && /ring\(app, false, null\);\s*app\.startForegroundService/.test(cs),
+    'call-ring: the ringtone in normal mode only, the vibration unless silent, a heads-up (high, category call; the lock screen without the name); no full-screen intent (the app closed rings nothing: B1); stopped once the call starts');
+  ok(/case "call":\s*case "call-speaker":\s*case "call-ring":\s*callOp\(to, id, m, op\);/.test(jbl) && /if \(!\(v instanceof Boolean\)\) \{\s*fail\(to, id, "call", "on: true or false"\);/.test(jbl)
+    && /put\("ev", "hangup"\)/.test(jbl) && /CallService\.ring\(activity, false, null\);\s*CallService\.call\(activity, false, null\);/.test(jbl)
+    && /SigeloBridge b = StayConnected\.page;\s*if \(b != null\) b\.hangup\(\);/.test(cs) && /'call', 'call-speaker', 'call-ring'/.test(read(REPO, 'apps', 'web', 'platform-android.mjs')),
+    'call: the bridge answers call, call-speaker, call-ring (booleans only, refused "call"), posts {ev:"hangup"} from the notification\'s Hang up, and turns both off when the page goes');
+  ok(/MAIN\.removeCallbacks\(RING_OVER\);/.test(cs) && /MAIN\.postDelayed\(RING_OVER, RING_MAX_MS\);/.test(cs) && /RING_MAX_MS = 75_000L/.test(cs)
+    && /if \(port != null\) \{\s*try \{\s*CallService\.ring\(activity, false, null\);\s*CallService\.call\(activity, false, null\);/.test(jbl),
+    'call-ring: stops by itself after 75 s (a ring lives 60 s); a reload of the page stops its ring and its call\'s audio');
+  ok(['call_channel', 'call_ring_channel', 'call_incoming', 'call_ongoing', 'call_hangup'].every((k) => strings.includes(`<string name="${k}">`)) && /\.onEvent\(\(\) => \{ try \{ void router\?\.page\?\.line\?\.hangup\?\.\(\)/.test(read(REPO, 'apps', 'web', 'boot.mjs')),
+    'call: its strings; the page ends the live call at {ev:"hangup"} (boot.mjs → the Line)');
+  ok(/cm\.registerDefaultNetworkCallback\(watch\);/.test(cs) && /cm\.unregisterNetworkCallback\(watch\);/.test(cs) && /boolean changed = lastNet != null && !lastNet\.equals\(n\);/.test(cs)
+    && /roam\(app, true\);/.test(cs) && /roam\(app, false\);/.test(cs) && /put\("ev", "network"\)/.test(jbl) && /onNetwork\(fn\)/.test(read(REPO, 'apps', 'web', 'boot.mjs')) && /LOCAL\?\.onNetwork\?\.\(\(\) => \{ CALL\.phone\?\.networkChanged\(\); \}\);/.test(read(REPO, 'apps', 'agent', 'ui.js')),
+    'call: the default network watched only while a call lasts; a change (not the first network) → {ev:"network"} → the page\'s Phone restarts ICE at once');
 }
 ok(!/onCreateOptionsMenu|onOptionsItemSelected|M_RELOAD|android\.view\.Menu|getActionBar/.test(code(ma)) && /void reload\(\) \{\s*if \(web != null\) web\.loadUrl\(START\);/.test(ma)
   && /case "reload":\s*\/\/[^\n]*\n\s*post\(to, ok\(id\)\);\s*main\.post\(activity::reload\);/.test(jbl)

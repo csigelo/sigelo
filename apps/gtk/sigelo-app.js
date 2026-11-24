@@ -888,6 +888,10 @@ app.connect('activate', () => {
   const ucm = new WebKit.UserContentManager();
   ucm.register_script_message_handler_with_reply('sigelo', null);
   const settings = new WebKit.Settings({ enable_media_stream: true, enable_developer_extras: DEV, enable_write_console_messages_to_stdout: DEV, media_playback_requires_user_gesture: false, enable_back_forward_navigation_gestures: false });
+  // Calls (design/calls.md §4): WebRTC on where this WebKitGTK has it (the enable-webrtc property, 2.38+, and a build with it);
+  // the page shows a Call button only where RTCPeerConnection exists. some distributions build WebKitGTK 2.48 without it
+  // (checked 2026-11-24: RTCPeerConnection undefined with the setting on): no Call button here, a ring answered unavailable.
+  if ('enable_webrtc' in settings) settings.enable_webrtc = true;
   const view = new WebKit.WebView({ web_context: ctx, user_content_manager: ucm, settings, vexpand: true, hexpand: true });
   let selfOrigin = null;   // http://127.0.0.1:<port>/ while this phone's page runs
   const ours = (uri) => uri.startsWith('sigelo-app://app/') || (selfOrigin !== null && uri.startsWith(selfOrigin));
@@ -994,8 +998,8 @@ app.connect('activate', () => {
     if (/^https?:\/\//.test(uri) && !ours(uri)) new Gtk.UriLauncher({ uri }).launch(win, null, null);
     return true;
   });
-  // Camera for scanning only (the start page, this phone's Devices view); the microphone alone for a voice message on this
-  // phone's own page (granted at once: the system's portal, where there is one, is the only ask); nothing else.
+  // Camera for scanning only (the start page, this phone's Devices view); the microphone alone for a voice message or a call
+  // on this phone's own page (granted at once: the system's portal, where there is one, is the only ask); nothing else.
   view.connect('permission-request', (_v, req) => {
     const media = req instanceof WebKit.UserMediaPermissionRequest, uri = view.get_uri() ?? '', self = selfOrigin !== null && uri.startsWith(selfOrigin);
     const camera = media && req.is_for_video_device && !req.is_for_audio_device, mic = media && req.is_for_audio_device && !req.is_for_video_device;
@@ -1007,11 +1011,11 @@ app.connect('activate', () => {
   const menu = new Gio.Menu();
   menu.append('Start page', 'app.start');
   menu.append('Forget this computer', 'app.forget');
-  const header = new Adw.HeaderBar({ title_widget: new Adw.WindowTitle({ title: 'sigelo' }) });
+  const header = new Adw.HeaderBar({ title_widget: new Adw.WindowTitle({ title: 'Sigelo' }) });
   header.pack_end(new Gtk.MenuButton({ icon_name: 'open-menu-symbolic', menu_model: menu, tooltip_text: 'Menu' }));
   const tv = new Adw.ToolbarView({ content: view });
   tv.add_top_bar(header);
-  const win = new Adw.ApplicationWindow({ application: app, title: 'sigelo', default_width: 420, default_height: 820, content: tv });
+  const win = new Adw.ApplicationWindow({ application: app, title: 'Sigelo', default_width: 420, default_height: 820, content: tv });
   const action = (name, fn) => { const a = new Gio.SimpleAction({ name }); a.connect('activate', fn); app.add_action(a); };
   action('start', () => startPage());
   action('forget', () => {

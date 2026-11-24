@@ -67,6 +67,8 @@ const STATIC: Record<string, [string, string]> = {
   '/words-lock.mjs': ['contact:words-lock.mjs', 'text/javascript'],
   // Voice messages (design/transfer.md "Voice"): the page's recorder and the checks it imports.
   '/voice-web.mjs': ['contact:voice-web.mjs', 'text/javascript'], '/voice.mjs': ['contact:voice.mjs', 'text/javascript'],
+  // Calls (design/calls.md): the page's Phone (call.mjs, no import), loaded at the first call or ring.
+  '/call.mjs': ['contact:call.mjs', 'text/javascript'],
   // The package's own package.json: About reads its version (a release bump reaches every form).
   '/package.json': ['pkg:package.json', 'application/json'],
 };

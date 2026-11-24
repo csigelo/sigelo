@@ -22,16 +22,27 @@ import * as door from './sigelo-agent-pass.ts';
 import * as service from './sigelo-agent-service.ts';
 import * as host from './sigelo-agent-host.ts';
 
+// The first thing --help shows (the agent-setup feedback, point 7: models invented verbs from the rest of it).
+export const GIVEN = `You were given a code?
+  ENROL-K7F3-Q9ZP, from your operator      → sigelo-agent init --enrol <code> --wait 60   (enrol: this machine
+                                             becomes your operator's agent; then sigelo-agent enrol --finish)
+  K7F3-Q9ZP, sgl1… or PUB-…, from a contact → sigelo-agent accept <code> --name <their name>   (pairing)
+  You give a contact a code                → sigelo-agent invite   (it prints yours; they accept it)
+Who you are, and your operator: sigelo-agent whoami. Never cat the identity file: it holds your key.`;
+
 const USAGE = `sigelo-agent — a portable sigelo/0 identity for an AI agent, and its contacts
+
+${GIVEN}
 
   --version                              print the version
 
-  init --recovery <z…> | --no-recovery   create the identity (once, on first run)
+  init --recovery <z…> | --no-recovery   create the identity (once, on first run); refused over one here
        [--passphrase-file <f>]           the key sealed under a passphrase (KEYCHAIN.md)
+       [--force]                         over an identity here: it is kept as <file>.bak first
   adopt <json|file|-> [--force]          take a key made elsewhere: { identity_seed_hex, genesis }
                                          (a keeper's POST /delegate answer as is)
   adopt --rotation <json|file|->         apply sigelo-offline recover's { rotation, identity_seed_hex }
-  whoami                                 current DID + genesis
+  whoami                                 current DID + genesis; a worker: its index, operator (name, DID), tier
   sign-challenge <json|->                sign a world's { typ: "challenge", … } body
   sign-http <base|->                     sign an RFC 9421 base for Web Bot Auth (apps/integrations/web-bot-auth)
   pass <url> [--json] [--fresh]          through a site's sigelo-pass door (accept/pass): the cookie to load
@@ -75,6 +86,24 @@ Identity file: --identity <file>; --operator: yours ($SIGELO_HUMAN, else ~/.conf
 else $SIGELO_IDENTITY, else ~/.config/moadim/sigelo.local.json (0600). Any verb (ENROL.md).
 This process never holds a Monero spend key: wallet-set refuses one.`;
 
+// Every verb, for "did you mean" (the contact verbs, those dispatched above, and this file's own).
+const ALL_VERBS = [...contact.VERBS, 'ui', 'enrol', 'keeper', 'watch', 'host', 'sdk', 'device', 'group', 'transfer', 'control', 'service', 'init', 'adopt', 'whoami', 'keys', 'seal', 'unseal',
+  'sign-challenge', 'sign-http', 'pass', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice', 'verify-invoice', 'pair'];
+/** The verb nearest `x`: edit distance at most 2 and half its length (or a prefix of 3+), else null. */
+function nearest(x: string): string | null {
+  const d = (a: string, b: string): number => {
+    const m = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++) m[0]![j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) m[i]![j] = Math.min(m[i - 1]![j]! + 1, m[i]![j - 1]! + 1, m[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return m[a.length]![b.length]!;
+  };
+  const v = x.toLowerCase();
+  let best: string | null = null, bd = 3;
+  const most = Math.min(2, Math.max(1, Math.floor(v.length / 2)));
+  for (const w of ALL_VERBS) { const k = d(v, w); if (k < bd && k <= most) { bd = k; best = w; } }
+  return best ?? (v.length >= 3 ? ALL_VERBS.find((w) => w.startsWith(v)) ?? null : null);
+}
+
 const OFFLINE_KEYGEN = `
 Make the recovery key first, and keep it off this machine (THREAT-MODEL §5):
 
@@ -111,8 +140,21 @@ const input = (v: string | undefined): unknown => {
   }
 };
 
-const [cmd, ...rest] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+// pair: accept's other name (pairing is what accept does); --code <c>, as models wrote it, is the code itself.
+if (argv[0] === 'pair') argv[0] = 'accept';
+if ((argv[0] === 'accept') && argv.includes('--code')) { const i = argv.indexOf('--code'); argv.splice(i, 1); }
+const [cmd, ...rest] = argv;
 if (cmd === '--version' || cmd === '-v') { console.log(contact.version()); process.exit(0); }
+// Codes given to the wrong verb, said in one line before anything runs (the agent-setup feedback, points 5 and 7).
+{
+  // The shape of apps/contact/short.mjs isEnrolCode, here before the contact library loads.
+  const isEnrolCode = (t: string): boolean => /^\s*ENROL[\s\-\u2010-\u2015\u2212]*[0-9A-Za-z]/i.test(t);
+  const code = rest.find((a) => !a.startsWith('--')), all = rest.filter((a) => !a.startsWith('--')).join(' ');
+  if (cmd === 'accept' && code !== undefined && (isEnrolCode(code) || /^\s*ENROL\s+[0-9A-Za-z]{4}/i.test(all))) { console.error('sigelo-agent: that is an enrol code: run init --enrol CODE (sigelo-agent init --enrol ' + code + ' --wait 60), on a machine with no identity yet; nothing was fetched'); process.exit(2); }
+  if (cmd === 'invite' && (rest.includes('--code') || (code !== undefined && isEnrolCode(code)))) { console.error('sigelo-agent: invite makes YOUR code for a contact; a code you were given goes to accept CODE (a pairing code) or init --enrol CODE (an enrol code, ENROL-…)'); process.exit(2); }
+  if (cmd === 'contacts' && rest[0] === 'accept') { console.error('sigelo-agent: "contacts" lists your contacts; to answer a code: sigelo-agent accept CODE'); process.exit(2); }
+}
 // The contact verbs live apart from the identity core (INTEGRATION.md) and need nothing below.
 // contact.exit never resolves: it exits once stdout has drained.
 // A page or a watcher on the identity file holds its relay session: contact.main refuses a second login.
@@ -168,10 +210,13 @@ try {
       // worker, whose recovery is the operator's seed (sigelo-agent-enrol.ts), so no --recovery here.
       if (rest.includes('--enrol')) {
         const code = flag('--enrol');
-        if (code === undefined || code.startsWith('--')) usage('init: --enrol needs the code the operator\'s sigelo-agent enrol printed (K7F3-Q9ZP)');
+        if (code === undefined || code.startsWith('--')) usage('init: --enrol needs the enrol code the operator\'s app or sigelo-agent enrol gave (ENROL-K7F3-Q9ZP)');
         if (rest.includes('--recovery') || rest.includes('--no-recovery')) usage('init --enrol: no --recovery: the worker this machine becomes commits to the operator\'s seed\'s recovery key');
         await contact.exit(await enrol.initEnrol(path, code, rest));
       }
+      // Over an identity here: refused in one line, never "move it away" (the agent-setup feedback, point 3); --force keeps it as .bak
+      // (below, once the command line is known good: a refused one moves nothing).
+      if (existsSync(path) && !rest.includes('--force')) usage(`init: ${enrol.alreadyHere(path)}`);
       const recovery = flag('--recovery');
       // A null recovery commitment must be a decision, never a default: it means theft of the
       // identity key is terminal (SPEC §4). keygen prints the warning itself.
@@ -180,6 +225,7 @@ try {
       }
       const pf = flag('--passphrase-file');
       if (rest.includes('--passphrase-file') && (pf === undefined || pf.startsWith('--'))) usage('init: --passphrase-file needs a file');
+      if (existsSync(path)) note(`init --force: the identity here kept as ${enrol.keepBak(path).join(', ')}`);
       const store = keys.init(path, recovery ?? null, process.env['SIGELO_KEY_PROVIDER'], process.env, pf);
       note(`identity written to ${path} (0600)`);
       // The recovery public key, when given as one: the identity keeps only its hash (SPEC §4), and
@@ -207,8 +253,10 @@ try {
       break;
     }
     case 'whoami': {
-      const store = load();
-      out({ did: did(id.head(store)), genesis: id.head(store), chain: id.chainOf(store), attestations: store.attestations.length });
+      // A worker says whose (the agent-setup feedback, point 6: a model read the identity file, key and all, to find out).
+      const store = load(), w = enrol.workerOf(path, store);
+      out({ did: did(id.head(store)), genesis: id.head(store), chain: id.chainOf(store), attestations: store.attestations.length, ...(w && { worker: w.worker, operator: w.operator.did, operator_name: w.operator.name, tier: w.operator.tier }) });
+      if (w) note(`worker ${w.worker ?? '?'} of ${w.operator.name ?? 'your operator'} (${w.operator.did}); its messages here: ${w.operator.tier ?? 'not paired yet'}`);
       break;
     }
     case 'sign-challenge':
@@ -305,9 +353,14 @@ try {
       out({ did: did(id.head(store)), chain: id.chainOf(store) });
       break;
     }
-    default:
+    default: {
+      // An unknown verb: the nearest by edit distance, one line (the agent-setup feedback, point 7); --help and none: everything.
+      const near = cmd !== undefined && !cmd.startsWith('-') ? nearest(cmd) : null;
+      if (near !== null) { note(`${JSON.stringify(cmd)} is not a verb: did you mean ${near}? (sigelo-agent --help lists them, a code you were given first)`); process.exit(2); }
+      if (cmd !== undefined && !['--help', '-h', 'help'].includes(cmd)) { note(`${JSON.stringify(cmd)} is not a verb`); console.error(GIVEN); process.exit(2); }
       console.error(`${USAGE}\n\n${contact.USAGE}\n\n${group.USAGE}\n\n${transfer.USAGE}\n\n${enrol.USAGE}\n\n${device.USAGE}`);
       process.exit(2);
+    }
   }
 } catch (e) {
   note(e instanceof Error ? e.message : String(e));

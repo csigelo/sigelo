@@ -133,9 +133,13 @@
    "from": "apps/contact/bip39-english.mjs",
    "sha256": "23c9c1d9239b6e0f596da9cba79ade3bd11285333902fb525e0ed2ec3f0936ec"
   },
+  "vendor/contact/call.mjs": {
+   "from": "apps/contact/call.mjs",
+   "sha256": "3cdaf91f545f09151d82738e82be4380fccf041b5dbfe7e64b44e0210f9f1519"
+  },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "d9760ed750a88c4d380f34e474aba204a4791b78d20ac5f7683c7995fda52928"
+   "sha256": "63e48e3992308bf788d75e9efa2788b758af002a29f740ca7f0009d28cb40654"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
@@ -151,7 +155,7 @@
   },
   "vendor/contact/enrol.mjs": {
    "from": "apps/contact/enrol.mjs",
-   "sha256": "42838a28097bad39f851391cc00d06582efa1ff9f16b56cb8cadc7f83452922a"
+   "sha256": "f857a7290705c70c5a988ae59b3c208e0b159557f502205c926dc9ecd3528576"
   },
   "vendor/contact/envelope.mjs": {
    "from": "apps/contact/envelope.mjs",
@@ -179,7 +183,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "87ba533ef49ad6e0b6e023edc75328f58cda49ded1979e9ed455f0c2a45a93eb"
+   "sha256": "c733a70fcc293ab97a92d3a831a76e77ad3d525069599733ab5292f4b79c7687"
   },
   "vendor/contact/photo.mjs": {
    "from": "apps/contact/photo.mjs",
@@ -215,11 +219,11 @@
   },
   "vendor/contact/short.mjs": {
    "from": "apps/contact/short.mjs",
-   "sha256": "2697d03c03fda4a8fa690b74b74048c8bb6d7bc7b08355435741540f22eeb2bd"
+   "sha256": "d916699200a5c1b3c4acb5b212a770eaf9d151da76ba80c8ca9bfdd2c33d53a0"
   },
   "vendor/contact/store.mjs": {
    "from": "apps/contact/store.mjs",
-   "sha256": "25d44380611ed4e58c6cddc4b69727ee15829b8b5d1399ebde83ec07c46ff29a"
+   "sha256": "e05ca88021eb48a91a1009230175d5d2de464881525273c0310ea5b272de7aca"
   },
   "vendor/contact/transfer-engine.mjs": {
    "from": "apps/contact/transfer-engine.mjs",
@@ -259,7 +263,7 @@
   },
   "vendor/package.json": {
    "from": "apps/agent/package.json",
-   "sha256": "1b11e4004bd6561e152261d5abac9d8cd631d3ed6c7047793c57d322540faa30"
+   "sha256": "6453b5ff968c569c5088df6e7ad85031d23014914d8594ec8d1317b03cda1fca"
   },
   "vendor/remote-client.mjs": {
    "from": "apps/agent/remote-client.mjs",
@@ -291,11 +295,11 @@
   },
   "vendor/ui.css": {
    "from": "apps/agent/ui.css",
-   "sha256": "137461dbe10e53f2aab183512c935c17ce5d56795c756d83f8d746e5d6b18eef"
+   "sha256": "dbacfa4f7579b86bf7b1d208b9b79ea9d830e38d875f0a88768a0b0e4d75b76f"
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "b08c7b43009822557301ef6d2c539d54b50a90fbc10997bf7047c9e7067c7803"
+   "sha256": "57dbedb765d4a105780693bece9ddb4542599716d7f206124d5877bec0c3109a"
   }
  }
 }

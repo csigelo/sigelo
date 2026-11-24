@@ -124,6 +124,20 @@ export function makeShort(rng = randomBytes, tag = null) {
 /** The key the relay parks under: hex SHA-256("sigelo-park/0" ‖ the normalised code). */
 export const codeHash = (text) => bytesToHex(sha256(concatBytes(utf8ToBytes(PARK_V), utf8ToBytes(normaliseShort(text)))));
 
+// Enrolment codes (enrol.mjs issue): a short code like any other, shown with the prefix ENROL-
+// (ENROL-K7F3-Q9ZP), so an agent given one knows it by its shape and never takes it for a pairing code
+// (the agent-setup feedback, points 5 and 7: models fed enrolment codes to accept and lost them). The prefix is
+// shown and read, never hashed or sent: the relay parks and fetches the 8 (or 12) characters as before.
+// ENROL_TTL_MAX: an enrolment code may live a day (relay/park.mjs ENROL_TTL), an invite's short code an hour.
+export const ENROL_PREFIX = 'ENROL', ENROL_TTL_MAX = 86400;
+const ENROL_RE = /^\s*ENROL[\s\-\u2010-\u2015\u2212]*/i;
+/** Whether `text` is an enrolment code by its shape: ENROL, then a short code. */
+export const isEnrolCode = (text) => typeof text === 'string' && text.length <= MAX_INPUT + 8 && ENROL_RE.test(text) && isShort(text.replace(ENROL_RE, ''));
+/** The short code inside an enrolment code (ENROL- taken off); any other text as it is. */
+export const stripEnrol = (text) => (isEnrolCode(text) ? text.replace(ENROL_RE, '') : text);
+/** "K7F3Q9ZP" → "ENROL-K7F3-Q9ZP", how an enrolment code is shown. */
+export const formatEnrol = (norm) => `${ENROL_PREFIX}-${formatShort(norm)}`;
+
 // Gift codes (sigelo-gift/0): Pro months for an operator, sold or handed out by the vendor
 // (the issuer makes them offline; relay/gifts.mjs redeems them, POST /gift). The
 // same 8 characters, alphabet and folding as a short code, shown with a prefix of their own,

@@ -16,7 +16,7 @@
 //             (`days`, ≤ 90; a device's 14). operatorName: how the worker files its operator (default
 //             "operator"); started: the carrier's (a search the human started, carrier.mjs POW_SEARCHES);
 //             confirmWords: kept with it, handed to confirm() as `ask` (the optional words switch)
-//   machine:  accept({ carrier, file, code, temp })  → `carrier` is a TEMPORARY identity (`temp`, its
+//   machine:  accept({ carrier, file, code, temp, strict? })  → `carrier` is a TEMPORARY identity (`temp`, its
 //             file): it fetches the code, pairs, and once paired sends a request, label LABEL_ENROL,
 //             {v, typ: "enrol-request", proof}
 //   both:     complete({ carrier, file, wait, until, keeper | place, temp, confirm }) → one inbox or more:
@@ -57,8 +57,21 @@
 //
 // The pending file, 0600, beside the identity (x.json → x.enrol.json), under its own lock:
 //   { v, issued: { invite nonce: { key, i, n, name, did, old_pair, relay, exp, attestation, issuer,
-//                                   temp?, invite?, done?, sent_at?, needs_send? } },
-//         joining: { invite nonce: { key, code_did, relay, exp, sent, temp } } }
+//                                   temp?, invite?, done?, sent_at?, needs_send?, short_hash?, unparked? } },
+//         joining: { invite nonce: { key, code_did, relay, exp, sent, temp, long?, short_hash?, answered? } } }
+//
+// The code is spent at the grant, not before (the agent-setup feedback, point 2). The operator parks its short
+// code as an enrolment code (relay/park.mjs: fetched again until the grant) and spends it there once
+// the worker's identity has gone (unparkHash, `unparked`). The machine keeps its joining entry from the
+// fetch on: the long code, the short code's hash and its temporary identity, whether its answer went
+// (`answered`); a refused proof of work or a crash leaves it, and init --enrol with the same code, or
+// enrol --finish, takes it up again (resumeAnswer) instead of fetching the code or making another
+// temporary identity.
+//
+// Who may enrol a machine (THREAT-MODEL §2.11a): only the identity that issued the code it fetched. The
+// grant (LABEL_IDENTITY) is taken on the temporary identity only, from the contact holding the code's
+// DID, for the code it names (`id`, the code's nonce: a grant for another code is refused enrol_replay),
+// while its joining entry lives; a worker's own identity never takes one (no place() runs on it).
 // Entries go at exp, 24 hours after they were made, whatever their state.
 //
 // Neither side waits on one message (0.1.17: a lost identity left both sides waiting for the other).
@@ -88,7 +101,7 @@ import { canonicalize, decodeKey, did as didOf, keygen, rotate, sign, structure,
 import { agentIdentitySeed, identitySeed, recoveryCommitment } from 'sigelo/dist/keys.js';
 import { keepLong, readCode } from './carrier.mjs';
 import { MsgError, checkNow, fail, pairId, signAs, unhex } from './kdf.mjs';
-import { codeKind, fingerprint } from './short.mjs';
+import { codeHash, codeKind, fingerprint, formatEnrol, normaliseShort, stripEnrol } from './short.mjs';
 import { platform as nodePlatform } from './platform-node.mjs';
 
 export const ENROL_V = 'sigelo-enrol/1';
@@ -207,7 +220,8 @@ export function readStatus(content) {
 export const toldFor = (check, detail) => TOLD[check] ?? `the operator could not send the key yet (${detail.replace(/ \(did:sigelo:[^)]*\)/g, '')}): it tries again within a minute`;
 
 /** The message that carries the worker: its identity file, a long invite to pair as it, and how it files its operator (optional). */
-export const identityMessage = (identity, invite, worker = null, operatorName = null) => ({ v: ENROL_V, typ: TYP_IDENTITY, identity, invite, worker, ...(operatorName !== null && { operator_name: operatorName }) });
+// id: the code's nonce this grant is for (the machine refuses one for any other code: enrol_replay).
+export const identityMessage = (identity, invite, worker = null, operatorName = null, id = null) => ({ v: ENROL_V, typ: TYP_IDENTITY, identity, invite, worker, ...(operatorName !== null && { operator_name: operatorName }), ...(id !== null && { id }) });
 // The operator's label for itself, as the worker files it: a contact name (1 to 64, no control or bidi characters).
 const LABEL_BAD = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 export const operatorLabel = (v) => (typeof v === 'string' && v.trim() !== '' && [...v.trim()].length <= 64 && !LABEL_BAD.test(v) ? v.trim() : null);
@@ -217,9 +231,11 @@ export const operatorLabel = (v) => (typeof v === 'string' && v.trim() !== '' &&
  * with through the code), naming `relay`. → { identity, did, original, invite }, or a MsgError
  * naming the check.
  */
-export function checkIdentity(content, { operator, relay, now }) {
+export function checkIdentity(content, { operator, relay, now, id }) {
   checkNow(now);
   if (!isObject(content) || content.v !== ENROL_V || content.typ !== TYP_IDENTITY || !isObject(content.identity) || typeof content.invite !== 'string') fail('enrol_message', `not a ${ENROL_V} ${TYP_IDENTITY}`);
+  // A grant names its code (0.1.19 on): one for another code than this enrolment's is an old or a misrouted one.
+  if (content.id !== undefined && id !== undefined && content.id !== id) fail('enrol_replay', 'a worker identity for another enrolment code than the one this machine answered: not taken');
   const x = content.identity, keys = ['v', 'secret', 'genesis', 'rotations', 'attestations', 'issuers'];
   if (Object.keys(x).sort().join() !== [...keys].sort().join() || typeof x.secret !== 'string' || !/^[0-9a-f]{64}$/.test(x.secret)) fail('enrol_message', `the identity must be exactly {${keys.join(', ')}}, secret 64 hex`);
   if (![x.rotations, x.attestations, x.issuers].every(Array.isArray) || x.attestations.length !== 1 || x.issuers.length !== 1) fail('enrol_message', 'the identity carries rotations, and exactly one attestation and one issuer');
@@ -304,15 +320,17 @@ export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR
   if (operatorName !== undefined && operatorName !== null && operatorLabel(operatorName) === null) fail('enrol', 'operatorName: 1 to 64 characters, no control characters');
   const w = workerChain(keeper.K, i, n, keeper.recovery);
   // The temporary identity's contact, named apart from the worker's (forgotten once it has paired).
-  const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true, ...(relay !== undefined && relay !== carrier.relay && { relay }), ...(started !== undefined && { started }), ...(ttl !== undefined && { ttl }) });
+  const r = await carrier.invite({ name: `${name ?? `worker ${i}`} (enrolling)`, short: true, enrol: true, ...(relay !== undefined && relay !== carrier.relay && { relay }), ...(started !== undefined && { started }), ...(ttl !== undefined && { ttl }) });
   const now = nowOf(carrier), code = readCode(r.code, now), me = self(carrier, now);
   const attestation = operatorAttestation({ sign: me.sign, iss: me.did, sub: w.original, relay: code.relay, now, days });
   const old = liveHolding(carrier, w.original);
   pendingOf(carrier)(file, now, (s) => {
     s.issued[code.nonce] = { key: bytesToHex(enrolKey(code.secret)), i, n, name: name ?? null, did: w.did, original: w.original, old_pair: old ? pairOf(old) : null,
-      relay: code.relay, exp: now + PENDING_TTL, attestation, issuer: me.genesis, ...(operatorLabel(operatorName) !== null && { operator_name: operatorLabel(operatorName) }), ...(confirmWords && { confirm_words: true }) };
+      relay: code.relay, exp: now + PENDING_TTL, attestation, issuer: me.genesis, ...(operatorLabel(operatorName) !== null && { operator_name: operatorLabel(operatorName) }), ...(confirmWords && { confirm_words: true }),
+      ...(r.short && { short_hash: codeHash(r.short) }) };
   });
-  return { ...r, id: code.nonce, did: w.did, original: w.original };
+  // enrol_code: how it is shown to an agent (ENROL-K7F3-Q9ZP, short.mjs), never taken for a pairing code.
+  return { ...r, id: code.nonce, did: w.did, original: w.original, ...(r.short && { enrol_code: formatEnrol(normaliseShort(r.short)) }) };
 }
 
 /**
@@ -321,14 +339,47 @@ export async function issue({ carrier, file, i, n, name, keeper, days = OPERATOR
  * else at a later complete(). temp: the temporary identity's file, kept with the entry.
  * → { status, did: the operator's DID as the code names it, contact?, id, long? }.
  */
-export async function accept({ carrier, file, code: text, name, wait = 10, temp }) {
-  const short = codeKind(text) === 'short', long = short ? await carrier.unpark(text) : text;
+// strict: a short code must be one the relay parked as an enrolment code (relay/park.mjs isEnrol), and a
+// long code is refused (it says nothing of what it is for): an agent's init --enrol, never a pairing code.
+export async function accept({ carrier, file, code: given, name, wait = 10, temp, strict = false, relay }) {
+  const text = stripEnrol(given), short = codeKind(text) === 'short';
+  if (strict && !short) fail('enrol_not', 'init --enrol takes the enrol code your operator\'s app or sigelo-agent enrol gave (ENROL-K7F3-Q9ZP), not a long sgl1… code; a pairing code from a contact goes to accept CODE');
+  const got = short ? await carrier.unparkFrom(text, { ...(relay !== undefined && { relay }) }) : { invite: text, enrol: false }, long = got.invite;
+  if (strict && got.enrol !== true) fail('enrol_not', 'that is a pairing code, not an enrol code (the relay parked it as an invite; or your operator\'s app is older than 0.1.19): a pairing code goes to accept CODE; for enrolment ask your operator for a new enrol code');
+  const now = nowOf(carrier), code = readCode(long, now, short ? 'parked' : 'long');
+  pendingOf(carrier)(file, now, (s) => {
+    s.joining[code.nonce] = { key: bytesToHex(enrolKey(code.secret)), code_did: code.did, relay: code.relay, exp: now + PENDING_TTL, sent: false, temp: temp ?? null,
+      long, ...(short && { short_hash: codeHash(text) }), answered: false };
+  });
+  return answer(carrier, file, code.nonce, long, { name, wait, short, did: code.did });
+}
+
+// The machine's answer to the code of joining entry `id`, marked `answered` once it went or waits queued
+// in the carrier (a refusal that withdrew it leaves it false: resumeAnswer sends it again).
+async function answer(carrier, file, id, long, { name, wait, short, did }) {
+  const mark = () => pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.joining[id]) s.joining[id].answered = true; });
   try {
-    const now = nowOf(carrier), code = readCode(long, now, short ? 'parked' : 'long');
-    pendingOf(carrier)(file, now, (s) => { s.joining[code.nonce] = { key: bytesToHex(enrolKey(code.secret)), code_did: code.did, relay: code.relay, exp: now + PENDING_TTL, sent: false, temp: temp ?? null }; });
     const r = await carrier.accept(long, { name, wait });
-    return { ...r, did: code.did, id: code.nonce, ...(short && { long }) };
-  } catch (e) { throw short ? keepLong(e, long) : e; }
+    mark();
+    return { ...r, did, id, ...(short && { long }) };
+  } catch (e) {
+    if (e?.kept) mark();
+    // The entry stays: init --enrol with the same code, or enrol --finish, takes it up again.
+    throw Object.assign(short ? keepLong(e, long) : e, { pending: id });
+  }
+}
+
+/** The machine: each joining entry of `temp` whose answer did not go (a refused proof of work withdrew it)
+ *  and whose code still lives is answered again. → how many were sent or queued again. */
+export async function resumeAnswer({ carrier, file, temp, name = 'operator', wait = 30 }) {
+  const now = nowOf(carrier);
+  const todo = pendingOf(carrier)(file, now, (s) => Object.entries(s.joining).filter(([, j]) => j.temp === temp && j.answered === false && typeof j.long === 'string'));
+  let n = 0;
+  for (const [id, j] of todo) {
+    if (liveHolding(carrier, j.code_did)) { pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.joining[id]) s.joining[id].answered = true; }); continue; }
+    try { await answer(carrier, file, id, j.long, { name, wait, short: false, did: j.code_did }); n++; } catch (e) { if (!(e instanceof MsgError) && !e?.check) throw e; if (e.kept) n++; }
+  }
+  return n;
 }
 
 /**
@@ -485,15 +536,26 @@ async function sendIdentity(carrier, file, keeper, id, e, c, out) {
     }
     const identity = workerIdentity({ K: keeper.K, i: e.i, n: e.n, recovery: keeper.recovery, attestation: e.attestation, issuer: e.issuer });
     if (didOf([identity.genesis, ...identity.rotations.map((x) => x.next_genesis)].at(-1)) !== e.did) fail('keeper', `worker ${e.i} derives to another DID than at enrol: the keeper root changed since (sigelo-agent keeper)`);
-    const sent = await carrier.send(c.did, identityMessage(identity, invite, e.i, e.operator_name ?? null), { label: LABEL_IDENTITY });
+    const sent = await carrier.send(c.did, identityMessage(identity, invite, e.i, e.operator_name ?? null, id), { label: LABEL_IDENTITY });
     pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) { s.issued[id].sent_at = nowOf(carrier); delete s.issued[id].needs_send; } });
     out.delivered.push({ id, name: e.name, temp: c.did, did: e.did, status: sent.status });
+    await spend(carrier, file, id, e);
   } catch (x) {
     if (!(x instanceof MsgError)) throw x;
     if (x.check !== 'keeper') pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].needs_send = nowOf(carrier); });
     out.refused.push({ check: x.check, detail: `worker ${e.i} did not go to ${who} (${x.message}): it goes again at the next round, or when the machine asks again (sigelo-agent enrol --finish there)`, from: c.did, needs_send: id });
     if (x.check !== 'keeper') await tell(carrier, file, c.did, x.check, x.message, out);
   }
+}
+
+// The operator: the grant went, so the enrolment code is spent at the relay (relay/park.mjs: until now it
+// could be fetched again). Best effort: one not spent runs out there by itself, and its pairing is taken.
+async function spend(carrier, file, id, e) {
+  if (!e.short_hash || e.unparked || typeof carrier.unparkHash !== 'function') return;
+  try {
+    const r = await carrier.unparkHash(e.short_hash, e.relay);
+    if (r.unparked) pendingOf(carrier)(file, nowOf(carrier), (s) => { if (s.issued[id]) s.issued[id].unparked = true; });
+  } catch {}
 }
 
 // The operator: each enrolment whose identity send failed (needs_send), sent again once RESEND_S
@@ -541,7 +603,7 @@ async function onIdentity(carrier, file, temp, m, out, place) {
   }
   const [id, j] = hit;
   try {
-    const x = checkIdentity(m.content, { operator: c, relay: j.relay, now }), tempDid = self(carrier, now).original;
+    const x = checkIdentity(m.content, { operator: c, relay: j.relay, now, id }), tempDid = self(carrier, now).original;
     const r = await place(x, { operator: c, id });
     // The temporary identity is done: the operator is forgotten on it, its mailboxes given up.
     let released = false, offline;

@@ -44,7 +44,19 @@ else {
   ok('identity dir is 0700', (statSync(join(HOME, '.config', 'moadim')).mode & 0o777) === 0o700);
 }
 ok('genesis carries the recovery commitment', created.genesis.recovery?.startsWith('sha256:') === true);
-ok('init refuses to overwrite an identity', fails('init', '--no-recovery').includes('refusing to overwrite'));
+ok('init over an identity: refused, naming it and where a code goes, never "move it" (k\'s third list, point 3)', ((t) => t.includes('already holds this machine\'s identity') && t.includes('accept CODE') && !/move|delete/i.test(t))(fails('init', '--no-recovery')));
+
+{
+  // init --force: the identity there kept as <file>.bak first (its family too), then a new one; a .bak there already stops it.
+  const H2 = tmpHome('id-force'), r2 = (...a: string[]): string => execFileSync('node', [CLI, ...a], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H2 }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  const p2 = join(H2, '.config', 'moadim', 'sigelo.local.json'), first = JSON.parse(r2('init', '--no-recovery')) as { did: string };
+  const second = JSON.parse(r2('init', '--no-recovery', '--force')) as { did: string };
+  const kept = JSON.parse(readFileSync(`${p2}.bak`, 'utf8')) as { genesis: Genesis };
+  let again = '';
+  try { r2('init', '--no-recovery', '--force'); } catch (e) { again = String((e as { stderr?: string }).stderr ?? ''); }
+  ok('init --force: the old identity kept as <file>.bak first, a new one written; a second --force with the .bak there: refused, nothing moved',
+    second.did !== first.did && did(kept.genesis) === first.did && again.includes('.bak exists') && (JSON.parse(r2('whoami')) as { did: string }).did === second.did, again);
+}
 
 // ── whoami ────────────────────────────────────────────────────────────────────────────────
 const me = JSON.parse(run('whoami')) as { did: string; genesis: Genesis; chain: string[] };

@@ -4,7 +4,15 @@ description: Someone sent you an 8-character sigelo code: accept it with one com
 ---
 # Pair with a code
 
-Someone sent you a code like `K7F3-Q9ZP`. It works once, for 10 minutes.
+You were given a code?
+
+| Code | From | Run |
+|---|---|---|
+| `ENROL-K7F3-Q9ZP` | your operator | `sigelo-agent init --enrol <code> --wait 60` ([enrol](/enrol.html)) |
+| `K7F3-Q9ZP`, `sgl1…`, `PUB-…` | a contact | `sigelo-agent accept <code> --name <them>` (pairing) |
+| you give one | | `sigelo-agent invite` |
+
+A pairing code like `K7F3-Q9ZP` works once, for 10 minutes.
 
 ```sh
 npx sigelo-agent accept K7F3-Q9ZP --name alice   # your agent; Node ≥ 22.18
@@ -18,4 +26,4 @@ You both see four words. Compare them by voice or another channel. The same: you
 
 Expired or used: ask for a new code.
 
-Your own agent, under your identity? That is [enrol](/enrol.html), not pairing.
+Never `cat` the identity file: `sigelo-agent whoami` says who you are.

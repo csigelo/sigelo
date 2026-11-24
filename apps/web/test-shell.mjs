@@ -264,7 +264,9 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const state = { mode, wipe, locked: false, secure: false, door: false, secureLog: [], clipCleared: 0, clip: null,
     lock: { on: true, after: 1, secure: true }, granted: true, asked: 0, notes: new Map(), pendingOpen: null, forced: [],
     // Stay connected (StayConnected.java): the switch for the phone, its two asks (each once, then the system's page), what opened.
-    stay: { on: true, exempt: false, asked: false, notifyAsked: false }, opened: [], denials: 0 };
+    stay: { on: true, exempt: false, asked: false, notifyAsked: false }, opened: [], denials: 0,
+    // Push (UnifiedPush.java): the distributors installed, the one picked, its state; a REGISTER answered at once (NEW_ENDPOINT).
+    pushApps: [], push: { on: false, state: 'off', reason: null, distributor: null, endpoint: null }, registers: [] };
   const live = new Set();   // the open TLS sockets: cut() drops them all, as a lost network
   let current = null;
   const ALIASES = { 'identity:false': 0, 'identity:true': 1, control: 2 };
@@ -306,7 +308,7 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
         if ((B.micRefusals ?? 0) >= 2) throw Object.assign(new Error('Android no longer asks'), { check: 'mic_blocked' });
         B.micDialogs = (B.micDialogs ?? 0) + 1;
         if (B.micAnswer) { B.micGranted = true; return { granted: true }; }
-        B.micRefusals = (B.micRefusals ?? 0) + 1; throw Object.assign(new Error('the microphone is off for sigelo: tap Voice again to allow it'), { check: 'mic_permission' });
+        B.micRefusals = (B.micRefusals ?? 0) + 1; throw Object.assign(new Error('the microphone is off for Sigelo: tap Voice again to allow it'), { check: 'mic_permission' });
       }
       case 'app-settings': B.settingsOpened = (B.settingsOpened ?? 0) + 1; return {};
       // Share into sigelo (SigeloBridge share-take, share-drop): the share held, gone once taken or dropped.
@@ -442,6 +444,21 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             }
             post({ id: m.id, ...st, notify: state.granted, notifyBlocked: state.denials >= 2 });
           }
+          else if (m.op === 'push') {
+            if ('on' in m && typeof m.on !== 'boolean') throw Object.assign(new Error('on'), { check: 'push' });
+            if ('distributor' in m && typeof m.distributor !== 'string') throw Object.assign(new Error('distributor'), { check: 'push' });
+            const P = state.push, ids = state.pushApps.map((d) => d.id);
+            if (m.on === false) Object.assign(P, { on: false, state: 'off', distributor: null, endpoint: null, reason: null });
+            if (m.on === true) {
+              if ('distributor' in m && !ids.includes(m.distributor)) throw Object.assign(new Error(`no such distributor installed: ${m.distributor}`), { check: 'push' });
+              const want = m.distributor ?? (ids.includes(P.distributor) ? P.distributor : ids.length === 1 ? ids[0] : null);
+              P.on = true;
+              if (!want) P.state = ids.length ? 'pick' : 'none';
+              else { state.registers.push(want); Object.assign(P, { distributor: want, state: 'ok', endpoint: `https://push.example.org/up${want.length}?up=1`, reason: null }); }
+            }
+            const ok2 = P.state === 'ok';
+            post({ id: m.id, ...P, distributors: state.pushApps, endpoint: ok2 ? P.endpoint : null, p256dh: ok2 ? 'B' + 'A'.repeat(86) : null, auth: ok2 ? 'Q'.repeat(22) : null });
+          }
           else if (m.op.startsWith('big-') || m.op.startsWith('share-') || m.op === 'mic' || m.op === 'app-settings') post({ id: m.id, ...bigOp(m) });
           else if (m.op === 'unlock') { state.forced.push(m.force === true); state.unlocks = (state.unlocks ?? 0) + 1; if (state.locked) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); post({ id: m.id }); }
           else throw Object.assign(new Error(`no op ${m.op}`), { check: 'op' });
@@ -456,17 +473,18 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   };
   const open = (tag) => current?.postMessage(JSON.stringify({ ev: 'open', tag }));
   const nudge = () => current?.postMessage(JSON.stringify({ ev: 'nudge' }));
+  const event = (ev) => current?.postMessage(JSON.stringify(ev));
   // An app's share (MainActivity's ACTION_SEND → SigeloBridge.shared): the latest held, told to the page now when it is connected.
   const share = ({ text, name, type = 'application/octet-stream', bytes, uri } = {}) => {
     const own = uri !== undefined && !/^content:\/\/(?!io\.sigelo\.app(\.|\/|$))/.test(uri);
-    const ev = own ? { ev: 'share', error: { check: 'share', message: 'this file cannot be shared into sigelo' } }
+    const ev = own ? { ev: 'share', error: { check: 'share', message: 'this file cannot be shared into Sigelo' } }
       : text !== undefined ? (text.length > 100_000 ? { ev: 'share', error: { check: 'share', message: 'the text is too long for a message (at most 100000 characters)' } } : { ev: 'share', text })
         : { ev: 'share', name, type, size: bytes.length };
     state.share = { ev, held: !ev.error, text: ev.error ? undefined : text, name, type, bytes };
     if (current) { current.postMessage(JSON.stringify(ev)); if (ev.error) state.share = null; }
   };
   const cut = () => { for (const s of live) s.destroy(); };
-  return { shell, target, state, log, keys, open, nudge, share, cut, bigFetch, connect: () => A.connectBridge({ shell, target }) };
+  return { shell, target, state, log, keys, open, nudge, event, share, cut, bigFetch, connect: () => A.connectBridge({ shell, target }) };
 }
 
 
@@ -642,7 +660,7 @@ class FakeEl {
     ok(title() === 'Name this phone' && button('‹') && button('Next') && box.textContent.includes('Step 1 of 3') && box.all().some((e) => e.tagName === 'DETAILS' && /More options/.test(e.textContent) && /Monero network/.test(e.textContent) && /Relay/.test(e.textContent)),
       'create 1: Name this phone, Step 1 of 3, Next, Back; the network and the relay under More options');
     button('‹').onclick();
-    ok(title() === 'sigelo' && button('Create my identity') && pushed.length === 1, 'Back: one step, to the welcome (one history entry per screen)');
+    ok(title() === 'Sigelo' && button('Create my identity') && pushed.length === 1, 'Back: one step, to the welcome (one history entry per screen)');
     button('Create my identity').onclick();
     box.all().find((e) => e.tagName === 'SELECT').value = 'stagenet';
     await button('Next').onclick();
@@ -686,14 +704,14 @@ class FakeEl {
     await until(() => F.state.secure === false, 2000);
     const u0 = F.log.ops.filter((o) => o === 'unlock').length, back0 = pushed.length;
     pop();
-    ok(box.textContent.includes('Step 3 of 3') && box.textContent.includes('Lock sigelo with your fingerprint or PIN') && box.textContent.includes('Asked only when you open the app, switch profile, pay above your limit or show your 25 words.')
+    ok(box.textContent.includes('Step 3 of 3') && box.textContent.includes('Lock Sigelo with your fingerprint or PIN') && box.textContent.includes('Asked only when you open the app, switch profile, pay above your limit or show your 25 words.')
       && button('Use my phone\'s lock') && !button('‹') && pushed.length === back0 + 1 && reloaded === 0, 'create 3: Lock (the mock\'s words), Use my phone\'s lock; Back held (the identity is made)');
     await button('Use my phone\'s lock').onclick();
     await until(() => title() === 'You\'re set', 3000);
     const chips = box.all().find((e) => e.className === 'words4');
-    ok(F.log.ops.filter((o) => o === 'unlock').length === u0 + 1 && chips?.kids.length === 4 && box.textContent.includes('Your four words') && button('Open sigelo') && button('×'),
-      'create 3 → You\'re set: the screen lock asked once (bridge unlock), the four words, Open sigelo, Close');
-    await button('Open sigelo').onclick();
+    ok(F.log.ops.filter((o) => o === 'unlock').length === u0 + 1 && chips?.kids.length === 4 && box.textContent.includes('Your four words') && button('Open Sigelo') && button('×'),
+      'create 3 → You\'re set: the screen lock asked once (bridge unlock), the four words, Open Sigelo, Close');
+    await button('Open Sigelo').onclick();
     await until(() => reloaded === 1, 5000);
     await sleep(100);
     ok(p.files.read('words.keystore') === null && p.files.read('words.sealed') === null && !F.log.seals.some((x) => x.kind === 'words'), 'create, paper: no password asked, no words kept (the mock\'s gate: one or the other)');
@@ -751,7 +769,7 @@ class FakeEl {
       'Set password: too short or not the same said; then the identity made and its words kept as kind words under the FULL key, never on the screen; then the lock');
     await b('Use my phone').onclick();
     await until(() => t6() === 'You\'re set', 3000);
-    await b('Open sigelo').onclick();
+    await b('Open Sigelo').onclick();
     await until(() => reloads === 1, 5000);
     const WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href);
     const kept = await W.loadSealed(p6, 'words');
@@ -783,7 +801,7 @@ class FakeEl {
       && seatRadios.length === 2 && seatRadios.find((e) => e.value === 'here')?.checked === true && box3.all().some((e) => e.tagName === 'DETAILS' && /More options/.test(e.textContent) && /Relay/.test(e.textContent)),
       `restore (one screen, the mock's words): the words checked as typed (${bad}), Restore only on a good checksum; when they were made; main or spare (main the default); More options; FLAG_SECURE on`);
     b('‹').onclick();
-    ok(box3.all().find((e) => e.tagName === 'H1')?.textContent === 'sigelo', 'Back from Restore: to the welcome');
+    ok(box3.all().find((e) => e.tagName === 'H1')?.textContent === 'Sigelo', 'Back from Restore: to the welcome');
     await sleep(20);
     ok(F3.state.secure === false, 'Back from Restore: the words dropped, FLAG_SECURE off');
     b('Restore from 25 words').onclick();
@@ -796,7 +814,7 @@ class FakeEl {
     await b('Use my phone').onclick();
     await until(() => t3() === 'Restored', 3000);
     ok(box3.all().find((e) => e.className === 'words4')?.kids.length === 4 && box3.textContent.includes('Your identity is back'), 'restore → the lock → done: the four words');
-    await b('Open sigelo').onclick();
+    await b('Open Sigelo').onclick();
     await until(() => reloads === 1, 10000);
     await sleep(100);
     const kp = JSON.parse(new TextDecoder().decode(await W.loadSealed(p3, 'keeper')));
@@ -888,7 +906,7 @@ class FakeEl {
       `profiles: add → Profile 2 (not set up), active, the lock once, a reload (${JSON.stringify(regOf().profiles)})`);
     await stopApp();
     const s2 = pg.session; pg = page(s2);
-    ok(await checkOf(() => pg.app.ready) === 'identity' && title(pg.box) === 'sigelo' && pg.box.all().some((e) => e.tagName === 'BUTTON' && e.attrs?.['aria-label'] === 'Back to my profiles') && pg.main.hidden === true,
+    ok(await checkOf(() => pg.app.ready) === 'identity' && title(pg.box) === 'Sigelo' && pg.box.all().some((e) => e.tagName === 'BUTTON' && e.attrs?.['aria-label'] === 'Back to my profiles') && pg.main.hidden === true,
       'profiles: the new profile opens on its first run (the welcome) with its Close, "Back to my profiles"; no picker (just chosen)');
     // Its identity (restored here as the welcome would): sealed under its own aliases, blob version 2 naming p2.
     const b2 = A.profileBridge(await F.connect(), 'p2'), p2 = await A.androidPlatform({ bridge: b2, mqtt: mqttEsm, indexedDB: idb, pow, name: PR.dbName('p2') });
@@ -1123,7 +1141,7 @@ class FakeEl {
     const F2 = fakeShell({ mode: null }), idb2 = new FakeIDB(), storage2 = memStore();
     const n = page(F2, idb2, storage2);
     await checkOf(() => n.app.ready);
-    ok(h1(n.box) === 'sigelo' && btnOf(n.box, 'Restore from a backup') !== undefined, 'new phone: the welcome offers Restore from a backup');
+    ok(h1(n.box) === 'Sigelo' && btnOf(n.box, 'Restore from a backup') !== undefined, 'new phone: the welcome offers Restore from a backup');
     btnOf(n.box, 'Restore from a backup').onclick();
     const in2 = n.box.all().find((e) => e.tagName === 'INPUT' && e.type === 'file'), pw2 = n.box.all().find((e) => e.tagName === 'INPUT' && e.type === 'password');
     in2.files = [{ arrayBuffer: async () => new Uint8Array(file.bytes).buffer }];
@@ -1137,7 +1155,7 @@ class FakeEl {
     ok(h1(n.box) === 'Lock' && F2.state.mode === 'self', `new phone: restored, then the lock step (${h1(n.box)})`);
     await btnOf(n.box, 'Use my phone\'s lock').onclick();
     ok(h1(n.box) === 'Restored' && n.box.textContent.includes('Your identity is back') && n.box.all().some((e) => e.className === 'words4'), 'new phone: Restored, the four words');
-    await btnOf(n.box, 'Open sigelo').onclick();
+    await btnOf(n.box, 'Open Sigelo').onclick();
     await stopAll();
     const n2 = page(F2, idb2, storage2), r2 = await n2.app.ready, me2 = (await r2.call('GET', '/api/me')).body;
     const sealed = F2.log.seals.map((x) => `${x.kind}:${x.full}`).sort().join();
@@ -1271,6 +1289,40 @@ class FakeEl {
       bn.onEvent((m) => got.push(m.ev), 'nudge');
       FN.nudge(); FN.open('chat:did:sigelo:zN'); await sleep(50);
       ok(got.join() === 'nudge' && opens.join() === 'open', `nudge: to its listener only, a nudge before any listener dropped (not kept "now" for later) (${got} / ${opens})`);
+    }
+    // ---- Push (bridge "push", local.push; UnifiedPush.java, design/push.md): the shell's state for the phone, the endpoint and keys
+    // only once the distributor gave one; refusals before the shell; {ev:"wake"} never kept, {ev:"push"} kept for a later listener.
+    {
+      const FP = fakeShell({ mode: 'self' }), bp = await FP.connect(), n0 = FP.log.ops.length;
+      const bad = await Promise.all([{ on: 'yes' }, { on: 1 }, { distributor: 7 }, { distributor: 'a b' }, { distributor: 'x'.repeat(201) }].map((o) => checkOf(() => bp.push(o))));
+      const g0 = await bp.push();
+      ok(bad.every((c) => c === 'push') && FP.log.ops.length === n0 + 1 && g0.on === false && g0.state === 'off' && g0.endpoint === null && g0.distributors.length === 0,
+        `push: off by default; anything but a boolean on and a package name refused "push" before the shell (${bad})`);
+      const none = await bp.push({ on: true });
+      ok(none.on === true && none.state === 'none' && none.endpoint === null && FP.state.registers.length === 0, 'push: on with no push app installed: state none, nothing registered');
+      FP.state.pushApps = [{ id: 'io.heckel.ntfy', name: 'ntfy' }, { id: 'org.unifiedpush.distributor.nextpush', name: 'NextPush' }];
+      const pick = await bp.push({ on: true }), refused = await checkOf(() => bp.push({ on: true, distributor: 'com.example.none' }));
+      const okd = await bp.push({ on: true, distributor: 'io.heckel.ntfy' });
+      ok(pick.state === 'pick' && pick.distributors.map((d) => d.name).join() === 'ntfy,NextPush' && refused === 'push'
+        && okd.state === 'ok' && okd.distributor === 'io.heckel.ntfy' && /^https:\/\//.test(okd.endpoint) && okd.p256dh.length === 87 && okd.auth.length === 22 && FP.state.registers.join() === 'io.heckel.ntfy',
+        'push: two push apps → pick; one not installed refused "push"; ntfy picked → registered, its endpoint and keys given');
+      const shape = A.pushState({ on: true, state: 'registering', endpoint: 'https://x.example/u', p256dh: 'B'.repeat(87), auth: 'A'.repeat(22), distributors: [{ id: 'bad id' }, { id: 'a.b' }], state2: 1 });
+      ok(shape.endpoint === null && shape.p256dh === null && shape.distributors.length === 1 && shape.distributors[0].name === 'a.b' && A.pushState({ state: 'weird' }).state === 'off',
+        'pushState: endpoint and keys only in state ok; a distributor that is no package name dropped; an unknown state is off');
+      // A call's name to the shell: at most NOTE_MAX UTF-16 units, as SigeloBridge counts them (64 emoji are 128), whole characters.
+      const asked = [], ca = A.callAudio({ request: async (op, m) => { asked.push([op, m]); return {}; } });
+      await ca.ring({ on: true, name: '\u{1F600}'.repeat(64) }); await ca.audio({ on: true, name: 'Ann' }); await ca.ring({ on: false, name: 'x' });
+      const nm = asked[0][1].name;
+      ok(nm.length <= A.NOTE_MAX && nm.length === 100 && !/[\uD800-\uDBFF]$/.test(nm) && asked[1][1].name === 'Ann' && asked[2][1].name === undefined && asked[0][0] === 'call-ring' && asked[1][0] === 'call',
+        'callAudio: a long name cut to what the shell takes (UTF-16 units, no half character); off sends no name');
+      const Lp = boot(FP), lg = await Lp.push.get();
+      ok(lg.state === 'ok' && lg.relay === null && (await Lp.push.set({ on: false })).state === 'off' && FP.state.push.on === false && boot(null).push === undefined,
+        'local.push: get and set through the shell (relay null with no carrier: no identity here); none without the shell');
+      const FW = fakeShell({ mode: 'self' }), bw = await FW.connect(), wakes = [], pushes = [];
+      FW.event({ ev: 'wake' }); FW.event({ ev: 'push', on: true, state: 'ok' }); await sleep(50);
+      bw.onEvent((m) => wakes.push(m.ev), 'wake'); bw.onEvent((m) => pushes.push(m.state), 'push');
+      FW.event({ ev: 'wake' }); await sleep(50);
+      ok(wakes.join() === 'wake' && pushes.join() === 'ok', `events: a wake before any listener dropped (it says "now"), a push answer kept for the listener (${wakes} / ${pushes})`);
     }
     // ---- words check: the password through the gate, no screen lock
     const S = new Uint8Array(32).fill(9); S[31] = 0x0d;
@@ -1453,6 +1505,19 @@ try {
     const back = await until(async () => X.sh.log.streams.length > s0 && (await X.call('GET', '/api/state')).body.me.online);
     await sleep(600);
     ok(quiet && back && X.sh.log.streams.length === s0 + 1, `wake: nothing while up; after a cut one reconnection, with the backoff, none beside it (${s0} → ${X.sh.log.streams.length})`);
+    // A push wake (boot's {ev:"wake"} listener: carrier.wake({ now: true })): after a cut, a login at once.
+    X.sh.cut();
+    await sleep(20);
+    const t9 = Date.now();
+    X.router.carrier.wake({ now: true });
+    const back9 = await until(async () => X.sh.log.streams.length > s0 + 1 && (await X.call('GET', '/api/state')).body.me.online);
+    ok(back9 && Date.now() - t9 < 3000 && X.sh.log.streams.length === s0 + 2, `push wake: after a cut, one login at once (${Date.now() - t9} ms)`);
+    // The carrier registers the shell's endpoint at the relay over the shell's TLS stream (sigelo-push/0), and removes it.
+    const pushRows = () => relay.db.raw.prepare('SELECT count(*) AS n FROM push').get().n;
+    X.router.carrier.setPush({ endpoint: 'https://push.example.org/upAda?up=1', p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' });
+    ok(await until(() => X.router.carrier.pushStatus().state === 'registered') && pushRows() === 1, `push: the app's carrier registers its endpoint at the relay (${JSON.stringify(X.router.carrier.pushStatus())})`);
+    X.router.carrier.setPush(null);
+    ok(await until(() => X.router.carrier.pushStatus().state === 'off') && pushRows() === 0, 'push: setPush(null): removed at the relay');
     // Share into sigelo (0.1.20), the page's path (ui.js share-to over the router): a text shared from another app lands as a
     // message in the chat chosen; a file as a transfer offered there, its doc taken for this profile.
     const shared = [];

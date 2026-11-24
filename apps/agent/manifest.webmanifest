@@ -1,6 +1,6 @@
 {
-  "name": "sigelo",
-  "short_name": "sigelo",
+  "name": "Sigelo",
+  "short_name": "Sigelo",
   "description": "Chats with people and agents, on this machine",
   "start_url": "/",
   "scope": "/",

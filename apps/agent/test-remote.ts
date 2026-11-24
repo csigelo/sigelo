@@ -168,8 +168,11 @@ await page.close();
 {
   const all = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/-]+)`/gm)].map((m) => m[1]!);
   // The device routes (D4) are documented too, and in no scope: deviceRoute refuses them before any scope.
-  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && !['POST /api/transfers/send', 'POST /api/transfers/pick', 'POST /api/transfers/open', 'POST /api/transfers/voice-part', 'POST /api/transfers/mic'].includes(x));
+  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && !['POST /api/transfers/send', 'POST /api/transfers/pick', 'POST /api/transfers/open', 'POST /api/transfers/voice-part', 'POST /api/transfers/mic'].includes(x) && !x.includes(' /api/calls'));
   const [r, c, a] = [rm.SCOPES.read, rm.SCOPES.chat, rm.SCOPES.all];
+  const calls = all.filter((x) => x.includes(' /api/calls'));
+  ok('remote: the call routes of UI-API.md are in no scope, refused 403 remote', calls.length >= 10 && !calls.some((x) => a.has(x) || c.has(x) || r.has(x))
+    && (await Promise.all(calls.map(async (x) => (await rm.remoteCall('all', { method: x.split(' ')[0]!, path: x.split(' ')[1]! }, {}, async () => [200, {}]))[0]))).every((s) => s === 403), JSON.stringify(calls));
   ok('remote: every UI-API.md route but the device ones is in scope all; read ⊂ chat ⊂ all', routes.length >= 17 && routes.every((x) => a.has(x)) && a.size === routes.length
     && [...r].every((x) => c.has(x)) && [...c].every((x) => a.has(x)), JSON.stringify(routes.filter((x) => !a.has(x))));
   ok('remote: the device routes of UI-API.md (list, add, confirm, words, scan, revoke, sync) are in no scope', devices.length === 7 && !devices.some((x) => a.has(x) || c.has(x) || r.has(x)), JSON.stringify(devices));
@@ -371,8 +374,8 @@ else {
       && rl.status === 200 && rl.body.relays.length === 0, JSON.stringify([se, sp, rl]));
     const wk = await call('GET', '/api/agents/workers'), ec = await call('POST', '/api/agents/enrol-code', { name: 'vps' });
     const rn = await call('POST', '/api/agents/rename', { worker: ec.body.worker, name: 'vps2' }), rv = await call('POST', '/api/agents/revoke', { worker: ec.body.worker }), rt = await call('POST', '/api/relays/test', { relay: 'relay.test' });
-    ok('remote e2e agents: the list, a code (12 characters: relay.test names its tag), rename, revoke (the unused code cancelled), the relay Test, sealed (scope all) → 200', wk.status === 200 && wk.body.keeper === true && ec.status === 200
-      && /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(ec.body.code) && rn.body.name === 'vps2' && rv.body.cancelled === true && rt.body.ok === true, JSON.stringify([ec, rn, rv, rt]).slice(0, 900));
+    ok('remote e2e agents: the list, an enrol code (ENROL-, 12 characters: relay.test names its tag), rename, revoke (the unused code cancelled), the relay Test, sealed (scope all) → 200', wk.status === 200 && wk.body.keeper === true && ec.status === 200
+      && /^ENROL-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(ec.body.code) && rn.body.name === 'vps2' && rv.body.cancelled === true && rt.body.ok === true, JSON.stringify([ec, rn, rv, rt]).slice(0, 900));
     const ec3 = await call('POST', '/api/agents/enrol-code', { name: 'vps3', confirm_words: true }), ew = await call('POST', '/api/agents/enrol-words', { id: ec3.body.id, match: false }), pt = await call('POST', '/api/pow/try', {});
     ok('remote e2e agents: the words answer (false: the code dropped, its key never sent) and Try now, sealed → 200', ec3.status === 200 && ew.status === 200 && ew.body.state === 'failed' && ew.body.check === 'device_words'
       && pt.status === 200 && Array.isArray(pt.body.tried), JSON.stringify([ec3, ew, pt]).slice(0, 600));

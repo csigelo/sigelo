@@ -44,16 +44,21 @@
 // local.reload() (ui.js Settings → About, "Reload the app"): the shell loads the page again from its start; a tab, env.reload().
 // local.stay (the Android app only; else undefined): Settings → Stay connected, the shell's switch for the phone (not per profile):
 // get() → { on, exempt, asked, notify, notifyAsked, notifyBlocked }, set({ on }), battery(yes), notifications(yes) (platform-android.mjs stay).
-// The shell's nudge ({ev:"nudge"}: its alarm, the end of Doze) reaches the running carrier's wake().
+// The shell's nudge ({ev:"nudge"}: its alarm, the end of Doze) reaches the running carrier's wake(); a push wake ({ev:"wake"}) its wake({ now: true }).
+// local.push (the Android app only; else undefined): Settings → Notifications' Push, the shell's UnifiedPush for the phone (not per
+// profile): get() → { on, state, reason, distributors, distributor, endpoint, p256dh, auth, relay } (relay: the carrier's pushStatus()),
+// set({ on, distributor }) the same; onChange(fn) at the distributor's answers. The endpoint and keys go to the active profile's
+// carrier (setPush), which registers them at its relay (sigelo-push/0); a computer's page and a tab: none.
 // local.shared (the Android app only; else undefined): share into sigelo (another app's ACTION_SEND, held by the shell): on(fn)
 // fn({ text } | { name, type, size } | { error: { check, message } }) at each share (one at a start: once the bridge is connected; a
 // second replaces the first); take() → { text } | { doc, name, size, mtime, url, type } for the profile in use (a doc POST
 // /api/transfers/send takes), gone from the shell then; drop() Cancel.
+// local.onNetwork(fn) (the Android app only): fn() at each change of the default network while a call lasts (CallService).
 // local.bars (the Android app only; else undefined): bars("#rrggbb") the system bars in the page's background (no action bar).
 // local.powEngine() (ui.js Settings → About): the proof of work's engine, 'wasm' | 'js' (both in a Worker) | null (none here).
 import { did as didOf, parseBytes } from 'sigelo';
 import { loadIdentity, memoryFiles, openDb, webPlatform } from './platform-web.mjs';
-import { TAG, androidPlatform, bigFiles, connectBridge, keystoreSealer, profileBridge } from './platform-android.mjs';
+import { TAG, androidPlatform, bigFiles, connectBridge, keystoreSealer, profileBridge, pushState } from './platform-android.mjs';
 import { makeRouter } from './router.mjs';
 import { addComputerView, remoteBackend, wipeIfAsked } from './shell.mjs';
 import { LIMIT as COMPUTERS_MAX, REVOKE, openComputers } from './computers.mjs';
@@ -65,7 +70,7 @@ import { guard, kept, openKept, wordsApi } from './words.mjs';
 import { makeBackup } from './backup.mjs';
 import { checkPassword } from './vendor/contact/words-lock.mjs';
 
-const SETTINGS = 'app/settings.json', PICKED = 'sigelo-picked', FROM = 'sigelo-from', ADD = 'sigelo-add', JOIN = 'sigelo-join';
+const SETTINGS = 'app/settings.json', PUSHED = 'push-registered', PICKED = 'sigelo-picked', FROM = 'sigelo-from', ADD = 'sigelo-add', JOIN = 'sigelo-join';
 const PATHS = new Set(['create', 'join', 'restore', 'computer', 'backup']);
 const refuse = (status, check, message) => { throw Object.assign(new Error(message), { status, check }); };
 
@@ -82,6 +87,23 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
   const shellOf = async () => raw ?? (await rawP);
   // Stay connected's nudge: the running carrier reconnects, with its backoff, at each relay that is down (nothing else).
   rawP.then((r) => r?.onEvent(() => { try { router?.carrier?.wake?.(); } catch {} }, 'nudge'), () => {});
+  // A push wake (UnifiedPush): mail waits at the relay; the carrier logs in at once, past any backoff.
+  rawP.then((r) => r?.onEvent(() => { try { router?.carrier?.wake?.({ now: true }); } catch {} }, 'wake'), () => {});
+  // Push (UnifiedPush, design/push.md): the shell's endpoint and keys to this profile's carrier, which registers them at its
+  // relay at every login (carrier.mjs setPush, sigelo-push/0); removed there (null) once push is off or the endpoint is gone,
+  // if this profile registered one (PUSHED in its storage). A computer's page (a remote profile) has no carrier here: nothing.
+  let pushStore = null;
+  const applyPush = (st) => {
+    const c = router?.carrier;
+    if (typeof c?.setPush !== 'function' || !pushStore) return;
+    try {
+      if (st.on && st.state === 'ok' && st.endpoint && st.p256dh && st.auth) { c.setPush({ endpoint: st.endpoint, p256dh: st.p256dh, auth: st.auth }); pushStore.setItem(PUSHED, '1'); }
+      else if (pushStore.getItem(PUSHED) === '1' && st.state !== 'registering' && st.state !== 'unavailable') { c.setPush(null); pushStore.removeItem(PUSHED); }
+    } catch {}
+  };
+  rawP.then((r) => r?.onEvent((m) => applyPush(pushState(m)), 'push'), () => {});
+  // A call's notification's Hang up (CallService): the live call ends as the page's Hang up would.
+  rawP.then((r) => r?.onEvent(() => { try { void router?.page?.line?.hangup?.()?.catch(() => {}); } catch {} }, 'hangup'), () => {});
 
   /** p1 before profiles: an identity sealed in `sigelo` → words; the shell's form remote → remote; else nothing yet. */
   async function migrate() {
@@ -148,6 +170,7 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
       words: { guard: (password) => guard(platform, password) } });
     await router.start();
     globalThis.addEventListener?.('pagehide', () => { void router.stop(); });
+    if (bridge) { pushStore = store; void raw.push().then(applyPush, () => {}); }
     learn('words');
     return router;
   })();
@@ -329,6 +352,8 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
       take: async () => (await shellOf()).shareTake((await profP).id),
       drop: async () => (await shellOf()).shareDrop(),
     }) : undefined,
+    // A call (design/calls.md): fn() when the shell sees the default network change ({ev:"network"}: Wi-Fi to mobile data).
+    onNetwork(fn) { if (!shell || typeof fn !== 'function') return; rawP.then((r) => r.onEvent(() => { try { fn(); } catch {} }, 'network'), () => {}); },
     // Settings → About's "Reload the app": the shell loads the page again from its start; a tab reloads itself.
     async reload() { if (shell) await (await shellOf()).reload(); else reload?.(); },
     // Settings → About's "Proof of work": 'wasm' | 'js' (in a Worker) | null (no search here); undefined: no platform here (a computer's page).
@@ -336,6 +361,17 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     // Stay connected (Settings): the shell's switch and its two asks; a page has none.
     stay: shell ? Object.freeze({ get: async () => (await shellOf()).stay(), set: async ({ on } = {}) => (await shellOf()).stay({ on }),
       battery: async (yes) => (await shellOf()).stay({ battery: yes === true }), notifications: async (yes) => (await shellOf()).stay({ notifications: yes === true }) }) : undefined,
+    // Push (Settings → Notifications): the shell's UnifiedPush state, for the phone, with this profile's relay's side (carrier
+    // pushStatus); set({ on, distributor }) through the shell, then to the carrier. A page has none.
+    push: shell ? Object.freeze({
+      get: async () => ({ ...(await (await shellOf()).push()), relay: router?.carrier?.pushStatus?.() ?? null }),
+      set: async ({ on, distributor } = {}) => {
+        const st = await (await shellOf()).push({ ...(on !== undefined && { on }), ...(distributor !== undefined && { distributor }) });
+        applyPush(st);
+        return { ...st, relay: router?.carrier?.pushStatus?.() ?? null };
+      },
+      onChange(fn) { if (typeof fn === 'function') rawP.then((r) => r?.onEvent(() => fn(), 'push'), () => {}); },
+    }) : undefined,
     // The system bars in the page's background ("#rrggbb", ui.js at each change of the look); a page has none.
     bars: shell ? async (colour) => (await shellOf()).bars(colour) : undefined,
     // FLAG_SECURE while the kept words are on the screen (ui.js Settings → Backup and recovery → Show my 25 words).

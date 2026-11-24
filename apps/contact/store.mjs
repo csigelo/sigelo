@@ -195,6 +195,15 @@ export class Contacts {
     return { did, tier, preset: true };
   }
 
+  // A new contact's name, unique among the live ones (the agent-setup feedback, point 9: two contacts with one
+  // name, and send <name> refused both): taken, it gets the first free numeric suffix, name-2, name-3…
+  freeName(name, did) {
+    if (typeof name !== 'string') return name;
+    const taken = (n) => Object.values(this.s.contacts).some((x) => !x.revoked && x.did !== did && x.name === n);
+    if (!taken(name)) return name;
+    for (let i = 2; ; i++) { const n = `${[...name].slice(0, NAME_MAX - String(i).length - 1).join('')}-${i}`; if (!taken(n)) return n; }
+  }
+
   /**
    * The owner's name for a contact (who: a name or any DID of its chain): 1 to NAME_MAX characters,
    * trimmed, no control characters, and no other live contact's (name_taken: a name two contacts
@@ -528,7 +537,7 @@ export class Contacts {
     const kept = old ? Object.fromEntries(TIER_KEYS.filter((k) => Object.hasOwn(old, k)).map((k) => [k, old[k]])) : {};
     const pre = !old && TIERS.includes(this.s.preset?.[r.chain[0]]) ? { tier: this.s.preset[r.chain[0]], tier_by: 'owner' } : {};
     if (this.s.preset) delete this.s.preset[r.chain[0]];
-    const c = { name: old?.name ?? name, did: r.chain[0], current_did: r.did, current_key: keyOf(bundle, rotations, r.did), revoked: false, chain: r.chain, rotations, ...kept, ...pre, ...fields };
+    const c = { name: old?.name ?? this.freeName(name, r.chain[0]), did: r.chain[0], current_did: r.did, current_key: keyOf(bundle, rotations, r.did), revoked: false, chain: r.chain, rotations, ...kept, ...pre, ...fields };
     if (fields.tier !== undefined && !TIERS.includes(fields.tier)) fail('tier', `a tier is ${TIERS.join(', ')}`);
     this.s.contacts[c.did] = c;
     // Attestations the bundle carried (none at a pairing today: chains only), then the tier.

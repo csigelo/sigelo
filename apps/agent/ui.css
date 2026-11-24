@@ -405,3 +405,23 @@ header.top.plain { border-bottom: 0; }
 .rec .rec-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--danger); animation: recblink 1.2s ease-in-out infinite; }
 @keyframes recblink { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .rec .rec-dot { animation: none; } }
+/* Calls (design/calls.md §4): the call screen over every screen (under the toasts), a call's line in a chat. */
+.callscreen { position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center; padding: var(--s6) var(--s4) calc(var(--s6) + env(safe-area-inset-bottom)); background: var(--bg); }
+.callscreen[hidden] { display: none; }
+.callbox { display: flex; flex-direction: column; align-items: center; gap: var(--s3); width: 100%; max-width: 360px; text-align: center; }
+.callbox h2 { margin: 0; font-size: 24px; font-weight: 600; overflow-wrap: anywhere; }
+.callstate { margin: 0; color: var(--text-2); font-size: 16px; }
+.calltime { color: var(--text); font-variant-numeric: tabular-nums; }
+.callwords small { display: block; color: var(--text-2); font-size: 13px; margin-bottom: var(--s1); }
+.callbox .btns { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s3); margin-top: var(--s6); }
+.callbox .ib { display: inline-flex; flex-direction: column; align-items: center; gap: var(--s1); width: auto; min-width: 72px; height: auto; min-height: 56px; padding: var(--s2); border: 1px solid var(--border); border-radius: var(--r); font-size: 13px; color: var(--text); background: var(--surface); }
+.callbox .ib.on { background: var(--accent-soft); border-color: var(--accent); }
+.callline { align-self: center; display: flex; align-items: center; gap: var(--s2); padding: var(--s1) var(--s3); border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 14px; }
+.callline.missed { color: var(--warn); }
+.callline .ic { width: 16px; height: 16px; }
+.callline .meta { font-size: 12px; }
+.callbars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; margin-left: var(--s1); vertical-align: baseline; }
+.callbars i { display: block; width: 4px; background: var(--border); border-radius: 1px; }
+.callbars i:nth-child(1) { height: 4px; } .callbars i:nth-child(2) { height: 8px; } .callbars i:nth-child(3) { height: 12px; }
+.callbars i.on { background: var(--ok); }
+.callbars.q1 i.on { background: var(--warn); }

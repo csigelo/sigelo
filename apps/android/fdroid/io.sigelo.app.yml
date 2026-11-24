@@ -8,15 +8,15 @@ SourceCode: https://github.com/csigelo/sigelo
 IssueTracker: https://github.com/csigelo/sigelo/issues
 Changelog: https://github.com/csigelo/sigelo/blob/main/CHANGELOG.md
 
-AutoName: sigelo
+AutoName: Sigelo
 
 RepoType: git
 Repo: https://github.com/csigelo/sigelo.git
 Binaries: https://github.com/csigelo/sigelo/releases/download/v%v/sigelo-%v.apk
 
 Builds:
-  - versionName: 0.1.18
-    versionCode: 10
+  - versionName: 0.1.19
+    versionCode: 11
     commit: a03d859bc519ebfc2f30bc241497ce8609244c02
     subdir: apps/android/app
     sudo:
@@ -50,5 +50,5 @@ AllowedAPKSigningKeys:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.1.18
-CurrentVersionCode: 10
+CurrentVersion: 0.1.19
+CurrentVersionCode: 11

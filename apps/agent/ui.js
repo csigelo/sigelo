@@ -100,7 +100,10 @@
     file: ['M6 3h8l4 4v14H6z', 'M14 3v4h4'], image: [['rect', { x: 3, y: 5, width: 18, height: 14, rx: 2 }], ['circle', { cx: 9, cy: 10, r: 1.5 }], 'M21 16l-5-5-8 8'], camera: ['M4 8h3.5l2-3h5l2 3H20v11H4z', ['circle', { cx: 12, cy: 13, r: 3.5 }]], 'arrow-in': ['M12 4v12M6 11l6 6 6-6M5 20h14'], 'arrow-out': ['M12 20V8M6 13l6-6 6 6M5 4h14'],
     finger: ['M12 11v4M8.5 9a4 4 0 017 0v6M6 8.5a7 7 0 0112 0v5M9 13v3a3 3 0 006 0'],
     mic: [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], 'M5 11a7 7 0 0014 0M12 18v3'], play: ['M8 5l11 7-11 7z'], pause: ['M8 5v14M16 5v14'],
+    bell: ['M6 16v-5a6 6 0 0112 0v5l2 2H4z', 'M10 20a2 2 0 004 0'],
     search: [['circle', { cx: 11, cy: 11, r: 6 }], 'M20 20l-4.5-4.5'],
+    phone: ['M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z'],
+    speaker: ['M4 9v6h4l5 4V5L8 9z', 'M16 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11'],
   };
   const SVG = 'http://www.w3.org/2000/svg';
   /** An icon as inline SVG (aria-hidden: the control around it carries the label); null where there is no SVG. */
@@ -268,8 +271,8 @@
     try { await navigator.clipboard.writeText(text); toast('Message copied: paste it into any chat or mail.'); } catch { window.prompt?.('Copy this message:', text); }
   }
   const PAIR_HOW = 'https://sigelo.io/pair.html', ENROL_HOW = 'https://sigelo.io/enrol.html';
-  const pairMessage = (code, exp) => `Pair with me on sigelo: code ${code}, once, until ${hhmm(exp)}. How: ${PAIR_HOW}`;
-  const enrolMessage = (code, exp, command) => `Enrol as my agent on sigelo: code ${code}, once, until ${hhmm(exp)}. On the agent's machine: ${command}  How: ${ENROL_HOW}`;
+  const pairMessage = (code, exp) => `Pair with me on Sigelo: code ${code}, once, until ${hhmm(exp)}. How: ${PAIR_HOW}`;
+  const enrolMessage = (code, exp, command) => `Enrol as my agent on Sigelo: code ${code}, once, until ${hhmm(exp)}. On the agent's machine: ${command}  How: ${ENROL_HOW}`;
 
   // ================================================================ SHARED PIECES (design/ux1/build.md lists them)
   /** A button: kind '' (secondary), 'pri', 'danger' or 'ghost'; an icon before the label. */
@@ -613,7 +616,15 @@
     return S.profiles;
   }
   async function loadMe() { try { S.me = await backend.call('GET', '/api/me'); } catch (e) { S.me = S.me ?? null; } return S.me; }
-  const profileName = () => S.prof?.name ?? (backend === http ? 'This computer' : 'sigelo');
+  /** A profile as the lists show it: its name; where another profile has the same name (a backup restored beside its
+   * original keeps its name), the first two of its four words beside it, or its number: each reads as its own identity. */
+  const profLabel = (p, all = S.profiles?.profiles ?? []) => {
+    const key = (q) => String(q?.name ?? '').trim().toLowerCase();
+    if (all.filter((q) => key(q) === key(p)).length < 2) return p.name;
+    const w = words4(p.words);
+    return `${p.name} · ${w.length ? w.slice(0, 2).join(' ') : `no. ${String(p.id).replace(/^p/, '')}`}`;
+  };
+  const profileName = () => (S.prof?.name ? profLabel(S.prof) : backend === http ? 'This computer' : 'Sigelo');
   const myWords = () => S.prof?.words ?? S.me?.words ?? '';
   function chip() {
     S.chip = h('button', { type: 'button', class: 'pchip', onclick: openProfiles });
@@ -811,7 +822,7 @@
     return c.last ? [lead, `${c.last.dir === 'out' ? 'You: ' : ''}${c.last.text}${wait}`] : agent ? h('span', { class: 'kind' }, 'Agent') : '';
   }
   function chatRows() {
-    const items = allContacts().map((c) => ({ at: c.last?.at ?? 0, name: c.name, row: () => row({
+    const items = allContacts().filter((c) => !chatDeleted(c)).map((c) => ({ at: c.last?.at ?? 0, name: c.name, row: () => row({
       start: avatar(kindOf(c), c.name, null, c.did), title: c.name, sub: contactLine(c), attrs: { 'data-chat': c.did },
       end: [short(c.last?.at), countBadge(unreadOf(c), c)],
       onclick: () => go('chat', c.did) }) }));
@@ -931,7 +942,7 @@
       if (S.snap?.pending.paired.some((x) => x.id === M.inv.id) || (M.inv.renew && cur?.used?.length)) void go('my-code', { id: M.inv.id });
       else if (M.inv.renew) draw();
     };
-    sheet({ title: 'New chat', lead: 'Give them your code, or type theirs. Then compare four words.', update, body: [mine,
+    sheet({ title: 'New chat', lead: 'Give them your code, or type theirs. Then you both compare your 4 words.', update, body: [mine,
       h('div', { class: 'pad btns end' }, field('Their code', theirs), btn('Pair', pair, { auto: true })),
       list(row({ compact: true, start: icon('scan'), title: 'Scan their QR', onclick: () => go('scan') }),
         row({ compact: true, start: icon('people'), title: 'New group', sub: 'People and agents together', onclick: () => go('group-new') })),
@@ -977,7 +988,7 @@
     return () => {
       put(foot);
       if (!M.id) {
-        put(body, h('p', { class: 'lead' }, 'A code lets one person start a chat with you. It works once, for 10 minutes. Then you both compare four words.'),
+        put(body, h('p', { class: 'lead' }, 'A code lets one person start a chat with you. It works once, for 10 minutes. Then you both compare your 4 words.'),
           list(toggle('Renews itself', 'A new code appears when this one is used', M.renew, (on) => { M.renew = on; })),
           btn(M.busy ? 'Making a code…' : 'Make a code', () => make(M.renew ? { renew: true } : {}), { kind: 'pri', disabled: M.busy }), btn('I have their code', () => go('enter-code'), { kind: 'ghost' }),
           M.error ? [inlineError(M.error), h('p', { class: 'help' }, 'Their agent on another relay? Make a long code instead.'), btn('Make a long code', () => make({ long: true }))] : null);
@@ -992,7 +1003,7 @@
       const again = () => { M.id = null; M.inv = null; return make(M.renew ? { renew: true } : {}); };
       if (!pend || !inv) { put(body, empty('This code is gone', 'It was used or cancelled.', btn('Make a new code', again, { kind: 'pri' }))); return; }
       const live = inv.short && inv.short_exp > relayNow();
-      if (inv.short && !live) { put(body, empty('This code has run out', 'Codes work for 10 minutes, once. Make a new one.', btn('Make a new code', again, { kind: 'pri' }))); return; }
+      if (inv.short && !live) { put(body, empty('This code has run out', 'A code works once, for the time you chose. Make a new one.', btn('Make a new code', again, { kind: 'pri' }))); return; }
       const shown = inv.short ?? inv.code;
       // The last person who used a renewing code: compare four words with them.
       const last = pend.renew ? pend.used?.at(-1) : null, lastC = last ? contactBy(last.did) : null;
@@ -1048,7 +1059,7 @@
           park_unknown: `No invite waits under this code at ${me?.relay ?? 'your relay'}. It ran out (10 minutes), was used (once only), or is mistyped: ask for a new code.`,
           code_expired: 'This code has run out. Codes work for 10 minutes, once. Ask for a new one.',
           mailbox_taken: 'This code was answered already, by someone else. Ask for a new one.',
-          short_code: 'Not a code sigelo knows. Check it with whoever gave it to you.',
+          short_code: 'Not a code Sigelo knows. Check it with whoever gave it to you.',
           public_paused: 'This public code is paused by its owner. Try again later.',
           public_cap: 'This public code took all its new chats for today. Try again tomorrow.',
           words: 'The four words are not the ones of this code\'s owner: not the code their page published. Nothing was paired.',
@@ -1074,11 +1085,11 @@
     const sc = scanner(async (t) => {
       const text = t.trim();
       if (/^[0-9a-z]{4}-?[0-9a-z]{4}$/i.test(text) || /^sgl1/i.test(text)) { sc.stop(); await swap('enter-code', { code: text }); return true; }
-      say.textContent = /^SIGELO:(DEV|CTL|UI):/.test(text) ? 'A device or computer code: use it under Me → Devices and computers.' : 'Not a sigelo code this app reads.';
+      say.textContent = /^SIGELO:(DEV|CTL|UI):/.test(text) ? 'A device or computer code: use it under Me → Devices and computers.' : 'Not a Sigelo code this app reads.';
       return false;
     });
     S.leave = () => sc.stop();
-    mount(page({ title: 'Scan', body: [h('div', { class: 'pad stack' }, h('p', { class: 'lead center' }, 'Point at a sigelo QR: a person, an agent, a shop or your computer.'), sc, say, btn('Type a code instead', () => swap('enter-code')))] }));
+    mount(page({ title: 'Scan', body: [h('div', { class: 'pad stack' }, h('p', { class: 'lead center' }, 'Point at a Sigelo QR: a person, an agent, a shop or your computer.'), sc, say, btn('Type a code instead', () => swap('enter-code')))] }));
     return () => {};
   });
 
@@ -1288,6 +1299,11 @@
   // (0.1.17: "keep the text if I change the screen"); gone once sent. At most DRAFT_MAX characters are kept.
   const DRAFT_MAX = 20000;
   const draftKey = (id) => `draft:${S.snap?.me?.did ?? S.me?.original ?? 'here'}:${id}`;
+  // A chat deleted (Chat settings → Delete this chat): its messages cleared on this device (POST /api/history/clear), the
+  // contact kept, the other side not told; the chat is left out of Chats until a message comes or goes, or the chat is
+  // opened again (a new empty one). This device's mark, per identity: the last message's time when it was deleted.
+  const deletedKey = (did) => `chat-deleted:${S.snap?.me?.did ?? S.me?.original ?? 'here'}:${did}`;
+  const chatDeleted = (c) => { const at = prefs.get(deletedKey(c.did)); return at !== null && (c.last?.at ?? 0) <= Number(at) && !unreadOf(c); };
   function composer(placeholder, onSend, lead, top = null, draft = null) {
     const text = h('textarea', { rows: 1, placeholder, 'aria-label': 'Message', 'data-keep': '' });
     if (draft) text.value = prefs.get(draftKey(draft)) ?? '';
@@ -1365,8 +1381,11 @@
     const heading = h('h1', { class: 'sr' });
     // The bar: Back, the name (avatar and name, one control: the chat settings, or my agent's page), Pay with the Wallet on.
     const payBtn = tbtn('Pay', () => pay(did)), payAt = h('span', null, walletOn() ? payBtn : null);
-    mount(page({ who, actions: [ibtn('search', 'Search this chat', () => go('search', { contact: did })), payAt], body: [heading, alerts, thread], after: C.el }));
+    // Call (design/calls.md §4): only a person online, from a page that can call.
+    const callBtn = ibtn('phone', 'Call', () => void callStart(did)), callAt = h('span', null, callable(contactBy(did)) ? callBtn : null);
+    mount(page({ who, actions: [callAt, ibtn('search', 'Search this chat', () => go('search', { contact: did })), payAt], body: [heading, alerts, thread], after: C.el }));
     notifyOut({ tag: tagOfChat(did), cancel: true });   // its notification, if one is up: read now
+    prefs.set(deletedKey(did), null);   // a deleted chat opened again: a new one, in Chats again
     let first = true;
     const asked = new Map();   // a payment request answered in this chat: what it says after (the mock's "Done. scout was told.")
     const answered = new Map();   // an approval or question answered here (n → the text sent), until the history shows it
@@ -1377,6 +1396,7 @@
       const w = mine(), k = kindOf(c), seen = presenceText(c);
       heading.textContent = safeText(c.name);
       if (walletOn() !== payAt.contains(payBtn)) put(payAt, walletOn() ? payBtn : null);
+      if (callable(c) !== callAt.contains(callBtn)) put(callAt, callable(c) ? callBtn : null);
       put(who, avatar(k, c.name, null, c.did), h('span', { class: 'mid' }, h('b', null, c.name), h('small', { class: c.online ? 'ok' : null }, w ? `your agent${seen ? ` · ${seen}` : ''}` : seen)));
       const ts = await transferSettingsNow();
       // My agent's chat: its settings first, then the "+" (photos and files only: its allowance is paid on its own screen).
@@ -1451,7 +1471,9 @@
         return h('div', { class: 'msg in prompt', 'data-prompt': String(m.n) }, a ? [h('b', null, a.tool), msgText(a.summary, 'div', false)] : msgText(q.question), end, h('span', { class: 'meta' }, hhmm(m.at)));
       };
       const pick = (m) => () => { RQ.set({ n: m.n, who: m.dir === 'out' ? 'You' : c.name, text: String(m.text).split('\n')[0].slice(0, 120) }); C.text.focus?.(); };
-      put(thread, r.messages.length ? threadOf(r.messages, (m) => (m.approval || m.question) && c.tier === 'own' ? promptBubble(m) : m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : m.file ? fileBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && tapOf(m)) },
+      // A call's line (design/calls.md §4: "Call · 4:12", "Missed call", "Declined"): local, never sent; no audio kept.
+      const callLine = (m) => h('div', { class: `callline ${m.dir}${m.call.state === 'missed' ? ' missed' : ''}`, 'data-call': m.call.state }, icon('phone'), h('span', null, m.text), h('span', { class: 'meta' }, hhmm(m.at)));
+      put(thread, r.messages.length ? threadOf(r.messages, (m) => m.call ? callLine(m) : (m.approval || m.question) && c.tier === 'own' ? promptBubble(m) : m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : m.file ? fileBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && tapOf(m)) },
         m.re ? quoteIn(m.re.dir === 'out' ? 'You' : c.name, m.re.text, m.re.n === null ? null : ['data-n', String(m.re.n)]) : null,
         m.label && m.label !== 'sigelo-file/0' && !m.re ? h('span', { class: 'who' }, m.label) : null,
         m.label === 'sigelo-file/0' ? fileText(m.text) : msgText(m.text),
@@ -1528,6 +1550,14 @@
           void act(() => backend.call('POST', '/api/history/clear', { contact: did }), () => toast('Chat cleared.'));
         }
       };
+      const del = async () => {
+        if (await ask({ title: `Delete this chat on this ${LOCAL || SHELL ? 'phone' : 'computer'}?`, text: 'Your contact keeps theirs. You can start a new one any time.', yes: 'Delete this chat', no: 'Keep it' })) {
+          void act(() => backend.call('POST', '/api/history/clear', { contact: did }), () => {
+            prefs.set(deletedKey(did), String(c.last?.at ?? 0)); prefs.set(draftKey(`c:${did}`), null);
+            toast('Chat deleted.'); home();
+          });
+        }
+      };
       put(body, noteCard(),
         h('div', { class: 'pad ident' }, picButton(kindOf(c), c.name, did, `Picture for ${c.name}`), h('h3', null, c.name), c.words ? fourWords(c.words) : null,
           c.words_checked ? h('p', { class: 'ok' }, '✓ Words compared') : c.words && !c.local ? btn('Compare four words', () => go('compare', did), { auto: true }) : null,
@@ -1542,13 +1572,17 @@
         autoBox(c),
         h('div', { class: 'list' },
           toggle('Sees when I\'m online', c.presence === 'own' ? 'Your own agent always sees it.' : null, c.presence !== 'deny', (allow) => act(() => backend.call('POST', '/api/presence', { contact: did, allow })), { disabled: c.presence === 'own' }),
+          // Calls (decision 2026-11-17): may they ring here; the default by tier and Settings, or this contact's own choice.
+          kindOf(c) === 'person' && typeof c.can_call === 'boolean' ? toggle('Can call me', c.can_call ? 'Their calls ring here' : c.tier === 'quiet' && !c.can_call_set ? 'Off for quiet contacts: a missed call shows in the chat' : 'Off: a missed call shows in the chat', c.can_call,
+            (on) => act(() => backend.call('POST', '/api/calls/allow', { contact: did, on }))) : null,
           // This chat's system notifications (NOTIFICATIONS below: the sender's name only, never the text) and its count.
           toggle('Notifications', muted(c) ? 'Off: no count on the Chats tab' : 'The sender\'s name only, never the text', !muted(c), (on) => act(() => backend.call('POST', '/api/notify', { chat: did, on }))),
           // Its kind (UI-API.md "Kinds"): the agent mark in the lists; derived by the page, or set here.
           toggle('This is an agent', c.kind_set ? 'You set this' : kindOf(c) === 'agent' ? 'Known from its pairing' : 'Shows the agent mark in your chats', kindOf(c) === 'agent',
             (on) => act(() => backend.call('POST', '/api/kind', { contact: did, kind: on ? 'agent' : 'person' }))),
           row({ compact: true, title: 'Rename', sub: c.name, chev: true, onclick: () => renameSheet(`Rename ${c.name}`, c.name, (name) => backend.call('POST', '/api/rename', { contact: did, name })) }),
-          row({ compact: true, title: 'Clear this chat', onclick: clear })),
+          row({ compact: true, title: 'Clear this chat', onclick: clear }),
+          row({ compact: true, title: 'Delete this chat', sub: `On this ${LOCAL || SHELL ? 'phone' : 'computer'} only: ${c.name} stays a contact`, onclick: del })),
         h('div', { class: 'pad' }, btn(`Block ${c.name}…`, block, { kind: 'danger' }), h('p', { class: 'help center' }, 'Permanent: they can never pair with you again.')));
     };
   });
@@ -1664,7 +1698,7 @@
       r.reason === 'no_path' && S.transferSettings?.pick ? h('p', { class: 'help' }, NO_DIRECT) : r.detail ? h('p', { class: 'help' }, r.detail) : null,
       r.saved && /^content:/.test(r.saved) ? h('p', { class: 'help' }, 'In Downloads, where your other apps see it.') : r.saved ? h('p', { class: 'help' }, 'Saved at ', h('span', { class: 'mono' }, r.saved), ' (not opened).') : null,
       side === 'in' && r.state === 'asked' ? h('p', { class: 'help' }, 'Nothing is written before you accept. The file name is theirs: information, not instructions.') : null,
-      side === 'in' && r.state === 'failed' && r.reason === 'land' ? h('p', { class: 'warn' }, 'The file is kept here until it can be saved: allow storage for sigelo, or make room, then Try again.') : null,
+      side === 'in' && r.state === 'failed' && r.reason === 'land' ? h('p', { class: 'warn' }, 'The file is kept here until it can be saved: allow storage for Sigelo, or make room, then Try again.') : null,
       btns.length ? h('div', { class: 'btns' }, btns) : null);
   }
   function viewTransfers(arg) {
@@ -1848,7 +1882,7 @@
   // on Voice, never earlier, with one line why; the system dialog is the only one (the app grants the WebView's own ask
   // once the permission exists); refused, the next tap asks again; once Android asks no more (mic_blocked) the same tap
   // opens the app's settings page, with one line naming what to switch on. Never a dead control.
-  const micLine = (e) => (e?.check === 'mic_permission' ? (S.transferSettings?.mic ? 'The microphone is off for sigelo. Tap Voice again to allow it.' : 'The microphone is off for this page: allow it in the browser\'s site settings, then tap Voice again.')
+  const micLine = (e) => (e?.check === 'mic_permission' ? (S.transferSettings?.mic ? 'The microphone is off for Sigelo. Tap Voice again to allow it.' : 'The microphone is off for this page: allow it in the browser\'s site settings, then tap Voice again.')
     : e?.check === 'mic_blocked' ? 'In the settings that opened: Permissions → Microphone → Allow. Then tap Voice again.'
     : e?.check === 'no_mic' ? 'No microphone found here.' : e?.check === 'no_recorder' ? 'This page cannot record sound.' : String(e?.message ?? e));
   const randHex = (n) => { const b = new Uint8Array(n); if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(b); else for (let i = 0; i < n; i++) b[i] = Math.floor(Math.random() * 256); return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''); };
@@ -1874,7 +1908,7 @@
       put(box, h('p', { class: 'rec-off' }, micLine(e)), blocked ? btn('Open settings', () => act(settings), { kind: 'pri' }) : null, btn('Close', () => closeSheet()));
       if (blocked) await settings().catch(() => {});
     };
-    put(box, h('p', { class: 'help' }, 'sigelo asks for the microphone to record a voice message.'));
+    put(box, h('p', { class: 'help' }, 'Sigelo asks for the microphone to record a voice message.'));
     sheet({ title: 'Voice message', lead: `To ${who}. Up to 5 minutes.`, onClose: () => { if (!done) { done = true; r?.cancel(); } }, body: [box] });
     // Android: RECORD_AUDIO through the shell (its one dialog, the first time only; remembered after); a browser asks at getUserMedia.
     if (S.transferSettings?.mic) { try { await backend.call('POST', '/api/transfers/mic'); } catch (e) { return refused(e); } }
@@ -2363,23 +2397,31 @@
       const mine = walletOn() && K ? live.map((w) => policyOf(w.worker)).filter(Boolean) : [], sw = syncWords();
       const sum = (f) => mine.reduce((t, a) => { try { return t + BigInt(a[f]); } catch { return t; } }, 0n);
       const periods = [...new Set(mine.map((a) => a.period_seconds))];
+      // Agents of your contacts (People and teams' "Their agents"): the ones a person introduced to you, paired or offered.
+      const theirs = allContacts().filter((c) => kindOf(c) === 'person').flatMap((p) => { const A = theirAgents(p); return [
+        A.paired.map((a) => row({ start: avatar('agent', a.name, null, a.did), title: a.name, sub: [`${p.name}'s agent`, a.link?.purpose].filter(Boolean).join(' · '), chev: true, attrs: { 'data-their-agent': a.did }, onclick: () => go('chat', a.did) })),
+        A.offered.map((x) => row({ start: avatar('agent', x.peer_name ?? 'agent'), title: x.peer_name ?? 'An agent', sub: `${p.name} offers it${x.purpose ? `: ${x.purpose}` : ''}`, end: tbtn('Add', () => go('requests')) }))]; });
       put(lst,
         W.error ? h('div', { class: 'card warn' }, h('p', null, W.error.check === 'scope' ? 'This control may not list the agents.' : plain(W.error))) : null,
+        asks.length || words.length ? [sec('Needs you'), list(asks, words)] : null,
+        // Yours and your contacts' apart: two sections, each with its heading.
+        sec('Your agents'),
         !W.error && !W.keeper ? h('div', { class: 'card' }, h('p', null, h('b', null, 'Your agents come from your 25 words')),
           h('p', { class: 'help' }, LOCAL ? 'Create a new identity or restore from your 25 words to enrol agents from this app.' : 'Make the keeper once on this computer: sigelo-agent keeper --from-words')) : null,
         W.seat === 'elsewhere' ? h('div', { class: 'card' }, h('p', null, 'Another device signs in as you: enrol agents there.')) : null,
         mine.length ? h('button', { type: 'button', class: 'card soft tap', 'data-allowances': '', onclick: () => go('allowances') }, h('p', null, h('b', null, `Allowances ${periods.length === 1 ? periodWord(periods[0]) : 'this period'}`)),
           h('p', { class: 'help' }, `${xmr(sum('spent'))} of ${xmr(sum('per_period_max'))} XMR spent by your agents`), meter(sum('spent'), sum('per_period_max')),
           sw ? h('p', { class: `help${synced() ? '' : ' stale'}`, 'data-sync': walletReady()?.sync?.state }, sw) : null) : null,
-        asks.length || words.length ? [sec('Needs you'), list(asks, words)] : null,
-        live.length ? [sec('Your agents'), list(live.map(workerRow))]
+        live.length ? list(live.map(workerRow))
           : W.keeper ? empty('No agents yet', 'Enrol an AI agent to let it act as you: chat, book, pay from an allowance you set.', btn('Enrol an agent', () => go('enrol'), { kind: 'pri', disabled: !canEnrol(W) })) : null,
         // Revoked stays revoked (never trusted again), folded away; Enrol again makes a new code under the same name: a new
         // worker, a new key, as Enrol agent does.
         gone.length ? h('details', { class: 'more', 'data-revoked': '' }, h('summary', null, `Revoked (${gone.length})`), list(gone.map((w) => {
           const r = workerRow(w, false);
           return h('div', { class: 'row-with' }, r, canEnrol(W) && w.placed !== 'device' ? btn('Enrol again', () => go('enrol', { name: w.name }), { kind: 'ghost' }) : null);
-        }))) : null);
+        }))) : null,
+        sec('Agents of your contacts'),
+        list(theirs) ?? h('p', { class: 'help pad', 'data-their-agents': 'none' }, 'No agents yet. Once a friend introduces their agent to you, it shows here.'));
     };
   });
 
@@ -2393,22 +2435,26 @@
     }
   }
   const TRUST = [['own', 'Works for me', 'Its messages shown in full. For agents you run.'], ['quiet', 'Reads the web', 'Low trust: you read it when you choose.']];
+  // How long the code works (the agent-setup feedback, point 12: a local model took 2 to 45 minutes to run the command).
+  const LIFE = [['600', '10 minutes', 'An agent that answers at once.'], ['3600', '1 hour', 'A slow or busy agent.'], ['86400', '24 hours', 'A local model on a busy machine.']];
   screen('enrol', {}, (arg) => {
-    const E = { id: arg?.id ?? null, first: null, busy: false, error: null, tier: 'own' };
+    const E = { id: arg?.id ?? null, first: null, busy: false, error: null, tier: 'own', ttl: 600 };
     const nameIn = input({ autocapitalize: 'none', maxlength: '64', placeholder: 'notes', 'data-keep': '' });
     if (typeof arg?.name === 'string') nameIn.value = arg.name;   // Enrol again (a revoked agent's name): a new code, a new key
     const body = h('div', { class: 'pad stack' }), foot = h('div'), title = h('h1', null, 'Enrol an agent'), say = h('div');
     const trust = radios('Trust', TRUST, 'own', (t) => { E.tier = t; trustLine.textContent = `Trust: ${TRUST.find(([v]) => v === t)[1].toLowerCase()}`; });
     const trustLine = h('summary', null, 'Trust: works for me');
+    const life = radios('Code works for', LIFE, '600', (t) => { E.ttl = Number(t); lifeLine.textContent = `Code works for ${LIFE.find(([v]) => v === t)[1]}`; });
+    const lifeLine = h('summary', null, 'Code works for 10 minutes');
     const form = h('div', { class: 'stack' }, h('p', { class: 'lead' }, 'Enrolling gives an AI agent its own key under your identity. It then acts as you, within the limits you set.'),
-      field('Agent name', nameIn, 'Lowercase letters, digits, - and _.'), h('details', { class: 'more' }, trustLine, trust), say);
+      field('Agent name', nameIn, 'Lowercase letters, digits, - and _.'), h('details', { class: 'more' }, trustLine, trust), h('details', { class: 'more' }, lifeLine, life), say);
     mount(page({ who: title, body: [body], foot: [foot] }));
     const keep = (id) => { S.stack[S.stack.length - 1].arg = id ? { id } : undefined; if (ours()) H.replaceState(stateOf(S.stack.length - 1), ''); };
     const reset = () => { E.id = null; E.first = null; keep(null); return refresh(); };
     const make = async () => {
       E.busy = true; E.error = null; await refresh();
       try {
-        const r = await started('POST', '/api/agents/enrol-code', { name: nameIn.value.trim(), ...(E.tier !== 'own' && { tier: E.tier }), confirm_words: true });
+        const r = await started('POST', '/api/agents/enrol-code', { name: nameIn.value.trim(), ...(E.tier !== 'own' && { tier: E.tier }), ...(E.ttl !== 600 && { ttl: E.ttl }), confirm_words: true });
         E.id = r.id; E.first = r; keep(r.id);
       } catch (e) { E.error = e; }
       E.busy = false;
@@ -2561,7 +2607,7 @@
 
   // An agent's allowance and limits (notes.md "Decided": the four common ones first, then Advanced), set at the keeper
   // (POST /api/keeper/agent): a change signed by you where the keeper takes it, else its policy file. Validation on leaving a
-  // field and on Save, the message under the field; Save is never disabled; Save asks one confirmation tap (Owner 2026-11-14).
+  // field and on Save, the message under the field; Save is never disabled; Save asks one confirmation tap (2026-11-14).
   screen('agent-allowance', {}, (i) => {
     S.keeperAt = 0;   // a screen opened reads the keeper afresh
     const body = h('div'), foot = h('div'), title = h('h1', null, 'Allowance'), say = h('div');
@@ -3087,7 +3133,7 @@
       put(body,
         h('div', { class: 'card me-card' }, picButton('person', profileName(), 'me', has ? 'Change your picture' : 'Add your picture'),
           h('span', { class: 'mid' }, h('h3', null, profileName()), h('p', { class: 'wline' }, wordsLine(myWords())))),
-        h('div', { class: 'pad btns' }, btn('My code and QR', () => go('my-code'), { kind: 'pri', ic: 'qr' }), btn('Scan', () => go('scan'), { ic: 'scan' })),
+        h('div', { class: 'pad btns' }, btn('My code and my QR', () => go('my-code'), { kind: 'pri', ic: 'qr' }), btn('Scan', () => go('scan'), { ic: 'scan' })),
         sec('You and others'),
         list(row({ compact: true, start: icon('people'), title: 'People and teams', chev: true, onclick: () => go('people'),
           sub: [`${people} ${people === 1 ? 'person' : 'people'}`, `${teams} ${teams === 1 ? 'team' : 'teams'}`, others ? `${others} ${others === 1 ? 'group' : 'groups'}` : null].filter(Boolean).join(' · ') }),
@@ -3198,7 +3244,7 @@
 
   // ---- Public invite (the mock's invite, invite-new, invite-on; design/public-invite.md, UI-API.md "Public invite"): one code
   // many use for months (Pro only), each new chat waiting for your OK unless you let anyone in; a daily cap, Pause, Stop for good.
-  const publicMessage = (p) => `Start a chat with me on sigelo: ${p.short}. My four words: ${p.words}. Or open ${p.link}`;
+  const publicMessage = (p) => `Start a chat with me on Sigelo: ${p.short}. My four words: ${p.words}. Or open ${p.link}`;
   screen('invite', {}, () => {
     const body = h('div');
     mount(page({ title: 'Public invite', body: [body] }));
@@ -3211,8 +3257,8 @@
     return () => {
       const p = S.snap?.pending?.public;
       if (!p) {
-        put(body, noteCard(), h('div', { class: 'empty left' }, h('h3', null, 'One code for everyone'),
-          h('p', null, 'Put it on your website, shop window or card. Anyone can start a chat with you. Each new chat waits for your OK, unless you let anyone in. It lasts for months and you can stop it any time.'),
+        put(body, noteCard(), h('div', { class: 'empty left' }, h('h3', null, 'One code for all'),
+          h('p', null, 'Put it on your website, your shop window or your business card. Anyone can start a chat with you. Each new chat waits for your OK, unless you let anyone in. It lasts for months and you can stop it any time.'),
           h('p', { class: 'help', 'data-pro': '' }, 'A public code comes with Pro: one allowance for all your agents.'),
           btn('Make a public invite', () => go('invite-new'), { kind: 'pri' }),
           h('p', { class: 'help' }, 'For one person, use My code instead: it works once.')));
@@ -3273,7 +3319,7 @@
     const signBtn = btn('Sign', sign, { kind: 'pri', ic: 'pen' });
     const to = arg?.to ? contactBy(arg.to) : null;
     mount(page({ title: 'Sign a message', body: [h('div', { class: 'pad stack' }, to ? h('p', { class: 'lead' }, `For ${to.name}: signed, then sent in your chat.`) : null,
-      field('What you want to sign', text, 'Anyone can check it came from you and was not changed.'), say,
+      field('What you want to sign', text, 'Anyone can check that this came from you and was not altered.'), say,
       btn('Pick a file instead', () => pick.click()), pick, to ? null : btn('Check someone\'s message instead', () => swap('check'), { kind: 'ghost' }))], foot: [signBtn] }));
     setTimeout(() => text.focus?.(), 0);
     return () => {};
@@ -3363,12 +3409,12 @@
     return () => {
       const r = A.r, list_ = r?.attestations ?? [];
       put(body, h('h3', null, 'Prove your identity is not new'),
-        h('p', { class: 'lead' }, 'Some services only trust identities older than a few weeks. A service that vouches for yours signs the day it does; anyone can check it later.'),
+        h('p', { class: 'lead' }, 'Some services only trust identities older than a few weeks. A service which vouches for you, signs the day it does.'),
         sec('What shows its age today'),
         !r ? (A.e ? inlineError(A.e) : h('p', { class: 'help' }, 'Loading…')) : [
           h('div', { class: 'list' }, r.created ? kv('Made on', `${day(Date.parse(r.created) / 1000)} · its own date, not proven`) : null,
             list_.map((a) => row({ compact: true, title: a.ctx, sub: [`vouched for it on ${day(a.iat)}`, ADMISSION[a.admission] ?? a.admission, `until ${day(a.exp)}`].join(' · '), subCls: 'wrap', attrs: { 'data-attestation': a.iss } }))),
-          list_.length ? null : h('p', { class: 'help' }, 'No service vouches for this identity yet. When one does, the day it signed shows here.')],
+          list_.length ? null : h('p', { class: 'help' }, 'No service has vouched for this identity yet.')],
         h('div', { class: 'card' }, h('p', null, h('b', null, 'Recording it on the Monero chain: not in this version.')),
           h('p', { class: 'help' }, 'One small transaction would record that this identity exists from that day, public and permanent. This version can\'t make it.')));
     };
@@ -3473,7 +3519,7 @@
           h('div', { class: 'pad stack' }, btn('Connect a computer', () => run(() => COMPUTERS.add()), { ic: 'plus', disabled: computers.length >= limit }),
             h('p', { class: 'help' }, computers.length >= limit ? `At most ${limit} computers: forget one to add another.` : 'Each computer is paired once, by its code or QR.')));
       } else put(comp, C.say ? inlineError(C.say) : null);
-      const move = h('details', { class: 'more pad' }, h('summary', null, 'Move signing in to another device'), h('p', { class: 'help' }, 'Only one device signs in as you at a time. To move it, open sigelo there: on a phone restored from your 25 words as a spare, "Make this phone the main one".'));
+      const move = h('details', { class: 'more pad' }, h('summary', null, 'Move signing in to another device'), h('p', { class: 'help' }, 'Only one device signs in as you at a time. To move it, open Sigelo there: on a phone restored from your 25 words as a spare, "Make this phone the main one".'));
       if (backend === http) { put(devs, D.el, move); await D.update(); } else if (backend.mode?.()?.kind === 'full') put(devs, move);
     };
   });
@@ -3584,7 +3630,7 @@
   screen('settings', {}, () => {
     const body = h('div');
     mount(page({ title: 'Settings', body: [body] }));
-    void loadMe().then(versionNow).then(lockState).then(transferSettingsNow).then(stayNow).then(refresh);
+    void loadMe().then(versionNow).then(lockState).then(transferSettingsNow).then(stayNow).then(pushNow).then(refresh);
     return () => {
       const me = S.snap?.me, n = S.profiles?.profiles?.length;
       put(body, sec(`This profile: ${profileName()}`),
@@ -3594,12 +3640,12 @@
           row({ compact: true, start: icon('chat'), title: 'Chats and history', chev: true, onclick: () => go('set-chats') })),
         sec(LOCAL || SHELL ? 'This phone' : 'This computer'),
         list(row({ compact: true, start: icon('lock'), title: 'Lock', sub: lockLine(), chev: true, onclick: () => go('set-lock') }),
+          STAY ? row({ compact: true, start: icon('bell'), title: 'Notifications', sub: wakeLine(), chev: true, onclick: () => go('set-notify') }) : null,
           PROFILES ? row({ compact: true, start: icon('people'), title: 'Profiles', sub: n ? `${n} on this phone` : null, chev: true, onclick: () => go('profiles-manage') }) : null,
           row({ compact: true, start: icon('pen'), title: 'Appearance', sub: 'Theme and colour', chev: true, onclick: () => go('set-appearance') }),
           row({ compact: true, start: icon('info'), title: 'About', sub: versionLine(), chev: true, onclick: () => go('about') })),
         S.transferSettings?.camera ? h('div', { class: 'list' }, toggle('Keep location in photos', 'Off: where a photo was taken is removed before it goes', S.transferSettings.keep_location === true,
-          (x) => act(() => backend.call('POST', '/api/transfers/settings', { keep_location: x }), (y) => { S.transferSettings = { ...S.transferSettings, ...y }; }))) : null,
-        stayBlock());
+          (x) => act(() => backend.call('POST', '/api/transfers/settings', { keep_location: x }), (y) => { S.transferSettings = { ...S.transferSettings, ...y }; }))) : null);
     };
   });
   // Settings → Stay connected (the Android app: LOCAL.stay, the shell's switch for this phone, StayConnected.java). Turned on by
@@ -3616,7 +3662,58 @@
     if (on && !st.exempt) st = await STAY.battery(await ask({ title: 'Let it run in the background?', text: 'Without this, Android may pause the connection to save battery.', yes: 'Allow', no: 'Not now', danger: false }));
     S.stay = st;
   }
-  const stayBlock = () => (S.stay ? [h('div', { class: 'list' }, toggle('Stay connected', 'Keeps the connection open while the app is minimised, so messages arrive and calls can ring. Shows a small notification.', S.stay.on, (x) => act(() => stayOn(x)))),
+  // Settings → Notifications (the Android app): the wake mode, one of three for the phone: Stay connected (above), Push (LOCAL.push:
+  // UnifiedPush through the user's push app, design/push.md §1 B: the relay wakes the phone when mail waits, the app swiped away
+  // too), or Off. Push names the push app used (a choice when there are several), what it said, and what the relay said; no push
+  // app: said once, with what to install, and Stay connected offered. The computer's page and the GTK app: none (phone first).
+  const PUSH = LOCAL?.push ?? null;
+  const pushNow = async () => { if (PUSH) { try { S.push = await PUSH.get(); } catch { S.push = null; } } };
+  PUSH?.onChange?.(() => { void pushNow().then(refresh); });
+  globalThis.document?.addEventListener?.('visibilitychange', () => { if (PUSH && S.push && !document.hidden) void pushNow().then(refresh); });
+  const wakeMode = () => (S.stay?.on ? 'stay' : S.push?.on ? 'push' : 'off');
+  const wakeLine = () => ({ stay: 'Stay connected', push: 'Push', off: 'Off' })[wakeMode()];
+  async function askNotify() {
+    if (S.stay && !S.stay.notify) S.stay = await STAY.notifications(await ask({ title: 'Allow notifications?', text: S.stay.notifyBlocked ? 'So new messages can tell you. In the settings that open, switch on Notifications.' : 'So new messages can tell you.', yes: S.stay.notifyBlocked ? 'Open settings' : 'Allow', no: 'Not now', danger: false }));
+  }
+  async function setWake(mode) {
+    if (mode === 'stay') { if (S.push?.on) S.push = await PUSH.set({ on: false }); await stayOn(true); return; }
+    if (S.stay?.on) S.stay = await STAY.set({ on: false });
+    if (mode === 'off') { if (S.push?.on) S.push = await PUSH.set({ on: false }); return; }
+    S.push = await PUSH.set({ on: true });
+    await askNotify();
+  }
+  const PUSH_SAYS = {
+    registering: (n) => `Waiting for ${n}…`, ok: (n) => `Ready: ${n} wakes sigelo when a message waits.`, pick: () => 'Pick the push app to use.',
+    failed: (n, r) => `${n} refused${r ? `: ${r}` : ''}. Pick it again, or use Stay connected.`, unregistered: (n) => `${n} dropped sigelo. Pick it again.`, unavailable: (n) => `${n} is not reachable now; it retries by itself.`,
+  };
+  const RELAY_SAYS = { pending: 'Relay: told at the next connection.', registered: 'Relay: registered.', unsupported: 'Your relay does not take push yet: messages arrive when you open the app.', off: 'Relay: removed.' };
+  const pushBlock = () => {
+    const P = S.push;
+    if (!P) return null;
+    const name = P.distributors.find((d) => d.id === P.distributor)?.name ?? 'the push app';
+    if (P.state === 'none') {
+      return h('div', { class: 'card warn stack', 'data-push': 'none' }, h('p', null, h('b', null, 'No push app on this phone.')),
+        h('p', { class: 'help' }, 'Install ntfy (F-Droid), and in its settings set the server to push.sigelo.ai, or your own. Or use Stay connected.'));
+    }
+    const R = P.relay, relayLine = R?.state === 'refused' ? `Relay refused: ${R.detail ?? R.code}` : RELAY_SAYS[R?.state] ?? null;
+    return [P.distributors.length > 1 ? [sec('Push app'), radios('Push app', P.distributors.map((d) => [d.id, d.name]), P.distributor, (v) => act(async () => { S.push = await PUSH.set({ on: true, distributor: v }); }))] : null,
+      h('div', { class: 'pad stack', 'data-push': P.state }, h('p', { class: 'help' }, PUSH_SAYS[P.state]?.(name, P.reason) ?? ''), P.state === 'ok' && relayLine ? h('p', { class: 'help' }, relayLine) : null)];
+  };
+  screen('set-notify', {}, () => {
+    const body = h('div');
+    mount(page({ title: 'Notifications', body: [body] }));
+    void stayNow().then(pushNow).then(refresh);
+    return () => {
+      const mode = wakeMode();
+      put(body, sec('When sigelo is not on the screen'),
+        radios('Wake mode', [['stay', 'Stay connected', 'Keeps the connection open while the app is minimised, so messages arrive and calls can ring. Shows a small notification.'],
+          ...(PUSH ? [['push', 'Push', 'Your push app (such as ntfy) wakes sigelo when a message waits, even after the app is swiped away. The relay learns which push service you use; it sends no content.']] : []),
+          ['off', 'Off', 'Messages arrive when you open the app.']], mode, (v) => act(() => setWake(v))),
+        mode === 'stay' ? stayBlock() : mode === 'push' ? [pushBlock(), S.stay && !S.stay.notify ? stayNotifyRow() : null] : null);
+    };
+  });
+  const stayNotifyRow = () => list(row({ compact: true, title: 'Notifications are off', sub: S.stay.notifyBlocked ? 'Messages arrive, but nothing tells you. Tap, then switch on Notifications.' : 'Messages arrive, but nothing tells you. Tap to turn them on.', onclick: () => act(async () => { S.stay = await STAY.notifications(true); }) }));
+  const stayBlock = () => (S.stay ? [
     S.stay.on && !S.stay.notify ? list(row({ compact: true, title: 'Notifications are off', sub: S.stay.notifyBlocked ? 'Messages arrive, but nothing tells you. Tap, then switch on Notifications.' : 'Messages arrive, but nothing tells you. Tap to turn them on.', onclick: () => act(async () => { S.stay = await STAY.notifications(true); }) })) : null,
     S.stay.on && !S.stay.exempt ? list(row({ compact: true, title: 'Battery saving may pause it', sub: 'Android may cut the connection while the phone sleeps. Tap to let it run.', onclick: () => act(async () => { S.stay = await STAY.battery(true); }) })) : null] : null);
   const backupLine = () => [SEC.st?.kept ? '25 words kept here, locked' : '25 words on paper', S.me?.recovery === 'set' ? 'recovery key set' : S.me ? 'no recovery key' : null].filter(Boolean).join(' · ');
@@ -3839,6 +3936,8 @@
       put(body, noteCard(),
         st ? [sec('New people\'s messages'), radios('New people\'s messages', TIERS, st.new_tier ?? 'friend', (v) => set({ new_tier: v })),
           h('div', { class: 'list' }, toggle('Show when I\'m online', 'to new people', st.new_presence === true, (v) => set({ new_presence: v }))),
+          // Calls (decision 2026-11-17): the default for own and friends; quiet contacts never ring; each contact's page can differ.
+          typeof st.calls === 'boolean' ? h('div', { class: 'list' }, toggle('Contacts can call me', st.calls ? 'Your own and friends ring here; quiet contacts never do. Each contact\'s page can change it.' : 'Off: nobody rings unless switched on on their page', st.calls, (v) => set({ calls: v }))) : null,
           h('div', { class: 'list' }, toggle('Send seen receipts', st.seen_receipts !== false ? 'They see ✓✓ once you have read their messages' : 'Off: they see one tick, never when you read', st.seen_receipts !== false, (v) => set({ seen_receipts: v })),
             // System notifications (NOTIFICATIONS below): the sender's name only; off, none at all.
             toggle('Notifications', 'The sender\'s name only, never the text', st.notify !== false, (v) => set({ notify: v })))]
@@ -3869,7 +3968,7 @@
     return () => {
       const m = S.me, me = S.snap?.me, off = me?.clock_offset;
       const kv = (k, v) => (v === null || v === undefined || v === '' ? null : h('div', { class: 'kv' }, h('span', null, k), h('span', null, v)));
-      put(body, h('div', { class: 'pad' }, h('p', { class: 'wordmark' }, 'sigelo'), h('p', { class: 'lead' }, `${versionLine()} · experimental`)),
+      put(body, h('div', { class: 'pad' }, h('p', { class: 'wordmark' }, 'Sigelo'), h('p', { class: 'lead' }, `${versionLine()} · experimental`)),
         h('details', { class: 'more pad', open: true }, h('summary', null, 'Technical details'), h('div', { class: 'list' },
           m ? h('div', { class: 'kv' }, h('span', null, 'Identity'), h('span', { class: 'mono' }, m.did)) : null,
           m ? row({ compact: true, title: 'Copy the identity', onclick: () => copy(m.did) }) : null,
@@ -3906,7 +4005,7 @@
     const run = async (fn) => { put(say); try { await fn(); } catch (e) { put(say, inlineError(e)); } };
     const full = P.profiles.length >= (P.limit ?? 8);
     sheet({ title: 'Profiles', lead: 'Each one is a separate identity with its own chats, agents and wallet.', body: [inlineError(P.error),
-      list(P.profiles.map((p) => row({ start: h('span', { class: `dot${p.id === P.active ? '' : ' off'}` }), title: p.name, attrs: { 'data-profile': p.id },
+      list(P.profiles.map((p) => row({ start: h('span', { class: `dot${p.id === P.active ? '' : ' off'}` }), title: profLabel(p, P.profiles), attrs: { 'data-profile': p.id },
         sub: [p.words ? wordsLine(p.words) : p.kind ? null : 'Not set up yet', p.kind === 'remote' ? 'A computer\'s page' : null].filter(Boolean).join(' · '),
         end: [p.kind === 'words' ? walletEnd(p) : null, p.id === P.active ? h('span', { class: 'ok', 'aria-label': 'In use' }, icon('check') ?? '✓') : null],
         onclick: p.id === P.active ? () => closeSheet() : () => run(() => PROFILES.use(p.id)) }))),
@@ -3932,19 +4031,20 @@
         if (!f) {
           const box = input({ value: p.name, maxlength: '24' });
           box.addEventListener('change', async () => { M.say = null; try { await PROFILES.rename(p.id, box.value); await loadProfiles(); toast('Renamed.'); } catch (e) { M.say = e; } await refresh(); });
-          f = field(p.name, box); names.set(p.id, f);
+          f = field(profLabel(p, P.profiles), box); names.set(p.id, f);
         }
         return f;
       };
       put(renames, P.profiles.map(fieldOf));
       put(body, inlineError(P.error), inlineError(M.say), P.profiles.length >= (P.limit ?? 8) ? h('p', { class: 'help pad' }, `At most ${P.limit ?? 8} profiles: remove one to add another.`) : null, sec('Rename'), renames,
-        sec('Remove'), h('div', { class: 'card' }, h('p', null, 'Removing a profile deletes its identity, chats and wallet from this phone. Only its 25 words bring it back.'),
-          h('div', { class: 'stack' }, P.profiles.map((p) => btn(`Remove ${p.name}…`, () => removeProfile(p), { kind: 'danger' })))));
+        sec('Remove'), h('div', { class: 'card' }, h('p', null, 'Removing a profile deletes its identity, chats and wallet from this phone. Only with the 25 words of the profile will it bring everything back.'),
+          h('div', { class: 'stack' }, P.profiles.map((p) => btn(`Remove ${profLabel(p, P.profiles)}…`, () => removeProfile(p), { kind: 'danger' })))));
     };
   });
   /** Remove a profile: a sheet naming it; a words profile needs "I have the 25 words" ticked, and its words password when kept. */
   async function removeProfile(p) {
     const tick = h('input', { type: 'checkbox', 'aria-label': 'I have the 25 words' }), pw = pwField('Its words password'), say = h('div');
+    const label = profLabel(p);
     let kept = false;
     try { kept = p.kind === 'words' && (await WORDS?.status(p.id))?.kept === true; } catch {}
     const go_ = async (b) => {
@@ -3953,14 +4053,14 @@
         const auth = kept ? await WORDS.auth(p.id, pw.value) : {};
         const r = await PROFILES.remove(p.id, { name: p.name, words: tick.checked, ...auth });
         await closeSheet();
-        if (!r?.reload) { await loadProfiles(); await refresh(); toast(`${p.name} removed.`); }
+        if (!r?.reload) { await loadProfiles(); await refresh(); toast(`${label} removed.`); }
       } catch (e) { put(say, inlineError(e)); b.disabled = false; }
     };
-    const yes = btn(`Remove ${p.name}`, () => go_(yes), { kind: 'danger' });
-    sheet({ title: `Remove ${p.name}?`, lead: p.kind === 'words' ? 'Its identity, chats and wallet leave this phone. Only its 25 words bring it back.'
+    const yes = btn(`Remove ${label}`, () => go_(yes), { kind: 'danger' });
+    sheet({ title: `Remove ${label}?`, lead: p.kind === 'words' ? 'Its identity, chats and wallet leave this phone. Only with the 25 words of the profile will it bring everything back.'
       : p.kind === 'remote' ? `The computers keep the pairing until you revoke it there: ${REVOKE_CONTROL}.` : 'Not set up yet: nothing in it.',
     body: [h('div', { class: 'pad stack' }, p.kind === 'words' ? h('label', { class: 'row compact' }, tick, h('span', { class: 'mid' }, h('b', null, 'I have the 25 words'))) : null,
-      kept ? field('Its words password', pw) : null, say, yes, btn(`Keep ${p.name}`, () => closeSheet()))] });
+      kept ? field('Its words password', pw) : null, say, yes, btn(`Keep ${label}`, () => closeSheet()))] });
   }
   const pwField = (label) => h('input', { type: 'password', autocomplete: label === 'New password' || label === 'Repeat it' ? 'new-password' : 'current-password', autocapitalize: 'none', spellcheck: 'false', 'aria-label': label });
 
@@ -4027,7 +4127,7 @@
     if (!BK.st) { void backupStatus(); return h('div', { class: 'card' }, h('p', { class: 'help' }, 'Loading…')); }
     if (BK.st.kind === 'remote') return h('div', { class: 'card' }, h('p', null, 'Nothing to back up here: your computer holds this profile.'));
     return h('div', { class: 'card' }, h('p', null, 'Your chats, contacts, agents and settings, with this phone\'s keys: a move to a new phone without pairing again.'),
-      h('p', { class: 'help' }, 'Encrypted with your words password. Never sent to a sigelo server.'),
+      h('p', { class: 'help' }, 'Encrypted with your words password. Never sent to a Sigelo server.'),
       h('div', { class: 'btns' }, btn('Back up this profile', () => go('backup-make'), { disabled: !BK.st.can })));
   }
   screen('backup-make', {}, () => {
@@ -4170,7 +4270,7 @@
     S.view = 'locked'; S.update = () => {};
     mount(h('div', { class: 'screen locked', 'data-screen': 'locked' },
       h('header', { class: 'top plain' }, h('span', { class: 'sp' }), PROFILES ? tbtn('Other profile', openProfiles) : null),
-      h('div', { class: 'hero center stack' }, h('div', { class: 'badge-ic' }, icon('lock')), h('h1', { class: 'big' }, 'sigelo is locked'), h('p', { class: 'lead' }, profileName()),
+      h('div', { class: 'hero center stack' }, h('div', { class: 'badge-ic' }, icon('lock')), h('h1', { class: 'big' }, 'Sigelo is locked'), h('p', { class: 'lead' }, profileName()),
         field('Words password', pw), say),
       h('div', { class: 'foot' }, btn('Unlock', open, { kind: 'pri', ic: 'lock' }))));
     pw.focus?.();
@@ -4241,6 +4341,126 @@
   if (WORDS && !LOCK && prefs.get('page-lock') === 'on') L.locked = true;
   if (WORDS) Promise.resolve().then(() => wordsStatus()).then(() => { if (L.locked && lockKind() !== 'password') { L.locked = false; void render(); } });
 
+  // ================================================================ CALLS (design/calls.md §4; apps/contact/call.mjs, UI-API.md "Calls")
+  // A Call button in a person's chat, shown when they are online (presence: decision 2026-11-17) and this page can call
+  // (an RTCPeerConnection and a microphone: the phone app's page, the computer's page in a tab; never the GTK app's remote
+  // form, nor a phone's remote form of a computer: no signalling over the relay at a poll's pace). The call screen lies
+  // over every screen, in the body: outgoing "Calling…", then "Ringing…", Cancel; incoming the name, the words line,
+  // Accept, Decline; active the name, the timer, Mute, Speaker (where the shell has one), Hang up, "Direct", and the
+  // pairing's four words when compared (the call's keys are signed by that pairing's identities: compared once covers
+  // every call), else the warning. The page's Phone polls /api/calls while a call is live; the page's own poll is the
+  // heartbeat (GET /api/calls?rtc=1): a ring waits only where a page can take it. No audio is ever kept.
+  const callLib = lazy('/call.mjs');
+  const CALL = { phone: null, made: false, el: null, out: null, tone: null, endAt: 0, endId: null, to: null };
+  const callsHere = () => !SHELL && (backend === http || Boolean(LOCAL && LOCAL.mode?.())) && S.snap?.call !== undefined
+    && typeof globalThis.RTCPeerConnection === 'function' && typeof navigator.mediaDevices?.getUserMedia === 'function';
+  const micErr = (e) => Object.assign(new Error(String(e?.message ?? e)), { check: e?.name === 'NotAllowedError' || e?.name === 'SecurityError' ? 'mic_permission' : e?.check ?? 'no_mic' });
+  /** The page's Phone, made once (call.mjs, or the test's globalThis.sigeloCall). */
+  async function phoneNow() {
+    if (CALL.phone || CALL.made) return CALL.phone;
+    CALL.made = true;
+    const C = globalThis.sigeloCall ?? await callLib();
+    if (!C) return null;
+    CALL.lib = C;
+    CALL.phone = new C.Phone({ api: (m, p, b) => backend.call(m, p, b), RTC: globalThis.RTCPeerConnection,
+      media: () => navigator.mediaDevices.getUserMedia({ audio: C.AUDIO }).catch((e) => { throw micErr(e); }),
+      onState: (v) => callDraw(v), onStream: (st) => callOut(st) });
+    return CALL.phone;
+  }
+  /** At every poll: the heartbeat, and an incoming ring found. */
+  // The shell's network change (the Android app: Wi-Fi to mobile data): the caller restarts ICE at once.
+  LOCAL?.onNetwork?.(() => { CALL.phone?.networkChanged(); });
+  async function callPoll() {
+    if (!callsHere()) return;
+    const p = await phoneNow();
+    if (p && !p.view().live) await p.tick();
+    // An ended call's screen goes once its 3 s are over (a page whose timers were held: at the next poll).
+    if (p && CALL.el && !CALL.el.hidden) callDraw(p.view());
+  }
+  /** May this page call c now: a person (not my agent), present, paired. */
+  const callable = (c) => Boolean(c && callsHere() && kindOf(c) === 'person' && !workerOf(c.did) && !c.local && c.online === true && c.status !== 'pair_again');
+  async function callStart(did) {
+    const p = await phoneNow();
+    if (!p) { toast('This page cannot make calls.'); return; }
+    CALL.to = did; CALL.endId = null; CALL.endAt = 0;
+    try { await p.place(did); } catch (e) {
+      // Their ring came first (both pressed Call): theirs is taken.
+      if (e?.check === 'call_busy' && p.call?.dir === 'in' && p.call.did === did && p.call.state === 'incoming') { await p.accept(); return; }
+      callDraw(p.view());
+    }
+  }
+  /** The far end's audio: one <audio> in the call screen, played from the stream (never recorded). */
+  function callOut(stream) {
+    if (!CALL.out) CALL.out = h('audio', { autoplay: true, 'aria-hidden': 'true' });
+    try { CALL.out.srcObject = stream; if (stream) void CALL.out.play?.()?.catch?.(() => {}); } catch {}
+  }
+  /** A ring in the page itself where no shell rings (a tab): a soft two-tone every 2 s while it rings. */
+  function callTone(on) {
+    if (!on) { if (CALL.tone) { clearInterval(CALL.tone.t); try { void CALL.tone.ctx.close(); } catch {} CALL.tone = null; } return; }
+    if (CALL.tone || typeof globalThis.AudioContext !== 'function') return;
+    try {
+      const ctx = new AudioContext(), beep = () => { for (const [f, at] of [[440, 0], [480, 0.4]]) { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; g.gain.value = 0.08; o.connect(g).connect(ctx.destination); o.start(ctx.currentTime + at); o.stop(ctx.currentTime + at + 0.35); } };
+      beep(); CALL.tone = { ctx, t: setInterval(beep, 2000) };
+    } catch {}
+  }
+  const v0 = () => CALL.phone?.view() ?? {};
+  const callEnded = (c, err) => {
+    if (err?.check === 'no_path' || c?.reason === 'no_path') return CALL.lib?.NO_PATH ?? 'Could not connect directly from these two networks.';
+    if (err) return err.check === 'mic_permission' ? (v0().can?.mic ? 'The microphone is off for Sigelo. Tap Call again to allow it.' : 'The microphone is off for this page: allow it in the browser\'s site settings, then call again.')
+      : err.check === 'mic_blocked' ? 'In the settings that opened: Permissions → Microphone → Allow. Then call again.' : err.check === 'no_mic' ? 'No microphone found here.' : plain(err);
+    if (!c) return 'Call ended';
+    const secs = c.secs ?? 0;
+    if (c.reason === 'declined') return c.dir === 'out' ? `${c.name} declined` : 'Declined';
+    if (c.reason === 'busy') return `${c.name} is on another call`;
+    if (c.reason === 'lost') return `Connection lost${secs ? ` · ${mss(secs)}` : ''}`;
+    if (c.dir === 'out' && !secs && ['no_answer', 'unavailable'].includes(c.reason)) return 'No answer';
+    if (c.dir === 'in' && !secs && c.reason !== 'hangup') return 'Missed call';
+    return `Call ended${secs ? ` · ${mss(secs)}` : ''}`;
+  };
+  /** The signal: three bars from the far end's reports (loss, round trip; call.mjs barsOf), none before the first. */
+  const QUALITY = ['Reconnecting', 'Poor connection', 'Fair connection', 'Good connection'];
+  function callBars(q) {
+    if (q === null || q === undefined) return null;
+    return h('span', { class: `callbars q${q}`, role: 'img', 'aria-label': QUALITY[q], title: QUALITY[q] }, [1, 2, 3].map((i) => h('i', { class: i <= q ? 'on' : null })));
+  }
+  /** The call screen, drawn again at every change of the Phone. */
+  function callDraw(v) {
+    const el = CALL.el ?? (CALL.el = h('div', { class: 'callscreen', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Call' }));
+    if (!el.parentNode) document.body?.append?.(el);
+    const c = v.call, p = CALL.phone, ended = (c && c.state === 'ended') || v.phase === 'failed';
+    const ringing = Boolean(c && c.dir === 'in' && c.state === 'incoming');
+    callTone(ringing && !v.can?.ring && !globalThis.document?.hidden);
+    // An ended call stays 3 s (its end said), then the screen goes; Close at once.
+    if (ended && CALL.endId !== (c?.id ?? 'failed')) { CALL.endId = c?.id ?? 'failed'; CALL.endAt = Date.now() + 3000; setTimeout(() => { if (CALL.phone) callDraw(CALL.phone.view()); }, 3100); }
+    if (!v.live && !(ended && Date.now() < CALL.endAt) && !v.error) { el.hidden = true; put(el); return; }
+    if (!v.live && v.error && !(Date.now() < CALL.endAt)) { el.hidden = true; put(el); return; }
+    el.hidden = false;
+    const did = c?.did ?? CALL.to, who = did ? contactBy(did) : null, name = c?.name ?? who?.name ?? '';
+    const words = who?.words_checked && who.words ? h('div', { class: 'callwords' }, h('small', null, 'Your words with them'), fourWords(who.words))
+      : h('p', { class: 'warn' }, 'Words not compared: you can\'t be sure it\'s them.');
+    const head = [avatar('person', name, 'lg', did), h('h2', null, name)];
+    let line = '', btns = [];
+    if (ended) {
+      line = callEnded(c, v.error);
+      btns = [btn('Close', () => { CALL.endAt = 0; p?.dismiss(); callDraw(p ? p.view() : v); })];
+      if (v.error?.check === 'mic_blocked') btns.unshift(btn('Open settings', () => act(() => backend.call('POST', '/api/calls/mic-settings')), { kind: 'pri' }));
+    } else if (v.phase === 'mic') { line = 'Asking for the microphone…'; btns = [btn('Cancel', () => p?.hangup())]; }
+    else if (v.phase === 'placing' || (c?.dir === 'out' && c.state === 'calling')) { line = 'Calling…'; btns = [btn('Cancel', () => p?.hangup(), { kind: 'danger' })]; }
+    else if (c?.dir === 'out' && c.state === 'ringing') { line = 'Ringing…'; btns = [btn('Cancel', () => p?.hangup(), { kind: 'danger' })]; }
+    else if (ringing) {
+      line = 'Incoming call';
+      btns = [btn('Accept', () => { callTone(false); void p?.accept(); }, { kind: 'pri' }), btn('Decline', () => { callTone(false); void p?.decline(); }, { kind: 'danger' })];
+    } else if (c?.state === 'connecting') { line = 'Connecting…'; btns = [btn('Hang up', () => p?.hangup(), { kind: 'danger' })]; }
+    else if (c?.state === 'active' && v.reconnecting) { line = h('span', null, h('b', { class: 'calltime' }, mss(c.secs ?? 0)), ' · Reconnecting…'); btns = [btn('Hang up', () => p?.hangup(), { kind: 'danger' })]; }
+    else if (c?.state === 'active') {
+      line = h('span', null, h('b', { class: 'calltime' }, mss(c.secs ?? 0)), ' · Direct ', callBars(v.quality));
+      btns = [h('button', { type: 'button', class: `ib callmute${v.muted ? ' on' : ''}`, 'aria-pressed': v.muted ? 'true' : 'false', 'aria-label': v.muted ? 'Unmute' : 'Mute', onclick: () => p?.mute(!v.muted) }, icon('mic'), v.muted ? 'Unmute' : 'Mute'),
+        v.can?.speaker ? h('button', { type: 'button', class: `ib callspk${v.speaker ? ' on' : ''}`, 'aria-pressed': v.speaker ? 'true' : 'false', 'aria-label': 'Speaker', onclick: () => void p?.speaker(!v.speaker).catch((e) => toast(plain(e))) }, icon('speaker'), 'Speaker') : null,
+        btn('Hang up', () => p?.hangup(), { kind: 'danger' })];
+    }
+    put(el, h('div', { class: 'callbox' }, head, h('p', { class: 'callstate', 'aria-live': 'polite' }, line), ended ? null : words, h('div', { class: 'btns' }, btns), CALL.out));
+  }
+
   // ================================================================ NOTIFICATIONS (Decided: the sender's name only, never the text)
   // A new message or a payment request raises a system notification: the Android app's (sigeloLocal.notify, its bridge), the GTK
   // app's (its bridge's notify op); a browser tab and the computer's page raise none. It says who (a contact's name, a group's
@@ -4262,7 +4482,8 @@
     const first = N.seen === null, seen = N.seen ?? new Map(), out = [];
     for (const c of allContacts()) {
       const l = c.last, at = l?.dir === 'in' ? l.at ?? 0 : 0, was = seen.get(c.did) ?? 0;
-      if (at > was) { seen.set(c.did, at); if (!first && !muted(c) && c.tier !== 'quiet' && !onScreen('chat', c.did)) out.push({ tag: tagOfChat(c.did), title: clip(c.name), text: 'New message' }); }
+      // A call's line (Calls): only a missed one is told, as "Missed call"; a call taken or made here was seen.
+      if (at > was) { seen.set(c.did, at); if (!first && !muted(c) && c.tier !== 'quiet' && !onScreen('chat', c.did) && (!l.call || l.call === 'missed')) out.push({ tag: tagOfChat(c.did), title: clip(c.name), text: l.call ? 'Missed call' : 'New message' }); }
     }
     for (const g of (S.groups?.groups ?? []).filter(liveGroup)) {
       const l = g.last, at = l && !l.mine ? l.at ?? 0 : 0, was = seen.get(g.gid) ?? 0;
@@ -4302,7 +4523,7 @@
     let r = null;
     try { r = await LOCAL.notify({ ask: true }); } catch {}
     N.denied = r && !r.granted ? (r.blocked ? 'blocked' : 'refused') : null;
-    if (N.denied === 'blocked' && typeof LOCAL?.openSettings === 'function') { toast('Switch on Notifications for sigelo, then come back'); void LOCAL.openSettings().catch(() => {}); }
+    if (N.denied === 'blocked' && typeof LOCAL?.openSettings === 'function') { toast('Switch on Notifications for Sigelo, then come back'); void LOCAL.openSettings().catch(() => {}); }
     else if (N.denied === 'refused') toast('Notifications not allowed. Tap again to allow them.');
     void refresh();
     return r;
@@ -4311,8 +4532,8 @@
   function notifyCard() {
     if (typeof LOCAL?.notify !== 'function' || N.global === false || prefs.get('notify-asked') === '1' && N.denied !== 'refused' && N.denied !== 'blocked') return null;
     if (![...(S.snap?.groups?.mine ?? []), ...(S.snap?.groups?.contacts ?? [])].some((c) => c.last)) return null;
-    const why = N.denied === 'blocked' ? 'Notifications are off for sigelo in Android. Tap to open its settings and switch them on.'
-      : N.denied === 'refused' ? 'Notifications were not allowed. Tap to ask again.' : 'Get a notification when a message comes while sigelo is closed: the sender\'s name only, never the text.';
+    const why = N.denied === 'blocked' ? 'Notifications are off for Sigelo in Android. Tap to open its settings and switch them on.'
+      : N.denied === 'refused' ? 'Notifications were not allowed. Tap to ask again.' : 'Get a notification when a message comes while Sigelo is closed: the sender\'s name only, never the text.';
     return h('div', { class: 'card', 'data-notify-ask': N.denied ?? 'first' }, row({ title: 'Notifications', sub: why, subCls: 'wrap',
       end: [tbtn(N.denied === 'blocked' ? 'Open settings' : 'Allow', () => void notifyAsk()), N.denied ? null : tbtn('Not now', () => { prefs.set('notify-asked', '1'); N.denied = null; void refresh(); })] }));
   }
@@ -4371,7 +4592,7 @@
     // Left by any way but a send (Back, a tab, a notification's chat): dropped. A second share replacing it is not dropped.
     S.leave = () => dropShare(mine);
     return async () => {
-      if (!mine || SH.cur !== mine) { q.hidden = true; put(pre, empty('Nothing to share', 'Share a text, a link, a photo or a file from another app, then choose sigelo.')); put(lst); return; }
+      if (!mine || SH.cur !== mine) { q.hidden = true; put(pre, empty('Nothing to share', 'Share a text, a link, a photo or a file from another app, then choose Sigelo.')); put(lst); return; }
       const text = typeof mine.text === 'string';
       put(pre, h('div', { class: 'card', 'data-share-preview': text ? 'text' : 'file' }, text
         ? h('p', { class: 'wrap' }, mine.text.length > 280 ? `${mine.text.slice(0, 280)}…` : mine.text)
@@ -4398,6 +4619,7 @@
     polling = true;
     try { S.snap = await backend.call('GET', `/api/state?since=${S.snap?.seq ?? 0}`); S.fatal = null; } catch (e) { S.fatal = e; }
     if (!S.fatal) await walletMirror();
+    if (!S.fatal) { try { await callPoll(); } catch {} }
     // The computer's page only (http): pending relay controls; a page that has none of it (404, 403) stops asking.
     if (backend === http && !S.fatal && S.controls !== false) { try { S.controls = (await backend.call('GET', '/api/controls')).pending; } catch (e) { if (e.status === 404 || e.status === 403) S.controls = false; } }
     polling = false;

@@ -584,12 +584,14 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   ok(h1() === 'Chats' && has('No chats yet') && btn('Start a chat') && btn('Enrol an agent') && btn('New chat')?.className === 'fab'
     && root.all().filter((e) => e.attrs['data-tab']).map((e) => e.textContent).join() === 'Chats,Agents,Me' && tabBtn('chats').attrs['aria-current'] === 'page',
     'ui.js: the first screen is Chats (empty: No chats yet, Start a chat, Enrol an agent), the New chat button; tabs Chats, Agents, Me (Wallet off: no tab)');
-  ok(root.all().some((e) => e.className === 'pchip' && e.textContent.includes('sigelo') && e.textContent.includes('amber · otter · violin · harbor')), 'top bar: the profile chip, the name and the four words (GET /api/me)');
+  ok(root.all().some((e) => e.className === 'pchip' && e.textContent.includes('Sigelo') && e.textContent.includes('amber · otter · violin · harbor')), 'top bar: the profile chip, the name and the four words (GET /api/me)');
   await tabBtn('agents').click(); await settle(); await poll();
   const rows = () => root.all().filter((e) => e.attrs['data-worker'] !== undefined);
   ok(h1() === 'Agents' && rows().length === 1 && rows()[0].textContent.includes('phone') && rows()[0].textContent.includes('a device that holds your identity') && !rows()[0].textContent.includes('FULL')
     && calls.some(([m, p]) => m === 'GET' && p === '/api/agents/workers') && btn('Enrol agent')?.className === 'fab' && !btn('Enrol agent').disabled && tabBtn('agents').attrs['aria-current'] === 'page',
     'ui.js: Agents, a row per worker from GET /api/agents/workers (its name, where it is, in words: no FULL or SAFE); Enrol agent ready (a keeper, the seat here)');
+  ok(root.all().filter((e) => e.className === 'sec').map((e) => e.textContent).join() === 'Your agents,Agents of your contacts' && has('No agents yet. Once a friend introduces their agent to you, it shows here.'),
+    'Agents: two sections, Your agents and Agents of your contacts; the second empty says how one comes');
   await tabBtn('chats').click(); await settle(); await poll();
   await btn('New chat').click(); await settle();
   ok(sheet() && sh1() === 'New chat' && btn('Make my code') && aria('Their code', 'INPUT') && btn('Pair') && has('Scan their QR') && has('New group') && has('Your own agent?') && (sandbox.unlocks ?? 0) === 0,
@@ -605,6 +607,11 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   nameIn.value = 'vps';
   const web = root.all().find((e) => e.tagName === 'INPUT' && e.attrs.type === 'radio' && e.value === 'quiet');
   web.checked = true; fire(web, 'change');
+  // The code's life (the agent-setup feedback, point 12): 10 minutes, 1 hour or 24 hours; 10 minutes sends no ttl (enrol --ttl's default).
+  const lives = root.all().filter((e) => e.tagName === 'INPUT' && e.attrs.type === 'radio' && ['600', '3600', '86400'].includes(e.value));
+  ok(lives.length === 3 && lives.find((e) => e.value === '600').checked && has('Code works for 10 minutes') && has('24 hours'), 'enrol: the code works for 10 minutes, 1 hour or 24 hours, 10 minutes chosen');
+  const day = lives.find((e) => e.value === '86400');
+  day.checked = true; fire(day, 'change');
   sandbox.powAsk = true;
   void btn('Make a code').click(); await settle();
   ok(sheet() && has('Fourth setup at this relay (relay.sigelo.ai) today, up to 2 minutes. Go on?'), 'enrol: past the day\'s 3 setups the page asks once (pow_confirm), in a sheet');
@@ -612,12 +619,12 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   const made = calls.find(([, p]) => p === '/api/agents/enrol-code'), again = calls.filter(([, p]) => p === '/api/agents/enrol-code')[1];
   sandbox.powAsk = false;
   const big = root.all().find((e) => e.className === 'code');
-  ok(again?.[2]?.pow_confirmed === true && JSON.stringify(made?.[2]) === JSON.stringify({ name: 'vps', tier: 'quiet', confirm_words: true }) && big?.textContent === 'K7F3-Q9ZP' && has('Works once, for ') && has('sigelo-agent init --enrol K7F3-Q9ZP')
-    && h1() === 'Code for vps' && has('This screen moves on by itself'), `enrol: POST /api/agents/enrol-code {name, tier (Reads the web: quiet), confirm_words}; Go on sends pow_confirmed; the code big, the countdown, the command (${JSON.stringify(made?.[2])})`);
+  ok(again?.[2]?.pow_confirmed === true && JSON.stringify(made?.[2]) === JSON.stringify({ name: 'vps', tier: 'quiet', ttl: 86400, confirm_words: true }) && big?.textContent === 'K7F3-Q9ZP' && has('Works once, for ') && has('sigelo-agent init --enrol K7F3-Q9ZP')
+    && h1() === 'Code for vps' && has('This screen moves on by itself'), `enrol: POST /api/agents/enrol-code {name, tier (Reads the web: quiet), ttl (24 hours), confirm_words}; Go on sends pow_confirmed; the code big, the countdown, the command (${JSON.stringify(made?.[2])})`);
   await btn('Copy').click();
   ok(sandbox.copied === 'K7F3-Q9ZP', 'enrol: Copy puts the code on the clipboard');
   await btn('Share').click(); await settle();
-  ok(/^Enrol as my agent on sigelo: code K7F3-Q9ZP, once, until \d{1,2}:\d{2}.*sigelo-agent init --enrol K7F3-Q9ZP .*How: https:\/\/sigelo\.io\/enrol\.html$/.test(sandbox.copied ?? ''),
+  ok(/^Enrol as my agent on Sigelo: code K7F3-Q9ZP, once, until \d{1,2}:\d{2}.*sigelo-agent init --enrol K7F3-Q9ZP .*How: https:\/\/sigelo\.io\/enrol\.html$/.test(sandbox.copied ?? ''),
     `enrol: Share, without a share sheet, copies a ready-to-send message: the code, until when, the command, the instructions link (${sandbox.copied})`);
   Object.assign(W_.workers[1].enrolling, { state: 'words', code: null, command: null, words: 'mobile absent bone lion' });
   await poll();
@@ -976,6 +983,31 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const cnt = chatRow('bo').all().find((e) => /^count/.test(e.className));
     ok(h1() === 'Chats' && cnt?.className === 'count muted' && !tabBtn('chats').textContent.startsWith('2'), 'muted: the row\'s count grey, the Chats tab\'s count without it');
     bo.notify = true;
+    // Delete this chat (Chat settings): local only. Its messages cleared here (POST /api/history/clear), no forget, the contact
+    // kept; out of Chats until a message comes, or the chat is opened again from the contact (a new empty one).
+    const cy = G_.contacts.find((c) => c.name === 'cy');
+    await chatRow('cy').click(); await settle(); await poll();
+    await root.all().find((e) => e.className === 'who').click(); await settle(); await poll();
+    const delRow = () => root.all().find((e) => e.tagName === 'BUTTON' && /^row/.test(e.className) && e.textContent.startsWith('Delete this chat'));
+    ok(delRow() && has('On this phone only: cy stays a contact'), 'Chat settings: Delete this chat, said local (on this phone only, the contact stays)');
+    void delRow().click(); await settle();
+    ok(sheet() && sh1() === 'Delete this chat on this phone?' && has('Your contact keeps theirs. You can start a new one any time.') && btn('Keep it'), 'Delete this chat: a sheet saying it is this phone only, theirs kept, a new one any time; Keep it');
+    const forgets = calls.filter(([, p]) => p === '/api/forget').length;
+    await root.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === 'Delete this chat').at(-1).click(); await settle(); await poll();
+    ok(calls.some(([, p, b]) => p === '/api/history/clear' && b.contact === cy.did) && calls.filter(([, p]) => p === '/api/forget').length === forgets && G_.contacts.includes(cy)
+      && h1() === 'Chats' && !chatRow('cy') && chatRow('bo'),
+      'Delete this chat (confirmed) → POST /api/history/clear {contact}, no forget: back on Chats without it, the contact kept');
+    cy.last = { dir: 'in', text: 'hello again', at: now() + 60 }; cy.unread = 1; await poll();
+    ok(chatRow('cy')?.textContent.includes('1 new message'), 'a deleted chat: their next message brings it back to Chats');
+    cy.last = null; cy.unread = 0; await poll();
+    ok(!chatRow('cy'), 'a deleted chat: out of Chats while it has nothing new');
+    await tabBtn('me').click(); await settle(); await poll();
+    await root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('People and teams')).click(); await settle(); await poll();
+    await root.all().find((e) => e.attrs['data-person'] === cy.did).click(); await settle(); await poll();
+    await btn('Message').click(); await settle(); await poll();
+    const inChat = h1() === 'cy' && root.all().some((e) => e.className === 'who');
+    for (let i = 0; i < 6 && h1() !== 'Chats'; i++) { if (tabBtn('chats')) { await tabBtn('chats').click(); await settle(); await poll(); } else await back(); }
+    ok(inChat && h1() === 'Chats' && chatRow('cy'), 'a deleted chat started again: the contact → Message, an empty chat, in Chats again');
     // Task 12 (3 taps) and task 2, making mine (4): New chat, Make my code, Show as QR; their use of it brings the words.
     G_.contacts.push(person('dee', { words: 'falcon pepper orbit twelve', words_checked: false }), person('eve', { words: 'mobile absent bone lion', words_checked: false }));
     await btn('New chat').click(); await settle();
@@ -1144,7 +1176,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   // ---- Settings → Relay (Monerujo's node picker): the one in use marked, the public list on demand, Test before OK
   {
     await tabBtn('me').click(); await settle(); await poll();
-    ok(h1() === 'Me' && has('My code and QR') && has('People and teams') && has('Devices and computers') && aria('Settings', 'BUTTON'), 'Me: who I am, My code and QR, People and teams, Devices and computers, Settings');
+    ok(h1() === 'Me' && has('My code and my QR') && has('People and teams') && has('Devices and computers') && aria('Settings', 'BUTTON'), 'Me: who I am, My code and my QR, People and teams, Devices and computers, Settings');
     await aria('Settings', 'BUTTON').click(); await settle(); await poll();
     ok(h1() === 'Settings' && ['Wallet', 'Backup and recovery', 'Relay', 'Chats and history', 'Lock', 'Appearance', 'About'].every(has) && has(`Version ${PKG_VERSION}`), 'Settings: Wallet, Backup and recovery, Relay, Chats and history, Lock, Appearance, About');
     await root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Relay')).click(); await settle(); await poll();
@@ -1184,7 +1216,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       && SET.seen_receipts === false && has('Off: they see one tick, never when you read'), 'Send seen receipts off, Quiet for new people → POST /api/settings {seen_receipts: false}, {new_tier: quiet}');
     await back();
     await root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Wallet')).click(); await settle(); await poll();
-    const wsw = aria('Wallet for sigelo', 'INPUT');
+    const wsw = aria('Wallet for Sigelo', 'INPUT');
     wsw.checked = true; fire(wsw, 'change'); await settle();
     await back(); await back();
     ok(h1() === 'Me' && root.all().filter((e) => e.attrs['data-tab']).map((e) => e.kids.at(-1).textContent).join() === 'Chats,Agents,Wallet,Me', 'Settings → Wallet on: the Wallet tab shows');
@@ -1564,14 +1596,14 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     routes['POST /api/public/approve'] = (b) => { sandbox.pending.public = { ...sandbox.pending.public, requests: [], chats: 4 }; return { approved: true, did: 'did:sigelo:zJoiner', name: 'public-1a2b-4', fingerprint: 'a b c d', id: b.id }; };
     routes['POST /api/public/set'] = (b) => { sandbox.pending.public = { ...sandbox.pending.public, paused: b.paused }; return sandbox.pending.public; };
     await sandbox.ui.go('chats'); await settle(); await poll();
-    // Task 12 from Me (3 taps): Me, My code and QR, Make a code: the code with its QR, Share and Copy.
+    // Task 12 from Me (3 taps): Me, My code and my QR, Make a code: the code with its QR, Share and Copy.
     let taps = 0;
     await tabBtn('me').click(); taps++; await settle(); await poll();
     ok(has('People and teams') && has('For your website or shop · off') && has('Sign or check a message') && has('Show since when this identity exists') && has('Devices and computers')
-      && aria('Add your picture', 'BUTTON') && btn('My code and QR') && btn('Scan'), 'Me: who I am (the picture button, name, four words), My code and QR, Scan; People and teams, Public invite (off), Sign or check, Proof of age; Devices, Settings');
-    await btn('My code and QR').click(); taps++; await settle(); await poll();
+      && aria('Add your picture', 'BUTTON') && btn('My code and my QR') && btn('Scan'), 'Me: who I am (the picture button, name, four words), My code and my QR, Scan; People and teams, Public invite (off), Sign or check, Proof of age; Devices, Settings');
+    await btn('My code and my QR').click(); taps++; await settle(); await poll();
     await btn('Make a code').click(); taps++; await settle(); await poll();
-    ok(taps === 3 && h1() === 'My code' && has('K7F3-Q9ZP') && btn('Share') && btn('Copy'), 'task 12 from Me, 3 taps: Me, My code and QR, Make a code: the code (and its QR), Share, Copy');
+    ok(taps === 3 && h1() === 'My code' && has('K7F3-Q9ZP') && btn('Share') && btn('Copy'), 'task 12 from Me, 3 taps: Me, My code and my QR, Make a code: the code (and its QR), Share, Copy');
     // A code that renews itself (on by default for a person code): the note; once used, the next code in its place and who used the last; Cancel this code.
     ok(calls.some(([, p, b]) => p === '/api/invite' && b.renew === true), 'My code: "Renews itself" on by default → POST /api/invite {renew: true}');
     const rn = { name: 'contact-1a2b', exp: now() + 86400, relay: 'relay.sigelo.ai', id: 'i1', short: 'K7F3-Q9ZP', short_exp: now() + 600, code: null, group: null, renew: true, used: [], renew_error: null };
@@ -1605,6 +1637,12 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await aria('Picture for bo', 'BUTTON').click(); await settle();
     ok(sh1() === 'Picture for bo' && has('On this device only.'), 'a contact\'s picture: a local one, on this device only');
     await aria('Close', 'BUTTON').click(); await settle();
+    // Agents: yours and your contacts' apart, each section with its heading; bo's booker (paired) and research (offered) in the second.
+    await sandbox.ui.go('agents'); await settle(); await poll();
+    const secs = root.all().filter((e) => e.className === 'sec').map((e) => e.textContent), their = root.all().find((e) => e.attrs['data-their-agent'] === G_.contacts.find((c) => c.name === 'booker').did);
+    ok(h1() === 'Agents' && secs.indexOf('Your agents') >= 0 && secs.indexOf('Your agents') < secs.indexOf('Agents of your contacts') && their?.textContent.includes('bo\'s agent · bookings')
+      && has('bo offers it: research') && !has('Once a friend introduces their agent to you'),
+      `Agents: Your agents, then Agents of your contacts (booker: bo's agent; research: bo offers it), apart (${secs})`);
     await sandbox.ui.go('team', TEAM); await settle(); await poll();
     const at = root.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === '@');
     ok(h1() === 'Studio' && has('A team is a group where each person brings their agents.') && has('You') && has('bo\'s agent') && at.length === 2 && btn('Open chat'), 'a team: You, then each person with the agents they brought (booker: bo\'s agent), @ to ask, Open chat');
@@ -1639,7 +1677,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     // Public invite (mock: off, new, on): off says Pro → Make → Valid for, I approve each, per day → Make it → the PUB code, its words,
     // Share, Copy, Waiting for your OK (Approve), the counts, Pause, Stop for good (confirmed) → cancel.
     await sandbox.ui.go('invite'); await settle(); await poll();
-    ok(h1() === 'Public invite' && has('One code for everyone') && has('It lasts for months') && has('comes with Pro') && btn('Make a public invite'), 'Public invite, off: one code for everyone, for months, with Pro; Make a public invite');
+    ok(h1() === 'Public invite' && has('One code for all') && has('It lasts for months') && has('comes with Pro') && btn('Make a public invite'), 'Public invite, off: one code for all, for months, with Pro; Make a public invite');
     await btn('Make a public invite').click(); await settle(); await poll();
     ok(kit(root).field('Valid for')?.value === '6' && kit(root).field('New chats per day at most')?.value === '50' && has('I approve each new chat') && has('Who answers') && btn('Make it'),
       'Make a public invite: Valid for (6 months), I approve each new chat, at most 50 a day, who answers, Make it');
@@ -1654,7 +1692,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     void btn('Stop for good').click(); await settle();
     ok(sh1() === 'Stop this public invite?' && has('The code stops working everywhere it is posted. Chats already started stay.') && btn('Keep it'), 'Stop for good: a sheet naming it, what it does, Keep it');
     await btn('Stop it').click(); await settle(); await poll();
-    ok(calls.some(([, p, b]) => p === '/api/invite/cancel' && b.id === 'pub1') && has('One code for everyone'), 'Stop it → POST /api/invite/cancel; off again');
+    ok(calls.some(([, p, b]) => p === '/api/invite/cancel' && b.id === 'pub1') && has('One code for all'), 'Stop it → POST /api/invite/cancel; off again');
     // Proof of age: what shows its age today (GET /api/attestations), the Monero record said to be not in this version.
     await sandbox.ui.go('age'); await settle(); await poll();
     ok(h1() === 'Proof of age' && has('1f916.ai') && has('vouched for it on') && has('invited by a member') && has('its own date, not proven') && has('not in this version') && !btn('Record it'),
@@ -1724,10 +1762,10 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       && sandbox.sent?.doc === 'ce'.repeat(16) && sandbox.sent.to === bo.did,
       `no camera app (no_camera): said in one line, the photo picker (images) opened instead, the photo to this chat (${JSON.stringify(sandbox.sent)})`);
     // The camera refused once: the next tap asks again (a line says so); refused for good: the tap opens the settings page.
-    routes['POST /api/transfers/photo'] = () => ({ __error: { check: 'camera_permission', message: 'the camera is not allowed for sigelo: tap Camera again to allow it' } });
+    routes['POST /api/transfers/photo'] = () => ({ __error: { check: 'camera_permission', message: 'the camera is not allowed for Sigelo: tap Camera again to allow it' } });
     await choose('Camera');
     const once = has('The camera was not allowed. Tap Camera again to allow it.') && !sandbox.settingsOpened;
-    routes['POST /api/transfers/photo'] = () => ({ __error: { check: 'camera_blocked', message: 'the camera is off for sigelo: switch on Camera in its Permissions' } });
+    routes['POST /api/transfers/photo'] = () => ({ __error: { check: 'camera_blocked', message: 'the camera is off for Sigelo: switch on Camera in its Permissions' } });
     await choose('Camera');
     ok(once && sandbox.settingsOpened === 1 && has('Switch on Camera in Permissions, then come back.'), 'camera refused: tap again to ask; refused for good: the tap opens sigelo\'s settings page, one line naming the switch');
     routes['POST /api/transfers/photo'] = photoWas;
@@ -1838,7 +1876,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       Object.assign(sandbox, { MediaRecorder: Rec, Blob, atob, btoa, Audio: FakeAudio, crypto: globalThis.crypto, sigeloVoice: VW });
       const parts = [];
       Object.assign(routes, {
-        'POST /api/transfers/mic': () => (REC.micBlocked ? { __error: { check: 'mic_blocked', message: 'Android no longer asks' } } : REC.micNo ? { __error: { check: 'mic_permission', message: 'the microphone is off for sigelo' } } : { granted: true }),
+        'POST /api/transfers/mic': () => (REC.micBlocked ? { __error: { check: 'mic_blocked', message: 'Android no longer asks' } } : REC.micNo ? { __error: { check: 'mic_permission', message: 'the microphone is off for Sigelo' } } : { granted: true }),
         'POST /api/transfers/voice-part': (b) => { parts.push(b); return { rec: b.rec, size: b.offset + Buffer.from(b.data, 'base64').length }; },
         'POST /api/transfers/send': (b) => { sandbox.sent = b; return { id: 'ef'.repeat(16), state: 'offered', ...(b.voice && { sha256: VSHA, name: b.voice.name, size: 200_000 }) }; },
         'POST /api/transfers/mic-settings': () => { REC.settings = (REC.settings ?? 0) + 1; return { opened: true }; },
@@ -1863,7 +1901,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       // The shell refuses the microphone: said, nothing recorded.
       REC.micNo = true; const asked0 = REC.asked; REC.asked = null;
       await choose('Voice');
-      ok(sheet() && has('The microphone is off for sigelo. Tap Voice again to allow it.') && btn('Close') && !btn('Open settings') && REC.asked === null && !has('Recording') && !REC.settings,
+      ok(sheet() && has('The microphone is off for Sigelo. Tap Voice again to allow it.') && btn('Close') && !btn('Open settings') && REC.asked === null && !has('Recording') && !REC.settings,
         'RECORD_AUDIO refused (mic_permission): one line in the Voice sheet, tap Voice again; nothing recorded, no settings page yet');
       await btn('Close').click(); await settle();
       // A refusal is never final: the next tap asks again, and a yes records.
@@ -1883,7 +1921,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       // The page's own ask refused (a browser tab, or the WebView's): the same line, Close.
       REC.deny = true;
       await choose('Voice'); await settle();
-      ok(sheet() && has('The microphone is off for sigelo. Tap Voice again to allow it.') && btn('Close'), 'getUserMedia refused (NotAllowedError): the same line in the sheet');
+      ok(sheet() && has('The microphone is off for Sigelo. Tap Voice again to allow it.') && btn('Close'), 'getUserMedia refused (NotAllowedError): the same line in the sheet');
       await btn('Close').click(); await settle();
       REC.deny = false;
       // Cancel: nothing sent, the microphone let go.
@@ -2058,32 +2096,65 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await A6.K.btn('Send 0.20 XMR').click(); await settle();
     ok(LK.unlocks.length === u0 + 2 && SENDS.length === 2 && SENDS[1].id === 'r200000000000', 'Send above the limit, the lock confirmed → sent');
 
-    // Settings → Stay connected (sigeloLocal.stay, the Android shell's switch for the phone): on by default with its help line; off
-    // stops it; turned on, what is missing asked one at a time after one line why; a refusal leaves a row whose tap asks again.
+    // Settings → Notifications (sigeloLocal.stay and .push, the Android shell's for the phone; design/push.md): the wake mode, Stay
+    // connected by default with its help line; Off stops it; Stay connected again asks what is missing one at a time after one line
+    // why; a refusal leaves a row whose tap asks again. Push: no push app said with what to install; several picked from; the push
+    // app's answer and the relay's said; Off turns push off.
     {
       const ST = { st: { on: true, exempt: false, asked: false, notify: false, notifyAsked: false, notifyBlocked: false }, calls: [] };
       const say = (k, v) => { ST.calls.push(`${k}:${v}`); return { ...ST.st }; };
-      const S6 = mk({ stay: { get: async () => ({ ...ST.st }), set: async ({ on }) => { ST.st.on = on; return say('on', on); }, battery: async (y) => say('battery', y), notifications: async (y) => say('notifications', y) } });
+      const PS = { st: { on: false, state: 'off', reason: null, distributors: [], distributor: null, endpoint: null, p256dh: null, auth: null }, relay: null, calls: [], next: () => ({}), change: null };
+      const push = { get: async () => ({ ...PS.st, relay: PS.relay }), onChange: (fn) => { PS.change = fn; },
+        set: async (o) => { PS.calls.push(JSON.stringify(o)); PS.st = o.on === false ? { ...PS.st, on: false, state: 'off' } : { ...PS.st, on: true, ...PS.next(o) }; return { ...PS.st, relay: PS.relay }; } };
+      const S6 = mk({ stay: { get: async () => ({ ...ST.st }), set: async ({ on }) => { ST.st.on = on; return say('on', on); }, battery: async (y) => say('battery', y), notifications: async (y) => say('notifications', y) }, push });
       await settle(); await S6.poll();
       await S6.sb.ui.go('settings'); await settle(); await S6.poll();
-      const sw6 = S6.K.aria('Stay connected', 'INPUT');
-      ok(sw6?.checked === true && S6.K.has('Keeps the connection open while the app is minimised, so messages arrive and calls can ring. Shows a small notification.')
-        && S6.K.has('Notifications are off') && S6.K.has('Battery saving may pause it') && ST.calls.length === 0,
-        'Settings: Stay connected on by default, its help line; notifications off and battery saving each a row; nothing asked at the screen\'s start');
-      sw6.checked = false; fire(sw6, 'change'); await settle(); await S6.poll();
-      const offOk = ST.calls.join() === 'on:false' && !S6.K.sheet() && !S6.K.has('Battery saving may pause it');
-      const sw7 = S6.K.aria('Stay connected', 'INPUT');
+      const notifyRow = () => S6.r.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Notifications'));
+      ok(notifyRow()?.textContent.includes('Stay connected') && !S6.K.aria('Stay connected', 'INPUT'), 'Settings: one row, Notifications, naming the wake mode (Stay connected); the switch is on its screen');
+      await notifyRow().click(); await settle(); await S6.poll();
+      const r6 = (t) => S6.K.aria(t, 'INPUT');
+      const pick = async (t) => { const x = r6(t); x.checked = true; fire(x, 'change'); await settle(); await sleep(30); await S6.poll(); };
+      ok(S6.K.h1() === 'Notifications' && r6('Stay connected')?.checked === true && r6('Push') && r6('Off') && S6.K.has('Keeps the connection open while the app is minimised, so messages arrive and calls can ring. Shows a small notification.')
+        && S6.K.has('Notifications are off') && S6.K.has('Battery saving may pause it') && ST.calls.length === 0 && PS.calls.length === 0,
+        'Notifications: three wake modes, Stay connected on by default with its help line; notifications off and battery saving each a row; nothing asked at the screen\'s start');
+      await pick('Off');
+      const offOk = ST.calls.join() === 'on:false' && !S6.K.sheet() && !S6.K.has('Battery saving may pause it') && r6('Off').checked === true;
+      const sw7 = r6('Stay connected');
       sw7.checked = true; fire(sw7, 'change'); await settle();
       const first = S6.K.sheet() && S6.K.sh1() === 'Allow notifications?';
       await S6.K.sheet().all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Allow').click(); await settle(); await sleep(30);
       const second = S6.K.sheet() && S6.K.sh1() === 'Let it run in the background?' && S6.K.has('Without this, Android may pause the connection to save battery.');
       await S6.K.sheet().all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Not now').click(); await settle(); await sleep(30); await S6.poll();
       ok(offOk && first && second && ST.calls.join() === 'on:false,on:true,notifications:true,battery:false',
-        `Stay connected: off → set({on:false}), its rows gone; on → notifications then the battery exemption, one at a time, each after its line why (${ST.calls})`);
-      ST.st.notifyBlocked = true; await S6.sb.ui.go('settings'); await settle(); await S6.poll();
+        `Stay connected: Off → set({on:false}), its rows gone; Stay connected → notifications then the battery exemption, one at a time, each after its line why (${ST.calls})`);
+      ST.st.notifyBlocked = true; await S6.sb.ui.go('set-notify'); await settle(); await S6.poll();
       const rowTap = S6.K.has('Tap, then switch on Notifications.'), n7 = ST.calls.length;
       await S6.r.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Notifications are off')).click(); await settle();
       ok(rowTap && ST.calls.length === n7 + 1 && ST.calls.at(-1) === 'notifications:true', `a refusal never final: Android no longer asking, the row names what to switch on and its tap opens the system's page (${ST.calls.at(-1)})`);
+
+      // Push, no push app installed: said, with what to install; Stay connected turned off for it.
+      ST.st.notify = true; ST.calls.length = 0;
+      PS.next = () => ({ state: 'none' });
+      await pick('Push');
+      ok(ST.calls.join() === 'on:false' && PS.calls.join() === '{"on":true}' && S6.K.has('No push app on this phone.') && S6.K.has('Install ntfy (F-Droid), and in its settings set the server to push.sigelo.ai, or your own. Or use Stay connected.') && !S6.K.sheet(),
+        `Push without a push app: Stay connected off, push on, "No push app on this phone." with what to install and Stay connected offered (${ST.calls} / ${PS.calls})`);
+      // Two push apps: picked from; the push app's answer, then the relay's.
+      PS.st.distributors = [{ id: 'io.heckel.ntfy', name: 'ntfy' }, { id: 'org.unifiedpush.distributor.nextpush', name: 'NextPush' }];
+      PS.next = (o) => (o.distributor ? { state: 'registering', distributor: o.distributor } : { state: 'pick' });
+      await pick('Off'); await pick('Push');
+      const picking = S6.K.has('Pick the push app to use.') && r6('ntfy') && r6('NextPush');
+      await pick('ntfy');
+      ok(picking && PS.calls.at(-1) === '{"on":true,"distributor":"io.heckel.ntfy"}' && S6.K.has('Waiting for ntfy…'), `several push apps: a choice; ntfy picked → set({on, distributor}), "Waiting for ntfy…" (${PS.calls.at(-1)})`);
+      PS.st = { ...PS.st, state: 'ok', endpoint: 'https://push.sigelo.ai/upAbc?up=1', p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) };
+      PS.relay = { state: 'registered', relay: 'relay.sigelo.ai' };
+      PS.change(); await settle(); await sleep(30); await S6.poll();
+      const ready = S6.K.has('Ready: ntfy wakes sigelo when a message waits.') && S6.K.has('Relay: registered.') && !S6.K.has('push.sigelo.ai/upAbc');
+      PS.relay = { state: 'refused', code: 'push', detail: 'endpoint: not a public address' };
+      PS.change(); await settle(); await sleep(30); await S6.poll();
+      ok(ready && S6.K.has('Relay refused: endpoint: not a public address'), 'the push app\'s answer (onChange): "Ready: ntfy wakes sigelo…", "Relay: registered."; the endpoint never shown; a relay refusal said by its words');
+      await pick('Off');
+      await S6.sb.ui.go('settings'); await settle(); await S6.poll();
+      ok(PS.calls.at(-1) === '{"on":false}' && notifyRow()?.textContent.includes('Off'), `Off from Push: push turned off; Settings names the mode Off (${PS.calls.at(-1)})`);
     }
 
     // A browser tab or the GTK app: no screen lock; the words password stands in where one is kept (the page locks itself).
@@ -2093,9 +2164,9 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const B6 = mk({ words, lock: undefined }, { prefs: [['sigelo-ui:page-lock', 'on']] });
     await settle(); await B6.poll();
     const pwL = B6.K.field('Words password');
-    ok(B6.K.h1() === 'sigelo is locked' && pwL && B6.K.btn('Unlock') && !B6.K.has('No chats yet'), 'the words password standing in: the page opens locked ("sigelo is locked", the profile, Words password, Unlock), nothing of the app shown');
+    ok(B6.K.h1() === 'Sigelo is locked' && pwL && B6.K.btn('Unlock') && !B6.K.has('No chats yet'), 'the words password standing in: the page opens locked ("Sigelo is locked", the profile, Words password, Unlock), nothing of the app shown');
     pwL.value = 'nope'; await B6.K.btn('Unlock').click(); await settle();
-    const stays = B6.K.h1() === 'sigelo is locked' && B6.K.has('Wrong password.');
+    const stays = B6.K.h1() === 'Sigelo is locked' && B6.K.has('Wrong password.');
     B6.K.field('Words password').value = 'correct horse'; await B6.K.btn('Unlock').click(); await settle(); await B6.poll();
     ok(stays && B6.K.h1() === 'Chats' && WPW.checks.join() === 'nope,correct horse', 'locked: a wrong password said, it stays locked; the right one → Chats (words.check, no screen lock)');
     await B6.sb.ui.go('set-lock'); await settle(); await B6.poll();
@@ -2235,8 +2306,8 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       await S6.sb.ui.go('share-to'); await settle(); await S6.poll();
       ok(SHR.drops === 1 && S6.K.has('Nothing to share') && scr() === 'share-to', `share: Back drops a share not taken (share-drop); the screen with nothing pending says so (${SHR.drops})`);
       // (The sandbox's timers are cut to 10 ms: the toast looked for at once.)
-      SHR.on({ error: { check: 'share', message: 'this file cannot be shared into sigelo' } });
-      ok(body.all().some((e) => e.className === 'toast' && e.textContent === 'this file cannot be shared into sigelo'), 'share: a refusal by the shell said in a toast');
+      SHR.on({ error: { check: 'share', message: 'this file cannot be shared into Sigelo' } });
+      ok(body.all().some((e) => e.className === 'toast' && e.textContent === 'this file cannot be shared into Sigelo'), 'share: a refusal by the shell said in a toast');
       GR.groups.pop(); bump();
       if (sendWas) routes['POST /api/send'] = sendWas; else delete routes['POST /api/send'];
       if (tsendWas) routes['POST /api/transfers/send'] = tsendWas; else delete routes['POST /api/transfers/send'];
@@ -2294,7 +2365,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     fire(nameIn, 'change'); await settle();
     ok(pc.some(([o, id, n]) => o === 'rename' && id === 'p2' && n === 'Office') && P.profiles[1].name === 'Office', 'Manage profiles: a name changed → profiles.rename');
     await K.btn('Remove Profile 1…').click(); await settle();
-    ok(K.sheet() && K.sh1() === 'Remove Profile 1?' && K.has('Its identity, chats and wallet leave this phone. Only its 25 words bring it back.') && K.has('I have the 25 words') && K.btn('Keep Profile 1'),
+    ok(K.sheet() && K.sh1() === 'Remove Profile 1?' && K.has('Its identity, chats and wallet leave this phone. Only with the 25 words of the profile will it bring everything back.') && K.has('I have the 25 words') && K.btn('Keep Profile 1'),
       'Remove (words): a sheet naming it, the warning, "I have the 25 words", Keep');
     await K.btn('Remove Profile 1').click(); await settle();
     ok(K.has('Tick "I have the 25 words"') && P.profiles.some((p) => p.id === 'p1') && K.sheet(), 'Remove (words): not ticked → refused, said in the sheet, kept');
@@ -2309,6 +2380,13 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await K.aria('Back', 'BUTTON').click(); await settle(); await poll2();
     await root2.all().find((e) => e.className === 'pchip').click(); await settle();
     ok(K.btn('Add') && !K.btn('Add').disabled && K.has('At most 8 profiles'), 'Profiles: at 8, the limit said (Add stays a button: it says the refusal)');
+    // Two profiles of one name (a backup restored beside its original keeps its name): each reads as its own identity.
+    P.profiles.find((p) => p.id === 'p4').name = 'Profile 6'; P.profiles.find((p) => p.id === 'p5').name = 'office';
+    await K.aria('Close', 'BUTTON').click(); await settle();
+    await root2.all().find((e) => e.className === 'pchip').click(); await settle();
+    const titles = cards().map((e) => e.all().find((x) => x.tagName === 'B')?.textContent);
+    ok(titles.join('|') === 'Office · eagle fancy|Profile 3|Profile 6 · no. 4|office · no. 5|Profile 6 · no. 6|Profile 7|Profile 8|Profile 9' && new Set(titles).size === titles.length,
+      `Profiles sheet: two profiles of one name each read as their own (the first two of the four words, or the number); a unique name alone (${titles})`);
   }
   // ---- Settings → Backup and recovery (design/apps-seed.md §8) over a fake local.words: the lock, the password, the words as at their
   // creation (FLAG_SECURE, nothing to copy, Done hides them), change, stop keeping them; removing a profile and taking the seat guarded.
@@ -2377,7 +2455,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await b3('Save').click(); await settle(); await poll3();
     ok(PW.pw === 'battery staple' && K.h1() === 'Backup and recovery' && wc.some(([o, a, b, c]) => o === 'change' && a === 'correct horse' && b === 'battery staple' && c === 'battery staple'), 'Change: old, new and its repeat → local.words.change, back to Backup and recovery');
     // The backup file (apps/web/backup.mjs): Back up this profile, the lock, the words password; the file named, where it went, keep it off this phone.
-    ok(has3('Backup file') && has3('Never sent to a sigelo server') && b3('Back up this profile'), 'Backup and recovery: the Backup file card, Back up this profile');
+    ok(has3('Backup file') && has3('Never sent to a Sigelo server') && b3('Back up this profile'), 'Backup and recovery: the Backup file card, Back up this profile');
     u = sandbox.unlocks ?? 0;
     await b3('Back up this profile').click(); await settle(); await poll3();
     ok(K.h1() === 'Back up this profile' && (sandbox.unlocks ?? 0) === u + 1 && K.field('Your words password')?.attrs.type === 'password' && !K.field('Repeat it'), 'Back up: the screen lock first, then the words password (kept here: no repeat)');
@@ -2472,6 +2550,156 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await K.aria('Back', 'BUTTON').click(); await settle(); await open();
     ok(K.btn('Connect a computer')?.disabled === true && K.has('At most 8 computers'), 'Computers: at 8, Connect a computer off, the limit said');
   }
+
+  // ---- Calls (design/calls.md, apps/contact/call.mjs), two pages: alice's and bob's ui.js, each over its own host (a Line,
+  // the /api/calls routes, its chat lines), the two Lines wired as the relay carries sigelo-call/0, a fake
+  // RTCPeerConnection between them (apps/contact/test-fake-rtc.mjs: they meet only on each other's ICE credentials and
+  // DTLS fingerprint). The Call button (a person online only), the call screen both sides, Accept, Mute, Hang up, the
+  // chat lines; Decline; glare (both press Call at once); no direct path ("Could not connect…"); the contact's
+  // "Can call me" switch and the Settings default.
+  {
+    const CM = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'call.mjs')).href);
+    const { fakeNet } = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'test-fake-rtc.mjs')).href);
+    const PO = { gatherMs: 30, lateMs: 150, iceMs: 1500, disconnectedMs: 300, retryMs: 600, lostMs: 3000, statsMs: 80, pollMs: 40 };
+    const net = fakeNet(), world = {};
+    const CALLMOD = { ...CM, Phone: class extends CM.Phone { constructor(x) { super({ ...x, o: PO }); } } };
+    const pageOf = (name, peerName) => {
+      const P = { name, did: `did:sigelo:z${name}00000000000000000000000000000000000000000`, lines: [], seq: 1, settings: { calls: true }, allow: {}, sent: [] };
+      const peerDid = `did:sigelo:z${peerName}00000000000000000000000000000000000000000`;
+      P.peer = { did: peerDid, name: peerName, current_did: null, relay: 'relay.sigelo.ai', re_pair: null, words: 'amber otter violin harbor', pair: 'p', words_checked: true, tags: [], local: null, mine: null, unread: 0, last: null,
+        waiting: null, not_collected: 0, queued: 0, status: 'ok', ours: false, tier: 'friend', link: null, online: true, online_since: now() - 60, last_seen: null, presence: 'allow', kind: 'person', kind_set: false };
+      const canCall = (c) => (typeof P.allow[c.did] === 'boolean' ? P.allow[c.did] : c.tier === 'quiet' ? false : P.settings.calls !== false);
+      P.line = new CM.Line({
+        send: async (to, content) => { P.sent.push(content); const x = JSON.parse(JSON.stringify(content)); setTimeout(() => world[to]?.line.receive({ from: P.did, content: x }), 2); return { status: 'sent' }; },
+        contact: (d) => (d === peerDid ? P.peer : null), allowed: canCall, shares: (c) => c.presence === 'allow', me: () => P.did,
+        line: (l) => { P.lines.push({ n: ++P.seq, dir: l.dir, at: now(), iat: null, text: l.text, label: CM.CALL_LABEL, status: null, code: null, detail: null, link: null, call: l.call }); },
+        changed: () => { P.seq++; }, o: { ringS: 3, expS: 4, pageMs: 1500, keepMs: 1200 },
+      });
+      const cr = CM.callRoutes({ line: P.line, contactOf: (d) => (d === peerDid ? P.peer : (() => { throw Object.assign(new Error('not a contact'), { check: 'not_contact', status: 404 }); })()),
+        callable: (c) => (c.online === true ? true : { check: 'call_offline', message: 'not online' }), stun: () => ['relay.sigelo.ai:3478'],
+        allow: (c, on) => { if (on === null) delete P.allow[c.did]; else P.allow[c.did] = on; P.seq++; }, allowOf: (c) => canCall(c) });
+      const peerNow = () => ({ ...P.peer, can_call: canCall(P.peer), can_call_set: typeof P.allow[peerDid] === 'boolean' });
+      const R = {
+        'GET /api/state': () => { const v = P.line.view(); return { seq: P.seq, now: now(), enrol_words: [], me: { did: P.did, relay: 'relay.sigelo.ai', online: true, clock_offset: 0, clock_checked: now(), retention_days: 7, error: null, pow: null, pow_done_ms: null, seat: null, pow_capped: null, pow_confirm: null, wallet: { on: false, prices: false, currency: null } },
+          groups: { mine: [], contacts: [peerNow()] }, chats: { unread: 0, invited: 0, notices: 0, rev: '0' }, pending: { invites: [], paired: [], answers: [], failed: [], public: null }, introductions: [], events: [],
+          call: v ? { id: v.id, did: v.did, name: v.name, dir: v.dir, state: v.state } : null }; },
+        'GET /api/me': () => ({ did: P.did, original: P.did, words: 'amber otter violin harbor', recovery: 'set', key: 'browser', relay: 'relay.sigelo.ai', retention_days: 7, erase: 'x' }),
+        'GET /api/agents/workers': () => ({ keeper: true, seat: 'here', workers: [] }),
+        'GET /api/settings': () => ({ relay: 'relay.sigelo.ai', default: 'relay.sigelo.ai', fixed: null, in_use: 'relay.sigelo.ai', added: [], seen_receipts: true, notify: true, new_tier: 'friend', new_presence: false, calls: P.settings.calls }),
+        'POST /api/settings': (b) => { Object.assign(P.settings, b); P.seq++; return R['GET /api/settings'](); },
+        'GET /api/messages': () => ({ seq: P.seq, messages: P.lines }),
+        'GET /api/groups': () => ({ tier: { tier: 'free', groups: 3, members: 8, told: true }, groups: [], notices: [] }),
+        ...cr,
+      };
+      P.calls = [];
+      const r = new El('main'), b = new El('body'), iv = [], d = docOf(r);
+      d.body = b;
+      const sb = { ...sandbox, document: d, setInterval: (f, ms) => { iv.push([f, ms]); return iv.length; }, history: { replaceState() {}, pushState() {}, back() {} }, sigeloUiTest: (t) => { sb.ui = t; },
+        RTCPeerConnection: net.RTC, navigator: { clipboard: { writeText: async () => {} }, mediaDevices: { getUserMedia: async (c) => { P.asked = c; return net.media(); } } }, sigeloCall: CALLMOD,
+        localStorage: { m: new Map(), getItem(k) { return this.m.get(k) ?? null; }, setItem(k, v) { this.m.set(k, String(v)); }, removeItem(k) { this.m.delete(k); } },
+        sigeloLocal: { ...sandbox.sigeloLocal, onChange() {}, mode: () => ({ kind: 'full' }),
+          async call(method, path, body) {
+            P.calls.push([method, path]);
+            const f = R[`${method} ${path.split('?')[0]}`];
+            if (!f) return { status: 404, body: { error: { check: 'route', message: `no ${method} ${path}` } } };
+            try { return { status: 200, body: JSON.parse(JSON.stringify(await f(JSON.parse(JSON.stringify(body ?? {})), new URL(path, 'http://x').searchParams) ?? null)) }; } catch (e) { return { status: e.status ?? 409, body: { error: { check: e.check ?? 'internal', message: e.message } } }; }
+          } } };
+      sb.globalThis = sb;
+      vm.runInNewContext(readFileSync(join(HERE, 'vendor', 'ui.js'), 'utf8'), sb);
+      P.sb = sb; P.root = r; P.body = b; P.K = kit(r); P.KB = kit(b);
+      P.poll = async () => { await iv.find(([, ms]) => ms === 2000)[0](); await settle(); };
+      P.screen = () => b.all().find((e) => e.className === 'callscreen');
+      P.shows = (t) => { const s = P.screen(); return Boolean(s && !s.hidden && s.textContent.includes(t)); };
+      P.cbtn = (t) => P.screen()?.all().find((e) => e.tagName === 'BUTTON' && (e.textContent === t || e.attrs['aria-label'] === t));
+      P.callBtn = () => r.all().find((e) => e.tagName === 'BUTTON' && e.attrs['aria-label'] === 'Call');
+      world[P.did] = P;
+      return P;
+    };
+    const A = pageOf('alice', 'bob'), B = pageOf('bob', 'alice');
+    const pollBoth = async () => { await A.poll(); await B.poll(); };
+    const waitFor = async (f, ms = 8000) => { const t = Date.now() + ms; while (Date.now() < t) { await pollBoth(); if (await f()) return true; await sleep(40); } return false; };
+    await settle(); await pollBoth();
+    ok(A.calls.some(([m, p]) => m === 'GET' && p === '/api/calls?rtc=1'), 'calls: a page that can call polls GET /api/calls?rtc=1 with its state (the heartbeat a ring waits for)');
+    await A.sb.ui.go('chat', B.did); await settle(); await A.poll();
+    ok(A.callBtn() !== undefined, 'calls: a Call button in a person\'s chat, online');
+    // A WebView without WebRTC (WebKitGTK 2.48 on some distributions, apps/gtk/README.md): no Call button, no heartbeat.
+    const rtcWas = A.sb.RTCPeerConnection;
+    delete A.sb.RTCPeerConnection; A.calls.length = 0; await A.poll(); await A.poll();
+    ok(A.callBtn() === undefined && !A.calls.some(([, p]) => p.startsWith('/api/calls')), 'calls: no RTCPeerConnection here (WebKitGTK without WebRTC): no Call button, no GET /api/calls');
+    A.sb.RTCPeerConnection = rtcWas; await A.poll(); await A.poll();
+    A.peer.online = false; await A.poll(); await A.poll();
+    ok(A.callBtn() === undefined, 'calls: none while they are offline (presence-gated)');
+    A.peer.online = true; await A.poll(); await A.poll();
+    // 1. A call: Calling…, Ringing…, the ring at bob's, Accept, active both sides, Mute, Hang up, the lines.
+    await A.callBtn().click(); await settle();
+    ok(await waitFor(() => A.shows('Ringing…') && A.shows('bob')), 'calls: the caller\'s screen, "Ringing…" once bob\'s side rings', A.screen()?.textContent);
+    ok(A.asked?.audio?.echoCancellation === true && A.asked.audio.noiseSuppression === true && A.asked.audio.autoGainControl === true, 'calls: the microphone asked with echo cancellation, noise suppression and gain');
+    ok(await waitFor(() => B.shows('Incoming call') && B.shows('alice') && B.cbtn('Accept') && B.cbtn('Decline')), 'calls: the callee\'s screen: the name, Incoming call, Accept, Decline', B.screen()?.textContent);
+    ok(B.shows('Your words with them') && B.screen().all().some((e) => e.className === 'words4'), 'calls: the pairing\'s four words on the call screen (compared once, every call)');
+    await B.cbtn('Accept').click(); await settle();
+    ok(await waitFor(() => A.shows('· Direct') && B.shows('· Direct') && A.cbtn('Hang up') && B.cbtn('Hang up')), 'calls: active on both sides: the timer, "Direct", Hang up', `${A.screen()?.textContent} / ${B.screen()?.textContent}`);
+    ok(A.cbtn('Mute') && !A.cbtn('Speaker'), 'calls: Mute; no Speaker where the shell has none (a tab)');
+    await A.cbtn('Mute').click(); await settle();
+    ok(A.cbtn('Unmute')?.attrs['aria-pressed'] === 'true', 'calls: Mute pressed, the button says Unmute');
+    const bars = (P) => P.screen()?.all().find((e) => String(e.className).startsWith('callbars'));
+    ok(await waitFor(() => bars(A)?.attrs['aria-label'] === 'Good connection' && bars(A).all().filter((e) => e.className === 'on').length === 3), 'calls: the signal, three bars (Good connection), from the far end\'s reports');
+    net.loss = 0.2;
+    ok(await waitFor(() => bars(A)?.attrs['aria-label'] === 'Poor connection' && bars(A).all().filter((e) => e.className === 'on').length === 1), 'calls: a lossy link (20 %): one bar (Poor connection)');
+    net.loss = 0;
+    // Wi-Fi to mobile data: the path fails; "Reconnecting…" on both screens, the call screen kept; then Direct again.
+    const sawR = { a: false, b: false };
+    net.fail();
+    ok(await waitFor(() => { sawR.a ||= A.shows('Reconnecting…'); sawR.b ||= B.shows('Reconnecting…'); return sawR.a && sawR.b; }, 3000) || (sawR.a || sawR.b), 'calls: roaming: "Reconnecting…" on the call screen', `${A.screen()?.textContent} / ${B.screen()?.textContent}`);
+    ok(await waitFor(() => A.shows('· Direct') && B.shows('· Direct')), 'calls: roaming: the restart connects, the call goes on');
+    await sleep(1100); await pollBoth();
+    await A.cbtn('Hang up').click(); await settle();
+    ok(await waitFor(() => A.lines.at(-1)?.text?.startsWith('Call · 0:0') && B.lines.at(-1)?.text?.startsWith('Call · 0:0')), 'calls: Hang up: "Call · 0:0x" in both chats', JSON.stringify([A.lines.at(-1), B.lines.at(-1)]));
+    ok(await waitFor(() => B.shows('Call ended')), 'calls: the far side says "Call ended"', B.screen()?.textContent);
+    ok(await waitFor(() => A.screen()?.hidden === true && B.screen()?.hidden === true), 'calls: then the call screen goes');
+    A.sb.ui.go('chat', B.did); await settle(); await A.poll(); await A.poll();
+    ok(A.root.all().some((e) => e.className === 'callline out' && e.textContent.includes('Call · 0:0')), 'calls: the line in the chat, as a call line (never a bubble)');
+    await sleep(1300);
+    // 2. Decline.
+    await A.callBtn().click(); await settle();
+    ok(await waitFor(() => B.cbtn('Decline')), 'calls: ringing again');
+    await B.cbtn('Decline').click(); await settle();
+    ok(await waitFor(() => A.shows('bob declined') && A.lines.at(-1)?.text === 'Declined' && B.lines.at(-1)?.text === 'Declined'), 'calls: Decline: "bob declined" on the caller\'s screen, "Declined" in both chats', A.screen()?.textContent);
+    await sleep(1300); await pollBoth();
+    // 3. Glare: both press Call at once (the rings cross at the relay); one call, connected; the dropped one leaves no line.
+    const hold = [];
+    for (const P of [A, B]) { const s = P.line.send; P.line.send = (to, c) => (c.typ === 'ring' ? (hold.push(() => s(to, c)), Promise.resolve({ status: 'sent' })) : s(to, c)); P.unhold = () => { P.line.send = s; }; }
+    await B.sb.ui.go('chat', A.did); await settle(); await B.poll();
+    const nA = A.lines.length, nB = B.lines.length;
+    await Promise.all([A.callBtn().click(), B.callBtn().click()]); await settle();
+    await until(() => hold.length === 2, 3000);
+    A.unhold(); B.unhold();
+    for (const f of hold.splice(0)) await f();
+    ok(await waitFor(() => A.shows('· Direct') && B.shows('· Direct')), 'calls: glare: both pressed Call, one call stands, connected on both sides', `${A.screen()?.textContent} / ${B.screen()?.textContent}`);
+    ok(A.line.view().id === B.line.view().id && A.line.view().id === (A.did < B.did ? A.sent.find((x) => x.typ === 'ring' && x.id === A.line.view().id)?.id : B.sent.find((x) => x.typ === 'ring' && x.id === A.line.view().id)?.id), 'calls: glare: the smaller DID\'s call');
+    await B.cbtn('Hang up').click(); await settle();
+    ok(await waitFor(() => A.lines.length === nA + 1 && B.lines.length === nB + 1 && A.lines.at(-1).text.startsWith('Call · ')), 'calls: glare: one line each when it ends', JSON.stringify([A.lines.slice(nA), B.lines.slice(nB)]));
+    await sleep(1300); await pollBoth();
+    // 4. No direct path: accepted, ICE never answers: "Could not connect directly from these two networks."
+    net.direct = false;
+    await A.callBtn().click(); await settle();
+    ok(await waitFor(() => B.cbtn('Accept')), 'calls: ringing for the no-path try');
+    await B.cbtn('Accept').click(); await settle();
+    ok(await waitFor(() => A.shows(CM.NO_PATH) || B.shows(CM.NO_PATH), 8000), `calls: no direct path: "${CM.NO_PATH}" (no TURN in the free tier)`, `${A.screen()?.textContent} / ${B.screen()?.textContent}`);
+    ok(await waitFor(() => A.lines.at(-1)?.text === 'Could not connect' && B.lines.at(-1)?.text === 'Could not connect'), 'calls: no direct path: "Could not connect" in both chats');
+    net.direct = true;
+    // 5. "Can call me": the contact's switch and the Settings default.
+    await B.sb.ui.go('chat-info', A.did); await settle(); await B.poll();
+    const canSw = () => B.root.all().find((e) => e.tagName === 'INPUT' && e.attrs['aria-label'] === 'Can call me');
+    ok(canSw()?.checked === true, 'calls: Chat info: "Can call me", on for a friend by default');
+    canSw().checked = false; fire(canSw(), 'change'); await settle(); await B.poll();
+    ok(B.allow[A.did] === false && canSw()?.checked === false, 'calls: switched off: kept for that contact (POST /api/calls/allow)');
+    await B.sb.ui.go('set-chats'); await settle(); await B.poll(); await settle();
+    const defSw = () => B.root.all().find((e) => e.tagName === 'INPUT' && e.attrs['aria-label'] === 'Contacts can call me');
+    ok(defSw()?.checked === true, 'calls: Settings → Chats and history: "Contacts can call me", on by default');
+    defSw().checked = false; fire(defSw(), 'change'); await settle();
+    ok(B.settings.calls === false, 'calls: the default off (POST /api/settings {calls})');
+    for (const P of [A, B]) P.line.close();
+  }
 }
 
 // ================================================================ 3. router.mjs against the relay
@@ -2536,7 +2764,7 @@ try {
   await A.router.start(); await B.router.start();
   ok(A.router.carrier.transport === 'wss' && A.router.carrier.platform === A.platform, 'router: the carrier runs on the web platform, MQTT over WebSocket');
   const st0 = await call(A, 'GET', '/api/state?since=0');
-  ok(st0.status === 200 && Object.keys(st0.body).sort().join() === 'chats,enrol_words,events,groups,introductions,me,now,pending,seq,transfers' && st0.body.transfers === null && st0.body.me.did === ADA.did
+  ok(st0.status === 200 && Object.keys(st0.body).sort().join() === 'call,chats,enrol_words,events,groups,introductions,me,now,pending,seq,transfers' && st0.body.transfers === null && st0.body.call === null && st0.body.me.did === ADA.did
     && Object.keys(st0.body.me).sort().join() === 'clock_checked,clock_offset,did,error,online,picture,pow,pow_capped,pow_confirm,pow_done_ms,relay,retention_days,seat,wallet' && st0.body.me.seat === null && st0.body.me.picture === null && st0.body.me.pow_capped === null
     && JSON.stringify(st0.body.me.wallet) === JSON.stringify({ on: false, prices: false, currency: null }),
   `GET /api/state: UI-API.md's keys, me.did (${JSON.stringify(st0.body).slice(0, 200)})`);
@@ -2577,7 +2805,7 @@ try {
   const paired = await until(async () => (await call(A, 'GET', '/api/state')).body.groups.contacts.some((c) => c.did === CY.did));
   const cyRow = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
   ok(paired && cyRow.name === 'cy' && cyRow.words === node.contacts().contacts[0].fingerprint, `pair: the Node agent accepted the app's short code; both hold the same four words (${acc.status})`);
-  ok(Object.keys(cyRow).sort().join() === 'busy,current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,name_from,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
+  ok(Object.keys(cyRow).sort().join() === 'busy,can_call,can_call_set,current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,name_from,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
     `a contact in groups: UI-API.md's keys (${Object.keys(cyRow).sort()})`);
   ok(await until(async () => (await call(A, 'GET', '/api/state')).body.me.online), 'GET /api/state: online once paired, the session up (MQTT.js over WebSocket, proof of work in the worker)');
   ok((await call(A, 'GET', '/api/state')).body.pending.paired.some((x) => x.id === inv.body.id && x.paired === CY.did), 'GET /api/state: pending.paired names the invite that paired');
@@ -2603,6 +2831,37 @@ try {
     'GET /api/messages: the Node agent\'s answer, in');
   ok(changes > before, `onChange: the message was pushed (${changes - before} changes)`);
   const msgs = (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body;
+
+  // Calls over the relay (apps/contact/call.mjs in page.mjs): a Node agent rings the app with a sigelo-call/0 ring (CALL_SEND);
+  // the app's Line takes it from the carrier (never a message), holds it while a page that can take a call polls
+  // GET /api/calls?rtc=1, says no "Ringing…" (presence not shared), and Decline answers end declined; one line "Declined".
+  {
+    const CM = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'call.mjs')).href);
+    const { fakeNet } = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'test-fake-rtc.mjs')).href);
+    const sdp = (await new (fakeNet().RTC)({}).createOffer()).sdp, id = 'c0'.repeat(16);
+    const crow = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
+    ok(crow.can_call === true && crow.can_call_set === false, 'calls: a friend may ring by default (can_call, not set by hand)');
+    await call(A, 'GET', '/api/calls?rtc=1');
+    await node.send('ada', CM.padded({ typ: 'ring', id, attempt: 1, sdp, exp: Math.floor(Date.now() / 1000) + 60, text: CM.OLD_TEXT }), { label: CM.CALL_LABEL, internal: nodeLib.CALL_SEND });
+    let cv = null;
+    ok(await until(async () => { cv = (await call(A, 'GET', '/api/calls?rtc=1')).body.call; return cv?.state === 'incoming'; }), 'calls: the ring reaches the app\'s Line over the relay: incoming, from cy', JSON.stringify(cv)?.slice(0, 200));
+    ok(cv.id === id && cv.dir === 'in' && cv.did === CY.did && cv.offer === sdp && (await call(A, 'GET', '/api/state')).body.call?.state === 'incoming', 'calls: its offer for the page; the state says it rings');
+    ok(!(await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.some((m) => m.label === CM.CALL_LABEL), 'calls: no message for the ring itself');
+    const dec = await call(A, 'POST', '/api/calls/decline', { id });
+    const got = [];
+    ok(dec.status === 200 && await until(async () => { await node.inbox({ wait: 0.3 }); got.push(...node.takeCalls().map((m) => m.content)); return got.some((x) => x.typ === 'end'); }), 'calls: Decline: the Node agent gets the end');
+    ok(got.some((x) => x.typ === 'end' && x.id === id && x.reason === 'declined') && !got.some((x) => x.typ === 'ringing'), `calls: end declined; no "Ringing…" (presence not shared) (${got.map((x) => x.typ)})`);
+    const lines = (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.filter((m) => m.label === CM.CALL_LABEL);
+    const row2 = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
+    ok(lines.length === 1 && lines[0].text === 'Declined' && lines[0].dir === 'in' && lines[0].call?.state === 'declined' && row2.last?.call === 'declined' && row2.unread === crow.unread,
+      `calls: one line in the chat, "Declined", its call field; not counted unread (${JSON.stringify(lines)})`);
+    const al = await call(A, 'POST', '/api/calls/allow', { contact: CY.did, on: false });
+    ok(al.status === 200 && al.body.can_call === false && al.body.set === true && (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did).can_call === false, 'calls: Can call me off for cy (kept)');
+    const st = await call(A, 'POST', '/api/settings', { calls: false });
+    ok(st.status === 200 && st.body.calls === false && (await call(A, 'POST', '/api/calls/allow', { contact: CY.did, on: null })).body.can_call === false, 'calls: the Settings default off; cy back to the default: off');
+    await call(A, 'POST', '/api/settings', { calls: true });
+    ok((await call(A, 'POST', '/api/calls/start', { to: CY.did, sdp })).body.error?.check === 'call_offline', 'calls: a contact whose presence is not known: no call (presence-gated)');
+  }
   ok(msgs.messages.map((m) => m.dir).join() === 'out,in' && Object.keys(msgs.messages[0]).sort().join() === 'at,code,detail,dir,iat,label,link,n,status,text' && msgs.seq >= msgs.messages.at(-1).n,
     'GET /api/messages: both, in order, UI-API.md\'s keys');
   // Seen receipts (UI-API.md): the page read the Node agent's answer, so one first receipt went; the agent's carrier takes
@@ -2722,8 +2981,8 @@ try {
     await O.start();
     try {
       const ec = await O.call('POST', '/api/agents/enrol-code', { name: 'vps', tier: 'quiet' });
-      ok(ec.status === 200 && ec.body.worker === 1 && /^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(ec.body.code) && ec.body.state === 'code' && ec.body.command === `SIGELO_RELAY=${HOST} sigelo-agent init --enrol ${ec.body.code}`,
-        `app enrol: POST /api/agents/enrol-code → worker 1 (after this device), an 8-character code, the command (${JSON.stringify(ec.body).slice(0, 160)})`);
+      ok(ec.status === 200 && ec.body.worker === 1 && /^ENROL-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(ec.body.code) && ec.body.state === 'code' && ec.body.command === `SIGELO_RELAY=${HOST} sigelo-agent init --enrol ${ec.body.code}`,
+        `app enrol: POST /api/agents/enrol-code → worker 1 (after this device), an enrol code (ENROL-, 8 characters), the command (${JSON.stringify(ec.body).slice(0, 160)})`);
       const tk = keygen({ recovery: 'sha256:' + '1'.repeat(64) }), tempFile = join(dir, 'vps.enrol-t.local.json'), file = E.enrolPath(join(dir, 'vps.local.json'));
       const tc = new nodeLib.Carrier({ identity: () => ({ secret: tk.secret, bundle: { v: 'sigelo/0', typ: 'bundle', genesis: tk.genesis, rotations: [], bindings: [], attestations: [], issuers: [] } }),
         ...nodeLib.pathsFor(tempFile), ...relayOpts, keep: true });

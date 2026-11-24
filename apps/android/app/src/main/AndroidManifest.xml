@@ -2,10 +2,11 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- sigelo for Android (design/apps.md §8). minSdk 28 and targetSdk 35 are in app/build.gradle.
      Permissions: the network (the relay, a computer on the LAN), the camera (asked at the first scan
-     or the first photo), the microphone (asked at the first voice message), notifications (asked when the page asks, Android 13+; a name only, never a
+     or the first photo), the microphone (asked at the first voice message or call), notifications (asked when the page asks, Android 13+; a name only, never a
      message), and on Android 9 only the shared storage, for a received file to land in Downloads
      (asked at the first; later versions write there through MediaStore with no permission). One
-     provider, not exported: the photo file a camera app writes (PhotoProvider). No backup of anything:
+     provider, not exported: the photo file a camera app writes (PhotoProvider). Push: one receiver and one service, exported to
+     the user's UnifiedPush distributor (UnifiedPush). No backup of anything:
      the identity, its contacts and ratchets stay on this phone. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -19,6 +20,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Voice calls (CallService, design/calls.md §4): a foreground service of type microphone for the call's duration,
+         the audio mode and route (earpiece, speaker), the proximity lock at the ear, the ring's vibration. None of these
+         shows a prompt; RECORD_AUDIO above is asked at the first call made or accepted. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- A call's network watched (CallService): Wi-Fi to mobile data restarts the call's path at once. No prompt. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -27,6 +37,10 @@
     <queries>
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <!-- Push (UnifiedPush.java): the distributors installed, each a receiver of REGISTER. -->
+        <intent>
+            <action android:name="org.unifiedpush.android.distributor.REGISTER" />
         </intent>
     </queries>
 
@@ -77,5 +91,34 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the end-to-end messaging connection open while the app is minimised, so messages arrive and calls can ring." />
         </service>
+
+        <!-- Push (UnifiedPush.java, design/push.md §1 B): the distributor's broadcasts, each checked against our token, and
+             the service it binds before a message so the wake may start StayConnected. Exported: the distributor is
+             another app; neither holds anything. -->
+        <receiver
+            android:name=".UnifiedPush"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+                <action android:name="org.unifiedpush.android.connector.TEMP_UNAVAILABLE" />
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+            </intent-filter>
+        </receiver>
+        <service
+            android:name=".UnifiedPush$Raise"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.RAISE_TO_FOREGROUND" />
+            </intent-filter>
+        </service>
+        <!-- A voice call (CallService): in the foreground while a call lasts, started from the activity at Call or Accept;
+             its notification's Hang up comes back to it. Not exported, ends with the task. -->
+        <service
+            android:name=".CallService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="microphone" />
     </application>
 </manifest>

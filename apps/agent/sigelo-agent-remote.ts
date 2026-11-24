@@ -89,6 +89,8 @@ export async function remoteCall(scope: Scope, msg: { method: string; path: stri
   if (deviceRoute(url.pathname)) return [403, { error: { check: 'remote', message: 'device routes are never remote: moving keys needs a human at the computer' } }];
   // The phone's own (its picker, its camera, opening a file there): a human holding that phone, never a control.
   if (['/api/transfers/pick', '/api/transfers/photo', '/api/transfers/open', '/api/transfers/mic', '/api/transfers/voice-part'].includes(url.pathname)) return [403, { error: { check: 'remote', message: 'the phone\'s picker, camera, microphone and files are never remote' } }];
+  // A call holds the microphone of the device whose page took it: a human there, never a control.
+  if (url.pathname === '/api/calls' || url.pathname.startsWith('/api/calls/')) return [403, { error: { check: 'remote', message: 'calls are never remote: a call is taken on the device that rings' } }];
   if (url.pathname === '/api/transfers/send') return [403, { error: { check: 'remote', message: 'sending a file of the computer by its path is never remote: a human at the computer picks it' } }];
   if (!SCOPES[scope].has(`${msg.method} ${url.pathname}`)) {
     return routes[`${msg.method} ${url.pathname}`] ? [403, { error: { check: 'scope', message: `${msg.method} ${url.pathname} is outside this control's scope (${scope})` } }]

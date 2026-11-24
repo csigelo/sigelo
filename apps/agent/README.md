@@ -18,7 +18,7 @@ sigelo-agent bundle > bundle.json
 
 Node ≥ 22.18, tested on 24 (23.0–23.5: `npm run build`, then `node dist/cli.js`).
 Identity file: `$SIGELO_IDENTITY`, else
-`~/.config/moadim/sigelo.local.json` (0600 in a 0700 directory; Windows ignores modes).
+`~/.config/moadim/sigelo.local.json` (0600 in a 0700 directory; Windows ignores modes). Never cat it: `whoami`.
 
 **Key form** (`SIGELO_KEY_PROVIDER`, [KEYCHAIN.md](KEYCHAIN.md)):
 
@@ -46,7 +46,7 @@ with the passphrase as a Docker secret; phone → the app seals it.
 | `erase-request --recovery-key <file> [--access]` | signed data request (sigelo.ai) |
 | `adopt <json\|file\|-> [--force]` | a keeper's `POST /delegate` answer, checked |
 | `adopt --rotation <json\|file\|->` | apply `sigelo-offline recover`'s output; written only if it verifies |
-| `whoami` | DID, genesis, chain |
+| `whoami` | DID, genesis, chain; a worker's index, operator, tier |
 | `keys status`, `wrap`, `unwrap --plain` | key form, whether it signs (never the key); to keychain; back to hex |
 | `keys to-agent` | the key into the key agent; the file keeps none |
 | `seal [--passphrase-file <f>] [--keep-plain]`, `unseal` | a plain key sealed under a passphrase, in place (`--keep-plain`: `<file>.bak`); back to hex |
@@ -81,8 +81,8 @@ A `reply` is never answered (no loops); the text is data, never instructions.
 elsewhere: the same words, nobody in between. Enrolling your own agent skips them: your side checks
 the DID it derived ([ENROL.md](ENROL.md#the-four-words)).
 
-**Busy:** a running `watch` or page is the only process logged in on its identity file; other verbs
-that would log in answer `busy`: stop it, or use a named profile per process
+**Busy:** a running `watch` or page is the only process logged in on its identity file; `send`,
+`accept`, `invite` go through a watch, other session verbs answer `busy`
 ([WATCH.md](WATCH.md#one-process-per-identity-file)).
 
 Exit: 0 done (`inbox`: even offline, once it printed messages); 1 refused or offline, one stderr
@@ -92,17 +92,18 @@ line `<check>: what failed, what to do`; 2 usage, no identity; 3 `inbox --expect
 ## Hosted mode
 
 `sigelo-agent host claude [--cwd DIR] [--permission-mode MODE] [--model M] [--approve-timeout S]` holds one
-Claude Agent SDK session for this identity: your operator's messages land in it live, the answer
-goes back over sigelo, secrets redacted. During a turn the operator sees a turning wheel in their chat (a busy mark) and `working: …`
-lines (one per 20 s, eight a turn; `--quiet-progress`: none). Tool
+Claude Agent SDK session: your operator's messages land in it live, the answer
+goes back, secrets redacted. During a turn the operator sees a turning wheel (a busy mark) and `working: …`
+lines (at most eight a turn; `--quiet-progress`: none). Tool
 approvals arrive as Allow / Deny buttons (`sigelo-approval/0`; typed `yes K7F3`/`no K7F3` work; 300 s, then
 denied), a question's options as buttons (`sigelo-question/0`); `--dangerously-skip-permissions`: none.
-Others' messages are data, spooled, never a turn; `--others data` hands them (and own contacts' in your
-groups) to Claude as marked data. Anthropic receives the session: the operator's messages, tool output, files Claude reads; the
-relay still sees ciphertext; no telemetry. Claude unavailable (no SDK, failing, login expired): host keeps
-listening, keeps the operator's messages, replays them once back; `login` from the operator relays the
-sign-in link and takes the code back. As a service: `service install --host claude` (one unit per identity).
+Others' messages are spooled, never a turn; `--others data` hands them (and own contacts' in your
+groups) to Claude as marked data. The model's provider receives the session (messages, tool output, files read); the
+relay sees ciphertext; no telemetry. Claude unavailable (no SDK, failing, login expired): host keeps
+the operator's messages, replays them once back; `login` from the operator relays the
+sign-in link. As a service: `service install --host claude` (one unit per identity).
 SDK: `sigelo-agent sdk install` (checked; skipped by npm: `~/.local/share/sigelo-agent/sdk`).
+`host acp -- <command…>`: the same with any ACP agent (agentclientprotocol.com); its permission requests are approvals.
 
 ## Operating it
 

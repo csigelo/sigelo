@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { bundleOf, load } from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
-import { actingFile, contactLib, contactModule, debug, holderFor, kick, noIdentity, safeJson, safeText, unreadable, type Batch } from './sigelo-agent-contact.ts';
+import { actingFile, contactLib, contactModule, debug, holderFor, kick, lockHolder, noIdentity, safeJson, safeText, unreadable, type Batch } from './sigelo-agent-contact.ts';
 
 interface Member { did: string; name: string; role: string; me: boolean; contact: boolean }
 export interface GroupSummary { gid: string; name: string; status: string; ver: number; brake: number | 'off'; creator: string; creator_name: string | null; mine: boolean; foreign: boolean; run: number; members: Member[] }
@@ -159,7 +159,10 @@ export async function main(rest: string[]): Promise<number> {
       case 'join': {
         const r = G.join({ ...o, group: args[0]! });
         out(r);
-        note(`group ${r.group.name}: joined; its messages come with your next inbox`);
+        // Local; beside a running watch, kicked: its next round takes the group's messages (the agent-setup feedback, point 4).
+        const hw = lockHolder(path);
+        if (hw?.kind === 'watch') kick(path);
+        note(`group ${r.group.name}: joined; its messages come ${hw?.kind === 'watch' ? `through sigelo-agent watch (pid ${hw.pid}) now` : 'with your next inbox'}`);
         return 0;
       }
       case 'leave': {

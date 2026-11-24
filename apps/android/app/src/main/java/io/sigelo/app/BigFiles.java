@@ -250,7 +250,7 @@ final class BigFiles {
             // Android shows no prompt any more (refused twice, "don't ask again"): the page opens the settings page.
             if (activity.blocked(Manifest.permission.CAMERA)) {
                 pendingPhoto = null;
-                r.no("camera_blocked", "the camera is off for sigelo: switch on Camera in its Permissions");
+                r.no("camera_blocked", "the camera is off for Sigelo: switch on Camera in its Permissions");
                 return;
             }
             activity.asking(Manifest.permission.CAMERA);
@@ -299,7 +299,7 @@ final class BigFiles {
         activity.requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, REQ_MIC);
     }
 
-    private static final String MIC_OFF = "the microphone is off for sigelo: tap Voice again to allow it";
+    private static final String MIC_OFF = "the microphone is off for Sigelo: tap Voice again to allow it";
     private static final String MIC_BLOCKED = "Android no longer asks: switch on Permissions → Microphone in the app's settings";
 
     /** The app's page in the system settings: a refused permission is allowed there. */
@@ -331,8 +331,8 @@ final class BigFiles {
             else if (pendingPhoto != null) {
                 Reply r = pendingPhoto;
                 pendingPhoto = null;
-                if (activity.blocked(Manifest.permission.CAMERA)) r.no("camera_blocked", "the camera is off for sigelo: switch on Camera in its Permissions");
-                else r.no("camera_permission", "the camera is not allowed for sigelo: tap Camera again to allow it");
+                if (activity.blocked(Manifest.permission.CAMERA)) r.no("camera_blocked", "the camera is off for Sigelo: switch on Camera in its Permissions");
+                else r.no("camera_permission", "the camera is not allowed for Sigelo: tap Camera again to allow it");
             }
             return true;
         }
@@ -342,7 +342,7 @@ final class BigFiles {
             afterStorage = null;
             pendingStorage = null;
             if (granted && go != null) go.run();
-            else if (r != null) r.no("land", "no permission to write to Downloads (Settings → Apps → sigelo → Permissions → Files)");
+            else if (r != null) r.no("land", "no permission to write to Downloads (Settings → Apps → Sigelo → Permissions → Files)");
             return true;
         }
         return false;

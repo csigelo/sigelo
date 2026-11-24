@@ -38,6 +38,10 @@ const pkgSrc = readFileSync(join(ROOT, 'apps', 'agent', 'package.json'), 'utf8')
 ok('install.sh: apps/agent/package.json beside the page as web/package.json, byte for byte (About\'s version, one source); the dry run lists it',
   existsSync(join(S, 'web', 'package.json')) && readFileSync(join(S, 'web', 'package.json'), 'utf8') === pkgSrc && dry.stdout.includes(`/apps/agent/package.json ${S}/web/package.json`), dry.stdout.split('\n').filter((l) => l.includes('package')).join(' '));
 ok('sigelo-app.js: sigelo-app://app/ serves .json as application/json (by name, as the other files)', /const TYPES = \{[^}]*json: 'application\/json'/.test(readFileSync(join(S, 'sigelo-app.js'), 'utf8')));
+// Calls (design/calls.md §4, C4): WebRTC switched on where WebKitGTK has the setting; the microphone for this phone's own page only.
+ok('sigelo-app.js: enable-webrtc on where the setting exists; audio-only capture granted to this phone\'s own page, video only for scanning',
+  /if \('enable_webrtc' in settings\) settings\.enable_webrtc = true;/.test(readFileSync(join(S, 'sigelo-app.js'), 'utf8'))
+    && /if \(\(camera && \(uri\.startsWith\('sigelo-app:\/\/app\/start\.html'\) \|\| self\)\) \|\| \(mic && self\)\) req\.allow\(\); else req\.deny\(\);/.test(readFileSync(join(S, 'sigelo-app.js'), 'utf8')));
 const desk = readFileSync(join(P, 'share/applications/io.sigelo.App.desktop'), 'utf8');
 ok('desktop file: Exec the installed launcher, icon io.sigelo.App, mobile form factor', desk.includes(`Exec=${P}/bin/sigelo-app\n`) && desk.includes('Icon=io.sigelo.App') && desk.includes('X-Purism-FormFactor=Workstation;Mobile;'));
 const v = spawnSync('desktop-file-validate', [join(HERE, 'io.sigelo.App.desktop')], { encoding: 'utf8' });

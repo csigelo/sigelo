@@ -1,0 +1,7 @@
+The app is named Sigelo.
+Voice calls between two people: Call in a contact's chat while they are online.
+Notifications: Stay connected, Push (your UnifiedPush app, no Google) or Off.
+Share into Sigelo from other apps. Search in all chats or one.
+Agent approvals are Allow / Deny cards. Code blocks with Copy.
+Jump to latest. Files you send show in your chat; small ones go over the relay when no direct path.
+Delete this chat. Agents of your contacts in their own section.

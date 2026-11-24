@@ -71,11 +71,25 @@
 //                                                 prompt while Android still shows it, else (notifyBlocked) the app's notification settings;
 //                                                 false only remembers the page's why was declined; exempt: battery optimisation off for the
 //                                                 app; notify: notifications allowed. Anything but booleans refused "stay"
+//   → {op:"push", id, on?, distributor?}          ← {id, on, state, reason, distributors: [{id, name}], distributor, endpoint, p256dh, auth}
+//                                                 UnifiedPush (UnifiedPush.java, design/push.md §1 B), for the phone (not per profile): on
+//                                                 true registers with the distributor named (installed, else refused "push"), else the one
+//                                                 kept, else the only one; state off | none (no distributor) | pick (several, none chosen) |
+//                                                 registering | ok (endpoint, p256dh, auth given) | failed (reason) | unregistered |
+//                                                 unavailable. on false unregisters, the keys erased. Anything else refused "push"
 //   → {op:"big-keep", id, profile, part, name}    ← as big-pick   a voice message's recording (written with big-write) kept as a file to send
 //   → {op:"big-url", id, profile, uri}            ← as big-pick   a file that landed, as a doc the page fetches whole (a voice message played)
 //   → {op:"mic", id, profile}                     ← {id, granted:true}  RECORD_AUDIO asked at the first; refused "mic_permission"
 //                                                 (a refusal remembered: no second dialog, refused at once until allowed in Settings)
 //   → {op:"app-settings", id}                     ← {id}         the app's page in the system settings (to allow the microphone)
+//   → {op:"call", id, on, name?}                  ← {id}         a voice call's audio (design/calls.md §4; CallService.java): on, the
+//                                                 foreground service of type microphone with its ongoing-call notification (name, timer,
+//                                                 Hang up), audio mode IN_COMMUNICATION, voice-call focus, the earpiece, the proximity
+//                                                 screen-off lock; off, all of it undone. Hang up in the notification: the event {ev:"hangup"}
+//   → {op:"call-speaker", id, on}                 ← {id}         the loudspeaker on or off (the earpiece) during a call
+//   → {op:"call-ring", id, on, name?}             ← {id}         an incoming call while the app runs (in front, or kept by Stay connected): the
+//                                                 ringtone and vibration as the ringer mode allows (silent: none), and a heads-up notification
+//                                                 ("Incoming call", the caller's name; its tap opens the app); off: both stop. Closed app: B1/push
 //   → {op:"share-take", id, profile}              ← {id, text} | {id, doc, name, size, mtime, url, type}  the share held by the shell
 //                                                 (another app's ACTION_SEND), gone from it then: a text, or a file as a doc of this profile
 //                                                 (sent as a picked one is, its limits too); nothing held: refused "share"
@@ -84,6 +98,8 @@
 // Events, the shell's own (no id; never an answer): ← {ev:"open", tag} one of our notifications tapped (the app running: at
 // once; started by the tap: kept by the shell until the page's port is open, then posted once); ← {ev:"nudge"} Stay
 // connected's alarm (at most every 15 minutes) or the end of Doze: the carrier reconnects, with its backoff, when down;
+// ← {ev:"wake"} a push wake (mail waits at the relay): the carrier logs in at once; ← {ev:"push", …as the op answers} the
+// distributor's answer (a new endpoint, a failure, unregistered);
 // ← {ev:"share", text} | {ev:"share", name, type, size} | {ev:"share", error:{check, message}} something shared into sigelo from
 // another app (MainActivity's ACTION_SEND: at once, and to each new page while held; one at a time, the latest wins), or why the
 // shell refused it (a file:// or the app's own URI, a text too long). Kept here until a listener is set (bridge.onEvent).
@@ -97,9 +113,21 @@ import { checkNetwork, webPlatform, workerPow } from './platform-web.mjs';
 import { streamSocket, wsOverStream } from './ws-over-stream.mjs';
 
 export const BRIDGE = 'sigelo-bridge/0';
-export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'bars', 'reload', 'open-settings', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify', 'stay',
+export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'open', 'mode', 'wiped', 'secure', 'bars', 'reload', 'open-settings', 'clip-clear', 'clip-copy', 'share', 'unlock', 'forget-profile', 'lock', 'notify', 'stay', 'push',
   'big-pick', 'big-photo', 'big-hash', 'big-stat', 'big-write', 'big-flush', 'big-digest', 'big-drop', 'big-free', 'big-land', 'big-open', 'big-awake',
-  'big-keep', 'big-url', 'mic', 'app-settings', 'share-take', 'share-drop']);
+  'big-keep', 'big-url', 'mic', 'app-settings', 'share-take', 'share-drop', 'call', 'call-speaker', 'call-ring']);
+const PUSH_STATES = new Set(['off', 'none', 'pick', 'registering', 'ok', 'failed', 'unregistered', 'unavailable']);
+/** The shell's push answer or event → { on, state, reason, distributors, distributor, endpoint, p256dh, auth } (unknown parts dropped). */
+export function pushState(r = {}) {
+  const str = (v, re) => (typeof v === 'string' && re.test(v) ? v : null);
+  const ok = r.state === 'ok';
+  return {
+    on: r.on === true, state: PUSH_STATES.has(r.state) ? r.state : 'off', reason: typeof r.reason === 'string' ? r.reason.slice(0, 200) : null,
+    distributors: Array.isArray(r.distributors) ? r.distributors.filter((d) => str(d?.id, /^[A-Za-z0-9._]{1,200}$/)).slice(0, 16).map((d) => ({ id: d.id, name: typeof d.name === 'string' && d.name ? d.name.slice(0, 60) : d.id })) : [],
+    distributor: str(r.distributor, /^[A-Za-z0-9._]{1,200}$/),
+    endpoint: ok ? str(r.endpoint, /^https:\/\/.{1,1016}$/) : null, p256dh: ok ? str(r.p256dh, /^[A-Za-z0-9_-]{87}$/) : null, auth: ok ? str(r.auth, /^[A-Za-z0-9_-]{22}$/) : null,
+  };
+}
 /** A notification's tag (SigeloBridge.TAG): what it is about, given back when it is tapped. */
 export const TAG = /^(chat|group|pay):[A-Za-z0-9:._-]{1,200}$/;
 /** The app lock's choices of minutes away (SigeloBridge.LOCK_AFTER). */
@@ -141,7 +169,7 @@ function makeBridge(info, port) {
     // A listener may take one kind only (onEvent(fn, ev)); a nudge is never kept (it says "now").
     if (typeof m?.ev === 'string') {
       const to = [...listeners].filter((l) => l.ev === undefined || l.ev === m.ev);
-      if (to.length) for (const l of to) { try { l.fn(m); } catch {} } else if (m.ev !== 'nudge' && early.length < 16) early.push(m);
+      if (to.length) for (const l of to) { try { l.fn(m); } catch {} } else if (m.ev !== 'nudge' && m.ev !== 'wake' && early.length < 16) early.push(m);
       return;
     }
     const w = waiting.get(m?.id);
@@ -233,6 +261,13 @@ function makeBridge(info, port) {
       const r = await request('stay', x);
       return { on: r.on === true, exempt: r.exempt === true, asked: r.asked === true, notify: r.notify === true, notifyAsked: r.notifyAsked === true, notifyBlocked: r.notifyBlocked === true };
     },
+    /** Push (UnifiedPush) → the shell's state (pushState); { on, distributor } as the op takes them. Anything else refused "push". */
+    async push(o = {}) {
+      const x = {};
+      if (o.on !== undefined) { if (typeof o.on !== 'boolean') throw new MsgError('push', 'on: true or false'); x.on = o.on; }
+      if (o.distributor !== undefined) { if (typeof o.distributor !== 'string' || !/^[A-Za-z0-9._]{1,200}$/.test(o.distributor)) throw new MsgError('push', 'distributor: a package name'); x.distributor = o.distributor; }
+      return pushState(await request('push', x));
+    },
     /** This app's page in the system settings, where a permission Android no longer asks for is switched on. */
     async openSettings() { await request('open-settings', {}); },
     /** The share the shell holds, for this profile → { text } | { doc, name, size, mtime, url, type }; gone from the shell then. */
@@ -300,6 +335,22 @@ export function bigFiles(bridge, { profile = bridge.profile ?? 'p1', fetch: get 
     async mic() { return (await req('mic')).granted === true; },
     /** The app's page in the system settings (a refused permission is allowed there). */
     async appSettings() { await bridge.request('app-settings', {}); },
+  });
+}
+
+/**
+ * A call's audio in the shell (design/calls.md §4, SigeloBridge "call", CallService.java): platform.calls as
+ * apps/contact/page.mjs's hooks.calls takes it. A name is shown as given (at most NOTE_MAX characters).
+ */
+export function callAudio(bridge) {
+  // At most NOTE_MAX UTF-16 units, as the shell counts them (a name of 64 emoji is 128): whole characters only.
+  const name = (v) => { if (typeof v !== 'string' || v.length === 0) return 'Sigelo'; let s = ''; for (const ch of v) { if (s.length + ch.length > NOTE_MAX) break; s += ch; } return s; };
+  return Object.freeze({
+    /** The ring here: ringtone, vibration, a heads-up notification; off stops them. */
+    async ring({ on, name: n } = {}) { await bridge.request('call-ring', { on: on === true, ...(on === true && { name: name(n) }) }); },
+    /** The call's audio mode and its foreground service, on at Call or Accept, off at the end. */
+    async audio({ on, name: n } = {}) { await bridge.request('call', { on: on === true, ...(on === true && { name: name(n) }) }); },
+    async speaker(on) { await bridge.request('call-speaker', { on: on === true }); },
   });
 }
 
@@ -385,6 +436,8 @@ export async function androidPlatform({ bridge, mqtt, name = 'sigelo', indexedDB
     sealer: keystoreSealer(bridge),
     // Big files (design/transfer.md §10): the bytes in the shell, this profile's.
     big: bigFiles(bridge),
+    // Calls (design/calls.md §4): the ring, the call's audio mode, the speaker.
+    calls: callAudio(bridge),
     get commits() { return p.commits; },
   });
 }

@@ -19,7 +19,9 @@ import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.provider.Settings;
@@ -46,11 +48,21 @@ import org.json.JSONObject;
  * Settings' row, one at a time, each after the page's one line why; never at a start. A refusal is never final: the
  * next tap asks again while Android still shows the prompt, after that it opens the app's page in the system's settings. Notifications denied: the service runs all the same; Android 13+ then shows its
  * notification nowhere but in the quick settings' list of active apps.
+ *
+ * The wake window (design/push.md §1 B, UnifiedPush): a push wake with the page alive starts this service with WAKE,
+ * allowed from the background while the distributor holds UnifiedPush.Raise bound; it keeps the process in front for
+ * WAKE_MS while the page's carrier logs in and fetches, then stops, unless the switch is on (then it runs on as above).
  */
 public final class StayConnected extends Service {
     static final String CHANNEL = "connection", ON = "stay_on", ASKED = "stay_battery_asked", NOTIFY_ASKED = "stay_notify_asked";
     private static final String POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS";   // Manifest.permission's, API 33
     private static final String NUDGE = "io.sigelo.app.NUDGE";
+    static final String WAKE = "io.sigelo.app.WAKE";
+    static final long WAKE_MS = 60_000L;
+    private final Handler later = new Handler(Looper.getMainLooper());
+    private final Runnable windowOver = () -> {
+        if (!on(this)) stopSelf();
+    };
     private static final int NOTE = 1;
     private static final long NUDGE_MS = 15 * 60_000L;
 
@@ -64,6 +76,15 @@ public final class StayConnected extends Service {
     /** The switch (default on). */
     static boolean on(Context c) {
         return prefs(c).getBoolean(ON, true);
+    }
+
+    /** A push wake (UnifiedPush): the service for the wake window. Refused by Android (no Raise binding): the page's own nudge only. */
+    static void wake(Context c) {
+        try {
+            c.startForegroundService(new Intent(c, StayConnected.class).setAction(WAKE));
+        } catch (IllegalStateException | SecurityException e) {
+            // not allowed now: the page still gets its wake
+        }
     }
 
     /** The service started (on) or stopped (off). Started while the app is in front (onPause, the switch): allowed then. */
@@ -178,6 +199,10 @@ public final class StayConnected extends Service {
         Notification n = note();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) startForeground(NOTE, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE); else startForeground(NOTE, n);
         if (i != null && NUDGE.equals(i.getAction())) nudge();
+        if (i != null && WAKE.equals(i.getAction())) {
+            later.removeCallbacks(windowOver);
+            later.postDelayed(windowOver, WAKE_MS);
+        }
         AlarmManager am = getSystemService(AlarmManager.class);
         if (am != null) am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + NUDGE_MS, alarm());
         // Killed: not restarted by the system, which would bring the notification back without the page.
@@ -186,6 +211,7 @@ public final class StayConnected extends Service {
 
     @Override
     public void onDestroy() {
+        later.removeCallbacks(windowOver);
         AlarmManager am = getSystemService(AlarmManager.class);
         if (am != null) am.cancel(alarm());
         unregisterReceiver(idle);
