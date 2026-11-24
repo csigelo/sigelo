@@ -2,8 +2,8 @@
 
 A code review of the whole repository at the pre-export head, done by the model that
 orchestrated most of its construction (Claude Fable 5.1) after the pieces had been written
-by other model tiers. It is a self-review and says so: it stands in for nothing in
-ROADMAP §5.4 (external review), and it is published so a reader can see what was checked
+by other model tiers. It is a self-review and says so: it stands in for no
+external review, and it is published so a reader can see what was checked
 and how, not as a certificate.
 
 ## Scope and method
@@ -77,8 +77,8 @@ invariants: `ts/src/sigelo.ts`, `ts/src/jcs.ts`, `ts/src/keys.ts`, `ts/src/moner
 | A1 | low | ts+go verifiers, SPEC §7 | Two byte-identical copies of one voluntary rotation are two candidates: the chain REJECTs as a fork. Consistent in both implementations, but the spec did not say it. No attacker gain (one who can insert a duplicate can insert anything), no CLI produces one. | SPEC sentence added: a bundle MUST NOT carry a rotation twice; verifiers do not deduplicate |
 | A2 | low–medium | every ts byte edge | A document containing invalid UTF-8 was rejected whole by Go (RFC 8259 §8.1) but read lossily by ts callers (`readFileSync(…, 'utf8')`, `setEncoding`), which turned the bytes into U+FFFD and discarded only the item whose signature then failed. Same bytes, different verdicts (exp). | `parseBytes()` decodes fatally; used at every file, body and stdin edge; tests in ts, moadim, spend; SPEC §3 states the rule |
 | A3 | low | adapters/1f916/sigelo.ts | The world bound a DID after checking only `v`, `typ` and `key` of the genesis; a genesis with an extra field or a malformed `recovery`/`created`/`nonce` was bound though no verifier would ever accept a bundle built on it. | Full §3.1 genesis shape check before binding |
-| A4 | medium (process) | release/publish.sh | The export's identity-string gate used `grep -r --binary-files=without-match --exclude…`; on a busybox host (this one) grep rejects those flags and exits 2, and `2>/dev/null` plus `hits=$(…) && [ -n "$hits" ]` read that error as "no hits". The gate never ran: the first export (fd6bf70) shipped with two generic-pattern hits in ROADMAP §5.1 (the literal time-zone offset and home path, in prose about the gate itself) — no private device string, but exactly what CI would have failed on at the first push. Found after the export by running the gate by hand. | Gate is now `git grep` over HEAD (runs the same on GNU, busybox, macOS, Git Bash), exit 0/1/other handled explicitly — any grep failure aborts the export; ROADMAP wording fixed; CI excludes `release/publish.sh` like it excludes its own file; export re-run and the CI check run by hand inside it |
-| A5 | low (process) | `.github/workflows/conformance.yml`, `release/publish.sh`, ROADMAP §5.1 | The identity gate kept three "generic" patterns inline in the two tracked files it excluded from its own search — so the first export published exactly the strings it was guarding. ROADMAP §5.1 also described the maintainer's existing infrastructure in words. Found by an independent sweep of the first export that built its own pattern list instead of trusting the gate. | No tracked file holds a pattern: all come from the `DEVICE_STRINGS` secret / private file, the gate refuses an empty list, nothing is excluded; ROADMAP §5.1 reworded; host-specific wording → "the test host" in docs |
+| A4 | medium (process) | release/publish.sh | The export's identity-string gate used `grep -r --binary-files=without-match --exclude…`; on a busybox host (this one) grep rejects those flags and exits 2, and `2>/dev/null` plus `hits=$(…) && [ -n "$hits" ]` read that error as "no hits". The gate never ran: the first export (fd6bf70) shipped with two generic-pattern hits in the planning notes (the literal time-zone offset and home path, in prose about the gate itself) — no private device string, but exactly what CI would have failed on at the first push. Found after the export by running the gate by hand. | Gate is now `git grep` over HEAD (runs the same on GNU, busybox, macOS, Git Bash), exit 0/1/other handled explicitly — any grep failure aborts the export; planning-notes wording fixed; CI excludes `release/publish.sh` like it excludes its own file; export re-run and the CI check run by hand inside it |
+| A5 | low (process) | `.github/workflows/conformance.yml`, `release/publish.sh` | The identity gate kept three "generic" patterns inline in the two tracked files it excluded from its own search — so the first export published exactly the strings it was guarding. The planning notes also described the maintainer's existing infrastructure in words. Found by an independent sweep of the first export that built its own pattern list instead of trusting the gate. | No tracked file holds a pattern: all come from the `DEVICE_STRINGS` secret / private file, the gate refuses an empty list, nothing is excluded; planning notes reworded; host-specific wording → "the test host" in docs |
 
 ## Accepted limits (unchanged, documented where they live)
 
@@ -95,7 +95,7 @@ invariants: `ts/src/sigelo.ts`, `ts/src/jcs.ts`, `ts/src/keys.ts`, `ts/src/moner
 
 ## Not covered
 
-Everything ROADMAP §1 R8 and §5.4 name: no review by anyone but Claude; no cross-check of
+Everything an external review would cover: no review by anyone but Claude; no cross-check of
 SigV2, base58 or JCS against third-party code; dishonest worlds, delegates of delegates,
 live policy edits and the 1f916 adapter were not simulated (tools/sim/REPORT.md). Portability
 across operating systems is in PORTABILITY.md.

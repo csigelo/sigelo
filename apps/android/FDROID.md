@@ -126,7 +126,7 @@ MATCH`; Debian 21's unsigned build = CI's (d7370697b091); verdict REPRODUCIBLE, 
 (0.1.15 / 7, `commit:` 6c89b30, the v0.1.15 tag), v0.1.16's (0.1.16 / 8, `commit:` cf8fdd3, the v0.1.16 tag; it could
 not hold a connection for a new identity), v0.1.17's (0.1.17 / 9, `commit:` 0018dc4, the v0.1.17 tag) or v0.1.18's
 (0.1.18 / 10, `commit:` a03d859, the v0.1.18 tag). v0.1.19 is the version to submit: the recipe names 0.1.19 / 11; its
-`commit:` (still a03d859, v0.1.18's) becomes the full commit hash of the `v0.1.19` tag at the sync, and the merge request
+`commit:` is 257d267 (the v0.1.19 tag), and the merge request
 opens after its compare run (fdroid/MR.md).
 
 ## Steps and who acts

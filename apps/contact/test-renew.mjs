@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// "Cancel this code" and codes that renew themselves (ROADMAP "Invite codes: auto-renew and cancel"),
+// "Cancel this code" and codes that renew themselves,
 // on a loopback relay (SIGELO_RELAY_DIR, else ../../relay): carrier.cancelInvite by the short code,
 // the long one, the hash (another device of the same identity), at a relay that cannot cancel (an
 // older one: the invite still goes here); invite({ renew: true }): a fresh short code parked once

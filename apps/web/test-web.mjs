@@ -1978,7 +1978,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   }
 
 
-  // ---- Pass 6: Back everywhere (the Owner: "Make sure the return/go back button works everywhere"). A page over a history as
+  // ---- Pass 6: Back everywhere (the return/go back button works everywhere). A page over a history as
   // a WebView keeps it (pushState, replaceState, back, go, popstate); the system Back as the Android app does it (MainActivity
   // onBackPressed: the page's history back while it can go back, else the app leaves). Every screen: opened from another
   // (Settings), the system Back, then its own top-bar Back or Close; every sheet over a screen: the system Back, then its Close.

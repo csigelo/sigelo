@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Short invite codes and the four words of a pairing, contract sigelo-park/0 (ROADMAP §8 item 1).
+// Short invite codes and the four words of a pairing, contract sigelo-park/0.
 // No network here; the carrier parks and fetches (carrier.mjs invite, accept). Fixture and runner:
 // fixtures/short-code-v0.json, gen-short.mjs, test-short.mjs.
 //

@@ -15,7 +15,7 @@
  *   keeper-<j>.json   one per keeper: K_j and what that keeper needs to start, and     0600
  *                     `created` (the UTC day, YYYY-MM-DD): the restore height's floor for its wallet
  *
- * The one other exit for the 25 words is `tty` (`ceremony --human`, ROADMAP §2 M4): the human
+ * The one other exit for the 25 words is `tty` (`ceremony --human`): the human
  * running the ceremony sees them on /dev/tty, which the CLI opens itself (`openTty`) so they
  * never pass through stdout, stderr or a pipe an agent reads. `importRoot` is the refusal to
  * make a root of words that already existed.
@@ -92,7 +92,7 @@ export function openTty(path = '/dev/tty'): Tty | string {
   return (text) => { writeSync(fd, text); };
 }
 
-/** The --human screen. "Vault only, never a hot wallet" is ROADMAP §2's one line. */
+/** The --human screen. "Vault only, never a hot wallet" is the rule in one line. */
 function humanScreen(words: string, vault: string): string {
   const w = words.split(' ');
   const rows = [0, 5, 10, 15, 20].map((i) => w.slice(i, i + 5).map((x, k) => `${String(i + k + 1).padStart(2)} ${x.padEnd(13)}`).join('').trimEnd());
@@ -105,7 +105,7 @@ function humanScreen(words: string, vault: string): string {
 }
 
 /** The M4 sentence: why `ceremony --import` refuses without `--i-know-this-seed-was-cold`. */
-export const IMPORT_REFUSED = 'ceremony: importing an existing seed is refused by default — a seed that has been in a hot wallet is not a root (ROADMAP §2 M4). ' +
+export const IMPORT_REFUSED = 'ceremony: importing an existing seed is refused by default — a seed that has been in a hot wallet is not a root. ' +
   'Run the ceremony without --import to generate one. Only if these words have existed solely on paper or an air-gapped box, never in a wallet on a networked device, pass --i-know-this-seed-was-cold.';
 /** What `--i-know-this-seed-was-cold` makes the operator accept, printed on every such run. */
 export const IMPORT_LIABILITY = 'ceremony: --i-know-this-seed-was-cold: you vouch that these words were never in a hot wallet. If they were, whoever copied them ' +

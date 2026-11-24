@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **agent:** host acp: closing a session gives the agent up to 0.5 s to read session/cancel and exit before SIGTERM, then SIGKILL after 3 s; the session awaits its exit.
+
 ## v0.1.19 — 2026-11-25
 
 - **This release:** the app is named Sigelo; voice calls; Push through UnifiedPush; share into Sigelo, search, approval cards, code blocks; files fall back to the relay lane; read receipts and a busy wheel from agents.
@@ -546,7 +548,7 @@ history, which is not public. This public history starts at the import of 2026-1
   SimpleX (`62407e2`, `709f412`).
 
 ### 2026-10-02
-- **Licence check:** vendor genesis pinned, vendor chain verified from the licence, longest-chain rule, term ≤ 3 years; legacy files warned (`dba9b9e`). Vendor ceremony procedure published (`release/vendor-ceremony.md`).
+- **Licence check:** vendor genesis pinned, vendor chain verified from the licence, longest-chain rule, term ≤ 3 years; legacy files warned (`dba9b9e`). Vendor ceremony procedure written.
 - **Spec coverage:** vectors for §7.2 `hash(next_genesis) == next` and a sixth-key challenge test in both suites (`9cd82d0`).
 - **ts = go messages:** 2,960-case mutation differential, 0 result or message differences after `4e1c8d2`.
 - **Hygiene:** SPDX MIT headers on every source file (`fe4e8ac`); spend suite runs offline with `SIGELO_TEST_NO_LIVE=1` (`00af8e4`).
@@ -603,7 +605,7 @@ history, which is not public. This public history starts at the import of 2026-1
   recovery-beats-`iat` example (`a795275`).
 - **Ceremony:** `--human` shows the 25 words on the terminal only; `restore --words` reads a file or stdin;
   `--import` needs `--i-know-this-seed-was-cold` (`278e87c`, `29a0402`).
-- **Monero:** FCMP++/Carrot keeps the 25-word root (ROADMAP §2); the wallet-rpc canary accepts 1.30–1.33; unused
+- **Monero:** FCMP++/Carrot keeps the 25-word root; the wallet-rpc canary accepts 1.30–1.33; unused
   `get_tx_key` removed (`085bf06`, `ba825f3`).
 - **Export:** placeholders replace real stagenet subaddresses and oracle signatures; host specifics removed from
   docs (`5e96d29`, `77a7be4`, `78878b6`, `da03f18`).

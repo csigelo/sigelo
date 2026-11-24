@@ -419,7 +419,7 @@ Therefore: the agent runtime holds its identity key and a bearer token, never a 
 Every wallet sits behind a keeper that pins each agent to its own account and enforces
 per-transaction, per-period and rate caps and an allowlist, clamped down the delegation tree
 so that no delegate can exceed its delegator (MONERO.md §4.1, §4.3). A second approval is
-optional, per agent, above a threshold — off by default, because the Owner wants agents to
+optional, per agent, above a threshold — off by default, because agents are meant to
 spend their own funds unaided; what bounds an injected agent by default is its balance and its
 caps. The agent-facing verbs carry no keys, every destination must pass the allowlist, and a repeated
 payment is idempotent, so a confused or weak model cannot pay twice by retrying (MONERO.md

@@ -182,7 +182,7 @@ if (!EVIDENCE) try {
   snaps.push({ ts: new Date().toISOString(), total: String(a.total_balance), total_unlocked: String(a.total_unlocked_balance), now: true });
 } catch (e) {
   // A wallet-rpc that blocks on a daemon it cannot reach is the phone being offline, not the soak
-  // being sick (2026-10-04: a Wi-Fi hand-over paged the Owner twice). Count it only when the
+  // being sick (2026-10-04: a Wi-Fi hand-over paged the operator twice). Count it only when the
   // phone itself is online.
   const online = await fetch('https://api.github.com/', { method: 'HEAD', signal: AbortSignal.timeout(15_000) }).then(() => true, () => false);
   if (online) unhealthy.push('wallet-rpc not answering');

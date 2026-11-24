@@ -207,7 +207,7 @@
   },
   "vendor/contact/relays.mjs": {
    "from": "apps/contact/relays.mjs",
-   "sha256": "0dedadbbf075828108120b4809cf4a325998617e71f3d7291a9207f5dfe700c9"
+   "sha256": "40bef7659ffa39e9d6db1d77792d42f289747bd677a19934a211205371f72d66"
   },
   "vendor/contact/restore.mjs": {
    "from": "apps/contact/restore.mjs",
@@ -219,11 +219,11 @@
   },
   "vendor/contact/short.mjs": {
    "from": "apps/contact/short.mjs",
-   "sha256": "d916699200a5c1b3c4acb5b212a770eaf9d151da76ba80c8ca9bfdd2c33d53a0"
+   "sha256": "162624c8ebd0fa9dd380427931d3bd30b6a143a09533c62659160f5ccf468720"
   },
   "vendor/contact/store.mjs": {
    "from": "apps/contact/store.mjs",
-   "sha256": "e05ca88021eb48a91a1009230175d5d2de464881525273c0310ea5b272de7aca"
+   "sha256": "2c1def52da42d5a563e3363404928d10f13c0658deffc25a8fc82203f83c6916"
   },
   "vendor/contact/transfer-engine.mjs": {
    "from": "apps/contact/transfer-engine.mjs",

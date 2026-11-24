@@ -33,7 +33,7 @@ import { dirname, join, resolve } from 'node:path';
 import { canonicalize, did, structure, verify, verifySig, type Attestation, type Genesis, type Rotation } from 'sigelo';
 
 /**
- * The vendor's DID, the only `iss` a licence may have. A PLACEHOLDER until D1 (ROADMAP §7): a
+ * The vendor's DID, the only `iss` a licence may have. A PLACEHOLDER until D1: a
  * DID minted for this constant whose secret key was discarded at once, so no licence verifies
  * against it — nobody can issue one. At D1 the vendor identity is minted offline (the ceremony) and
  * its DID goes here (and in the release notes). `SIGELO_VENDOR_DID` overrides it: for tests, and for

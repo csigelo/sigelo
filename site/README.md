@@ -2,7 +2,7 @@
 
 The website, built for agents first: every page is HTML with a Markdown twin at the same path,
 plus `llms.txt`, `llms-full.txt`, `adopt.md`, `index.json`, `robots.txt`, `sitemap.xml` and
-`.well-known/security.txt` at the root (ROADMAP §3), plus the IndexNow key file `/<key>.txt`. Static files only: no JavaScript to read
+`.well-known/security.txt` at the root, plus the IndexNow key file `/<key>.txt`. Static files only: no JavaScript to read
 it (one script, `/join.mjs`, shows a join link's code on /join and sends nothing), no cookies, no analytics, no requests to another origin. It is generated from the
 repository's own documents at build time, so it cannot say something the tree does not.
 
@@ -52,8 +52,8 @@ internal links resolve; every page has its twin, `<link rel="alternate" type="te
 a description, a canonical URL on https://sigelo.io, one `<h1>`, JSON-LD that parses and holds
 the project's `SoftwareSourceCode` (`TechArticle` on spec and threat model); tags balance; no
 executable script, inline style or event handler; nothing loaded from another origin;
-`llms.txt` has the llmstxt.org shape and all its links resolve; `robots.txt` names the crawlers
-of ROADMAP §3 and its sitemap resolves; every `sitemap.xml` URL resolves; `index.json`'s
+`llms.txt` has the llmstxt.org shape and all its links resolve; `robots.txt` names the AI and search
+crawlers and its sitemap resolves; every `sitemap.xml` URL resolves; `index.json`'s
 sha256s match the files served *and* the repository's own files; `security.txt` has Contact,
 one Expires about a year out, Canonical and Policy; `apps/integrations/mcp/server.json` agrees
 with its `package.json`. It makes no external request.

@@ -2874,7 +2874,7 @@ catch (e) { ok('unlock_time must be 0', (e as Error).message.includes('unlock_ti
       describeLicence(leg).includes('WARNING legacy single-key licence') && !describeLicence(pro).includes('legacy') && describeLicence(pro).includes('vendor chain length 1'), describeLicence(leg));
   }
   {
-    // ---- the vendor chain (runbook §6, RISKS R14): the pin is the vendor's genesis; the licence carries the
+    // ---- the vendor chain: the pin is the vendor's genesis; the licence carries the
     // chain; only the chain's CURRENT key licenses; the keeper keeps the longest chain it has seen.
     const fresh = (): string => mkdtempSync(join(scratch, 'kc-'));
     const at = (raw: unknown, dir: string): string => whyOf(raw, gA, dir);
@@ -4240,7 +4240,7 @@ if (liveAddress !== null) {
   ok('canary retry: no delays, one attempt (npm test does not wait for an absent wallet)', once === null && calls === 1 && slept.length === 0, JSON.stringify({ once, calls, slept }));
   await new Promise<void>((r) => { srv.close(() => { r(); }); });
 }
-await (await import('./canary.js')).canary({ ok, skip, mockWallet, ...(NO_LIVE ? { live: 'http://127.0.0.1:1/json_rpc' } : {}) }); // the wallet-rpc canary (ROADMAP §5.5)
+await (await import('./canary.js')).canary({ ok, skip, mockWallet, ...(NO_LIVE ? { live: 'http://127.0.0.1:1/json_rpc' } : {}) }); // the wallet-rpc canary
 rmSync(dir, { recursive: true, force: true });
 console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);
 if (failed > 0) process.exit(1);

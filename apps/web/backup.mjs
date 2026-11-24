@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// The backup file of a profile that holds its own identity (sigelo-backup/0; ROADMAP "encrypted backup and restore of
-// contacts and chats"): the profile as this phone holds it, encrypted under the words password, so a restore on a new
+// The backup file of a profile that holds its own identity (sigelo-backup/0):
+// the profile as this phone holds it, encrypted under the words password, so a restore on a new
 // phone is the same device: the same keys, the same pairings, nothing paired again. The crypto is the words password's
 // (apps/contact/words-lock.mjs lockBytes: PBKDF2-SHA256 with ITERATIONS rounds and a 16-byte salt, HKDF, AES-256-GCM),
 // under its own label, the header bound as the AAD.

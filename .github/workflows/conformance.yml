@@ -15,7 +15,7 @@ jobs:
   # Its own job, so a missing secret or a hit never hides the test results of the other jobs.
   identity-strings:
     permissions: { contents: read }
-    # GitHub holds only public, sanitised data (Owner rule, 2026-10-02): the private pattern list that
+    # GitHub holds only public, sanitised data (since 2026-10-02): the private pattern list that
     # gates every export lives on the maintainer's machine and runs in release/publish.sh before any
     # push. This job only catches the generic shapes a slip would take: a home directory path, a
     # user-profile path, a private IP. It stores and prints nothing identifying.
@@ -62,7 +62,7 @@ jobs:
             { grep '^FAIL ' /tmp/ts-out | head -n 7; grep -E -m 3 'Error|^node:' /tmp/ts-out; tail -n 3 /tmp/ts-out; } | grep . | cut -c1-900 | sed 's/%/%25/g; s/^/::error title=ts node dist\/test.js::/'; exit 1; }
           grep -q '^ALL PASS$' /tmp/ts-out
         working-directory: ts
-      # `sigelo-verify --conformance --impl` (ROADMAP T7): the Go binary and ts/ (through its
+      # `sigelo-verify --conformance --impl`: the Go binary and ts/ (through its
       # wrapper) as candidates must both score ALL PASS, a deliberately broken wrapper must FAIL,
       # and tools/docs-test/grade-verifier.mjs must print the same case lines as the binary
       - run: |
@@ -294,7 +294,7 @@ jobs:
             require("assert").deepStrictEqual(b, a);
           '
 
-  # Reproducible release (ROADMAP §5.5, T4): five sigelo-verify targets, the source archive and
+  # Reproducible release: five sigelo-verify targets, the source archive and
   # the four npm tarballs, built twice, the second time with an empty Go build cache and npm
   # cache, and the two SHA256SUMS must be identical; then release/pack-test.sh installs the
   # tarballs in an empty directory and runs them. Uploaded as an artifact for a second builder

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * The wallet-rpc canary (ROADMAP §5.5): the `monero-wallet-rpc` interface the keeper depends
+ * The wallet-rpc canary: the `monero-wallet-rpc` interface the keeper depends
  * on, pinned. Method names, the parameters the keeper sends and the result fields it reads —
  * the same fields `service.ts` parses (`asBuilt`, `held`, `receive`, `history`, `bind`,
  * `/delegate`, the revoke sweep). An upstream change of any of them (FCMP++/Carrot is the one
@@ -40,7 +40,7 @@ export interface CanaryCtx {
  * 1.30 = v0.18.5.0, on the soak host (2026-09-29). The rest of RPC_RANGE is accepted on a SOURCE
  * DIFF only, never run: 1.31 = v0.18.5.1 (2026-07-08), 1.33 = the FCMP++ stressnet beta
  * (seraphis-migration v0.19.0.0-beta.3.0, 2026-09-25); neither changes a method, parameter or
- * result field this file pins (ROADMAP M6). A version outside the range FAILS: re-run the oracle
+ * result field this file pins. A version outside the range FAILS: re-run the oracle
  * and the whole apps/keeper/ suite against it, then move the ceiling (or the floor) in rpcrange.ts.
  */
 // The constants live in rpcrange.ts, which the package ships (`sigelo-spend doctor` checks the

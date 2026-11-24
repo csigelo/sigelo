@@ -285,7 +285,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   const BANNED = [/\bOwner\b/, /\b[Ff]eedback\b/, /\bthe same day\b/i, /(?:^|[\s("])[Ww]e /m, /(?:^|[\s("])I (?=[a-z])/m,
     /\b(?:an?|each|its own|one|the|Haiku|Sonnet|Opus|sub)\s*agents? (?:ran|found|wrote|fixed|reviewed|built|did|made|checked|closed|proved)\b/i, /\bby (?:an?|each|its own|one) agent\b/i];
   const hits = BANNED.filter((re) => re.test(cl));
-  ok(hits.length === 0, `changelog: no narration (Owner, agent as actor, feedback, "the same day", first person)${hits.length ? ` — hit ${hits.join(' ')}` : ''}`);
+  ok(hits.length === 0, `changelog: no narration (a decider named, agent as actor, feedback, "the same day", first person)${hits.length ? ` — hit ${hits.join(' ')}` : ''}`);
 }
 
 // ---- the page list and the word budgets ---------------------------------------------------------
@@ -304,8 +304,8 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     }
     return w;
   };
-  // 2026-10-25 (Owner): / may explain in place, +40 words (155 → 195). 2026-11-14: /faq's lost-device answer says what the
-  // words and the backup file bring back and how to change phones (Owner's request), +34 (420 → 454).
+  // 2026-10-25: / may explain in place, +40 words (155 → 195). 2026-11-14: /faq's lost-device answer says what the
+  // words and the backup file bring back and how to change phones, +34 (420 → 454).
   // 2026-11-14: /adopt and /llms.txt open with the package sentence (agents took `sigelo` for the CLI), +22 each.
   const BUDGET = { '/index.md': 195, '/adopt.md': 272, '/accept.md': 200, '/verify.md': 150, '/keeper.md': 200, '/contact.md': 80, '/privacy.md': 150, '/sandboxes.md': 200, '/404.md': 40, '/pair.md': 150, '/enrol.md': 150, '/join.md': 250, '/faq.md': 454 };
   for (const [f, max] of Object.entries(BUDGET)) {
@@ -391,7 +391,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(!/^disallow:\s*\S/im.test(t), 'robots.txt: disallows nothing');
   const uas = [...t.matchAll(/^User-agent:\s*(\S+)/gim)].map((m) => m[1]);
   const want = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'Google-Extended', 'Applebot', 'Applebot-Extended', 'CCBot', 'Amazonbot', 'Amzn-SearchBot', 'Meta-ExternalAgent', 'Meta-WebIndexer', 'MistralAI-User', 'MistralAI-Index', 'DuckAssistBot', '*'];
-  ok(want.every((w) => uas.includes(w)), `robots.txt: names the crawlers of ROADMAP §3 (${uas.length} user-agents)`);
+  ok(want.every((w) => uas.includes(w)), `robots.txt: names the AI and search crawlers (${uas.length} user-agents)`);
   const sm = t.match(/^Sitemap:\s*(\S+)/im)?.[1];
   ok(sm === `${ORIGIN}/sitemap.xml` && await status(local(sm)) === 200, 'robots.txt: Sitemap line resolves');
   const x = (await get('/sitemap.xml')).body.toString();
@@ -600,7 +600,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     ok(linking.length === 0 && !home?.relatedLink && !/\{\{relay_/.test(md('/index.md') + md('/adopt.md') + md('/contact.md')),
       `no file links or names a URL on sigelo.ai before the relay launch, no JSON-LD relatedLink${linking.length ? ` (in: ${linking.join(' ')})` : ''}`);
   }
-  // The motto is the project's (2026-10-25, Owner): on / right under the H1, with the disclosure
+  // The motto is the project's (since 2026-10-25): on / right under the H1, with the disclosure
   // sub-line saying who answers; the why stays the first paragraph of prose.
   const lines = md('/index.md').split('\n').filter(Boolean);
   ok(lines[0].startsWith('# sigelo: ') && lines[1] === '**By AI, for AI.** Built by a team of AI agents under a human owner. Why trust it? For the reason Bitcoin is trusted: the code is public, nobody needs permission, every claim can be checked ([FAQ](/faq.md#why-trust-it)).' && /^[A-Z]/.test(lines[2]) && /stranger/.test(lines[2]),
@@ -886,7 +886,7 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
   ok(p?.registryType === 'npm' && p.identifier === pj.name && p.version === pj.version && p.transport?.type === 'stdio', 'server.json: one npm package, sigelo-mcp, stdio');
 }
 
-// ---- dark pages (ROADMAP §15 R1; site/build.mjs DISCLOSED): a fixture page, built into scratch directories,
+// ---- dark pages (site/build.mjs DISCLOSED): a fixture page, built into scratch directories,
 // never site/dist. False: beside the output (<out>-dark/), noindex, and nothing in the site names it. True: a
 // page of the site, in the sitemap, index.json and llms.txt.
 {

@@ -41,7 +41,7 @@
 #                         nginx on 127.0.0.1 and /world/stats from the world on 127.0.0.1:8790,
 #                         restarts whichever unit fails, and logs to the journal
 #   --backup AGE-RECIPIENT  ONLY the state-backup step (Debian/systemd): age, the recipient
-#                         (age1…, the PUBLIC half; the identity stays on the Owner's phone) in
+#                         (age1…, the PUBLIC half; the identity stays on the operator's phone) in
 #                         /etc/sigelo-backup.recipient, /usr/local/sbin/sigelo-vps-backup and
 #                         sigelo-vps-backup.timer (daily 03:30 Europe/Berlin): the world state, the
 #                         nginx config and stats password file, /etc/letsencrypt, the sigelo units,
@@ -386,7 +386,7 @@ if [ -n "$backup" ] && [ "$relay" = 0 ]; then
 #!/bin/sh
 # sigelo-vps-backup — written by site/deploy/server-setup.sh --backup; run daily by
 # sigelo-vps-backup.timer as root. Tars the server's state, encrypts it with age to the recipient in
-# /etc/sigelo-backup.recipient (its identity is on the Owner's phone only: this server cannot read
+# /etc/sigelo-backup.recipient (its identity is on the operator's phone only: this server cannot read
 # its own backups) and writes <admin home>/backup/vps-state-<stamp>.tgz.age, admin user 0600, 7 kept.
 # The phone's nightly sigelo-backup fetches the newest one. Restore: site/deploy/README.md.
 set -eu
@@ -417,7 +417,7 @@ RUN
   BKDIR="$(getent passwd csigelo | cut -d: -f6)/backup"
   cat > /etc/systemd/system/sigelo-vps-backup.service <<'UNIT'
 [Unit]
-Description=sigelo.io state backup, age-encrypted to the Owner's phone key
+Description=sigelo.io state backup, age-encrypted to the operator's phone key
 
 [Service]
 Type=oneshot
@@ -1188,7 +1188,7 @@ UNIT
 
   say "R16. visit statistics: the /_stats/ password, sigelo-relay-stats every 10 minutes"
   # As sigelo.io's (--stats), with one difference: the password is kept on this host, root only,
-  # so the Owner reads it over ssh (sudo cat) instead of from a line printed once. nginx reads the
+  # so the operator reads it over ssh (sudo cat) instead of from a line printed once. nginx reads the
   # hash file (www-data), never the password. The page needs deploy/nginx.conf's /_stats/ location
   # (deploy/deploy.sh installs it with the release).
   HT=/etc/nginx/sigelo-stats.htpasswd PWF=/root/sigelo-stats.pw
