@@ -17,7 +17,7 @@ Binaries: https://github.com/csigelo/sigelo/releases/download/v%v/sigelo-%v.apk
 Builds:
   - versionName: 0.1.20
     versionCode: 12
-    commit: 257d267d6581ca1161e954260ca08853e78911a9
+    commit: 25380436ee379ef1774f48078ae3f8f7868cf33a
     subdir: apps/android/app
     sudo:
       - apt-get update

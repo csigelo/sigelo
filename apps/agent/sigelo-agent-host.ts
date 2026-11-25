@@ -5,7 +5,8 @@
  * It is a watcher (sigelo-agent-watch.ts, its lock "<pid> watch": a `watch` and a `host` never run on
  * one identity) with a router in front of the spool:
  *   the operator's message  → a user turn in the session; the turn's final text goes back to them
- *                             (code fences dropped, cut in parts of PART_MAX, secrets redacted)
+ *                             (cut in parts of PART_MAX, secrets redacted; code fences kept: the app
+ *                             shows them as code with Copy)
  *   `yes CODE` / `no CODE`  → the answer to that approval, never a turn
  *   anything while a question waits → its answer, never a turn
  *   anyone else's message   → spooled as `watch --spool` does; the operator gets one line about it;
@@ -77,8 +78,6 @@ export function redact(s: string): string {
     .replace(/(^|[^:\w])[0-9a-fA-F]{64}(?![0-9a-fA-F])/g, `$1${R}`)
     .replace(/\b[48][1-9A-HJ-NP-Za-km-z]{94}(?:[1-9A-HJ-NP-Za-km-z]{11})?\b/g, R);
 }
-/** Markdown code fences dropped (their content kept as plain text). */
-export const plain = (s: string): string => s.replace(/^[ \t]*```[^\n]*\n?/gm, '').trim();
 /** A long text in parts of at most max characters, cut at a paragraph, else a line, else a space; "(i/n)" first when more than one. */
 export function parts(s: string, max = PART_MAX): string[] {
   const room = max - 8, out: string[] = [];
@@ -449,11 +448,11 @@ export function hostCore(o: CoreOptions): Core {
   let login: { proc: LoginProc; asking: boolean } | null = null;
   type Waiter<T> = { done(v: T | null): void };
   const approvals = new Map<string, Waiter<boolean>>(), questions: Waiter<string>[] = [];
-  const say = async (text: string, label = ''): Promise<void> => { for (const p of parts(plain(redact(text)))) await o.tell(p, label); };
+  const say = async (text: string, label = ''): Promise<void> => { for (const p of parts(redact(text).trim())) await o.tell(p, label); };
   const tellQuietly = (text: string): Promise<void> => say(text).catch((e: Error) => log(`host: ${e.message}`));
   // An approval or a question with buttons in the app: its fields redacted, `text` the line as say sends it.
   const ask = async (line: string, label: string, f: Record<string, string | number | string[]>): Promise<void> => {
-    const text = plain(redact(line));
+    const text = redact(line).trim();
     if (o.tellObj === undefined || text.length > PART_MAX) return say(line);
     const red = (v: string | number | string[]): string | number | string[] => (typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(redact) : v);
     await o.tellObj({ ...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, red(v)])), text }, label);

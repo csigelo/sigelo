@@ -127,7 +127,7 @@ MATCH`; Debian 21's unsigned build = CI's (d7370697b091); verdict REPRODUCIBLE, 
 not hold a connection for a new identity), v0.1.17's (0.1.17 / 9, `commit:` 0018dc4, the v0.1.17 tag) or v0.1.18's
 (0.1.18 / 10, `commit:` a03d859, the v0.1.18 tag), nor v0.1.19's (0.1.19 / 11, `commit:` 257d267, the v0.1.19 tag;
 it could not send a file over 1 MiB). v0.1.20 is the version to submit: the recipe names 0.1.20 / 12; its `commit:`
-(still 257d267, v0.1.19's) becomes the full commit hash of the `v0.1.20` tag at the sync, and the merge request
+is 2538043 (the v0.1.20 tag), and the merge request
 opens after its compare run (fdroid/MR.md).
 
 ## Steps and who acts
