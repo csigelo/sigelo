@@ -59,7 +59,7 @@
 //                                                 CAMERA asked at the first); doc: 32 hex, this profile's; refused no_camera (no app
 //                                                 answers the camera intent: the page offers the picker), camera_permission
 //   → {op:"big-hash"|"big-stat", id, profile, doc} ← {id, name, size, mtime, sha256, hashes (base64)} | {id, size, mtime}
-//   GET ORIGIN/.big/<doc>?size=&mtime=&profile= with Range: bytes=a-b (≤ 1 MiB) ← 206 those bytes, 409 when size or mtime moved (fetch, no base64)
+//   GET ORIGIN/.big/<doc>?size=&mtime=&profile=&from=a&to=b (≤ 1 MiB; no Range header) ← 200 those bytes, 409 when size or mtime moved (fetch, no base64)
 //   → {op:"big-write", id, profile, part, offset, data} | big-flush | big-digest | big-drop {part} | big-free ← {id} | {id, sha256} | {id, free}
 //   → {op:"big-land", id, profile, part, name}    ← {id, uri, name}  the partial moved into Downloads (MediaStore; Android 9: the storage
 //                                                 permission asked at the first); refused "land" with why (no permission, no room)
@@ -309,7 +309,9 @@ export function bigFiles(bridge, { profile = bridge.profile ?? 'p1', fetch: get 
     /** length bytes at offset, read by the shell from the file itself; file_changed when its size or time moved. */
     async read(doc, offset, length, { size, mtime }) {
       if (length === 0) return new Uint8Array(0);
-      const r = await get(`${origin}/.big/${id(doc, 'doc')}?size=${size}&mtime=${mtime}&profile=${profile}`, { headers: { Range: `bytes=${offset}-${offset + length - 1}` }, cache: 'no-store' });
+      // The range in the query, no Range header: the WebView would apply it again to the bytes the shell returns
+      // (BigFiles.range), and every chunk after the first failed.
+      const r = await get(`${origin}/.big/${id(doc, 'doc')}?size=${size}&mtime=${mtime}&profile=${profile}&from=${offset}&to=${offset + length - 1}`, { cache: 'no-store' });
       if (r.status === 409) throw new MsgError('file_changed', 'the file changed since it was offered: send it again');
       if (r.status !== 206 && r.status !== 200) throw new MsgError('file', `the app could not read the file (${r.status})`);
       const b = new Uint8Array(await r.arrayBuffer());

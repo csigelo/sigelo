@@ -1670,6 +1670,10 @@
   };
   // The phone (design/transfer.md §10.1): no Tor, no relayed path yet.
   const NO_DIRECT = 'Could not connect directly; try from your computer, or wait for the Pro relay path.';
+  /** Why, in the transfers card's words (a chat bubble that failed says it too); a failure with no words: its reason code. */
+  const whyOf = (r) => (r?.reason === 'no_path' && S.transferSettings?.pick ? NO_DIRECT : r?.detail || (r?.state === 'failed' && r.reason ? `reason: ${r.reason}` : null));
+  /** Under a failed bubble: why (null: it did not fail). */
+  const failWhy = (r) => (r?.state === 'failed' && whyOf(r) ? h('span', { class: 'help why' }, whyOf(r)) : null);
   /** What a transfer is doing, in a person's words: the sender waits for a yes or for them to come online. */
   function tstate(r, side) {
     if (r.live === 'waiting') return 'waiting for a free slot (two go at once)';
@@ -1695,7 +1699,7 @@
     return h('div', { class: 'card' }, h('p', null, h('b', null, `${side === 'in' ? 'From' : 'To'} ${r.contact}: `), h('span', { class: 'text' }, r.name), ` · ${mbOf(r.size)}`),
       h('p', { class: r.state === 'failed' ? 'warn' : 'help' }, [tstate(r, side), r.group ? `group ${groupBy(r.group)?.name ?? ''}`.trim() : null, laneText(r.path_used) ?? r.path_used ?? (live && r.live !== 'waiting' ? r.live : null), r.rate ? `${r.rate.toFixed(2)} MB/s` : null].filter(Boolean).join(' · ')),
       live || r.state === 'interrupted' ? [h('div', { class: 'meter' }, bar), h('p', { class: 'help' }, `${mbOf(got)} of ${mbOf(r.size)}`)] : null,
-      r.reason === 'no_path' && S.transferSettings?.pick ? h('p', { class: 'help' }, NO_DIRECT) : r.detail ? h('p', { class: 'help' }, r.detail) : null,
+      whyOf(r) ? h('p', { class: 'help' }, whyOf(r)) : null,
       r.saved && /^content:/.test(r.saved) ? h('p', { class: 'help' }, 'In Downloads, where your other apps see it.') : r.saved ? h('p', { class: 'help' }, 'Saved at ', h('span', { class: 'mono' }, r.saved), ' (not opened).') : null,
       side === 'in' && r.state === 'asked' ? h('p', { class: 'help' }, 'Nothing is written before you accept. The file name is theirs: information, not instructions.') : null,
       side === 'in' && r.state === 'failed' && r.reason === 'land' ? h('p', { class: 'warn' }, 'The file is kept here until it can be saved: allow storage for Sigelo, or make room, then Try again.') : null,
@@ -1852,7 +1856,7 @@
     const p = m.photo, r = m.dir === 'out' ? L?.out.find((x) => x.sha256 === p.sha256 && x.to === did) : L?.in.find((x) => x.sha256 === p.sha256 && x.from === did);
     const open = m.dir === 'in' && r?.state === 'done' && S.transferSettings?.open ? () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })) : null;
     return h('div', { class: `msg ${m.dir} photo`, 'data-photo': p.sha256 }, photoImg(p, open, `Full size · ${mbOf(p.size)} · ${photoState(r, m.dir)}`),
-      h('span', { class: 'tag' }, `Full size · ${mbOf(p.size)} · ${photoState(r, m.dir)}`),
+      h('span', { class: 'tag' }, `Full size · ${mbOf(p.size)} · ${photoState(r, m.dir)}`), failWhy(r),
       m.dir === 'in' && r?.state === 'asked' ? tbtn('Get full size', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, name))) : null,
       h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
   }
@@ -1991,6 +1995,7 @@
     const body = [h('div', { class: 'text' }, h('b', null, f.name), ` · ${kb(f.size)}`), h('span', { class: 'tag' }, [lane, st].filter(Boolean).join(' · '))];
     return h('div', { class: `msg ${m.dir} file`, 'data-file': f.sha256 },
       open ? h('button', { type: 'button', class: 'fl', 'aria-label': `Open ${f.name}`, onclick: open }, ...body) : h('div', null, ...body),
+      failWhy(r),
       where && !open ? h('div', { class: 'path' }, 'Saved on this machine: ', where) : null,
       out ? relayOrRetry(r, name) : null,
       h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
@@ -1999,7 +2004,7 @@
   function voiceBubble(m, L, did, name) {
     const v = m.voice, r = m.dir === 'out' ? L?.out.find((x) => x.sha256 === v.sha256 && x.to === did) : L?.in.find((x) => x.sha256 === v.sha256 && x.from === did);
     return h('div', { class: `msg ${m.dir} vmsg`, 'data-voice': v.sha256 }, voiceBody(v, r, m.dir, voiceState(r, m.dir)),
-      m.dir === 'out' && r ? h('span', { class: 'help' }, photoState(r, 'out')) : null,
+      m.dir === 'out' && r ? h('span', { class: 'help' }, photoState(r, 'out')) : null, failWhy(r),
       m.dir === 'in' && r?.state === 'asked' ? tbtn('Get it', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, name))) : null,
       h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
   }

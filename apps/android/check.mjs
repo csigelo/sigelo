@@ -402,9 +402,9 @@ ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooser
 {
   // Big files (design/transfer.md §10): BigFiles and PhotoProvider.
   const bf = java['BigFiles.java'], pp = java['PhotoProvider.java'];
-  ok(/path\.startsWith\("\/\.big\/"\) && bridge != null\) return bridge\.big\.range\(u, r\.getRequestHeaders\(\), HEADERS\);/.test(ma) && ma.indexOf('bridge.big.range') < ma.indexOf('SAFE_PATH.matcher(path)')
+  ok(/path\.startsWith\("\/\.big\/"\) && bridge != null\) return bridge\.big\.range\(u, HEADERS\);/.test(ma) && ma.indexOf('bridge.big.range') < ma.indexOf('SAFE_PATH.matcher(path)')
     && /if \(!String\.valueOf\(st\[0\]\)\.equals\(u\.getQueryParameter\("size"\)\) \|\| !String\.valueOf\(st\[1\]\)\.equals\(u\.getQueryParameter\("mtime"\)\)\) return empty\(409/.test(bf)
-    && /to - from \+ 1 > CHUNK\) return empty\(416/.test(bf) && /docOf\(profile == null \? "p1" : profileChecked\(profile\), doc\)/.test(bf),
+    && /to - from \+ 1 > CHUNK\) return empty\(416/.test(bf) && /u\.getQueryParameter\(\"from\"\)/.test(bf) && !/\"range\"\.equalsIgnoreCase/.test(bf) && /docOf\(profile == null \? "p1" : profileChecked\(profile\), doc\)/.test(bf),
     'big files: a range of a doc this profile picked or took, at most 1 MiB, 409 once its size or time moved; before the page\'s own files');
   ok(/COLUMN_LAST_MODIFIED\)/.test(bf) && /c\.getLong\(di\) \* 1000/.test(bf) && /MediaStore\.MediaColumns\.DATE_MODIFIED/.test(bf),
     'big files: a doc\'s time is its last-modified, else the media store\'s DATE_MODIFIED (an edit seen on a resume: file_changed)');

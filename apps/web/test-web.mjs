@@ -1803,7 +1803,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       const fm = (n, dir, sha, name, size, via = null) => ({ n, dir, at: now(), iat: now(), text: dir === 'out' ? `File: ${name}` : `file ${name} (${size} bytes), saved at /files/bo/${name}`, label: 'sigelo-file/0', status: dir === 'out' ? 'sent' : null, code: null, detail: null, link: null, file: { name, size, sha256: sha, via, transfer: null } });
       MSGS[bo.did] = [...MSGS[bo.did], fm(11, 'out', F1, 'sigelo.apk', 1_000_003), fm(12, 'out', F2, 'eight.bin', M8), fm(13, 'out', F3, 'big.bin', M8 + 1), fm(14, 'in', F4, 'notes.pdf', 12, 'relay')];
       TL.out.push({ id: 'a1'.repeat(16), to: bo.did, contact: 'bo', name: 'sigelo.apk', size: 1_000_003, sha256: F1, state: 'done', path_used: 'relay', sent: 1_000_003 },
-        { id: 'a2'.repeat(16), to: bo.did, contact: 'bo', name: 'eight.bin', size: M8, sha256: F2, state: 'failed', reason: 'no_path' },
+        { id: 'a2'.repeat(16), to: bo.did, contact: 'bo', name: 'eight.bin', size: M8, sha256: F2, state: 'failed', reason: 'relay', detail: 'over the relay: Failed to fetch' },
         { id: 'a3'.repeat(16), to: bo.did, contact: 'bo', name: 'big.bin', size: M8 + 1, sha256: F3, state: 'failed', reason: 'no_path' });
       routes['POST /api/transfers/relay'] = (b) => { sandbox.relayed = b; return { id: b.id, state: 'relaying' }; };
       routes['POST /api/transfers/retry'] = (b) => { sandbox.retried = b; return { id: 'b3'.repeat(16), state: 'offered' }; };
@@ -1812,6 +1812,9 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       ok(fb_(F1)?.className === 'msg out file' && fb_(F1).textContent.includes('sigelo.apk') && fb_(F1).textContent.includes('977 KB') && fb_(F1).textContent.includes('via relay · delivered'),
         `my file's own bubble: name, size, the lane and its state (${fb_(F1)?.textContent})`);
       const bt = (sha, l) => fb_(sha)?.all().find((e) => e.tagName === 'BUTTON' && e.textContent === l);
+      const why = (sha) => fb_(sha)?.all().find((e) => e.className === 'help why')?.textContent;
+      ok(why(F2) === 'over the relay: Failed to fetch' && fb_(F2).textContent.includes('failed') && typeof why(F3) === 'string' && why(F3).length > 0 && !why(F1),
+        `one that failed says why under "failed", in the transfers card's words (${why(F2)} | ${why(F3)})`);
       ok(bt(F2, 'Send over the relay') && !bt(F2, 'Retry') && bt(F3, 'Retry') && !bt(F3, 'Send over the relay'), 'one that did not go: exactly 8 MiB offers Send over the relay; 8 MiB + 1 byte offers Retry');
       await bt(F2, 'Send over the relay').click(); await settle();
       await bt(F3, 'Retry').click(); await settle();

@@ -1,0 +1,2 @@
+Files over 1 MiB send again.
+A failed file, photo or voice message says why.
