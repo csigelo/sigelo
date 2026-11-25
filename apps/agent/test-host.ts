@@ -107,7 +107,6 @@ const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e
       && !H.progressLine('Bash', { command: `curl -H "Authorization: Bearer ${TOKEN}"` }).includes(TOKEN));
   const miss = await H.loadSdk('@anthropic-ai/claude-agent-sdk-not-installed').then(() => 'loaded', (e: Error) => e.message);
   ok('host: the SDK missing → one line with the install command (an optional peer, never installed with sigelo-agent)', miss === H.SDK_MISSING && miss.includes('npm i -g @anthropic-ai/claude-agent-sdk@0.3.317'), miss);
-  ok('plain: code fences dropped, their content kept', H.plain('a\n```js\nx = 1\n```\nb') === 'a\nx = 1\nb');
 }
 
 // ── the session alone (hostCore) ──────────────────────────────────────────────────────────────────
@@ -136,7 +135,7 @@ const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e
     JSON.stringify(sent.filter((t) => t.startsWith('tool said:'))));
   sent.length = 0;
   core.input('long');
-  ok('a long answer: in parts (i/n), each ≤ PART_MAX, no code fences', await until(() => sent.some((t) => t.endsWith('end'))) && sent.length > 1 && sent.every((t, i) => t.length <= H.PART_MAX && t.startsWith(`(${i + 1}/${sent.length}) `) && !t.includes('```')), `${sent.length} parts`);
+  ok('a long answer: in parts (i/n), each ≤ PART_MAX, code fences kept', await until(() => sent.some((t) => t.endsWith('end'))) && sent.length > 1 && sent.every((t, i) => t.length <= H.PART_MAX && t.startsWith(`(${i + 1}/${sent.length}) `)) && sent.some((t) => t.includes('```')), `${sent.length} parts`);
   sent.length = 0;
   core.input('crash');
   ok('the session throws → a new one, the operator told the message was lost', await has((t) => t === 'session restarted: your last message was not answered, send it again') && core.sessions() === 2 && queries === 2, JSON.stringify(sent));
