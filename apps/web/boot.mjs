@@ -42,12 +42,12 @@
 // notify({ ask: true }) → { granted, blocked } asks the permission (blocked: Android asks no more: openSettings() instead). local.onOpen(fn): fn(tag) when one of them is tapped (a start by the tap:
 // once the bridge is connected); without the shell nothing.
 // local.reload() (ui.js Settings → About, "Reload the app"): the shell loads the page again from its start; a tab, env.reload().
-// local.stay (the Android app only; else undefined): Settings → Stay connected, the shell's switch for the phone (not per profile):
+// local.stay (the Android app only; else undefined): Stay connected, the shell's switch for the phone (not per profile; no longer in Settings, Built in push keeps the process):
 // get() → { on, exempt, asked, notify, notifyAsked, notifyBlocked }, set({ on }), battery(yes), notifications(yes) (platform-android.mjs stay).
 // The shell's nudge ({ev:"nudge"}: its alarm, the end of Doze) reaches the running carrier's wake(); a push wake ({ev:"wake"}) its wake({ now: true }).
-// local.push (the Android app only; else undefined): Settings → Notifications' Push, the shell's UnifiedPush for the phone (not per
-// profile): get() → { on, state, reason, distributors, distributor, endpoint, p256dh, auth, relay } (relay: the carrier's pushStatus()),
-// set({ on, distributor }) the same; onChange(fn) at the distributor's answers. The endpoint and keys go to the active profile's
+// local.push (the Android app only; else undefined): Settings → Notifications, the shell's push for the phone (not per profile; Built
+// in or the push app): get() → { mode, on, state, reason, distributors, distributor, endpoint, p256dh, auth, relay } (relay: the
+// carrier's pushStatus()), set({ mode, distributor }) the same; onChange(fn) at the push app's answers and Built in's changes. The endpoint and keys go to the active profile's
 // carrier (setPush), which registers them at its relay (sigelo-push/0); a computer's page and a tab: none.
 // local.shared (the Android app only; else undefined): share into sigelo (another app's ACTION_SEND, held by the shell): on(fn)
 // fn({ text } | { name, type, size } | { error: { check, message } }) at each share (one at a start: once the bridge is connected; a
@@ -56,6 +56,8 @@
 // local.onNetwork(fn) (the Android app only): fn() at each change of the default network while a call lasts (CallService).
 // local.bars (the Android app only; else undefined): bars("#rrggbb") the system bars in the page's background (no action bar).
 // local.powEngine() (ui.js Settings → About): the proof of work's engine, 'wasm' | 'js' (both in a Worker) | null (none here).
+// local.saveFile(name, bytes) (ui.js: a received file's "Save to Downloads"): as the backup's file, the Android app's Downloads
+// (MediaStore, no storage permission from Android 10), a tab's download → { name, where: 'Downloads' | 'download' }; local.saves: which.
 import { did as didOf, parseBytes } from 'sigelo';
 import { loadIdentity, memoryFiles, openDb, webPlatform } from './platform-web.mjs';
 import { TAG, androidPlatform, bigFiles, connectBridge, keystoreSealer, profileBridge, pushState } from './platform-android.mjs';
@@ -89,7 +91,7 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
   rawP.then((r) => r?.onEvent(() => { try { router?.carrier?.wake?.(); } catch {} }, 'nudge'), () => {});
   // A push wake (UnifiedPush): mail waits at the relay; the carrier logs in at once, past any backoff.
   rawP.then((r) => r?.onEvent(() => { try { router?.carrier?.wake?.({ now: true }); } catch {} }, 'wake'), () => {});
-  // Push (UnifiedPush, design/push.md): the shell's endpoint and keys to this profile's carrier, which registers them at its
+  // Push (Built in or UnifiedPush, design/push.md): the shell's endpoint and keys to this profile's carrier, which registers them at its
   // relay at every login (carrier.mjs setPush, sigelo-push/0); removed there (null) once push is off or the endpoint is gone,
   // if this profile registered one (PUSHED in its storage). A computer's page (a remote profile) has no carrier here: nothing.
   let pushStore = null;
@@ -361,12 +363,12 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     // Stay connected (Settings): the shell's switch and its two asks; a page has none.
     stay: shell ? Object.freeze({ get: async () => (await shellOf()).stay(), set: async ({ on } = {}) => (await shellOf()).stay({ on }),
       battery: async (yes) => (await shellOf()).stay({ battery: yes === true }), notifications: async (yes) => (await shellOf()).stay({ notifications: yes === true }) }) : undefined,
-    // Push (Settings → Notifications): the shell's UnifiedPush state, for the phone, with this profile's relay's side (carrier
-    // pushStatus); set({ on, distributor }) through the shell, then to the carrier. A page has none.
+    // Push (Settings → Notifications): the shell's push state (Built in or the push app), for the phone, with this profile's
+    // relay's side (carrier pushStatus); set({ mode, distributor }) through the shell, then to the carrier. A page has none.
     push: shell ? Object.freeze({
       get: async () => ({ ...(await (await shellOf()).push()), relay: router?.carrier?.pushStatus?.() ?? null }),
-      set: async ({ on, distributor } = {}) => {
-        const st = await (await shellOf()).push({ ...(on !== undefined && { on }), ...(distributor !== undefined && { distributor }) });
+      set: async ({ mode, distributor } = {}) => {
+        const st = await (await shellOf()).push({ ...(mode !== undefined && { mode }), ...(distributor !== undefined && { distributor }) });
         applyPush(st);
         return { ...st, relay: router?.carrier?.pushStatus?.() ?? null };
       },
@@ -381,6 +383,9 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     // The code a profile added by "Join from an invite code" was made for: once, then gone (ui.js opens Enter their code with it).
     joinCode() { const c = sess.get(JOIN); if (!c) return null; sess.set(JOIN, ''); return c; },
     backup,
+    // A received file out of the app (2026-11-25): where the backup goes, by the same path.
+    saveFile: async (name, bytes) => saveFile(String(name), bytes),
+    saves: shell ? 'Downloads' : 'download',
     words: wordsApi(() => own, { unlock: async () => { if (raw) await raw.unlock(); }, withProfile, original: () => ownDid }),
   });
   return { ready, local, registry: regP };

@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { keygen } from 'sigelo';
-import { CHUNK, LOW, REASONS, checkMessage, readFrame, frames } from './transfer.mjs';
+import { CHUNK, LOW, REASONS, checkMessage, readFrame, frames, manifest } from './transfer.mjs';
 import * as E from './transfer-engine.mjs';
 import { FILE_LABEL, MAX_FILE } from './file.mjs';
 
@@ -132,6 +132,71 @@ const OWN = { did: 'did:sigelo:zOwn', name: 'own', tier: 'own' }, PAL = { did: '
   }
 }
 
+// ================================================================ the accept rule, whatever the lane (2026-11-25)
+// On the phone, with direct off, every file waited for a manual accept. The rule (transfer auto <contact> <MB>)
+// says yes under the size; the direct switch only picks the lane: off, no Tor, the receiver ends no_path at once and the
+// sender's relay lane carries it (up to 8 MiB).
+{
+  const io = memIo(), car = fakeCarrier([OWN, PAL, NEW]), x = new E.Engine({ carrier: car, io, compared: (d) => d === PAL.did, timer: false });
+  car.takeTransfers = () => { const l = car.inbound ?? []; car.inbound = []; return l; };
+  const offer = async (from, size) => {
+    const n = Math.ceil(size / CHUNK), m = manifest({ name: 'f.bin', size, sha256: 'ab'.repeat(32), hashes: new Uint8Array(n * 32), now: NOW });
+    car.inbound = [{ from: from.did, name: from.name, content: m }];
+    await x.round();
+    return E.list({ carrier: car, io }).in.find((r) => r.id === m.id);
+  };
+  E.setDirect({ carrier: car, io, contact: 'own', on: false });
+  E.setAuto({ carrier: car, io, contact: 'own', mb: 100 });
+  const r1 = await offer(OWN, 3_000_000);
+  ok(r1.by === 'rule' && r1.state === 'failed' && r1.reason === 'no_path', `direct off, auto 100 MB, 3 MB: accepted by the rule, no question (${r1.state}${r1.reason ? `: ${r1.reason}` : ''})`);
+  ok(car.sent.some((m) => m.content.typ === 'end' && m.content.id === r1.id && m.content.reason === 'no_path') && !car.sent.some((m) => m.content.typ === 'offer' && m.content.id === r1.id),
+    'no direct and no Tor here: no_path to the sender at once (its relay lane takes it), no offer with addresses');
+  const r12 = await offer(OWN, 12_000_000);
+  ok(r12.state === 'asked' && !r12.by, `direct off, no Tor, 12 MB (over the relay lane's 8 MiB): asked, not accepted to fail no_path unseen (${r12.state})`);
+  io.tor = { caps: async () => ({ serve: false, connect: false }), close() {} };
+  const r13 = await offer(OWN, 13_000_000);
+  ok(r13.by === 'rule', `direct off, Tor on here, 13 MB: accepted by the rule (Tor may carry it) (${r13.state})`);
+  io.tor = null;
+  const r2 = await offer(OWN, 101_000_000);
+  ok(r2.state === 'asked' && !r2.by, 'the size cap kept: 101 MB over 100 MB is asked');
+  E.setAuto({ carrier: car, io, contact: 'own', mb: 0 });
+  ok((await offer(OWN, 10)).state === 'asked', 'auto 0 for the contact: always asked, direct off or not');
+  E.setAuto({ carrier: car, io, contact: 'own', mb: null });
+  const r3 = await offer(PAL, 1000);
+  ok(r3.by === 'rule' && E.list({ carrier: car, io }).direct[PAL.did] === undefined, 'a compared friend, direct never asked: accepted by the rule, the switch left unset (no address shown)');
+  E.setAuto({ carrier: car, io, contact: 'new', mb: 100 });
+  ok((await offer(NEW, 10)).state === 'asked', 'words not compared: asked, whatever its size');
+  // Direct on: the rule's yes is followed by an offer (the direct lane), as before.
+  E.setDirect({ carrier: car, io, contact: 'own', on: true });
+  const rtc = { peer: async () => ({ offer: async () => 'v=0 fake', close() {} }) };
+  const y = new E.Engine({ carrier: car, io, rtc: async () => rtc, stun: [], timer: false });
+  car.inbound = [{ from: OWN.did, name: 'own', content: manifest({ name: 'g.bin', size: 10, sha256: 'cd'.repeat(32), hashes: new Uint8Array(32), now: NOW }) }];
+  await y.round();
+  const r4 = E.list({ carrier: car, io }).in.find((r) => r.name === 'g.bin');
+  ok(r4.by === 'rule' && r4.state === 'offering' && car.sent.some((m) => m.content.typ === 'offer' && m.content.id === r4.id), `direct on: the rule's yes, then an offer (${r4.state})`);
+  // The rule's yeses add up: the disk must hold every file still coming, and at most 8 a contact (WAIT_CONTACT) come
+  // unasked at once; past either, asked (a sender sending more than its 8, or many large ones, cannot fill the disk).
+  const offerY = async (name, size) => {
+    const n = Math.ceil(size / CHUNK), m = manifest({ name, size, sha256: createHash('sha256').update(name).digest('hex'), hashes: new Uint8Array(n * 32), now: NOW });
+    car.inbound = [{ from: OWN.did, name: 'own', content: m }];
+    await y.round();
+    return E.list({ carrier: car, io }).in.find((r) => r.id === m.id);
+  };
+  const freeWas = io.free;
+  io.free = () => E.FREE_MARGIN + 12_000_000;
+  const d1 = await offerY('d1.bin', 5_000_000), d2 = await offerY('d2.bin', 5_000_000), d3 = await offerY('d3.bin', 5_000_000);
+  ok(d1.by === 'rule' && d2.by === 'rule' && d3.state === 'asked' && !d3.by,
+    `12 MB free, three 5 MB files: two by the rule, the third asked (10 MB promised + 5 > 12) (${[d1, d2, d3].map((r) => r.by ?? r.state)})`);
+  io.free = freeWas;
+  const many = [];
+  for (let i = 0; i < 6; i++) many.push(await offerY(`m${i}.bin`, 10));
+  const nRule = [r4, d1, d2, ...many].filter((r) => E.list({ carrier: car, io }).in.find((z) => z.id === r.id)?.by === 'rule').length;
+  ok(nRule === 8 && many.at(-1).state === 'asked' && many.slice(0, -1).every((r) => r.by === 'rule'),
+    `3 files from one contact already coming, 6 more: 5 by the rule (8 at once), the 6th asked (${many.map((r) => r.by ?? r.state)})`);
+  for (const r of [r4, d1, d2, ...many]) y.drop(r.id, 'cancelled');
+  await x.close(); await y.close();
+}
+
 // ================================================================ two agents on a loopback relay, a fake direct path
 const RELAY_DIR = process.env.SIGELO_RELAY_DIR ?? join(HERE, '..', '..', 'relay');
 if (!existsSync(join(RELAY_DIR, 'server.mjs'))) {
@@ -238,6 +303,16 @@ try {
   await sleep(1500);
   ok(aRec(r3.id).state === 'failed' && !aRec(r3.id).relay && !aRec(r3.id).path_used, 'not fallen back to the relay lane');
   ok(await failure(() => A.relay(r3.id, { manual: true })) === 'file_too_large', 'Send over the relay is refused past 8 MiB (the bubble offers Retry)');
+
+  // 4. Direct off at the receiver (2026-11-25), its rule "transfer auto alice 100": no question, over the relay lane.
+  net.blocked = false;
+  X.setDirect({ carrier: bob.c, identity: bob.identity, contact: 'alice', on: false });
+  X.setAuto({ carrier: bob.c, identity: bob.identity, contact: 'alice', mb: 100 });
+  const pdf = seeded('pdf', 2 * CHUNK + 5); writeFileSync(join(dir, 'notes.pdf'), pdf);
+  const r4 = await X.send({ carrier: alice.c, identity: alice.identity, to: 'bob', path: join(dir, 'notes.pdf') });
+  ok(await until(() => aRec(r4.id)?.state === 'done', 60000) && aRec(r4.id).path_used === 'relay', 'direct off, auto 100 MB: done over the relay lane', JSON.stringify(aRec(r4.id)));
+  ok(await until(async () => (await bFile(sha(pdf))) !== undefined, 60000), 'the receiver has it whole, no accept given');
+  ok(bRec(r4.id)?.by === 'rule' && !bEv.some((e) => e.what === 'asked' && e.id === r4.id), 'accepted by the rule: never asked', JSON.stringify(bRec(r4.id)));
 } finally {
   await A?.close().catch(() => {}); await B?.close().catch(() => {});
   await alice.c.stop().catch(() => {}); await bob.c.stop().catch(() => {});

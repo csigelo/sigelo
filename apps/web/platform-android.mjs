@@ -54,7 +54,8 @@
 //   → {op:"notify", id, ask:true}                  ← {id, granted, blocked} POST_NOTIFICATIONS asked when not granted (Android 13+);
 //                                                                 blocked: Android no longer asks (open-settings instead)
 //   → {op:"open-settings", id}                     ← {id}         this app's page in the system settings
-//   → {op:"big-pick", id, profile, images?} | {op:"big-photo", id, profile, keepLocation}  ← {id, doc, name, size, mtime, url} | {id, cancelled:true}
+//   → {op:"big-pick", id, profile, images?, multiple?} | {op:"big-photo", id, profile, keepLocation}  ← {id, doc, name, size, mtime, url} | {id, cancelled:true}
+//                                                 (multiple: ← {id, docs: [{doc, name, size, mtime, url}, …]}, several chosen at once)
 //                                                 the system's picker (the read grant kept) or camera (the location tags removed unless kept;
 //                                                 CAMERA asked at the first); doc: 32 hex, this profile's; refused no_camera (no app
 //                                                 answers the camera intent: the page offers the picker), camera_permission
@@ -71,12 +72,13 @@
 //                                                 prompt while Android still shows it, else (notifyBlocked) the app's notification settings;
 //                                                 false only remembers the page's why was declined; exempt: battery optimisation off for the
 //                                                 app; notify: notifications allowed. Anything but booleans refused "stay"
-//   → {op:"push", id, on?, distributor?}          ← {id, on, state, reason, distributors: [{id, name}], distributor, endpoint, p256dh, auth}
-//                                                 UnifiedPush (UnifiedPush.java, design/push.md §1 B), for the phone (not per profile): on
-//                                                 true registers with the distributor named (installed, else refused "push"), else the one
-//                                                 kept, else the only one; state off | none (no distributor) | pick (several, none chosen) |
-//                                                 registering | ok (endpoint, p256dh, auth given) | failed (reason) | unregistered |
-//                                                 unavailable. on false unregisters, the keys erased. Anything else refused "push"
+//   → {op:"push", id, mode?, distributor?}        ← {id, mode, on, state, reason, distributors: [{id, name}], distributor, endpoint, p256dh, auth}
+//                                                 Push for the phone (not per profile; design/push.md §1 B, §6): mode builtin (the default:
+//                                                 PushClient.java's own stream to push.sigelo.ai), app (UnifiedPush.java: the distributor named,
+//                                                 installed, else refused "push", else the one kept, else the only one; a distributor alone
+//                                                 means app) or off (both ended, the keys erased); state off | none (no distributor) | pick
+//                                                 (several, none chosen) | registering | ok (endpoint, p256dh, auth given) | failed (reason) |
+//                                                 unregistered | unavailable (Built in: reconnecting). Anything else refused "push"
 //   → {op:"big-keep", id, profile, part, name}    ← as big-pick   a voice message's recording (written with big-write) kept as a file to send
 //   → {op:"big-url", id, profile, uri}            ← as big-pick   a file that landed, as a doc the page fetches whole (a voice message played)
 //   → {op:"mic", id, profile}                     ← {id, granted:true}  RECORD_AUDIO asked at the first; refused "mic_permission"
@@ -117,12 +119,14 @@ export const OPS = Object.freeze(['https', 'tls', 'write', 'close', 'seal', 'ope
   'big-pick', 'big-photo', 'big-hash', 'big-stat', 'big-write', 'big-flush', 'big-digest', 'big-drop', 'big-free', 'big-land', 'big-open', 'big-awake',
   'big-keep', 'big-url', 'mic', 'app-settings', 'share-take', 'share-drop', 'call', 'call-speaker', 'call-ring']);
 const PUSH_STATES = new Set(['off', 'none', 'pick', 'registering', 'ok', 'failed', 'unregistered', 'unavailable']);
-/** The shell's push answer or event → { on, state, reason, distributors, distributor, endpoint, p256dh, auth } (unknown parts dropped). */
+export const PUSH_MODES = Object.freeze(['builtin', 'app', 'off']);
+/** The shell's push answer or event → { mode, on, state, reason, distributors, distributor, endpoint, p256dh, auth } (unknown parts dropped). */
 export function pushState(r = {}) {
   const str = (v, re) => (typeof v === 'string' && re.test(v) ? v : null);
   const ok = r.state === 'ok';
+  const mode = PUSH_MODES.includes(r.mode) ? r.mode : 'off';
   return {
-    on: r.on === true, state: PUSH_STATES.has(r.state) ? r.state : 'off', reason: typeof r.reason === 'string' ? r.reason.slice(0, 200) : null,
+    mode, on: mode !== 'off', state: PUSH_STATES.has(r.state) ? r.state : 'off', reason: typeof r.reason === 'string' ? r.reason.slice(0, 200) : null,
     distributors: Array.isArray(r.distributors) ? r.distributors.filter((d) => str(d?.id, /^[A-Za-z0-9._]{1,200}$/)).slice(0, 16).map((d) => ({ id: d.id, name: typeof d.name === 'string' && d.name ? d.name.slice(0, 60) : d.id })) : [],
     distributor: str(r.distributor, /^[A-Za-z0-9._]{1,200}$/),
     endpoint: ok ? str(r.endpoint, /^https:\/\/.{1,1016}$/) : null, p256dh: ok ? str(r.p256dh, /^[A-Za-z0-9_-]{87}$/) : null, auth: ok ? str(r.auth, /^[A-Za-z0-9_-]{22}$/) : null,
@@ -261,10 +265,10 @@ function makeBridge(info, port) {
       const r = await request('stay', x);
       return { on: r.on === true, exempt: r.exempt === true, asked: r.asked === true, notify: r.notify === true, notifyAsked: r.notifyAsked === true, notifyBlocked: r.notifyBlocked === true };
     },
-    /** Push (UnifiedPush) → the shell's state (pushState); { on, distributor } as the op takes them. Anything else refused "push". */
+    /** Push (Built in or the push app) → the shell's state (pushState); { mode, distributor } as the op takes them. Anything else refused "push". */
     async push(o = {}) {
       const x = {};
-      if (o.on !== undefined) { if (typeof o.on !== 'boolean') throw new MsgError('push', 'on: true or false'); x.on = o.on; }
+      if (o.mode !== undefined) { if (!PUSH_MODES.includes(o.mode)) throw new MsgError('push', 'mode: builtin, app or off'); x.mode = o.mode; }
       if (o.distributor !== undefined) { if (typeof o.distributor !== 'string' || !/^[A-Za-z0-9._]{1,200}$/.test(o.distributor)) throw new MsgError('push', 'distributor: a package name'); x.distributor = o.distributor; }
       return pushState(await request('push', x));
     },
@@ -300,8 +304,14 @@ export function bigFiles(bridge, { profile = bridge.profile ?? 'p1', fetch: get 
   const desc = (x) => (x.cancelled ? null : { doc: id(x.doc, 'doc'), name: String(x.name), size: Number(x.size), mtime: Number(x.mtime), url: String(x.url) });
   return Object.freeze({
     profile,
-    /** The system's document picker → { doc, name, size, mtime, url } | null (cancelled); images: pictures only. */
-    async pick({ images = false } = {}) { return desc(await req('big-pick', images === true ? { images: true } : {})); },
+    /** The system's document picker → { doc, name, size, mtime, url } | null (cancelled); images: pictures only. multiple:
+     *  several may be chosen → [{ doc, … }, …] | null (an older shell answers one: a list of one). */
+    async pick({ images = false, multiple = false } = {}) {
+      const x = await req('big-pick', { ...(images === true && { images: true }), ...(multiple === true && { multiple: true }) });
+      if (multiple !== true) return desc(x);
+      if (x.cancelled) return null;
+      return Array.isArray(x.docs) ? x.docs.map(desc).filter(Boolean) : [desc(x)];
+    },
     /** The system's camera → as pick; keepLocation false: the location tags removed in the shell. */
     async photo({ keepLocation = false } = {}) { return desc(await req('big-photo', { keepLocation: keepLocation === true })); },
     async hash(doc) { const x = await req('big-hash', { doc: id(doc, 'doc') }); return { name: String(x.name), size: Number(x.size), mtime: Number(x.mtime), sha256: String(x.sha256), hashes: unb64(x.hashes) }; },

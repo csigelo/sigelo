@@ -86,7 +86,7 @@ export function fakeShell({ landFails = null } = {}) {
   ok(t({ size: 25e6 }) === 'auto' && t({ size: 25e6 + 1 }) === 'ask', '25 MB exactly lands; one byte more asks (MB = 10^6)');
   ok(t({ limitMb: 0 }) === 'ask' && t({ limitMb: 2 }) === 'ask' && t({ limitMb: 4 }) === 'auto', 'the contact\'s own size wins: 0 always asks');
   ok(t({ defaultMb: 0 }) === 'ask' && t({ defaultMb: 1, limitMb: 5 }) === 'auto', 'the default 0: always ask, unless the contact has its own');
-  ok(t({ direct: null }) === 'ask' && t({ direct: false }) === 'ask', 'direct not allowed yet: asked (the human settles it once)');
+  ok(t({ direct: null }) === 'auto' && t({ direct: false }) === 'auto', 'the direct switch is not the rule\'s (2026-11-25): off or not asked, still auto (the lane falls to Tor or the relay)');
   const c = (x) => ({ did: 'did:sigelo:zA', tier: 'friend', ...x });
   ok(E.trustOf(c({ tier: 'own' })) === 'own' && E.trustOf(c({ ours: true })) === 'own', 'trustOf: own tier and ours are own');
   ok(E.trustOf(c({}), () => true) === 'compared' && E.trustOf(c({}), () => false) === 'other', 'trustOf: a friend is known once the words were compared');

@@ -87,6 +87,20 @@ try {
   let r9: (Rec & { by?: string }) | undefined;
   for (let i = 0; i < 30 && !r9; i++) { await new Promise((r) => setTimeout(r, 500)); r9 = json<{ in: (Rec & { by?: string })[] }>((await cli('bob', 'transfer', 'list')).stdout)?.in.find((r) => r.id === id9 && r.by === 'rule'); }
   ok('transfer auto alice 1: kept; a 5-byte file is accepted by the rule, no question; auto x: exit 2', au.status === 0 && au.stderr.includes('up to 1 MB') && auBad.status === 2 && r9?.state === 'accepted', au.stderr + JSON.stringify(r9));
+  // Several files in one send (2026-11-25): one transfer each, in order, one JSON array; a missing one: nothing sent.
+  const small2 = join(H, 'small2.txt'), small3 = join(H, 'small3.txt');
+  writeFileSync(small2, 'hello again'); writeFileSync(small3, 'and once more');
+  const sm = await cli('alice', 'transfer', 'send', 'bob', small, small2, small3, '--wait', '0'), many = json<Rec[]>(sm.stdout) ?? [];
+  ok('send <contact> <file> <file> <file>: exit 0, three transfers in order, three ids', sm.status === 0 && Array.isArray(many) && many.length === 3 && many.map((r) => r.name).join() === 'small.txt,small2.txt,small3.txt'
+    && new Set(many.map((r) => r.id)).size === 3 && many.every((r) => r.state === 'offered'), sm.stdout + sm.stderr);
+  let got: (Rec & { by?: string })[] = [];
+  for (let i = 0; i < 30 && got.length < 3; i++) { await new Promise((r) => setTimeout(r, 500)); got = json<{ in: (Rec & { by?: string })[] }>((await cli('bob', 'transfer', 'list')).stdout)?.in.filter((r) => many.some((m) => m.id === r.id)) ?? []; }
+  ok('bob has the three offers, each accepted by his rule', got.length === 3 && got.every((r) => r.by === 'rule'), JSON.stringify(got));
+  const miss = await cli('alice', 'transfer', 'send', 'bob', small, join(H, 'nope.bin'), '--wait', '0');
+  const nine = await cli('alice', 'transfer', 'send', 'bob', ...Array.from({ length: 9 }, (_, i) => join(H, `f${i}`)));
+  const twice = await cli('alice', 'transfer', 'send', 'bob', small, small);
+  ok('a file missing: exit 1, nothing sent; nine files: exit 2 (8 at most); one named twice: exit 2', miss.status === 1 && miss.stderr.includes('nothing sent') && miss.stdout.trim() === '' && nine.status === 2 && nine.stderr.includes('at most 8') && twice.status === 2,
+    miss.stderr + nine.stderr + twice.stderr);
   const st = await cli('bob', 'transfer', 'settings', '--tor', 'off');
   ok('settings --tor off: kept, said', st.status === 0 && json<{ tor: boolean }>(st.stdout)?.tor === false && st.stderr.includes('Tor off'), st.stderr);
 } finally { await relay.close?.(); }

@@ -22,7 +22,7 @@ for it; beside a page they refuse (`busy`): use its Files view.
 
 | Verb | |
 |---|---|
-| `send <contact> <path> [--via tor] [--direct on\|off]` | hashes the file in place, sends its manifest |
+| `send <contact> <path>... [--via tor] [--direct on\|off]` | hashes each file, sends its manifest (8 at most) |
 | `list` | both sides: state, MB, MB/s, path (direct or Tor), reason |
 | `accept <id> [--direct on\|off] [--via tor]` | free disk checked; nothing is written before it |
 | `decline <id>`, `cancel <id>`, `forget <id>` | no; stop either side; drop the record and partials here |
@@ -38,8 +38,8 @@ as an event `{type: "transfer", what: "asked", id, file, size}`. Page: the Files
 
 ## Consent and the direct switch
 
-- **A manifest is a question,** unless the accept rule answers: up to 25 MB (`--auto`, per contact `auto`) from own agents
-  and contacts and friends whose words you compared, direct on, it lands unasked; others always ask.
+- **A manifest is a question,** unless the accept rule answers: up to 25 MB (`--auto`, per contact `auto`) from own agents,
+  own contacts and compared friends lands unasked if direct, Tor or the relay (8 MiB) carries it; others ask.
   Name, size, SHA-256 and the chunk list's hash, under 1 KiB. Only the
   receiver's operator (CLI, page) or its agent (MCP, told by the operator) says yes. At most 8 wait
   per contact, 64 in all; more are answered `busy`. A manifest lives 7 days.

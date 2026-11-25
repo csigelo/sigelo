@@ -16,7 +16,7 @@ import { actingFile, contactLib, contactModule, debug, holderFor, kick, lockHold
 const lockFree = (path: string): boolean => lockHolder(path) === null;
 
 export interface Rec { id: string; to?: string; from?: string; contact: string; name: string; size: number; state: string; reason?: string; detail?: string; attempt?: number; got?: number; sent?: number;
-  live?: string; rate?: number | null; saved?: string; path_used?: string; via?: string; exp: number }
+  live?: string; rate?: number | null; saved?: string; path_used?: string; via?: string; by?: string; exp: number }
 interface Engine { kick(): Promise<void>; idle(ms?: number, busy?: () => boolean): Promise<boolean>; close(): Promise<void>; progress(id: string): { live: string; got: number; sent: number; rate: number | null } | null }
 export interface TransferLib {
   send(o: object): Promise<Rec>; accept(o: object): Rec; resume(o: object): Rec; decline(o: object): Promise<Rec>; cancel(o: object): Promise<Rec>; forget(o: object): Rec;
@@ -30,9 +30,10 @@ export interface TransferLib {
 
 export const USAGE = `sigelo-agent transfer — big files agent to agent (TRANSFER.md)
 
-  transfer send <contact> <path>           up to 16 GiB, read in place: the contact is asked first; then
-       [--via tor] [--direct on|off]       direct (your addresses to them) or over Tor; --via tor: Tor only;
-       [--wait <s>]                        --direct: may this contact see your address (asked once; own: on)
+  transfer send <contact> <path>...        up to 16 GiB each, read in place, one transfer per file, in order:
+       [--via tor] [--direct on|off]       the contact is asked first (or its size rule says yes); then direct
+       [--wait <s>]                        (your addresses to them) or over Tor; --via tor: Tor only;
+                                           --direct: may this contact see your address (asked once; own: on)
   transfer list                            both sides: asked, offering, active (MB, MB/s), done, failed
   transfer accept <id> [--direct on|off]   yes to a file offered to you (free disk checked); nothing is
        [--via tor] [--wait <s>]            written before it; saved as send-file saves, one inbox item
@@ -49,8 +50,10 @@ export const USAGE = `sigelo-agent transfer — big files agent to agent (TRANSF
 --wait: seconds to stay connected (default 3600; 0: return once sent). Each verb: --identity <file>, or
 --operator. A watcher (sigelo-agent watch) moves the bytes for it when one runs on the identity.`;
 
+/** Files in one send (a receiver keeps at most 8 waiting from one contact: more are refused busy there). */
+export const SEND_MAX = 8;
 const SUBS: Record<string, { flags: string[]; args: [number, number] }> = {
-  send: { flags: ['--via', '--direct', '--wait'], args: [2, 2] }, list: { flags: [], args: [0, 0] }, accept: { flags: ['--direct', '--via', '--wait'], args: [1, 1] },
+  send: { flags: ['--via', '--direct', '--wait'], args: [2, SEND_MAX + 1] }, list: { flags: [], args: [0, 0] }, accept: { flags: ['--direct', '--via', '--wait'], args: [1, 1] },
   decline: { flags: [], args: [1, 1] }, cancel: { flags: [], args: [1, 1] }, resume: { flags: ['--wait', '--direct'], args: [1, 1] }, forget: { flags: [], args: [1, 1] },
   direct: { flags: [], args: [2, 2] }, auto: { flags: [], args: [2, 2] }, settings: { flags: ['--tor', '--prefer', '--auto'], args: [0, 0] },
 };
@@ -71,7 +74,7 @@ export function line(r: Rec, side: 'in' | 'out'): string {
   const why = r.reason ? `: ${r.reason}${r.detail ? ` (${r.detail})` : ''}` : r.state === 'relayed' && r.detail ? `: ${r.detail}` : '';
   const lane = r.state === 'done' && r.path_used ? `, ${r.path_used === 'relay' ? 'via relay' : r.path_used}` : '';
   const next = side === 'in' && r.state === 'asked' ? ` · sigelo-agent transfer accept ${r.id} | decline ${r.id}` : side === 'in' && r.state === 'interrupted' ? ` · transfer resume ${r.id}` : '';
-  return `transfer ${r.id} ${who}: ${r.name}, ${size}, ${r.state}${lane}${prog}${why}${r.saved ? ` → ${r.saved}` : ''}${next}`;
+  return `transfer ${r.id} ${who}: ${r.name}, ${size}, ${r.state}${r.by === 'rule' && side === 'in' && r.state !== 'done' ? ' (your size rule)' : ''}${lane}${prog}${why}${r.saved ? ` → ${r.saved}` : ''}${next}`;
 }
 
 /** `sigelo-agent transfer <sub> …` → 0 done (or queued, asked), 1 refused or failed, 2 usage or no identity. */
@@ -90,7 +93,8 @@ export async function main(rest: string[]): Promise<number> {
     if (v === undefined) return usage(`${a} needs a value`);
     flags.set(a, v);
   }
-  if (args.length < spec.args[0] || args.length > spec.args[1]) return usage(`${sub}: ${args.length < spec.args[0] ? 'an argument is missing' : `unexpected argument ${JSON.stringify(args[spec.args[1]])}`}`);
+  if (args.length < spec.args[0] || args.length > spec.args[1]) return usage(`${sub}: ${args.length < spec.args[0] ? 'an argument is missing' : sub === 'send' ? `at most ${SEND_MAX} files at once` : `unexpected argument ${JSON.stringify(args[spec.args[1]])}`}`);
+  if (sub === 'send' && new Set(args.slice(1)).size !== args.length - 1) return usage('send: a file named twice');
   const via = flags.get('--via');
   if (via !== undefined && via !== 'tor') return usage('--via: tor');
   const waitS = flags.has('--wait') ? Number(flags.get('--wait')) : 3600;
@@ -120,20 +124,23 @@ export async function main(rest: string[]): Promise<number> {
   }) as unknown as { start(): Promise<void>; stop(): Promise<void>; sync(o?: object): Promise<void> };
   const o = { carrier: c, identity: path, local: w !== null };
   // With no holder: this process holds the session and moves the bytes until the record ends.
-  const live = async (id: string, side: 'in' | 'out'): Promise<number> => {
-    const rec = (): Rec | undefined => X.list({ carrier: c, identity: path })[side].find((r) => r.id === id);
-    if (w || waitS === 0) out(rec());
+  // Several (send with more than one file): all of them, one JSON array; one: its record, as before.
+  const live = async (ids: string[], side: 'in' | 'out'): Promise<number> => {
+    const recs = (): (Rec | undefined)[] => { const l = X.list({ carrier: c, identity: path })[side]; return ids.map((id) => l.find((r) => r.id === id)); };
+    const show = (): void => { const rs = recs(); out(ids.length === 1 ? rs[0] : rs); };
+    if (w || waitS === 0) show();
     if (w) { kick(path); note(`transfer ${sub}: queued for sigelo-agent watch (pid ${w.pid}), which moves the bytes: transfer list shows how far`); return 0; }
-    if (waitS === 0) { await c.sync(); note(`transfer ${id}: sent; a watcher or a later transfer verb carries on`); return 0; }
-    engine = new X.Engine({ carrier: c, identity: path, onEvent: (e: { what?: string; id?: string; detail?: string }) => { if (e.id === id && e.what === 'no_direct') note(`transfer ${id}: no direct path (${e.detail}); trying Tor`); } });
+    if (waitS === 0) { await c.sync(); note(`transfer ${ids.join(', ')}: sent; a watcher or a later transfer verb carries on`); return 0; }
+    engine = new X.Engine({ carrier: c, identity: path, onEvent: (e: { what?: string; id?: string; detail?: string }) => { if (e.id && ids.includes(e.id) && e.what === 'no_direct') note(`transfer ${e.id}: no direct path (${e.detail}); trying Tor`); } });
     await c.start();
-    const busy = (): boolean => { const r = rec(); return !!r && (side === 'in' ? ['accepted', 'offering', 'active'].includes(r.state) || (r.state === 'interrupted' && r.reason === 'drop') : ['offered', 'active'].includes(r.state)); };
-    const tick = setInterval(() => { const r = rec(), p = engine?.progress(id); if (r && p) note(line({ ...r, ...p }, side)); }, 10_000);
+    const moving = (r: Rec | undefined): boolean => !!r && (side === 'in' ? ['accepted', 'offering', 'active'].includes(r.state) || (r.state === 'interrupted' && r.reason === 'drop') : ['offered', 'active'].includes(r.state));
+    const busy = (): boolean => recs().some(moving);
+    const tick = setInterval(() => { for (const r of recs()) { const p = r && engine?.progress(r.id); if (r && p) note(line({ ...r, ...p }, side)); } }, 10_000);
     try { await engine.idle(waitS * 1000, busy); } finally { clearInterval(tick); await engine.close(); await c.stop(); }
-    const r = rec();
-    if (r) { out(r); note(line(r, side)); }
-    if (r && busy()) note(`transfer ${id}: still ${r.state} after ${waitS} s; it goes on with sigelo-agent watch, or transfer resume`);
-    return r && ['failed', 'cancelled', 'declined', 'expired'].includes(r.state) ? 1 : 0;
+    const rs = recs();
+    if (rs.some(Boolean)) { show(); for (const r of rs) if (r) note(line(r, side)); }
+    for (const r of rs) if (moving(r)) note(`transfer ${r!.id}: still ${r!.state} after ${waitS} s; it goes on with sigelo-agent watch, or transfer resume`);
+    return rs.some((r) => !r || ['failed', 'cancelled', 'declined', 'expired'].includes(r.state)) ? 1 : 0;
   };
   // The direct switch, asked once on a terminal when it is not set for that contact (design §7).
   const ask = async <T>(fn: (d: boolean | undefined) => Promise<T> | T): Promise<T> => {
@@ -161,15 +168,29 @@ export async function main(rest: string[]): Promise<number> {
         return 0;
       }
       case 'send': {
-        const r = await ask((d) => X.send({ ...o, to: args[0]!, path: args[1]!, ...(via && { via }), ...(d !== undefined && { direct: d }) }));
-        note(`transfer ${r.id}: ${r.name} (${mb(r.size)}) offered to ${r.contact}; it goes once their operator says yes`);
-        return live(r.id, 'out');
+        // Several files: each its own transfer (its own manifest), offered in order; the direct switch asked once at the first.
+        const paths = args.slice(1), ids: string[] = [];
+        for (const p of paths) if (!existsSync(p)) { note(`transfer send: no file ${JSON.stringify(p)}; nothing sent`); return 1; }
+        let d0 = direct, failed = 0;
+        for (const p of paths) {
+          let r: Rec;
+          try { r = await ask((d) => { if (d !== undefined) d0 = d; return X.send({ ...o, to: args[0]!, path: p, ...(via && { via }), ...(d0 !== undefined && { direct: d0 }) }); }); } catch (e) {
+            // Not the file's fault (the contact, the direct switch): the same for every file, said once.
+            if (paths.length === 1 || ['not_contact', 'name', 'direct_ask', 'usage'].includes((e as { check?: string }).check ?? '')) throw e;
+            note(`transfer send ${p}: ${(e as Error).message}`); failed++; continue;
+          }
+          ids.push(r.id);
+          note(`transfer ${r.id}: ${r.name} (${mb(r.size)}) offered to ${r.contact}; it goes once their operator says yes (or their size rule)`);
+        }
+        if (ids.length === 0) return 1;
+        const code = await live(ids, 'out');
+        return failed ? 1 : code;
       }
       case 'accept': case 'resume': {
         // resume (0.1.19): a stuck transfer (accepted, offering, active with nothing moving) is taken again too.
         const r = await ask((d) => (sub === 'resume' ? X.resume : X.accept)({ ...o, id: args[0]!, ...(via && { via }), ...(d !== undefined && { direct: d }) }));
         note(`transfer ${r.id}: ${sub === 'accept' ? 'accepted' : 'resumed'}, ${r.name} from ${r.contact}`);
-        return live(r.id, 'in');
+        return live([r.id], 'in');
       }
       case 'decline': { const r = await X.decline({ ...o, id: args[0]! }); out(r); note(`transfer ${r.id}: declined; ${r.contact} is told`); if (w) kick(path); return 0; }
       case 'cancel': { const r = await X.cancel({ ...o, id: args[0]! }); out(r); note(`transfer ${r.id}: cancelled; ${r.contact} is told`); if (w) kick(path); return 0; }

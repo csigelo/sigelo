@@ -54,7 +54,8 @@ import java.util.regex.Pattern;
  * at offsets, then has the partial moved into the phone's Downloads.
  *
  *   big-pick   the system's document picker (ACTION_OPEN_DOCUMENT; images: pictures only); the read grant kept (a resume after a
- *              restart still reads it) → {doc, name, size, mtime} | {cancelled}
+ *              restart still reads it) → {doc, name, size, mtime} | {cancelled}; multiple: several may be chosen (EXTRA_ALLOW_MULTIPLE,
+ *              at most PICK_MAX) → {docs: [{doc, name, size, mtime}, …], picked: how many were chosen} | {cancelled}
  *   big-photo  the system's camera (ACTION_IMAGE_CAPTURE) into this app's cache through PhotoProvider; CAMERA
  *              asked at the first (declared for the scan, Android refuses the intent until it is granted);
  *              the location tags removed unless keepLocation → {doc, name, size, mtime} | {cancelled};
@@ -90,6 +91,8 @@ final class BigFiles {
     private static final Pattern PROFILE = Pattern.compile("^p[1-9][0-9]{0,2}$");
     private static final Pattern SAFE_NAME = Pattern.compile("[\\\\/:*?\"<>|\\x00-\\x1f]");
     private static final int NAME_MAX = 200;
+    /** Files in one pick (multiple): the page sends at most 8 at once; a few more kept from a long selection are dropped there. */
+    private static final int PICK_MAX = 16;
     /** A file read whole by the page (no from/to: a photo it downscales for the preview): at most this. */
     private static final long PREVIEW_MAX = 64L << 20;
     /** from= and to= of a range: decimal, short enough for a long. */
@@ -108,7 +111,7 @@ final class BigFiles {
     private final Map<String, RandomAccessFile> open = new ConcurrentHashMap<>();
     private Reply pendingPick, pendingPhoto, pendingStorage, pendingMic;   // the main thread's
     private String pendingPickProfile, pendingPhotoProfile, pendingPhotoDoc;
-    private boolean pendingKeepLocation;
+    private boolean pendingKeepLocation, pendingPickMultiple;
     private Runnable afterStorage;
 
     BigFiles(MainActivity activity, SharedPreferences prefs) {
@@ -243,8 +246,10 @@ final class BigFiles {
         if (pendingPick != null) pendingPick.no("cancelled", "another pick");
         pendingPick = r;
         pendingPickProfile = profile;
+        pendingPickMultiple = m.optBoolean("multiple", false);
         // images: pictures only (the composer's Photo, and the way on when there is no camera app).
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(m.optBoolean("images", false) ? "image/*" : "*/*")
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, pendingPickMultiple)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         try {
             activity.startActivityForResult(i, REQ_PICK);
@@ -370,23 +375,39 @@ final class BigFiles {
         if (req == REQ_PICK) {
             Reply r = pendingPick;
             String profile = pendingPickProfile;
+            boolean multiple = pendingPickMultiple;
             pendingPick = null;
             if (r == null) return true;
-            Uri u = data == null ? null : data.getData();
-            if (code != Activity.RESULT_OK || u == null) {
+            // One file: getData(); several (EXTRA_ALLOW_MULTIPLE): the ClipData's items, in the order chosen.
+            java.util.List<Uri> us = new java.util.ArrayList<>();
+            android.content.ClipData clip = data == null ? null : data.getClipData();
+            if (clip != null) for (int k = 0; k < clip.getItemCount() && us.size() < PICK_MAX; k++) if (clip.getItemAt(k).getUri() != null) us.add(clip.getItemAt(k).getUri());
+            if (us.isEmpty() && data != null && data.getData() != null) us.add(data.getData());
+            final int picked = Math.max(us.size(), clip == null ? 0 : clip.getItemCount());
+            if (code != Activity.RESULT_OK || us.isEmpty()) {
                 r.ok(cancelled());
                 return true;
             }
-            try {
-                activity.getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } catch (SecurityException e) {
-                // not persistable: it reads until the app restarts
+            String[] docs = new String[us.size()];
+            for (int k = 0; k < us.size(); k++) {
+                try {
+                    activity.getContentResolver().takePersistableUriPermission(us.get(k), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (SecurityException e) {
+                    // not persistable: it reads until the app restarts
+                }
+                docs[k] = newToken();
+                keepDoc(profile, docs[k], "u:" + us.get(k));
             }
-            String doc = newToken();
-            keepDoc(profile, doc, "u:" + u);
             io.execute(() -> {
                 try {
-                    r.ok(describe(profile, doc, "u:" + u));
+                    if (!multiple) {
+                        r.ok(describe(profile, docs[0], "u:" + us.get(0)));
+                        return;
+                    }
+                    org.json.JSONArray a = new org.json.JSONArray();
+                    for (int k = 0; k < docs.length; k++) a.put(describe(profile, docs[k], "u:" + us.get(k)));
+                    // picked: how many were chosen (the docs stop at PICK_MAX), so the page can say how many were not sent.
+                    r.ok(new JSONObject().put("docs", a).put("picked", picked));
                 } catch (SigeloBridge.Refused e) {
                     r.no(e.check, e.getMessage());
                 } catch (JSONException e) {

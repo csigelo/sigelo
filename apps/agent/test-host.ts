@@ -14,6 +14,7 @@ import { CLI, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTestRelay, tmpH
 import * as H from './sigelo-agent-host.ts';
 import * as X from './sigelo-agent-exec.ts';
 import { APPROVAL_LABEL, promptLine, QUESTION_LABEL } from './sigelo-agent-contact.ts';
+import type { Caps } from './sigelo-agent-host.ts';
 
 const TOKEN = 'abcdefghijklmnopqrstuvwx', HEX = 'ab'.repeat(32);
 // ── the fake SDK ──────────────────────────────────────────────────────────────────────────────────
@@ -58,6 +59,21 @@ async function* script(text: string, o: Opts): AsyncGenerator<H.SdkMsg> {
     return;
   }
   if (text === 'slow') { await new Promise((r) => setTimeout(r, 700)); yield result('slow done'); return; }
+  // Subagents as 0.3.317 reports them (SDKTaskStartedMessage, SDKTaskNotificationMessage, SDKTaskUpdatedMessage).
+  if (text === 'agents') {
+    const sys = (m: Record<string, unknown>): H.SdkMsg => ({ type: 'system', uuid: 'u', session_id: 's1', ...m }) as H.SdkMsg, pause = (): Promise<unknown> => new Promise((r) => setTimeout(r, 120));
+    yield sys({ subtype: 'task_started', task_id: 'a1', task_type: 'local_agent', subagent_type: 'general-purpose', description: 'one' }); await pause();
+    yield sys({ subtype: 'task_started', task_id: 'a2', task_type: 'local_agent', subagent_type: 'Explore', description: 'two', spawn_depth: 2, parent_task_id: 'a1' }); await pause();
+    yield sys({ subtype: 'task_started', task_id: 'b1', task_type: 'local_bash', description: 'a shell' });
+    yield sys({ subtype: 'task_started', task_id: 'w1', task_type: 'local_agent', subagent_type: 'watcher', ambient: true, description: 'housekeeping' });
+    yield sys({ subtype: 'task_started', task_id: 'm1', task_type: 'local_agent', subagent_type: 'main-session', description: 'the main session, backgrounded' }); await pause();
+    yield sys({ subtype: 'task_progress', task_id: 'a2', description: 'two', usage: { total_tokens: 1, tool_uses: 1, duration_ms: 1 } });
+    yield sys({ subtype: 'task_notification', task_id: 'a2', status: 'completed', output_file: '', summary: 'done' }); await pause();
+    yield sys({ subtype: 'task_updated', task_id: 'a1', patch: { status: 'killed' } }); await pause();
+    yield result('agents done');
+    return;
+  }
+  if (text === 'init') { yield { type: 'system', subtype: 'init', model: 'claude-fake-1' } as H.SdkMsg; yield result('inited'); return; }
   yield { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: `echo: ${text}` }] } };
   yield { type: 'result', subtype: 'success', is_error: false, result: '' };
 }
@@ -77,9 +93,21 @@ const fake: H.Sdk = {
         yield* script(r.value.message.content, options);
       }
     }
-    return Object.assign(run(), { close() { void it.return?.(undefined); } });
+    // The settings' controls (Query.supportedModels, setModel, setPermissionMode, applyFlagSettings), recorded.
+    return Object.assign(run(), {
+      close() { void it.return?.(undefined); },
+      supportedModels: async () => MODELS,
+      setModel: async (m?: string) => { controls.push(`model ${m}`); },
+      setPermissionMode: async (m: string) => { controls.push(`mode ${m}`); },
+      applyFlagSettings: async (x: Record<string, unknown>) => { if (x['effortLevel'] === 'low') throw new Error('refused by the CLI'); controls.push(`flags ${JSON.stringify(x)}`); },
+    });
   },
 };
+const controls: string[] = [];
+const MODELS: H.ModelRow[] = [
+  { value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-fake-1', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high'], supportsAutoMode: true },
+  { value: 'small', displayName: 'Small', supportsEffort: false, supportsAutoMode: false },
+];
 H.setSdk(fake);
 const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e = Date.now() + ms; while (!f() && Date.now() < e) await new Promise((r) => setTimeout(r, 20)); return f(); };
 
@@ -242,6 +270,78 @@ const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e
   c2.input('hello');
   ok('…a busy that fails: logged, the reply still goes', await until(() => s2.includes('hi operator')) && await until(() => errs.some((l) => l.includes('busy: relay away'))), JSON.stringify({ s2, errs }));
   await c2.close();
+}
+{
+  // The busy mark's count (2026-11-25): 1 + the live subagents (local_agent, not ambient, not the main session), sent again as it moves.
+  const log: string[] = [];
+  const core = H.hostCore({ sdk: fake, tell: async (t) => { log.push(`tell ${t}`); }, busy: async (on, n) => { log.push(`busy ${on} ${n}`); }, busyMs: 60_000, progress: false, backoff: [30, 60], log: () => {} });
+  core.input('agents');
+  await until(() => log.includes('tell agents done'));
+  ok('host busy count: 1, 2 and 3 as subagents start (a shell, an ambient task and the main session not counted), down to 1 as they end, off, the reply',
+    log.filter((x) => !x.startsWith('tell Claude session')).join('|') === 'busy true 1|busy true 2|busy true 3|busy true 2|busy true 1|busy false 0|tell agents done', JSON.stringify(log));
+  await core.close();
+}
+{
+  // Agent settings (2026-11-25): announced once the session listed its models; the operator's choice kept for the next turn.
+  const sent: string[] = [], caps: Caps[] = [];
+  const last = (): Caps => caps.at(-1)!, f = (k: string) => last().fields.find((x) => x.key === k)!;
+  const vals = (k: string): string => f(k).options.map((x) => x.value).join(',');
+  controls.length = 0; turns.length = 0;
+  // The caps go out in order, never waited for: a setting, then a moment for them.
+  const set = async (c: unknown): Promise<string> => { const r = core.setting(c); await new Promise((ok) => setTimeout(ok, 20)); return r; };
+  const core = H.hostCore({ sdk: fake, tell: async (t) => { sent.push(t); }, caps: async (c) => { caps.push(c); }, progress: false, backoff: [30, 60], log: () => {} });
+  ok('host settings: announced at the session\'s start: model, effort, permissionMode (the SDK\'s option names), the default "" first',
+    await until(() => caps.length === 1) && last().fields.map((x) => x.key).join() === 'model,effort,permissionMode' && f('model').value === '' && vals('model') === ',small'
+      && f('model').options[0]!.label === 'Default' && vals('effort') === ',low,medium,high' && f('permissionMode').value === 'default' && vals('permissionMode') === 'default,acceptEdits,plan,dontAsk,auto'
+      && last().fields.every((x) => x.off === undefined && x.next === undefined), JSON.stringify(caps));
+  ok('…the SDK\'s "default" row is the "" choice (no second Default); its effort levels are the default\'s; no bypassPermissions without --dangerously-skip-permissions',
+    !vals('model').split(',').includes('default') && !vals('permissionMode').includes('bypass'));
+  ok('…a setting: model small → next, the effort of small (none: off, one line why), auto gone (small has no auto mode); nothing applied yet',
+    await set({ key: 'model', value: 'small' }) === 'next' && f('model').next === 'small' && f('model').value === '' && f('effort').off === 'This model has no effort levels' && f('effort').options.length === 0
+      && !vals('permissionMode').includes('auto') && controls.length === 0, JSON.stringify(last()));
+  ok('…refused: a value not offered, bypassPermissions, a key not known, a malformed one; each said in the note, nothing kept',
+    await set({ key: 'model', value: 'huge' }) === 'refused' && last().note === 'Model: not one of its choices'
+      && await set(JSON.stringify({ key: 'permissionMode', value: 'bypassPermissions' })) === 'refused' && last().note === 'Permissions: not one of its choices'
+      && await set({ key: 'cwd', value: '/' }) === 'refused' && await set('model small') === 'refused' && last().note === 'Not a setting'
+      && f('model').next === 'small' && f('permissionMode').next === undefined, JSON.stringify(last()));
+  ok('…its JSON text (a CLI\'s) is taken too: permissionMode plan → next', await set('{"key":"permissionMode","value":"plan"}') === 'next' && f('permissionMode').next === 'plan' && last().note === undefined);
+  core.input('hello');
+  await until(() => sent.includes('hi operator'));
+  ok('…applied at the next turn\'s start, before it (setModel, setPermissionMode); announced again with the new values, nothing waiting',
+    controls.join('|') === 'model small|mode plan' && turns.at(-1) === 'hello' && f('model').value === 'small' && f('permissionMode').value === 'plan' && last().fields.every((x) => x.next === undefined), JSON.stringify([controls, last()]));
+  ok('…the value in use chosen again: nothing waits', await set({ key: 'model', value: 'small' }) === 'next' && f('model').next === undefined);
+  await set({ key: 'model', value: '' });
+  await set({ key: 'effort', value: 'high' });
+  controls.length = 0;
+  core.input('hello');
+  await until(() => sent.filter((x) => x === 'hi operator').length === 2);
+  ok('…back to the default model (setModel(undefined)) and effort high (applyFlagSettings {effortLevel})', controls.join('|') === 'model undefined|flags {"effortLevel":"high"}' && f('effort').value === 'high', JSON.stringify(controls));
+  await set({ key: 'effort', value: 'low' });
+  core.input('hello');
+  await until(() => sent.filter((x) => x === 'hi operator').length === 3);
+  ok('…a change the session refuses: said in the note, the value kept', last().note === 'Effort not changed: refused by the CLI' && f('effort').value === 'high', JSON.stringify(last()));
+  core.input('init');
+  await until(() => sent.includes('inited'));
+  await set({ key: 'permissionMode', value: 'acceptEdits' });
+  core.input('crash');
+  ok('…a new session starts with the settings (Options.model, effort, permissionMode), the waiting one too', await until(() => seen.length > 0 && seen.at(-1)!['permissionMode'] === 'acceptEdits')
+    && seen.at(-1)!['effort'] === 'high' && seen.at(-1)!['model'] === undefined && await until(() => caps.at(-1)!.fields[2]!.value === 'acceptEdits'), JSON.stringify(seen.at(-1)));
+  await core.close();
+  // --dangerously-skip-permissions: bypassPermissions offered and in use; the operator may go back to asking.
+  const c3: Caps[] = [];
+  const sk = H.hostCore({ sdk: fake, tell: async () => {}, caps: async (c) => { c3.push(c); }, skipPermissions: true, progress: false, backoff: [30, 60], log: () => {} });
+  ok('host settings after --dangerously-skip-permissions: bypassPermissions offered and in use; "default" (ask first) can be chosen',
+    await until(() => c3.length === 1) && c3[0]!.fields[2]!.value === 'bypassPermissions' && c3[0]!.fields[2]!.options.some((x) => x.value === 'bypassPermissions' && x.label === 'Skip all checks')
+      && c3[0]!.fields[2]!.options.find((x) => x.value === 'default')?.label === 'Ask first' && sk.setting({ key: 'permissionMode', value: 'default' }) === 'next'
+      && await until(() => c3.at(-1)!.fields[2]!.next === 'default'), JSON.stringify(c3));
+  await sk.close();
+  // An SDK without the controls (host acp's plug): every field off, one line why.
+  const plain: H.Sdk = { query: (p) => { const q = fake.query(p); return Object.assign((async function* () { yield* q; })(), { close: () => q.close?.() }); } };
+  const c4: Caps[] = [];
+  const ac = H.hostCore({ sdk: plain, name: 'gemini', tell: async () => {}, caps: async (c) => { c4.push(c); }, progress: false, backoff: [30, 60], log: () => {} });
+  ok('host settings on a plug without the controls (ACP): every field off, "Not settable over ACP: set it on gemini\'s machine"; a setting refused',
+    await until(() => c4.length === 1) && c4[0]!.fields.every((x) => x.off === 'Not settable over ACP: set it on gemini\'s machine' && x.options.length === 0) && ac.setting({ key: 'model', value: '' }) === 'refused', JSON.stringify(c4));
+  await ac.close();
 }
 {
   // Others as data: a turn of its own, framed; never an approval's answer, a question's, a login's.
@@ -550,7 +650,7 @@ try {
 
   turns.length = 0;
   const SPOOL = join(V, 'spool');
-  host = await H.startHost({ identity: file(V), spool: SPOOL, approveTimeout: 60, backoff: [50, 100], quiet: true });
+  host = await H.startHost({ identity: file(V), spool: SPOOL, approveTimeout: 60, backoff: [50, 100], quiet: true, capsMs: 300 });
   const lock = readFileSync(join(V, '.config', 'moadim', 'sigelo.local.ui.pid'), 'utf8');
   const w = await cv('watch');
   ok('the host holds the watch lock: a watch beside it → exit 1, busy', lock.endsWith(' watch ' + SPOOL) && w.status === 1 && w.stderr.includes('is watched by sigelo-agent watch'), lock + w.stderr);
@@ -586,6 +686,19 @@ try {
   await cw('send', 'agent', 'leak');
   const leak = await opGets((s) => s.startsWith('tool said:'));
   ok('a token in the answer: redacted on the wire', leak !== undefined && !leak.includes(TOKEN) && !leak.includes(HEX) && !leak.includes('hunter2222') && leak.includes('[redacted]'), leak);
+  // Agent settings (2026-11-25): the operator's receipts (its inbox's read marks) say host: true, so the settings reach it,
+  // labelled sigelo-host-caps/0; its setting (the JSON text a CLI sends) waits for the next turn; the pal's is never applied.
+  const capsGot = async (f: (c: Caps) => boolean): Promise<Caps | undefined> => {
+    const find = (): Caps | undefined => got.filter((m) => m.label === H.CAPS_LABEL).map((m) => m.content as Caps).reverse().find(f);
+    for (const end = Date.now() + 30000; find() === undefined && Date.now() < end;) await opGets(() => false, 3000);
+    return find();
+  };
+  ok('host settings on the relay: the operator\'s app takes them (host_peer): sigelo-host-caps/0 reaches it, model first', (await capsGot((c) => c.fields[0]?.key === 'model')) !== undefined, JSON.stringify(got.map((m) => m.label)));
+  await cp('send', 'agent', JSON.stringify({ key: 'model', value: 'small' }), '--label', H.SET_LABEL);
+  ok('…the pal\'s setting: never applied, never a turn (spooled as its messages are)', await until(() => readdirSync(SPOOL).some((f) => JSON.parse(readFileSync(join(SPOOL, f), 'utf8')).label === H.SET_LABEL), 20000)
+    && host.core.caps()?.fields[0]?.next === undefined && !turns.some((x) => x.includes('small')), JSON.stringify(host.core.caps()));
+  await cw('send', 'agent', JSON.stringify({ key: 'permissionMode', value: 'plan' }), '--label', H.SET_LABEL);
+  ok('…the operator\'s: kept for the next turn, said back in the settings (next: plan), not a turn', (await capsGot((c) => c.fields[2]?.next === 'plan')) !== undefined && !turns.some((x) => x.includes('plan')), JSON.stringify(host.core.caps()));
   await cp('send', 'agent', 'from the pal');
   got.length = 0;
   ok('host: only the operator\'s direct messages are turns: another contact\'s is spooled, the operator told in one line', await opGets((s) => s === 'a message from pal waits in the spool') !== undefined

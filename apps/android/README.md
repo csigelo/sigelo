@@ -83,7 +83,8 @@ new phone. THREAT-MODEL §3.12 says what this does not defend.
 
 ## Stay connected
 
-Settings → Stay connected (on by default; one setting for the phone, not per profile): the app keeps
+*Since 2026-11-25 no longer a choice in Settings: Built in push (below) keeps the process instead; this service
+still runs the push app's wake window.* Stay connected (off by default; one setting for the phone): the app keeps
 its relay connection while minimised, so messages arrive and a call can ring. StayConnected.java is a
 foreground service of type `specialUse` that owns no socket: the connection is the page's (the carrier
 in the WebView, its TLS stream in SigeloBridge), and the service keeps that process at foreground
@@ -101,10 +102,26 @@ stops asking (two refusals), opens the app's page in the system's settings. Noti
 service runs all the same; Android 13+ then shows its notice only in the quick settings' list of
 active apps. Not yet measured on a phone: the battery cost, Doze, vendor task killers.
 
-## Push (UnifiedPush)
+## Push (Built in, or UnifiedPush)
 
-Settings → Notifications chooses the wake mode for the phone: Stay connected (above), Push, or Off. Push
-(design/push.md §1 B) hands the connection to the user's UnifiedPush app (a "distributor": ntfy from F-Droid,
+Settings → Notifications chooses the push mode for the phone: Built in (the default), Push app, or Off. Stay
+connected (above) is no longer a choice: Built in keeps the process the same way, and a phone that had it on
+starts in Built in (Push → Push app, Off stays Off).
+
+**Built in** (design/push.md §6, PushClient.java, Ntfy.java): the app holds one HTTPS stream itself, the ntfy JSON
+stream of its own topic on `push.sigelo.ai` (`up` + 12 random `[A-Za-z0-9]`, the length ntfy takes as UnifiedPush),
+in a foreground service of type `specialUse` that survives a swipe-away (`stopWithTask` false, `START_STICKY`, a 1 s
+restart alarm at `onTaskRemoved`) and starts at boot and after an update (`PushClient$Boot`, `RECEIVE_BOOT_COMPLETED`).
+One notification, "Sigelo · ready for messages" (the Connection channel, low importance). The endpoint
+`https://push.sigelo.ai/<topic>?up=1` goes to the page and the relay only after the stream's first `open` (ntfy
+refuses a publish with no subscriber, 507). A message that opens to the wake is handled as below, with a 30 s wake
+lock; `since` the last message id, so wakes sent while offline come at the next connect (12 h cache). Reconnects:
+5, 10, 15, 20, 30, 45, 60, 120 s (the ntfy app's table), at once on a new network; 90 s read timeout. Choosing Built
+in asks for notifications, then once for the battery exemption, each after one line why; with Built in the
+mode, the first run asks for the exemption once too (refused: Settings' row only). Force-stopped: nothing
+until the app is opened again.
+
+**Push app** (design/push.md §1 B) hands the connection to the user's UnifiedPush app (a "distributor": ntfy from F-Droid,
 NextPush, Sunup, Conversations), which holds one for all its apps; ntfy users without a server of their own
 set it to `push.sigelo.ai` (relay/deploy/ntfy/README.md). UnifiedPush.java is the connector, written against
 the spec (AND_3) without the library (no Kotlin, no Tink, no AndroidX): it finds the distributors (receivers
@@ -120,7 +137,7 @@ A wake that opens to the relay's 32 bytes: with the page alive (minimised, its p
 runs for 60 s (the wake window) and the page's carrier logs in at once and fetches; its own notifications
 follow, with names. With no page (swiped away, or not opened since the phone started), one notification,
 "sigelo · New activity", no name, no count; a tap opens the app, which fetches. A call rings only once the
-app is open. No push app installed: Settings says so, with what to install, and offers Stay connected. Not
+app is open. No push app installed: Settings says so, with what to install, and offers Built in. Not
 yet measured on a phone: the delay of a wake, a distributor's own battery cost.
 
 Choices where design/push.md left one: the wake's 32 bytes are `"sigelo-push/0 wake"` and zeros, compared after
@@ -212,9 +229,9 @@ node apps/android/assets.mjs --check
 node apps/web/test-shell.mjs    # the page side over a fake shell in Node
 ```
 
-`node apps/android/test-push.mjs` runs WebPush.java's RFC 8291 vectors on a desktop JDK (`SIGELO_JDK` or `JAVA_HOME`; SKIP without one).
+`node apps/android/test-push.mjs` runs WebPush.java's RFC 8291 vectors and Ntfy.java's tests (topic, endpoint, the stream's lines, the wake as ntfy carries it, the retry table) on a desktop JDK (`SIGELO_JDK` or `JAVA_HOME`; SKIP without one).
 
-`check.mjs`: the manifest and resources (well-formed, thirteen permissions (storage up to Android 9), one provider not exported, the push receiver and its service, no backup, references, the
+`check.mjs`: the manifest and resources (well-formed, fourteen permissions (storage up to Android 9), one provider not exported, the push receivers and services, no backup, references, the
 icon as `assets/brand/app-icon.svg`), Gradle (versions, no dependency), the wrapper by SHA-256, the Java (the
 bridge's operations as the page sends them, the WebView's settings, every asset type served, the lock,
 notifications and their open event), the version (build.gradle's = `apps/agent/package.json`'s, shipped as

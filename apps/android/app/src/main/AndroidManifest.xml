@@ -6,7 +6,7 @@
      message), and on Android 9 only the shared storage, for a received file to land in Downloads
      (asked at the first; later versions write there through MediaStore with no permission). One
      provider, not exported: the photo file a camera app writes (PhotoProvider). Push: one receiver and one service, exported to
-     the user's UnifiedPush distributor (UnifiedPush). No backup of anything:
+     the user's UnifiedPush distributor (UnifiedPush); Built in push's service and its boot receiver (PushClient). No backup of anything:
      the identity, its contacts and ratchets stay on this phone. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -27,8 +27,11 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- A call's network watched (CallService): Wi-Fi to mobile data restarts the call's path at once. No prompt. -->
+    <!-- A call's network watched (CallService): Wi-Fi to mobile data restarts the call's path at once; Built in push
+         (PushClient) reconnects on a new network. No prompt. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Built in push (PushClient, design/push.md §6): its service started again at boot and after an update. No prompt. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -91,6 +94,26 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the end-to-end messaging connection open while the app is minimised, so messages arrive and calls can ring." />
         </service>
+
+        <!-- Built in push (PushClient, design/push.md §6): one HTTPS stream to push.sigelo.ai while the push mode is Built in;
+             not ended by a swipe-away (stopWithTask false), started again at boot and after an update (PushClient$Boot). -->
+        <service
+            android:name=".PushClient"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Holds one connection to the app's own push server, so a waiting end-to-end message wakes the app without Google services." />
+        </service>
+        <receiver
+            android:name=".PushClient$Boot"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Push (UnifiedPush.java, design/push.md §1 B): the distributor's broadcasts, each checked against our token, and
              the service it binds before a message so the wake may start StayConnected. Exported: the distributor is

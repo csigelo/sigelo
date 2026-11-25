@@ -31,7 +31,9 @@ import org.json.JSONObject;
 
 /**
  * Stay connected (design/push.md §A): a foreground service of type specialUse while the switch is on
- * (SigeloBridge "stay", SharedPreferences "stay_on", default on: one setting for the phone, not per profile).
+ * (SigeloBridge "stay", SharedPreferences "stay_on", default off: one setting for the phone, not per profile). Since
+ * 2026-11-25 it is no longer a mode in Settings (Built in push, PushClient, keeps the process; design/push.md §6): it
+ * runs for the wake window of the push app's wakes, and while a page turns the switch on.
  *
  * It owns no socket. The relay's connection is the page's: the carrier (MQTT, its keepalive and backoff) runs in
  * MainActivity's WebView, and its TLS stream is SigeloBridge's, both in this process. The service keeps the process
@@ -73,9 +75,9 @@ public final class StayConnected extends Service {
         return c.getSharedPreferences("sigelo", Context.MODE_PRIVATE);
     }
 
-    /** The switch (default on). */
+    /** The switch (default off since 2026-11-25: Built in push keeps the process instead, design/push.md §6; UnifiedPush.mode turns an old on off). */
     static boolean on(Context c) {
-        return prefs(c).getBoolean(ON, true);
+        return prefs(c).getBoolean(ON, false);
     }
 
     /** A push wake (UnifiedPush): the service for the wake window. Refused by Android (no Raise binding): the page's own nudge only. */

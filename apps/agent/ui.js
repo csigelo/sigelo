@@ -803,8 +803,10 @@
   }
   /** A busy mark (UI-API.md "Busy marks"): a turning ring; reduced motion, the word instead (ui.css). */
   const spinner = () => h('span', { class: 'spin', 'aria-hidden': 'true' });
-  const busyLine = () => h('span', { class: 'busyline' }, spinner(), 'working…');
-  const busyBubble = () => h('div', { class: 'msg in busy', role: 'status', 'aria-label': 'Working', 'data-busy': '' }, spinner(), h('span', { class: 'word' }, 'working…'));
+  // More than one agent running (the mark's n: the session and its subagents): their number beside the ring.
+  const busyN = (c) => (c?.busy_n > 1 ? h('b', { class: 'busyn', 'aria-hidden': 'true' }, String(c.busy_n)) : null);
+  const busyLine = (c) => h('span', { class: 'busyline' }, spinner(), busyN(c), 'working…');
+  const busyBubble = (c) => h('div', { class: 'msg in busy', role: 'status', 'aria-label': c?.busy_n > 1 ? `Working: ${c.busy_n} agents` : 'Working', 'data-busy': '' }, spinner(), busyN(c), h('span', { class: 'word' }, 'working…'));
   /** What a chat's row says under its name: the tier decides (own: the text; friend: a count; quiet: nothing). */
   function contactLine(c) {
     const unread = unreadOf(c), agent = kindOf(c) === 'agent';
@@ -816,7 +818,7 @@
     if (c.tier === 'quiet') return agent ? h('span', { class: 'kind' }, 'Agent') : '';
     if (c.tier === 'friend') return unread ? [lead, `${unread} new message${unread === 1 ? '' : 's'}`] : agent ? h('span', { class: 'kind' }, 'Agent') : '';
     // Their agent works on a turn (UI-API.md "Busy marks"): the small wheel in place of the last message; no count, no badge.
-    if (c.busy) return [lead, busyLine()];
+    if (c.busy) return [lead, busyLine(c)];
     // Mine waiting (offline, or no reader yet): said after it, as the mock's offline list does.
     const wait = c.last?.dir === 'out' && c.last.status === 'queued' ? ' · waiting to send' : '';
     return c.last ? [lead, `${c.last.dir === 'out' ? 'You: ' : ''}${c.last.text}${wait}`] : agent ? h('span', { class: 'kind' }, 'Agent') : '';
@@ -1115,10 +1117,32 @@
   // Reply to one message (0.1.17: "reply to messages"): a swipe to the right on a bubble (or a double click) picks it;
   // the composer shows it quoted above the box with × to drop it; the reply shows the quote, and a tap on the quote
   // goes to the message it answers, marked a moment, when it is loaded. Nothing else: no threads, no editing.
+  // (0.1.20: "reply to one message does not work" on the phone: the swipe was read on pointerup, which a touch screen
+  // never sends once the finger moves: the browser took the move as a scroll and sent pointercancel.) The bubble is
+  // touch-action: pan-y (.swipe): a vertical move scrolls, a horizontal one is ours; read in pointermove, once.
+  // Not while text is selected (a selection being made or moved), nor from inside a code block (it scrolls sideways).
   function replyable(el, pick) {
-    let x0 = null, y0 = null;
-    el.addEventListener('pointerdown', (ev) => { x0 = ev.clientX; y0 = ev.clientY; });
-    el.addEventListener('pointerup', (ev) => { if (x0 !== null && ev.clientX - x0 > 60 && Math.abs((ev.clientY ?? 0) - (y0 ?? 0)) < 40) pick(); x0 = null; });
+    let x0 = null, y0 = null, id = null, dragged = false;
+    const sel = () => String(globalThis.getSelection?.() ?? '') !== '';
+    const reset = () => { if (id !== null) try { el.releasePointerCapture?.(id); } catch {} x0 = y0 = id = null; el.style.transform = ''; };
+    el.classList?.add('swipe');
+    el.addEventListener('pointerdown', (ev) => {
+      reset(); dragged = false;
+      if (ev.isPrimary === false || (ev.button ?? 0) !== 0 || sel() || ev.target?.closest?.('pre')) return;
+      x0 = ev.clientX; y0 = ev.clientY;
+    });
+    el.addEventListener('pointermove', (ev) => {
+      if (x0 === null) return;
+      const dx = ev.clientX - x0, dy = Math.abs((ev.clientY ?? 0) - (y0 ?? 0));
+      if (sel() || dy >= 40 || dx < -10) return reset();
+      // Captured once it is a sideways move, not at the touch: a capture at once would take a tap's click from the
+      // chip, the quote or a link inside the bubble.
+      if (id === null && dx > 10 && ev.pointerId !== undefined) { id = ev.pointerId; dragged = true; try { el.setPointerCapture?.(id); } catch {} }
+      if (dx > 60) { reset(); pick(); } else if (dx > 0) el.style.transform = `translateX(${dx / 2}px)`;
+    });
+    for (const t of ['pointerup', 'pointercancel']) el.addEventListener(t, reset);
+    // A sideways drag that stopped short is not a tap: the click its release makes on the captured bubble is swallowed.
+    el.addEventListener('click', (ev) => { if (dragged) { dragged = false; ev.stopImmediatePropagation?.(); ev.preventDefault?.(); } }, true);
     el.addEventListener('dblclick', () => pick());
     return el;
   }
@@ -1423,10 +1447,10 @@
       if (c.not_collected) al.push(h('div', { class: 'card' }, h('p', null, 'Not collected yet: their side has not been online since.'), h('div', { class: 'btns' }, btn('Retry now', () => act(() => backend.call('POST', '/api/sync'))))));
       if (!c.words_checked && c.words && !c.local) al.push(h('div', { class: 'card warn' }, h('p', null, 'Compare four words with them to know it\'s really them.'), h('div', { class: 'btns' }, btn('Compare four words', () => go('compare', did), { kind: 'pri' }))));
       put(alerts, ...al.filter(Boolean));
-      // Again when the history moved, their seen receipt did (the ticks), or their busy mark (the wheel).
+      // Again when the history moved, their seen receipt did (the ticks), or their busy mark or its count (the wheel).
       // A photo's full file moves on its own: its state in the mark too.
       const tl = S.photosHere ? await transfersNow() : null;
-      const mark = `${S.snap.seq} ${c.seen_upto ?? ''} ${c.busy ? 'busy' : ''} ${tl ? photoMark(tl) : ''}`;
+      const mark = `${S.snap.seq} ${c.seen_upto ?? ''} ${c.busy ? `busy ${c.busy_n ?? 1}` : ''} ${tl ? photoMark(tl) : ''}`;
       if (mark === S.msgsSeq) return;
       S.msgsSeq = mark;
       const r = await backend.call('GET', `/api/messages?contact=${encodeURIComponent(did)}`).catch(() => null);
@@ -1479,7 +1503,7 @@
         m.label === 'sigelo-file/0' ? fileText(m.text) : msgText(m.text),
         m.link ? h('span', { class: 'help' }, `Introduced: ${m.link.purpose}`) : null,
         m.dir === 'in' ? h('button', { type: 'button', class: 'meta', 'aria-label': `${hhmm(m.at)}. Check who signed it`, onclick: (ev) => { ev?.stopPropagation?.(); void go('signed', { did, n: m.n }); } }, hhmm(m.at))
-          : h('span', { class: 'meta' }, hhmm(m.at), ticks(m))), pick(m))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'), c.busy ? busyBubble() : null);
+          : h('span', { class: 'meta' }, hhmm(m.at), ticks(m))), pick(m))) : h('span', { class: 'day' }, 'No messages yet. Say hello.'), c.busy ? busyBubble(c) : null);
       if (end) toEnd();
       seekIn(did, thread);
       J.saw(r.messages.filter((m) => m.dir === 'in').map((m) => m.n), end);
@@ -1566,7 +1590,10 @@
           walletOn() ? row({ compact: true, start: icon('coin'), title: 'Pay', onclick: () => pay(did) }) : null,
           // Their agents (People and teams): the ones they introduced to you, paired or waiting for your answer.
           kindOf(c) === 'person' ? row({ compact: true, start: icon('agent'), title: 'Their agents', sub: agentsLine(c), chev: true, onclick: () => go('person', did) }) : null,
-          row({ compact: true, start: icon('link'), title: 'Introduce to someone', chev: true, onclick: () => go('introduce', did) })),
+          row({ compact: true, start: icon('link'), title: 'Introduce to someone', chev: true, onclick: () => go('introduce', did) }),
+          // A hosted agent that said what can be set (UI-API.md "Agent settings"): an own agent's only (a host takes settings
+          // from its operator alone, so another contact's would be a page that sets nothing).
+          c.host && (c.ours || c.tier === 'own') && !remoteHere() ? row({ compact: true, start: icon('agent'), title: 'Agent settings', sub: c.host.fields.map((f) => HOST_FIELD[f.key] ?? f.key).join(', '), chev: true, onclick: () => go('host-settings', did) }) : null),
         sec('Their messages'),
         radios('Their messages', TIERS, c.tier, (t) => act(() => backend.call('POST', '/api/tier', { contact: did, tier: t }))),
         autoBox(c),
@@ -1584,6 +1611,27 @@
           row({ compact: true, title: 'Clear this chat', onclick: clear }),
           row({ compact: true, title: 'Delete this chat', sub: `On this ${LOCAL || SHELL ? 'phone' : 'computer'} only: ${c.name} stays a contact`, onclick: del })),
         h('div', { class: 'pad' }, btn(`Block ${c.name}…`, block, { kind: 'danger' }), h('p', { class: 'help center' }, 'Permanent: they can never pair with you again.')));
+    };
+  });
+
+  // ---- A hosted agent's settings (UI-API.md "Agent settings"): what its host said can be set; a change goes at its next turn.
+  const HOST_FIELD = { model: 'Model', effort: 'Effort', permissionMode: 'Permissions' };
+  screen('host-settings', {}, (did) => {
+    const body = h('div');
+    mount(page({ title: 'Agent settings', body: [body] }));
+    return () => {
+      const hs = contactBy(did)?.host;
+      if (!hs) { put(body, empty('No settings', 'This agent has not said what can be set.')); return; }
+      const labelOf = (f, v) => f.options.find((o) => o.value === v)?.label ?? (v === '' ? 'Default' : v);
+      put(body, noteCard(), h('p', { class: 'pad help' }, 'Changes apply from its next turn.'), hs.note ? h('p', { class: 'pad warn', 'data-host-note': '' }, hs.note) : null,
+        h('div', { class: 'pad stack' }, hs.fields.map((f) => {
+          // Not settable: grayed, its value only, one line why.
+          const off = f.off !== undefined, name = HOST_FIELD[f.key] ?? f.key;
+          const el = select(name, off ? [[f.value, labelOf(f, f.value)]] : f.options.map((o) => [o.value, o.label]), f.next ?? f.value);
+          el.disabled = off;
+          el.addEventListener('change', () => act(() => backend.call('POST', '/api/host/set', { contact: did, key: f.key, value: el.value })));
+          return field(name, el, off ? f.off : f.next !== undefined ? `Next turn: ${labelOf(f, f.next)}` : null);
+        })));
     };
   });
 
@@ -1691,6 +1739,7 @@
     }
     if (side === 'in' && (r.state === 'interrupted' || (r.state === 'failed' && ['no_path', 'tor', 'land'].includes(r.reason)))) btns.push(btn(r.reason === 'land' ? 'Try again' : 'Resume', () => act(() => transferCall('/api/transfers/resume', { id: r.id }, r.contact))));
     if (side === 'in' && r.state === 'done' && r.saved && S.transferSettings?.open) btns.push(btn('Open', () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })), { kind: 'pri' }));
+    if (side === 'in' && r.state === 'done' && r.saved && !/^content:/.test(r.saved) && r.size <= SAVE_MAX && !remoteHere()) btns.push(btn(saveLabel(), () => saveReceived(`id=${r.id}`)));
     if (['asked', 'offered', 'accepted', 'offering', 'active', 'interrupted'].includes(r.state) && !(side === 'in' && r.state === 'asked')) {
       btns.push(btn('Stop', async () => { if (await ask({ title: `Stop ${r.name}?`, text: 'The contact is told; what came so far is deleted.', yes: 'Stop it' })) void act(() => backend.call('POST', '/api/transfers/cancel', { id: r.id })); }, { kind: 'danger' }));
     }
@@ -1778,15 +1827,18 @@
     }
     throw new Error('This photo stays too large for a preview.');
   }
-  /** A file the shell gave (a pick or a photo) to this chat: a picture with its preview at once, the full file by its transfer. */
-  async function sendDoc(target, d, who, photo) {
+  /** A file the shell gave (a pick or a photo) to this chat: a picture with its preview at once, the full file by its transfer.
+   *  quiet: no toast (one of several: pickAndSend says it once). → true when it went. */
+  async function sendDoc(target, d, who, photo, quiet = false) {
     const picture = photo || /\.(jpe?g|png|webp)$/i.test(d.name);
     const preview = picture ? await previewOf(d.url).catch(() => null) : null;
+    let sent = false;
     await act(() => transferCall('/api/transfers/send', { ...target, doc: d.doc, ...(preview && { photo: preview }) }, who), (x) => {
-      S.msgsSeq = -1; S.groups = null;
+      S.msgsSeq = -1; S.groups = null; sent = true;
       if (x?.unpaired?.length) toast(`Sent to ${x.sent.length}; ${x.unpaired.map((m) => m.name).join(', ')} get${x.unpaired.length === 1 ? 's' : ''} the preview only (not paired with you)`);
-      else toast(preview ? 'Photo sent: full size follows' : `${d.name} offered`);
+      else if (!quiet) toast(preview ? 'Photo sent: full size follows' : `${d.name} offered`);
     });
+    return sent;
   }
   /** The system's camera: the photo goes at once to this chat (contact, agent or group). */
   async function shoot(target, who) {
@@ -1813,12 +1865,20 @@
     if (!d || d.cancelled) return;
     await sendDoc(target, d, who, true);
   }
-  /** The system's picker (images: pictures only, sent as a photo): the file chosen goes to this chat. */
+  // Several files at once (2026-11-25): each its own transfer and bubble, sent in order; a receiver keeps 8 waiting from one contact.
+  const PICK_SEND_MAX = 8;
+  /** The system's picker (images: pictures only, sent as photos): the files chosen go to this chat, one by one. */
   async function pickAndSend(target, who, images = false) {
     let d;
-    try { d = await backend.call('POST', '/api/transfers/pick', images ? { images: true } : undefined); } catch (e) { S.note = e; return refresh(); }
+    try { d = await backend.call('POST', '/api/transfers/pick', { ...(images && { images: true }), multiple: true }); } catch (e) { S.note = e; return refresh(); }
     if (!d || d.cancelled) return;
-    await sendDoc(target, d, who, images);
+    const all = Array.isArray(d.docs) ? d.docs : [d], docs = all.slice(0, PICK_SEND_MAX);
+    if (docs.length === 1) { await sendDoc(target, docs[0], who, images); return; }
+    let n = 0;
+    for (const x of docs) { if (await sendDoc(target, x, who, images, true)) n++; else break; }
+    // picked: how many the picker returned before the shell's own cap (more than the docs listed).
+    const total = Number.isSafeInteger(d.picked) && d.picked > all.length ? d.picked : all.length, left = total - n;
+    toast(`${n} ${images ? 'photos' : 'files'} sent${left ? `; ${left} not sent${total > PICK_SEND_MAX ? ` (${PICK_SEND_MAX} at once)` : ''}` : ''}`);
   }
   /** A photo's state in a person's words, from its transfer (none yet: still coming). */
   function photoState(r, dir) {
@@ -1980,6 +2040,27 @@
   }
   /** Their voice message's state before it plays: "receiving…" (or the transfer's own words), "Get it" when asked. */
   const voiceState = (r, dir) => (dir === 'out' ? photoState(r, 'out') : !r || ['accepted', 'offering', 'active', 'offered'].includes(r.state) ? (r?.live && r.size ? `receiving… ${Math.min(99, Math.round((100 * (r.got ?? 0)) / r.size))} %` : 'receiving…') : photoState(r, 'in'));
+  // A received file out of the app (2026-11-25): in the Android app into Downloads (sigeloLocal.saveFile: the shell's
+  // MediaStore, no storage permission), elsewhere a download of its bytes. q: `n=<message>` or `id=<transfer>`.
+  const SAVE_MAX = 64 * 2 ** 20;   // page.mjs FILE_DATA_MAX: larger ones stay where they were saved
+  const saveLabel = () => (LOCAL?.saves === 'Downloads' ? 'Save to Downloads' : 'Download');
+  // A phone that controls a computer's page: the computer's files and its agents' settings stay there (never remote,
+  // UI-API.md), so neither Save nor Agent settings is offered.
+  const remoteHere = () => backend.mode?.()?.kind === 'remote';
+  function saveReceived(q) {
+    return act(async () => {
+      const x = await backend.call('GET', `/api/files/data?${q}`), bytes = unb64(x.data);
+      const r = typeof LOCAL?.saveFile === 'function' ? await LOCAL.saveFile(x.name, bytes) : { name: download(x.name, bytes), where: 'download' };
+      toast(r.where === 'Downloads' ? `Saved in Downloads/${r.name}` : `Downloaded ${r.name}`);
+    });
+  }
+  /** A tab's download: an object URL on an <a download>, let go a minute later. */
+  function download(name, bytes) {
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' })), a = h('a', { href: url, download: name, rel: 'noopener', hidden: true });
+    document.body?.append?.(a); a.click?.(); a.remove?.();
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch {} }, 60000);
+    return name;
+  }
   /**
    * A file in a chat (0.1.19: the sender's own showed no bubble): name and size, the lane that carried it (direct, via
    * relay, over Tor) and its state; mine that did not go offers the relay lane or a retry; a tap opens it where this app can.
@@ -1990,13 +2071,15 @@
       : (f.transfer && L?.in.find((x) => x.id === f.transfer)) || L?.in.find((x) => x.sha256 === f.sha256 && x.from === did && x.state === 'done');
     const lane = laneText(f.via) ?? laneText(r?.state === 'done' || r?.state === 'relaying' ? r.path_used ?? (r.state === 'relaying' ? 'relay' : null) : null);
     const st = out ? (r ? photoState(r, 'out') : null) : 'saved';
-    const open = S.transferSettings?.open && r && (out ? r.state !== 'cancelled' : r.state === 'done') ? () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })) : null;
-    const where = !out ? /, saved at (.+)$/s.exec(String(m.text ?? ''))?.[1] : null;
+    // The phone opens what is in Downloads (a content URI); one that came over the relay sits in the app: Save first.
+    const open = S.transferSettings?.open && r && (out ? r.state !== 'cancelled' : r.state === 'done' && (!S.transferSettings.pick || /^content:/.test(r.saved ?? ''))) ? () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })) : null;
+    const where = !out ? /, saved at (.+)$/s.exec(String(m.text ?? ''))?.[1] : null, inDownloads = /^content:/.test(where ?? '');
     const body = [h('div', { class: 'text' }, h('b', null, f.name), ` · ${kb(f.size)}`), h('span', { class: 'tag' }, [lane, st].filter(Boolean).join(' · '))];
     return h('div', { class: `msg ${m.dir} file`, 'data-file': f.sha256 },
       open ? h('button', { type: 'button', class: 'fl', 'aria-label': `Open ${f.name}`, onclick: open }, ...body) : h('div', null, ...body),
       failWhy(r),
-      where && !open ? h('div', { class: 'path' }, 'Saved on this machine: ', where) : null,
+      where && !open && !inDownloads && LOCAL?.saves !== 'Downloads' ? h('div', { class: 'path' }, 'Saved on this machine: ', where) : null,
+      inDownloads ? h('span', { class: 'help' }, 'In Downloads') : where && f.size <= SAVE_MAX && !remoteHere() ? tbtn(saveLabel(), () => saveReceived(`n=${m.n}`)) : null,
       out ? relayOrRetry(r, name) : null,
       h('span', { class: 'meta' }, hhmm(m.at), ticks(m)));
   }
@@ -3653,56 +3736,67 @@
           (x) => act(() => backend.call('POST', '/api/transfers/settings', { keep_location: x }), (y) => { S.transferSettings = { ...S.transferSettings, ...y }; }))) : null);
     };
   });
-  // Settings → Stay connected (the Android app: LOCAL.stay, the shell's switch for this phone, StayConnected.java). Turned on by
-  // the user: what is still missing (notifications, then the battery exemption), each after one line why, one at a time; never at
-  // a start. A refusal is never final: a row says what it costs, its tap asks again, or once Android stops asking, opens the
-  // app's page in the system's settings with one line naming what to switch on.
+  // The Android app's asks for this phone (LOCAL.stay, StayConnected.java's op): notifications, and the battery exemption that
+  // Built in push needs to keep its connection while the phone sleeps. Asked when the user picks Built in, each after one line
+  // why, one at a time, never at a start; the battery exemption asked that once only (asked). A refusal is never final: a row
+  // says what it costs and its tap asks again, or once Android stops asking, opens the app's page in the system's settings.
   const STAY = LOCAL?.stay ?? null;
   const stayNow = async () => { if (STAY) { try { S.stay = await STAY.get(); } catch { S.stay = null; } } };
   // Back from the system's page (a prompt, the battery list, the notification settings): what it now says.
   globalThis.document?.addEventListener?.('visibilitychange', () => { if (STAY && S.stay && !document.hidden) void stayNow().then(refresh); });
-  async function stayOn(on) {
-    let st = await STAY.set({ on });
-    if (on && !st.notify) st = await STAY.notifications(await ask({ title: 'Allow notifications?', text: st.notifyBlocked ? 'So new messages can tell you. In the settings that open, switch on Notifications.' : 'So new messages can tell you, and the app can show it is connected.', yes: st.notifyBlocked ? 'Open settings' : 'Allow', no: 'Not now', danger: false }));
-    if (on && !st.exempt) st = await STAY.battery(await ask({ title: 'Let it run in the background?', text: 'Without this, Android may pause the connection to save battery.', yes: 'Allow', no: 'Not now', danger: false }));
-    S.stay = st;
-  }
-  // Settings → Notifications (the Android app): the wake mode, one of three for the phone: Stay connected (above), Push (LOCAL.push:
-  // UnifiedPush through the user's push app, design/push.md §1 B: the relay wakes the phone when mail waits, the app swiped away
-  // too), or Off. Push names the push app used (a choice when there are several), what it said, and what the relay said; no push
-  // app: said once, with what to install, and Stay connected offered. The computer's page and the GTK app: none (phone first).
+  // Settings → Notifications (the Android app): the push mode, one of three for the phone (design/push.md §6): Built in (the
+  // default: the app's own connection to push.sigelo.ai wakes it when mail waits, swiped away too), Push app (LOCAL.push through
+  // the user's UnifiedPush app, §1 B), or Off. Each names what it said and what the relay said; Push app names the push app used
+  // (a choice when there are several); no push app: said, with what to install, and Built in offered. The computer's page and
+  // the GTK app: none (phone first).
   const PUSH = LOCAL?.push ?? null;
   const pushNow = async () => { if (PUSH) { try { S.push = await PUSH.get(); } catch { S.push = null; } } };
   PUSH?.onChange?.(() => { void pushNow().then(refresh); });
   globalThis.document?.addEventListener?.('visibilitychange', () => { if (PUSH && S.push && !document.hidden) void pushNow().then(refresh); });
-  const wakeMode = () => (S.stay?.on ? 'stay' : S.push?.on ? 'push' : 'off');
-  const wakeLine = () => ({ stay: 'Stay connected', push: 'Push', off: 'Off' })[wakeMode()];
+  const wakeMode = () => S.push?.mode ?? 'off';
+  const wakeLine = () => (S.push ? { builtin: 'Built in', app: 'Push app', off: 'Off' }[wakeMode()] : null);
   async function askNotify() {
     if (S.stay && !S.stay.notify) S.stay = await STAY.notifications(await ask({ title: 'Allow notifications?', text: S.stay.notifyBlocked ? 'So new messages can tell you. In the settings that open, switch on Notifications.' : 'So new messages can tell you.', yes: S.stay.notifyBlocked ? 'Open settings' : 'Allow', no: 'Not now', danger: false }));
   }
   async function setWake(mode) {
-    if (mode === 'stay') { if (S.push?.on) S.push = await PUSH.set({ on: false }); await stayOn(true); return; }
-    if (S.stay?.on) S.stay = await STAY.set({ on: false });
-    if (mode === 'off') { if (S.push?.on) S.push = await PUSH.set({ on: false }); return; }
-    S.push = await PUSH.set({ on: true });
+    if (mode === 'app' && S.push?.mode === 'app') return;
+    S.push = await PUSH.set({ mode });
+    if (mode === 'off') return;
     await askNotify();
+    if (mode === 'builtin' && S.stay && !S.stay.exempt && !S.stay.asked) S.stay = await STAY.battery(await ask({ title: 'Let it run in the background?', text: 'Without this, Android may pause the connection to save battery.', yes: 'Allow', no: 'Not now', danger: false }));
   }
   const PUSH_SAYS = {
     registering: (n) => `Waiting for ${n}…`, ok: (n) => `Ready: ${n} wakes sigelo when a message waits.`, pick: () => 'Pick the push app to use.',
-    failed: (n, r) => `${n} refused${r ? `: ${r}` : ''}. Pick it again, or use Stay connected.`, unregistered: (n) => `${n} dropped sigelo. Pick it again.`, unavailable: (n) => `${n} is not reachable now; it retries by itself.`,
+    failed: (n, r) => `${n} refused${r ? `: ${r}` : ''}. Pick it again, or use Built in.`, unregistered: (n) => `${n} dropped sigelo. Pick it again.`, unavailable: (n) => `${n} is not reachable now; it retries by itself.`,
   };
+  const BUILTIN_SAYS = { registering: 'Connecting…', ok: 'Ready: sigelo wakes when a message waits.', unavailable: 'Not connected now; it retries by itself.', failed: (r) => `Push failed${r ? `: ${r}` : ''}.` };
   const RELAY_SAYS = { pending: 'Relay: told at the next connection.', registered: 'Relay: registered.', unsupported: 'Your relay does not take push yet: messages arrive when you open the app.', off: 'Relay: removed.' };
+  // First run (2026-11-25: notices were missed): with Built in the mode, the battery exemption asked once, with the same
+  // line why, once the app is open (no lock, no other sheet); asked is the shell's, kept for the phone, so never again. A
+  // refusal leaves Settings' row, nothing else.
+  let batteryAsked = false;
+  async function batteryFirstRun() {
+    if (batteryAsked || !STAY || !PUSH || S.sheet || L.locked) return;
+    batteryAsked = true;
+    await stayNow(); await pushNow();
+    if (S.push?.mode !== 'builtin' || !S.stay || S.stay.exempt || S.stay.asked) return;
+    S.stay = await STAY.battery(await ask({ title: 'Let it run in the background?', text: 'Without this, Android may pause the connection to save battery.', yes: 'Allow', no: 'Not now', danger: false }));
+  }
+  const relayLine = (R) => (R?.state === 'refused' ? `Relay refused: ${R.detail ?? R.code}` : RELAY_SAYS[R?.state] ?? null);
   const pushBlock = () => {
     const P = S.push;
     if (!P) return null;
+    if (P.mode === 'builtin') {
+      const said = BUILTIN_SAYS[P.state], line = typeof said === 'function' ? said(P.reason) : said ?? '';
+      return h('div', { class: 'pad stack', 'data-push': P.state }, h('p', { class: 'help' }, line), P.state === 'ok' && relayLine(P.relay) ? h('p', { class: 'help' }, relayLine(P.relay)) : null);
+    }
     const name = P.distributors.find((d) => d.id === P.distributor)?.name ?? 'the push app';
     if (P.state === 'none') {
       return h('div', { class: 'card warn stack', 'data-push': 'none' }, h('p', null, h('b', null, 'No push app on this phone.')),
-        h('p', { class: 'help' }, 'Install ntfy (F-Droid), and in its settings set the server to push.sigelo.ai, or your own. Or use Stay connected.'));
+        h('p', { class: 'help' }, 'Install ntfy (F-Droid), and in its settings set the server to push.sigelo.ai, or your own. Or use Built in.'));
     }
-    const R = P.relay, relayLine = R?.state === 'refused' ? `Relay refused: ${R.detail ?? R.code}` : RELAY_SAYS[R?.state] ?? null;
-    return [P.distributors.length > 1 ? [sec('Push app'), radios('Push app', P.distributors.map((d) => [d.id, d.name]), P.distributor, (v) => act(async () => { S.push = await PUSH.set({ on: true, distributor: v }); }))] : null,
-      h('div', { class: 'pad stack', 'data-push': P.state }, h('p', { class: 'help' }, PUSH_SAYS[P.state]?.(name, P.reason) ?? ''), P.state === 'ok' && relayLine ? h('p', { class: 'help' }, relayLine) : null)];
+    return [P.distributors.length > 1 ? [sec('Push app'), radios('Push app', P.distributors.map((d) => [d.id, d.name]), P.distributor, (v) => act(async () => { S.push = await PUSH.set({ mode: 'app', distributor: v }); }))] : null,
+      h('div', { class: 'pad stack', 'data-push': P.state }, h('p', { class: 'help' }, PUSH_SAYS[P.state]?.(name, P.reason) ?? ''), P.state === 'ok' && relayLine(P.relay) ? h('p', { class: 'help' }, relayLine(P.relay)) : null)];
   };
   screen('set-notify', {}, () => {
     const body = h('div');
@@ -3711,16 +3805,16 @@
     return () => {
       const mode = wakeMode();
       put(body, sec('When sigelo is not on the screen'),
-        radios('Wake mode', [['stay', 'Stay connected', 'Keeps the connection open while the app is minimised, so messages arrive and calls can ring. Shows a small notification.'],
-          ...(PUSH ? [['push', 'Push', 'Your push app (such as ntfy) wakes sigelo when a message waits, even after the app is swiped away. The relay learns which push service you use; it sends no content.']] : []),
+        radios('Push', [['builtin', 'Built in', 'Wakes sigelo when a message waits, even after you swipe it away. Shows a small notification.'],
+          ['app', 'Push app', 'Your push app (such as ntfy) wakes sigelo instead.'],
           ['off', 'Off', 'Messages arrive when you open the app.']], mode, (v) => act(() => setWake(v))),
-        mode === 'stay' ? stayBlock() : mode === 'push' ? [pushBlock(), S.stay && !S.stay.notify ? stayNotifyRow() : null] : null);
+        mode !== 'off' ? [pushBlock(), stayRows(mode)] : null,
+        mode !== 'off' ? h('p', { class: 'help pad' }, 'The relay learns which push service you use; it sends no content.') : null);
     };
   });
-  const stayNotifyRow = () => list(row({ compact: true, title: 'Notifications are off', sub: S.stay.notifyBlocked ? 'Messages arrive, but nothing tells you. Tap, then switch on Notifications.' : 'Messages arrive, but nothing tells you. Tap to turn them on.', onclick: () => act(async () => { S.stay = await STAY.notifications(true); }) }));
-  const stayBlock = () => (S.stay ? [
-    S.stay.on && !S.stay.notify ? list(row({ compact: true, title: 'Notifications are off', sub: S.stay.notifyBlocked ? 'Messages arrive, but nothing tells you. Tap, then switch on Notifications.' : 'Messages arrive, but nothing tells you. Tap to turn them on.', onclick: () => act(async () => { S.stay = await STAY.notifications(true); }) })) : null,
-    S.stay.on && !S.stay.exempt ? list(row({ compact: true, title: 'Battery saving may pause it', sub: 'Android may cut the connection while the phone sleeps. Tap to let it run.', onclick: () => act(async () => { S.stay = await STAY.battery(true); }) })) : null] : null);
+  const stayRows = (mode) => (S.stay ? [
+    !S.stay.notify ? list(row({ compact: true, title: 'Notifications are off', sub: S.stay.notifyBlocked ? 'Messages arrive, but nothing tells you. Tap, then switch on Notifications.' : 'Messages arrive, but nothing tells you. Tap to turn them on.', onclick: () => act(async () => { S.stay = await STAY.notifications(true); }) })) : null,
+    mode === 'builtin' && !S.stay.exempt ? list(row({ compact: true, title: 'Battery saving may pause it', sub: 'Android may cut the connection while the phone sleeps. Tap to let it run.', onclick: () => act(async () => { S.stay = await STAY.battery(true); }) })) : null] : null);
   const backupLine = () => [SEC.st?.kept ? '25 words kept here, locked' : '25 words on paper', S.me?.recovery === 'set' ? 'recovery key set' : S.me ? 'no recovery key' : null].filter(Boolean).join(' · ');
 
   // Settings → Wallet (notes.md "Decided"): the switch (this profile's, in its settings), a local price (opt-in, with what
@@ -4642,6 +4736,7 @@
     await refresh(true);
     // Notifications are asked at need, never at a start (0.1.17): the card a first message brings (notifyCard), or the switch.
     if (!S.fatal) { try { await notifyNew(); } catch {} }
+    if (!S.fatal && S.snap) void batteryFirstRun().catch(() => {});
   }
   setInterval(() => { for (const el of document.querySelectorAll('.countdown')) el.textContent = left(Number(el.dataset.exp)); }, 1000);
   // Installable on this machine (manifest.webmanifest, sw.js: the three files, never /api/).

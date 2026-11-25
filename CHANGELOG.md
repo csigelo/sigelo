@@ -5,6 +5,14 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **transfers:** a size rule (`transfer auto <contact> <MB>`, the app's "Accept without asking") accepts with direct off too, over Tor or (≤ 8 MiB) the relay lane; 8 at once a contact.
+- **transfers:** several files at once: the app's picker takes several (one bubble each, sent in order), `transfer send <contact> <file>...` up to 8; no wire change.
+- **app:** a received file that sits in the app (it came over the relay lane) has "Save to Downloads" on the phone (MediaStore, no storage permission), "Download" elsewhere.
+- **agent:** host claude: the busy mark carries the number of running agents (the session and its live subagents, from the SDK's task events); the app shows it beside the wheel when more than one.
+- **app:** Agent settings page for a hosted agent: model, effort, permissions as its host announced them (sigelo-host-caps/0); a change (operator only) applies at its next turn; unsupported ones grayed, one line why.
+- **android:** push built in, the new default: Sigelo keeps its own connection to push.sigelo.ai, no second app. Settings → Notifications: Built in, Push app or Off (push on before: Push app).
+- **app:** reply by swipe works on touch.
+
 ## v0.1.20 — 2026-11-25
 
 - **This release:** files over 1 MiB send again from the Android app; a failed file says why.
