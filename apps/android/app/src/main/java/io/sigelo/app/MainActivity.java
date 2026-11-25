@@ -277,7 +277,7 @@ public final class MainActivity extends Activity {
         if (!"GET".equals(r.getMethod())) return refuse(405, "Method Not Allowed");
         String path = u.getPath();
         // A file the page sends, by range (BigFiles: the doc a pick or a photo gave; 409 once it changed).
-        if (path != null && path.startsWith("/.big/") && bridge != null) return bridge.big.range(u, r.getRequestHeaders(), HEADERS);
+        if (path != null && path.startsWith("/.big/") && bridge != null) return bridge.big.range(u, HEADERS);
         if (path == null || path.equals("/")) path = "/index.html";
         if (!SAFE_PATH.matcher(path).matches() || path.contains("..") || path.contains("//")) return refuse(404, "Not Found");
         int dot = path.lastIndexOf('.');

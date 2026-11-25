@@ -368,8 +368,8 @@ is not the one it staged. Then `deploy/check.mjs`: front page, headers, `llms.tx
 operator keys and each licensed operator's account and chain; never messages, claims or counters
 (`deploy/backup.sh --self-test`, in the relay export's proof, extracts from a seeded database and
 checks that). With the config and `/etc/letsencrypt` it writes `/home/csigelo/backup/relay-state-<stamp>.tgz.age`
-(7 kept), encrypted to a key the host does not hold. On a new host: untar `etc/letsencrypt` and
-`etc/sigelo-relay.env`, run `--relay` (R9 copies the restored `relay.sigelo.ai` certificate for the broker), deploy
+(7 kept), encrypted to a key the host does not hold. On a new host: untar `etc/letsencrypt`,
+`etc/sigelo-relay.env` and `push.key` (to `/var/lib/sigelo-relay/`, 0600, before the first start), run `--relay` (R9 copies the restored `relay.sigelo.ai` certificate for the broker), deploy
 once (the relay creates its tables), `systemctl stop sigelo-relay`, `sigelo-relay-backup --restore
 <relay-licences.db, readable by sigelo-relay>`, start it.
 

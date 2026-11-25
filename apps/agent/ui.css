@@ -345,6 +345,7 @@ button.card.tap.flex .mid small { color: var(--text-2); }
 .msg.pay { background: var(--surface); border: 1px solid var(--border); }
 .msg.pay b { display: block; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .msg .tag { display: block; font-size: 14px; color: var(--text-2); }
+.msg .why { display: block; }
 .row select, .field select { min-height: 44px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); padding: 0 var(--s2); font: inherit; }
 
 /* ---- Pass 5: Me, pictures, signed statements (design/ux1/mock.html me, person, team, sign, verify-result, invite) */

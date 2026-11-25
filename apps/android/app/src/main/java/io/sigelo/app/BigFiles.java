@@ -61,8 +61,8 @@ import java.util.regex.Pattern;
  *              refused no_camera when no app answers the intent (the page offers the picker instead)
  *   big-hash   each 1 MiB chunk's SHA-256 and the whole file's, here (the page would take minutes) → {name, size, mtime, sha256, hashes}
  *   big-stat   {size, mtime}: the sender checks the file is still the one hashed
- *   a range    GET ORIGIN/.big/<doc>?size=&mtime= with Range (MainActivity.serve → range): 206 and those bytes,
- *              409 when size or mtime moved, 404 for any other doc. No base64: the page fetch()es them. No Range:
+ *   a range    GET ORIGIN/.big/<doc>?size=&mtime=&from=&to= (MainActivity.serve → range): those bytes (≤ 1 MiB),
+ *              409 when size or mtime moved, 404 for any other doc. No base64: the page fetch()es them. No from/to:
  *              the whole file, up to 64 MiB (a photo the page downscales for its preview).
  *   big-write  bytes at an offset of <part>.part in this profile's private storage; big-flush: on disk (fsync)
  *   big-digest the partial read back whole (SHA-256); big-drop: gone; big-free: bytes free here
@@ -90,8 +90,10 @@ final class BigFiles {
     private static final Pattern PROFILE = Pattern.compile("^p[1-9][0-9]{0,2}$");
     private static final Pattern SAFE_NAME = Pattern.compile("[\\\\/:*?\"<>|\\x00-\\x1f]");
     private static final int NAME_MAX = 200;
-    /** A file read whole by the page (no Range: a photo it downscales for the preview): at most this. */
+    /** A file read whole by the page (no from/to: a photo it downscales for the preview): at most this. */
     private static final long PREVIEW_MAX = 64L << 20;
+    /** from= and to= of a range: decimal, short enough for a long. */
+    private static final Pattern OFFSET = Pattern.compile("^\\d{1,15}$");
 
     /** An answer to the page, or a refusal (SigeloBridge.Refused), from any thread. */
     interface Reply {
@@ -191,26 +193,41 @@ final class BigFiles {
         return n.length() > NAME_MAX ? n.substring(n.length() - NAME_MAX) : n;
     }
 
-    /** The file opened at offset for reading (a content URI through its descriptor, so it can seek). */
+    /** The file opened for reading (a content URI through its descriptor, so it can seek). */
+    private FileInputStream open(String where) throws IOException {
+        if (where.startsWith("f:")) return new FileInputStream(new File(photos(activity), where.substring(2)));
+        ParcelFileDescriptor pfd = activity.getContentResolver().openFileDescriptor(Uri.parse(where.substring(2)), "r");
+        if (pfd == null) throw new IOException("the provider gave no file");
+        return new ParcelFileDescriptor.AutoCloseInputStream(pfd);
+    }
+
+    /**
+     * The file opened at offset for reading: seeked, and only when the channel says it is there; else (a provider's
+     * pipe cannot seek) opened again and read up to the offset (bounded: the file ends).
+     */
     private InputStream openAt(String where, long offset) throws IOException {
-        FileInputStream in;
-        if (where.startsWith("f:")) in = new FileInputStream(new File(photos(activity), where.substring(2)));
-        else {
-            ParcelFileDescriptor pfd = activity.getContentResolver().openFileDescriptor(Uri.parse(where.substring(2)), "r");
-            if (pfd == null) throw new IOException("the provider gave no file");
-            in = new ParcelFileDescriptor.AutoCloseInputStream(pfd);
-        }
+        FileInputStream in = open(where);
         try {
-            in.getChannel().position(offset);
-        } catch (IOException e) {
+            if (offset == 0) return in;
+            try {
+                if (in.getChannel().position(offset).position() == offset) return in;
+            } catch (IOException e) {
+                // no seek: read up to it below
+            }
+            in.close();
+            in = open(where);
+            byte[] buf = new byte[64 << 10];
             long left = offset;
             while (left > 0) {
-                long k = in.skip(left);
-                if (k <= 0) throw new IOException("cannot reach the offset");
+                int k = in.read(buf, 0, (int) Math.min(buf.length, left));
+                if (k < 0) throw new IOException("the file ends before the offset");
                 left -= k;
             }
+            return in;
+        } catch (IOException | RuntimeException e) {
+            in.close();
+            throw e;
         }
-        return in;
     }
 
     private JSONObject describe(String profile, String doc, String where) throws SigeloBridge.Refused, JSONException {
@@ -526,8 +543,15 @@ final class BigFiles {
         return new JSONObject().put("size", st[0]).put("mtime", st[1]);
     }
 
-    /** GET ORIGIN/.big/<doc>?size=&mtime=&profile= with a Range header: those bytes (206), or a refusal. */
-    WebResourceResponse range(Uri u, Map<String, String> headers, Map<String, String> base) {
+    /**
+     * GET ORIGIN/.big/<doc>?size=&mtime=&profile=&from=&to=: bytes from..to (at most 1 MiB); without from and to the
+     * whole file (a preview, at most PREVIEW_MAX); or a refusal. The range is in the query, never read from a Range
+     * header: the WebView applies a request's Range to the stream returned here once more (Chromium
+     * android_stream_reader_url_loader.cc ParseRange, input_stream_reader.cc Seek: bounds against the stream's
+     * length, then a skip), so a body already sliced for "Range: bytes=1048576-..." failed every chunk after the
+     * first. A Range an element sends itself (a video) is left to the WebView, over the whole file.
+     */
+    WebResourceResponse range(Uri u, Map<String, String> base) {
         String path = u.getPath() == null ? "" : u.getPath(), doc = path.substring("/.big/".length());
         String where;
         long[] st;
@@ -540,13 +564,11 @@ final class BigFiles {
         }
         if (!String.valueOf(st[0]).equals(u.getQueryParameter("size")) || !String.valueOf(st[1]).equals(u.getQueryParameter("mtime"))) return empty(409, "Conflict", base);
         long from = 0, to = st[0] - 1;
-        String r = null;
-        for (Map.Entry<String, String> h : headers.entrySet()) if ("range".equalsIgnoreCase(h.getKey())) r = h.getValue();
-        if (r != null) {
-            java.util.regex.Matcher mm = Pattern.compile("^bytes=(\\d+)-(\\d+)$").matcher(r.trim());
-            if (!mm.matches()) return empty(416, "Range Not Satisfiable", base);
-            from = Long.parseLong(mm.group(1));
-            to = Math.min(Long.parseLong(mm.group(2)), st[0] - 1);
+        String f = u.getQueryParameter("from"), t = u.getQueryParameter("to");
+        if (f != null || t != null) {
+            if (f == null || t == null || !OFFSET.matcher(f).matches() || !OFFSET.matcher(t).matches()) return empty(416, "Range Not Satisfiable", base);
+            from = Long.parseLong(f);
+            to = Math.min(Long.parseLong(t), st[0] - 1);
             if (from > to || to - from + 1 > CHUNK) return empty(416, "Range Not Satisfiable", base);
         } else if (st[0] > PREVIEW_MAX) {
             // Whole only for a picture the page shows or downscales (the preview); a bigger file goes by range.
@@ -564,10 +586,9 @@ final class BigFiles {
             return empty(409, "Conflict", base);
         }
         Map<String, String> h = new HashMap<>(base);
-        h.put("Content-Range", "bytes " + from + "-" + to + "/" + st[0]);
         h.put("Content-Length", String.valueOf(out.length));
         String type = where.startsWith("f:") ? "image/jpeg" : "application/octet-stream";
-        return new WebResourceResponse(type, null, r == null ? 200 : 206, r == null ? "OK" : "Partial Content", h, new ByteArrayInputStream(out));
+        return new WebResourceResponse(type, null, 200, "OK", h, new ByteArrayInputStream(out));
     }
 
     private static String profileChecked(String p) throws SigeloBridge.Refused {

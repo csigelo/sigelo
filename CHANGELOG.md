@@ -5,6 +5,13 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+## v0.1.20 — 2026-11-25
+
+- **This release:** files over 1 MiB send again from the Android app; a failed file says why.
+- **android:** files over 1 MiB send again: the page asks the app for each 1 MiB piece in the query, not a Range header, which the WebView applied a second time (every piece after the first failed).
+- **app:** a failed file, photo or voice bubble says why under "failed" (no direct path, or the transfer's reason), as the transfers card does.
+- **relay:** the nightly backup archives the push key (`push.key`, 0600) beside the licence extract; `--self-test` checks it. Restore: relay/deploy/README.md, `RELAY_PUSH_KEY`.
+- **relay:** tests: a bad proof of work is never the old SHA-256 solver's answer too, which the relay refuses `client_old` (1 run in 16 at 4 bits).
 - **agent:** host acp: closing a session gives the agent up to 0.5 s to read session/cancel and exit before SIGTERM, then SIGKILL after 3 s; the session awaits its exit.
 
 ## v0.1.19 — 2026-11-25

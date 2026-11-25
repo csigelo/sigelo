@@ -260,7 +260,7 @@ const same = (a, b) => Buffer.from(a).equals(Buffer.from(b));
 // hosts: name → { port: local port }.
 const PRIVATE = (h) => { const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h); if (!m) return false; const [a, b] = [Number(m[1]), Number(m[2])]; return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254); };
 function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
-  const target = new EventTarget(), keys = new Map(), log = { ops: [], streams: [], seals: [] };
+  const target = new EventTarget(), keys = new Map(), log = { ops: [], streams: [], seals: [], bigUrls: [], bigRanges: 0 };
   const state = { mode, wipe, locked: false, secure: false, door: false, secureLog: [], clipCleared: 0, clip: null,
     lock: { on: true, after: 1, secure: true }, granted: true, asked: 0, notes: new Map(), pendingOpen: null, forced: [],
     // Stay connected (StayConnected.java): the switch for the phone, its two asks (each once, then the system's page), what opened.
@@ -328,9 +328,30 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
     const u = new URL(url), doc = u.pathname.slice('/.big/'.length), d = state.big.docs.get(`${u.searchParams.get('profile') ?? 'p1'}/${doc}`);
     if (!d) return { status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
     if (String(d.bytes.length) !== u.searchParams.get('size') || String(d.mtime) !== u.searchParams.get('mtime')) return { status: 409, arrayBuffer: async () => new ArrayBuffer(0) };
-    const [, a, b] = /^bytes=(\d+)-(\d+)$/.exec(init.headers?.Range ?? '') ?? [];
-    const x = d.bytes.subarray(Number(a), Number(b) + 1);
-    return { status: 206, arrayBuffer: async () => x.buffer.slice(x.byteOffset, x.byteOffset + x.length) };
+    // BigFiles.range: from= and to= in the query (at most 1 MiB) sliced in the shell; neither: the whole file. A Range header is not read there.
+    const f = u.searchParams.get('from'), t = u.searchParams.get('to');
+    if ((f === null) !== (t === null) || (f !== null && (!/^\d{1,15}$/.test(f) || !/^\d{1,15}$/.test(t)))) return { status: 416, arrayBuffer: async () => new ArrayBuffer(0) };
+    const a = f === null ? 0 : Number(f), b = f === null ? d.bytes.length - 1 : Math.min(Number(t), d.bytes.length - 1);
+    if (f !== null && (a > b || b - a + 1 > 1048576)) return { status: 416, arrayBuffer: async () => new ArrayBuffer(0) };
+    log.bigUrls.push(url);
+    return webView(init, d.bytes.subarray(a, b + 1), 200);
+  };
+  /**
+   * What the WebView does with the stream shouldInterceptRequest returned (Chromium
+   * components/embedder_support/android/util/android_stream_reader_url_loader.cc ParseRange, and
+   * input_stream_reader.cc Seek): a request's Range header is applied AGAIN to that stream — bounds
+   * computed against its length (available()), then its first bytes skipped; out of bounds → the request
+   * fails (ERR_FAILED: fetch rejects with a TypeError).
+   */
+  const webView = (init, x, status) => {
+    const r = /^bytes=(\d+)-(\d+)?$/.exec(init.headers?.Range ?? init.headers?.range ?? '');
+    if (r) log.bigRanges++;
+    if (r && x.length > 0) {
+      const a = Number(r[1]), b = Math.min(r[2] === undefined ? x.length - 1 : Number(r[2]), x.length - 1);
+      if (a > b) return Promise.reject(new TypeError('Failed to fetch'));
+      x = x.subarray(a, b + 1);
+    }
+    return { status, arrayBuffer: async () => x.buffer.slice(x.byteOffset, x.byteOffset + x.length) };
   };
   const route = (host, port) => { const p = hosts[host]?.[port]; if (!p) throw Object.assign(new Error(`${host}:${port}: unreachable`), { check: 'connect' }); return p; };
   const shell = {
@@ -1803,6 +1824,15 @@ try {
   ok(h.hashes instanceof Uint8Array && h.hashes.length === 4 * 32 && h.sha256 === createHash('sha256').update(bytes).digest('hex'), 'big: hash in the shell → the chunk hashes (bytes) and the whole');
   const r = await big.read(d.doc, 1048576, 1048576, { size: d.size, mtime: d.mtime });
   ok(r.length === 1048576 && r[0] === bytes[1048576] && r.at(-1) === bytes[2 * 1048576 - 1] && !F.log.ops.includes('big-read'), 'big: a range read by fetch from the app\'s origin (no base64 over the port)');
+  {
+    // Every chunk of a file over 1 MiB, the last one short (the 1,056,817-byte APK of 2026-11-25), through the WebView
+    // as it is (a Range header would be applied again to the shell's slice: chunk 1 on failed); no Range header sent.
+    const C = 1048576, all = [];
+    for (let i = 0; i * C < bytes.length; i++) all.push(await big.read(d.doc, i * C, Math.min(C, bytes.length - i * C), { size: d.size, mtime: d.mtime }));
+    const back = Buffer.concat(all);
+    ok(all.length === 4 && all[3].length === 17 && back.equals(Buffer.from(bytes)) && F.log.bigUrls.at(-1).endsWith(`&from=${3 * C}&to=${3 * C + 16}`) && F.log.bigRanges === 0,
+      'big: every chunk read (index 1 on, the last short) is its slice: the whole file back, the range in the query');
+  }
   F.state.big.docs.get(`p2/${d.doc}`).mtime = 2000;
   ok(await checkOf(() => big.read(d.doc, 0, 10, { size: d.size, mtime: d.mtime })) === 'file_changed', 'big: the file changed since → file_changed');
   ok(await checkOf(() => A.bigFiles(bridge, { fetch: F.bigFetch }).hash(d.doc)) === 'file', 'big: another profile\'s doc is no file of this one');
