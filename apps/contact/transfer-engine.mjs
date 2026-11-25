@@ -19,8 +19,8 @@
 // The accept rule (design §10.2, decided 2026-11-13): a file lands without a question up to the size set
 // (settings.auto_mb, default 25 MB; per contact auto[DID]) from own agents and own contacts (tier own,
 // ours) and from friends whose four words were compared (compared(did), the page's), when the disk has
-// room and direct is allowed for that contact; larger, or from anyone else (words not compared, a
-// public-code joiner, quiet), it is asked.
+// room; larger, or from anyone else (words not compared, a public-code joiner, quiet), it is asked. The
+// direct switch picks the lane, not the yes (2026-11-25): off, it comes over Tor or the relay lane.
 //
 // The relay lane (0.1.19): a file of at most RELAY_MAX (8 MiB, send-file's) to an own agent or contact, or to a friend
 // whose words were compared, that cannot go direct (no path, no Tor: the end no_path) or whose channel dropped and did
@@ -156,9 +156,9 @@ const recIn = (s, id) => s.in[id] ?? fail('transfer_unknown', `no transfer ${id}
 const either = (s, id) => (s.in[id] ? { side: 'in', r: s.in[id] } : s.out[id] ? { side: 'out', r: s.out[id] } : fail('transfer_unknown', `no transfer ${id}`));
 const haveOf = (io, r) => { const b = io.have.read(r.id); try { return new Have(r.chunks, b ?? undefined); } catch { return new Have(r.chunks); } };
 /** Free disk for a record (in s), or disk_full. */
-const room = (io, r) => {
+const room = (io, r, promised = 0) => {
   const need = r.size - haveOf(io, r).bytes(r.size), free = io.free();
-  if (free < need + FREE_MARGIN) fail('disk_full', `${r.name} needs ${need} bytes more here, ${free} are free`);
+  if (free < need + promised + FREE_MARGIN) fail('disk_full', `${r.name} needs ${need} bytes more here, ${free} are free${promised ? ` (${promised} promised to files accepted before)` : ''}`);
 };
 
 /** The receiver's yes to a manifest (or a resume of one that stopped): free disk checked, the direct switch settled. */
@@ -445,10 +445,19 @@ export class Engine {
         if (waiting.length >= WAIT_ALL || waiting.filter((y) => y.from === m.from).length >= WAIT_CONTACT) return 'busy';
         const rec = { id: x.id, from: m.from, contact: m.name, name: safeName(x.name), size: x.size, sha256: x.sha256, chunks: x.chunks, list: x.list, exp: x.exp, state: 'asked', attempt: 0, at: now, got: 0 };
         s.in[x.id] = rec;
-        // The accept rule: a yes given by the rule, when the disk has room and direct is allowed.
+        // The accept rule: a yes given by the rule, when the disk has room. Whatever the direct switch: off (or not
+        // asked yet), #offer leaves direct out and the file comes over Tor, else the sender's relay lane (no_path).
+        // Only when one of those lanes can carry it: direct on, or Tor on here, or within the relay lane's 8 MiB;
+        // else it is asked (Accept asks the direct question), never accepted to fail no_path unseen.
         const mb = Object.hasOwn(s.auto, m.from) ? s.auto[m.from] : null;
-        if (c && acceptRule({ size: x.size, trust, limitMb: mb, defaultMb: autoDefault(s), direct: directFor(s, c) === true }) === 'auto') {
-          try { room(this.io, rec); rec.state = 'accepted'; rec.auto = 0; rec.by = 'rule'; } catch {}
+        const lane = c && (directFor(s, c) === true || x.size <= RELAY_MAX || (settingsOf(s).tor && !!this.io.tor));
+        // The rule's yeses still coming count as waiting ones do (WAIT_CONTACT a contact, WAIT_ALL in all), and the disk
+        // must hold them all: a sender past the 8 a batch, or many at once, is asked.
+        const live = Object.values(s.in).filter((y) => y.by === 'rule' && y.id !== rec.id && ['accepted', 'offering', 'active', 'interrupted'].includes(y.state));
+        const fits = live.length < WAIT_ALL && live.filter((y) => y.from === m.from).length < WAIT_CONTACT;
+        if (lane && fits && acceptRule({ size: x.size, trust, limitMb: mb, defaultMb: autoDefault(s) }) === 'auto') {
+          const promised = live.reduce((t, y) => t + Math.max(0, y.size - haveOf(this.io, y).bytes(y.size)), 0);
+          try { room(this.io, rec, promised); rec.state = 'accepted'; rec.auto = 0; rec.by = 'rule'; } catch {}
         }
         return { ...rec };
       });

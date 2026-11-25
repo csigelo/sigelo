@@ -467,12 +467,12 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     contains(x) { for (let n = x; n; n = n.parent) if (n === this) return true; return false; }
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return this.attrs[k] ?? null; }
-    addEventListener(t, f) { (this.on[t] ??= []).push(f); }
+    addEventListener(t, f, o) { const l = (this.on[t] ??= []); if (o === true || o?.capture) l.unshift(f); else l.push(f); }
     focus() { focus.el = this; }
     getContext() { return null; }
     scrollIntoView(o) { (scroll.into ??= []).push([this, o]); }
     all() { return [this, ...this.kids.filter((k) => k instanceof El).flatMap((k) => k.all())]; }
-    async click() { const ev = { preventDefault() {}, stopImmediatePropagation() {}, target: this }; for (const f of this.on.click ?? []) await f(ev); }
+    async click() { let stop = false; const ev = { preventDefault() {}, stopImmediatePropagation() { stop = true; }, target: this }; for (const f of this.on.click ?? []) { await f(ev); if (stop) break; } }
   }
   const fire = (el, t) => { for (const f of el.on[t] ?? []) f({ target: el, key: '', preventDefault() {} }); };
   // A tree's helpers: a button by its text, a control by its label, the heading, the text.
@@ -545,6 +545,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     'POST /api/agents/enrol-words': (b) => { sandbox.wordsAnswer = b; return { id: b.id, state: 'sending' }; },
     'POST /api/pow/try': (b) => { sandbox.tried = b; return { tried: ['relay.sigelo.ai'] }; },
     'POST /api/agents/cancel': (b) => { const i = W_.workers.findIndex((x) => x.enrolling?.id === b.id); const w = W_.workers[i]; if (i >= 0) W_.workers.splice(i, 1); return { id: b.id, worker: w?.worker ?? null, cancelled: true, revoked: null, forgot: null }; },
+    'POST /api/host/set': (b) => { const c = [...G_.mine, ...G_.contacts].find((x) => x.did === b.contact), f = c.host.fields.find((x) => x.key === b.key); f.next = b.value; return { did: c.did, host: c.host, status: 'sent' }; },
     'POST /api/agents/revoke': (b) => { const w = W_.workers.find((x) => x.worker === b.worker); w.status = 'revoked'; w.revoked = now(); return { worker: b.worker, name: w.name, cancelled: false, revoked: w.revoked, forgot: w.contact }; },
   };
   const docLis = new Map();   // the document's listeners (the "+" row's tap elsewhere)
@@ -775,6 +776,47 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(wheel().length === 0, 'busy off: the wheel goes');
     await back();
   }
+  {
+    // The busy count (UI-API.md "Busy marks": busy_n, 2026-11-25): more than one agent → their number beside the wheel.
+    const ana = G_.mine.find((c) => c.name === 'ana'), nOf = (e) => e?.all().find((x) => x.className === 'busyn')?.textContent;
+    ana.busy = true; ana.busy_n = 3; await poll();
+    ok(nOf(chatRow('ana')) === '3' && chatRow('ana').textContent.includes('working…'), `busy count: 3 agents → "3" beside the wheel on the row (${chatRow('ana')?.textContent})`);
+    await sandbox.ui.go('chat', ana.did); await settle(); await poll();
+    const wh = () => root.all().find((e) => e.className === 'msg in busy');
+    ok(nOf(wh()) === '3' && wh().attrs['aria-label'] === 'Working: 3 agents' && root.all().filter((e) => e.className === 'msg in busy').length === 1, 'busy count: the chat\'s one wheel with "3", said "Working: 3 agents"');
+    ana.busy_n = 1; await poll();
+    ok(wh() && nOf(wh()) === undefined && wh().attrs['aria-label'] === 'Working', 'busy count: one agent → no number');
+    ana.busy = false; ana.busy_n = 0; await poll(); await back();
+  }
+  {
+    // Agent settings (UI-API.md, 2026-11-25): a contact that announced them gets a row in its chat settings and a page.
+    const ana = G_.mine.find((c) => c.name === 'ana'), settingsRow = () => root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Agent settings'));
+    await sandbox.ui.go('chat-info', ana.did); await settle(); await poll();
+    ok(h1() === 'Chat settings' && !settingsRow(), 'agent settings: no row while the agent has said none');
+    ana.host = { at: now(), fields: [{ key: 'model', value: '', options: [{ value: '', label: 'Default' }, { value: 'small', label: 'Small' }] }, { key: 'effort', value: '', options: [], off: 'This model has no effort levels' },
+      { key: 'permissionMode', value: 'default', options: [{ value: 'default', label: 'Ask first' }, { value: 'auto', label: 'Auto (a classifier decides)' }] }] };
+    await poll();
+    ok(settingsRow()?.textContent === 'Agent settingsModel, Effort, Permissions', `agent settings: the row names its fields (${settingsRow()?.textContent})`);
+    { const modeWas = sandbox.sigeloLocal.mode; sandbox.sigeloLocal.mode = () => ({ kind: 'remote' }); await poll();
+      ok(!settingsRow(), 'agent settings: no row on a phone controlling a computer\'s page (POST /api/host/set is never remote)');
+      sandbox.sigeloLocal.mode = modeWas; await poll(); }
+    { const tierWas = ana.tier, oursWas = ana.ours; Object.assign(ana, { tier: 'friend', ours: false }); await poll();
+      ok(!settingsRow(), 'agent settings: no row for a contact that is not an own agent (a friend\'s caps set nothing)');
+      Object.assign(ana, { tier: tierWas, ours: oursWas }); await poll(); }
+    await settingsRow().click(); await settle(); await poll();
+    const fld = (l) => kit(root).field(l);
+    ok(h1() === 'Agent settings' && has('Changes apply from its next turn.') && fld('Model')?.tagName === 'SELECT' && !fld('Model').disabled && fld('Model').value === ''
+      && fld('Permissions').value === 'default' && fld('Permissions').kids.map((o) => o.textContent).join() === 'Ask first,Auto (a classifier decides)',
+      'agent settings: a picker per field, the value in use chosen, the choices in the agent\'s words');
+    ok(fld('Effort')?.disabled === true && fld('Effort').kids.length === 1 && fld('Effort').kids[0].textContent === 'Default' && has('This model has no effort levels'), 'agent settings: a field it cannot set: grayed, its value only, one line why');
+    fld('Model').value = 'small'; fire(fld('Model'), 'change'); await settle(); await poll();
+    const sent = calls.filter(([, p]) => p === '/api/host/set').at(-1)?.[2];
+    ok(sent?.contact === ana.did && sent.key === 'model' && sent.value === 'small' && has('Next turn: Small') && fld('Model').value === 'small',
+      `agent settings: a change → POST /api/host/set {contact, key, value}; "Next turn: Small" in place, no chat message (${JSON.stringify(sent)})`);
+    ana.host.note = 'Model not changed: no answer within 15 s'; await poll();
+    ok(root.all().some((e) => e.attrs['data-host-note'] === '' && e.textContent === 'Model not changed: no answer within 15 s'), 'agent settings: the agent\'s note shown in place');
+    delete ana.host; await back(); await back();
+  }
   await chatRow('bo').click(); await settle(); await poll();
   ok(root.all().some((e) => e.className === 'who' && e.textContent.includes('bo') && e.textContent.includes('last seen 5 min ago')) && aria('Message', 'TEXTAREA') && aria('Send', 'BUTTON') && aria('Attach', 'BUTTON') && !btn('Pay'),
     'a chat: the name and "last seen 5 min ago" in the top bar; the composer (Attach, Message, Send); no Pay with the Wallet off');
@@ -939,9 +981,37 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     // Reply to one message (0.1.17): a double click (a swipe on a phone) quotes it above the box, × drops it; Send carries
     // re (its n); a reply shows its quote, which goes to the message answered.
     const bub1 = root.all().find((e) => e.attrs['data-n'] === '1');
+    const qbar = () => root.all().find((e) => e.className === 'quotebar');
+    // The swipe as a phone's WebView sends it (0.1.20 fix): down, moves, then pointercancel, never pointerup; read in the moves.
+    const caps = [];
+    Object.assign(bub1, { setPointerCapture: (i) => caps.push(['set', i]), releasePointerCapture: (i) => caps.push(['rel', i]) });
+    const swipe = (pts) => { const ev = (t, [x, y]) => { for (const f of bub1.on[t] ?? []) f({ target: bub1, currentTarget: bub1, pointerId: 7, isPrimary: true, button: 0, clientX: x, clientY: y }); };
+      ev('pointerdown', pts[0]); for (const p of pts.slice(1)) ev('pointermove', p); ev('pointercancel', pts.at(-1)); };
+    swipe([[100, 300], [130, 305], [175, 310]]);
+    await settle();
+    const swiped = qbar()?.hidden === false && qbar().textContent.includes('Dinner on Friday?');
+    ok(swiped && caps[0]?.[0] === 'set' && caps.at(-1)?.[0] === 'rel' && bub1.style.transform === '',
+      `reply by swipe on touch: down, a move right past 60 px, pointercancel (no pointerup) quotes the message; captured, let go, the nudge undone (${JSON.stringify([qbar()?.hidden, caps, bub1.style.transform])})`);
+    await aria('Drop the reply', 'BUTTON')?.click(); await settle();
+    swipe([[100, 300], [110, 340], [180, 420]]);
+    await settle();
+    const vert = qbar()?.hidden === true;
+    sandbox.getSelection = () => ({ toString: () => 'Dinner' });
+    swipe([[100, 300], [130, 302], [175, 304]]);
+    sandbox.getSelection = undefined;
+    await settle();
+    ok(vert && qbar()?.hidden === true && bub1.style.transform === '', `reply by swipe: a vertical drag (a scroll) picks nothing, nor a sideways one while text is selected (${JSON.stringify([vert, qbar()?.hidden])})`);
+    // A sideways drag that stopped short (captured at 30 px, let go): its release's click is not a tap on the bubble
+    // (no "Check who signed it"); the next touch clears it (task 11's tap on a message, below, opens it).
+    let bubTaps = 0; bub1.addEventListener('click', () => { bubTaps++; });
+    const h1Was = h1();
+    swipe([[100, 300], [130, 302]]); await settle();
+    await bub1.click(); await settle();
+    ok(bubTaps === 0 && h1() === h1Was && qbar()?.hidden === true, `reply by swipe: a short sideways drag swallows its one click (${JSON.stringify([bubTaps, h1()])})`);
+    for (const f of bub1.on.pointerdown ?? []) f({ target: bub1, pointerId: 8, isPrimary: true, button: 0, clientX: 5, clientY: 5 });
+    for (const f of bub1.on.pointercancel ?? []) f({ target: bub1, pointerId: 8 });
     for (const f of bub1?.on?.dblclick ?? []) f({});
     await settle();
-    const qbar = () => root.all().find((e) => e.className === 'quotebar');
     const quoted = qbar()?.hidden === false && qbar().textContent.includes('bo') && qbar().textContent.includes('Dinner on Friday?');
     await aria('Drop the reply', 'BUTTON')?.click(); await settle();
     const dropped = qbar()?.hidden === true;
@@ -1775,6 +1845,29 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await choose('File');
     const pk2 = calls.filter(([, p]) => p === '/api/transfers/pick');
     ok(pk.at(-1)[2]?.images === true && pk2.length === pk.length + 1 && pk2.at(-1)[2]?.images === undefined, 'Photo → POST /api/transfers/pick {images: true}; File → the picker for any file');
+    // Several files at once (2026-11-25): the picker asked for several; each its own send to this chat, in order; one line.
+    // The toasts said (each goes after 3 s, 10 ms here): kept as they come.
+    const said = [], tl = body.all().find((e) => e.className === 'toasts'), tlAppend = tl.append.bind(tl);
+    tl.append = (x) => { said.push(x.textContent); return tlAppend(x); };
+    {
+      const sendWas = routes['POST /api/transfers/send'], pickWas = routes['POST /api/transfers/pick'], sents = [];
+      const doc = (i) => ({ doc: String(i).repeat(32).slice(0, 32), name: `f${i}.bin`, size: 10 * i, mtime: 1, url: `https://app.invalid/.big/${i}` });
+      routes['POST /api/transfers/send'] = (b) => { sents.push(b); return { id: String(sents.length).repeat(32).slice(0, 32), state: 'offered' }; };
+      routes['POST /api/transfers/pick'] = () => ({ docs: [doc(1), doc(2), doc(3)] });
+      await choose('File');
+      ok(calls.filter(([, p]) => p === '/api/transfers/pick').at(-1)[2]?.multiple === true && sents.map((b) => b.doc).join() === [1, 2, 3].map((i) => doc(i).doc).join() && sents.every((b) => b.to === bo.did)
+        && said.includes('3 files sent'), `File, three chosen: {multiple: true}, three sends to this chat in the order chosen, one line (${sents.map((b) => b.doc)})`);
+      sents.length = 0;
+      routes['POST /api/transfers/pick'] = () => ({ docs: Array.from({ length: 10 }, (_, i) => doc(i % 9 + 1)) });
+      await choose('File');
+      ok(sents.length === 8 && said.includes('8 files sent; 2 not sent (8 at once)'), `ten chosen: eight sent, the rest said (${sents.length})`);
+      // The shell lists at most 16 (BigFiles PICK_MAX) and says how many were picked: 20 picked → 12 not sent.
+      sents.length = 0;
+      routes['POST /api/transfers/pick'] = () => ({ docs: Array.from({ length: 16 }, (_, i) => doc(i % 9 + 1)), picked: 20 });
+      await choose('File');
+      ok(sents.length === 8 && said.includes('8 files sent; 12 not sent (8 at once)'), `twenty picked, sixteen listed by the shell: eight sent, 12 not sent said (${sents.length})`);
+      routes['POST /api/transfers/send'] = sendWas; routes['POST /api/transfers/pick'] = pickWas;
+    }
     MSGS[bo.did] = [...(MSGS[bo.did] ?? []), { n: 9, dir: 'in', at: now(), iat: now(), text: 'Photo', label: 'sigelo-photo/0', status: null, code: null, detail: null, link: null, photo: { type: 'image/jpeg', data: jpeg, w: 640, h: 480, sha256: SHA, size: 3200000, name: 'IMG_2.jpg' } }];
     TL.in.push({ id: '12'.repeat(16), from: bo.did, contact: 'bo', name: 'IMG_2.jpg', size: 3200000, sha256: SHA, state: 'done', saved: 'content://media/external/downloads/1', got: 3200000 });
     sandbox.seq = (sandbox.seq ?? 1) + 1; await poll(); await poll();
@@ -1822,6 +1915,28 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       ok(fb_(F4)?.className === 'msg in file' && fb_(F4).textContent.includes('notes.pdf') && fb_(F4).textContent.includes('via relay · saved'), `theirs over the relay: its bubble says so (${fb_(F4)?.textContent})`);
       await aria('Open sigelo.apk', 'BUTTON')?.click(); await settle();
       ok(sandbox.opened?.id === 'a1'.repeat(16), 'a tap on my own file → POST /api/transfers/open, its transfer');
+      // Save to Downloads (2026-11-25): a file that came over the relay sits in the app; the Android app saves it into
+      // Downloads (sigeloLocal.saveFile, the shell's MediaStore), a tab downloads it; one already in Downloads says so.
+      const L0 = sandbox.sigeloLocal, saved = [];
+      L0.saves = 'Downloads'; L0.saveFile = async (name, bytes) => { saved.push([name, Buffer.from(bytes).toString()]); return { name, where: 'Downloads' }; };
+      routes['GET /api/files/data'] = (_, path) => { sandbox.dataPath = path; return { name: 'notes.pdf', size: 5, data: Buffer.from('hello').toString('base64') }; };
+      const F5 = 'f5'.repeat(32);
+      MSGS[bo.did] = [...MSGS[bo.did], { ...fm(15, 'in', F5, 'IMG_9.jpg', 2_000_000, 'direct'), text: 'file IMG_9.jpg (2000000 bytes), saved at content://media/external/downloads/9' }];
+      sandbox.seq += 1; await poll(); await poll();
+      ok(bt(F4, 'Save to Downloads') && !fb_(F4).textContent.includes('Saved on this machine') && fb_(F5)?.textContent.includes('In Downloads') && !bt(F5, 'Save to Downloads'),
+        `a file over the relay: Save to Downloads (no app-private path shown); one that landed in Downloads: "In Downloads" (${fb_(F4)?.textContent} | ${fb_(F5)?.textContent})`);
+      await bt(F4, 'Save to Downloads').click(); await settle(); await settle();
+      ok(sandbox.dataPath === '/api/files/data?n=14' && saved.length === 1 && saved[0][0] === 'notes.pdf' && saved[0][1] === 'hello' && said.includes('Saved in Downloads/notes.pdf'),
+        `Save to Downloads → GET /api/files/data?n=14, its bytes to sigeloLocal.saveFile, a line naming Downloads/notes.pdf (${sandbox.dataPath} ${JSON.stringify(saved)})`);
+      delete L0.saves; delete L0.saveFile;
+      sandbox.seq += 1; await poll(); await poll();
+      await bt(F4, 'Download')?.click(); await settle(); await settle();
+      ok(said.includes('Downloaded notes.pdf') && saved.length === 1, 'outside the Android app: Download, the bytes as a browser download');
+      // A phone controlling a computer's page: the file is the computer's (GET /api/files/data is never remote): no button.
+      const modeWas = L0.mode; L0.mode = () => ({ kind: 'remote' });
+      sandbox.seq += 1; await poll(); await poll();
+      ok(fb_(F4) && !bt(F4, 'Download') && !bt(F4, 'Save to Downloads'), `a remote profile: no Download / Save to Downloads (the route is never remote) (${fb_(F4)?.textContent})`);
+      L0.mode = modeWas; sandbox.seq += 1; await poll(); await poll();
     }
     // Drafts kept (0.1.17): the unsent text stays per chat across screens, on this device (localStorage, restarts too); sent, it goes.
     let box = aria('Message', 'TEXTAREA');
@@ -2099,55 +2214,72 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await A6.K.btn('Send 0.20 XMR').click(); await settle();
     ok(LK.unlocks.length === u0 + 2 && SENDS.length === 2 && SENDS[1].id === 'r200000000000', 'Send above the limit, the lock confirmed → sent');
 
-    // Settings → Notifications (sigeloLocal.stay and .push, the Android shell's for the phone; design/push.md): the wake mode, Stay
-    // connected by default with its help line; Off stops it; Stay connected again asks what is missing one at a time after one line
-    // why; a refusal leaves a row whose tap asks again. Push: no push app said with what to install; several picked from; the push
-    // app's answer and the relay's said; Off turns push off.
+    // Settings → Notifications (sigeloLocal.push and .stay, the Android shell's for the phone; design/push.md §6): the push mode, Built
+    // in by default with its help line and state; Off ends it; Built in again asks for notifications, then once for the battery
+    // exemption, each after one line why; a refusal leaves a row whose tap asks again. Push app: no push app said with what to
+    // install; several picked from; the push app's answer and the relay's said; Off turns push off.
     {
-      const ST = { st: { on: true, exempt: false, asked: false, notify: false, notifyAsked: false, notifyBlocked: false }, calls: [] };
+      const ST = { st: { on: false, exempt: false, asked: false, notify: false, notifyAsked: false, notifyBlocked: false }, calls: [] };
       const say = (k, v) => { ST.calls.push(`${k}:${v}`); return { ...ST.st }; };
-      const PS = { st: { on: false, state: 'off', reason: null, distributors: [], distributor: null, endpoint: null, p256dh: null, auth: null }, relay: null, calls: [], next: () => ({}), change: null };
+      const PS = { st: { mode: 'builtin', on: true, state: 'ok', reason: null, distributors: [], distributor: null, endpoint: 'https://push.sigelo.ai/upAbcdef012345?up=1', p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) },
+        relay: { state: 'registered', relay: 'relay.sigelo.ai' }, calls: [], next: () => ({}), change: null };
       const push = { get: async () => ({ ...PS.st, relay: PS.relay }), onChange: (fn) => { PS.change = fn; },
-        set: async (o) => { PS.calls.push(JSON.stringify(o)); PS.st = o.on === false ? { ...PS.st, on: false, state: 'off' } : { ...PS.st, on: true, ...PS.next(o) }; return { ...PS.st, relay: PS.relay }; } };
-      const S6 = mk({ stay: { get: async () => ({ ...ST.st }), set: async ({ on }) => { ST.st.on = on; return say('on', on); }, battery: async (y) => say('battery', y), notifications: async (y) => say('notifications', y) }, push });
-      await settle(); await S6.poll();
+        set: async (o) => { PS.calls.push(JSON.stringify(o)); PS.st = o.mode === 'off' ? { ...PS.st, mode: 'off', on: false, state: 'off' } : { ...PS.st, mode: o.mode ?? 'app', on: true, ...PS.next(o) }; return { ...PS.st, relay: PS.relay }; } };
+      const stay = { get: async () => ({ ...ST.st }), set: async ({ on }) => { ST.st.on = on; return say('on', on); },
+        battery: async (y) => { ST.st.asked = true; return say('battery', y); }, notifications: async (y) => { if (y && !ST.st.notifyBlocked) ST.st.notify = true; return say('notifications', y); } };
+      const S6 = mk({ stay, push });
+      await settle(); await S6.poll(); await settle(); await sleep(30);
+      // First run with Built in the mode: the battery exemption asked once, with its line why; "Not now" leaves the row only.
+      const firstRun = S6.K.sheet() && S6.K.sh1() === 'Let it run in the background?' && S6.K.has('Without this, Android may pause the connection to save battery.');
+      await S6.K.sheet().all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Not now').click(); await settle(); await sleep(30);
+      await S6.poll(); await settle(); await sleep(30); await S6.poll();
+      ok(firstRun && ST.calls.join() === 'battery:false' && ST.st.asked === true && !S6.K.sheet(), `first run, Built in: the battery exemption asked once with its line why; refused, not asked again at the next polls (${ST.calls})`);
+      ST.calls.length = 0;
       await S6.sb.ui.go('settings'); await settle(); await S6.poll();
       const notifyRow = () => S6.r.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Notifications'));
-      ok(notifyRow()?.textContent.includes('Stay connected') && !S6.K.aria('Stay connected', 'INPUT'), 'Settings: one row, Notifications, naming the wake mode (Stay connected); the switch is on its screen');
+      ok(notifyRow()?.textContent.includes('Built in') && !S6.K.aria('Built in', 'INPUT'), 'Settings: one row, Notifications, naming the push mode (Built in); the choice is on its screen');
       await notifyRow().click(); await settle(); await S6.poll();
       const r6 = (t) => S6.K.aria(t, 'INPUT');
       const pick = async (t) => { const x = r6(t); x.checked = true; fire(x, 'change'); await settle(); await sleep(30); await S6.poll(); };
-      ok(S6.K.h1() === 'Notifications' && r6('Stay connected')?.checked === true && r6('Push') && r6('Off') && S6.K.has('Keeps the connection open while the app is minimised, so messages arrive and calls can ring. Shows a small notification.')
-        && S6.K.has('Notifications are off') && S6.K.has('Battery saving may pause it') && ST.calls.length === 0 && PS.calls.length === 0,
-        'Notifications: three wake modes, Stay connected on by default with its help line; notifications off and battery saving each a row; nothing asked at the screen\'s start');
+      ok(S6.K.h1() === 'Notifications' && r6('Built in')?.checked === true && r6('Push app') && r6('Off') && !r6('Stay connected')
+        && S6.K.has('Wakes sigelo when a message waits, even after you swipe it away. Shows a small notification.') && S6.K.has('Ready: sigelo wakes when a message waits.') && S6.K.has('Relay: registered.')
+        && S6.K.has('Notifications are off') && S6.K.has('Battery saving may pause it') && !S6.K.has('push.sigelo.ai/up') && ST.calls.length === 0 && PS.calls.length === 0 && !S6.K.sheet(),
+        'Notifications: three choices, Built in (the default) checked with its help line, its state and the relay\'s; notifications off and battery saving each a row; the endpoint never shown; nothing asked at the screen\'s start');
       await pick('Off');
-      const offOk = ST.calls.join() === 'on:false' && !S6.K.sheet() && !S6.K.has('Battery saving may pause it') && r6('Off').checked === true;
-      const sw7 = r6('Stay connected');
-      sw7.checked = true; fire(sw7, 'change'); await settle();
+      const offOk = PS.calls.join() === '{"mode":"off"}' && !S6.K.sheet() && !S6.K.has('Battery saving may pause it') && r6('Off').checked === true;
+      PS.next = () => ({ state: 'registering' });
+      const b7 = r6('Built in');
+      b7.checked = true; fire(b7, 'change'); await settle();
       const first = S6.K.sheet() && S6.K.sh1() === 'Allow notifications?';
-      await S6.K.sheet().all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Allow').click(); await settle(); await sleep(30);
-      const second = S6.K.sheet() && S6.K.sh1() === 'Let it run in the background?' && S6.K.has('Without this, Android may pause the connection to save battery.');
-      await S6.K.sheet().all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Not now').click(); await settle(); await sleep(30); await S6.poll();
-      ok(offOk && first && second && ST.calls.join() === 'on:false,on:true,notifications:true,battery:false',
-        `Stay connected: Off → set({on:false}), its rows gone; Stay connected → notifications then the battery exemption, one at a time, each after its line why (${ST.calls})`);
-      ST.st.notifyBlocked = true; await S6.sb.ui.go('set-notify'); await settle(); await S6.poll();
+      await S6.K.sheet().all().find((e) => e.tagName === 'BUTTON' && e.textContent === 'Allow').click(); await settle(); await sleep(30); await S6.poll();
+      ok(offOk && first && !S6.K.sheet() && PS.calls.join() === '{"mode":"off"},{"mode":"builtin"}' && ST.calls.join() === 'notifications:true' && S6.K.has('Connecting…') && S6.K.has('Battery saving may pause it'),
+        `Built in: Off → set({mode:"off"}), its rows gone; Built in → set({mode:"builtin"}), then notifications after its line why; the battery exemption, asked at the first run, not again; "Connecting…" (${PS.calls} / ${ST.calls})`);
+      await pick('Off'); await pick('Built in');
+      ok(!S6.K.sheet() && ST.calls.join() === 'notifications:true', `the battery exemption asked once only: Built in again asks nothing (${ST.calls})`);
+      ST.st.notify = false; ST.st.notifyBlocked = true; await S6.sb.ui.go('set-notify'); await settle(); await S6.poll();
       const rowTap = S6.K.has('Tap, then switch on Notifications.'), n7 = ST.calls.length;
       await S6.r.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Notifications are off')).click(); await settle();
-      ok(rowTap && ST.calls.length === n7 + 1 && ST.calls.at(-1) === 'notifications:true', `a refusal never final: Android no longer asking, the row names what to switch on and its tap opens the system's page (${ST.calls.at(-1)})`);
+      const nTap = ST.calls.length === n7 + 1 && ST.calls.at(-1) === 'notifications:true';
+      await S6.r.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Battery saving may pause it')).click(); await settle();
+      ok(rowTap && nTap && ST.calls.at(-1) === 'battery:true', `a refusal never final: the row names what to switch on and its tap opens the system's page; the battery row's tap asks again (${ST.calls.slice(-2)})`);
+      PS.st = { ...PS.st, state: 'unavailable' }; PS.change(); await settle(); await sleep(30); await S6.poll();
+      ok(S6.K.has('Not connected now; it retries by itself.') && !S6.K.has('Relay: registered.'), 'Built in reconnecting: said, it retries by itself');
 
-      // Push, no push app installed: said, with what to install; Stay connected turned off for it.
-      ST.st.notify = true; ST.calls.length = 0;
+      // Push app, none installed: said, with what to install, Built in offered.
+      ST.st.notify = true; ST.st.notifyBlocked = false; ST.calls.length = 0;
+      await S6.sb.ui.go('set-notify'); await settle(); await S6.poll();
       PS.next = () => ({ state: 'none' });
-      await pick('Push');
-      ok(ST.calls.join() === 'on:false' && PS.calls.join() === '{"on":true}' && S6.K.has('No push app on this phone.') && S6.K.has('Install ntfy (F-Droid), and in its settings set the server to push.sigelo.ai, or your own. Or use Stay connected.') && !S6.K.sheet(),
-        `Push without a push app: Stay connected off, push on, "No push app on this phone." with what to install and Stay connected offered (${ST.calls} / ${PS.calls})`);
+      await pick('Push app');
+      ok(PS.calls.at(-1) === '{"mode":"app"}' && S6.K.has('No push app on this phone.') && S6.K.has('Install ntfy (F-Droid), and in its settings set the server to push.sigelo.ai, or your own. Or use Built in.') && !S6.K.sheet()
+        && !S6.K.has('Battery saving may pause it') && ST.calls.length === 0,
+        `Push app without a push app: set({mode:"app"}), "No push app on this phone." with what to install and Built in offered; no battery row (${PS.calls.at(-1)})`);
       // Two push apps: picked from; the push app's answer, then the relay's.
       PS.st.distributors = [{ id: 'io.heckel.ntfy', name: 'ntfy' }, { id: 'org.unifiedpush.distributor.nextpush', name: 'NextPush' }];
       PS.next = (o) => (o.distributor ? { state: 'registering', distributor: o.distributor } : { state: 'pick' });
-      await pick('Off'); await pick('Push');
+      await pick('Off'); await pick('Push app');
       const picking = S6.K.has('Pick the push app to use.') && r6('ntfy') && r6('NextPush');
       await pick('ntfy');
-      ok(picking && PS.calls.at(-1) === '{"on":true,"distributor":"io.heckel.ntfy"}' && S6.K.has('Waiting for ntfy…'), `several push apps: a choice; ntfy picked → set({on, distributor}), "Waiting for ntfy…" (${PS.calls.at(-1)})`);
+      ok(picking && PS.calls.at(-1) === '{"mode":"app","distributor":"io.heckel.ntfy"}' && S6.K.has('Waiting for ntfy…'), `several push apps: a choice; ntfy picked → set({mode:"app", distributor}), "Waiting for ntfy…" (${PS.calls.at(-1)})`);
       PS.st = { ...PS.st, state: 'ok', endpoint: 'https://push.sigelo.ai/upAbc?up=1', p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) };
       PS.relay = { state: 'registered', relay: 'relay.sigelo.ai' };
       PS.change(); await settle(); await sleep(30); await S6.poll();
@@ -2157,7 +2289,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       ok(ready && S6.K.has('Relay refused: endpoint: not a public address'), 'the push app\'s answer (onChange): "Ready: ntfy wakes sigelo…", "Relay: registered."; the endpoint never shown; a relay refusal said by its words');
       await pick('Off');
       await S6.sb.ui.go('settings'); await settle(); await S6.poll();
-      ok(PS.calls.at(-1) === '{"on":false}' && notifyRow()?.textContent.includes('Off'), `Off from Push: push turned off; Settings names the mode Off (${PS.calls.at(-1)})`);
+      ok(PS.calls.at(-1) === '{"mode":"off"}' && notifyRow()?.textContent.includes('Off'), `Off from Push app: push turned off; Settings names the mode Off (${PS.calls.at(-1)})`);
     }
 
     // A browser tab or the GTK app: no screen lock; the words password stands in where one is kept (the page locks itself).
@@ -2808,7 +2940,7 @@ try {
   const paired = await until(async () => (await call(A, 'GET', '/api/state')).body.groups.contacts.some((c) => c.did === CY.did));
   const cyRow = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did);
   ok(paired && cyRow.name === 'cy' && cyRow.words === node.contacts().contacts[0].fingerprint, `pair: the Node agent accepted the app's short code; both hold the same four words (${acc.status})`);
-  ok(Object.keys(cyRow).sort().join() === 'busy,can_call,can_call_set,current_did,did,kind,kind_set,last,last_seen,link,local,mine,name,name_from,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
+  ok(Object.keys(cyRow).sort().join() === 'busy,busy_n,can_call,can_call_set,current_did,did,host,kind,kind_set,last,last_seen,link,local,mine,name,name_from,not_collected,notify,online,online_since,ours,pair,picture,picture_local,presence,queued,re_pair,relay,seen_upto,status,tags,tier,unread,via,waiting,words,words_checked',
     `a contact in groups: UI-API.md's keys (${Object.keys(cyRow).sort()})`);
   ok(await until(async () => (await call(A, 'GET', '/api/state')).body.me.online), 'GET /api/state: online once paired, the session up (MQTT.js over WebSocket, proof of work in the worker)');
   ok((await call(A, 'GET', '/api/state')).body.pending.paired.some((x) => x.id === inv.body.id && x.paired === CY.did), 'GET /api/state: pending.paired names the invite that paired');
@@ -2885,6 +3017,26 @@ try {
     `busy marks: the agent's busy(true) → the page's contact busy, no message, no unread (${b1.status})`);
   await node.busy('ada', false);
   ok(await until(async () => (await cyAt())?.busy === false), 'busy marks: busy(false) → off');
+  // The count (2026-11-25): n agents running → busy_n; an earlier agent's mark (no n) is 1; off → 0.
+  await node.busy('ada', true, { n: 3 });
+  ok(await until(async () => (await cyAt())?.busy_n === 3) && await nIn() === m0, 'busy marks: busy(true, n 3) → the contact\'s busy_n 3, no message');
+  await node.busy('ada', false);
+  ok(await until(async () => (await cyAt())?.busy === false) && (await cyAt()).busy_n === 0, 'busy marks: off → busy_n 0');
+  // Agent settings (2026-11-25): the page's receipts said host: true; the agent's sigelo-host-caps/0 is kept as the contact's
+  // host, never a message; POST /api/host/set sends sigelo-host-set/0 with one of its choices, marked next.
+  const CAPS = { fields: [{ key: 'model', value: '', options: [{ value: '', label: 'Default' }, { value: 'small', label: 'Small' }] }, { key: 'effort', value: '', options: [], off: 'This model has no effort levels' },
+    { key: 'futureKnob', value: 'x', options: [] }] };
+  ok(node.contacts().contacts.find((c) => c.name === 'ada')?.host_peer === true, 'agent settings: the page\'s receipts say it takes them (the agent\'s host_peer)');
+  await node.send('ada', CAPS, { label: 'sigelo-host-caps/0' });
+  ok(await until(async () => (await cyAt())?.host?.fields?.length === 2) && await nIn() === m0 && (await cyAt()).host.fields.map((f) => f.key).join() === 'model,effort' && (await cyAt()).host.fields[1].off === 'This model has no effort levels',
+    `agent settings: kept as the contact's host (a key not known here dropped), no message (${JSON.stringify((await cyAt())?.host)})`);
+  const hs1 = await call(A, 'POST', '/api/host/set', { contact: CY.did, key: 'model', value: 'small' });
+  const hsBad = await call(A, 'POST', '/api/host/set', { contact: CY.did, key: 'model', value: 'huge' }), hsOff = await call(A, 'POST', '/api/host/set', { contact: CY.did, key: 'effort', value: '' });
+  const setGot = [];
+  await until(async () => { setGot.push(...(await node.inbox({ wait: 0.5 })).messages.filter((m) => m.label === 'sigelo-host-set/0')); return setGot.length > 0; });
+  ok(hs1.status === 200 && hs1.body.host.fields[0].next === 'small' && setGot.length === 1 && JSON.stringify(setGot[0].content) === '{"key":"model","value":"small"}' && await nIn() === m0,
+    `agent settings: POST /api/host/set → sigelo-host-set/0 {key, value} to the agent, marked next, no message (${JSON.stringify([hs1.body, setGot.map((m) => m.content)])})`);
+  ok(hsBad.status === 400 && hsBad.body.error.check === 'body' && hsOff.status === 409 && hsOff.body.error.check === 'host_off', 'agent settings: a value not offered → 400 body; a field it cannot set → 409 host_off');
   ok((await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === CY.did).unread === 0, 'read once shown: unread 0');
   // Read marks (0.1.19, carrier.mjs read): the agent's reader took the page's message, so its carrier sends the mark by
   // code, once; the page shows ✓✓ on it.
@@ -3199,6 +3351,20 @@ try {
         await call(P, 'POST', '/api/transfers/accept', { id: t3.id });
         ok(await until(async () => (await msgsOf(P)).some((m) => m.dir === 'in' && m.file?.sha256 === t3.sha256 && m.file.via === 'relay'), 60000), 'phone: the file came over the relay lane, its bubble says via relay');
         ok(await until(async () => { const r = (await call(P, 'GET', '/api/transfers')).body.in.find((x) => x.id === t3.id); return r?.state === 'done' && r.path_used === 'relay'; }), 'phone: its transfer record done by the file (via relay), not left active');
+        // Save to Downloads (2026-11-25): the file over the relay sits in the app's storage; its bytes by the chat message or the
+        // transfer, for the page to hand to the shell; one in Downloads already, a message not a received file, refused.
+        const fmsg = (await msgsOf(P)).find((m) => m.dir === 'in' && m.file?.sha256 === t3.sha256);
+        const [byN, byId, inDl, notFile, bad] = [await call(P, 'GET', `/api/files/data?n=${fmsg.n}`), await call(P, 'GET', `/api/files/data?id=${t3.id}`), await call(P, 'GET', `/api/files/data?id=${'cd'.repeat(16)}`),
+          await call(P, 'GET', `/api/files/data?n=${mine.n}`), await call(P, 'GET', '/api/files/data')];
+        ok(byN.status === 200 && byN.body.name === 'notes.pdf' && Buffer.from(byN.body.data, 'base64').toString() === 'a short note' && byId.status === 200 && byId.body.data === byN.body.data
+          && inDl.status === 409 && inDl.body.error.check === 'in_downloads' && notFile.status === 404 && bad.status === 400,
+          `phone: GET /api/files/data by message or transfer → the bytes; in Downloads already 409; my own file 404; neither 400 (${[byN, byId, inDl, notFile, bad].map((x) => x.status)})`);
+        // Several files picked at once (2026-11-25): POST /api/transfers/pick {multiple} → {docs}, each then its own send.
+        const nextWas = fb.next; fb.nextMany = [['one.txt', new Uint8Array(3)], ['two.txt', new Uint8Array(4)]];
+        const pm = await call(P, 'POST', '/api/transfers/pick', { multiple: true }); fb.nextMany = null; fb.next = null;
+        const pc = await call(P, 'POST', '/api/transfers/pick', { multiple: true }); fb.next = nextWas;
+        ok(pm.status === 200 && pm.body.docs?.map((d) => d.name).join() === 'one.txt,two.txt' && fb.pickAsked?.multiple === true && pc.body.cancelled === true,
+          `phone: pick {multiple: true} → {docs} in the order chosen; none chosen → cancelled (${JSON.stringify(pm.body).slice(0, 160)})`);
         // A restart: the sender's bubble and the lane come back; a tap opens the file picked.
         await P.router.stop(); await P.platform.flush();
         P2 = await webApp(ELI, P.idb, 'phone', fb);

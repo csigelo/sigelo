@@ -121,10 +121,11 @@ import javax.net.ssl.SSLSocketFactory;
  *          notifyBlocked}; on kept for the phone (default true), the foreground service follows; battery and notifications
  *          ask the system at each tap while Android still shows its prompt, then open the app's page in its settings. Its event, no id: {ev:"nudge"} (its alarm, the end of Doze): the page's carrier
  *          reconnects when down.
- *   push          UnifiedPush (UnifiedPush.java, design/push.md §1 B): {on?, distributor?} → {on, state (off | none | pick |
- *          registering | ok | failed | unregistered | unavailable), reason, distributors: [{id, name}], distributor, endpoint,
- *          p256dh, auth}; anything else refused "push". Its events, no id: {ev:"push", …the same} when the distributor answers,
- *          {ev:"wake"} at a push wake: the page's carrier logs in at once (carrier.wake({now: true})).
+ *   push          Push (UnifiedPush.java; design/push.md §1 B, §6): {mode?: builtin | app | off, distributor?} → {mode, on,
+ *          state (off | none | pick | registering | ok | failed | unregistered | unavailable), reason, distributors: [{id,
+ *          name}], distributor, endpoint, p256dh, auth}; builtin is PushClient's stream to push.sigelo.ai, app the user's
+ *          push app; anything else refused "push". Its events, no id: {ev:"push", …the same} when the push app or PushClient
+ *          says something new, {ev:"wake"} at a push wake: the page's carrier logs in at once (carrier.wake({now: true})).
  *   big-keep, big-url, mic, app-settings   voice messages (BigFiles): a recording kept as a file to send, a landed one
  *          to play, RECORD_AUDIO asked at the first (refused mic_permission, remembered), the app's settings page.
  *   call, call-speaker, call-ring   a voice call's audio (CallService: the foreground service of type microphone and its
@@ -834,7 +835,7 @@ public final class SigeloBridge {
         }
     }
 
-    /** The distributor's answer (UnifiedPush, main thread): {ev:"push", …the state} to the page. */
+    /** The push app's answer or PushClient's new state (UnifiedPush.tell, main thread): {ev:"push", …the state} to the page. */
     void pushChanged(JSONObject state) throws JSONException {
         if (port != null) post(port, state.put("ev", "push"));
     }

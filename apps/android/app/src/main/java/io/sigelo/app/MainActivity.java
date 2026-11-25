@@ -77,7 +77,8 @@ import java.util.regex.Pattern;
  *
  * Stay connected (StayConnected, SigeloBridge "stay"): with the switch on, the foreground service is started as the
  * app leaves the screen (onPause, still in front: allowed) and keeps this process, this WebView and its relay
- * connection alive; Back on the first screen then moves the task back instead of finishing it.
+ * connection alive; Back on the first screen then moves the task back instead of finishing it. Built in push
+ * (PushClient, started at each start by UnifiedPush.refresh) keeps the process the same way, and Back does the same.
  */
 public final class MainActivity extends Activity {
     static final String HOST = "appassets.androidplatform.net";
@@ -148,7 +149,7 @@ public final class MainActivity extends Activity {
         web.setWebViewClient(new Client());
         web.setWebChromeClient(new Chrome());
         web.loadUrl(START);
-        // Push on: registered with the distributor again at each start (UnifiedPush; a lost registration comes back).
+        // Push: Built in's service started (PushClient), or the push app registered with again (a lost registration comes back).
         UnifiedPush.refresh(this);
         // Started by a tap on one of our notifications (not a restart that brings back the same intent).
         if (saved == null) opened(getIntent());
@@ -196,8 +197,8 @@ public final class MainActivity extends Activity {
             web.goBack();
             return;
         }
-        // Stay connected: the page (and its connection) kept, the app only minimised.
-        if (StayConnected.on(this)) moveTaskToBack(true);
+        // Stay connected or Built in push: the page (and its connection) kept, the app only minimised.
+        if (StayConnected.on(this) || UnifiedPush.BUILTIN.equals(UnifiedPush.mode(this))) moveTaskToBack(true);
         else super.onBackPressed();
     }
 

@@ -39,8 +39,9 @@
 //                                            each contact with its four words (fingerprint),
 //                                            pair id, chain, ours (an operator attestation of mine marks it), tier, seen_upto
 //                                            (their newest seen receipt: my messages sealed at or before it were shown; null: none) and
-//                                            seen_peer (a receipt came: they read receipts), busy (their busy mark is on) and
-//                                            busy_peer (they take busy marks), tier
+//                                            seen_peer (a receipt came: they read receipts), busy (their busy mark is on), busy_n
+//                                            (agents running by it, 0 when off), busy_peer (they take busy marks), host_peer (they
+//                                            take a hosted agent's settings), tier
 //                                            (store.mjs: own, friend, quiet) and tier_by, prekeys: its
 //                                            bundle is here (false: messages wait for it), waiting: why they wait, or null;
 //                                            failed: pairing_failed events (code_expired: an answer that outlived its code) until inbox
@@ -77,7 +78,7 @@
 //                                            contact's link record (store.mjs setLink)
 //   await c.seen(to, upto)                 a seen receipt (SEEN_LABEL, the header's "Seen receipts") to contact to: every message of
 //                                            theirs sealed at or before upto (their iat, unix seconds; 0: none yet) was shown → as send
-//   await c.busy(to, on, { local })        a busy mark (BUSY_LABEL, the header's "Busy marks") to contact to: on (a turn runs)
+//   await c.busy(to, on, { local, n })     a busy mark (BUSY_LABEL, the header's "Busy marks") to contact to: on (a turn runs)
 //                                            or off → as send, or { status: 'skipped' } for a contact that never said it takes them
 //   await c.read(items, { local })         read marks: a seen receipt to each sender of these inbox items, once per message
 //                                            (own contacts always, others as the app does) → [{ to, upto, status | error }]
@@ -252,9 +253,11 @@
 //     known to read them, further ones only once one came back). A contact on an earlier version takes
 //     the first as a message with that label, and never sends one: its messages stay at one tick.
 //     Once paired, each side also sends one {seen: 0, name}: its display name (the "Names" below).
-//     Every receipt (the name's too) carries busy: true: this side takes busy marks (below).
+//     Every receipt (the name's too) carries busy: true: this side takes busy marks (below), and host: true: it takes a
+//     hosted agent's settings (sigelo-host-caps/0, apps/contact/page.mjs "Agent settings"); kept as host_peer (contacts()).
 //   - Busy marks (label BUSY_LABEL, inside the envelope; 2026-11-19): {busy: true|false}, a hosted agent's "I am
-//     working on it" (sigelo-agent-host.ts): on at a turn's start and every 20 s while it runs, off before its reply.
+//     working on it" (sigelo-agent-host.ts): on at a turn's start and every 20 s while it runs, off before its reply;
+//     n (optional, an integer 2..99): that many agents run (the session and its subagents), kept as busy_n (absent: 1).
 //     Taken here, never an inbox message, never logged, never an event `message`: the contact's busy_until (now +
 //     BUSY_TTL_S, 0 for off; any message or file of theirs ends it too), contacts() busy, an event `busy`. Sent
 //     only through busy() (BUSY_SEND), with expires now + BUSY_TTL_S (a stale one goes unsent), and only to a
@@ -1315,7 +1318,7 @@ export class Carrier {
     let n = null;
     try { n = theirName(this.#selfName()); } catch {}
     if (n === null) return;
-    this.#entry(st, did).outbox.push({ id: randomId(), label: SEEN_LABEL, content: { seen: 0, name: n, busy: true } });
+    this.#entry(st, did).outbox.push({ id: randomId(), label: SEEN_LABEL, content: { seen: 0, name: n, busy: true, host: true } });
   }
 
   #note(st, now, ev) {
@@ -1597,6 +1600,7 @@ export class Carrier {
       const n = r.body.content?.seen, nm = theirName(r.body.content?.name);
       // busy: true: they take busy marks (the header's "Busy marks").
       if (r.body.content?.busy === true) this.#entry(st, c.did).busy_peer = true;
+      if (r.body.content?.host === true) this.#entry(st, c.did).host_peer = true;
       if (nm !== null) {
         const all = store.load().s.contacts, rec = all[c.did];
         if (rec && (rec.name_from === 'auto' || rec.name_from === 'them') && rec.name !== nm) {
@@ -1616,9 +1620,10 @@ export class Carrier {
       }
     } else if (r.body.label === BUSY_LABEL) {
       // A busy mark (the header's): good for BUSY_TTL_S, never an inbox message nor logged.
-      const e = this.#entry(st, c.did), on = r.body.content?.busy === true;
+      const e = this.#entry(st, c.did), on = r.body.content?.busy === true, n = r.body.content?.n;
       e.busy_until = on ? now + BUSY_TTL_S : 0;
-      events.push({ type: 'busy', from: c.did, name: c.name, on });
+      e.busy_n = on && Number.isSafeInteger(n) && n > 1 ? Math.min(n, 99) : 1;
+      events.push({ type: 'busy', from: c.did, name: c.name, on, n: e.busy_n });
     } else if (r.body.label === DEVICE_LABEL) {
       // A device message (device.mjs): kept for the `device` verbs, never for inbox() nor onEvent's readers.
       const l = (st.devices ??= []);
@@ -3454,7 +3459,7 @@ export class Carrier {
             // Presence (the header's): what this contact sees of mine, and theirs as read now (null: not known).
             presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null,
             seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true,
-            busy: (e?.busy_until ?? 0) > now, busy_peer: e?.busy_peer === true, via: c.via ?? null, name_from: c.name_from ?? null };
+            busy: (e?.busy_until ?? 0) > now, busy_n: (e?.busy_until ?? 0) > now ? (e?.busy_n ?? 1) : 0, busy_peer: e?.busy_peer === true, host_peer: e?.host_peer === true, via: c.via ?? null, name_from: c.name_from ?? null };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay,
           ...(typeof p.short === 'string' && { short: p.short, short_exp: p.short_exp }), ...(p.renew && { renew: p.renew }) })),
@@ -3487,15 +3492,15 @@ export class Carrier {
   // A seen receipt (the header's "Seen receipts"): every message of to's sealed at or before upto was shown.
   async seen(to, upto, { local = false } = {}) {
     if (!Number.isSafeInteger(upto) || upto < 0) fail('body', 'upto: unix seconds, 0 for none yet');
-    return this.send(to, { seen: upto, busy: true }, { label: SEEN_LABEL, local, internal: SEEN_SEND });
+    return this.send(to, { seen: upto, busy: true, host: true }, { label: SEEN_LABEL, local, internal: SEEN_SEND });
   }
 
   // A busy mark (the header's "Busy marks"): on, a turn runs for to; off, it ended. Only to a contact that
-  // said it takes them (busy_peer), else { status: 'skipped' }; unsent past BUSY_TTL_S.
-  async busy(to, on, { local = false } = {}) {
+  // said it takes them (busy_peer), else { status: 'skipped' }; unsent past BUSY_TTL_S. n: agents running (sent when > 1).
+  async busy(to, on, { local = false, n = 1 } = {}) {
     const peer = this.#read(({ store, st }) => st.peers[this.#resolve(store, to).did]?.busy_peer === true);
     if (!peer) return { status: 'skipped', to, detail: 'this contact never said it takes busy marks' };
-    return this.send(to, { busy: on === true }, { label: BUSY_LABEL, local, internal: BUSY_SEND, expires: this.clock() + BUSY_TTL_S });
+    return this.send(to, { busy: on === true, ...(on === true && Number.isSafeInteger(n) && n > 1 && { n: Math.min(n, 99) }) }, { label: BUSY_LABEL, local, internal: BUSY_SEND, expires: this.clock() + BUSY_TTL_S });
   }
 
   // Read marks (the header's "Seen receipts", 0.1.19): an agent's reader took these items (inbox, the MCP, a hook,

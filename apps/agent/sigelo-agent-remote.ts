@@ -92,6 +92,7 @@ export async function remoteCall(scope: Scope, msg: { method: string; path: stri
   // A call holds the microphone of the device whose page took it: a human there, never a control.
   if (url.pathname === '/api/calls' || url.pathname.startsWith('/api/calls/')) return [403, { error: { check: 'remote', message: 'calls are never remote: a call is taken on the device that rings' } }];
   if (url.pathname === '/api/transfers/send') return [403, { error: { check: 'remote', message: 'sending a file of the computer by its path is never remote: a human at the computer picks it' } }];
+  if (url.pathname === '/api/files/data') return [403, { error: { check: 'remote', message: 'the files received on the computer are never read remotely: save them there' } }];
   if (!SCOPES[scope].has(`${msg.method} ${url.pathname}`)) {
     return routes[`${msg.method} ${url.pathname}`] ? [403, { error: { check: 'scope', message: `${msg.method} ${url.pathname} is outside this control's scope (${scope})` } }]
       : [404, { error: { check: 'route', message: `no ${msg.method} ${url.pathname}` } }];

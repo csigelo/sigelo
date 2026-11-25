@@ -10,7 +10,7 @@ The page of `sigelo-agent ui` comes in three forms:
 
 ## Self-contained or remote
 
-**This phone.** The phone holds an identity, SAFE (an own agent, DEVICES.md) or FULL (you,
+**This phone.** It holds an identity, SAFE (an own agent, DEVICES.md) or FULL (you,
 standby), and talks to the relay itself: the GTK app through `sigelo-agent ui --app`, the Android
 app with its own carrier, the file sealed under a keystore key.
 
@@ -24,7 +24,7 @@ the computer pushes its state.
 
 Devices are never remote. `ui --revoke-control <name>` ends a control.
 
-**Closed app:** Settings → Notifications: Stay connected, Push or Off.
+**Closed app:** Settings → Notifications: Built in, Push app or Off.
 
 ## Install
 

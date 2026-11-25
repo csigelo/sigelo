@@ -69,11 +69,11 @@ interface Car {
   contacts(): { contacts: WatchContact[] };
   send(to: string, content: string | Record<string, unknown>, o?: { label?: string }): Promise<{ status: string; detail?: string }>;
   read(items: unknown[], o?: { local?: boolean }): Promise<{ to: string; error?: string }[]>;
-  busy(to: string, on: boolean, o?: { local?: boolean }): Promise<{ status: string }>;
+  busy(to: string, on: boolean, o?: { local?: boolean; n?: number }): Promise<{ status: string }>;
   takeCalls(): { from: string; name: string; content: unknown }[];
 }
 /** A contact as the carrier lists it (the fields a host reads). */
-export interface WatchContact { name: string; did: string; current_did?: string; chain: string[]; revoked?: boolean; tier?: string; presence?: string }
+export interface WatchContact { name: string; did: string; current_did?: string; chain: string[]; revoked?: boolean; tier?: string; presence?: string; host_peer?: boolean }
 /** An own message offered to a router (sigelo-agent-host.ts): its id, sender, sender's name, text or file. */
 export type Routed = Item & { id: string; sender: string };
 export interface WatchOptions {
@@ -100,8 +100,8 @@ export interface Watch {
   contacts(): WatchContact[]; send(to: string, text: string | Record<string, unknown>, label?: string): Promise<{ status: string; detail?: string }>;
   /** Read marks on the watcher's session (carrier.mjs read): the senders of these items get a seen receipt, once per message. */
   read(items: unknown[]): Promise<void>;
-  /** A busy mark on the watcher's session (carrier.mjs busy): skipped for a contact that never said it reads them. */
-  busy(to: string, on: boolean): Promise<{ status: string }>;
+  /** A busy mark on the watcher's session (carrier.mjs busy; n: agents running): skipped for a contact that never said it reads them. */
+  busy(to: string, on: boolean, n?: number): Promise<{ status: string }>;
 }
 
 // The same stored message: by its id; an item kept by an earlier version has none, and its sender,
@@ -369,7 +369,7 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
       contacts: () => carrier.contacts().contacts,
       send: (to, text, label = '') => carrier.send(to, text, { label }),
       read: mark,
-      busy: (to, on) => carrier.busy(to, on),
+      busy: (to, on, n) => carrier.busy(to, on, { n }),
       idle: async () => { await new Promise((r) => setTimeout(r, NOTICE_MS + 50)); await queue; },
       async close() {
         if (closed) return;

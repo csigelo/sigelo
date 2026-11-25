@@ -72,8 +72,13 @@ import org.json.JSONObject;
  * notification "sigelo · New activity", no name, no count; a tap opens the app, which connects and fetches. Anything
  * else: acknowledged and dropped.
  *
- * SharedPreferences "sigelo" (one setting for the phone, not per profile): push_on, push_dist, push_token,
- * push_endpoint, push_state, push_reason, push_pub (base64url), push_keys (sealed).
+ * The push mode (design/push.md §6), one for the phone: "builtin" (the default: PushClient holds the stream to
+ * push.sigelo.ai itself, no second app), "app" (this connector, the user's push app) or "off". The keys are the same for
+ * both; Built in's endpoint is Ntfy.endpoint(its topic), given only once its stream has opened (push_ready).
+ *
+ * SharedPreferences "sigelo" (one setting for the phone, not per profile): push_mode, push_dist, push_token,
+ * push_endpoint, push_state, push_reason, push_pub (base64url), push_keys (sealed); PushClient's push_topic, push_since,
+ * push_ready. push_on (before 2026-11-25) is read once, by mode().
  */
 public final class UnifiedPush extends BroadcastReceiver {
     static final String DIST = "org.unifiedpush.android.distributor.", CONN = "org.unifiedpush.android.connector.";
@@ -83,15 +88,30 @@ public final class UnifiedPush extends BroadcastReceiver {
     static final String ON = "push_on", DISTRIBUTOR = "push_dist", TOKEN = "push_token", ENDPOINT = "push_endpoint", STATE = "push_state",
             REASON = "push_reason", PUB = "push_pub", KEYS = "push_keys";
     private static final String KEYSTORE = "AndroidKeyStore", ALIAS = "sigelo-push", WAKE_TAG = "wake";
+    static final String MODE = "push_mode", BUILTIN = "builtin", APP = "app", OFF = "off";
     private static final int ENDPOINT_MAX = 1024, REASON_MAX = 200;
 
     private static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences("sigelo", Context.MODE_PRIVATE);
     }
 
-    /** Push switched on (wake mode Push). */
+    /**
+     * The push mode. Unset (an install, or an app from before 2026-11-25): Push app where push was on; else Built in, unless
+     * Stay connected was switched off (Off then); Stay connected is no longer a mode (Built in keeps the process as it did),
+     * so its switch is turned off here once.
+     */
+    static String mode(Context c) {
+        SharedPreferences p = prefs(c);
+        String m = p.getString(MODE, null);
+        if (BUILTIN.equals(m) || APP.equals(m) || OFF.equals(m)) return m;
+        m = p.getBoolean(ON, false) ? APP : p.getBoolean(StayConnected.ON, true) ? BUILTIN : OFF;
+        p.edit().putString(MODE, m).remove(ON).putBoolean(StayConnected.ON, false).commit();
+        return m;
+    }
+
+    /** Push on (Built in or Push app). */
     static boolean on(Context c) {
-        return prefs(c).getBoolean(ON, false);
+        return !OFF.equals(mode(c));
     }
 
     /** The distributors installed: package names (not this app). */
@@ -183,14 +203,15 @@ public final class UnifiedPush extends BroadcastReceiver {
 
     // ---------------------------------------------------------------- the page's op
 
-    /** The state the page reads: {on, state, reason, distributors: [{id, name}], distributor, endpoint, p256dh, auth}. */
+    /** The state the page reads: {mode, on, state, reason, distributors: [{id, name}], distributor, endpoint, p256dh, auth}. */
     static JSONObject state(Context c) throws JSONException {
         SharedPreferences p = prefs(c);
         JSONArray ds = new JSONArray();
         for (String d : distributors(c)) ds.put(new JSONObject().put("id", d).put("name", label(c, d)));
-        String endpoint = p.getString(ENDPOINT, null), dist = p.getString(DISTRIBUTOR, null);
+        String mode = mode(c), dist = p.getString(DISTRIBUTOR, null), topic = p.getString(PushClient.TOPIC, null);
+        String endpoint = !BUILTIN.equals(mode) ? p.getString(ENDPOINT, null) : p.getBoolean(PushClient.READY, false) && Ntfy.topic(topic) ? Ntfy.endpoint(topic) : null;
         Object[] k = endpoint == null ? null : keys(c);
-        JSONObject o = new JSONObject().put("on", on(c)).put("state", p.getString(STATE, "off")).put("distributors", ds)
+        JSONObject o = new JSONObject().put("mode", mode).put("on", !OFF.equals(mode)).put("state", p.getString(STATE, "off")).put("distributors", ds)
                 .put("distributor", dist == null ? JSONObject.NULL : dist).put("reason", p.getString(REASON, null) == null ? JSONObject.NULL : p.getString(REASON, null));
         if (endpoint != null && k != null) o.put("endpoint", endpoint).put("p256dh", p.getString(PUB, "")).put("auth", b64((byte[]) k[1]));
         else o.put("endpoint", JSONObject.NULL).put("p256dh", JSONObject.NULL).put("auth", JSONObject.NULL);
@@ -198,25 +219,63 @@ public final class UnifiedPush extends BroadcastReceiver {
     }
 
     /**
-     * SigeloBridge "push" (main thread): {on?: boolean, distributor?: string} → state(). on true registers with the
-     * distributor asked for (it must be installed: else refused "push"), else the one kept, else the only one installed;
-     * several and none picked: state "pick"; none installed: state "none". on false unregisters (the keys go too).
-     * Neither: the state only.
+     * SigeloBridge "push" (main thread): {mode?: "builtin" | "app" | "off", distributor?: string} → state(). builtin: the
+     * push app (if one was used) told to forget us, PushClient started (state registering until its stream opens, then ok;
+     * unavailable while it reconnects). app: PushClient stopped and its topic forgotten, then registered with the distributor
+     * asked for (it must be installed: else refused "push"), else the one kept, else the only one installed; several and
+     * none picked: state "pick"; none installed: state "none". A distributor alone means app. off: both ended, the keys
+     * erased. Neither: the state only.
      */
     static JSONObject op(Context c, JSONObject m) throws SigeloBridge.Refused, JSONException {
-        if (m.has("on") && !(m.opt("on") instanceof Boolean)) throw new SigeloBridge.Refused("push", "on: true or false");
+        Object mo = m.opt("mode");
+        if (m.has("mode") && !(BUILTIN.equals(mo) || APP.equals(mo) || OFF.equals(mo))) throw new SigeloBridge.Refused("push", "mode: builtin, app or off");
         if (m.has("distributor") && !(m.opt("distributor") instanceof String)) throw new SigeloBridge.Refused("push", "distributor: a package name");
-        if (!m.has("on")) return state(c);
-        SharedPreferences p = prefs(c);
-        if (!m.getBoolean("on")) {
+        if (m.has("distributor") && m.has("mode") && !APP.equals(mo)) throw new SigeloBridge.Refused("push", "distributor: with mode app only");
+        if (!m.has("mode") && !m.has("distributor")) return state(c);
+        String want = m.has("mode") ? (String) mo : APP;
+        if (OFF.equals(want)) {
             off(c);
             return state(c);
+        }
+        if (BUILTIN.equals(want)) {
+            builtin(c);
+            return state(c);
+        }
+        return app(c, m);
+    }
+
+    /** Built in: the push app forgotten, the keys made if none, PushClient started. */
+    private static void builtin(Context c) {
+        SharedPreferences p = prefs(c);
+        boolean was = BUILTIN.equals(mode(c));
+        if (!was) unregisterAt(c);
+        p.edit().putString(MODE, BUILTIN).remove(DISTRIBUTOR).apply();
+        try {
+            if (keys(c) == null) makeKeys(c);
+        } catch (GeneralSecurityException | IOException e) {
+            p.edit().putString(STATE, "failed").putString(REASON, "the push keys could not be made").apply();
+            return;
+        }
+        PushClient.topic(c);
+        String st = p.getString(STATE, null);
+        boolean kept = was && ("ok".equals(st) || "unavailable".equals(st) || "registering".equals(st));   // PushClient's, as it last said
+        if (!kept) p.edit().putString(STATE, p.getBoolean(PushClient.READY, false) ? "unavailable" : "registering").remove(REASON).apply();
+        PushClient.start(c);
+    }
+
+    /** Push app: Built in ended (its topic forgotten), then the distributor as before. */
+    private static JSONObject app(Context c, JSONObject m) throws SigeloBridge.Refused, JSONException {
+        SharedPreferences p = prefs(c);
+        if (BUILTIN.equals(mode(c))) {
+            p.edit().putString(MODE, APP).remove(STATE).commit();   // first: PushClient's thread writes nothing once the mode moved
+            PushClient.stop(c);
+            PushClient.forget(c);
         }
         List<String> ds = distributors(c);
         String want = m.has("distributor") ? m.getString("distributor") : p.getString(DISTRIBUTOR, null);
         if (m.has("distributor") && !ds.contains(want)) throw new SigeloBridge.Refused("push", "no such distributor installed: " + want);
         if (want == null || !ds.contains(want)) want = ds.size() == 1 ? ds.get(0) : null;
-        p.edit().putBoolean(ON, true).apply();
+        p.edit().putString(MODE, APP).apply();
         if (want == null) {
             p.edit().putString(STATE, ds.isEmpty() ? "none" : "pick").remove(REASON).apply();
             return state(c);
@@ -251,10 +310,13 @@ public final class UnifiedPush extends BroadcastReceiver {
         p.edit().remove(TOKEN).remove(ENDPOINT).apply();
     }
 
-    /** Push off: unregistered, the keys erased (a new registration makes new ones). */
+    /** Push off: Built in stopped and its topic forgotten, the push app told to forget us, the keys erased (a new registration makes new ones). */
     static void off(Context c) {
+        prefs(c).edit().putString(MODE, OFF).commit();   // first: PushClient's thread writes nothing once the mode moved
+        PushClient.stop(c);
+        PushClient.forget(c);
         unregisterAt(c);
-        prefs(c).edit().putBoolean(ON, false).putString(STATE, "off").remove(REASON).remove(KEYS).remove(PUB).remove(DISTRIBUTOR).apply();
+        prefs(c).edit().putString(MODE, OFF).putString(STATE, "off").remove(REASON).remove(KEYS).remove(PUB).remove(DISTRIBUTOR).apply();
         try {
             KeyStore ks = KeyStore.getInstance(KEYSTORE);
             ks.load(null);
@@ -264,12 +326,21 @@ public final class UnifiedPush extends BroadcastReceiver {
         }
     }
 
-    /** The app starts with push on: registered again (a distributor may have lost us; NEW_ENDPOINT comes back the same or new). */
+    /**
+     * The app starts: Built in, PushClient started (allowed: the app is in front; the keys and topic made at the first
+     * start, so Built in works from the first run); Push app, registered again (a distributor may have lost us;
+     * NEW_ENDPOINT comes back the same or new).
+     */
     static void refresh(Context c) {
         SharedPreferences p = prefs(c);
+        String mode = mode(c);
+        if (BUILTIN.equals(mode)) {
+            builtin(c);
+            return;
+        }
         String dist = p.getString(DISTRIBUTOR, null);
-        if (on(c) && dist != null && distributors(c).contains(dist)) register(c, dist);
-        else if (on(c) && dist != null) p.edit().putString(STATE, "unregistered").putString(REASON, "the push app was removed").remove(TOKEN).remove(ENDPOINT).apply();
+        if (APP.equals(mode) && dist != null && distributors(c).contains(dist)) register(c, dist);
+        else if (APP.equals(mode) && dist != null) p.edit().putString(STATE, "unregistered").putString(REASON, "the push app was removed").remove(TOKEN).remove(ENDPOINT).apply();
     }
 
     // ---------------------------------------------------------------- from the distributor
@@ -308,10 +379,7 @@ public final class UnifiedPush extends BroadcastReceiver {
             case MESSAGE: {
                 String id = i.getStringExtra("id"), dist = p.getString(DISTRIBUTOR, null);
                 if (id != null && dist != null) c.sendBroadcast(new Intent(ACK).setPackage(dist).putExtra("token", token).putExtra("id", id));
-                byte[] body = i.getByteArrayExtra("bytesMessage");
-                Object[] k = keys(c);
-                byte[] pub = unb64(p.getString(PUB, null));
-                if (body != null && k != null && pub != null && WebPush.isWake(body, (ECPrivateKey) k[0], pub, (byte[]) k[1])) wake(c);
+                if (APP.equals(mode(c)) && isWake(c, i.getByteArrayExtra("bytesMessage"))) wake(c);
                 break;
             }
             default:
@@ -319,8 +387,8 @@ public final class UnifiedPush extends BroadcastReceiver {
         }
     }
 
-    /** The page told the new state ({ev:"push", …state()}), when it is open. */
-    private static void tell(Context c) {
+    /** The page told the new state ({ev:"push", …state()}), when it is open. Main thread. */
+    static void tell(Context c) {
         SigeloBridge b = StayConnected.page;
         if (b == null) return;
         try {
@@ -330,11 +398,21 @@ public final class UnifiedPush extends BroadcastReceiver {
         }
     }
 
-    /** A wake: the page alive → the service for the wake window and {ev:"wake"}; else the one notification. */
+    /** body opens to WebPush.WAKE under our keys (a distributor's MESSAGE, or PushClient's message). */
+    static boolean isWake(Context c, byte[] body) {
+        Object[] k = keys(c);
+        byte[] pub = unb64(prefs(c).getString(PUB, null));
+        return body != null && k != null && pub != null && WebPush.isWake(body, (ECPrivateKey) k[0], pub, (byte[]) k[1]);
+    }
+
+    /**
+     * A wake: the page alive → {ev:"wake"} (Push app: with the service for the wake window first; Built in: PushClient
+     * already keeps the process in front); else the one notification.
+     */
     static void wake(Context c) {
         SigeloBridge b = StayConnected.page;
         if (b != null) {
-            StayConnected.wake(c);
+            if (!BUILTIN.equals(mode(c))) StayConnected.wake(c);
             if (b.wake()) return;
         }
         NotificationManager nm = c.getSystemService(NotificationManager.class);

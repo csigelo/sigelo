@@ -134,7 +134,8 @@ ok('remote: scope all: forget, tier, agents, link, links/allow in scope (404 not
   && (await full.call('GET', '/api/agents')).status === 200 && (await full.call('GET', '/api/devices')).body.error.check === 'remote');
 ok('remote: transfers: the list and an answer in scope all; sending a file by its path never (403 remote)', (await full.call('GET', '/api/transfers')).status === 200
   && (await full.call('POST', '/api/transfers/accept', { id: 'ab'.repeat(16) })).body.error.check === 'transfer_unknown'
-  && (await full.call('POST', '/api/transfers/send', { to: 'did:sigelo:zNope', path: '/etc/passwd' })).body.error.check === 'remote');
+  && (await full.call('POST', '/api/transfers/send', { to: 'did:sigelo:zNope', path: '/etc/passwd' })).body.error.check === 'remote'
+  && (await full.call('GET', '/api/files/data?n=1')).body.error.check === 'remote');
 {
   const [ec, rv, rt] = [await full.call('POST', '/api/agents/enrol-code', { name: 'vps' }), await full.call('POST', '/api/agents/revoke', { worker: 7 }), await full.call('POST', '/api/relays/test', { relay: 'relay.test' })];
   ok('remote: scope all: enrol-code reaches the route (no relay here: 409 connect), revoke an unknown worker 404, relays/test answers (the relay unreachable: ok false)',
@@ -168,7 +169,7 @@ await page.close();
 {
   const all = [...readFileSync(join(import.meta.dirname, 'UI-API.md'), 'utf8').matchAll(/^\| `((?:GET|POST) \/api\/[a-z/-]+)`/gm)].map((m) => m[1]!);
   // The device routes (D4) are documented too, and in no scope: deviceRoute refuses them before any scope.
-  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && !['POST /api/transfers/send', 'POST /api/transfers/pick', 'POST /api/transfers/open', 'POST /api/transfers/voice-part', 'POST /api/transfers/mic'].includes(x) && !x.includes(' /api/calls'));
+  const devices = all.filter((x) => rm.deviceRoute(x.split(' ')[1]!)), routes = all.filter((x) => !devices.includes(x) && !['POST /api/transfers/send', 'GET /api/files/data', 'POST /api/transfers/pick', 'POST /api/transfers/open', 'POST /api/transfers/voice-part', 'POST /api/transfers/mic'].includes(x) && !x.includes(' /api/calls'));
   const [r, c, a] = [rm.SCOPES.read, rm.SCOPES.chat, rm.SCOPES.all];
   const calls = all.filter((x) => x.includes(' /api/calls'));
   ok('remote: the call routes of UI-API.md are in no scope, refused 403 remote', calls.length >= 10 && !calls.some((x) => a.has(x) || c.has(x) || r.has(x))

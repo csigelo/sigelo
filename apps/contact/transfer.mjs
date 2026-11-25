@@ -368,13 +368,12 @@ export function pathOrder({ pro = false, prefer = 'fast', via = 'auto', direct =
  * The accept rule (design §10.2): → 'auto' (lands without a question) or 'ask'. trust: 'own' (own agents and
  * contacts), 'compared' (a friend whose four words were compared) or 'other' (not compared, a public-code
  * joiner, quiet: always asked); limitMb: the contact's own size (0: always ask), null for defaultMb; MB are
- * 10^6 bytes; direct: may this contact see the addresses already (else the human is asked first).
+ * 10^6 bytes. The lane is not the rule's (2026-11-25): direct off, the file comes over Tor or the relay lane.
  */
-export function acceptRule({ size, trust, limitMb = null, defaultMb = AUTO_MB, direct = true }) {
+export function acceptRule({ size, trust, limitMb = null, defaultMb = AUTO_MB }) {
   if (trust !== 'own' && trust !== 'compared') return 'ask';
   const mb = limitMb ?? defaultMb;
-  if (!(Number.isFinite(mb) && mb > 0) || !(size <= mb * 1e6)) return 'ask';
-  return direct === true ? 'auto' : 'ask';
+  return Number.isFinite(mb) && mb > 0 && size <= mb * 1e6 ? 'auto' : 'ask';
 }
 /** Who serves the onion: the sender if it can, else the receiver; null when no pair of the two works. */
 export function torRoles(sender, receiver) {

@@ -105,6 +105,12 @@
 // summary, exp, text}, QUESTION_LABEL {question, options?, text}; checked (promptOf), kept as `approval` / `question`
 // beside a one-line text; the page's buttons answer with a reply's text (`yes CODE`, an option). Malformed: shown as data.
 //
+// A hosted agent's settings (UI-API.md "Agent settings"; sigelo-agent-host.ts): HOST_CAPS_LABEL {fields: [{key, value,
+// options: [{value, label}], off?, next?}], note?}, sent only to a page whose receipts said host: true (carrier.mjs
+// host_peer); checked (capsOf: keys model, effort, permissionMode; others dropped), kept as data.host[did], never in the
+// history; the contact's `host`. POST /api/host/set sends HOST_SET_LABEL {key, value} (a choice it offered) and marks it
+// next until the agent says again. A HOST_SET_LABEL that reaches a page: dropped (a page hosts nothing).
+//
 // The public invite (UI-API.md "Public invite"): a public code (sigelo-public/0, carrier.mjs invitePublic), PUB-…
 // with the four words and a link, for 1, 6 or 12 months, Pro only, kept in the contact store; each use a request to
 // approve (/api/public/approve, /refuse) unless open; Pause and the cap: /api/public/set; Stop for good (Revoke for
@@ -154,6 +160,8 @@ export const refuse = (status, check, message) => { throw Object.assign(new Erro
 // ---- pictures and signed statements (the header's)
 export const PICTURE_LABEL = 'sigelo-picture/0', STATEMENT_LABEL = 'sigelo-statement/0', PICTURE_MAX = 64 * 1024, STATEMENT_MAX = 10_000;
 const PICTURE_TYPES = new Set(['image/jpeg', 'image/webp']);
+/** A received file the page reads whole to save it (GET /api/files/data): at most this. */
+export const FILE_DATA_MAX = 64 * 2 ** 20;
 const b64 = (bytes) => { let t = ''; for (let i = 0; i < bytes.length; i += 0x8000) t += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(t); };
 const unb64 = (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
 const b64url = (bytes) => b64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -184,6 +192,22 @@ export function promptOf(label, c) {
     return { key: 'question', value, text: `question: ${c.question}${value.options ? `\n${value.options.map((o, i) => `  ${i + 1}) ${o}`).join('\n')}` : ''}` };
   }
   return null;
+}
+export const HOST_CAPS_LABEL = 'sigelo-host-caps/0', HOST_SET_LABEL = 'sigelo-host-set/0';
+const HOST_KEYS = new Set(['model', 'effort', 'permissionMode']);
+/** A hosted agent's settings as it announced them → {fields, note?} (a key not known here dropped), or null (malformed). */
+export function capsOf(c) {
+  if (typeof c !== 'object' || c === null || Array.isArray(c) || !Array.isArray(c.fields) || c.fields.length > 16) return null;
+  const str = (v, max) => typeof v === 'string' && v.length <= max, fields = [];
+  for (const f of c.fields) {
+    if (typeof f !== 'object' || f === null || !str(f.key, 40) || !str(f.value, 200) || !Array.isArray(f.options) || f.options.length > 100
+      || !f.options.every((o) => typeof o === 'object' && o !== null && str(o.value, 200) && str(o.label, 80))
+      || (f.off !== undefined && !str(f.off, 120)) || (f.next !== undefined && !str(f.next, 200))) return null;
+    if (!HOST_KEYS.has(f.key) || fields.some((x) => x.key === f.key)) continue;
+    fields.push({ key: f.key, value: f.value, options: f.options.map((o) => ({ value: o.value, label: o.label })), ...(f.off !== undefined && { off: f.off }), ...(f.next !== undefined && { next: f.next }) });
+  }
+  if (c.note !== undefined && !str(c.note, 120)) return null;
+  return { fields, ...(c.note !== undefined && { note: c.note }) };
 }
 const chainOnly = (b) => ({ v: 'sigelo/0', typ: 'bundle', genesis: b.genesis, rotations: b.rotations ?? [], bindings: [], attestations: [], issuers: [] });
 const SIGNED_LINE = /\n-- Signed with sigelo by [a-z]+ [a-z]+ [a-z]+ [a-z]+\. Check it in the sigelo app\.\s*$/;
@@ -286,7 +310,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   };
   let data;
   try { data = JSON.parse(store.readData() ?? 'null') ?? {}; } catch { data = {}; }
-  for (const k of ['tags', 'checked', 'read', 'controls', 'settings', 'gread', 'seen', 'notify', 'kind', 'pics', 'pic_sent', 'pic_peer']) data[k] ??= {};
+  for (const k of ['tags', 'checked', 'read', 'controls', 'settings', 'gread', 'seen', 'notify', 'kind', 'pics', 'pic_sent', 'pic_peer', 'host']) data[k] ??= {};
   data.gnotices ??= [];
   delete data.waiting;   // kept by an earlier page; the carrier says it now (contacts: prekeys, waiting)
   const saveData = () => store.writeData(JSON.stringify(data));
@@ -329,6 +353,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (hidden({ did: m['from'], name: m['name'] })) continue;
       // A contact's own picture (the header's "Pictures"): kept apart, never in the history.
       if (m['label'] === PICTURE_LABEL) { takePicture(m); continue; }
+      // A hosted agent's settings (the header's): kept apart, never in the history; a setting sent here, dropped.
+      if (m['label'] === HOST_CAPS_LABEL) { const h = capsOf(m['content']); if (h) { data.host[String(m['from'])] = { ...h, at: nowS() }; saveData(); changed(); } continue; }
+      if (m['label'] === HOST_SET_LABEL) continue;
       // A photo's preview (photo.mjs): into the chat at once, the full file by its transfer.
       if (m['label'] === PHOTO_LABEL) {
         let ph = null;
@@ -773,7 +800,9 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         last: last ? { dir: last.kind, text: textOf(last.text).slice(0, 200), at: last.at, status: statusOf(last, x.seen_upto), ...(last.call && { call: last.call.state }) } : null,
         notify: notifyOf(x.did), seen_upto: x.seen_upto ?? null,
         // A busy mark (carrier.mjs "Busy marks"): their agent works on a turn; the chat's wheel, never a message.
-        busy: x.busy === true,
+        busy: x.busy === true, busy_n: x.busy === true ? (x.busy_n ?? 1) : 0,
+        // A hosted agent's settings (the header's), as it last said them; null: it never did.
+        host: data.host[x.did] ?? null,
         picture: picRev(picOf(x.did) ?? ''), picture_local: data.pics[`l:${x.did}`] !== undefined,
         waiting, not_collected: queued.length, queued: x.queued,
         status: x.re_pair ? 'pair_again' : waiting ? 'waiting' : queued.length ? 'not_collected' : 'ok', ours: x.ours === true || mine !== null, tier,
@@ -1193,6 +1222,20 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (typeof allow !== 'boolean') refuse(400, 'body', 'allow: true or false');
       try { return carrier.setPresence(c.did, allow); } catch (e) { if (e.check === 'presence_own') e.status = 409; throw e; }
     }),
+    // A hosted agent's setting (the header's): one of the choices it offered; it applies it at its next turn.
+    'POST /api/host/set': (b) => serial(async () => {
+      const c = contactOf(b['contact']), h = data.host[c.did], key = b['key'], value = b['value'];
+      if (!h) refuse(409, 'host_none', 'this contact has not said what can be set');
+      const f = h.fields.find((x) => x.key === key) ?? refuse(400, 'body', `key: one of ${h.fields.map((x) => x.key).join(', ')}`);
+      if (f.off !== undefined) refuse(409, 'host_off', f.off);
+      if (typeof value !== 'string' || !f.options.some((o) => o.value === value)) refuse(400, 'body', 'value: one of its choices');
+      const r = await carrier.send(c.did, { key, value }, { label: HOST_SET_LABEL });
+      // Waiting for its next turn until the agent says again.
+      if (value === f.value) delete f.next; else f.next = value;
+      delete h.note;
+      saveData(); changed();
+      return { did: c.did, host: h, status: r.status };
+    }),
     // A contact's kind, the human's choice (Chat settings → This is an agent): agent, person, or null (the page decides again).
     'POST /api/kind': (b) => serial(async () => {
       const c = contactOf(b['contact']), k = b['kind'];
@@ -1537,6 +1580,31 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     allowOf: (c) => canCall(c),
   });
   for (const [k, f] of Object.entries(callRouteSet)) routes[k] = k.startsWith('POST ') ? (b, q) => gone(() => f(b, q))() : f;
+  // A file received (2026-11-25, the bubble's "Save to Downloads"): its bytes, for the page to put where the owner takes it
+  // from (the Android app: Downloads, through the shell's MediaStore; a tab or a computer's page: a download). By its chat
+  // message (n) or its transfer (id); only a file under this identity's received files, at most FILE_DATA_MAX. Never remote.
+  routes['GET /api/files/data'] = (_, q) => {
+    let path = null, name = null, size = 0;
+    const n = q.get('n'), id = q.get('id');
+    if (n !== null) {
+      const k = Number(n), r = Number.isSafeInteger(k) ? recs.find((x) => x.n === k && x.kind === 'in' && x.file) : undefined;
+      if (!r) refuse(404, 'file_unknown', 'no file received in that message');
+      ({ name, size } = r.file);
+      path = /, saved at (.+)$/s.exec(String(r.text ?? ''))?.[1] ?? null;
+    } else if (id !== null) {
+      if (!transfers) refuse(404, 'transfer_unknown', 'no transfers here');
+      if (!/^[0-9a-f]{32}$/.test(id)) refuse(400, 'body', 'id: a transfer id (32 hex digits)');
+      const r = transfers.lib.list({ carrier, identity: hooks.transfers.identity }).in.find((x) => x.id === id && x.state === 'done') ?? refuse(404, 'transfer_unknown', 'no file received by that transfer');
+      ({ name, size } = r); path = r.saved ?? null;
+    } else refuse(400, 'body', 'n: a chat message, or id: a transfer');
+    if (typeof path === 'string' && path.startsWith('content:')) refuse(409, 'in_downloads', `${name} is in Downloads already`);
+    const base = carrier.filesDir, rel = typeof path === 'string' && path.startsWith(`${base}/`) ? path.slice(base.length + 1) : null;
+    if (rel === null || rel.startsWith('.') || rel.split('/').includes('..')) refuse(404, 'file_unknown', 'not a file received here');
+    if (size > FILE_DATA_MAX) refuse(409, 'file_too_large', `${name} is over ${FILE_DATA_MAX / 2 ** 20} MiB: open it where it was saved`);
+    const bytes = carrier.platform.files.read(path) ?? refuse(404, 'file_gone', `${name} is not here any more`);
+    if (bytes.length > FILE_DATA_MAX) refuse(409, 'file_too_large', `${name} is over ${FILE_DATA_MAX / 2 ** 20} MiB: open it where it was saved`);
+    return { name, size: bytes.length, data: b64(bytes) };
+  };
   if (transfers) Object.assign(routes, transferRoutes({ X: transfers.lib, engine: transfers.engine, host: hooks.transfers, carrier, identity: hooks.transfers.identity, serial, contactOf, changed, record, groups: G && groupsFile ? { G, file: groupsFile, list: groupsList } : null }));
   if (G) Object.assign(routes, groupRoutes);
   // One handler for every listener: the route's answer as [status, JSON value].
@@ -1637,8 +1705,14 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
       return strip(r);
     })),
     // The phone's own: a file picked (the system's picker), a photo taken (the system's camera), a file that landed opened.
-    // images: the picker shows pictures only (the composer's Photo).
-    ...(docs && { 'POST /api/transfers/pick': (b) => serial(async () => (await host.pick({ images: b?.['images'] === true })) ?? { cancelled: true }) }),
+    // images: the picker shows pictures only (the composer's Photo). multiple (2026-11-25): several at once → { docs: [...] },
+    // each then sent as its own transfer (POST /api/transfers/send per doc, in order).
+    ...(docs && { 'POST /api/transfers/pick': (b) => serial(async () => {
+      const multiple = b?.['multiple'] === true, x = await host.pick({ images: b?.['images'] === true, ...(multiple && { multiple: true }) });
+      if (!multiple || x === null || x === undefined) return x ?? { cancelled: true };
+      const list = Array.isArray(x) ? x : [x];
+      return list.length ? { docs: list } : { cancelled: true };
+    }) }),
     // The microphone asked of the shell before the page records (Android: RECORD_AUDIO at the first); none elsewhere.
     // Refused once, never asked again (the shell remembers): mic-settings opens the app's settings page instead.
     ...(typeof host.mic === 'function' && { 'POST /api/transfers/mic': async () => ({ granted: await host.mic() }) }),

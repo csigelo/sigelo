@@ -79,7 +79,8 @@ export class FakeWorker {
 export class FakeBig {
   constructor({ sha256 }) { this.sha = sha256; this.docs = new Map(); this.parts = new Map(); this.landed = []; this.opened = []; this.awakes = []; this.n = 0; this.next = null; }
   add(name, bytes, mtime = 1000) { const doc = `d${++this.n}`; this.docs.set(doc, { name, bytes, mtime }); return { doc, name, size: bytes.length, mtime, url: `https://app.invalid/.big/${doc}` }; }
-  async pick(o) { this.pickAsked = o; return this.next ? this.add(...this.next) : null; }
+  // nextMany: several chosen at once (multiple) → a list, in order.
+  async pick(o) { this.pickAsked = o; if (o?.multiple && this.nextMany) return this.nextMany.map((x) => this.add(...x)); return this.next ? this.add(...this.next) : null; }
   async photo(o) { this.photoAsked = o; return this.next ? this.add(...this.next) : null; }
   async hash(doc) {
     const d = this.docs.get(doc), n = Math.ceil(d.bytes.length / 1048576), hashes = new Uint8Array(n * 32);

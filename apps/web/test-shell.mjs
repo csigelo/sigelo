@@ -265,8 +265,9 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
     lock: { on: true, after: 1, secure: true }, granted: true, asked: 0, notes: new Map(), pendingOpen: null, forced: [],
     // Stay connected (StayConnected.java): the switch for the phone, its two asks (each once, then the system's page), what opened.
     stay: { on: true, exempt: false, asked: false, notifyAsked: false }, opened: [], denials: 0,
-    // Push (UnifiedPush.java): the distributors installed, the one picked, its state; a REGISTER answered at once (NEW_ENDPOINT).
-    pushApps: [], push: { on: false, state: 'off', reason: null, distributor: null, endpoint: null }, registers: [] };
+    // Push (UnifiedPush.java, PushClient.java): the mode; the distributors installed, the one picked, its state; a REGISTER answered at
+    // once (NEW_ENDPOINT); Built in "registering" until the test opens its stream (pushOpen).
+    pushApps: [], push: { mode: 'off', state: 'off', reason: null, distributor: null, endpoint: null }, registers: [] };
   const live = new Set();   // the open TLS sockets: cut() drops them all, as a lost network
   let current = null;
   const ALIASES = { 'identity:false': 0, 'identity:true': 1, control: 2 };
@@ -286,7 +287,11 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   function bigOp(m) {
     const B = state.big;
     switch (m.op) {
-      case 'big-pick': B.picks = [...(B.picks ?? []), m.images === true]; return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
+      case 'big-pick': B.picks = [...(B.picks ?? []), m.images === true]; B.multi = [...(B.multi ?? []), m.multiple === true];
+        // Several chosen (EXTRA_ALLOW_MULTIPLE): B.nextMany, answered {docs}; an older shell (B.oneOnly) answers the first alone.
+        if (m.multiple === true && B.nextMany && !B.oneOnly) return { docs: B.nextMany.map((x) => newDoc(profileOf(m), ...x)) };
+        if (B.nextMany) return newDoc(profileOf(m), ...B.nextMany[0]);
+        return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
       case 'big-photo': if (B.noCamera) throw Object.assign(new Error('no camera app on this phone'), { check: 'no_camera' }); B.photos.push(m.keepLocation); return B.next ? newDoc(profileOf(m), ...B.next) : { cancelled: true };
       case 'big-hash': { const d = docOf(m), n = Math.ceil(d.bytes.length / 1048576), h = Buffer.alloc(n * 32); for (let i = 0; i < n; i++) createHash('sha256').update(d.bytes.subarray(i * 1048576, (i + 1) * 1048576)).digest().copy(h, i * 32); return { name: d.name, size: d.bytes.length, mtime: d.mtime, sha256: createHash('sha256').update(d.bytes).digest('hex'), hashes: h.toString('base64') }; }
       case 'big-stat': { const d = docOf(m); return { size: d.bytes.length, mtime: d.mtime }; }
@@ -466,19 +471,20 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
             post({ id: m.id, ...st, notify: state.granted, notifyBlocked: state.denials >= 2 });
           }
           else if (m.op === 'push') {
-            if ('on' in m && typeof m.on !== 'boolean') throw Object.assign(new Error('on'), { check: 'push' });
+            if ('mode' in m && !['builtin', 'app', 'off'].includes(m.mode)) throw Object.assign(new Error('mode'), { check: 'push' });
             if ('distributor' in m && typeof m.distributor !== 'string') throw Object.assign(new Error('distributor'), { check: 'push' });
-            const P = state.push, ids = state.pushApps.map((d) => d.id);
-            if (m.on === false) Object.assign(P, { on: false, state: 'off', distributor: null, endpoint: null, reason: null });
-            if (m.on === true) {
+            const P = state.push, ids = state.pushApps.map((d) => d.id), want0 = m.mode ?? ('distributor' in m ? 'app' : null);
+            if (want0 === 'off') Object.assign(P, { mode: 'off', state: 'off', distributor: null, endpoint: null, reason: null });
+            if (want0 === 'builtin') Object.assign(P, { mode: 'builtin', state: 'registering', distributor: null, endpoint: 'https://push.sigelo.ai/upAbcdef012345?up=1', reason: null });
+            if (want0 === 'app') {
               if ('distributor' in m && !ids.includes(m.distributor)) throw Object.assign(new Error(`no such distributor installed: ${m.distributor}`), { check: 'push' });
               const want = m.distributor ?? (ids.includes(P.distributor) ? P.distributor : ids.length === 1 ? ids[0] : null);
-              P.on = true;
+              P.mode = 'app';
               if (!want) P.state = ids.length ? 'pick' : 'none';
               else { state.registers.push(want); Object.assign(P, { distributor: want, state: 'ok', endpoint: `https://push.example.org/up${want.length}?up=1`, reason: null }); }
             }
             const ok2 = P.state === 'ok';
-            post({ id: m.id, ...P, distributors: state.pushApps, endpoint: ok2 ? P.endpoint : null, p256dh: ok2 ? 'B' + 'A'.repeat(86) : null, auth: ok2 ? 'Q'.repeat(22) : null });
+            post({ id: m.id, ...P, on: P.mode !== 'off', distributors: state.pushApps, endpoint: ok2 ? P.endpoint : null, p256dh: ok2 ? 'B' + 'A'.repeat(86) : null, auth: ok2 ? 'Q'.repeat(22) : null });
           }
           else if (m.op.startsWith('big-') || m.op.startsWith('share-') || m.op === 'mic' || m.op === 'app-settings') post({ id: m.id, ...bigOp(m) });
           else if (m.op === 'unlock') { state.forced.push(m.force === true); state.unlocks = (state.unlocks ?? 0) + 1; if (state.locked) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); post({ id: m.id }); }
@@ -1146,6 +1152,10 @@ class FakeEl {
     const h = BK.readHeader(new Uint8Array(file.bytes));
     ok(made.where === 'Downloads' && /^sigelo-profile-1-\d{4}-\d\d-\d\d\.sbk$/.test(made.name) && file.name === made.name && file.bytes.length === made.size && h.did === did1 && h.iter === 1_000_000 && F.state.big.parts.size === 0,
       `Back up this profile: the file in Downloads through the shell (big-write, big-land), named for the profile and the day; the header names the DID and 1,000,000 rounds (${made.name}, ${made.size} bytes)`);
+    // A received file saved to Downloads (2026-11-25, the bubble's Save to Downloads): local.saveFile by the backup's path.
+    const sv = await L.saveFile('notes.pdf', new TextEncoder().encode('hello')), sf = F.state.big.landed.at(-1);
+    ok(L.saves === 'Downloads' && sv.where === 'Downloads' && sv.name === 'notes.pdf' && sf.name === 'notes.pdf' && Buffer.from(sf.bytes).toString() === 'hello' && F.state.big.parts.size === 0,
+      `local.saveFile: a received file into Downloads through the shell (big-write, big-land), the partial gone (${JSON.stringify(sv)})`);
     // The same phone: Profiles → Add → Restore from a backup, with the file of p1: refused, the same DID.
     await L.profiles.add('backup');
     await stopAll();
@@ -1315,21 +1325,26 @@ class FakeEl {
     // only once the distributor gave one; refusals before the shell; {ev:"wake"} never kept, {ev:"push"} kept for a later listener.
     {
       const FP = fakeShell({ mode: 'self' }), bp = await FP.connect(), n0 = FP.log.ops.length;
-      const bad = await Promise.all([{ on: 'yes' }, { on: 1 }, { distributor: 7 }, { distributor: 'a b' }, { distributor: 'x'.repeat(201) }].map((o) => checkOf(() => bp.push(o))));
+      const bad = await Promise.all([{ mode: 'yes' }, { mode: true }, { mode: 'stay' }, { distributor: 7 }, { distributor: 'a b' }, { distributor: 'x'.repeat(201) }].map((o) => checkOf(() => bp.push(o))));
       const g0 = await bp.push();
-      ok(bad.every((c) => c === 'push') && FP.log.ops.length === n0 + 1 && g0.on === false && g0.state === 'off' && g0.endpoint === null && g0.distributors.length === 0,
-        `push: off by default; anything but a boolean on and a package name refused "push" before the shell (${bad})`);
-      const none = await bp.push({ on: true });
-      ok(none.on === true && none.state === 'none' && none.endpoint === null && FP.state.registers.length === 0, 'push: on with no push app installed: state none, nothing registered');
+      ok(bad.every((c) => c === 'push') && FP.log.ops.length === n0 + 1 && g0.mode === 'off' && g0.on === false && g0.state === 'off' && g0.endpoint === null && g0.distributors.length === 0,
+        `push: off here (the shell says its mode); anything but builtin, app or off and a package name refused "push" before the shell (${bad})`);
+      const bi = await bp.push({ mode: 'builtin' });
+      ok(bi.mode === 'builtin' && bi.on === true && bi.state === 'registering' && bi.endpoint === null && bi.p256dh === null && FP.state.registers.length === 0,
+        'push: Built in: registering, no endpoint until its stream opened (ntfy refuses a publish before a subscriber), no push app asked');
+      const none = await bp.push({ mode: 'app' });
+      ok(none.mode === 'app' && none.on === true && none.state === 'none' && none.endpoint === null && FP.state.registers.length === 0, 'push: Push app with no push app installed: state none, nothing registered');
       FP.state.pushApps = [{ id: 'io.heckel.ntfy', name: 'ntfy' }, { id: 'org.unifiedpush.distributor.nextpush', name: 'NextPush' }];
-      const pick = await bp.push({ on: true }), refused = await checkOf(() => bp.push({ on: true, distributor: 'com.example.none' }));
-      const okd = await bp.push({ on: true, distributor: 'io.heckel.ntfy' });
+      const pick = await bp.push({ mode: 'app' }), refused = await checkOf(() => bp.push({ mode: 'app', distributor: 'com.example.none' }));
+      const okd = await bp.push({ mode: 'app', distributor: 'io.heckel.ntfy' });
       ok(pick.state === 'pick' && pick.distributors.map((d) => d.name).join() === 'ntfy,NextPush' && refused === 'push'
         && okd.state === 'ok' && okd.distributor === 'io.heckel.ntfy' && /^https:\/\//.test(okd.endpoint) && okd.p256dh.length === 87 && okd.auth.length === 22 && FP.state.registers.join() === 'io.heckel.ntfy',
         'push: two push apps → pick; one not installed refused "push"; ntfy picked → registered, its endpoint and keys given');
-      const shape = A.pushState({ on: true, state: 'registering', endpoint: 'https://x.example/u', p256dh: 'B'.repeat(87), auth: 'A'.repeat(22), distributors: [{ id: 'bad id' }, { id: 'a.b' }], state2: 1 });
-      ok(shape.endpoint === null && shape.p256dh === null && shape.distributors.length === 1 && shape.distributors[0].name === 'a.b' && A.pushState({ state: 'weird' }).state === 'off',
-        'pushState: endpoint and keys only in state ok; a distributor that is no package name dropped; an unknown state is off');
+      const shape = A.pushState({ mode: 'builtin', state: 'registering', endpoint: 'https://x.example/u', p256dh: 'B'.repeat(87), auth: 'A'.repeat(22), distributors: [{ id: 'bad id' }, { id: 'a.b' }], state2: 1 });
+      const odd = A.pushState({ mode: 'stay', on: true, state: 'weird' });
+      ok(shape.mode === 'builtin' && shape.on === true && shape.endpoint === null && shape.p256dh === null && shape.distributors.length === 1 && shape.distributors[0].name === 'a.b'
+        && odd.state === 'off' && odd.mode === 'off' && odd.on === false,
+        'pushState: endpoint and keys only in state ok; a distributor that is no package name dropped; an unknown state is off, an unknown mode off (on follows the mode)');
       // A call's name to the shell: at most NOTE_MAX UTF-16 units, as SigeloBridge counts them (64 emoji are 128), whole characters.
       const asked = [], ca = A.callAudio({ request: async (op, m) => { asked.push([op, m]); return {}; } });
       await ca.ring({ on: true, name: '\u{1F600}'.repeat(64) }); await ca.audio({ on: true, name: 'Ann' }); await ca.ring({ on: false, name: 'x' });
@@ -1337,10 +1352,10 @@ class FakeEl {
       ok(nm.length <= A.NOTE_MAX && nm.length === 100 && !/[\uD800-\uDBFF]$/.test(nm) && asked[1][1].name === 'Ann' && asked[2][1].name === undefined && asked[0][0] === 'call-ring' && asked[1][0] === 'call',
         'callAudio: a long name cut to what the shell takes (UTF-16 units, no half character); off sends no name');
       const Lp = boot(FP), lg = await Lp.push.get();
-      ok(lg.state === 'ok' && lg.relay === null && (await Lp.push.set({ on: false })).state === 'off' && FP.state.push.on === false && boot(null).push === undefined,
+      ok(lg.state === 'ok' && lg.relay === null && (await Lp.push.set({ mode: 'off' })).state === 'off' && FP.state.push.mode === 'off' && boot(null).push === undefined,
         'local.push: get and set through the shell (relay null with no carrier: no identity here); none without the shell');
       const FW = fakeShell({ mode: 'self' }), bw = await FW.connect(), wakes = [], pushes = [];
-      FW.event({ ev: 'wake' }); FW.event({ ev: 'push', on: true, state: 'ok' }); await sleep(50);
+      FW.event({ ev: 'wake' }); FW.event({ ev: 'push', mode: 'builtin', state: 'ok' }); await sleep(50);
       bw.onEvent((m) => wakes.push(m.ev), 'wake'); bw.onEvent((m) => pushes.push(m.state), 'push');
       FW.event({ ev: 'wake' }); await sleep(50);
       ok(wakes.join() === 'wake' && pushes.join() === 'ok', `events: a wake before any listener dropped (it says "now"), a push answer kept for the listener (${wakes} / ${pushes})`);
@@ -1854,6 +1869,16 @@ try {
   // The composer's Photo: the picker for pictures only (images), any file otherwise.
   await big.pick({ images: true }); await big.pick();
   ok(F.state.big.picks.slice(-2).join() === 'true,false', `big: pick {images: true} asks the shell for pictures only; a plain pick does not (${F.state.big.picks.join()})`);
+  // Several at once (2026-11-25): pick {multiple} → a list of docs, in the order chosen; an older shell's one → a list of one.
+  F.state.big.nextMany = [['a.pdf', new Uint8Array(3)], ['b.pdf', new Uint8Array(4)], ['c.pdf', new Uint8Array(5)]];
+  const many = await big.pick({ multiple: true });
+  F.state.big.oneOnly = true;
+  const one = await big.pick({ multiple: true });
+  F.state.big.nextMany = null; F.state.big.oneOnly = false; F.state.big.next = null;
+  const none = await big.pick({ multiple: true });
+  ok(Array.isArray(many) && many.map((x) => x.name).join() === 'a.pdf,b.pdf,c.pdf' && many.every((x) => /^[0-9a-f]{32}$/.test(x.doc)) && new Set(many.map((x) => x.doc)).size === 3
+    && Array.isArray(one) && one.length === 1 && one[0].name === 'a.pdf' && none === null && F.state.big.multi.at(-1) === true,
+    `big: pick {multiple: true} → the docs chosen, in order; an older shell's single answer → a list of one; cancelled → null (${JSON.stringify(many?.map((x) => x.name))})`);
   ok(await checkOf(() => big.write('nope', 0, new Uint8Array(1))) === 'big', 'big: a part that is not 32 hex refused here, before the shell');
   // Voice messages: the microphone asked at a tap on Voice (the one dialog), asked again after a refusal while Android
   // shows its dialog, then mic_blocked at once (the page opens the app's settings page); the recording written as a

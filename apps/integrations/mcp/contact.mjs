@@ -134,7 +134,10 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
     if (!x) {
       const X = await tlib();
       x = { asked: [], running: false };
-      x.e = new X.Engine({ carrier: carrier(path), identity: path, onEvent: (ev) => { if (ev.what === 'asked') x.asked.push({ type: 'transfer', what: 'asked', id: ev.id, from: ev.from, name: ev.contact, file: ev.name, size: ev.size }); } });
+      x.e = new X.Engine({ carrier: carrier(path), identity: path, onEvent: (ev) => {
+        if (ev.what === 'asked') x.asked.push({ type: 'transfer', what: 'asked', id: ev.id, from: ev.from, name: ev.contact, file: ev.name, size: ev.size });
+        if (ev.what === 'landing') x.landing = true;   // accepted by the rule (transfer auto): this server holds the session for it
+      } });
       engines.set(path, x);
     }
     return x;
@@ -254,7 +257,12 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
       if (!local) fresh = (await (await devices()).deviceRound(carrier(path), path, fresh, (l) => console.error(`sigelo-mcp: ${l}`))).batch ?? fresh;
       fresh = (await (await groups()).groupRound(carrier(path), path, fresh, { local, tiers, said: (l) => console.error(`sigelo-mcp: ${l}`) })).batch;
       // Transfers: a manifest is an event (name and size are data); beside a watcher, the watcher's.
-      if (!local) { const x = await engineFor(path); await x.e.kick(); if (x.asked.length) fresh = { ...fresh, events: [...fresh.events, ...x.asked.splice(0)] }; }
+      if (!local) {
+        const x = await engineFor(path); await x.e.kick();
+        if (x.asked.length) fresh = { ...fresh, events: [...fresh.events, ...x.asked.splice(0)] };
+        // A file the accept rule took (any lane: direct, Tor, or the sender's relay lane): moved as an accepted one is.
+        if (x.landing) { x.landing = false; await keepLive(path).catch((e) => console.error(`sigelo-mcp: transfer: ${e.message}`)); }
+      }
     } catch (e) { held.putBack(file, got); throw e; }
     // Voice messages (sigelo-voice/0, a group msg's voice): their fields checked (voice) and one line (text: [voice 0:42 name]).
     let all = (await held.contactModule('voice')).voiceItems(held.merge(held.takeHeld(file), fresh));
