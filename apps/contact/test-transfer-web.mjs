@@ -161,8 +161,29 @@ const TURN = { urls: ['turn:relay.test:3478?transport=udp', 'turn:relay.test:347
   ok(await eng({ turn: false }, c1).turnOf(W) === null && await eng({ env: { SIGELO_TURN: 'off' } }, c1).turnOf(W) === null && asked.length === 1, 'turn: false, or SIGELO_TURN=off: none, nothing asked');
   ok(await eng({}, { turnServer: async () => { throw new Error('down'); } }).turnOf(W) === null && await eng({}, {}).turnOf(W) === null && await eng({}, { turnServer: async () => null }).turnOf(W) === null,
     'a carrier that fails, has no turnServer, or whose relay gives none: null (STUN alone)');
-  ok(await eng({}, c1).turnOf(await import('../transfer/rtc.mjs').catch(() => ({ TURN_OK: false }))) === null && await eng({}, c1).turnOf({ peer() {} }) === null && asked.length === 1,
-    'werift (apps/transfer/rtc.mjs, TURN_OK false) or a module that does not say TURN_OK: no credential asked');
+  ok(await eng({}, c1).turnOf({ peer() {} }) === null && await eng({}, c1).turnOf({ TURN_OK: false }) === null && asked.length === 1,
+    'a module that does not say TURN_OK true (werift without its handshake checks): no credential asked');
+  ok((await eng({}, c1).turnOf(await import('../transfer/rtc.mjs')))?.username === TURN.username && asked.length === 2,
+    'werift (apps/transfer/rtc.mjs) with its handshake checks in place: TURN_OK true, a credential asked');
+  // "Always relay my media" (design/calls.md §6): the policy, the page's peer under it, the engine's.
+  ok(eng({}, {}).policyNow() === 'all' && eng({ policy: () => 'relay' }, {}).policyNow() === 'relay' && eng({ env: { SIGELO_ICE_POLICY: 'relay' } }, {}).policyNow() === 'relay'
+    && eng({ policy: () => { throw new Error('x'); } }, {}).policyNow() === 'all', 'the engine\'s policy: the setting (policy()) or SIGELO_ICE_POLICY=relay; else all');
+  ok(await failure(() => webPeer({ stun: ['relay.test:3478'], turn: null, RTC: R, policy: 'relay' })) === 'relay_only', 'rtc-web peer(): relay only without TURN: refused relay_only, no connection made');
+  cfg = null;
+  class RS { constructor(c) { cfg = c; this.iceGatheringState = 'complete'; this.localDescription = null; } addEventListener() {} createDataChannel() { return { readyState: 'connecting', addEventListener() {} }; }
+    async createOffer() { return { type: 'offer', sdp: '' }; } async setLocalDescription() { this.localDescription = { sdp: 'v=0\r\na=candidate:1 1 udp 1 192.0.2.7 5000 typ host\r\na=candidate:3 1 udp 1 198.51.100.4 49200 typ relay raddr 203.0.113.9 rport 6000\r\n' }; }
+    async getStats() { return new Map([['t', { id: 't', type: 'transport', selectedCandidatePairId: 'p' }], ['p', { id: 'p', type: 'candidate-pair', localCandidateId: 'l', remoteCandidateId: 'r' }], ['l', { id: 'l', candidateType: 'relay' }], ['r', { id: 'r', candidateType: 'srflx' }]]); } close() {} }
+  const pr = await webPeer({ stun: ['relay.test:3478'], turn: TURN, RTC: RS, policy: 'relay' }), o = await pr.offer('sigelo-transfer/0 x 1');
+  ok(cfg.iceTransportPolicy === 'relay' && cfg.iceServers.length === 1 && !/192\.0\.2\.7|203\.0\.113\.9/.test(o) && /typ relay raddr 0\.0\.0\.0 rport 0/.test(o),
+    'rtc-web peer() relay only: iceTransportPolicy relay, TURN alone, the SDP with the relayed candidate only, raddr zeroed', o);
+  ok(await pr.relayed() === true, 'rtc-web relayed(): the selected pair has a relayed candidate (call.mjs relayedOf, as the call screen)');
+  pr.close();
+  const W2 = await import('../transfer/rtc.mjs');
+  ok(await failure(() => W2.peer({ turn: null, policy: 'relay' })) === 'relay_only', 'werift peer(): relay only without TURN: relay_only');
+  const wr = await W2.peer({ turn: { ...TURN, urls: ['turn:127.0.0.1:9?transport=udp'] }, gatherMs: 300, policy: 'relay' }), wo = await wr.offer('sigelo-transfer/0 y 1');
+  ok(typeof wo === 'string' && !/typ (host|srflx)/.test(wo) && wr.pc.config?.iceTransportPolicy === 'relay', 'werift relay only (a TURN that answers nothing): no host or srflx candidate in the offer', wo);
+  ok(await wr.relayed() === null, 'werift relayed(): no pair selected yet: null');
+  wr.close();
   ok(noPath('bob').startsWith('No direct path to bob from these two networks') && noPath('bob', true).startsWith('No path to bob from these two networks, not even through the relay host'),
     'no path: the old words without TURN; "not even through the relay host" with it');
 }
@@ -202,10 +223,9 @@ const sh = fakeShell(), pio = webIo({ files: sh.files, big: sh.big }), PX = webT
 // The page's peers recorded: this loopback relay gives no TURN, so every attempt goes with STUN alone, as before TURN.
 const peers = [], rtcSeen = { ...rtc, peer: (o) => { peers.push(o); return rtc.peer(o); } };
 {
-  ok(rtc.TURN_OK === false && JSON.stringify(rtc.iceServers(['relay.test:3478'], TURN)) === '[{"urls":["stun:relay.test:3478"]}]', 'sigelo-transfer (werift): TURN_OK false, its ICE servers have no turn: entry even when one is given');
+  ok(rtc.TURN_OK === true && JSON.stringify(rtc.iceServers([], TURN)) === JSON.stringify(iceServers([], TURN)), 'sigelo-transfer (werift, handshake checks in place): TURN_OK true, the same ICE servers as the page');
   const w = await rtc.peer({ stun: [], turn: { ...TURN, urls: ['turn:127.0.0.1:9?transport=udp'] }, gatherMs: 200 });
-  const wsdp = await w.offer('sigelo-transfer/0 t 1');
-  ok(typeof wsdp === 'string' && !/ typ relay/.test(wsdp) && !JSON.stringify(w.pc.config?.iceServers ?? []).includes('turn:'), 'werift peer(): a turn given is not used (no relay candidate, no turn: in its config)');
+  ok(w.pc && typeof (await w.offer('sigelo-transfer/0 t 1')) === 'string', 'werift takes a TURN server (one that answers nothing: host candidates still offered)');
   w.close();
 }
 P = { ...phone, X: PX, e: new E.Engine({ carrier: phone.c, io: pio, rtc: async () => rtcSeen, stun: [], maxServe: 2, retryMs: 300, onEvent: (e) => pEvents.push(e) }) };
@@ -226,6 +246,7 @@ try {
   ok(await until(() => nRec('in', r1.id)?.state === 'done', 120000), 'phone → computer, own contact, 3 MB: landed by the rule', JSON.stringify(nRec('in', r1.id)));
   ok(sha(readFileSync(nRec('in', r1.id).saved)) === sha(shot) && nRec('in', r1.id).path_used === 'direct', 'whole, over the direct path (the page\'s engine, werift in this test)');
   ok(await until(() => pRec('out', r1.id)?.state === 'done'), 'the phone\'s record: done');
+  ok(nRec('in', r1.id).relayed === false && pRec('out', r1.id).relayed === false, 'both records: relayed false (the selected pair is direct: the transfers list says "direct")', JSON.stringify([nRec('in', r1.id).relayed, pRec('out', r1.id).relayed]));
   ok(sh.big.ops.filter((x) => x === 'read').length === 4, `read by range, one per chunk (${sh.big.ops.filter((x) => x === 'read').length})`);
 
   // Computer → phone: 6 MB; it lands in Downloads through the shell; the bitmap saved after every chunk.
@@ -269,6 +290,18 @@ try {
   sh.big.docs.get(d5.doc).mtime = 2000;
   X.accept({ carrier: N.c, identity: N.identity, id: r5.id }); N.e.kick();
   ok(await until(() => pRec('out', r5.id)?.reason === 'file_changed' && nRec('in', r5.id)?.reason === 'file_changed'), 'the picked file changed after the offer: file_changed both sides');
+
+  // "Always relay my media" on the phone, and this relay offers no TURN: its direct lane left out at once, no peer made
+  // (nothing gathered), the record says the sentence; the sender is told no_path (its relay lane or Tor, as ever).
+  X.settings({ identity: N.identity, patch: { auto_mb: 25 } });
+  P.e.policy = () => 'relay';
+  const n0 = peers.length, ro = seeded('relayonly', 2000); writeFileSync(join(dir, 'ro.bin'), ro);
+  const r6 = await X.send({ carrier: N.c, identity: N.identity, to: 'phone', path: join(dir, 'ro.bin') });
+  ok(await until(() => pRec('in', r6.id)?.reason === 'relay_only' || pRec('in', r6.id)?.state === 'relayed', 60000) && peers.length === n0,
+    'relay only, no TURN: no peer made on the phone; failed relay_only (or relayed by the sender\'s relay lane)', JSON.stringify(pRec('in', r6.id)));
+  ok(pEvents.some((e) => e.what === 'no_direct' && e.id === r6.id && e.detail === E.RELAY_ONLY), `the phone's event says "${E.RELAY_ONLY}"`);
+  ok(await until(() => ['failed', 'relaying', 'done'].includes(nRec('out', r6.id)?.state), 60000) && nRec('out', r6.id)?.path_used !== 'direct', 'the sender told: not over the direct lane', JSON.stringify(nRec('out', r6.id)));
+  P.e.policy = () => 'all';
 } finally {
   await P.e.close().catch(() => {}); await N.e.close().catch(() => {});
   await P.c.stop().catch(() => {}); await N.c.stop().catch(() => {});

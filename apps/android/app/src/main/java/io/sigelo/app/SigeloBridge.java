@@ -92,8 +92,8 @@ import javax.net.ssl.SSLSocketFactory;
  *          never opens again).
  *   mode / wiped  the active profile's form, set once its first run commits (it turns the app lock on);
  *          wiped: the page cleared its storage after a switch of an older version (wipe).
- *   secure        FLAG_SECURE on the window while a seed screen is up (no screenshot, no recents
- *          thumbnail, no screen recording of the 25 words); off again after. door: while on, the system
+ *   secure        FLAG_SECURE on the window while a secret screen is up (the list: UI-API.md "Secret
+ *          screens"; no screenshot, no recents thumbnail, no screen recording); off again after. door: while on, the system
  *          Back does nothing (a new identity's words: the review screen's one button is the only way on).
  *   clip-clear    the system clipboard emptied (the page asks after the words were pasted).
  *   share         the system's share sheet (ACTION_SEND, text/plain) with a message the page wrote: a code and how to use it.
@@ -516,6 +516,8 @@ public final class SigeloBridge {
                 boolean on = m.optBoolean("on", false);
                 if (on) activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
                 else activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                // FLAG_SECURE already blanks the recents thumbnail; from API 33 the recents screenshot is refused too.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) activity.setRecentsScreenshotEnabled(!on);
                 activity.door = on && m.optBoolean("door", false);
                 post(to, ok(id));
                 break;

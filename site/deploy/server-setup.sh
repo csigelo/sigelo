@@ -1015,6 +1015,11 @@ delete table inet filter
 table inet filter {
     chain input {
         type filter hook input priority filter; policy drop;
+        # coturn relays UDP from its relay ports; to this host's own addresses such a packet comes in on lo,
+        # past "iif lo accept": only coturn's ports may be reached so (relay to relay), never another local
+        # listener (dhcpcd on 68, 546). First, before conntrack's accept (the output path made the flow
+        # established); in input, not output, so coturn's send succeeds and the allocation lives on.
+        iif lo udp sport 49160-49400 fib daddr type local udp dport != { 3478, 3479, 49160-49400 } counter drop comment "TURN relayed to a local non-coturn port"
         ct state established,related accept
         iif lo accept
         meta l4proto icmp accept

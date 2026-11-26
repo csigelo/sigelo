@@ -180,8 +180,8 @@ export const intake = ({ carrier, identity, compared }) => E.intake({ carrier, i
 
 /** The engine on this machine: E.Engine over nodeIo, with Tor when a tor daemon is configured. */
 export class Engine extends E.Engine {
-  constructor({ carrier, identity, rtc = loadRtc, tor = torConfig(), stun = null, pro, compared, maxServe, onEvent, retryMs, torConnectMs = TOR_CONNECT_MS, timer, fallbackMs, stallMs }) {
-    super({ carrier, io: nodeIo(identity, carrier.filesDir, tor, carrier.logPath ?? null), rtc, stun, env: process.env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, timer, fallbackMs, stallMs });
+  constructor({ carrier, identity, rtc = loadRtc, tor = torConfig(), stun = null, pro, compared, maxServe, onEvent, retryMs, torConnectMs = TOR_CONNECT_MS, timer, fallbackMs, stallMs, policy, env = process.env }) {
+    super({ carrier, io: nodeIo(identity, carrier.filesDir, tor, carrier.logPath ?? null), rtc, stun, env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, timer, fallbackMs, stallMs, ...(policy && { policy }) });
     this.identity = identity; this.torCfg = tor;
   }
 }

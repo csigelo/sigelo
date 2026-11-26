@@ -65,6 +65,9 @@
 // data.calls[did] true | false, else the default: off for a quiet contact, else data.settings.calls (default on).
 // A call's chat line is a history record { kind: in | out, label CALL_LABEL, text "Call · 3:12" | "Missed call" | …,
 // call: { id, state, secs } }; only a missed one counts as unread (a call taken or made here was seen).
+// "Always relay my media" (design/calls.md §6, UI-API.md "Settings"): data.settings.relay_media, per profile (default
+// off); SIGELO_ICE_POLICY=relay in the host's environment says the same. On: GET /api/calls/turn answers policy
+// "relay" and the transfer engine is given it (relayMedia): every WebRTC lane only through the relay's TURN.
 //
 // Proof of work (design/profiles.md §6): what the human starts here (the page's start, a code, an
 // answer, "Try now") passes the carrier's `started: 'user'`; past the day's three the route answers
@@ -131,8 +134,8 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalize, did as didOf, parseBytes, verify, verifySig } from 'sigelo';
-import { CALL_LABEL, CALL_SEND, DEFAULT_RELAY, POW_COST, POW_EVAL_MS, RE_LABEL, quoteHash, reLabel } from './carrier.mjs';
-import { Line, callRoutes, stunOf } from './call.mjs';
+import { CALL_LABEL, CALL_SEND, DEFAULT_RELAY, KINDS, POW_COST, POW_EVAL_MS, RE_LABEL, quoteHash, reLabel } from './carrier.mjs';
+import { Line, callRoutes, policyOf, stunOf } from './call.mjs';
 import { signAs } from './kdf.mjs';
 import * as E from './enrol.mjs';
 import { checkRelay } from './invite.mjs';
@@ -497,15 +500,25 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   };
   // The accept rule's "words compared": the pairing's words as the human checked them here (Chats → the four words).
   const compared = (did) => { const x = carrier.contacts().contacts.find((c) => c.did === did); return Boolean(x && x.pair !== null && x.pair !== undefined && data.checked?.[did] === x.pair); };
-  const transfers = hooks.transfers ? { lib: hooks.transfers.lib, engine: hooks.transfers.make(carrier, onTransfer, { compared }) } : null;
+  // "Always relay my media" (the header's): the setting, or SIGELO_ICE_POLICY=relay where the host has an environment.
+  const relayMedia = () => policyOf(data.settings.relay_media === true, globalThis.process?.env?.SIGELO_ICE_POLICY);
+  const transfers = hooks.transfers ? { lib: hooks.transfers.lib, engine: hooks.transfers.make(carrier, onTransfer, { compared, policy: relayMedia }) } : null;
   // ---- calls (the header's): the Line, its messages taken from the carrier at each `call` event and each drain.
   data.calls ??= {};
   const liveContact = (d) => carrier.contacts().contacts.find((c) => c.did === d && !c.revoked) ?? null;
   const canCall = (c) => (typeof data.calls[c.did] === 'boolean' ? data.calls[c.did] : c.tier === 'quiet' ? false : data.settings.calls !== false);
+  // Calls are between people (design/calls.md §1): a contact this page takes for an agent (its kind, as the chat list
+  // shows it: the human's choice, else my agent, a worker, a group's agent) is never rung from here and never rings here.
+  const personOf = (c) => {
+    const agent = (hooks.agents?.() ?? []).find((a) => a.did !== undefined && c.chain?.includes(a.did));
+    return kindOf(c, agent?.mine ?? null, rosterAgents()).kind === 'person';
+  };
   const CH = hooks.calls ?? {};
   const line = new Line({
     send: (to, content) => carrier.send(to, content, { label: CALL_LABEL, internal: CALL_SEND, local: false }),
-    contact: liveContact, allowed: canCall, shares: (c) => c.presence === 'allow' || c.presence === 'own', me: () => hooks.me().original,
+    contact: liveContact, allowed: canCall, person: personOf,
+    refused: ({ did, check }) => record({ kind: 'event', type: 'dropped', did, name: liveContact(did)?.name ?? null, code: check, detail: 'a call from an agent: refused (calls are between people)' }),
+    shares: (c) => c.presence === 'allow' || c.presence === 'own', me: () => hooks.me().original,
     line: ({ did, dir, text, call }) => { record({ kind: dir, did, name: liveContact(did)?.name ?? null, text, label: CALL_LABEL, call }); },
     alert: (x) => { try { CH.alert?.(x); } catch {} },
     audio: (x) => { try { void Promise.resolve(CH.audio?.(x)).catch(() => {}); } catch {} },
@@ -560,7 +573,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   const publicInvite = (c) => c.publics?.[0] ?? null;
   const walletSet = () => ({ wallet: data.settings.wallet === true, prices: data.settings.prices === true, currency: CURRENCIES.includes(data.settings.currency) ? data.settings.currency : null });
   const settingsAll = () => ({ ...settings(), seen_receipts: receiptsOn(), notify: data.settings.notify !== false,
-    new_tier: TIER_NEW.has(data.settings.new_tier) ? data.settings.new_tier : 'friend', new_presence: data.settings.new_presence === true, calls: data.settings.calls !== false, ...walletSet() });
+    new_tier: TIER_NEW.has(data.settings.new_tier) ? data.settings.new_tier : 'friend', new_presence: data.settings.new_presence === true, calls: data.settings.calls !== false,
+    relay_media: relayMedia() === 'relay', ...walletSet() });
 
   // ---- pictures (the header's): mine to the contacts that read them, theirs kept, a local one beside
   const picFile = (key) => (key === 'me' ? 'me' : `${key[0]}-${bytesToHex(sha256(utf8ToBytes(key.slice(2)))).slice(0, 16)}`);
@@ -740,16 +754,18 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   };
   // The contact holding a worker's original DID, live, or null.
   const contactOfWorker = (w) => carrier.contacts().contacts.find((x) => !x.revoked && x.chain.includes(w.original)) ?? null;
-  // A contact's kind (UI-API.md "Kinds"): an agent when the page knows it is one (my agent: ours by its operator
-  // attestation, on this machine, or a worker of my keeper root; a member a group roster names an agent), else a
-  // person; the human's choice (POST /api/kind, data.kind) wins.
+  // A contact's kind (UI-API.md "Kinds"): person, agent or desk (a support desk). The human's choice (POST /api/kind,
+  // data.kind) wins; else what the contact said of itself once paired (carrier.mjs "Kinds": kind_peer agent or desk);
+  // else an agent when the page knows it is one (my agent: ours by its operator attestation, on this machine, or a
+  // worker of my keeper root; a member a group roster names an agent); else a person.
   let workerDids = new Set();
   const rosterAgents = () => {
     try { return new Set(G && groupsFile && carrier.platform.files.read(groupsFile) !== null ? G.list({ carrier, file: groupsFile }).flatMap((g) => g.members.filter((m) => m.role === 'agent').map((m) => m.did)) : []); } catch { return new Set(); }
   };
   const kindOf = (x, mine, roles) => {
     const set = data.kind[x.did];
-    if (set === 'agent' || set === 'person') return { kind: set, kind_set: true };
+    if (KINDS.includes(set)) return { kind: set, kind_set: true };
+    if (x.kind_peer === 'agent' || x.kind_peer === 'desk') return { kind: x.kind_peer, kind_set: false };
     const agent = x.ours === true || mine !== null || x.chain.some((d) => workerDids.has(d) || roles.has(d));
     return { kind: agent ? 'agent' : 'person', kind_set: false };
   };
@@ -1237,10 +1253,10 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       saveData(); changed();
       return { did: c.did, host: h, status: r.status };
     }),
-    // A contact's kind, the human's choice (Chat settings → This is an agent): agent, person, or null (the page decides again).
+    // A contact's kind, the human's choice (Chat settings → "This is"): person, agent, desk, or null (the page decides again).
     'POST /api/kind': (b) => serial(async () => {
       const c = contactOf(b['contact']), k = b['kind'];
-      if (k !== 'agent' && k !== 'person' && k !== null) refuse(400, 'body', 'kind: agent, person, or null (automatic)');
+      if (!KINDS.includes(k) && k !== null) refuse(400, 'body', 'kind: person, agent, desk, or null (automatic)');
       if (k === null) delete data.kind[c.did]; else data.kind[c.did] = k;
       saveData(); changed();
       return { did: c.did, kind: kindOf(c, null, rosterAgents()).kind, kind_set: k !== null };
@@ -1352,8 +1368,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     'GET /api/settings': () => settingsAll(),
     // Any of: relay, seen_receipts, notify, new_tier, new_presence (Settings → Chats); wallet, prices, currency (Settings → Wallet); each checked before any is kept.
     'POST /api/settings': (b) => serial(async () => {
-      const v = b['relay'], flags = ['seen_receipts', 'notify', 'new_presence', 'wallet', 'prices', 'calls'].filter((k) => b[k] !== undefined), t = b['new_tier'], cur = b['currency'];
-      if (v === undefined && flags.length === 0 && t === undefined && cur === undefined) refuse(400, 'body', 'relay: a host[:port], or "" for the default (or seen_receipts, notify, new_tier, new_presence, wallet, prices, currency, calls)');
+      const v = b['relay'], flags = ['seen_receipts', 'notify', 'new_presence', 'wallet', 'prices', 'calls', 'relay_media'].filter((k) => b[k] !== undefined), t = b['new_tier'], cur = b['currency'];
+      if (v === undefined && flags.length === 0 && t === undefined && cur === undefined) refuse(400, 'body', 'relay: a host[:port], or "" for the default (or seen_receipts, notify, new_tier, new_presence, wallet, prices, currency, calls, relay_media)');
       for (const k of flags) if (typeof b[k] !== 'boolean') refuse(400, 'body', `${k}: true or false`);
       if (t !== undefined && !TIER_NEW.has(t)) refuse(400, 'body', 'new_tier: own, friend or quiet');
       if (cur !== undefined && cur !== null && !CURRENCIES.includes(cur)) refuse(400, 'body', `currency: one of ${CURRENCIES.join(', ')}`);
@@ -1367,6 +1383,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       if (b['notify'] !== undefined) data.settings.notify = b['notify'];
       if (b['new_presence'] !== undefined) data.settings.new_presence = b['new_presence'];
       if (b['calls'] !== undefined) data.settings.calls = b['calls'];
+      if (b['relay_media'] !== undefined) data.settings.relay_media = b['relay_media'];
       if (t !== undefined) data.settings.new_tier = t;
       if (b['wallet'] !== undefined) data.settings.wallet = b['wallet'];
       if (b['prices'] !== undefined) data.settings.prices = b['prices'];
@@ -1569,13 +1586,14 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   const callRouteSet = callRoutes({
     line, contactOf: (v) => { const x = contactOf(v); return liveContact(x.did) ?? refuse(404, 'not_contact', 'not a contact'); },
     callable: (c) => {
-      if (data.kind[c.did] === 'agent' || (data.kind[c.did] !== 'person' && (c.ours === true || workerDids.has(c.did)))) return { check: 'call_agent', message: 'agents take no calls (later)' };
+      if (!personOf(c)) return { check: 'call_agent', message: 'calls are between people: no calls to or from an agent' };
       if (c.re_pair) return { check: 'call_pairing', message: 'pair again first' };
       if (c.online !== true) return { check: 'call_offline', message: `${c.name} is not online now` };
       return true;
     },
     stun: (c) => stunOf(carrier.relay, c?.relay),
     turn: () => (globalThis.process?.env?.SIGELO_TURN === 'off' ? null : carrier.turnServer?.() ?? null),   // SIGELO_TURN=off: STUN alone (the transfer engine reads it too)
+    policy: relayMedia,
     can: { speaker: typeof CH.speaker === 'function', mic: typeof CH.mic === 'function', ring: typeof CH.alert === 'function' },
     hooks: { speaker: CH.speaker, mic: CH.mic, micSettings: CH.micSettings },
     allow: (c, on) => { if (on === null) delete data.calls[c.did]; else data.calls[c.did] = on; saveData(); changed(); },

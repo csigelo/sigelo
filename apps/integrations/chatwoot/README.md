@@ -1,14 +1,15 @@
 <!-- SPDX-License-Identifier: MIT -->
 # sigelo-chatwoot
 
-Your support team answers sigelo contacts from Chatwoot. Each allowed contact is a Chatwoot contact
-with one conversation; their messages come in, your agents' replies go back end to end. Design:
+Your support team answers sigelo contacts from Chatwoot. Each allowed contact gets
+one Chatwoot conversation; messages go both ways, end to end. Design:
 [bridge.mjs](bridge.mjs). Node ≥ 22.18, no dependencies.
 Tested with a fake Chatwoot (`npm test`) and on Chatwoot 4.20.1.
 
 **sigelo side.** Run the watcher with a spool: `sigelo-agent service install` (or
 `sigelo-agent watch --spool <identity>.spool`). Each bridged contact must be tier own:
 `sigelo-agent tier alice own`. Do not run `inbox` on this identity: it would take the spool.
+`invite --kind desk`: a support desk, never called.
 
 **Chatwoot side.**
 1. Settings → Inboxes → Add Inbox → API. Name it, leave the callback URL empty, add agents.

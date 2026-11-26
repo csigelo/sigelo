@@ -3,8 +3,12 @@
 // behind the interface of apps/transfer/rtc.mjs (werift, Node), so transfer-engine.mjs drives both alike
 // and a phone talks to a Node agent or another phone over the same `sigelo-transfer/0` channel.
 //
-//   const p = await peer({ stun, turn, gatherMs, RTC })   RTC: the constructor (default globalThis.RTCPeerConnection);
-//                                                     turn: { urls, username, credential } (carrier.turnServer) or null
+//   const p = await peer({ stun, turn, gatherMs, RTC, policy })   RTC: the constructor (default globalThis.RTCPeerConnection);
+//                                                     turn: { urls, username, credential } (carrier.turnServer) or null;
+//                                                     policy "relay" ("Always relay my media"): iceTransportPolicy relay, no
+//                                                     STUN, relayed candidates only in what leaves (call.mjs relayOnly); refused
+//                                                     relay_only without turn
+//   await p.relayed() → the selected pair has a relayed candidate (true), none (false), not known (null): call.mjs relayedOf
 //   await p.offer(label) → sdp; await p.answer(sdp, label) → sdp; await p.accept(sdp)
 //   await p.open(ms) → the channel (transfer.mjs's: send, buffered, close, on) once it is open, or throws ice_timeout
 //   p.close()
@@ -15,11 +19,12 @@
 // address. The send buffer: the engine pauses above 4 MiB (transfer.mjs HIGH) and goes on below 1 MiB
 // (bufferedamountlow); a browser closes a channel whose buffer passes 16 MiB, so neither is raised.
 import { LOW } from './transfer.mjs';
+import { RELAY_ONLY, relayOnly, relayedOf } from './call.mjs';
 
 const fail = (check, why) => { throw Object.assign(new Error(`${check}: ${why}`), { check }); };
 /** STUN ['host:port', …] and TURN ({ urls, username, credential } from the relay, or null) → RTCIceServer[]. The policy stays
  *  "all": a direct pair is preferred, the relayed candidate is used only when none answers. */
-/** Browser and WebView DTLS checks the handshake signatures: TURN allowed here (apps/transfer/rtc.mjs TURN_OK: not on werift). */
+/** Browser and WebView DTLS checks the handshake signatures: TURN allowed here (apps/transfer/rtc.mjs: only with dtls-verify.mjs's checks in place). */
 export const TURN_OK = true;
 export const iceServers = (stun, turn = null) => [...(stun.length ? [{ urls: stun.map((s) => `stun:${s}`) }] : []),
   ...(turn ? [{ urls: [...turn.urls], username: turn.username, credential: turn.credential }] : [])];
@@ -45,9 +50,11 @@ export function channelOf(dc, pc) {
   };
 }
 
-export async function peer({ stun = [], turn = null, gatherMs = 3000, RTC = globalThis.RTCPeerConnection } = {}) {
+export async function peer({ stun = [], turn = null, gatherMs = 3000, RTC = globalThis.RTCPeerConnection, policy = 'all' } = {}) {
   if (typeof RTC !== 'function') fail('no_rtc', 'this page has no RTCPeerConnection');
-  const pc = new RTC({ iceServers: iceServers(stun, turn) });
+  const relay = policy === 'relay';
+  if (relay && !turn) throw Object.assign(new Error(RELAY_ONLY), { check: 'relay_only' });
+  const pc = new RTC({ iceServers: iceServers(relay ? [] : stun, turn), ...(relay && { iceTransportPolicy: 'relay' }) });
   let dc = null, want = null, gotDc;
   const dcP = new Promise((r) => { gotDc = r; });
   pc.addEventListener('datachannel', (ev) => {
@@ -63,7 +70,7 @@ export async function peer({ stun = [], turn = null, gatherMs = 3000, RTC = glob
         pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); r(); } });
       });
     }
-    return pc.localDescription.sdp;
+    return relay ? relayOnly(pc.localDescription.sdp) : pc.localDescription.sdp;
   };
   return {
     pc,
@@ -96,6 +103,7 @@ export async function peer({ stun = [], turn = null, gatherMs = 3000, RTC = glob
         return channelOf(ch, pc);
       } finally { clearTimeout(timer); }
     },
+    async relayed() { try { return relayedOf(await pc.getStats()); } catch { return null; } },
     close() { try { pc.close(); } catch {} },
   };
 }

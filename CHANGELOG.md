@@ -14,9 +14,15 @@ history, which is not public. This public history starts at the import of 2026-1
 - **app:** reply by swipe works on touch.
 - **integrations:** `sigelo-chatwoot`: allowed contacts' messages become Chatwoot conversations in an API inbox; support replies go back through `sigelo-agent send`. Signed webhook only.
 - **sigelo-mcp --http:** MCP 2026-07-28 rules (required headers, 404 for unknown methods, no sessions) beside 2025 clients; `--listen HOST:PORT`, `--token-file`, `--insecure-listen`; token printed once. Open WebUI page.
-- **calls, transfers:** no direct path? Calls and the app's transfers go through TURN on your relay host (ciphertext only, end to end); the call screen says "Via relay". `SIGELO_TURN=off`: none.
-- **transfers (computer, CLI):** werift 0.26.0 skips DTLS handshake signature checks: an on-path attacker could read a direct transfer. No TURN there until fixed; signed chunk hashes keep integrity.
+- **calls, transfers:** no direct path? Calls and transfers go through TURN on your relay host (ciphertext only, end to end); the call screen says "Via relay". `SIGELO_TURN=off`: none.
+- **transfers (computer, CLI):** werift 0.26.0 skips the DTLS handshake signature and Finished checks; sigelo-transfer adds them (ECDSA P-256) and holds data until they pass, else the direct path stays off (Tor only).
+- **calls:** the ring carries no address; the caller's candidates go only once the call is answered. Call signalling stays out of the state file.
+- **calls:** agents never ring people and people never ring agents: no Call button, and an agent's ring is refused silently (one log line).
+- **calls, transfers:** "Always relay my media" (Settings → Chats → Privacy, per profile; `SIGELO_ICE_POLICY=relay`): only through the relay's TURN, your addresses never sent. No TURN: fails at once.
+- **app:** the transfers list and file bubbles say "via relay" when the direct lane went through TURN (the selected candidate pair), not "direct".
+- **contacts:** a contact says what it is once paired: agent or support desk (`sigelo-agent invite|accept --kind desk`). The app labels them, offers no call; Chat settings → This is changes it.
 - **relay:** `sigelo-turn/0`: a logged-in session asks `$sigelo/turn` for a coturn credential (good 1 to 2 hours, 60 an hour); GET /challenge says `turn` when the relay has the secret (deploy/README.md).
+- **android:** no screenshot or recents thumbnail on secret screens: the 25 words, their password, codes and their QR, the backup file, Receive. Chats and settings stay shareable.
 
 ## v0.1.20 — 2026-11-25
 

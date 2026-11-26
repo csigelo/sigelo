@@ -227,8 +227,12 @@
   const allContacts = () => (S.snap ? [...S.snap.groups.mine, ...S.snap.groups.contacts] : []);
   const contactBy = (did) => allContacts().find((c) => c.did === did) ?? null;
   const workerOf = (did) => S.workers?.workers?.find((w) => w.contact === did && w.status !== 'revoked') ?? null;
-  /** A contact's kind for its mark: the API's (UI-API.md "Kinds": derived, or the human's choice), else mine are agents. */
-  const kindOf = (c) => (c.kind === 'agent' || c.kind === 'person' ? c.kind : c.ours || c.local || workerOf(c.did) ? 'agent' : 'person');
+  /** A contact's kind for its mark: the API's (UI-API.md "Kinds": derived, said by the contact, or the human's choice), else
+   *  mine are agents. A support desk is marked as an agent (no call, the square); deskOf and kindWord tell it apart. */
+  const kindOf = (c) => (c.kind === 'agent' || c.kind === 'desk' ? 'agent' : c.kind === 'person' ? 'person' : c.ours || c.local || workerOf(c.did) ? 'agent' : 'person');
+  const deskOf = (c) => c?.kind === 'desk';
+  /** The small label beside an agent's or a desk's name. */
+  const kindWord = (c) => (deskOf(c) ? 'Support desk' : 'Agent');
   const unreadOf = (c) => (c.tier === 'quiet' ? 0 : c.unread);
   // A chat's notifications off (POST /api/notify): its count stays in the list, grey, and leaves the tab's.
   const muted = (x) => x?.notify === false;
@@ -471,6 +475,19 @@
    */
   const SCREENS = new Map();
   const screen = (name, opts, build) => { SCREENS.set(name, { ...opts, build }); };
+  /**
+   * The secret screens (UI-API.md "Secret screens"): a screen made with secret (true, or a function asked at each draw)
+   * or a sheet opened with secret keeps screenshots out while it is up (the Android shell's FLAG_SECURE through
+   * local.secure; a computer's window or a browser tab has none). Asked at every draw, a sheet's open and close: on
+   * entering, off on leaving by any way (Back, a tab, Done, a sheet's Close); the shell is told only of a change.
+   */
+  function shots() {
+    const def = SCREENS.get(top()?.view), s = def?.secret;
+    const want = !!(typeof s === 'function' ? s() : s) || S.sheet?.secret === true;
+    if (want === S.secure) return;
+    S.secure = want;
+    try { void Promise.resolve(LOCAL?.secure?.(want)).catch(() => {}); } catch {}
+  }
   const H = globalThis.history;
   const ours = () => H?.state?.sigelo === 1;
   const top = () => S.stack[S.stack.length - 1];
@@ -493,6 +510,7 @@
     S.leave?.(); S.leave = null;   // a screen that showed the words hides them
     dropSheet();
     S.view = e.view; S.note = null; S.msgsSeq = -1; S.chip = null; S.tabs = null; S.jump = null;
+    shots();   // before the build: a secret is never drawn unguarded
     S.update = def.build(e.arg) ?? (() => {});
     if (!same) window.scrollTo?.(0, 0);
     // A new screen: the focus on its heading (said first by a screen reader), unless its update puts it in a field.
@@ -685,6 +703,7 @@
     s.under?.removeAttribute?.('inert');
     s.onClose?.();
     if (s.opener && app.contains?.(s.opener)) s.opener.focus?.({ preventScroll: true });   // back where it was opened from
+    if (s.secret) shots();
   }
   /** The sheet closed (one entry back when it pushed one); resolves once it is gone. */
   function closeSheet() {
@@ -694,7 +713,7 @@
     return Promise.resolve();
   }
   /** sheet({title, lead, body, onClose, update}) → {panel, close}: a dialog over the screen. */
-  function sheet({ title, lead, body = [], onClose, update, bare }) {
+  function sheet({ title, lead, body = [], onClose, update, bare, secret = false }) {
     dropSheet();
     const panel = h('div', { class: 'panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, tabindex: '-1' },
       h('div', { class: 'phead' }, h('h1', { class: bare ? 'sr' : null }, title ?? ''), bare ? h('span', { class: 'sp' }) : null, ibtn('x', 'Close', () => closeSheet())), lead ? h('p', { class: 'lead' }, lead) : null, body);
@@ -705,7 +724,8 @@
     // The screen under it out of reach (focus, a screen reader, taps) while the sheet is up: the focus stays in the dialog.
     const under = S.screenEl && S.screenEl !== el ? S.screenEl : null;
     under?.setAttribute?.('inert', '');
-    S.sheet = { el, panel, onClose, opener, update, under };   // update: run at every poll while it is open
+    S.sheet = { el, panel, onClose, opener, update, under, secret };   // update: run at every poll while it is open
+    shots();
     if (ours() && !H.state.sheet) H.pushState({ ...H.state, sheet: true }, '');
     panel.focus?.();
     return { panel, close: closeSheet };
@@ -809,19 +829,19 @@
   const busyBubble = (c) => h('div', { class: 'msg in busy', role: 'status', 'aria-label': c?.busy_n > 1 ? `Working: ${c.busy_n} agents` : 'Working', 'data-busy': '' }, spinner(), busyN(c), h('span', { class: 'word' }, 'working…'));
   /** What a chat's row says under its name: the tier decides (own: the text; friend: a count; quiet: nothing). */
   function contactLine(c) {
-    const unread = unreadOf(c), agent = kindOf(c) === 'agent';
-    const lead = agent ? [h('span', { class: 'kind' }, 'Agent'), ' · '] : [];
+    const unread = unreadOf(c), agent = kindOf(c) === 'agent', tag = () => h('span', { class: 'kind' }, kindWord(c));
+    const lead = agent ? [tag(), ' · '] : [];
     if (c.status === 'pair_again') return [lead, h('span', { class: 'warn' }, 'Pair again')];
     if (!c.words_checked && c.words && !c.local) return [lead, h('span', { class: 'warn' }, typeof c.via?.public === 'string' ? 'Public code · not compared' : 'Compare four words')];
     if (c.status === 'waiting') return [lead, 'Waiting for their side'];
     if (c.not_collected) return [lead, 'Not collected yet'];
-    if (c.tier === 'quiet') return agent ? h('span', { class: 'kind' }, 'Agent') : '';
-    if (c.tier === 'friend') return unread ? [lead, `${unread} new message${unread === 1 ? '' : 's'}`] : agent ? h('span', { class: 'kind' }, 'Agent') : '';
+    if (c.tier === 'quiet') return agent ? tag() : '';
+    if (c.tier === 'friend') return unread ? [lead, `${unread} new message${unread === 1 ? '' : 's'}`] : agent ? tag() : '';
     // Their agent works on a turn (UI-API.md "Busy marks"): the small wheel in place of the last message; no count, no badge.
     if (c.busy) return [lead, busyLine(c)];
     // Mine waiting (offline, or no reader yet): said after it, as the mock's offline list does.
     const wait = c.last?.dir === 'out' && c.last.status === 'queued' ? ' · waiting to send' : '';
-    return c.last ? [lead, `${c.last.dir === 'out' ? 'You: ' : ''}${c.last.text}${wait}`] : agent ? h('span', { class: 'kind' }, 'Agent') : '';
+    return c.last ? [lead, `${c.last.dir === 'out' ? 'You: ' : ''}${c.last.text}${wait}`] : agent ? tag() : '';
   }
   function chatRows() {
     const items = allContacts().filter((c) => !chatDeleted(c)).map((c) => ({ at: c.last?.at ?? 0, name: c.name, row: () => row({
@@ -871,7 +891,7 @@
     };
   });
 
-  screen('requests', {}, () => {
+  screen('requests', { secret: true }, () => {
     const body = h('div', { class: 'pad stack' });
     mount(page({ title: 'Requests', body: [body] }));
     let links = null, at = 0;
@@ -944,7 +964,7 @@
       if (S.snap?.pending.paired.some((x) => x.id === M.inv.id) || (M.inv.renew && cur?.used?.length)) void go('my-code', { id: M.inv.id });
       else if (M.inv.renew) draw();
     };
-    sheet({ title: 'New chat', lead: 'Give them your code, or type theirs. Then you both compare your 4 words.', update, body: [mine,
+    sheet({ title: 'New chat', lead: 'Give them your code, or type theirs. Then you both compare your 4 words.', update, secret: true, body: [mine,
       h('div', { class: 'pad btns end' }, field('Their code', theirs), btn('Pair', pair, { auto: true })),
       list(row({ compact: true, start: icon('scan'), title: 'Scan their QR', onclick: () => go('scan') }),
         row({ compact: true, start: icon('people'), title: 'New group', sub: 'People and agents together', onclick: () => go('group-new') })),
@@ -978,7 +998,7 @@
   });
 
   // My code: one person starts a chat with me; once, 10 minutes; then the four words (UI-API.md /api/invite).
-  screen('my-code', {}, (arg) => {
+  screen('my-code', { secret: true }, (arg) => {
     const M = { id: arg?.id ?? null, inv: null, busy: false, error: null, renew: true }, body = h('div', { class: 'pad stack' }), foot = h('div');
     const title = h('h1', null, 'My code');
     mount(page({ who: title, body: [body], foot: [foot] }));
@@ -1021,7 +1041,7 @@
   });
 
   // Their code: accept it (UI-API.md /api/accept), then the words.
-  screen('enter-code', {}, (arg) => {
+  screen('enter-code', { secret: true }, (arg) => {
     const P = { busy: false, error: null, result: null }, body = h('div', { class: 'pad stack' }), foot = h('div');
     const code = input({ autocapitalize: 'characters', class: 'big', value: arg?.code ?? '', placeholder: 'M4QX-8T2B' }), name = input({ autocomplete: 'off', placeholder: 'Optional' });
     const title = h('h1', null, 'Enter their code');
@@ -1082,7 +1102,7 @@
   });
 
   // Scan a sigelo QR: a pairing code opens Enter their code; the camera, an image or pasted text (scanner()).
-  screen('scan', {}, () => {
+  screen('scan', { secret: true }, () => {
     const say = h('p', { class: 'help', role: 'status' });
     const sc = scanner(async (t) => {
       const text = t.trim();
@@ -1421,7 +1441,9 @@
       heading.textContent = safeText(c.name);
       if (walletOn() !== payAt.contains(payBtn)) put(payAt, walletOn() ? payBtn : null);
       if (callable(c) !== callAt.contains(callBtn)) put(callAt, callable(c) ? callBtn : null);
-      put(who, avatar(k, c.name, null, c.did), h('span', { class: 'mid' }, h('b', null, c.name), h('small', { class: c.online ? 'ok' : null }, w ? `your agent${seen ? ` · ${seen}` : ''}` : seen)));
+      // Under the name: "your agent", else "agent" or "support desk" for one (UI-API.md "Kinds"), then presence.
+      const label = w ? 'your agent' : k === 'agent' ? kindWord(c).toLowerCase() : '';
+      put(who, avatar(k, c.name, null, c.did), h('span', { class: 'mid' }, h('b', null, c.name), h('small', { class: c.online ? 'ok' : null, 'data-kind': label || null }, [label, seen].filter(Boolean).join(' · '))));
       const ts = await transferSettingsNow();
       // My agent's chat: its settings first, then the "+" (photos and files only: its allowance is paid on its own screen).
       put(lead, M.set([...fileChoices({ to: did }, c.name, ts, !w),
@@ -1603,10 +1625,14 @@
           kindOf(c) === 'person' && typeof c.can_call === 'boolean' ? toggle('Can call me', c.can_call ? 'Their calls ring here' : c.tier === 'quiet' && !c.can_call_set ? 'Off for quiet contacts: a missed call shows in the chat' : 'Off: a missed call shows in the chat', c.can_call,
             (on) => act(() => backend.call('POST', '/api/calls/allow', { contact: did, on }))) : null,
           // This chat's system notifications (NOTIFICATIONS below: the sender's name only, never the text) and its count.
-          toggle('Notifications', muted(c) ? 'Off: no count on the Chats tab' : 'The sender\'s name only, never the text', !muted(c), (on) => act(() => backend.call('POST', '/api/notify', { chat: did, on }))),
-          // Its kind (UI-API.md "Kinds"): the agent mark in the lists; derived by the page, or set here.
-          toggle('This is an agent', c.kind_set ? 'You set this' : kindOf(c) === 'agent' ? 'Known from its pairing' : 'Shows the agent mark in your chats', kindOf(c) === 'agent',
-            (on) => act(() => backend.call('POST', '/api/kind', { contact: did, kind: on ? 'agent' : 'person' }))),
+          toggle('Notifications', muted(c) ? 'Off: no count on the Chats tab' : 'The sender\'s name only, never the text', !muted(c), (on) => act(() => backend.call('POST', '/api/notify', { chat: did, on })))),
+        // Its kind (UI-API.md "Kinds"): a person, an agent or a support desk; derived by the page or said by the contact, or set here.
+        // An agent or a desk carries the square mark and its label, and is never called.
+        sec('This is'),
+        radios('This is', [['person', 'A person'], ['agent', 'An agent', 'The agent mark, no calls'], ['desk', 'A support desk', 'Labelled "support desk", no calls']],
+          c.kind === 'desk' ? 'desk' : kindOf(c), (v) => act(() => backend.call('POST', '/api/kind', { contact: did, kind: v }))),
+        h('p', { class: 'pad help', 'data-kind-from': c.kind_set ? 'you' : 'page' }, c.kind_set ? 'You set this.' : kindOf(c) === 'agent' ? 'Known from its pairing.' : 'Nothing says otherwise.'),
+        h('div', { class: 'list' },
           row({ compact: true, title: 'Rename', sub: c.name, chev: true, onclick: () => renameSheet(`Rename ${c.name}`, c.name, (name) => backend.call('POST', '/api/rename', { contact: did, name })) }),
           row({ compact: true, title: 'Clear this chat', onclick: clear }),
           row({ compact: true, title: 'Delete this chat', sub: `On this ${LOCAL || SHELL ? 'phone' : 'computer'} only: ${c.name} stays a contact`, onclick: del })),
@@ -1709,6 +1735,9 @@
   // "Send over the relay"; a larger one "Retry". The lane a file took, in a word.
   const RELAY_MAX = 8 * 1024 * 1024;
   const laneText = (v) => (v === 'relay' ? 'via relay' : v === 'direct' ? 'direct' : v === 'tor' ? 'over Tor' : null);
+  /** A transfer's lane: the direct lane whose selected candidate pair was relayed (TURN; the record's `relayed`, as the call
+   *  screen's "Via relay") says via relay too; live, the path it is on. */
+  const laneOf = (r, v) => (v === 'direct' && r?.relayed === true ? 'via relay' : laneText(v));
   /** A file of mine that did not go: whether the bubble offers the relay lane or a retry (null: neither). */
   const stuckOut = (r) => r && (['failed', 'expired'].includes(r.state) || (r.state === 'offered' && r.dropAt)) ? (r.size <= RELAY_MAX ? 'relay' : 'retry') : null;
   const relayOrRetry = (r, who) => {
@@ -1738,7 +1767,7 @@
     if (side === 'in' && r.state === 'asked') {
       btns.push(btn('Accept', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, r.contact)), { kind: 'pri' }), btn('Decline', () => act(() => backend.call('POST', '/api/transfers/decline', { id: r.id }))));
     }
-    if (side === 'in' && (r.state === 'interrupted' || (r.state === 'failed' && ['no_path', 'tor', 'land'].includes(r.reason)))) btns.push(btn(r.reason === 'land' ? 'Try again' : 'Resume', () => act(() => transferCall('/api/transfers/resume', { id: r.id }, r.contact))));
+    if (side === 'in' && (r.state === 'interrupted' || (r.state === 'failed' && ['no_path', 'relay_only', 'tor', 'land'].includes(r.reason)))) btns.push(btn(r.reason === 'land' ? 'Try again' : 'Resume', () => act(() => transferCall('/api/transfers/resume', { id: r.id }, r.contact))));
     if (side === 'in' && r.state === 'done' && r.saved && S.transferSettings?.open) btns.push(btn('Open', () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })), { kind: 'pri' }));
     if (side === 'in' && r.state === 'done' && r.saved && !/^content:/.test(r.saved) && r.size <= SAVE_MAX && !remoteHere()) btns.push(btn(saveLabel(), () => saveReceived(`id=${r.id}`)));
     if (['asked', 'offered', 'accepted', 'offering', 'active', 'interrupted'].includes(r.state) && !(side === 'in' && r.state === 'asked')) {
@@ -1747,7 +1776,7 @@
     if (side === 'out') { const k = stuckOut(r); if (k) btns.push(btn(k === 'relay' ? 'Send over the relay' : 'Retry', () => act(() => (k === 'relay' ? backend.call('POST', '/api/transfers/relay', { id: r.id }) : transferCall('/api/transfers/retry', { id: r.id }, r.contact))))); }
     if (['done', 'declined', 'cancelled', 'failed', 'expired', 'relayed'].includes(r.state)) btns.push(btn('Remove', () => act(() => backend.call('POST', '/api/transfers/forget', { id: r.id }))));
     return h('div', { class: 'card' }, h('p', null, h('b', null, `${side === 'in' ? 'From' : 'To'} ${r.contact}: `), h('span', { class: 'text' }, r.name), ` · ${mbOf(r.size)}`),
-      h('p', { class: r.state === 'failed' ? 'warn' : 'help' }, [tstate(r, side), r.group ? `group ${groupBy(r.group)?.name ?? ''}`.trim() : null, laneText(r.path_used) ?? r.path_used ?? (live && r.live !== 'waiting' ? r.live : null), r.rate ? `${r.rate.toFixed(2)} MB/s` : null].filter(Boolean).join(' · ')),
+      h('p', { class: r.state === 'failed' ? 'warn' : 'help' }, [tstate(r, side), r.group ? `group ${groupBy(r.group)?.name ?? ''}`.trim() : null, laneOf(r, r.path_used) ?? r.path_used ?? (live && r.live !== 'waiting' ? laneOf(r, r.live) ?? r.live : null), r.rate ? `${r.rate.toFixed(2)} MB/s` : null].filter(Boolean).join(' · ')),
       live || r.state === 'interrupted' ? [h('div', { class: 'meter' }, bar), h('p', { class: 'help' }, `${mbOf(got)} of ${mbOf(r.size)}`)] : null,
       whyOf(r) ? h('p', { class: 'help' }, whyOf(r)) : null,
       r.saved && /^content:/.test(r.saved) ? h('p', { class: 'help' }, 'In Downloads, where your other apps see it.') : r.saved ? h('p', { class: 'help' }, 'Saved at ', h('span', { class: 'mono' }, r.saved), ' (not opened).') : null,
@@ -2070,7 +2099,7 @@
     const f = m.file, out = m.dir === 'out';
     const r = out ? L?.out.find((x) => x.sha256 === f.sha256 && x.to === did) ?? L?.out.find((x) => x.id === f.transfer)
       : (f.transfer && L?.in.find((x) => x.id === f.transfer)) || L?.in.find((x) => x.sha256 === f.sha256 && x.from === did && x.state === 'done');
-    const lane = laneText(f.via) ?? laneText(r?.state === 'done' || r?.state === 'relaying' ? r.path_used ?? (r.state === 'relaying' ? 'relay' : null) : null);
+    const lane = laneOf(r, f.via) ?? laneOf(r, r?.state === 'done' || r?.state === 'relaying' ? r.path_used ?? (r.state === 'relaying' ? 'relay' : null) : null);
     const st = out ? (r ? photoState(r, 'out') : null) : 'saved';
     // The phone opens what is in Downloads (a content URI); one that came over the relay sits in the app: Save first.
     const open = S.transferSettings?.open && r && (out ? r.state !== 'cancelled' : r.state === 'done' && (!S.transferSettings.pick || /^content:/.test(r.saved ?? ''))) ? () => act(() => backend.call('POST', '/api/transfers/open', { id: r.id })) : null;
@@ -2526,7 +2555,7 @@
   const TRUST = [['own', 'Works for me', 'Its messages shown in full. For agents you run.'], ['quiet', 'Reads the web', 'Low trust: you read it when you choose.']];
   // How long the code works (the agent-setup feedback, point 12: a local model took 2 to 45 minutes to run the command).
   const LIFE = [['600', '10 minutes', 'An agent that answers at once.'], ['3600', '1 hour', 'A slow or busy agent.'], ['86400', '24 hours', 'A local model on a busy machine.']];
-  screen('enrol', {}, (arg) => {
+  screen('enrol', { secret: true }, (arg) => {
     const E = { id: arg?.id ?? null, first: null, busy: false, error: null, tier: 'own', ttl: 600 };
     const nameIn = input({ autocapitalize: 'none', maxlength: '64', placeholder: 'notes', 'data-keep': '' });
     if (typeof arg?.name === 'string') nameIn.value = arg.name;   // Enrol again (a revoked agent's name): a new code, a new key
@@ -2632,7 +2661,7 @@
     if (!on && !(await ask({ title: `Resume ${w.name}?`, text: `It can pay again, within its limits. You sign this with your key.`, yes: `Resume ${w.name}`, danger: false }))) return;
     await act(() => backend.call('POST', '/api/keeper/agent', { keeper: a.keeper, agent: a.name, paused: on }), async () => { toast(on ? `${w.name} paused` : `${w.name} resumed`); S.keeperAt = 0; await keeperNow(true); });
   }
-  screen('agent', {}, (i) => {
+  screen('agent', { secret: true }, (i) => {
     S.keeperAt = 0;   // a screen opened reads the keeper afresh
     const body = h('div'), title = h('h1', null, 'Agent'), acts = h('span');
     mount(page({ who: title, actions: [acts], body: [body] }));
@@ -2994,7 +3023,7 @@
     const q = [amount ? `tx_amount=${amount}` : null, note ? `tx_description=${encodeURIComponent(note)}` : null].filter(Boolean);
     return `monero:${addr}${q.length ? `?${q.join('&')}` : ''}`;
   };
-  screen('receive', {}, () => {
+  screen('receive', { secret: true }, () => {
     const R = { addr: null, index: null, error: null, labelled: '' };
     const body = h('div', { class: 'pad stack center' }), qr = h('div'), amount = input({ inputmode: 'decimal', placeholder: '0.10' }), note = input({ maxlength: '100', placeholder: 'Optional' });
     const amountErr = h('p', { class: 'err', role: 'alert', hidden: true });
@@ -3585,7 +3614,7 @@
     if (mode.kind === 'full') return row({ start: icon('check'), title: 'Holds your identity', sub: 'Signs in as you. Your key is sealed by the phone.', subCls: 'wrap' });
     return row({ start: icon('agent'), title: 'An agent of yours', sub: `It holds its own key${Number.isInteger(mode.worker) ? ` (worker ${mode.worker})` : ''}, vouched for by yours.`, subCls: 'wrap' });
   }
-  screen('devices', {}, () => {
+  screen('devices', { secret: () => backend === http }, () => {
     const here = h('div'), comp = h('div'), devs = h('div'), C = { r: null, say: null, done: null, asked: false };
     const D = devicesPart();
     mount(page({ title: 'Devices and computers', body: [here, comp, devs] }));
@@ -4038,6 +4067,10 @@
           h('div', { class: 'list' }, toggle('Show when I\'m online', 'to new people', st.new_presence === true, (v) => set({ new_presence: v }))),
           // Calls (decision 2026-11-17): the default for own and friends; quiet contacts never ring; each contact's page can differ.
           typeof st.calls === 'boolean' ? h('div', { class: 'list' }, toggle('Contacts can call me', st.calls ? 'Your own and friends ring here; quiet contacts never do. Each contact\'s page can change it.' : 'Off: nobody rings unless switched on on their page', st.calls, (v) => set({ calls: v }))) : null,
+          // "Always relay my media" (design/calls.md §6): per profile; calls and direct transfers only through the relay host.
+          typeof st.relay_media === 'boolean' ? [sec('Privacy'), h('div', { class: 'list' }, toggle('Always relay my media', st.relay_media
+            ? 'Contacts never learn this device\'s addresses. Calls go through the relay host, large transfers are slower; the host sees that you connected and how much, not what.'
+            : 'Off: calls and transfers go direct when they can, and the contact sees this device\'s addresses', st.relay_media, (v) => set({ relay_media: v })))] : null,
           h('div', { class: 'list' }, toggle('Send seen receipts', st.seen_receipts !== false ? 'They see ✓✓ once you have read their messages' : 'Off: they see one tick, never when you read', st.seen_receipts !== false, (v) => set({ seen_receipts: v })),
             // System notifications (NOTIFICATIONS below): the sender's name only; off, none at all.
             toggle('Notifications', 'The sender\'s name only, never the text', st.notify !== false, (v) => set({ notify: v })))]
@@ -4230,7 +4263,7 @@
       h('p', { class: 'help' }, 'Encrypted with your words password. Never sent to a Sigelo server.'),
       h('div', { class: 'btns' }, btn('Back up this profile', () => go('backup-make'), { disabled: !BK.st.can })));
   }
-  screen('backup-make', {}, () => {
+  screen('backup-make', { secret: true }, () => {
     const body = h('div', { class: 'pad stack' }), foot = h('div'), pw = pwField('Words password'), again = pwField('Repeat it'), V = { say: null, done: null };
     mount(page({ title: 'Back up this profile', body: [body], foot: [foot] }));
     void backupStatus();
@@ -4251,15 +4284,15 @@
       put(foot, btn('Make the backup file', make, { kind: 'pri', ic: 'lock', disabled: V.busy || !BK.st?.can }));
     };
   });
-  screen('words-show', {}, () => {
+  screen('words-show', { secret: true }, () => {
     const body = h('div', { class: 'pad stack' }), foot = h('div'), pw = pwField('Words password'), V = { say: null, words: null }, title = h('h1', null, 'Show 25 words');
     const pwBox = field('Words password', pw), lockMark = h('div', { class: 'badge-ic' }, icon('lock'));
     mount(page({ who: title, body: [body], foot: [foot] }));
     // Shown, the top bar's Back becomes Close (the mock's words-show); either hides them.
     const bar = S.backBtn, closeAs = () => { if (!bar) return; bar.setAttribute('aria-label', 'Close'); bar.setAttribute('title', 'Close'); put(bar, icon('x')); };
-    const hide = () => { V.words = null; V.shown = null; void LOCAL?.secure?.(false); };
+    const hide = () => { V.words = null; V.shown = null; };
     S.leave = hide;
-    const open = run(V, async () => { const r = await WORDS.reveal(pw.value); pw.value = ''; await LOCAL?.secure?.(true); V.words = r.words; });
+    const open = run(V, async () => { const r = await WORDS.reveal(pw.value); pw.value = ''; V.words = r.words; });
     return () => {
       if (!V.words) {
         put(body, lockMark, h('p', { class: 'lead center' }, 'Anyone who sees them owns this identity and its money. Check nobody is looking.'), pwBox, inlineError(V.say));
@@ -4275,7 +4308,7 @@
       put(foot, btn('Done', () => { hide(); back(); }, { kind: 'pri' }));
     };
   });
-  screen('words-change', {}, () => {
+  screen('words-change', { secret: true }, () => {
     const body = h('div', { class: 'pad stack' }), old = pwField('Current password'), next = pwField('New password'), again = pwField('Repeat it'), V = { say: null };
     const save = run(V, async () => { await WORDS.change(old.value, next.value, again.value); for (const x of [old, next, again]) x.value = ''; await wordsStatus(); toast('Password changed.'); back(); });
     mount(page({ title: 'Change the password', body: [body], foot: [btn('Save', () => save(), { kind: 'pri' })] }));
@@ -4284,19 +4317,18 @@
   });
   // Set a password (Backup and recovery, none kept): the 25 words typed once more, checked to be this identity's, kept here
   // encrypted under the password (apps/web/words.mjs set); then showing them asks the lock and the password.
-  screen('words-set', {}, () => {
+  screen('words-set', { secret: true }, () => {
     const body = h('div', { class: 'pad stack' }), words = h('textarea', { rows: 4, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', 'aria-label': 'Your 25 words' });
     const next = pwField('New password'), again = pwField('Repeat it'), V = { say: null };
     words.addEventListener('copy', (e) => e.preventDefault?.());
     const save = run(V, async () => { await WORDS.set(words.value, next.value, again.value); words.value = ''; next.value = ''; again.value = ''; await wordsStatus(); toast('Password set: your words are kept here.'); back(); });
-    S.leave = () => { words.value = ''; void LOCAL?.secure?.(false); };
-    void LOCAL?.secure?.(true);
+    S.leave = () => { words.value = ''; };
     mount(page({ title: 'Set a password', body: [body], foot: [btn('Save', () => save(), { kind: 'pri' })] }));
     const boxes = [h('p', { class: 'lead' }, 'Type your 25 words once more. They are kept here, encrypted under this password; nobody looking at this phone can read them without it.'),
       field('Your 25 words, in order', words, 'Checked to be this identity\'s before they are kept.'), field('New password', next, 'At least 8 characters.'), field('Repeat it', again)];
     return () => put(body, inlineError(V.say), boxes);
   });
-  screen('words-remove', {}, () => {
+  screen('words-remove', { secret: true }, () => {
     const body = h('div', { class: 'pad stack' }), pw = pwField('Password'), V = { say: null };
     const goBtn = btn('Stop keeping them here', () => remove(), { kind: 'danger' });
     const remove = run(V, async () => { await WORDS.remove(pw.value); pw.value = ''; await wordsStatus(); toast('The words kept here are deleted.'); back(); });
@@ -4305,7 +4337,7 @@
     return () => put(body, h('p', { class: 'warn' }, 'The words kept on this phone are deleted. Your paper is then the only copy.'), inlineError(V.say), box);
   });
   /** The app's seat taken here (the seat card) when the words password guards it. */
-  screen('seat-take', {}, () => {
+  screen('seat-take', { secret: true }, () => {
     const body = h('div', { class: 'pad stack' }), pw = pwField('Password'), V = { say: null };
     const take = run(V, async () => { await backend.call('POST', '/api/seat/take', { confirm: true, password: pw.value }); pw.value = ''; back(); });
     mount(page({ title: 'Make this phone the main one', body: [body], foot: [btn('Make this phone the main one', () => take(), { kind: 'danger' })] }));

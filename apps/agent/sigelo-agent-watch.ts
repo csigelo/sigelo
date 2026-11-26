@@ -48,7 +48,7 @@ import { existsSync, mkdirSync, renameSync, rmSync, unwatchFile, watchFile, writ
 import { join, resolve } from 'node:path';
 import * as id from './sigelo-agent.ts';
 import { signer } from './sigelo-agent-keys.ts';
-import { actingFile, contactLib, promptLine, contactModule, debug, duration, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, serveAsks, unreadable, type Ask } from './sigelo-agent-contact.ts';
+import { actingFile, contactLib, promptLine, contactModule, debug, duration, introText, kickPath, linkNotes, noIdentity, safeJson, safeText, selfKindOf, selfNameOf, serveAsks, unreadable, type Ask } from './sigelo-agent-contact.ts';
 import type { GroupItem, GroupLib } from './sigelo-agent-group.ts';
 import { takeLock } from './sigelo-agent-ui.ts';
 import { deviceRound, seatGate } from './sigelo-agent-device.ts';
@@ -339,7 +339,8 @@ export async function startWatch(o: WatchOptions): Promise<Watch> {
     };
     carrier = new lib.Carrier({
       identity: () => { let s; try { s = id.load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: id.bundleOf(s) }; },
-      ...lib.pathsFor(path), ...lib.optionsFromEnv(), backoff: WATCH_BACKOFF, ...o.carrier, keep: true, onEvent,
+      // The name and kind told to a contact whose pairing completes here (carrier.mjs "Names", "Kinds"), as the CLI's.
+      ...lib.pathsFor(path), ...lib.optionsFromEnv(), backoff: WATCH_BACKOFF, selfName: () => selfNameOf(path), selfKind: () => selfKindOf(path), ...o.carrier, keep: true, onEvent,
     }) as unknown as Car;
     const X = await (await import('./sigelo-agent-contact.ts')).contactModule<{ Engine: new (o: object) => { kick(): Promise<void>; close(): Promise<void> } }>('transfer-node');
     engine = new X.Engine({ carrier, identity: path, onEvent: onTransfer });

@@ -883,6 +883,35 @@ class FakeEl {
       f.stop();
     }
   }
+  // The first run's secret screens (UI-API.md "Secret screens"): an invite code, a backup's password, a computer's code and
+  // the words password set FLAG_SECURE on entering; Back, or going on to a shareable screen, clears it.
+  {
+    const bx = new FakeEl('div'), log = [];
+    const f = WM.firstRun(bx, { ...SU.setupApi(p, { bridge: null, mqtt: mqttEsm, storage: new Map(), reload() {} }), join() {}, async restoreBackup() { throw new Error('no'); }, async keepWords() {}, secure: (on) => { log.push(on); } });
+    const b = (x) => bx.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith(x)), h1 = () => bx.all().find((e) => e.tagName === 'H1')?.textContent;
+    const bad = [];
+    for (const [x, want] of [['I have an invite code', 'Join from an invite'], ['Restore from a backup', 'Restore from a backup'], ['Use my computer instead', 'Use my computer']]) {
+      const n = log.length;
+      b(x).onclick();
+      const on = h1() === want && log.length === n + 1 && log.at(-1) === true;
+      history.back();
+      if (!on || log.length !== n + 2 || log.at(-1) !== false || h1() !== 'Sigelo') bad.push(want);
+    }
+    ok(bad.length === 0, `first run: Join from an invite, Restore from a backup, Use my computer set FLAG_SECURE on entering, Back clears it${bad.length ? ` (wrong: ${bad.join(', ')})` : ''}`);
+    b('I have an invite code').onclick();
+    bx.all().find((e) => e.className === 'code-in').value = 'K7F3-Q9ZP';
+    await b('Next').onclick();
+    const onward = h1() === 'Name this phone' && log.slice(-2).join() === 'true,false';
+    history.back(); history.back();
+    b('Create my identity').onclick(); await b('Next').onclick();
+    const n = log.length;
+    b('Set a password').onclick();
+    const pwOn = h1() === 'Set a password' && log.length === n + 1 && log.at(-1) === true;
+    history.back();
+    ok(onward && pwOn && h1() === 'Keep it safe' && log.at(-1) === false && log.length === n + 2,
+      'first run: an invite code taken (Next to Name this phone) clears it; Set a password sets it, Back to Keep it safe clears it');
+    f.stop();
+  }
   restoreGlobals();
   const src = readFileSync(join(HERE, 'setup.mjs'), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   ok(!/mnemonicFromRoot|encodeMoneroWords|newRoot\b|localStorage\.setItem|sessionStorage|console\./.test(src) && /session\.words\(\)/.test(src), 'setup.mjs: the words only from the session (apps/contact/create.mjs), never stored or logged');

@@ -171,6 +171,8 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
         ...lib.pathsFor(path), ...options, ...(clock && { clock }),
         // The name told to a new contact once paired (carrier.mjs "Names"), as the CLI's: SIGELO_NAME, else the profile's.
         selfName: () => env.SIGELO_NAME?.trim() || /(?:^|[\\/])sigelo\.([a-z0-9_-]{1,64})\.local\.json$/.exec(path)?.[1] || null,
+        // Its kind, as the CLI's (sigelo-agent selfKindOf): $SIGELO_KIND, else <identity>.kind (invite|accept --kind), else agent.
+        selfKind: () => { const e = env.SIGELO_KIND?.trim(); if (e === 'agent' || e === 'desk') return e; try { return readFileSync(`${path.replace(/\.json$/, '')}.kind`, 'utf8').trim() === 'desk' ? 'desk' : 'agent'; } catch { return 'agent'; } },
       }));
     }
     return carriers.get(path);

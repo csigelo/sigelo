@@ -272,6 +272,10 @@ ok(/private boolean locked = true;/.test(ma) && /protected void onStart\(\) \{[\
   && /boolean weaker = \(lockOn\(\) && !on1\) \|\| after1 > lockAfter\(\);\s*if \(weaker\) activity\.unlock\(save,/.test(jbl) && /\.put\("secure", km != null && km\.isDeviceSecure\(\)\)/.test(jbl),
   'app lock: the screen lock at a start and at a return after the set minutes (1, 5, 15, 60; default 1), none when off (default on), the page hidden until confirmed; '
   + 'the page\'s own asks always (a minute\'s window, force skips it); a weaker setting asks the lock first; a second ask joins the prompt up, never cancels it');
+// The secret screens (apps/agent/UI-API.md "Secret screens"): the bridge's secure sets and clears FLAG_SECURE, and from API 33
+// refuses the recents screenshot while on; the op is the page's (platform-android.mjs OPS).
+ok(/case "secure": \{[\s\S]*?if \(on\) activity\.getWindow\(\)\.addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\);\s*else activity\.getWindow\(\)\.clearFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\);[\s\S]*?if \(Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.TIRAMISU\) activity\.setRecentsScreenshotEnabled\(!on\);[\s\S]*?break;/.test(jbl)
+  && ops.includes('secure'), 'secret screens: secure sets and clears FLAG_SECURE (no screenshot, no recording, a blank recents thumbnail), the recents screenshot refused too from API 33');
 {
   // Notifications: only what the page gives, its name kept off the lock screen, the tap's intent immutable and ours, the tag checked.
   const nb = /private void notification\(WebMessagePort to, int id, JSONObject m\) \{([\s\S]*?)\n    \}\n/.exec(jbl)?.[1] ?? '';

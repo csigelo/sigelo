@@ -112,7 +112,7 @@ const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort:
 const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
 const make = (a) => {
   const paths = pathsFor(join(dir, `${a.label}.local.json`));
-  a.c = new Carrier({ identity: () => ({ secret: a.secret, bundle: a.bundle }), ...paths, relay: HOST, endpoints, clock: () => now, keep: true, backoff: [100, 400], retentionDays: 7, ...(a.selfName && { selfName: a.selfName }) });
+  a.c = new Carrier({ identity: () => ({ secret: a.secret, bundle: a.bundle }), ...paths, relay: HOST, endpoints, clock: () => now, keep: true, backoff: [100, 400], retentionDays: 7, ...(a.selfName && { selfName: a.selfName }), ...(a.selfKind !== undefined && { selfKind: a.selfKind }) });
   a.f = groupsPath(join(dir, `${a.label}.local.json`)); a.paths = paths; a.out = []; a.seen = [];
   return a;
 };
@@ -403,7 +403,18 @@ try {
   let creatorName = null;
   for (let i = 0; i < 3 && creatorName !== 'Nora x'; i++) creatorName = await g4at4();
   ok(creatorName === 'Nora x', `names: the creator's own name in the roster is its told one, not "creator" (${creatorName})`);
-  for (const a of [N1, N2, N3, N4]) await a.c.stop();
+  // ---- kinds (carrier.mjs "Kinds", 2026-11-26): a desk and an agent say so in the name's receipt; a person's app says
+  // nothing; the receiver keeps kind_peer; an unknown kind is ignored; a kind with no name is not taken for a receipt.
+  const K1 = make(Object.assign(agent('kinds person'), { selfName: 'Pia' })), K2 = make(Object.assign(agent('kinds desk'), { selfName: 'Help', selfKind: () => 'desk' }));
+  const K3 = make(Object.assign(agent('kinds agent'), { selfKind: 'agent' })), K4 = make(Object.assign(agent('kinds odd'), { selfName: 'Odd', selfKind: () => 'robot' }));
+  for (const x of [K2, K3, K4]) { const inv = await x.c.invite({}); await K1.c.accept(inv.code, { wait: 0.3 }); }
+  for (let i = 0; i < 3; i++) { now += 5; for (const x of [K1, K2, K3, K4]) await x.c.inbox(); }
+  ok(cOf(K1, K2)?.kind_peer === 'desk' && cOf(K1, K2).name === 'Help' && cOf(K1, K3)?.kind_peer === 'agent' && cOf(K1, K4)?.kind_peer === null,
+    `kinds: the desk's and the agent's said, kept as kind_peer; an unknown one ignored (${[cOf(K1, K2)?.kind_peer, cOf(K1, K3)?.kind_peer, cOf(K1, K4)?.kind_peer]})`);
+  ok([K2, K3, K4].every((x) => cOf(x, K1)?.kind_peer === null) && cOf(K1, K3).seen_peer === false, 'kinds: a person says nothing (null on the other side); a kind-only receipt is not a seen receipt');
+  ok(K2.c.selfKind() === 'desk' && K4.c.selfKind() === null && K1.c.selfKind() === null, 'selfKind(): desk; an unknown one or none: null');
+  ok((() => { try { make(Object.assign(agent('kinds bad'), { selfKind: 'robot' })); return false; } catch (e) { return e instanceof TypeError; } })(), 'selfKind: a string not a kind refused at construction');
+  for (const a of [N1, N2, N3, N4, K1, K2, K3, K4]) await a.c.stop();
   for (const a of all) await a.c.stop();
 } finally {
   await relay.close();
