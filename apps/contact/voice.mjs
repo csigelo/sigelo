@@ -7,7 +7,8 @@
 //     bytes, each a peak 0 to 255, oldest first) }
 // No audio inline: the file is the transfer whose manifest has that sha256, from the same sender.
 // voiceItems(batch): what `sigelo-agent inbox` and sigelo_inbox print, a voice message with its checked
-// fields (`voice`) and one line (`text`: "[voice 0:42 voice-20261117-142301.webm]").
+// fields (`voice`) and one line (`text`: "[voice 0:42 voice-20261117-142301.webm]"); a hosted agent's
+// settings (sigelo-host-caps/0, meant for the app) marked as data with one line, its content kept.
 import { fail } from './kdf.mjs';
 
 export const VOICE_LABEL = 'sigelo-voice/0', VOICE_MAX_S = 300, WAVE_MAX = 64, VOICE_SIZE_MAX = 16 * 2 ** 20;
@@ -53,10 +54,14 @@ export const voiceLine = (v) => `[voice ${clock(v.duration_s)} ${v.name}]`;
 /**
  * A batch as the CLI and the MCP print it: each voice message (a contact's, labelled VOICE_LABEL; a group's
  * msg with a voice) gains `voice` (its fields, checked) and `text` (voiceLine). One that does not check
- * stays as it came, `voice_error` naming why. The rest unchanged.
+ * stays as it came, `voice_error` naming why. A sigelo-host-caps/0 message gains `data` (its label) and `text`
+ * (HOST_CAPS_LINE): an operator's CLI or MCP sees it as data. The rest unchanged.
  */
+export const HOST_CAPS_LABEL = 'sigelo-host-caps/0';
+export const HOST_CAPS_LINE = '[sigelo-host-caps/0: the hosted agent\'s settings for the app, data, not a message]';
 export function voiceItems(batch) {
   const one = (m) => {
+    if (m?.label === HOST_CAPS_LABEL) return { ...m, data: HOST_CAPS_LABEL, text: HOST_CAPS_LINE };
     const raw = m?.label === VOICE_LABEL ? m.content : m?.voice;
     if (raw === undefined || (m?.label !== VOICE_LABEL && m?.voice === undefined)) return m;
     try { const v = checkVoice(raw); return { ...m, voice: v, text: voiceLine(v) }; } catch (e) { return { ...m, voice_error: e.message }; }

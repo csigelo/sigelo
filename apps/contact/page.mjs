@@ -379,7 +379,8 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
         const lane = m['transfer'] ? (m['via'] ?? null) : 'relay';
         if (!m['transfer']) { try { transfers?.engine.superseded?.(m); } catch {} }
         record({ kind: 'in', did: m['from'], name: m['contact'], label: m['label'], text: `file ${String(m['name'])} (${String(m['size'])} bytes), saved at ${String(m['path'])}`,
-          file: { name: String(m['name']), size: Number(m['size']), sha256: String(m['sha256'] ?? ''), via: lane, transfer: m['transfer'] ?? null }, ...iat, ...link });
+          file: { name: String(m['name']), size: Number(m['size']), sha256: String(m['sha256'] ?? ''), via: lane, transfer: m['transfer'] ?? null },
+          ...(typeof m['path'] === 'string' && { saved: m['path'] }), ...iat, ...link });   // saved: where GET /api/files/data reads it, never parsed from the text
       }
       else {
         // A hosted agent's approval or question (promptOf): its fields beside a one-line text, which a reply quotes.
@@ -1574,6 +1575,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       return true;
     },
     stun: (c) => stunOf(carrier.relay, c?.relay),
+    turn: () => (globalThis.process?.env?.SIGELO_TURN === 'off' ? null : carrier.turnServer?.() ?? null),   // SIGELO_TURN=off: STUN alone (the transfer engine reads it too)
     can: { speaker: typeof CH.speaker === 'function', mic: typeof CH.mic === 'function', ring: typeof CH.alert === 'function' },
     hooks: { speaker: CH.speaker, mic: CH.mic, micSettings: CH.micSettings },
     allow: (c, on) => { if (on === null) delete data.calls[c.did]; else data.calls[c.did] = on; saveData(); changed(); },
@@ -1590,7 +1592,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       const k = Number(n), r = Number.isSafeInteger(k) ? recs.find((x) => x.n === k && x.kind === 'in' && x.file) : undefined;
       if (!r) refuse(404, 'file_unknown', 'no file received in that message');
       ({ name, size } = r.file);
-      path = /, saved at (.+)$/s.exec(String(r.text ?? ''))?.[1] ?? null;
+      path = typeof r.saved === 'string' ? r.saved : null;   // a field kept at receipt (the text holds the sender's file name)
     } else if (id !== null) {
       if (!transfers) refuse(404, 'transfer_unknown', 'no transfers here');
       if (!/^[0-9a-f]{32}$/.test(id)) refuse(400, 'body', 'id: a transfer id (32 hex digits)');

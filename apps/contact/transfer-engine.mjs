@@ -312,14 +312,15 @@ export function stunFor(carrier, c, env = {}) {
 export class Engine {
   /**
    * carrier: started (it holds the session); io (above); rtc: () → the direct path's module ({ peer }) or null;
-   * stun: a list, or null for stunFor(env); pro: () → whether this agent's pool is Pro; compared(did): the four
+   * stun: a list, or null for stunFor(env); turn: null (ask carrier.turnServer at each attempt; env.SIGELO_TURN=off: never), false (none),
+   * or a function → { urls, username, credential } | null; pro: () → whether this agent's pool is Pro; compared(did): the four
    * words of that contact were compared (the accept rule); maxServe: transfers served at once (the rest wait,
    * their offers kept); onEvent(e): {type: 'transfer', what, id, …}; fallbackMs: a drop not picked up again within it goes
    * over the relay lane (up to 8 MiB, own and compared); stallMs: a channel with no byte for so long counts as dropped.
    */
-  constructor({ carrier, io, rtc = async () => null, stun = null, env = {}, pro = () => false, compared = () => false, maxServe = Infinity, onEvent = () => {}, retryMs = RETRY_MS, torConnectMs = 120_000, timer = true,
+  constructor({ carrier, io, rtc = async () => null, stun = null, turn = null, env = {}, pro = () => false, compared = () => false, maxServe = Infinity, onEvent = () => {}, retryMs = RETRY_MS, torConnectMs = 120_000, timer = true,
     fallbackMs = FALLBACK_MS, stallMs = STALL_MS }) {
-    Object.assign(this, { carrier, io, rtcLoad: rtc, stun, env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, fallbackMs, stallMs });
+    Object.assign(this, { carrier, io, rtcLoad: rtc, stun, turn, env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, fallbackMs, stallMs });
     this.relaying = new Set();   // ids going over the relay lane from this process (relay)
     this.attempts = new Map();   // id → { role, attempt, peer, channel, proto, onion, server, got, sent, path }
     this.held = [];              // offers waiting for a free slot (maxServe)
@@ -338,6 +339,13 @@ export class Engine {
     return this.caps;
   }
   stunOf(c) { return this.stun ?? stunFor(this.carrier, c, this.env); }
+  /** The TURN server for an attempt starting now (relay/turn.mjs, fresh credentials), or null: STUN alone, as before.
+   *  rtc: the direct path's module; only one with TURN_OK true gets one (werift's DTLS: apps/transfer/rtc.mjs). */
+  async turnOf(rtc) {
+    if (rtc?.TURN_OK !== true || this.turn === false || this.env.SIGELO_TURN === 'off') return null;
+    const f = typeof this.turn === 'function' ? this.turn : () => this.carrier.turnServer?.();
+    try { return (await f()) ?? null; } catch { return null; }
+  }
   /** One round soon (a `transfer` event, a kick from a verb beside this process). */
   kick() {
     if (this.closed) return this.chain;
@@ -600,7 +608,9 @@ export class Engine {
     this.attempts.set(id, a);
     let sdp = null;
     if (order[0] === 'direct') {
-      a.peer = await rtc.peer({ stun: this.stunOf(c), gatherMs: GATHER_MS });
+      const turn = await this.turnOf(rtc);
+      a.turn = turn !== null;
+      a.peer = await rtc.peer({ stun: this.stunOf(c), turn, gatherMs: GATHER_MS });
       sdp = await a.peer.offer(channelLabel(id, attempt));
     }
     this.st((s) => Object.assign(s.in[id], { state: 'offering', attempt, offerAt: this.now(), path: order[0] }));
@@ -642,7 +652,7 @@ export class Engine {
     }
     this.attempts.delete(r.id); this.closeAttempt(a);
     const c = contactOf(this.carrier, r.from);
-    this.fail('in', r.id, 'no_path', noPath(c.name));
+    this.fail('in', r.id, 'no_path', noPath(c.name, a.turn === true));
     await sendMsg(this.carrier, r.from, { typ: 'end', id: r.id, reason: 'no_path', attempt: a.attempt }, false).catch(() => {});
   }
 
@@ -670,7 +680,9 @@ export class Engine {
     this.st((s) => Object.assign(s.out[r.id], { state: 'active', attempt: x.attempt }));
     let sdp = null;
     if (directOk) {
-      a.peer = await rtc.peer({ stun: this.stunOf(c), gatherMs: GATHER_MS });
+      const turn = await this.turnOf(rtc);
+      a.turn = turn !== null;
+      a.peer = await rtc.peer({ stun: this.stunOf(c), turn, gatherMs: GATHER_MS });
       sdp = await a.peer.answer(x.sdp, channelLabel(r.id, x.attempt));
     }
     await sendMsg(this.carrier, m.from, { typ: 'answer', id: r.id, attempt: x.attempt, sdp, tor }, false);

@@ -52,6 +52,9 @@ ok(voiceLine(V) === '[voice 0:42 voice-20261117-142301.webm]', 'voiceLine: [voic
   ok(r.messages[0].text === '[voice 0:42 voice-20261117-142301.webm]' && r.messages[0].voice.sha256 === SHA && r.messages[0].content === V, 'voiceItems: a voice message gains text [voice 0:42 name] and its fields (voice); content kept');
   ok(r.messages[1] === batch.messages[1] && r.events === batch.events, 'voiceItems: other messages and the events as they were');
   ok(r.messages[2].voice_error?.includes('duration_s') && r.messages[2].text === undefined, 'voiceItems: one that does not check says why (voice_error), no line');
+  const caps = { label: 'sigelo-host-caps/0', content: { v: 'sigelo-host-caps/0', model: { value: 'x' } } };
+  const rc = voiceItems({ messages: [caps], events: [] }).messages[0];
+  ok(rc.data === 'sigelo-host-caps/0' && /data, not a message/.test(rc.text) && rc.content === caps.content, 'voiceItems: a sigelo-host-caps/0 message is marked data with one line, content kept');
   ok(r.messages[3].text === voiceLine(V) && r.messages[3].voice.duration_s === 42, 'voiceItems: a group msg with a voice gets the line too');
 }
 

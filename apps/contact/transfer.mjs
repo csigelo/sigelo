@@ -382,6 +382,9 @@ export function torRoles(sender, receiver) {
   return null;
 }
 /** The free refusal (design §5), for a contact's name. */
-export const noPath = (name) => `No direct path to ${name} from these two networks, and no Tor. Up to 8 MiB: send-file. Tor on both sides, or Pro, carries larger files.`;
+// relayed: a TURN server was offered and still no pair answered (UDP and TCP to the relay host blocked, say).
+export const noPath = (name, relayed = false) => (relayed
+  ? `No path to ${name} from these two networks, not even through the relay host, and no Tor. Up to 8 MiB: send-file. Tor on both sides carries larger files.`
+  : `No direct path to ${name} from these two networks, and no Tor. Up to 8 MiB: send-file. Tor on both sides, or Pro, carries larger files.`);
 
 export { hexToBytes, bytesToHex };

@@ -284,15 +284,15 @@ try {
     const p = spawn(process.execPath, [join(here, 'server.mjs'), ...args], { env: { ...process.env, SIGELO_KEY_PROVIDER: keyAgent ? 'agent' : 'file', ...env }, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     const exited = new Promise((res) => p.on('exit', (code) => res(code)));
-    const up = new Promise((res) => p.stderr.on('data', (d) => { stderr += d; const m = /listening on (http:\/\/\S+)/.exec(stderr); if (m && /bearer token \S+/.test(stderr)) res(m[1]); }));
+    const up = new Promise((res) => p.stderr.on('data', (d) => { stderr += d; const m = /listening on (http:\/\/\S+)/.exec(stderr); if (m && /Open WebUI: .*\n/.test(stderr)) res(m[1]); }));
     return { p, exited, stderr: () => stderr, url: Promise.race([up, exited.then(() => null)]), stop: () => { p.kill('SIGTERM'); return exited; } };
   };
   const h1 = httpServer({ SIGELO_IDENTITY: idFile });
   const mcpUrl = await h1.url;
   ok(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(mcpUrl ?? ''), 'http: listens on 127.0.0.1 by default and prints the URL', h1.stderr());
   const tokFile = join(dir, 'sigelo-mcp-http.token'), tok = readFileSync(tokFile, 'utf8').trim();
-  ok(/^[A-Za-z0-9_-]{43}$/.test(tok) && (process.platform === 'win32' || (statSync(tokFile).mode & 0o777) === 0o600) && h1.stderr().includes(`bearer token ${tok} (new)`),
-    'http: a 256-bit token made once beside the identity file (0600) and printed', h1.stderr());
+  ok(/^[A-Za-z0-9_-]{43}$/.test(tok) && (process.platform === 'win32' || (statSync(tokFile).mode & 0o777) === 0o600) && h1.stderr().includes(`new token, kept in ${tokFile}; paste into your client: ${mcpUrl}  Authorization: Bearer ${tok}`),
+    'http: a 256-bit token made once beside the identity file (0600) and printed with the URL', h1.stderr());
   const post = (body, headers = {}) => fetch(mcpUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${tok}`, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
   const rpcH = async (method, params, headers) => { const res = await post({ jsonrpc: '2.0', id: 7, method, ...(params && { params }) }, headers); return { status: res.status, type: res.headers.get('content-type'), cors: res.headers.get('access-control-allow-origin'), m: res.status === 200 ? await res.json() : await res.text() }; };
   let hr = await rpcH('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
@@ -330,7 +330,28 @@ try {
   const batch = res.status === 200 ? await res.json() : [];
   ok(batch.length === 2 && batch[0].id === 1 && JSON.parse(batch[1].result?.content?.[0]?.text ?? '{}').identity_file === idFile, 'http: a 2025-03-26 batch → one answer per request, none for the notification', JSON.stringify(batch).slice(0, 200));
   hr = await rpcH('tools/list', undefined, { 'MCP-Protocol-Version': '1999-01-01' });
-  ok(hr.status === 400 && /unsupported MCP-Protocol-Version/.test(hr.m), 'http: an unsupported MCP-Protocol-Version → 400', JSON.stringify(hr));
+  ok(hr.status === 400 && /unsupported MCP-Protocol-Version/.test(hr.m) && JSON.parse(hr.m).error.code === -32022 && JSON.parse(hr.m).error.data.supported.includes('2026-07-28'), 'http: an unsupported MCP-Protocol-Version → 400, -32022 with the supported list', JSON.stringify(hr));
+  // 2026-07-28 (stateless): the standard headers are required and must match the body.
+  const meta28 = (extra = {}) => ({ _meta: { [PVK]: '2026-07-28' }, ...extra });
+  const hdr28 = (method, extra = {}) => ({ 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...extra });
+  hr = await rpcH('tools/call', meta28({ name: 'sigelo_whoami', arguments: {} }), hdr28('tools/call', { 'Mcp-Name': 'sigelo_whoami' }));
+  ok(hr.status === 200 && hr.m.result?.resultType === 'complete' && JSON.parse(hr.m.result.content[0].text).identity_file === idFile, 'http: a 2026-07-28 tools/call round trip with MCP-Protocol-Version, Mcp-Method, Mcp-Name', JSON.stringify(hr).slice(0, 300));
+  hr = await rpcH('tools/call', meta28({ name: 'sigelo_whoami', arguments: {} }), hdr28('tools/call', { 'Mcp-Name': `=?base64?${Buffer.from('sigelo_whoami').toString('base64')}?=` }));
+  ok(hr.status === 200 && hr.m.result?.isError === false, 'http: a base64 Mcp-Name is decoded before the compare', JSON.stringify(hr).slice(0, 300));
+  const mismatch = async (params, headers) => { const x = await rpcH('tools/call', params, headers); return x.status === 400 && JSON.parse(x.m).error?.code === -32020; };
+  ok(await mismatch(meta28({ name: 'sigelo_whoami', arguments: {} }), hdr28('tools/call'))
+    && await mismatch(meta28({ name: 'sigelo_whoami', arguments: {} }), hdr28('tools/call', { 'Mcp-Name': 'sigelo_bundle' }))
+    && await mismatch(meta28({ name: 'sigelo_whoami', arguments: {} }), { 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Name': 'sigelo_whoami' })
+    && await mismatch(meta28({ name: 'sigelo_whoami', arguments: {} }), { 'Mcp-Method': 'tools/call', 'Mcp-Name': 'sigelo_whoami' })
+    && await mismatch({ name: 'sigelo_whoami', arguments: {} }, hdr28('tools/call', { 'Mcp-Name': 'sigelo_whoami' })),
+  'http: 2026-07-28 without Mcp-Name, Mcp-Method or MCP-Protocol-Version, a wrong Mcp-Name, or no _meta version → 400, -32020');
+  hr = await rpcH('nope/nothing', meta28(), hdr28('nope/nothing'));
+  const legacyUnknown = await rpcH('nope/nothing');
+  ok(hr.status === 404 && JSON.parse(hr.m).error?.code === -32601 && legacyUnknown.status === 200 && legacyUnknown.m.error?.code === -32601, 'http: an unknown method → 404 with -32601 in 2026-07-28, a JSON-RPC error in 200 before', JSON.stringify([hr, legacyUnknown]));
+  hr = await rpcH('tools/list', meta28(), hdr28('tools/list', { 'Mcp-Session-Id': 'not-a-session' }));
+  ok(hr.status === 200 && hr.m.result?.tools?.length === LISTED.length, 'http: 2026-07-28 ignores Mcp-Session-Id (no sessions in that revision)', JSON.stringify(hr).slice(0, 200));
+  res = await post([{ jsonrpc: '2.0', id: 1, method: 'ping' }], { 'MCP-Protocol-Version': '2025-06-18' });
+  ok(res.status === 400, 'http: a batch under 2025-06-18 → 400 (batches are 2025-03-26 only)');
   hr = await rpcH('tools/list', { _meta: { [PVK]: '2026-07-28' } }, { 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call' });
   ok(hr.status === 400 && /-32020/.test(hr.m), 'http: Mcp-Method disagreeing with the body → 400, -32020', JSON.stringify(hr));
   res = await post('{"jsonrpc":"2.0","id":9,"id":9,"method":"ping"}');
@@ -339,24 +360,31 @@ try {
   ok(res.status === 415, 'http: a body not declared application/json → 415');
   res = await fetch(new URL('/', mcpUrl));
   const pageText = await res.text();
-  ok(res.status === 200 && pageText.includes(mcpUrl) && /Open WebUI/.test(pageText) && /MCP Streamable HTTP/.test(pageText) && !pageText.includes(tok), 'http: GET / says what it is and how to add it, without the token', pageText.slice(0, 200));
+  ok(res.status === 200 && pageText.includes(mcpUrl) && /Open WebUI/.test(pageText) && /MCP \(Streamable HTTP\)/.test(pageText) && !pageText.includes(tok), 'http: GET / says what it is and how to add it, without the token', pageText.slice(0, 200));
   const h1code = await h1.stop();
   ok(process.platform === 'win32' ? h1code !== undefined : h1code === 0, 'http: SIGTERM stops it (exit 0 checked off Windows, where kill is forced)', String(h1code));
   const h2 = httpServer({ SIGELO_IDENTITY: idFile });
   await h2.url;
-  ok(h2.stderr().includes(`bearer token ${tok}, kept in`), 'http: a restart reuses the token', h2.stderr());
+  ok(h2.stderr().includes(`bearer token in ${tokFile}`) && !h2.stderr().includes(tok) && readFileSync(tokFile, 'utf8').trim() === tok, 'http: a restart reuses the token and does not print it again', h2.stderr());
   await h2.stop();
+  const tf = join(dir, 'other', 'mcp.token');
+  const hTf = httpServer({ SIGELO_IDENTITY: idFile }, ['--http', '--listen', '127.0.0.1:0', '--token-file', tf]);
+  const uTf = await hTf.url, tTf = readFileSync(tf, 'utf8').trim();
+  const listTf = (t) => fetch(uTf, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' }).then((r) => r.status);
+  ok(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(uTf ?? '') && tTf !== tok && (process.platform === 'win32' || (statSync(tf).mode & 0o777) === 0o600) && await listTf(tTf) === 200 && await listTf(tok) === 401,
+    'http: --listen HOST:PORT and --token-file (made there, 0600, the only token taken)', hTf.stderr());
+  await hTf.stop();
   const h3 = httpServer({ SIGELO_IDENTITY: idFile }, ['--http', '--listen', 'example.com']);
   ok(await h3.exited === 2 && /--listen example\.com: give an IP address/.test(h3.stderr()), 'http: --listen takes an IP address only', h3.stderr());
-  const h5 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: '' }, ['--http', '0.0.0.0:0']);
-  ok(await h5.exited === 2 && /0\.0\.0\.0 is not loopback: give a bearer token/.test(h5.stderr()), 'http: a non-loopback bind without a given token is refused (the token file does not count)', h5.stderr());
+  const h5 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: 'g'.repeat(40) }, ['--http', '0.0.0.0:0']);
+  ok(await h5.exited === 2 && /0\.0\.0\.0 is not loopback: refused without --insecure-listen/.test(h5.stderr()), 'http: a non-loopback bind is refused without --insecure-listen, even with a token', h5.stderr());
   const given = 'g'.repeat(40);
-  const h6 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: given }, ['--http', '0.0.0.0:0']);
+  const h6 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: given }, ['--http', '0.0.0.0:0', '--insecure-listen']);
   await h6.url;
   const p6 = /listening on http:\/\/.*:(\d+)\/mcp/.exec(h6.stderr())?.[1];
   const u6 = `http://127.0.0.1:${p6}/mcp`, list6 = (t) => fetch(u6, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' }).then((r) => r.status);
-  ok(/WARNING: 0\.0\.0\.0 is not loopback/.test(h6.stderr()) && !h6.stderr().includes(given) && await list6(given) === 200 && await list6(tok) === 401,
-    'http: with SIGELO_MCP_TOKEN it binds 0.0.0.0, warns, takes that token only, never prints it', h6.stderr());
+  ok(h6.stderr().match(/WARNING/g)?.length === 1 && /WARNING: 0\.0\.0\.0 is not loopback/.test(h6.stderr()) && !h6.stderr().includes(given) && await list6(given) === 200 && await list6(tok) === 401,
+    'http: --insecure-listen binds 0.0.0.0 with a one-line warning; SIGELO_MCP_TOKEN is the only token taken, never printed', h6.stderr());
   await h6.stop();
   const h7 = httpServer({ SIGELO_IDENTITY: idFile, SIGELO_MCP_TOKEN: '' }, ['--http', '127.0.0.1:0', '--token', 'short']);
   ok(await h7.exited === 2 && /32 or more printable/.test(h7.stderr()), 'http: a short --token is refused', h7.stderr());

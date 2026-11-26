@@ -214,7 +214,7 @@ jobs:
           grep -q '^ALL PASS keyagent' "$RUNNER_TEMP/keyagent-out"
         working-directory: apps/keyagent
 
-  # The protocol profiles (apps/integrations/a2a, pap, web-bot-auth): each a zero-dependency package on the
+  # The protocol profiles (apps/integrations/a2a, pap, web-bot-auth) and the Chatwoot bridge: each a zero-dependency package on the
   # ts library (file dep), tests offline; the moadim sidecar for the CLI routes; the a2a Python lookup.
   integrations:
     permissions: { contents: read }
@@ -233,7 +233,7 @@ jobs:
       - run: (cd ../contact && npm ci --ignore-scripts) && npm ci --ignore-scripts && npm run build
         working-directory: apps/agent
       - run: |
-          for d in a2a pap web-bot-auth; do
+          for d in a2a pap web-bot-auth chatwoot; do
             (cd "$d" && npm ci --ignore-scripts && node test.mjs 2>&1 | tee "$RUNNER_TEMP/int-$d" || true)
             grep -q '^ALL PASS' "$RUNNER_TEMP/int-$d" || { { grep '^FAIL ' "$RUNNER_TEMP/int-$d" | head -n 7; tail -n 3 "$RUNNER_TEMP/int-$d"; } | cut -c1-900 | sed "s/%/%25/g; s/^/::error title=integrations $d::/"; exit 1; }
           done

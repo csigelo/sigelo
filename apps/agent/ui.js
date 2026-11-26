@@ -1719,7 +1719,8 @@
   // The phone (design/transfer.md §10.1): no Tor, no relayed path yet.
   const NO_DIRECT = 'Could not connect directly; try from your computer, or wait for the Pro relay path.';
   /** Why, in the transfers card's words (a chat bubble that failed says it too); a failure with no words: its reason code. */
-  const whyOf = (r) => (r?.reason === 'no_path' && S.transferSettings?.pick ? NO_DIRECT : r?.detail || (r?.state === 'failed' && r.reason ? `reason: ${r.reason}` : null));
+  const NO_RELAYED = 'Could not connect, not even through the relay host; try from your computer.';
+  const whyOf = (r) => (r?.reason === 'no_path' && S.transferSettings?.pick ? (/not even through the relay host/.test(r.detail ?? '') ? NO_RELAYED : NO_DIRECT) : r?.detail || (r?.state === 'failed' && r.reason ? `reason: ${r.reason}` : null));
   /** Under a failed bubble: why (null: it did not fail). */
   const failWhy = (r) => (r?.state === 'failed' && whyOf(r) ? h('span', { class: 'help why' }, whyOf(r)) : null);
   /** What a transfer is doing, in a person's words: the sender waits for a yes or for them to come online. */
@@ -4504,7 +4505,8 @@
   }
   const v0 = () => CALL.phone?.view() ?? {};
   const callEnded = (c, err) => {
-    if (err?.check === 'no_path' || c?.reason === 'no_path') return CALL.lib?.NO_PATH ?? 'Could not connect directly from these two networks.';
+    if (err?.check === 'no_path' && err.message) return err.message;
+    if (err?.check === 'no_path' || c?.reason === 'no_path') return (CALL.phone?.turn ? CALL.lib?.NO_PATH_RELAYED : CALL.lib?.NO_PATH) ?? 'Could not connect directly from these two networks.';
     if (err) return err.check === 'mic_permission' ? (v0().can?.mic ? 'The microphone is off for Sigelo. Tap Call again to allow it.' : 'The microphone is off for this page: allow it in the browser\'s site settings, then call again.')
       : err.check === 'mic_blocked' ? 'In the settings that opened: Permissions → Microphone → Allow. Then call again.' : err.check === 'no_mic' ? 'No microphone found here.' : plain(err);
     if (!c) return 'Call ended';
@@ -4552,7 +4554,7 @@
     } else if (c?.state === 'connecting') { line = 'Connecting…'; btns = [btn('Hang up', () => p?.hangup(), { kind: 'danger' })]; }
     else if (c?.state === 'active' && v.reconnecting) { line = h('span', null, h('b', { class: 'calltime' }, mss(c.secs ?? 0)), ' · Reconnecting…'); btns = [btn('Hang up', () => p?.hangup(), { kind: 'danger' })]; }
     else if (c?.state === 'active') {
-      line = h('span', null, h('b', { class: 'calltime' }, mss(c.secs ?? 0)), ' · Direct ', callBars(v.quality));
+      line = h('span', null, h('b', { class: 'calltime' }, mss(c.secs ?? 0)), v.relayed ? ' · Via relay ' : ' · Direct ', callBars(v.quality));
       btns = [h('button', { type: 'button', class: `ib callmute${v.muted ? ' on' : ''}`, 'aria-pressed': v.muted ? 'true' : 'false', 'aria-label': v.muted ? 'Unmute' : 'Mute', onclick: () => p?.mute(!v.muted) }, icon('mic'), v.muted ? 'Unmute' : 'Mute'),
         v.can?.speaker ? h('button', { type: 'button', class: `ib callspk${v.speaker ? ' on' : ''}`, 'aria-pressed': v.speaker ? 'true' : 'false', 'aria-label': 'Speaker', onclick: () => void p?.speaker(!v.speaker).catch((e) => toast(plain(e))) }, icon('speaker'), 'Speaker') : null,
         btn('Hang up', () => p?.hangup(), { kind: 'danger' })];

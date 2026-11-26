@@ -13,10 +13,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { keygen } from 'sigelo';
-import { CHUNK, LOW, acceptRule, chunkLength, chunksOf } from './transfer.mjs';
+import { CHUNK, LOW, acceptRule, chunkLength, chunksOf, noPath } from './transfer.mjs';
 import * as E from './transfer-engine.mjs';
 import { webIo, webTransfers } from './transfer-web.mjs';
-import { channelOf, noMdns } from './rtc-web.mjs';
+import { channelOf, iceServers, noMdns, peer as webPeer } from './rtc-web.mjs';
+import * as W from './rtc-web.mjs';
 import { PHOTO_LABEL, PHOTO_MAX, checkPhoto, imageType } from './photo.mjs';
 
 let count = 0;
@@ -143,6 +144,29 @@ export function fakeShell({ landFails = null } = {}) {
   ok(X.setAuto({ carrier, contact: 'bob', mb: 0 }).auto_mb === 0 && X.list({ carrier }).auto['did:sigelo:zBob'] === 0, 'setAuto: per contact, in the list');
 }
 
+// ================================================================ TURN (2026-11-26): the relay's credential at each attempt
+const TURN = { urls: ['turn:relay.test:3478?transport=udp', 'turn:relay.test:3478?transport=tcp'], username: '1764200000:abcdefghijklmnop', credential: 'Y3JlZGVudGlhbA==', exp: 1764200000 };
+{
+  ok(JSON.stringify(iceServers(['relay.test:3478'])) === '[{"urls":["stun:relay.test:3478"]}]' && JSON.stringify(iceServers([], null)) === '[]', 'the page\'s ICE servers without TURN: STUN alone, as before');
+  ok(JSON.stringify(iceServers(['relay.test:3478'], TURN)) === JSON.stringify([{ urls: ['stun:relay.test:3478'] }, { urls: TURN.urls, username: TURN.username, credential: TURN.credential }]), 'with TURN: the relay\'s turn: URIs, username, credential after STUN');
+  let cfg = null;
+  class R { constructor(c) { cfg = c; } addEventListener() {} close() {} }
+  const p = await webPeer({ stun: ['relay.test:3478'], turn: TURN, RTC: R });
+  ok(cfg.iceServers.length === 2 && cfg.iceServers[1].credential === TURN.credential && cfg.iceTransportPolicy === undefined, 'rtc-web peer(): the connection gets STUN and TURN; the policy stays "all" (a direct pair preferred)');
+  p.close();
+  const eng = (o, carrier) => new E.Engine({ carrier, io: {}, timer: false, ...o });
+  const asked = [];
+  const c1 = { turnServer: async () => { asked.push(1); return TURN; } };
+  ok((await eng({}, c1).turnOf(W))?.username === TURN.username && asked.length === 1, 'the engine asks carrier.turnServer() at each attempt');
+  ok(await eng({ turn: false }, c1).turnOf(W) === null && await eng({ env: { SIGELO_TURN: 'off' } }, c1).turnOf(W) === null && asked.length === 1, 'turn: false, or SIGELO_TURN=off: none, nothing asked');
+  ok(await eng({}, { turnServer: async () => { throw new Error('down'); } }).turnOf(W) === null && await eng({}, {}).turnOf(W) === null && await eng({}, { turnServer: async () => null }).turnOf(W) === null,
+    'a carrier that fails, has no turnServer, or whose relay gives none: null (STUN alone)');
+  ok(await eng({}, c1).turnOf(await import('../transfer/rtc.mjs').catch(() => ({ TURN_OK: false }))) === null && await eng({}, c1).turnOf({ peer() {} }) === null && asked.length === 1,
+    'werift (apps/transfer/rtc.mjs, TURN_OK false) or a module that does not say TURN_OK: no credential asked');
+  ok(noPath('bob').startsWith('No direct path to bob from these two networks') && noPath('bob', true).startsWith('No path to bob from these two networks, not even through the relay host'),
+    'no path: the old words without TURN; "not even through the relay host" with it');
+}
+
 // ================================================================ a page engine against a Node agent on a loopback relay
 const RELAY_DIR = process.env.SIGELO_RELAY_DIR ?? join(HERE, '..', '..', 'relay');
 if (!existsSync(join(RELAY_DIR, 'server.mjs')) || !existsSync(join(HERE, '..', 'transfer', 'node_modules', 'werift'))) {
@@ -175,7 +199,16 @@ const pEvents = [], nEvents = [];
 const phone = carrierOf('phone', (e) => { if (e.type === 'transfer') P?.e.kick(); });
 const node = carrierOf('node', (e) => { if (e.type === 'transfer') N?.e.kick(); });
 const sh = fakeShell(), pio = webIo({ files: sh.files, big: sh.big }), PX = webTransfers(pio, { rtc });
-P = { ...phone, X: PX, e: new E.Engine({ carrier: phone.c, io: pio, rtc: async () => rtc, stun: [], maxServe: 2, retryMs: 300, onEvent: (e) => pEvents.push(e) }) };
+// The page's peers recorded: this loopback relay gives no TURN, so every attempt goes with STUN alone, as before TURN.
+const peers = [], rtcSeen = { ...rtc, peer: (o) => { peers.push(o); return rtc.peer(o); } };
+{
+  ok(rtc.TURN_OK === false && JSON.stringify(rtc.iceServers(['relay.test:3478'], TURN)) === '[{"urls":["stun:relay.test:3478"]}]', 'sigelo-transfer (werift): TURN_OK false, its ICE servers have no turn: entry even when one is given');
+  const w = await rtc.peer({ stun: [], turn: { ...TURN, urls: ['turn:127.0.0.1:9?transport=udp'] }, gatherMs: 200 });
+  const wsdp = await w.offer('sigelo-transfer/0 t 1');
+  ok(typeof wsdp === 'string' && !/ typ relay/.test(wsdp) && !JSON.stringify(w.pc.config?.iceServers ?? []).includes('turn:'), 'werift peer(): a turn given is not used (no relay candidate, no turn: in its config)');
+  w.close();
+}
+P = { ...phone, X: PX, e: new E.Engine({ carrier: phone.c, io: pio, rtc: async () => rtcSeen, stun: [], maxServe: 2, retryMs: 300, onEvent: (e) => pEvents.push(e) }) };
 N = { ...node, e: new X.Engine({ carrier: node.c, identity: node.identity, stun: [], tor: null, retryMs: 300, onEvent: (e) => nEvents.push(e) }) };
 try {
   const inv = await P.c.invite({ name: 'node' });
@@ -242,5 +275,6 @@ try {
   await relay.close();
   rmSync(dir, { recursive: true, force: true });
 }
+ok(peers.length > 0 && peers.every((o) => o.turn === null), `the relay gives no TURN: every attempt with STUN alone (${peers.length} peers)`);
 report();
 console.log(`ALL PASS (${count})`);

@@ -135,11 +135,11 @@
   },
   "vendor/contact/call.mjs": {
    "from": "apps/contact/call.mjs",
-   "sha256": "3cdaf91f545f09151d82738e82be4380fccf041b5dbfe7e64b44e0210f9f1519"
+   "sha256": "eaedd4dc06dbefe235e73ac4d7a99f0f0c8940211598bbfd8966983842b721e5"
   },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "e4eae3704c6c11bf029383eb9a2c4fb18812b2b59aa54db1ae56a66f4a0e7812"
+   "sha256": "a363655f4f6e7b89e3140e71d3c59e9a4c1d18fc386045a5b7f3af750ecb2e7b"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
@@ -183,7 +183,7 @@
   },
   "vendor/contact/page.mjs": {
    "from": "apps/contact/page.mjs",
-   "sha256": "bc9c6826869343a81368ed5849bedb4023ce997de1a9f7ecf7b1a67f6f7f6c4b"
+   "sha256": "3650222c26b8ac73d03878c12670b5e7bfe1e6e46b89886a6fc0a6ee2ce8aeb5"
   },
   "vendor/contact/photo.mjs": {
    "from": "apps/contact/photo.mjs",
@@ -215,7 +215,7 @@
   },
   "vendor/contact/rtc-web.mjs": {
    "from": "apps/contact/rtc-web.mjs",
-   "sha256": "00b9abfefe68d3f4f5c094d1589ad0d0da0020822732cb6a387228ba52ddbcf6"
+   "sha256": "0367bc97b442560ff9836813859145f4f64a645d9b53f20a0e9040b14bbaa4c3"
   },
   "vendor/contact/short.mjs": {
    "from": "apps/contact/short.mjs",
@@ -227,7 +227,7 @@
   },
   "vendor/contact/transfer-engine.mjs": {
    "from": "apps/contact/transfer-engine.mjs",
-   "sha256": "7879e6ce75ca960fa3b24ae86342006a4f7fa025933d74970501e7fdf843800f"
+   "sha256": "99d56e33436f736c2d9aa79d57658411aa6319f99f82f000fb297ee49a57fc0e"
   },
   "vendor/contact/transfer-web.mjs": {
    "from": "apps/contact/transfer-web.mjs",
@@ -235,7 +235,7 @@
   },
   "vendor/contact/transfer.mjs": {
    "from": "apps/contact/transfer.mjs",
-   "sha256": "5dc7e670f91149604afc3593b8075826e77f93cc94d4d174934cbd785586b723"
+   "sha256": "695abd8d4a613fad1b838a049ef56146fb99ec79045e0f0535c7a106c7e533a6"
   },
   "vendor/contact/voice-web.mjs": {
    "from": "apps/contact/voice-web.mjs",
@@ -243,7 +243,7 @@
   },
   "vendor/contact/voice.mjs": {
    "from": "apps/contact/voice.mjs",
-   "sha256": "67f4e828cf64556b1d0d2de85a8cc623001d49476ed989e606476185000c1f7e"
+   "sha256": "ca3584a5b0a1355e7b072f94af251e79f42ce0a99b91819c2baa410f2021b2d2"
   },
   "vendor/contact/words-lock.mjs": {
    "from": "apps/contact/words-lock.mjs",
@@ -299,7 +299,7 @@
   },
   "vendor/ui.js": {
    "from": "apps/agent/ui.js",
-   "sha256": "fc923f9ef561d20b317b26b689b6c7b5e393247cdca38caab4912d1513ecbcf1"
+   "sha256": "1602e9ac794aaf78b6d4daac64a8db6b983b3da68407b97777734f61302d1556"
   }
  }
 }

@@ -5,7 +5,8 @@
 // apps/contact/transfer-node.mjs imports it only when a transfer starts, and goes without it (Tor only)
 // when it is not installed.
 //
-//   const p = await peer({ stun, gatherMs })   one side of a pairing's transfer attempt
+//   const p = await peer({ stun, gatherMs })   one side of a pairing's transfer attempt; STUN only: a `turn` given is ignored
+//                               (TURN_OK below)
 //   await p.offer(label)        → sdp: the receiver's (it pulls): a data channel named label, every candidate gathered
 //   await p.answer(sdp, label)  → sdp: the sender's, for that offer; only a channel named label is taken
 //   await p.accept(sdp)         the receiver sets the sender's answer
@@ -24,7 +25,11 @@ export const WERIFT = '0.26.0';
 const LOW = 1 << 20;
 
 const fail = (check, why) => { throw Object.assign(new Error(`${check}: ${why}`), { check }); };
-const iceServers = (stun) => (stun.length ? [{ urls: stun.map((s) => `stun:${s}`) }] : []);
+// No TURN on werift lanes until its DTLS checks the handshake signatures: werift 0.26.0 verifies only the
+// peer's certificate fingerprint (public in the SDP), so a TURN host on the path could sit in the middle.
+// The engine asks no credential for a module without TURN_OK true, and iceServers drops any turn given.
+export const TURN_OK = false;
+export const iceServers = (stun, _turn = null) => (stun.length ? [{ urls: stun.map((s) => `stun:${s}`) }] : []);
 const noMdns = (sdp) => sdp.split(/\r?\n/).filter((l) => !/^a=candidate:.* [0-9a-f-]+\.local /i.test(l)).join('\r\n');
 
 // werift creates a cipher for every DTLS record from the raw key bytes, and Node prepares that key
@@ -57,8 +62,8 @@ export function channelOf(dc, pc) {
   };
 }
 
-export async function peer({ stun = [], gatherMs = 3000 } = {}) {
-  const pc = new RTCPeerConnection({ iceServers: iceServers(stun), iceStunGatherTimeout: Math.max(1, Math.ceil(gatherMs / 1000)) });   // werift: seconds
+export async function peer({ stun = [], turn = null, gatherMs = 3000 } = {}) {   // turn: ignored (TURN_OK)
+  const pc = new RTCPeerConnection({ iceServers: iceServers(stun, turn), iceStunGatherTimeout: Math.max(1, Math.ceil(gatherMs / 1000)) });   // werift: seconds
   let dc = null, want = null, gotDc;
   const dcP = new Promise((r) => { gotDc = r; });
   pc.onDataChannel.subscribe((ch) => {
