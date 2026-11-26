@@ -5,6 +5,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+## v0.1.21 — 2026-11-26
+
+- **This release:** calls and transfers through your relay's TURN when no direct path works, or always ("Always relay my media"); a ring without addresses; agent and desk contacts; no screenshots of secrets.
+- **npm:** `sigelo-transfer` (the direct transfer lane, werift 0.26.0 with its DTLS checks) is published with the other packages from this release.
 - **transfers:** a size rule (`transfer auto <contact> <MB>`, the app's "Accept without asking") accepts with direct off too, over Tor or (≤ 8 MiB) the relay lane; 8 at once a contact.
 - **transfers:** several files at once: the app's picker takes several (one bubble each, sent in order), `transfer send <contact> <file>...` up to 8; no wire change.
 - **app:** a received file that sits in the app (it came over the relay lane) has "Save to Downloads" on the phone (MediaStore, no storage permission), "Download" elsewhere.

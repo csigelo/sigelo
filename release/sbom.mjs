@@ -22,7 +22,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The package directories release/build.sh packs (its npm loop).
-const PACKAGES = ['ts', 'apps/contact', 'apps/keeper', 'apps/agent', 'apps/integrations/mcp', 'apps/kit', 'apps/keyagent'];
+const PACKAGES = ['ts', 'apps/contact', 'apps/keeper', 'apps/agent', 'apps/integrations/mcp', 'apps/kit', 'apps/keyagent', 'apps/transfer'];
 
 const root = resolve(process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '..'));
 const die = (m) => { console.error(`sbom.mjs: ${m}`); process.exit(1); };

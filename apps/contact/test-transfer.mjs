@@ -10,7 +10,7 @@
 // when SIGELO_TEST_TOR names its control port. SIGELO_TEST_MB: the size of the direct file (default 50).
 //   node apps/contact/test-transfer.mjs   → ALL PASS (n)
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -202,6 +202,18 @@ export function attempt(bytes, m, hashes, { have, known = null, drop, alter, rea
   const ended = new Promise((res) => new Serve({ m, hashes, channel: ca, read: async () => new Uint8Array(1), onEnd: (r) => res(r) }).start());
   cb.send(frames.want(m.chunks - 1, 2));
   ok(await ended === 'cancelled', 'a WANT past the file: the sender ends it');
+}
+
+// Where sigelo-transfer is looked for (transfer-node.mjs rtcDirs): the global layout `npm i -g sigelo-agent sigelo-transfer`
+// makes (sigelo-contact inside sigelo-agent's node_modules, sigelo-transfer beside sigelo-agent) is found by name.
+{
+  const { rtcDirs } = await import('./transfer-node.mjs');
+  const g = mkdtempSync(join(tmpdir(), 'sigelo-rtcdirs-')), lib = join(g, 'lib', 'node_modules'), from = join(lib, 'sigelo-agent', 'node_modules', 'sigelo-contact');
+  for (const d of [from, join(lib, 'sigelo-transfer')]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(lib, 'sigelo-transfer', 'package.json'), JSON.stringify({ name: 'sigelo-transfer', exports: { './package.json': './package.json' } }));
+  const dirs = rtcDirs(from);
+  ok(dirs.includes(join(lib, 'sigelo-transfer')) && dirs[0] === join(lib, 'sigelo-agent', 'node_modules', 'transfer'), 'rtcDirs: a global sigelo-transfer beside sigelo-agent is found by name, after the fixed places', JSON.stringify(dirs));
+  rmSync(g, { recursive: true, force: true });
 }
 
 const RELAY_DIR = process.env.SIGELO_RELAY_DIR ?? join(HERE, '..', '..', 'relay');

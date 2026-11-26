@@ -1,6 +1,6 @@
 {
   "name": "sigelo-transfer",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "private": false,
   "description": "Direct file transfer for sigelo-contact: the WebRTC data channel (werift, pure TypeScript, no native code) behind sigelo-agent transfer. The relay carries only the introduction.",
   "keywords": [
@@ -32,6 +32,9 @@
     "node": ">=22.18"
   },
   "scripts": {
+    "prepack": "node ../../release/prepack.mjs pre",
+    "postpack": "node ../../release/prepack.mjs post",
+    "prepublishOnly": "node -e \"if(process.env.SIGELO_PUBLISH!=='1'){console.error('refusing: publishing is a release step (release/RELEASE.md); publish the release/build.sh tarballs with SIGELO_PUBLISH=1');process.exit(1)}\"",
     "test": "node test-dtls.mjs && node -e \"import('./rtc.mjs').then((m) => m.selfTest()).then((r) => { console.log('ALL PASS (1): ' + r); }, (e) => { console.error(e); process.exit(1); })\""
   },
   "dependencies": {

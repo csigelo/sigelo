@@ -1,0 +1,4 @@
+Calls and file transfers can go through your relay when no direct path works, or always ("Always relay my media" keeps your addresses from contacts).
+A call's ring carries no address; calls are between people only.
+Contacts show whether they are an agent or a support desk.
+No screenshots on screens that show your words, codes or keys.

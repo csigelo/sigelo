@@ -11,7 +11,7 @@ Site: [sigelo.io](https://sigelo.io) · why: [WHY.md](docs/WHY.md)
 
 ## The protocol
 
-Wire `sigelo/0`: draft, not frozen ([VERSIONING.md](VERSIONING.md)). Libraries v0.1.20.
+Wire `sigelo/0`: draft, not frozen ([VERSIONING.md](VERSIONING.md)). Libraries v0.1.21.
 
 What every implementation agrees on: [SPEC.md](SPEC.md), [test-vectors.json](test-vectors.json), [schema/](schema/).
 
@@ -19,7 +19,7 @@ Get it:
 
 ```sh
 npm i sigelo
-go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.20
+go install github.com/csigelo/sigelo/go/cmd/sigelo-verify@v0.1.21
 ```
 
 Verify yours: `sigelo-verify --conformance test-vectors.json --impl <your command>`.
@@ -29,12 +29,12 @@ Verify yours: `sigelo-verify --conformance test-vectors.json --impl <your comman
 
 ## The apps
 
-v0.1.20, Experimental. The keeper: stagenet by default, mainnet with small amounts; no outside review yet.
+v0.1.21, Experimental. The keeper: stagenet by default, mainnet with small amounts; no outside review yet.
 
-- **Phone (Android):** [sigelo-0.1.20.apk](https://github.com/csigelo/sigelo/releases/download/v0.1.20/sigelo-0.1.20.apk)
-  from the [v0.1.20 release](https://github.com/csigelo/sigelo/releases/tag/v0.1.20). F-Droid: coming.
+- **Phone (Android):** [sigelo-0.1.21.apk](https://github.com/csigelo/sigelo/releases/download/v0.1.21/sigelo-0.1.21.apk)
+  from the [v0.1.21 release](https://github.com/csigelo/sigelo/releases/tag/v0.1.21). F-Droid: coming.
 - **Agent on a computer:** `npm i -g sigelo-agent` ([QUICKSTART.md](docs/QUICKSTART.md)); never cat its identity file: `whoami`.
-- **MCP server:** `npx -y sigelo-mcp@0.1.20` ([frameworks](https://sigelo.io/frameworks.html); URL-only hosts: [AgentRun](apps/integrations/agentrun.md)).
+- **MCP server:** `npx -y sigelo-mcp@0.1.21` ([frameworks](https://sigelo.io/frameworks.html); URL-only hosts: [AgentRun](apps/integrations/agentrun.md)).
 - **Desktop (GTK):** [apps/gtk](apps/gtk/README.md).
 - **Relay:** [sigelo.ai](https://sigelo.ai) sees each message's sender, recipient, size and timing,
   never its content; for privacy, [run your own](https://github.com/csigelo/sigelo-relay).
@@ -44,8 +44,8 @@ v0.1.20, Experimental. The keeper: stagenet by default, mainnet with small amoun
 In a clone of this repository:
 
 ```sh
-release/verify-release.sh v0.1.20                      # SHA256SUMS, release.json, the tag's signature
-release/apk-check.sh sigelo-0.1.20.apk release.json    # one APK: hash and signing certificate
+release/verify-release.sh v0.1.21                      # SHA256SUMS, release.json, the tag's signature
+release/apk-check.sh sigelo-0.1.21.apk release.json    # one APK: hash and signing certificate
 ```
 
 ## What is where

@@ -38,7 +38,7 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never the p
    (OIDC, npm 11.21.1): rebuilds the tag, waits ≤ 30 min for step 5, publishes
    only if SHA256SUMS equals the release's; idempotent; a Rekor 409 re-signs. No trusted publisher (a new
    package): before step 4's push, `npm publish $S/a/<pkg>-<v>.tgz` (temporary-userconfig token;
-   `sigelo` first, `sigelo-contact` second).
+   `sigelo` first, `sigelo-contact` second; 0.1.21: `sigelo-transfer` before dispatching, trusted publisher after).
 9. `gh workflow run mcp-registry.yml -R csigelo/sigelo`; `site/deploy/mirror-release.sh v<v>
    sigelo-vps`; commit its SHA256SUMS; deploy.
 

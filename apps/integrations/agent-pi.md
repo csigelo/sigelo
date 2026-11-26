@@ -8,20 +8,20 @@ the package `sigelo` is the library and has no CLI.
 ## MCP
 
 ```sh
-pi mcp add sigelo --env SIGELO_IDENTITY="$HOME/.pi/sigelo.local.json" -- npx -y sigelo-mcp@0.1.20
+pi mcp add sigelo --env SIGELO_IDENTITY="$HOME/.pi/sigelo.local.json" -- npx -y sigelo-mcp@0.1.21
 ```
 
 Use the command. By hand instead: `~/.pi/agent/mcp.json` is a file (never `mkdir -p` it), top-level
 key `mcpServers` (not `servers`); project servers go in `.pi/mcp.json`:
 
 ```json
-{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.20"],"env":{"SIGELO_IDENTITY":"/home/you/.pi/sigelo.local.json"}}}}
+{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.21"],"env":{"SIGELO_IDENTITY":"/home/you/.pi/sigelo.local.json"}}}}
 ```
 
 ## CLI skill (any pi version, no server)
 
 ```sh
-npm i -g sigelo-agent@0.1.20
+npm i -g sigelo-agent@0.1.21
 mkdir -p ~/.pi/agent/skills && ln -sfn "$SIGELO_HOME/apps/integrations/skills-cli/sigelo" ~/.pi/agent/skills/sigelo
 ```
 
@@ -39,4 +39,4 @@ A task may take hours: `sigelo_wait_for_message`, then `sigelo_reply` by message
 pi has none by design. Each pi process gets its own identity:
 `SIGELO_IDENTITY=/path/<name>.local.json pi`.
 
-Check: run `pi mcp list`; it prints `sigelo`. With the CLI: `sigelo-agent --version` prints `0.1.20`.
+Check: run `pi mcp list`; it prints `sigelo`. With the CLI: `sigelo-agent --version` prints `0.1.21`.

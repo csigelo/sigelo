@@ -8,6 +8,7 @@
 #   sigelo-recovery-kit-<v>.tgz        the six npm packages, as `npm publish` would upload them
 #                                      (sigelo-spend carries the keeper installer, `sigelo-spend init`)
 #   sigelo-key-agent-<v>.tgz           the seventh: the key agent (keyagent/), on npm from 0.1.15
+#   sigelo-transfer-<v>.tgz            the eighth: the direct transfer lane (apps/transfer/, werift pinned), from 0.1.21
 #   sigelo-verify-<os>-<arch>[.exe]    static verifier binaries: linux/darwin × amd64/arm64, windows/amd64
 #   sigelo-verify-src-<v>.tar.gz       go/ + test-vectors.json + LICENSE: `go build ./cmd/sigelo-verify`
 #   test-vectors.json                  the conformance target (`sigelo-verify --conformance`)
@@ -16,11 +17,12 @@
 # release/pack-test.sh installs all of it in an empty directory and runs it. At D1,
 # once the npm account and the repository exist, the maintainer publishes exactly these files:
 #
-#   for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do npm publish "$out/$t-<v>.tgz"; done
+#   for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent sigelo-transfer; do npm publish "$out/$t-<v>.tgz"; done
 #   gh release create v<v> "$out"/sigelo-verify-* "$out"/test-vectors.json "$out"/SHA256SUMS
 #
 # `sigelo` first: the others depend on it (^<v>); `sigelo-contact` before `sigelo-agent`, which
-# depends on it (^<v>), and `sigelo-mcp` and `sigelo-key-agent` on that. Publishing a tarball runs no scripts, so
+# depends on it (^<v>), and `sigelo-mcp` and `sigelo-key-agent` on that; `sigelo-transfer` depends on none of them
+# (sigelo-contact finds it beside itself at run time). Publishing a tarball runs no scripts, so
 # the prepublishOnly guard in each package.json (which refuses a publish from a directory
 # without SIGELO_PUBLISH=1) does not apply to it. `go install
 # github.com/csigelo/sigelo/go/cmd/sigelo-verify@v<v>` works once the export carries that module path
@@ -73,9 +75,9 @@ src=$stage/src
 git clone -q --shared --no-checkout "$root" "$src"
 git -C "$src" -c advice.detachedHead=false checkout -q --detach "$commit"
 
-# The six packages share one version (VERSIONING.md: packages use semver, in lockstep in 0.x).
+# The eight packages share one version (VERSIONING.md: packages use semver, in lockstep in 0.x).
 v=$(node -p 'require(process.argv[1]).version' "$src/ts/package.json")
-for p in apps/contact apps/keeper apps/agent apps/integrations/mcp apps/kit apps/keyagent; do
+for p in apps/contact apps/keeper apps/agent apps/integrations/mcp apps/kit apps/keyagent apps/transfer; do
 	pv=$(node -p 'require(process.argv[1]).version' "$src/$p/package.json")
 	[ "$pv" = "$v" ] || { echo "build.sh: $p/package.json is $pv, ts/package.json is $v; the packages move together" >&2; exit 1; }
 done
@@ -99,14 +101,14 @@ cp "$src/test-vectors.json" "$out/test-vectors.json"
 
 # npm: flaky networks are the norm on some builders; npm ci is retried, never skipped.
 retry() { n=1; until "$@"; do [ $n -ge 3 ] && return 1; n=$((n + 1)); echo "build.sh: retry $n: $*" >&2; sleep 5; done; }
-for p in ts apps/contact apps/keeper apps/agent apps/integrations/mcp apps/kit apps/keyagent; do
-	# mcp, kit and keyagent have no build step: their pack only reads their siblings' package.json, so no install.
+for p in ts apps/contact apps/keeper apps/agent apps/integrations/mcp apps/kit apps/keyagent apps/transfer; do
+	# mcp, kit, keyagent and transfer have no build step: their pack only reads their siblings' package.json, so no install.
 	# contact has none either, but runtime dependencies: npm ci checks its lockfile against them.
-	case $p in apps/integrations/mcp|apps/kit|apps/keyagent) ;; *) (cd "$src/$p" && retry npm ci --ignore-scripts --no-audit --no-fund --silent) ;; esac
+	case $p in apps/integrations/mcp|apps/kit|apps/keyagent|apps/transfer) ;; *) (cd "$src/$p" && retry npm ci --ignore-scripts --no-audit --no-fund --silent) ;; esac
 	(cd "$src/$p" && npm pack --silent --pack-destination "$out" >/dev/null)
 done
 node "$src/release/normalize-tgz.mjs" "$out"/*.tgz
-for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do
+for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent sigelo-transfer; do
 	[ -f "$out/$t-$v.tgz" ] || { echo "build.sh: npm pack made no $t-$v.tgz" >&2; exit 1; }
 	# the published manifest must name no sibling directory
 	if tar -xzOf "$out/$t-$v.tgz" package/package.json | grep -q '"file:'; then
@@ -127,6 +129,13 @@ for f in agent.mjs protocol.mjs policy.mjs store.mjs units/sigelo-key-agent.serv
 	printf '%s\n' "$listing" | grep -qx "package/$f" || { echo "build.sh: sigelo-key-agent-$v.tgz has no $f" >&2; exit 1; }
 done
 if printf '%s\n' "$listing" | grep -q 'package/test\.mjs'; then echo "build.sh: sigelo-key-agent-$v.tgz carries the tests" >&2; exit 1; fi
+# sigelo-transfer: rtc.mjs refuses to load without dtls-verify.mjs's checks, so both ship; its tests do not; werift exact.
+listing=$(tar -tzf "$out/sigelo-transfer-$v.tgz")
+for f in rtc.mjs dtls-verify.mjs README.md LICENSE; do
+	printf '%s\n' "$listing" | grep -qx "package/$f" || { echo "build.sh: sigelo-transfer-$v.tgz has no $f" >&2; exit 1; }
+done
+if printf '%s\n' "$listing" | grep -q 'package/test-'; then echo "build.sh: sigelo-transfer-$v.tgz carries the tests" >&2; exit 1; fi
+tar -xzOf "$out/sigelo-transfer-$v.tgz" package/package.json | grep -q '"werift": "[0-9][0-9.]*"' || { echo "build.sh: sigelo-transfer-$v.tgz: werift not pinned to one version" >&2; exit 1; }
 # The SBOM: the npm lockfiles and the Go build list of this commit, nothing of this host (release/sbom.mjs).
 node "$src/release/sbom.mjs" "$src" > "$out/sigelo-$v.cdx.json"
 cd "$out"
