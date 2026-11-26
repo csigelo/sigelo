@@ -34,6 +34,7 @@ import { createHash, createHmac, createPrivateKey, createPublicKey, generateKeyP
 import { closeSync, createReadStream, existsSync, fdatasyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, statfsSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { open as openFile } from 'node:fs/promises';
 import net from 'node:net';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TRANSFER_SEND, contactDir } from './carrier.mjs';
@@ -400,10 +401,18 @@ function torOf(cfg) {
 // ---------------------------------------------------------------- the direct path's library
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** sigelo-transfer's rtc.mjs, from beside sigelo-contact (an install's node_modules, or the repository's
- *  apps/transfer/, beside apps/contact/), or null: then transfers go over Tor only. Only a package named sigelo-transfer loads. */
+/** Where sigelo-transfer may sit, seen from sigelo-contact's directory `from`: the repository's apps/transfer/ beside
+ *  apps/contact/; beside sigelo-contact in one node_modules; inside it; or wherever Node resolves the name from there (every
+ *  node_modules above: `npm i -g sigelo-agent sigelo-transfer` puts it two levels above sigelo-agent's own sigelo-contact). */
+export function rtcDirs(from = HERE) {
+  const dirs = [join(from, '..', 'transfer'), join(from, '..', 'sigelo-transfer'), join(from, 'node_modules', 'sigelo-transfer')];
+  try { dirs.push(dirname(createRequire(join(from, 'transfer-node.mjs')).resolve('sigelo-transfer/package.json'))); } catch {}
+  return [...new Set(dirs.map((d) => resolve(d)))];
+}
+/** sigelo-transfer's rtc.mjs (rtcDirs, in order), or null: then transfers go over Tor only. Only a package named
+ *  sigelo-transfer loads, and only with its DTLS checks in place (rtc.mjs refuses to load otherwise). */
 export async function loadRtc() {
-  for (const d of [join(HERE, '..', 'transfer'), join(HERE, '..', 'sigelo-transfer'), join(HERE, 'node_modules', 'sigelo-transfer')]) {
+  for (const d of rtcDirs()) {
     try {
       const m = JSON.parse(readFileSync(join(d, 'package.json'), 'utf8'));
       if (m?.name !== 'sigelo-transfer') continue;

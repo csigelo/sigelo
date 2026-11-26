@@ -139,7 +139,7 @@
   },
   "vendor/contact/carrier.mjs": {
    "from": "apps/contact/carrier.mjs",
-   "sha256": "f1a8fafc6a76665693aab6533b6f641a3fffd0be9ce2e86b4664889b95f7defb"
+   "sha256": "63c5392f3838defda666ebd095173153a495fa863214d1c5b20d2b82da93bbc0"
   },
   "vendor/contact/control.mjs": {
    "from": "apps/contact/control.mjs",
@@ -263,7 +263,7 @@
   },
   "vendor/package.json": {
    "from": "apps/agent/package.json",
-   "sha256": "d4abacf598032d15c3035c9501a26824e81c6536f7b138ab5537ed2db0a43099"
+   "sha256": "43e82e2d4a7ddc8db22c5592efdd9b27d417d71d4386cb0ed44f0763c648aaf1"
   },
   "vendor/remote-client.mjs": {
    "from": "apps/agent/remote-client.mjs",

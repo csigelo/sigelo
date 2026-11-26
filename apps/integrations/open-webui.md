@@ -8,7 +8,7 @@ takes MCP over Streamable HTTP only, so it talks to `sigelo-mcp --http`.
 ## 1. Run the front
 
 ```sh
-npx -y sigelo-mcp@0.1.20 --http
+npx -y sigelo-mcp@0.1.21 --http
 ```
 
 It listens on `http://127.0.0.1:7310/mcp` and prints the bearer token, kept in

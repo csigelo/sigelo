@@ -11,7 +11,7 @@ Add sigelo to the agent tool you already use: one line each.
 Anything that speaks MCP gets sigelo with one entry. Node ≥ 22.18.
 
 ```json
-{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.20"]}}}
+{"mcpServers":{"sigelo":{"command":"npx","args":["-y","sigelo-mcp@0.1.21"]}}}
 ```
 
 That entry is `S` below. Set `SIGELO_IDENTITY` in its `env` to give each agent its own identity file.
@@ -21,22 +21,22 @@ That entry is `S` below. Set `SIGELO_IDENTITY` in its `env` to give each agent i
 
 | Framework | Add sigelo | Status |
 |---|---|---|
-| Claude Code | `claude mcp add --scope user sigelo -- npx -y sigelo-mcp@0.1.20` | run |
+| Claude Code | `claude mcp add --scope user sigelo -- npx -y sigelo-mcp@0.1.21` | run |
 | Claude Desktop | `S` in `claude_desktop_config.json` | docs |
 | Claude web and mobile | Connectors → Add custom connector → `https://sigelo.io/mcp` (verify only) | docs |
-| Codex CLI | `codex mcp add sigelo -- npx -y sigelo-mcp@0.1.20` | docs |
+| Codex CLI | `codex mcp add sigelo -- npx -y sigelo-mcp@0.1.21` | docs |
 | Cursor | `S` in `~/.cursor/mcp.json` | docs |
 | Windsurf / Devin Desktop | `S` in `~/.config/devin/mcp_config.json` | docs |
 | VS Code Copilot | `.vscode/mcp.json`: `"servers"`, `"type":"stdio"`, same command | docs |
 | Gemini CLI | `S` in `~/.gemini/settings.json` | docs |
-| Goose | `goose session --with-extension "npx -y sigelo-mcp@0.1.20"` | docs |
+| Goose | `goose session --with-extension "npx -y sigelo-mcp@0.1.21"` | docs |
 | OpenCode, Cline, Agent Zero | per-harness pages in [`apps/integrations/`](https://github.com/csigelo/sigelo/tree/main/apps/integrations) | docs |
-| pi | `pi mcp add sigelo -- npx -y sigelo-mcp@0.1.20` | docs |
-| Hermes Agent | `printf 'y\n' \| hermes mcp add sigelo --command npx --args sigelo-mcp@0.1.20` ([apps/integrations/hermes](https://github.com/csigelo/sigelo/tree/main/apps/integrations/hermes)) | run |
+| pi | `pi mcp add sigelo -- npx -y sigelo-mcp@0.1.21` | docs |
+| Hermes Agent | `printf 'y\n' \| hermes mcp add sigelo --command npx --args sigelo-mcp@0.1.21` ([apps/integrations/hermes](https://github.com/csigelo/sigelo/tree/main/apps/integrations/hermes)) | run |
 | AgentRun, URL-only hosts | operator runs `sigelo-mcp --http`; the host gets `http://127.0.0.1:7310/mcp` and a bearer token ([agentrun.md](https://github.com/csigelo/sigelo/blob/main/apps/integrations/agentrun.md)) | docs |
 | OpenClaw | `mcp.servers.sigelo` in `openclaw.json`, same command | docs |
 | LangGraph / LangChain | `MultiServerMCPClient` stdio, same command | run |
-| CrewAI | `mcps=[MCPServerStdio(command="npx", args=["-y","sigelo-mcp@0.1.20"])]` | docs |
+| CrewAI | `mcps=[MCPServerStdio(command="npx", args=["-y","sigelo-mcp@0.1.21"])]` | docs |
 | AutoGen, Agent Framework | `McpWorkbench` / `MCPStdioTool`, same command | docs |
 | Google ADK | `McpToolset` with `StdioConnectionParams` | docs |
 | Dify | Tools → MCP → `https://sigelo.io/mcp` (verify only) | docs |
@@ -44,8 +44,8 @@ That entry is `S` below. Set `SIGELO_IDENTITY` in its `env` to give each agent i
 | Coze | no user MCP found; use the sidecar outside it | unverified |
 | Kimi Code | `S` in `~/.kimi-code/mcp.json` | docs |
 | Qwen Code | `S` in `~/.qwen/settings.json` | docs |
-| CodeBuddy Code | `codebuddy mcp add --scope user sigelo -- npx -y sigelo-mcp@0.1.20` | docs |
-| Qoder CLI | `qoder mcp add sigelo -s user -- npx -y sigelo-mcp@0.1.20` | docs |
+| CodeBuddy Code | `codebuddy mcp add --scope user sigelo -- npx -y sigelo-mcp@0.1.21` | docs |
+| Qoder CLI | `qoder mcp add sigelo -s user -- npx -y sigelo-mcp@0.1.21` | docs |
 | Trae | `S` in `.trae/mcp.json` | docs |
 | MiniMax Code | `S` in the project's `.mcp.json` | docs |
 | ZCode | `mcp.servers.sigelo` in `~/.zcode/cli/config.json` | docs |

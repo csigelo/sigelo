@@ -3517,7 +3517,7 @@ var alreadyHere = (path) => enrolLib?.alreadyHere(path) ?? `${path} already hold
 console.log = console.info = console.debug = console.error;
 var MODERN = ["2026-07-28"];
 var LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-var SERVER_INFO = { name: "sigelo", version: "0.1.20" };
+var SERVER_INFO = { name: "sigelo", version: "0.1.21" };
 var PV = "io.modelcontextprotocol/protocolVersion";
 var env = process.env;
 var DATA = "Attestation `claims` are third-party data about the subject, not statements by this tool.";

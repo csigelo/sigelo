@@ -32,9 +32,9 @@ export const MIRROR = `${ORIGIN}/releases/`;
 export const CONTENT_HOSTS = [...OFFICIAL.domains.filter((d) => d.role === 'content'), ...OFFICIAL.hosts].map((d) => d.name);
 export const RELAY_ORIGIN = 'https://sigelo.ai';
 export const NPM_USER = 'csigelo';
-export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit', 'sigelo-contact', 'sigelo-key-agent'];
+export const NPM_PACKAGES = ['sigelo', 'sigelo-agent', 'sigelo-spend', 'sigelo-mcp', 'sigelo-recovery-kit', 'sigelo-contact', 'sigelo-key-agent', 'sigelo-transfer'];
 // A package that joined the lockstep after the first publish: the first version it ships at.
-export const PACKAGE_SINCE = { 'sigelo-contact': '0.1.2', 'sigelo-key-agent': '0.1.15' };
+export const PACKAGE_SINCE = { 'sigelo-contact': '0.1.2', 'sigelo-key-agent': '0.1.15', 'sigelo-transfer': '0.1.21' };
 
 const read = (p) => readFileSync(isAbsolute(p) ? p : join(ROOT, p), 'utf8');
 const readBytes = (p) => readFileSync(join(ROOT, p));

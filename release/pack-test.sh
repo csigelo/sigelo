@@ -6,7 +6,7 @@
 #                                    (from HEAD) into a temporary directory
 #
 # In an empty temporary directory, outside the repository, with HOME pointed there too:
-#   1. `npm install` the six tarballs together. The pinned `sigelo@^<v>` that the others ask for
+#   1. `npm install` the eight tarballs together (sigelo-transfer from 0.1.21). The pinned `sigelo@^<v>` that the others ask for
 #      is met by the sigelo tarball installed beside them, and sigelo-agent's `sigelo-contact@^<v>`
 #      by that tarball, so nothing comes from the registry but the third-party dependencies
 #      (@noble/*, mqtt).
@@ -48,7 +48,7 @@ case $(uname -m) in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) 
 (cd "$dist" && if command -v sha256sum >/dev/null 2>&1; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi) > "$work/sums.log" 2>&1 \
 	|| { cat "$work/sums.log" >&2; fail "sha256sum -c SHA256SUMS"; }
 ok "SHA256SUMS: $(wc -l < "$dist/SHA256SUMS" | tr -d ' ') files verified"
-for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do
+for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent sigelo-transfer; do
 	m=$(tar -xzOf "$dist/$t-$v.tgz" package/package.json)
 	printf '%s' "$m" | grep -q '"file:' && fail "$t-$v.tgz: file: dependency in the packed manifest"
 	printf '%s' "$m" | grep -q '"private": *true' && fail "$t-$v.tgz: private"
@@ -56,7 +56,14 @@ for t in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recov
 done
 dep=$(tar -xzOf "$dist/sigelo-agent-$v.tgz" package/package.json | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).dependencies["sigelo-contact"]))')
 [ "$dep" = "^$v" ] || fail "sigelo-agent-$v.tgz depends on sigelo-contact $dep, not ^$v"
-ok "packed manifests: no file: dependency, none private, LICENSE in each; sigelo-agent depends on sigelo-contact ^$v"
+# sigelo-transfer: its two modules and README, never its tests; werift exactly the version dtls-verify.mjs is written for.
+listing=$(tar -tzf "$dist/sigelo-transfer-$v.tgz")
+for f in rtc.mjs dtls-verify.mjs README.md LICENSE package.json; do printf '%s\n' "$listing" | grep -qx "package/$f" || fail "sigelo-transfer-$v.tgz has no $f"; done
+printf '%s\n' "$listing" | grep -q 'test-' && fail "sigelo-transfer-$v.tgz carries the tests"
+w=$(tar -xzOf "$dist/sigelo-transfer-$v.tgz" package/package.json | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).dependencies.werift))')
+wv=$(tar -xzOf "$dist/sigelo-transfer-$v.tgz" package/dtls-verify.mjs | sed -n "s/^export const WERIFT = '\([0-9.]*\)';/\1/p")
+[ -n "$wv" ] && [ "$w" = "$wv" ] || fail "sigelo-transfer-$v.tgz: werift \"$w\", dtls-verify.mjs is written for \"$wv\""
+ok "packed manifests: no file: dependency, none private, LICENSE in each; sigelo-agent depends on sigelo-contact ^$v; sigelo-transfer: rtc.mjs, dtls-verify.mjs, no tests, werift $w exactly"
 
 # 1. A consumer with nothing but the tarballs.
 c=$work/consumer
@@ -73,9 +80,9 @@ unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME XDG_RUNTIME_DI
 cd "$c"
 printf '{ "name": "consumer", "private": true, "type": "module" }\n' > package.json
 retry npm install --no-audit --no-fund --silent \
-	"$dist/sigelo-$v.tgz" "$dist/sigelo-contact-$v.tgz" "$dist/sigelo-spend-$v.tgz" "$dist/sigelo-agent-$v.tgz" "$dist/sigelo-mcp-$v.tgz" "$dist/sigelo-recovery-kit-$v.tgz" "$dist/sigelo-key-agent-$v.tgz" \
-	> "$work/install.log" 2>&1 || { cat "$work/install.log" >&2; fail "npm install of the seven tarballs"; }
-for p in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent; do
+	"$dist/sigelo-$v.tgz" "$dist/sigelo-contact-$v.tgz" "$dist/sigelo-spend-$v.tgz" "$dist/sigelo-agent-$v.tgz" "$dist/sigelo-mcp-$v.tgz" "$dist/sigelo-recovery-kit-$v.tgz" "$dist/sigelo-key-agent-$v.tgz" "$dist/sigelo-transfer-$v.tgz" \
+	> "$work/install.log" 2>&1 || { cat "$work/install.log" >&2; fail "npm install of the eight tarballs"; }
+for p in sigelo sigelo-contact sigelo-spend sigelo-agent sigelo-mcp sigelo-recovery-kit sigelo-key-agent sigelo-transfer; do
 	[ -L "node_modules/$p" ] && fail "node_modules/$p is a link, not an install"
 	[ -f "node_modules/$p/package.json" ] || fail "node_modules/$p missing"
 done
@@ -83,7 +90,11 @@ done
 [ -z "$(find node_modules -mindepth 3 -path '*/node_modules/sigelo/package.json')" ] || fail "a nested second copy of sigelo"
 [ -z "$(find node_modules -mindepth 3 -path '*/node_modules/sigelo-contact/package.json')" ] || fail "a nested second copy of sigelo-contact"
 [ -z "$(find node_modules -mindepth 3 -path '*/node_modules/sigelo-agent/package.json')" ] || fail "a nested second copy of sigelo-agent"
-ok "npm install of the seven tarballs in $c (one shared sigelo $v, one sigelo-contact, one sigelo-agent)"
+ok "npm install of the eight tarballs in $c (one shared sigelo $v, one sigelo-contact, one sigelo-agent)"
+# sigelo-contact finds sigelo-transfer beside it, with its DTLS checks in place (TURN_OK; else it would not load).
+out=$(node --input-type=module -e "const { pathToFileURL } = await import('node:url'); const m = await import(pathToFileURL(process.argv[1]).href); const r = await m.loadRtc(); console.log(r ? 'TURN_OK ' + r.TURN_OK : 'none')" "$c/node_modules/sigelo-contact/transfer-node.mjs" 2>&1)
+[ "$out" = 'TURN_OK true' ] || fail "sigelo-contact's loadRtc() beside sigelo-transfer: $out"
+ok "sigelo-contact loads sigelo-transfer from the install: its DTLS checks in place (TURN_OK true)"
 
 # 2a. sigelo-agent
 out=$(npx sigelo-agent init 2>&1) && fail "init without a recovery choice succeeded"
@@ -110,7 +121,7 @@ set +e; out=$(npx sigelo-agent accept sgl1x 2>&1); rc=$?; set -e
 ok "npx sigelo-agent contacts → no contacts yet; accept sgl1x → code_length (the installed sigelo-contact ran)"
 # The same as `npm i -g sigelo-agent`: a global install into a prefix of its own, its dependencies
 # met by the sigelo and sigelo-contact tarballs installed with it.
-retry npm install -g --prefix "$work/prefix" --no-audit --no-fund --silent "$dist/sigelo-$v.tgz" "$dist/sigelo-contact-$v.tgz" "$dist/sigelo-agent-$v.tgz" \
+retry npm install -g --prefix "$work/prefix" --no-audit --no-fund --silent "$dist/sigelo-$v.tgz" "$dist/sigelo-contact-$v.tgz" "$dist/sigelo-agent-$v.tgz" "$dist/sigelo-transfer-$v.tgz" \
 	> "$work/global.log" 2>&1 || { cat "$work/global.log" >&2; fail "npm install -g --prefix of sigelo-agent"; }
 g=$work/prefix/bin/sigelo-agent; [ -e "$g" ] || g=$work/prefix/sigelo-agent.cmd   # Windows puts the shims in the prefix
 set +e; out=$("$g" invite --help 2>&1); rc=$?; set -e
@@ -118,6 +129,16 @@ set +e; out=$("$g" invite --help 2>&1); rc=$?; set -e
 set +e; out=$("$g" accept sgl1x 2>&1); rc=$?; set -e
 [ $rc -eq 1 ] && printf '%s' "$out" | grep -q 'code_length' || fail "global sigelo-agent accept sgl1x (exit $rc): $out"
 ok "npm install -g --prefix: sigelo-agent invite --help prints the usage, accept sgl1x → code_length"
+# Every sigelo-contact of the global install (the top-level one, sigelo-agent's own if npm nested one) finds the global
+# sigelo-transfer (transfer-node.mjs rtcDirs: by name, every node_modules above).
+found=0
+for tn in $(find "$work/prefix" -path '*/sigelo-contact/transfer-node.mjs'); do
+	out=$(node --input-type=module -e "const { pathToFileURL } = await import('node:url'); const m = await import(pathToFileURL(process.argv[1]).href); const r = await m.loadRtc(); console.log(r ? 'TURN_OK ' + r.TURN_OK : 'none')" "$tn" 2>&1)
+	[ "$out" = 'TURN_OK true' ] || fail "global install: $tn loadRtc(): $out"
+	found=$((found + 1))
+done
+[ $found -ge 1 ] || fail "global install: no sigelo-contact/transfer-node.mjs under the prefix"
+ok "npm install -g --prefix with sigelo-transfer: each sigelo-contact there ($found) loads it, DTLS checks in place"
 
 # 2b. sigelo-wallet: no keeper configured is a plain refusal, not a stack trace
 set +e; out=$(npx -p sigelo-spend sigelo-wallet balance 2>&1); rc=$?; set -e

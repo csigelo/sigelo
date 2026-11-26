@@ -101,7 +101,7 @@ Owner steps on npmjs.com, as `csigelo`:
 
 1. Avatar → Account → Two-Factor Authentication: "Authorization and writes".
 2. Avatar → Access Tokens: delete all (none is used).
-3. For each of `sigelo`, `sigelo-contact`, `sigelo-agent`, `sigelo-spend`, `sigelo-mcp`, `sigelo-recovery-kit`:
+3. For each of `sigelo`, `sigelo-contact`, `sigelo-agent`, `sigelo-spend`, `sigelo-mcp`, `sigelo-recovery-kit`, `sigelo-key-agent`, and `sigelo-transfer` once its first version is up (by token, RELEASE.md step 8):
    - Settings → Publishing access → "Require two-factor authentication and disallow tokens" → Update;
    - Settings → Trusted Publisher → GitHub Actions: user `csigelo`, repository `sigelo`, workflow `release.yml`, environment `npm` → Save. Remove the `npm-publish.yml` entry after the first green v2 release.
 

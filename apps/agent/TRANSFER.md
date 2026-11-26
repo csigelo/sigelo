@@ -56,10 +56,11 @@ as an event `{type: "transfer", what: "asked", id, file, size}`. Page: the Files
 Free: direct, then Tor, else no path (up to 8 MiB: the relay lane). `--via tor`: Tor only. Pro:
 `prefer fast` (direct, then Tor) or `private` (Tor first).
 
-**Direct:** WebRTC data channel (ICE, DTLS, SCTP) on werift (`sigelo-transfer`, no native code).
-Candidates (3 s of gathering) ride the signed offer and answer. werift 0.26.0 checks only the
-DTLS fingerprint; `sigelo-transfer` adds the handshake signature and Finished checks, else the
-direct path stays off. STUN: 3478 on both relay hosts (`SIGELO_STUN`,
+**Direct:** WebRTC data channel (ICE, DTLS, SCTP) on werift (`npm i -g sigelo-transfer@0.1.21`, no
+native code).
+Candidates (3 s gathering) ride the signed offer and answer. werift 0.26.0 checks only the
+DTLS fingerprint; `sigelo-transfer` adds the handshake signature and Finished checks, else
+direct stays off. STUN: 3478 on both relay hosts (`SIGELO_STUN`,
 `host:port` list; empty: none). TURN (`SIGELO_TURN=off`: none), if no direct pair answers; `SIGELO_ICE_POLICY=relay`: TURN only. An offer waits 10 minutes, ICE 30 s.
 
 **Tor:** the side that serves (the sender if it can) adds an ephemeral v3 onion with its key discarded
