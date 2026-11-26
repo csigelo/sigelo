@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { keygen } from 'sigelo';
-import { CALL_LABEL, MAX_BPS, MIN_BPS, NO_PATH, OLD_TEXT, PAD, REASONS, TYPS, Line, Phone, barsOf, callRoutes, checkSdp, checkSignal, lineOf, nextBps, opusTune, padded, stunOf } from './call.mjs';
+import { CALL_LABEL, MAX_BPS, MIN_BPS, NO_PATH, NO_PATH_RELAYED, OLD_TEXT, TURN_FRESH_S, iceServersOf, relayedOf, PAD, REASONS, TYPS, Line, Phone, barsOf, callRoutes, checkSdp, checkSignal, lineOf, nextBps, opusTune, padded, stunOf } from './call.mjs';
 import { fakeNet } from './test-fake-rtc.mjs';
 
 let count = 0;
@@ -75,7 +75,7 @@ const DIDS = { alice: 'did:sigelo:zAlice', bob: 'did:sigelo:zBob', carol: 'did:s
 const FAST = { ringS: 1, expS: 3, pageMs: 600, keepMs: 800 };
 const PFAST = { gatherMs: 30, lateMs: 200, iceMs: 3000, disconnectedMs: 300, retryMs: 500, lostMs: 1500, statsMs: 60, pollMs: 20 };
 /** A host: its Line, its contacts, its chat lines, the page's api over callRoutes, and its Phone. */
-function host(name, net, world) {
+function host(name, net, world, { turn = undefined } = {}) {
   const H = { name, did: DIDS[name], lines: [], alerts: [], audio: [], allow: {}, sent: [], offline: false, world };
   H.contacts = Object.fromEntries(Object.entries(DIDS).filter(([n]) => n !== name).map(([n, d]) => [d, { did: d, name: n, online: true, tier: 'friend', presence: 'allow', relay: 'relay.test' }]));
   H.line = new Line({
@@ -84,7 +84,7 @@ function host(name, net, world) {
     line: (l) => H.lines.push(l), alert: (x) => H.alerts.push(x), audio: (x) => H.audio.push(x), o: FAST,
   });
   const routes = callRoutes({ line: H.line, contactOf: (d) => H.contacts[d] ?? (() => { throw Object.assign(new Error('not a contact'), { check: 'not_contact', status: 404 }); })(),
-    callable: (c) => (c.online === true ? true : { check: 'call_offline', message: 'not online' }), stun: (c) => stunOf('relay.test', c?.relay), allow: () => {}, allowOf: () => true });
+    callable: (c) => (c.online === true ? true : { check: 'call_offline', message: 'not online' }), stun: (c) => stunOf('relay.test', c?.relay), ...(turn && { turn }), allow: () => {}, allowOf: () => true });
   H.api = async (method, path, body) => {
     const u = new URL(path, 'http://x'), f = routes[`${method} ${u.pathname}`];
     if (!f) throw Object.assign(new Error('no route'), { check: 'route', status: 404 });
@@ -248,7 +248,7 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   await rings(B);
   await B.phone.accept();
   ok(await until(() => A.lines.at(-1)?.text === 'Could not connect' && B.lines.at(-1)?.text === 'Could not connect', 8000), 'no pair of candidates answers within ICE_MS: "Could not connect" on both sides');
-  ok([A.phone.error?.message, B.phone.error?.message].includes(NO_PATH) && [A.line.view()?.reason, B.line.view()?.reason].includes('no_path'), `the screen says "${NO_PATH}" (no TURN in the free tier)`);
+  ok([A.phone.error?.message, B.phone.error?.message].includes(NO_PATH) && [A.line.view()?.reason, B.line.view()?.reason].includes('no_path'), `the screen says "${NO_PATH}" (the relay offered no TURN)`);
   net.direct = true;
   await sleep(850);
   await A.phone.place(DIDS.bob);
@@ -341,6 +341,58 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   stop(A, B);
 }
 
+// 7. TURN (2026-11-26): the ICE servers, GET /api/calls/turn, the connection built with the relay's credential, "Via relay",
+// the no-path message when even the relay could not connect, a credential near its expiry fetched again at a restart.
+{
+  const T = { urls: ['turn:relay.test:3478?transport=udp', 'turn:relay.test:3478?transport=tcp'], username: '1764200000:abcdefghijklmnop', credential: 'Y3JlZGVudGlhbA==', exp: 1764200000 };
+  ok(JSON.stringify(iceServersOf(['relay.test:3478'], null)) === JSON.stringify([{ urls: ['stun:relay.test:3478'] }]), 'ICE servers without TURN: STUN alone, as before');
+  ok(JSON.stringify(iceServersOf(['relay.test:3478'], T)) === JSON.stringify([{ urls: ['stun:relay.test:3478'] }, { urls: T.urls, username: T.username, credential: T.credential }]), 'with TURN: STUN, then the relay\'s turn: URIs with username and credential');
+  const stats = (local, remote, how = 'transport') => new Map([
+    ...(how === 'transport' ? [['t', { id: 't', type: 'transport', selectedCandidatePairId: 'p' }]] : []),
+    ['p', { id: 'p', type: 'candidate-pair', localCandidateId: 'l', remoteCandidateId: 'r', nominated: true, state: 'succeeded' }],
+    ['l', { id: 'l', type: 'local-candidate', candidateType: local }], ['r', { id: 'r', type: 'remote-candidate', candidateType: remote }]]);
+  ok(relayedOf(stats('relay', 'srflx')) === true && relayedOf(stats('host', 'relay', 'nominated')) === true && relayedOf(stats('srflx', 'prflx')) === false && relayedOf(new Map()) === null,
+    'relayedOf: a relayed candidate on either side of the selected pair (transport\'s selectedCandidatePairId, else the nominated pair); none selected: null');
+  const R = callRoutes({ line: new Line({ send: async () => ({}), contact: () => null, allowed: () => true, shares: () => false, me: () => 'did:x', o: FAST }), contactOf: () => null, callable: () => true, stun: () => [] });
+  ok(JSON.stringify(await R['GET /api/calls/turn']()) === '{"turn":null}', 'GET /api/calls/turn with no TURN hook: {turn: null}');
+  const R2 = callRoutes({ line: new Line({ send: async () => ({}), contact: () => null, allowed: () => true, shares: () => false, me: () => 'did:x', o: FAST }), contactOf: () => null, callable: () => true, stun: () => [], turn: async () => { throw new Error('down'); } });
+  ok(JSON.stringify(await R2['GET /api/calls/turn']()) === '{"turn":null}', 'a TURN hook that fails: {turn: null} (the call goes on with STUN)');
+  let asked = 0, cred = T;
+  const net = fakeNet(), world = {}, A = host('alice', net, world, { turn: async () => { asked++; return cred; } }), B = host('bob', net, world, { turn: async () => cred });
+  await sleep(60);
+  net.direct = false;
+  await A.phone.place(DIDS.bob);
+  const pcA = [...net.pcs].find((p) => p.type === 'offer');
+  ok(asked === 1 && pcA && JSON.stringify(pcA.cfg.iceServers) === JSON.stringify(iceServersOf(['relay.test:3478'], T)) && pcA.cfg.iceTransportPolicy === undefined,
+    'the caller\'s connection: STUN and the relay\'s TURN, fetched once at connection start; the policy stays "all"', JSON.stringify(pcA?.cfg));
+  ok(!A.sent.some((x) => JSON.stringify(x).includes(T.credential)), 'the credential never leaves in a call message');
+  await rings(B);
+  await B.phone.accept();
+  const pcB = [...net.pcs].find((p) => p.type === 'answer');
+  ok(pcB && pcB.cfg.iceServers.length === 2 && A.phone.view().turn === undefined, 'the callee\'s connection has its own relay\'s TURN too (fetched at Accept)');
+  ok(await until(() => A.lines.at(-1)?.text === 'Could not connect' && B.lines.at(-1)?.text === 'Could not connect', 8000) && [A.phone.error?.message, B.phone.error?.message].includes(NO_PATH_RELAYED)
+    && ![A.phone.error?.message, B.phone.error?.message].includes(NO_PATH), `no path even with TURN: "${NO_PATH_RELAYED}" (not "${NO_PATH}", which section 4 shows without TURN)`, JSON.stringify([A.phone.error, B.phone.error]));
+  net.direct = true;
+  await sleep(850);
+  // Connected through the relay: the selected pair has a relayed candidate.
+  const real = net.RTC.prototype.getStats;
+  net.RTC.prototype.getStats = async function () { const m = await real.call(this); for (const [k, v] of stats('relay', 'srflx')) m.set(k, v); return m; };
+  await A.phone.place(DIDS.bob); await rings(B); await B.phone.accept();
+  ok(await until(() => state(A) === 'active' && A.phone.view().relayed === true), 'connected, the pair relayed: the view says relayed (the screen: "Via relay")');
+  net.RTC.prototype.getStats = real;
+  ok(await until(() => A.phone.view().relayed === false, 2000), 'a direct pair: relayed false (the screen: "Direct")');
+  // A restart with a credential within TURN_FRESH_S of its expiry: fetched again and set on the connection.
+  const n0 = asked, pcR = A.phone.pc;
+  cred = { ...T, username: '1764203600:qrstuvwxyzabcdef', exp: 1764203600 };
+  A.phone.turn = { ...T, exp: Math.floor(Date.now() / 1000) + TURN_FRESH_S - 5 };
+  let setTo = null;
+  pcR.getConfiguration = () => pcR.cfg; pcR.setConfiguration = (c) => { setTo = c; };
+  net.cut();
+  ok(await until(() => A.sent.some((x) => x.typ === 'restart'), 2000) && asked === n0 + 1 && setTo && setTo.iceServers[1]?.username === cred.username, 'a restart near the credential\'s expiry: a fresh one, set on the connection before it gathers', JSON.stringify(setTo));
+  await A.phone.hangup();
+  stop(A, B);
+}
+
 // 6. A flood of rings while busy: one busy answer per contact per REPLY_MS.
 {
   const net = fakeNet(), world = {}, A = host('alice', net, world), B = host('bob', net, world), C = host('carol', net, world);
@@ -370,7 +422,8 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs')) || !existsSync(join(RELAY_DIR, 'n
   const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
   const { Carrier, CALL_SEND, pathsFor } = await import('./carrier.mjs');
   const HOST = 'relay.test', dir = mkdtempSync(join(tmpdir(), 'sigelo-call-'));
-  const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1,
+  const TURN_SECRET = 'f0'.repeat(32);
+  const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, turnSecret: TURN_SECRET,
     log: () => {}, policy: (ctx) => relayPolicy(ctx, { pow: { bits: 4, loadBits: 8, loadPerHour: 1000, cost: { m: 8, t: 1, p: 1 } } }) });
   const endpoints = { [HOST]: { mqtt: `mqtt://127.0.0.1:${relay.ports.tcp}`, http: `http://127.0.0.1:${relay.ports.http}` } };
   const seed = (l) => new Uint8Array(createHash('sha256').update(`sigelo-call-test/0 ${l}`).digest());
@@ -395,6 +448,15 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs')) || !existsSync(join(RELAY_DIR, 'n
     const took = B.c.takeCalls(), sorted = (o) => JSON.stringify(Object.fromEntries(Object.entries(o).sort()));
     ok(took.length === 1 && took[0].from === A.did && sorted(took[0].content) === sorted(ring) && B.c.takeCalls().length === 0, 'takeCalls(): the message, once');
     ok(!(await B.c.inbox()).messages.some((m) => m.label === CALL_LABEL) && !B.c.history({ since: 0 }).messages.some((m) => m.label === CALL_LABEL), 'never in inbox() nor the log');
+    // TURN (relay/turn.mjs): the carrier asks its own relay over the session; the credential is coturn's for that secret.
+    const { createHmac } = await import('node:crypto');
+    const t1 = await A.c.turnServer();
+    ok(t1 && t1.urls.join() === 'turn:relay.test:3478?transport=udp,turn:relay.test:3478?transport=tcp' && t1.credential === createHmac('sha1', TURN_SECRET).update(t1.username).digest('base64')
+      && /^\d+:[A-Za-z0-9_-]{16}$/.test(t1.username) && t1.exp > Date.now() / 1000 + 3000, 'carrier.turnServer(): the relay\'s TURN URIs and a credential coturn accepts for its secret (base64 HMAC-SHA1 of "<exp>:<tag>")', JSON.stringify(t1));
+    const t2 = await A.c.turnServer();
+    ok(t2.username === t1.username && !A.events.some((e) => e.type === 'notice' && e.code === 'turn'), 'asked again: the same credential, kept (no notice event)');
+    const tb = await B.c.turnServer();
+    ok(tb && tb.username !== t1.username, 'another identity: another username');
   } finally {
     await A.c.stop().catch(() => {}); await B.c.stop().catch(() => {});
     await relay.close?.(); rmSync(dir, { recursive: true, force: true });

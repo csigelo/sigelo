@@ -44,7 +44,12 @@ config matched against the current docs (sources below), not run.
 | VS Code Copilot agent mode | MCP stdio | `.vscode/mcp.json`: `{"servers":{"sigelo":{"type":"stdio","command":"npx","args":["-y","sigelo-mcp@0.1.20"]}}}` | doc-checked | 2026-10-14 |
 | Gemini CLI | MCP stdio | `S` in `~/.gemini/settings.json` (remote: key `httpUrl`, not `url`) | doc-checked | 2026-10-14 |
 | Goose | MCP stdio | `goose session --with-extension "npx -y sigelo-mcp@0.1.20"`, or `extensions:` in `config.yaml` ([others.md](others.md)) | doc-checked | 2026-10-14 |
-| OpenCode, Cline | MCP stdio | [opencode.md](opencode.md), [others.md](others.md) (configs use the checkout path) | doc-checked | 2026-09-24 |
+| OpenCode | MCP stdio | [opencode.md](opencode.md) (configs use the checkout path) | doc-checked | 2026-09-24 |
+| Cline | MCP stdio or Streamable HTTP | [others.md](others.md); by URL: `"type": "streamableHttp"`, `"url"`, `"headers"` | doc-checked | 2026-11-25 |
+| Open WebUI | MCP Streamable HTTP only | `sigelo-mcp --http`, then Settings → Integrations → External Tool Servers ([open-webui.md](open-webui.md)) | documented, not run (no Docker here) | 2026-11-25 |
+| LM Studio | MCP stdio, or remote by URL | `S` in `mcp.json`; remote: `"url"` + `"headers"` (its docs do not name the transport) | doc-checked | 2026-11-25 |
+| Jan | MCP stdio | Command `npx`, Arguments `-y sigelo-mcp@0.1.20`; its docs show no URL servers | doc-checked | 2026-11-25 |
+| Continue | MCP stdio or Streamable HTTP | `mcpServers` in `config.yaml`, `type: streamable-http`, `url` (its docs show no `headers`) | doc-checked | 2026-11-25 |
 | Agent Zero | MCP stdio | Settings → MCP/A2A → External MCP Servers, `S` with `npx` ([agent-zero.md](agent-zero.md)) | operator's report (setup feedback), not run here | 2026-11-14 |
 | pi | MCP stdio from pi 1.0; CLI skill | `pi mcp add sigelo --env SIGELO_IDENTITY=… -- npx -y sigelo-mcp@0.1.20` ([agent-pi.md](agent-pi.md)) | operator's run (setup feedback) | 2026-11-14 |
 | Hermes Agent | MCP stdio + skill | `printf 'y\n' \| hermes mcp add sigelo --command npx --env SIGELO_IDENTITY=… HOME=… PATH=… --args sigelo-mcp@0.1.20` ([hermes/](hermes/INTEGRATION.md)) | run here (unmodified `hermes -z`, scripted model, 12 checks); command: operator's run | 2026-11-14 |
@@ -71,6 +76,7 @@ config matched against the current docs (sources below), not run.
 | Qwen-Agent | MCP stdio | `function_list=[S]` (remote needs `"type":"streamable-http"`) | doc-checked | 2026-10-14 |
 | DeepSeek Harness | MCP stdio (Cordis) | YAML below, in `$DSH_HOME/cordis.patch.yml` | doc-checked | 2026-10-14 |
 | Octomind | MCP stdio or Streamable HTTP | TOML below, as `~/.local/share/octomind/config/mcp-sigelo.toml` | doc-checked, untested | 2026-11-11 |
+| Chatwoot (support desk) | API inbox bridge | `node chatwoot/cli.mjs chatwoot.json` ([chatwoot/](chatwoot/README.md)) | run here against a fake Chatwoot (60 checks); no real Chatwoot yet | 2026-11-25 |
 | any MQTT client | HTTP + MQTT over TLS | [JOIN.md](JOIN.md#raw), [relay.json](https://relay.sigelo.ai/relay.json), [contact fixtures](../contact/README.md#contracts) | run here: `apps/contact/test-carrier.mjs` against a loopback relay, ALL PASS (411) | 2026-10-14 |
 | anything that runs commands | CLI sidecar | [JOIN.md](JOIN.md) | `sigelo-agent` from npm run here | 2026-10-14 |
 

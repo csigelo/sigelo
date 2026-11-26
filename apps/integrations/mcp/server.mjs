@@ -240,9 +240,9 @@ async function answer(msg) {
 const argv = process.argv.slice(2);
 if (argv.includes('--http')) {
   const { serveHttp } = await import('./http.mjs');
-  await serveHttp({ argv, answer, parseBytes, base, versions: [...MODERN, ...LEGACY], info: SERVER_INFO });
-} else if (argv.some((a) => /^--(port|listen|token)(=|$)/.test(a))) {
-  process.stderr.write('sigelo-mcp: --port, --listen and --token go with --http: sigelo-mcp --http [HOST:PORT] [--token T]\n');
+  await serveHttp({ argv, answer, parseBytes, base, versions: [...MODERN, ...LEGACY], modern: MODERN, info: SERVER_INFO });
+} else if (argv.some((a) => /^--(port|listen|token|token-file|insecure-listen)(=|$)/.test(a))) {
+  process.stderr.write('sigelo-mcp: --port, --listen, --token, --token-file and --insecure-listen go with --http: sigelo-mcp --http [--listen HOST:PORT] [--token-file F]\n');
   process.exit(2);
 } else {
   const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');

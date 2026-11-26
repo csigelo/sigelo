@@ -33,11 +33,12 @@ No identity: `sigelo_enrol` with your operator's code; `sigelo_init` for one of 
 
 ## Over HTTP (`--http`)
 
-`sigelo-mcp --http [HOST:PORT]` serves MCP Streamable HTTP at `/mcp` on `127.0.0.1:7310`.
+`sigelo-mcp --http [--listen HOST:PORT]` serves MCP Streamable HTTP at `/mcp` on `127.0.0.1:7310`.
 Same tools, same identity file. Every request needs
-`Authorization: Bearer <token>`: `SIGELO_MCP_TOKEN` or `--token`, else one made at first start
-and kept in `sigelo-mcp-http.token` beside the identity file. Off loopback you must give the
-token, and plain HTTP carries it in clear. No SSE stream.
+`Authorization: Bearer <token>`: `SIGELO_MCP_TOKEN` or `--token`, else one made once, printed,
+kept in `sigelo-mcp-http.token` beside the identity (or `--token-file F`). Off loopback only
+with `--insecure-listen`; plain HTTP carries the token in clear.
+Open WebUI: [open-webui.md](../open-webui.md).
 
 ## Remote (verify only)
 

@@ -3,7 +3,8 @@
 // behind the interface of apps/transfer/rtc.mjs (werift, Node), so transfer-engine.mjs drives both alike
 // and a phone talks to a Node agent or another phone over the same `sigelo-transfer/0` channel.
 //
-//   const p = await peer({ stun, gatherMs, RTC })   RTC: the constructor (default globalThis.RTCPeerConnection)
+//   const p = await peer({ stun, turn, gatherMs, RTC })   RTC: the constructor (default globalThis.RTCPeerConnection);
+//                                                     turn: { urls, username, credential } (carrier.turnServer) or null
 //   await p.offer(label) → sdp; await p.answer(sdp, label) → sdp; await p.accept(sdp)
 //   await p.open(ms) → the channel (transfer.mjs's: send, buffered, close, on) once it is open, or throws ice_timeout
 //   p.close()
@@ -16,7 +17,12 @@
 import { LOW } from './transfer.mjs';
 
 const fail = (check, why) => { throw Object.assign(new Error(`${check}: ${why}`), { check }); };
-export const iceServers = (stun) => (stun.length ? [{ urls: stun.map((s) => `stun:${s}`) }] : []);
+/** STUN ['host:port', …] and TURN ({ urls, username, credential } from the relay, or null) → RTCIceServer[]. The policy stays
+ *  "all": a direct pair is preferred, the relayed candidate is used only when none answers. */
+/** Browser and WebView DTLS checks the handshake signatures: TURN allowed here (apps/transfer/rtc.mjs TURN_OK: not on werift). */
+export const TURN_OK = true;
+export const iceServers = (stun, turn = null) => [...(stun.length ? [{ urls: stun.map((s) => `stun:${s}`) }] : []),
+  ...(turn ? [{ urls: [...turn.urls], username: turn.username, credential: turn.credential }] : [])];
 export const noMdns = (sdp) => sdp.split(/\r?\n/).filter((l) => !/^a=candidate:.* [0-9a-f-]+\.local /i.test(l)).join('\r\n');
 
 /** An RTCDataChannel as transfer.mjs's channel. */
@@ -39,9 +45,9 @@ export function channelOf(dc, pc) {
   };
 }
 
-export async function peer({ stun = [], gatherMs = 3000, RTC = globalThis.RTCPeerConnection } = {}) {
+export async function peer({ stun = [], turn = null, gatherMs = 3000, RTC = globalThis.RTCPeerConnection } = {}) {
   if (typeof RTC !== 'function') fail('no_rtc', 'this page has no RTCPeerConnection');
-  const pc = new RTC({ iceServers: iceServers(stun) });
+  const pc = new RTC({ iceServers: iceServers(stun, turn) });
   let dc = null, want = null, gotDc;
   const dcP = new Promise((r) => { gotDc = r; });
   pc.addEventListener('datachannel', (ev) => {

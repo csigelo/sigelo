@@ -75,7 +75,7 @@
 #                         no other, copied for it by a deploy hook, and by this script whenever
 #                         the copy is missing or stale (after a restore); fail2ban;
 #                         unattended upgrades rebooting at 04:30 UTC when
-#                         needed; nftables (22, 80, 443, 8883, udp 3478; armed with a 3-minute rollback the
+#                         needed; nftables (22, 80, 443, 8883, 3478, udp 3478 and 49160-49400; armed with a 3-minute rollback the
 #                         first time, confirmed by hand from a new ssh session); sshd key only,
 #                         root off, AllowUsers csigelo sigelo — only once csigelo has a password,
 #                         is in group sudo and both users have a key; nginx Restart=on-failure and
@@ -1005,7 +1005,7 @@ Unattended-Upgrade::Automatic-Reboot-Time "04:30";
 Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
 APT
 
-  say "R12. nftables: inbound 22, 80, 443 and 8883 (tcp), 3478 (udp, STUN) only"
+  say "R12. nftables: inbound 22, 80, 443, 8883 and 3478 (tcp), 3478 and 49160-49400 (udp, STUN and TURN) only"
   put /etc/nftables.conf 0755 <<'NFT'
 #!/usr/sbin/nft -f
 # written by site/deploy/server-setup.sh --relay. Replaces table inet filter only, never the whole
@@ -1022,7 +1022,9 @@ table inet filter {
         udp sport 67 udp dport 68 accept          # DHCPv4 replies
         udp sport 547 udp dport 546 accept        # DHCPv6 replies
         tcp dport { 22, 80, 443, 8883 } accept    # ssh, ACME, nginx, the broker
-        udp dport 3478 accept comment "STUN for sigelo transfers"   # coturn (relay/deploy/README.md, STUN)
+        udp dport 3478 accept comment "STUN for sigelo transfers"   # coturn (relay/deploy/README.md, STUN and TURN)
+        tcp dport 3478 accept comment "TURN over TCP"
+        udp dport 49160-49400 accept comment "TURN relayed ports"   # turnserver.conf min-port, max-port
     }
     chain forward {
         type filter hook forward priority filter; policy drop;

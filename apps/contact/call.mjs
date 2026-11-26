@@ -24,7 +24,11 @@
 //
 // Timers: the caller gives up at RING_S (end no_answer); a ring past its exp is a "Missed call"; a ring with no page
 // here that can take it (none polled GET /api/calls?rtc=1 within PAGE_MS) gets `end unavailable`; ICE has ICE_MS after
-// the answer, else end no_path ("Could not connect directly from these two networks." No TURN in the free tier);
+// the answer, else end no_path ("Could not connect directly from these two networks.", or with a TURN server offered
+// "Could not connect, not even through the relay host."). TURN (2026-11-26, for everyone): the Line's host asks its relay
+// for a credential (carrier.turnServer, relay/turn.mjs) at each connection (GET /api/calls/turn), again at a restart once
+// within TURN_FRESH_S of its expiry; the policy stays "all" (a direct pair preferred); the screen says "Via relay" while
+// the selected pair has a relayed candidate (getStats);
 // roaming (Wi-Fi to mobile data, a new address): disconnected DISCONNECTED_MS (2 s), or failed, or the shell's network
 // change → the caller restarts ICE with a fresh offer, again every RETRY_MS while it does not connect; both screens say
 // "Reconnecting…"; LOST_MS (30 s) after the drop → end lost, "Connection lost" on the screen and in the chat. Weak links:
@@ -55,6 +59,9 @@ export const REPLY_MS = 30000;
 export const PAD = 8192, SDP_MAX = 6144, CANDS_MAX = 16, CAND_MAX = 512, ATTEMPT_MAX = 100, TEXT_MAX = 200;
 export const OLD_TEXT = 'Calling you on sigelo: update to answer';
 export const NO_PATH = 'Could not connect directly from these two networks.';
+export const NO_PATH_RELAYED = 'Could not connect, not even through the relay host.';
+/** Seconds: a TURN credential this close to its expiry is fetched again before an ICE restart gathers. */
+export const TURN_FRESH_S = 600;
 export const STUN_PORT = 3478;
 
 const ID = /^[0-9a-f]{32}$/;
@@ -65,6 +72,19 @@ export const newCallId = () => { const b = new Uint8Array(16); globalThis.crypto
 export const mss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 /** STUN as transfers use it (transfer-engine.mjs stunFor): this side's relay host and the contact's, port 3478. */
 export const stunOf = (...relays) => [...new Set(relays.filter((r) => typeof r === 'string' && r !== '').map((r) => r.replace(/:\d+$/, '')))].map((h) => `${h}:${STUN_PORT}`);
+/** STUN ['host:port', …] and TURN ({ urls, username, credential } | null) → RTCIceServer[] (as rtc-web.mjs iceServers). */
+export const iceServersOf = (stun, turn = null) => [...(stun.length ? [{ urls: stun.map((s) => `stun:${s}`) }] : []),
+  ...(turn ? [{ urls: [...turn.urls], username: turn.username, credential: turn.credential }] : [])];
+/** getStats() → true when the selected candidate pair has a relayed (TURN) candidate on either side, false when it has
+ *  none, null when no pair is selected yet. */
+export function relayedOf(report) {
+  const by = new Map(), pairs = [];
+  let selected = null;
+  report.forEach((x) => { by.set(x.id, x); if (x.type === 'transport' && x.selectedCandidatePairId) selected = x.selectedCandidatePairId; if (x.type === 'candidate-pair') pairs.push(x); });
+  const pair = (selected && by.get(selected)) || pairs.find((x) => x.selected) || pairs.find((x) => x.nominated && x.state === 'succeeded');
+  if (!pair) return null;
+  return [by.get(pair.localCandidateId), by.get(pair.remoteCandidateId)].some((c) => c?.candidateType === 'relay');
+}
 /** A `.local` (multicast DNS) candidate dropped, as rtc-web.mjs does: resolving one would put an mDNS socket on the LAN. */
 export const noMdns = (sdp) => sdp.split(/\r?\n/).filter((l) => !/^a=candidate:.* [0-9a-f-]+\.local /i.test(l)).join('\r\n');
 const candsIn = (sdp) => (String(sdp).match(/^a=candidate:.*$/gm) ?? []).map((l) => l.slice(2).trim());
@@ -354,12 +374,13 @@ export class Line {
 
 /**
  * The /api/calls* routes over one Line (UI-API.md "Calls"). contactOf(did) → the contact (refuses an unknown one);
- * callable(c) → whether this side may call it now (a person, present); stun(c) → the STUN list; can: { speaker, mic, ring }
+ * callable(c) → whether this side may call it now (a person, present); stun(c) → the STUN list; turn() → { urls, username,
+ * credential, exp } | null (the relay's TURN credential: carrier.turnServer); can: { speaker, mic, ring }
  * (ring: the host rings itself, the page plays no tone);
  * hooks: { speaker(on), mic(), micSettings() } where the host has them (the phone app); allow(c, on) / allowOf(c) the
  * "Can call me" switch.
  */
-export function callRoutes({ line, contactOf, callable, stun, can = {}, hooks = {}, allow, allowOf }) {
+export function callRoutes({ line, contactOf, callable, stun, turn = async () => null, can = {}, hooks = {}, allow, allowOf }) {
   const idOf = (b) => (typeof b['id'] === 'string' && ID.test(b['id']) ? b['id'] : bad('body', 'id: a call id (32 hex digits)'));
   const attemptOf = (b, d) => (b['attempt'] === undefined ? d : isInt(b['attempt']) && b['attempt'] >= 1 && b['attempt'] <= ATTEMPT_MAX ? b['attempt'] : bad('body', 'attempt: a whole number'));
   return {
@@ -367,6 +388,12 @@ export function callRoutes({ line, contactOf, callable, stun, can = {}, hooks = 
       const to = q?.get?.('to'), c = to ? contactOf(to) : null, call = line.view({ rtc: q?.get?.('rtc') === '1' });
       const peer = c ?? (call ? contactOf(call.did) : null);
       return { call, stun: stun(peer), can: { speaker: can.speaker === true, mic: can.mic === true, ring: can.ring === true } };
+    },
+    // A TURN server for a connection starting now; null: STUN alone. Asked at each connection, never in the poll.
+    'GET /api/calls/turn': async () => {
+      let t = null;
+      try { t = (await turn()) ?? null; } catch {}
+      return { turn: t ? { urls: t.urls, username: t.username, credential: t.credential, exp: t.exp } : null };
     },
     'POST /api/calls/start': async (b) => {
       const c = contactOf(b['to']);
@@ -440,13 +467,14 @@ export class Phone {
     this.o = { gatherMs: GATHER_MS, lateMs: LATE_MS, iceMs: ICE_MS, disconnectedMs: DISCONNECTED_MS, retryMs: RETRY_MS, lostMs: LOST_MS, statsMs: STATS_MS, pollMs: 500, ...o };
     this.call = null;        // the Line's view
     this.stun = [];
+    this.turn = null;        // the TURN server of this connection (GET /api/calls/turn), or null
     this.can = { speaker: false, mic: false };
     this.#reset();
   }
   #reset() {
     this.pc = null; this.stream = null; this.id = null; this.attempt = 1; this.applied = 0; this.pending = []; this.remote = false;
     this.ever = false; this.muted = false; this.speakerOn = false; this.phase = null; this.error = null; this.place_ = null;
-    this.reconnecting = false; this.quality = null; this.bps = MAX_BPS; this.clean = 0; this.prevIn = null; this.loss = null; this.rtt = null;
+    this.reconnecting = false; this.quality = null; this.bps = MAX_BPS; this.clean = 0; this.prevIn = null; this.loss = null; this.rtt = null; this.relayed = null; this.turn = null;
     for (const k of ['ice', 'disc', 'retry', 'lost', 'stats', 'poll']) this.#stop(k);
   }
   #tm = {};
@@ -459,7 +487,7 @@ export class Phone {
   view() {
     const c = this.call;
     return { call: c, phase: this.phase, error: this.error, muted: this.muted, speaker: this.speakerOn, can: this.can, reconnecting: this.reconnecting,
-      quality: this.reconnecting ? 0 : this.quality, bps: this.bps, loss: this.loss, rtt: this.rtt, live: Boolean(c && c.state !== 'ended') || this.phase === 'mic' || this.phase === 'placing' };
+      quality: this.reconnecting ? 0 : this.quality, relayed: this.relayed === true, bps: this.bps, loss: this.loss, rtt: this.rtt, live: Boolean(c && c.state !== 'ended') || this.phase === 'mic' || this.phase === 'placing' };
   }
   #changed() { try { this.onState(this.view()); } catch {} }
 
@@ -483,12 +511,24 @@ export class Phone {
   async #pc() {
     let certificates;
     try { if (typeof this.RTC.generateCertificate === 'function') certificates = [await this.RTC.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' })]; } catch {}
-    const pc = new this.RTC({ iceServers: this.stun.length ? [{ urls: this.stun.map((s) => `stun:${s}`) }] : [], bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require', ...(certificates && { certificates }) });
+    this.turn = await this.#turnNow();
+    const pc = new this.RTC({ iceServers: iceServersOf(this.stun, this.turn), bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require', ...(certificates && { certificates }) });
     for (const t of this.stream.getAudioTracks()) pc.addTrack(t, this.stream);
     this.prevIn = null;
     pc.addEventListener('track', (ev) => { try { this.onStream(ev.streams?.[0] ?? null); } catch {} });
     pc.addEventListener('iceconnectionstatechange', () => void this.#ice(pc));
     return pc;
+  }
+  async #turnNow() {
+    try { const r = await this.api('GET', '/api/calls/turn'); return r?.turn && Array.isArray(r.turn.urls) ? r.turn : null; } catch { return null; }
+  }
+  /** Before an ICE restart gathers: a TURN credential near its expiry is replaced (coturn refuses an expired one at a new allocation). */
+  async #freshTurn(pc) {
+    if (!this.turn || !Number.isSafeInteger(this.turn.exp) || this.turn.exp - TURN_FRESH_S > this.now() / 1000) return;
+    const t = await this.#turnNow();
+    if (!t || this.pc !== pc) return;
+    this.turn = t;
+    try { pc.setConfiguration?.({ ...(pc.getConfiguration?.() ?? {}), iceServers: iceServersOf(this.stun, t) }); } catch {}
   }
   async #mic() {
     this.phase = 'mic'; this.#changed();
@@ -583,7 +623,7 @@ export class Phone {
   /** The page leaves the call screen for good (Close on the ended state). */
   dismiss() { if (!this.view().live) { this.call = null; this.phase = null; this.error = null; this.#changed(); } }
 
-  async #noPath() { if (!this.ever && this.id) { this.error = { check: 'no_path', message: NO_PATH }; await this.hangup('no_path'); } }
+  async #noPath() { if (!this.ever && this.id) { this.error = { check: 'no_path', message: this.turn ? NO_PATH_RELAYED : NO_PATH }; await this.hangup('no_path'); } }
   async #ice(pc) {
     if (this.pc !== pc) return;
     const s = pc.iceConnectionState;
@@ -592,6 +632,7 @@ export class Phone {
       if (this.reconnecting) { this.reconnecting = false; this.#changed(); }
       if (!this.ever) {
         this.ever = true;
+        try { this.relayed = relayedOf(await pc.getStats()); } catch {}
         await this.#bitrate(pc);
         this.#start('stats', this.o.statsMs, () => this.#stats(pc));
         const r = await this.api('POST', '/api/calls/connected', { id: this.id }).catch(() => null);
@@ -623,6 +664,7 @@ export class Phone {
     // Not connected again within RETRY_MS: another restart (a later network may be up by then).
     this.#start('retry', this.o.retryMs, () => { if (this.reconnecting && this.pc === pc) { this.#stop('disc'); this.#start('disc', 0, () => this.#restart()); } });
     try {
+      await this.#freshTurn(pc);
       await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
       this.remote = false;
       const sdp = await this.#gathered(pc, this.o.gatherMs);
@@ -645,6 +687,7 @@ export class Phone {
         } else if (x.type === 'inbound-rtp' && (x.kind ?? 'audio') === 'audio') { inLost = x.packetsLost ?? 0; inRecv = x.packetsReceived ?? 0; }
         else if (x.type === 'candidate-pair' && x.nominated && typeof x.currentRoundTripTime === 'number' && rtt === null) rtt = x.currentRoundTripTime;
       });
+      this.relayed = relayedOf(r);
       // What reaches this side: the loss since the last read.
       const p = this.prevIn;
       if (inLost !== null) {
@@ -705,6 +748,7 @@ export class Phone {
           for (const c of s.cands) await this.#add(pc, c);
         } else if (s.typ === 'restart' && call.dir === 'in') {
           this.attempt = s.attempt; this.remote = false;
+          await this.#freshTurn(pc);
           await this.#remote(pc, 'offer', s.sdp);
           await pc.setLocalDescription(await pc.createAnswer());
           const sdp = await this.#gathered(pc, this.o.gatherMs);

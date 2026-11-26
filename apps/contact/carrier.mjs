@@ -111,6 +111,9 @@
 //                                          down with no try already waiting; nothing else. now (a push wake): at once
 //   c.setPush(reg | null), c.pushStatus()  the phone's UnifiedPush endpoint and keys registered at this agent's own relay
 //                                          (sigelo-push/0 on $sigelo/push, relay/push.mjs) at every login; null removes it
+//   await c.turnServer()                   → { urls, username, credential, exp } | null: a TURN credential from this agent's own
+//                                          relay (sigelo-turn/0 on $sigelo/turn, relay/turn.mjs), where GET /challenge says it
+//                                          gives them and the session is up; kept until 10 minutes before exp; null otherwise
 //   started: 'user' | 'confirmed'          (start, invite, accept, tryNow) a search the human started: past
 //                                          POW_SEARCHES a day it is never refused, it asks (pow_confirm),
 //                                          and 'confirmed' goes on; without it (automatic retries) the cap holds
@@ -397,6 +400,8 @@ export const SEEN_LABEL = 'sigelo-seen/0', SEEN_SEND = Symbol('sigelo-seen send'
 // UnifiedPush (design/push.md, relay/push.mjs): the phone's endpoint and keys, registered with this agent's own
 // relay over its session (setPush), where GET /challenge says the relay takes them.
 export const PUSH_TOPIC = '$sigelo/push', PUSH_V = 'sigelo-push/0';
+// TURN (relay/turn.mjs): a credential for coturn on this agent's own relay host, asked over the session.
+export const TURN_TOPIC = '$sigelo/turn', TURN_V = 'sigelo-turn/0', TURN_WAIT_MS = 5000, TURN_KEEP_S = 600;
 // Busy marks (the header's): sent only with BUSY_SEND, never an inbox message; one is good for BUSY_TTL_S seconds.
 export const BUSY_LABEL = 'sigelo-busy/0', BUSY_SEND = Symbol('sigelo-busy send'), BUSY_TTL_S = 45;
 // Names (0.1.17: "the system allocated some random text" for a new contact). Once paired, each side tells the other its
@@ -936,6 +941,16 @@ export function groupTierOf(n) {
   if ((n?.tier !== 'free' && n?.tier !== 'pro') || g === null || typeof g !== 'object' || !whole(g.max, 0, GROUPS_TOLD_MAX) || !whole(g.members, 2, GROUP_MEMBERS_MAX)) return null;
   return { tier: n.tier, groups: { max: g.max, members: g.members } };
 }
+// The relay's TURN credential ({code: "turn", turn}, relay/turn.mjs): {v, urls (1 to 4 turn: URIs), username, credential, exp},
+// each checked, else ignored. → {urls, username, credential, exp} | null.
+const TURN_URL = /^turns?:[A-Za-z0-9.-]{1,253}(:\d{1,5})?(\?transport=(udp|tcp))?$/;
+export function turnOf(t) {
+  if (t === null || typeof t !== 'object' || Array.isArray(t) || Object.keys(t).sort().join() !== 'credential,exp,urls,username,v' || t.v !== TURN_V) return null;
+  if (!Array.isArray(t.urls) || t.urls.length < 1 || t.urls.length > 4 || !t.urls.every((u) => typeof u === 'string' && TURN_URL.test(u))) return null;
+  if (typeof t.username !== 'string' || !/^[\x21-\x7e]{1,128}$/.test(t.username) || typeof t.credential !== 'string' || !/^[A-Za-z0-9+/=]{1,128}$/.test(t.credential)) return null;
+  if (!Number.isSafeInteger(t.exp) || t.exp <= 0) return null;
+  return { urls: [...t.urls], username: t.username, credential: t.credential, exp: t.exp };
+}
 const quotaWhy = (r, name) => (r.code !== 'quota_storage' ? null
   : r.side === 'reader' ? `${name}'s side is over its storage quota (its queue is full, or its operator's Pro lapsed): nothing is wrong with your relay or your allowance; send again once ${name}'s agent has collected its messages (${relaySays(r.detail)})`
     : r.side === 'sender' ? `your network has used its share of this relay's free storage: send again once messages are collected or expire (${relaySays(r.detail)})` : null);
@@ -1104,7 +1119,7 @@ export class Carrier {
   #claimed = new Set(); #refusedTopics = new Map(); #handshakes = new Map(); #soon = new Set();
   #renewing = false;
   #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #powWaits = new Set(); #ask = false; #spare = new Map();
-  #push = undefined; #pushState = { state: 'none' };   // setPush: undefined = never set (nothing sent), null = off
+  #push = undefined; #pushState = { state: 'none' }; #turn = null;   // #turn: the last TURN credential (turnServer)   // setPush: undefined = never set (nothing sent), null = off
   #mineMemo = null; #clocks = new Map(); #selfName = () => null;
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
@@ -1492,6 +1507,8 @@ export class Carrier {
     try { n = parseBytes(bytes); } catch { return; }
     if (n === null || typeof n !== 'object' || typeof n.code !== 'string') return;
     // The relay's group tier for this login (relay/allowance.mjs "tier"): kept per relay in the state, refuses nothing.
+    // The answer to $sigelo/turn (turnServer): kept on the link for the publish that asked.
+    if (n.code === 'turn') { link.turnGot = turnOf(n.turn); return; }
     if (n.code === 'tier') {
       const g = groupTierOf(n);
       if (g) { try { this.#locked(({ st }) => { (st.group_tier ??= {})[link.relay] = g; }); } catch {} this.#emit({ type: 'group_tier', relay: link.relay, ...g }); }
@@ -2525,6 +2542,34 @@ export class Carrier {
   /** → { state: 'none' (never set) | 'pending' | 'registered' | 'off' | 'refused' | 'unsupported', relay?, at?, code?, detail? }. */
   pushStatus() { return { ...this.#pushState }; }
 
+  /**
+   * A TURN server for a call or a transfer starting now (relay/turn.mjs): { urls, username, credential, exp } from this agent's
+   * own relay, asked over its session (one publish, in the queue of the session's work: one request in flight), kept until
+   * TURN_KEEP_S before exp. null where the relay gives none, the session is down, or no answer within TURN_WAIT_MS: the
+   * caller goes on with STUN alone.
+   */
+  async turnServer() {
+    const t = this.#turn;
+    if (t && t.exp - TURN_KEEP_S > this.clock()) return { ...t };
+    const link = this.#links.get(this.relay);
+    if (!link?.up || !link.turn) return null;
+    const asked = new Promise((resolve) => {
+      this.#later(async () => {
+        if (!link.up) return resolve(null);
+        link.turnGot = null;
+        let r = null;
+        try { r = await this.#publish(link, TURN_TOPIC, new Uint8Array(0)); } catch { return resolve(null); }
+        const got = link.turnGot;
+        link.turnGot = null;
+        if (r) this.#emit({ type: 'notice', relay: link.relay, code: r.code, detail: r.detail });
+        resolve(r ? null : got);
+      });
+    });
+    const got = await Promise.race([asked, sleep(TURN_WAIT_MS).then(() => null)]);
+    if (got) this.#turn = got;
+    return got ? { ...got } : null;
+  }
+
   // Presence at one relay (the header's "Presence"): each contact's marker toward this agent read
   // (QoS 0: a marker is never queued); this agent's published toward those who may see it, once
   // per connection, by a started carrier only (its CONNECT set the will); cleared toward any other.
@@ -2681,7 +2726,7 @@ export class Carrier {
     }
     const password = canonicalize({ v: LOGIN_V, nonce: ch.nonce, sig, bundle: loginBundle(me.bundle, relay), ...(pow !== undefined && { pow }) });
     // until: this login's nonce is good till about then (#dial keeps it for a retry after "rate").
-    return { username: me.current_did, clientId: clientIdOf(me.did), password, pow, until: issued + POW_MS, push: r.body?.push === PUSH_V };
+    return { username: me.current_did, clientId: clientIdOf(me.did), password, pow, until: issued + POW_MS, push: r.body?.push === PUSH_V, turn: r.body?.turn === TURN_V };
   }
 
   // How long this agent's own relay keeps a message on the free tier (relay.json, plan §11), when
@@ -2762,7 +2807,7 @@ export class Carrier {
     if (!link.client.connected) throw link.cut ?? new MsgError('connect', 'the relay closed the connection');
     // Deliveries are counted from here (quiet), not from before the login: a proof-of-work search
     // of seconds would read as a drained queue, and give up stale claims before what they hold came.
-    link.since = Date.now(); link.onlineAt = this.clock(); link.push = creds.push === true;
+    link.since = Date.now(); link.onlineAt = this.clock(); link.push = creds.push === true; link.turn = creds.turn === true;
     if (creds.pow !== undefined) this.#locked(({ st }) => { (st.relays[relay] ??= { proven: false, claims: {} }).proven = true; });
     link.client.on('error', () => {});   // a close follows
     link.client.on('close', () => this.#closed(link));

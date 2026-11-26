@@ -1,0 +1,10 @@
+{
+  "name": "sigelo-chatwoot",
+  "private": true,
+  "description": "A sigelo identity as a Chatwoot API inbox: bridged contacts' messages in, support replies out",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "bin": { "sigelo-chatwoot": "cli.mjs" },
+  "scripts": { "test": "node test.mjs" }
+}

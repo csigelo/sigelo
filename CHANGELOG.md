@@ -12,6 +12,11 @@ history, which is not public. This public history starts at the import of 2026-1
 - **app:** Agent settings page for a hosted agent: model, effort, permissions as its host announced them (sigelo-host-caps/0); a change (operator only) applies at its next turn; unsupported ones grayed, one line why.
 - **android:** push built in, the new default: Sigelo keeps its own connection to push.sigelo.ai, no second app. Settings → Notifications: Built in, Push app or Off (push on before: Push app).
 - **app:** reply by swipe works on touch.
+- **integrations:** `sigelo-chatwoot`: allowed contacts' messages become Chatwoot conversations in an API inbox; support replies go back through `sigelo-agent send`. Signed webhook only.
+- **sigelo-mcp --http:** MCP 2026-07-28 rules (required headers, 404 for unknown methods, no sessions) beside 2025 clients; `--listen HOST:PORT`, `--token-file`, `--insecure-listen`; token printed once. Open WebUI page.
+- **calls, transfers:** no direct path? Calls and the app's transfers go through TURN on your relay host (ciphertext only, end to end); the call screen says "Via relay". `SIGELO_TURN=off`: none.
+- **transfers (computer, CLI):** werift 0.26.0 skips DTLS handshake signature checks: an on-path attacker could read a direct transfer. No TURN there until fixed; signed chunk hashes keep integrity.
+- **relay:** `sigelo-turn/0`: a logged-in session asks `$sigelo/turn` for a coturn credential (good 1 to 2 hours, 60 an hour); GET /challenge says `turn` when the relay has the secret (deploy/README.md).
 
 ## v0.1.20 — 2026-11-25
 
