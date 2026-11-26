@@ -47,8 +47,8 @@ import { eraseRequest, pubPath, recoverWith, recoveryKey } from './sigelo-agent-
 // refused before anything connects: `inbox --wiat 30` ran at once without the wait, and
 // `invite --help` minted a code.
 const SPEC: Record<string, { flags: Record<string, boolean>; args: [number, number] }> = {
-  invite: { flags: { '--name': true, '--ttl': true, '--json': false, '--long': false, '--relay': true, '--renew': false, '--cancel': true, '--public': false, '--months': true, '--cap': true, '--open': false }, args: [0, 0] },
-  accept: { flags: { '--name': true, '--wait': true, '--tier': true, '--relay': true, '--words': true }, args: [1, Infinity] },
+  invite: { flags: { '--name': true, '--ttl': true, '--json': false, '--long': false, '--relay': true, '--renew': false, '--cancel': true, '--public': false, '--months': true, '--cap': true, '--open': false, '--kind': true }, args: [0, 0] },
+  accept: { flags: { '--name': true, '--wait': true, '--tier': true, '--relay': true, '--words': true, '--kind': true }, args: [1, Infinity] },
   public: { flags: { '--json': false }, args: [0, 2] },
   contacts: { flags: {}, args: [0, 0] },
   tier: { flags: {}, args: [2, 2] },
@@ -79,6 +79,8 @@ export const USAGE = `Pairing with other agents, and talking to them through a r
                                            to 7 days, default a day); --json: both, DID, relay, expiry;
                                            --relay: the pairing's relay (default $SIGELO_RELAY)
        [--renew]                           --renew: a fresh short code once this one is used (inbox prints it)
+       [--kind agent|desk]                 what this identity tells each new contact it is (kept; default agent;
+                                           desk: a support desk; their app shows it, offers no call)
   invite --cancel <code>                   cancel a code of yours (short, long, or its hash), at the relay too
   invite --public [--months 1|6|12]        a public code for a website or a service (Pro only): PUB-XXXX-XXXX,
        [--cap <n>] [--open] [--name <n>]   the four words to print beside it, a link; many may use it, each a
@@ -93,6 +95,7 @@ export const USAGE = `Pairing with other agents, and talking to them through a r
        [--relay <host>]                    --relay: the inviter's relay, when asked (relay_tag)
        [--words "<four words>"]            a public code (PUB-…): the words its page prints beside it; another
                                            inviter's are refused (words), nothing paired
+       [--kind agent|desk]                 as invite's
   contacts                                 contacts (four words to check; re_pair: pair again; ours: yours by key;
                                            tier: how far you trust it), pending codes and answers
   tier <did|name> own|friend|quiet         own: messages pushed in full (watch --on-message); friend: a notice
@@ -589,6 +592,18 @@ const hint = (text: string): string => (/^bundle: the relay refused the login/.t
 /** The name this identity tells a new contact once paired (carrier.mjs "Names"): $SIGELO_NAME, else a profile's name
  *  (sigelo.<name>.local.json), else none. */
 export const selfNameOf = (path: string): string | null => process.env['SIGELO_NAME']?.trim() || /(?:^|[\\/])sigelo\.([a-z0-9_-]{1,64})\.local\.json$/.exec(path)?.[1] || null;
+/** Where this identity's kind is kept (`invite|accept --kind`): <identity>.kind, the one word. */
+export const kindPath = (path: string): string => `${path.replace(/\.json$/, '')}.kind`;
+/** The kind this identity tells a new contact once paired (carrier.mjs "Kinds"): agent by default, desk for a support
+ *  identity (--kind desk, kept in kindPath; $SIGELO_KIND wins); none for the operator's own file (a person). */
+export function selfKindOf(path: string, env: Env = process.env): 'agent' | 'desk' | null {
+  if (real(path) === real(humanPath(env))) return null;
+  const e = env['SIGELO_KIND']?.trim();
+  if (e === 'agent' || e === 'desk') return e;
+  let k = '';
+  try { k = readFileSync(kindPath(path), 'utf8').trim(); } catch {}
+  return k === 'desk' ? 'desk' : 'agent';
+}
 
 // --wait bounds a session: a carrier waiting without end keeps its relay connection open.
 const WAIT_MAX = 300;
@@ -725,7 +740,7 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
     const paths = lib.pathsFor(path);
     const c = carrier = new lib.Carrier({
       identity: () => { let s; try { s = load(path); } catch (e) { throw unreadable(path, e); } return { sign: signer(path, s).sign, bundle: bundleOf(s) }; },
-      ...paths, ...lib.optionsFromEnv(), selfName: () => selfNameOf(path),
+      ...paths, ...lib.optionsFromEnv(), selfName: () => selfNameOf(path), selfKind: () => (flags.has('--operator') ? null : selfKindOf(path)),
       // The first login proves work, silently for up to a minute on a phone: say so. keep, as without
       // onEvent: messages wait in the state file for inbox.
       keep: true, onEvent: (e: { type?: string; ms?: number }) => {
@@ -752,6 +767,14 @@ export async function main(cmd: string, rest: string[]): Promise<number> {
     // A pairing that did not complete (carrier pairing_failed; code_expired: the code outlived the
     // wait for the inviter), one line each.
     const failed = (fs: Failed[]): void => { for (const f of fs) note(`pairing with ${f.name ?? f.did} failed: ${f.code}: ${f.detail ?? ''}`); };
+    // --kind (invite, accept): what this identity tells each new contact it is (carrier.mjs "Kinds"), kept beside it.
+    const kind = flags.get('--kind');
+    if (kind !== undefined) {
+      if (kind !== 'agent' && kind !== 'desk') throw misuse(`--kind: agent or desk, not ${JSON.stringify(kind)}`);
+      if (flags.has('--operator')) throw misuse('--kind: an agent\'s or a desk\'s, not the operator\'s (a person)');
+      writeFileSync(kindPath(path), `${kind}\n`, { mode: 0o600 });
+      note(`this identity tells each new contact it is ${kind === 'desk' ? 'a support desk' : 'an agent'}${process.env['SIGELO_KIND'] && process.env['SIGELO_KIND'] !== kind ? ` (but $SIGELO_KIND=${process.env['SIGELO_KIND']} wins)` : ''}`);
+    }
     switch (cmd) {
       case 'invite': {
         // The bare code by default, as connect.html says it prints: the short one, to say or send;

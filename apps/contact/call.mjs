@@ -12,10 +12,12 @@
 //
 // The messages (design §2), content {typ, id, …}, id 32 hex, kept apart by the carrier (CALL_LABEL, CALL_SEND: never in
 // the inbox, the log, MCP; `watch` answers a ring `end unavailable`):
-//   ring     caller   {attempt: 1, sdp (the offer), exp (iat + 60 s), text (what an older app shows), pad}
+//   ring     caller   {attempt: 1, sdp (the offer, no address in it: ringSdp), exp (iat + 60 s), text (what an older app shows), pad}
 //   ringing  callee   {}   (only to a contact this side shares presence with: it says "online")
 //   answer   callee   {attempt, sdp, pad}   (attempt 1: the ring accepted; n > 1: a restart answered)
-//   cands    either   {attempt, cands: ["candidate:…"]}   the candidates gathered after the offer or answer left, once
+//   cands    either   {attempt, cands: ["candidate:…"]}   the candidates gathered after the offer or answer left, once; the
+//                     caller's first ones only after the answer came (the ring carries no address: a callee that never
+//                     accepts learns none of the caller's, LAN or public)
 //   restart  caller   {attempt n + 1, sdp (an ICE-restart offer), pad}
 //   end      either   {reason}   hangup declined busy no_answer cancelled lost no_path unavailable
 // ring, answer and restart are padded to PAD characters of JSON, so their size tells nothing. Every field is checked
@@ -28,7 +30,10 @@
 // "Could not connect, not even through the relay host."). TURN (2026-11-26, for everyone): the Line's host asks its relay
 // for a credential (carrier.turnServer, relay/turn.mjs) at each connection (GET /api/calls/turn), again at a restart once
 // within TURN_FRESH_S of its expiry; the policy stays "all" (a direct pair preferred); the screen says "Via relay" while
-// the selected pair has a relayed candidate (getStats);
+// the selected pair has a relayed candidate (getStats). "Always relay my media" (design §6, 2026-11-26: Settings, per
+// profile; SIGELO_ICE_POLICY=relay on a computer): GET /api/calls/turn says policy "relay", the connection is made with
+// iceTransportPolicy "relay" and only relayed candidates leave this page, their related address zeroed (relayOnly):
+// the contact never learns this device's addresses; a relay with no TURN to offer: RELAY_ONLY at once, nothing rung;
 // roaming (Wi-Fi to mobile data, a new address): disconnected DISCONNECTED_MS (2 s), or failed, or the shell's network
 // change → the caller restarts ICE with a fresh offer, again every RETRY_MS while it does not connect; both screens say
 // "Reconnecting…"; LOST_MS (30 s) after the drop → end lost, "Connection lost" on the screen and in the chat. Weak links:
@@ -49,7 +54,7 @@ export const TYPS = Object.freeze(['ring', 'ringing', 'answer', 'cands', 'restar
 export const REASONS = Object.freeze(['hangup', 'declined', 'busy', 'no_answer', 'cancelled', 'lost', 'no_path', 'unavailable']);
 /** Seconds: the caller's wait, a ring's life. */
 export const RING_S = 45, EXP_S = 60;
-/** Milliseconds: gathering before the offer goes, before the late candidates go; ICE after the answer; a disconnection
+/** Milliseconds: gathering before an answer or a restart goes (the ring waits for none), before the late candidates go; ICE after the answer; a disconnection
  *  before the restart, then before the call is lost; a page's last poll for a ring to wait for it; an ended call shown. */
 export const GATHER_MS = 1000, LATE_MS = 5000, ICE_MS = 15000, DISCONNECTED_MS = 2000, RETRY_MS = 8000, LOST_MS = 30000, PAGE_MS = 10000, KEEP_MS = 30000;
 /** Weak links (2026-11-24): Opus at most MAX_BPS, at least MIN_BPS, stepped by the far end's RTCP every STATS_MS. */
@@ -60,6 +65,10 @@ export const PAD = 8192, SDP_MAX = 6144, CANDS_MAX = 16, CAND_MAX = 512, ATTEMPT
 export const OLD_TEXT = 'Calling you on sigelo: update to answer';
 export const NO_PATH = 'Could not connect directly from these two networks.';
 export const NO_PATH_RELAYED = 'Could not connect, not even through the relay host.';
+/** "Always relay my media" on and the relay gives no TURN: calls and direct transfers fail at once with this sentence. */
+export const RELAY_ONLY = 'Relay only is on and this relay offers no relay path.';
+/** ICE policy from a setting or SIGELO_ICE_POLICY: "relay" when either says so, else "all". */
+export const policyOf = (...v) => (v.some((x) => x === true || x === 'relay') ? 'relay' : 'all');
 /** Seconds: a TURN credential this close to its expiry is fetched again before an ICE restart gathers. */
 export const TURN_FRESH_S = 600;
 export const STUN_PORT = 3478;
@@ -85,9 +94,26 @@ export function relayedOf(report) {
   if (!pair) return null;
   return [by.get(pair.localCandidateId), by.get(pair.remoteCandidateId)].some((c) => c?.candidateType === 'relay');
 }
+/** An SDP or candidate lines as they leave under the relay policy: only relayed candidates, their related address
+ *  (raddr/rport: the mapped public address a TURN allocation reports) zeroed, as a browser hides it. A host or srflx
+ *  candidate (none is gathered under "relay"; this is the second fence) is dropped. Lines or one string, either form. */
+export function relayOnly(x) {
+  const one = (l) => {
+    const m = /^(a=)?candidate:/i.test(l) ? / typ (\S+)/.exec(l) : null;
+    if (!m) return l;
+    return m[1] === 'relay' ? l.replace(/ raddr \S+ rport \d+/, ' raddr 0.0.0.0 rport 0') : null;
+  };
+  if (Array.isArray(x)) return x.map(one).filter((l) => l !== null);
+  return String(x).split(/\r?\n/).map(one).filter((l) => l !== null).join('\r\n');
+}
 /** A `.local` (multicast DNS) candidate dropped, as rtc-web.mjs does: resolving one would put an mDNS socket on the LAN. */
 export const noMdns = (sdp) => sdp.split(/\r?\n/).filter((l) => !/^a=candidate:.* [0-9a-f-]+\.local /i.test(l)).join('\r\n');
 const candsIn = (sdp) => (String(sdp).match(/^a=candidate:.*$/gm) ?? []).map((l) => l.slice(2).trim());
+
+/** The ring's offer with no address in it: candidate lines gone, the connection and RTCP addresses 0.0.0.0, the port 9
+ *  (RFC 8840 §4.3.1's values for "none gathered yet"). The caller's candidates follow in `cands` once the answer came. */
+export const ringSdp = (sdp) => String(sdp).split(/\r?\n/).filter((l) => !/^a=(candidate:|end-of-candidates)/i.test(l))
+  .map((l) => l.replace(/^c=IN IP[46] \S+/i, 'c=IN IP4 0.0.0.0').replace(/^m=(\S+) \d+/, 'm=$1 9').replace(/^a=rtcp:\d+ IN IP[46] \S+/i, 'a=rtcp:9 IN IP4 0.0.0.0')).join('\r\n');
 
 /** An SDP as a call takes it: ASCII, one audio stream, exactly one sha-256 DTLS fingerprint; else refused. */
 export function checkSdp(sdp) {
@@ -154,6 +180,8 @@ export function lineOf(call, nowMs) {
  *   send(did, content) → Promise      the carrier's send, label CALL_LABEL, internal CALL_SEND
  *   contact(did) → { did, name, online, … } | null    a live contact by its (original) DID
  *   allowed(c) → may that contact ring here ("Can call me"); shares(c) → may it see this side online (presence)
+ *   person(c) → is that contact a person (design §1: calls are between people; an agent's ring is refused silently,
+ *   no line, nothing said back, only refused({ did, id, check: 'call_agent' }) for the host's log)
  *   me() → this identity's original DID (glare)
  *   line({ did, dir, text, call: { id, state, secs } })   a chat line kept in the history
  *   alert({ on, id, did, name }) the ring here (the seam above); audio({ on, id, name }) the call's audio mode (the
@@ -162,8 +190,8 @@ export function lineOf(call, nowMs) {
  */
 export class Line {
   #t = new Map();   // id → [timer]
-  constructor({ send, contact, allowed, shares = () => false, me, line, alert = () => {}, audio = () => {}, changed = () => {}, now = () => Date.now(), timers = globalThis, o = {} }) {
-    Object.assign(this, { send, contact, allowed, shares, me, line, alert, audio, changed, now, timers });
+  constructor({ send, contact, allowed, person = () => true, refused = () => {}, shares = () => false, me, line, alert = () => {}, audio = () => {}, changed = () => {}, now = () => Date.now(), timers = globalThis, o = {} }) {
+    Object.assign(this, { send, contact, allowed, person, refused, shares, me, line, alert, audio, changed, now, timers });
     this.o = { ringS: RING_S, expS: EXP_S, pageMs: PAGE_MS, keepMs: KEEP_MS, ...o };
     this.calls = new Map();
     this.live = null;
@@ -214,10 +242,10 @@ export class Line {
       ...(c.dir === 'in' && c.offer && { offer: c.offer }), signals: c.signals.map((s) => ({ ...s })) };
   }
 
-  /** The caller's Call: the ring goes, padded, with its offer. → the view. */
+  /** The caller's Call: the ring goes, padded, with its offer (no address in it, whatever the page gave: ringSdp). → the view. */
   async start(c, sdp) {
     if (this.current()) bad('call_busy', 'a call is going on already', 409);
-    checkSdp(sdp);
+    sdp = checkSdp(ringSdp(checkSdp(sdp)));
     const id = newCallId(), now = this.now();
     const call = { id, did: c.did, name: c.name, dir: 'out', state: 'calling', at: now, answered: null, connected: null, ended: null, reason: null, by: null, glare: false, attempt: 1, n: 0, signals: [], audio: true };
     this.calls.set(id, call); this.live = id; this.#seen(id);
@@ -254,6 +282,8 @@ export class Line {
   async cands(id, attempt, list) {
     const call = this.#mine(id);
     if (attempt !== call.attempt) bad('call_state', `attempt ${call.attempt} is the current one`, 409);
+    // The caller's addresses go only to a callee that accepted (the ring carried none).
+    if (call.dir === 'out' && call.answered === null) bad('call_state', 'the candidates go once the call is answered', 409);
     await this.#say(call, { typ: 'cands', id, attempt, cands: checkCands(list) });
     return { sent: list.length };
   }
@@ -334,6 +364,8 @@ export class Line {
     if (this.seen.has(x.id)) return;   // a repeat of one already taken
     this.#seen(x.id);
     const now = this.now(), nowS = Math.floor(now / 1000);
+    // An agent rings no human (design §1): no ring, no line, nothing back; the host logs it.
+    if (!this.person(c)) { this.dropped++; try { this.refused({ did: c.did, id: x.id, check: 'call_agent' }); } catch {} return; }
     // Not allowed to ring here (a quiet contact, the switch off) or past its life: a line, nothing said back.
     if (!this.allowed(c) || x.exp <= nowS || this.gone.has(`${c.did} ${x.id}`)) return this.#missed(c, x.id);
     let glare = false;
@@ -380,7 +412,7 @@ export class Line {
  * hooks: { speaker(on), mic(), micSettings() } where the host has them (the phone app); allow(c, on) / allowOf(c) the
  * "Can call me" switch.
  */
-export function callRoutes({ line, contactOf, callable, stun, turn = async () => null, can = {}, hooks = {}, allow, allowOf }) {
+export function callRoutes({ line, contactOf, callable, stun, turn = async () => null, policy = () => 'all', can = {}, hooks = {}, allow, allowOf }) {
   const idOf = (b) => (typeof b['id'] === 'string' && ID.test(b['id']) ? b['id'] : bad('body', 'id: a call id (32 hex digits)'));
   const attemptOf = (b, d) => (b['attempt'] === undefined ? d : isInt(b['attempt']) && b['attempt'] >= 1 && b['attempt'] <= ATTEMPT_MAX ? b['attempt'] : bad('body', 'attempt: a whole number'));
   return {
@@ -390,10 +422,11 @@ export function callRoutes({ line, contactOf, callable, stun, turn = async () =>
       return { call, stun: stun(peer), can: { speaker: can.speaker === true, mic: can.mic === true, ring: can.ring === true } };
     },
     // A TURN server for a connection starting now; null: STUN alone. Asked at each connection, never in the poll.
+    // policy: "relay" with "Always relay my media" on (the page then refuses to connect without TURN), else "all".
     'GET /api/calls/turn': async () => {
       let t = null;
       try { t = (await turn()) ?? null; } catch {}
-      return { turn: t ? { urls: t.urls, username: t.username, credential: t.credential, exp: t.exp } : null };
+      return { turn: t ? { urls: t.urls, username: t.username, credential: t.credential, exp: t.exp } : null, policy: policyOf(policy()) };
     },
     'POST /api/calls/start': async (b) => {
       const c = contactOf(b['to']);
@@ -468,6 +501,7 @@ export class Phone {
     this.call = null;        // the Line's view
     this.stun = [];
     this.turn = null;        // the TURN server of this connection (GET /api/calls/turn), or null
+    this.policy = 'all';     // its ICE policy (the same answer): "relay" with "Always relay my media" on
     this.can = { speaker: false, mic: false };
     this.#reset();
   }
@@ -512,7 +546,10 @@ export class Phone {
     let certificates;
     try { if (typeof this.RTC.generateCertificate === 'function') certificates = [await this.RTC.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' })]; } catch {}
     this.turn = await this.#turnNow();
-    const pc = new this.RTC({ iceServers: iceServersOf(this.stun, this.turn), bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require', ...(certificates && { certificates }) });
+    // Relay only and no TURN: nothing connects, nothing is gathered (a connection without TURN would gather host candidates).
+    if (this.policy === 'relay' && !this.turn) throw Object.assign(new Error(RELAY_ONLY), { check: 'relay_only' });
+    const pc = new this.RTC({ iceServers: iceServersOf(this.policy === 'relay' ? [] : this.stun, this.turn), bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require',
+      ...(this.policy === 'relay' && { iceTransportPolicy: 'relay' }), ...(certificates && { certificates }) });
     for (const t of this.stream.getAudioTracks()) pc.addTrack(t, this.stream);
     this.prevIn = null;
     pc.addEventListener('track', (ev) => { try { this.onStream(ev.streams?.[0] ?? null); } catch {} });
@@ -520,7 +557,11 @@ export class Phone {
     return pc;
   }
   async #turnNow() {
-    try { const r = await this.api('GET', '/api/calls/turn'); return r?.turn && Array.isArray(r.turn.urls) ? r.turn : null; } catch { return null; }
+    try {
+      const r = await this.api('GET', '/api/calls/turn');
+      this.policy = r?.policy === 'relay' ? 'relay' : 'all';
+      return r?.turn && Array.isArray(r.turn.urls) ? r.turn : null;
+    } catch { return null; }
   }
   /** Before an ICE restart gathers: a TURN credential near its expiry is replaced (coturn refuses an expired one at a new allocation). */
   async #freshTurn(pc) {
@@ -528,7 +569,7 @@ export class Phone {
     const t = await this.#turnNow();
     if (!t || this.pc !== pc) return;
     this.turn = t;
-    try { pc.setConfiguration?.({ ...(pc.getConfiguration?.() ?? {}), iceServers: iceServersOf(this.stun, t) }); } catch {}
+    try { pc.setConfiguration?.({ ...(pc.getConfiguration?.() ?? {}), iceServers: iceServersOf(this.policy === 'relay' ? [] : this.stun, t) }); } catch {}
   }
   async #mic() {
     this.phase = 'mic'; this.#changed();
@@ -542,13 +583,32 @@ export class Phone {
         pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { this.timers.clearTimeout(t); r(); } });
       });
     }
-    return pc.localDescription.sdp;
+    return this.#out(pc.localDescription.sdp);
+  }
+  /** What leaves this page: under the relay policy, relayed candidates only (relayOnly). */
+  #out(sdp) { return this.policy === 'relay' ? relayOnly(sdp) : sdp; }
+  /** The caller's candidates once the answer came: all gathered so far at once, then the rest once gathering is done
+   *  (or lateMs), in batches of CANDS_MAX. */
+  async #trickle(pc, attempt) {
+    const had = new Set();
+    const post = async () => {
+      if (this.pc !== pc || this.attempt !== attempt || !this.id) return;
+      const more = candsIn(this.#out(pc.localDescription?.sdp ?? '')).filter((c) => !had.has(c));
+      for (let i = 0; i < more.length; i += CANDS_MAX) {
+        const b = more.slice(i, i + CANDS_MAX);
+        for (const c of b) had.add(c);
+        await this.api('POST', '/api/calls/cands', { id: this.id, attempt, cands: b }).catch(() => {});
+      }
+    };
+    await post();
+    await this.#gathered(pc, this.o.lateMs);
+    await post();
   }
   /** The candidates found after the SDP left, once (gathering done, or lateMs). */
   async #late(pc, attempt, sent) {
     await this.#gathered(pc, this.o.lateMs);
     if (this.pc !== pc || this.attempt !== attempt || !this.id) return;
-    const had = new Set(candsIn(sent)), more = candsIn(pc.localDescription?.sdp ?? '').filter((c) => !had.has(c)).slice(0, CANDS_MAX);
+    const had = new Set(candsIn(sent)), more = candsIn(this.#out(pc.localDescription?.sdp ?? '')).filter((c) => !had.has(c)).slice(0, CANDS_MAX);
     if (more.length) await this.api('POST', '/api/calls/cands', { id: this.id, attempt, cands: more }).catch(() => {});
   }
   async #remote(pc, type, sdp) {
@@ -563,7 +623,8 @@ export class Phone {
   }
   #fail(e) { this.error = { check: e?.check ?? 'call', message: String(e?.message ?? e) }; }
 
-  /** Call: the microphone, a fresh connection, the offer after GATHER_MS, the ring. */
+  /** Call: the microphone, a fresh connection, the ring at once with an offer that holds no address (ringSdp); the
+   *  candidates gather meanwhile and go once the answer comes (#trickle). */
   async place(did) {
     if (this.view().live) throw Object.assign(new Error('a call is going on already'), { check: 'call_busy' });
     this.#reset();
@@ -574,10 +635,8 @@ export class Phone {
       this.phase = 'placing'; this.#changed();
       const pc = this.pc = await this.#pc();
       await pc.setLocalDescription(await pc.createOffer());
-      const sdp = await this.#gathered(pc, this.o.gatherMs);
-      const r = await this.api('POST', '/api/calls/start', { to: did, sdp });
+      const r = await this.api('POST', '/api/calls/start', { to: did, sdp: ringSdp(pc.localDescription.sdp) });
       this.id = r.call.id; this.call = r.call; this.phase = null;
-      void this.#late(pc, 1, sdp);
       this.#changed(); this.#loop();
       return r.call;
     } catch (e) {
@@ -606,7 +665,8 @@ export class Phone {
       this.#changed(); this.#loop();
     } catch (e) {
       this.#fail(e); this.phase = 'failed';
-      await this.api('POST', '/api/calls/end', { id: c.id, reason: 'hangup' }).catch(() => {});
+      // Relay only with no TURN here: the caller hears "Could not connect" (no_path), not a hang-up.
+      await this.api('POST', '/api/calls/end', { id: c.id, reason: e?.check === 'relay_only' ? 'no_path' : 'hangup' }).catch(() => {});
       this.#close(); this.#changed();
     }
   }
@@ -741,7 +801,7 @@ export class Phone {
       try {
         if (s.typ === 'answer' && call.dir === 'out' && s.attempt === this.attempt) {
           await this.#remote(pc, 'answer', s.sdp);
-          if (s.attempt === 1) this.#start('ice', this.o.iceMs, () => this.#noPath());
+          if (s.attempt === 1) { this.#start('ice', this.o.iceMs, () => this.#noPath()); void this.#trickle(pc, 1); }
           // A restart whose path never dropped (the shell's network event came first): ICE stays connected, no event comes.
           else if (['connected', 'completed'].includes(pc.iceConnectionState)) void this.#ice(pc);
         } else if (s.typ === 'cands' && s.attempt === this.attempt) {

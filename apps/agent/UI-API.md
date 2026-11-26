@@ -36,7 +36,7 @@ keychain unlock (K2); "clear" (`POST /api/history/clear`) is the only mitigation
 | `POST /api/words` | `{contact, match}` | `true`: `{checked: true}`; `false`: forget and block |
 | `POST /api/rename` | `{contact, name}` | `{did, name}`; `409 name_taken` if another live contact has it |
 | `POST /api/tier` | `{contact, tier}` | `{did, name, tier, ours}`: `own`, `friend` or `quiet`, kept until changed |
-| `POST /api/kind` | `{contact, kind}` | `{did, kind, kind_set}`: the human's choice of the contact's kind (Chat settings → This is an agent), `agent` or `person`; `null` gives it back to the page ("Kinds") |
+| `POST /api/kind` | `{contact, kind}` | `{did, kind, kind_set}`: the human's choice of the contact's kind (Chat settings → This is), `person`, `agent` or `desk`; `null` gives it back to the page ("Kinds") |
 | `POST /api/presence` | `{contact, allow}` | `{did, name, presence}`: may it see when I am online (`allow`, `deny`; `own` always, deny `409 presence_own`) |
 | `POST /api/tag` | `{contact, tags: [≤ 8, ≤ 20 chars]}` | `{tags}` |
 | `POST /api/forget` | `{contact}` | `{forgotten, offline}`: revoked here for good |
@@ -86,10 +86,10 @@ keychain unlock (K2); "clear" (`POST /api/history/clear`) is the only mitigation
 | `POST /api/unlink` | `{id}` | `{id, status: "ended", role}` |
 | `POST /api/links/answer` | `{id, accept, tell?, tier?}` | `{id, from, status: "linked"\|"accepting"\|"refused"\|"failed", told}`; `tier` friend or quiet (default) |
 | `POST /api/links/allow` | `{contact, allow, tier?, days?}` | `{contact, name, allow, tier, until}`, or `{contact, allow: false, had}` |
-| `GET /api/settings` | | `{relay, default, fixed, in_use, added, seen_receipts, notify, new_tier, new_presence, calls, wallet, prices, currency}`: the relay new codes name (default `relay.sigelo.ai`); `fixed`: `SIGELO_RELAY`'s host, which wins, or null; `in_use`: this session's own; `added`: the relays taken here by name, newest first (at most 5). Settings → Chats and history: `seen_receipts` (default true), `notify` (all chats, default true), `new_tier` (`own`, `friend` the default, `quiet`) and `new_presence` (default false), given to a contact when it pairs (not to an introduced one, nor a tier chosen at accept). Settings → Wallet ("Wallet"): `wallet` (this profile's switch, default false), `prices` (default false), `currency` (one of 16, or null) |
-| `POST /api/settings` | any of `{relay, seen_receipts, notify, new_tier, new_presence, calls, wallet, prices, currency}` | the same; `relay` a host[:port], `""` or null for the default; each checked (`400`) before any is kept, in `.ui.json` `settings` |
+| `GET /api/settings` | | `{relay, default, fixed, in_use, added, seen_receipts, notify, new_tier, new_presence, calls, relay_media, wallet, prices, currency}`: the relay new codes name (default `relay.sigelo.ai`); `fixed`: `SIGELO_RELAY`'s host, which wins, or null; `in_use`: this session's own; `added`: the relays taken here by name, newest first (at most 5). Settings → Chats and history: `seen_receipts` (default true), `notify` (all chats, default true), `new_tier` (`own`, `friend` the default, `quiet`) and `new_presence` (default false), given to a contact when it pairs (not to an introduced one, nor a tier chosen at accept); `relay_media` (Privacy, "Always relay my media", default false; `SIGELO_ICE_POLICY=relay` makes it true): calls and direct transfers only through the relay's TURN. Settings → Wallet ("Wallet"): `wallet` (this profile's switch, default false), `prices` (default false), `currency` (one of 16, or null) |
+| `POST /api/settings` | any of `{relay, seen_receipts, notify, new_tier, new_presence, calls, relay_media, wallet, prices, currency}` | the same; `relay` a host[:port], `""` or null for the default; each checked (`400`) before any is kept, in `.ui.json` `settings` |
 | `GET /api/calls` | `rtc=1?&to=<did>?` | `{call, stun, can: {speaker, mic, ring}}` ("Calls"): the live call, or the last for 30 s after its end, `{id, did, name, dir: "out"\|"in", state: "calling"\|"ringing"\|"incoming"\|"connecting"\|"active"\|"ended", reason, glare, attempt, secs, offer?, signals: [{n, typ: "answer"\|"cands"\|"restart", attempt, sdp?, cands?}]}` or null; `stun` the STUN servers for that contact (`to`) or the call's; `rtc=1`: a page that can take a call asks (a ring waits only for one that asked within 10 s) |
-| `GET /api/calls/turn` | | `{turn}`: a TURN server for a connection starting now, `{urls, username, credential, exp}` from this identity's relay, or `null` (STUN alone); never in the poll |
+| `GET /api/calls/turn` | | `{turn, policy}`: a TURN server for a connection starting now, `{urls, username, credential, exp}` from this identity's relay, or `null` (STUN alone); `policy` `relay` with `relay_media` on (the page then connects only through TURN, and with none fails `relay_only`), else `all`; never in the poll |
 | `POST /api/calls/start` | `{to, sdp}` | `{call}`: the ring sent with the page's offer (one audio stream, one sha-256 fingerprint, else `400 sdp*`); `409 call_busy`, `call_offline` (not online: presence-gated), `call_agent`, `call_pairing` |
 | `POST /api/calls/accept` | `{id, sdp, attempt?}` | `{call}`: the answer to the ring (attempt 1), or to a restart (its attempt); `404 call_unknown`, `409 call_state` |
 | `POST /api/calls/decline` | `{id}` | `{call}`: `end declined`, the line "Declined" |
@@ -121,7 +121,7 @@ keychain unlock (K2); "clear" (`POST /api/history/clear`) is the only mitigation
 | `POST /api/devices/scan` | `{text \| texts, name?, words?}` | this machine as the device, into `sigelo.<name>.local.json` (agents' directory): an online code → `{kind: "online", state, file}` (then `joining`); frames → `{state: "frames", have, count, missing}`, `{state: "words"}`, with `words` `{state: "done", did, worker, operator, file, paired}`; wrong words `409 device_words` |
 | `POST /api/devices/revoke` | `{name, lost?}` | `{device, rank, worker, revoked, lost, wiped: false, forgot, list, synced, steps?}`: the wipe answered later; `lost` forgets now, `steps` the rest |
 | `POST /api/devices/sync` | | `{list, synced, forgot}`: the signed list to every device; wiped answers read |
-| `GET /api/transfers` | | `{out, in, direct, auto, settings}` (TRANSFER.md): each `{id, contact, name, size, sha256, state, attempt, via, reason?, detail?, got\|sent, live?, rate?, saved?, path_used?, by?, group?}`; `state` `asked`, `offered`, `accepted`, `offering`, `active`, `interrupted`, `done`, `declined`, `cancelled`, `failed`, `expired`, `relaying` (the sender: over the relay lane now), `relayed` (the receiver: it comes over `sigelo-file/0` instead); `path_used` `direct`, `tor` or `relay`; an `active` one with nothing for 10 minutes is listed `interrupted`, reason `stalled`; `by: "rule"`: accepted by the accept rule; `group`: a group's fan-out; `live` `waiting`: an offer held for a free slot; reason `land`: came whole, not saved (`detail` says why; resume saves again); `direct` `{did: true\|false}`; `auto` `{did: MB}` (0: always ask); `settings` `{tor, prefer, auto_mb, keep_location}` |
+| `GET /api/transfers` | | `{out, in, direct, auto, settings}` (TRANSFER.md): each `{id, contact, name, size, sha256, state, attempt, via, reason?, detail?, got\|sent, live?, rate?, saved?, path_used?, by?, group?}`; `state` `asked`, `offered`, `accepted`, `offering`, `active`, `interrupted`, `done`, `declined`, `cancelled`, `failed`, `expired`, `relaying` (the sender: over the relay lane now), `relayed` (the receiver: it comes over `sigelo-file/0` instead); `path_used` `direct`, `tor` or `relay`; `relayed` (the direct lane): `true` when its selected candidate pair went through the relay's TURN (shown "via relay"), `false` when not; a receiver's `failed` reason `relay_only`: "Always relay my media" on and no TURN (Tor or the sender's relay lane go on); an `active` one with nothing for 10 minutes is listed `interrupted`, reason `stalled`; `by: "rule"`: accepted by the accept rule; `group`: a group's fan-out; `live` `waiting`: an offer held for a free slot; reason `land`: came whole, not saved (`detail` says why; resume saves again); `direct` `{did: true\|false}`; `auto` `{did: MB}` (0: always ask); `settings` `{tor, prefer, auto_mb, keep_location}` |
 | `POST /api/transfers/send` | `{to \| group, path \| doc \| rec, via?, direct?, photo?, voice?}` | the record, `offered`: a file of this computer read in place (`path`, ≤ 16 GiB; never remote), or on the phone a `doc` from pick or photo; `photo` `{type, data, w, h}`: its preview (photo.mjs), sent beside the manifest as `sigelo-photo/0` and into the chat (`400 photo`); `rec` with `voice` `{name, type, duration_s, waveform?}`: a recording sent by voice-part, kept by the host as a file and sent the same way, its fields as `sigelo-voice/0` (voice.mjs; `400 voice`); `group`: one transfer per member paired with → `{group, mid, sha256, name, size, sent: [{did, name, id}], unpaired, failed}`, the preview (or "File: name") as one group message; any other file to a contact: its own bubble in the chat (a message `file` `{name, size, sha256, via, transfer}`, label `sigelo-file/0`) |
 | `POST /api/transfers/auto` | `{contact, mb}` | `{did, name, auto_mb}`: that contact's size for the accept rule (0: always ask; `null`: the default) |
 | `POST /api/transfers/pick`, `/photo` | pick: `{images?: true, multiple?: true}` | the phone only: `{doc, name, size, mtime, url}` (multiple: `{docs: [...]}`) from the system's picker or camera (`url`: the page reads it, e.g. the preview), or `{cancelled: true}`; photo removes location tags unless `keep_location`; refused `no_camera` when no camera app answers (the page says so and opens the picker), `camera_permission` |
@@ -143,7 +143,7 @@ keychain unlock (K2); "clear" (`POST /api/history/clear`) is the only mitigation
 
 `contact` is the contact's original DID. A contact in `groups`: `{did, name, current_did, relay, re_pair,
 words, pair, words_checked, tags, local, mine, unread, last, waiting, not_collected, queued, status,
-ours, tier, link, online, online_since, last_seen, presence, can_call, can_call_set, notify, seen_upto, busy, busy_n, host, kind, kind_set, picture, picture_local, via, name_from}`; `name_from`: `"them"` when the name is the one the contact told once paired (at most 40 characters, sanitised; it replaces only a made-up one), `"auto"` while still made up here, null once the human named it; `via`: a public code it came by ("Public invite"), or null; `picture`: the rev of the picture shown (a local one, else theirs) or null; `picture_local`: a local one is set ("Pictures"). `kind` ("Kinds"): `agent` or `person`; `kind_set`: the human chose it. `last`: `{dir, text, at, status, call?}` (`call`: a call line's state, "Calls"; only a missed one counts in `unread`), `status`
+ours, tier, link, online, online_since, last_seen, presence, can_call, can_call_set, notify, seen_upto, busy, busy_n, host, kind, kind_set, picture, picture_local, via, name_from}`; `name_from`: `"them"` when the name is the one the contact told once paired (at most 40 characters, sanitised; it replaces only a made-up one), `"auto"` while still made up here, null once the human named it; `via`: a public code it came by ("Public invite"), or null; `picture`: the rev of the picture shown (a local one, else theirs) or null; `picture_local`: a local one is set ("Pictures"). `kind` ("Kinds"): `person`, `agent` or `desk`; `kind_set`: the human chose it. `last`: `{dir, text, at, status, call?}` (`call`: a call line's state, "Calls"; only a missed one counts in `unread`), `status`
 as in `GET /api/messages`; `notify`: `POST /api/notify`; `seen_upto`: the contact's newest seen receipt (their time), or null; `busy`: their busy mark is on ("Busy marks"). `online`: `true`, `false` (then `last_seen`, the relay's time) or `null` (not known: not allowed, or this page offline); `presence`: what they see of mine. `link`: `{id, purpose, linked_by, expires}` or null. `status`: `ok`, `waiting` (their keys have not come, or the carrier says why messages wait:
 `waiting`), `not_collected` (a message queued, no reader yet), `pair_again` (`re_pair` after a recovery). `tier` (apps/contact/store.mjs): `own` (my agents:
 an unexpired `sigelo-relay/operator` attestation from my DID, seen in a local agent's file or proved
@@ -184,10 +184,13 @@ copies carried on, messages filed; the CLI's `group` verbs refuse `busy` beside 
 notices, rev}`, the Groups tab's count; `rev` changes with any group's roster, status or newest message. Notices
 (`{id, why: stranger|creator_left|refused, …}`) are kept in `.ui.json` until dismissed; an invitation is a group `pending`.
 
-**Kinds** (the marks: an agent square, a person round): a contact is an `agent` when the page knows it is one: my agent (`ours`, an
-agent of this machine, or a worker of my keeper root, its original DID in the chain), or a member some group's roster names an agent
-(GROUPS.md roles); else a `person`. The human's choice (`POST /api/kind`, kept in `.ui.json` `kind`) wins until given back with `null`.
-A bundle carries no "I am an agent" of its own (SPEC); a stranger's agent is a person here until marked.
+**Kinds** (the marks: an agent square, a person round): `person`, `agent` or `desk` (a support desk: the square, "Support desk"
+in Chats, "support desk" under its name). The human's choice (`POST /api/kind`, kept in `.ui.json` `kind`) wins until given back
+with `null`; else what the contact said of itself once paired (carrier.mjs "Kinds": `agent` or `desk` in the name's receipt;
+sigelo-agent says agent, `--kind desk` a desk); else `agent` when the page knows it is one: my agent (`ours`, an agent of this
+machine, or a worker of my keeper root, its original DID in the chain), or a member some group's roster names an agent (GROUPS.md
+roles); else a `person`. Only a person is called or rings. A bundle carries no "I am an agent" of its own (SPEC); a stranger's agent
+that says nothing (an earlier version) is a person here until marked.
 
 **Keeper** (apps/keeper, `sigelo-spend`; apps/agent/sigelo-agent-spend.ts): the allowance wallet's policy service, where it runs.
 `ui` reads the keepers this host registered (`SIGELO_SPEND_REGISTRY`, else `$XDG_CONFIG_HOME/sigelo-spend/keepers.json`): `none`
@@ -373,11 +376,27 @@ The words password (design/apps-seed.md §8), Settings → Backup and recovery (
 that profile's `kept`); `reveal(password)` → `{words: [25]}` after the screen lock; `change(old, next, repeat)`; `set(words, next, repeat)` (none kept: the 25 words
 typed again, refused `words_other` when they make another identity, `words_check` when they are not words; then kept);
 `remove(password)` (the kept words deleted); `auth(id, password)` → what a guarded call carries. `sigeloLocal.secure(on)`:
-`FLAG_SECURE` while the words are up. Refusals: `words_none`, `words_password`, `words_password_needed`,
+`FLAG_SECURE` while a secret screen is up (below). Refusals: `words_none`, `words_password`, `words_password_needed`,
 `words_password_rule` (at least 8 characters, the repeat the same). GTK phone app, bridge ops beside the profile ones:
 `words-status {id?}` → `{here, kept, keyring}`; `words-get {id?}` → `{blob}` (base64 of words-lock.mjs's blob; never the
 check); `words-keep {blob, check, proof?}` (proof needed over kept words); `words-drop {proof}`; `take {proof?}` on the
 start page. The page does the crypto with `/words-lock.mjs`, which `ui` serves (apps/contact/words-lock.mjs, as it is).
+
+## Secret screens (the apps)
+
+No screenshot, screen recording or recents thumbnail while one is up: the page calls `sigeloLocal.secure(true)` on
+entering and `secure(false)` on leaving by any way (Back, a tab, Done, a sheet's Close; `ui.js` `shots()`, the first
+run's `guard`); the Android shell sets and clears `FLAG_SECURE` (bridge op `secure`). Off everywhere else: chats,
+contacts, settings, pictures stay shareable. The GTK app and a browser tab have no such flag: the page does nothing there.
+
+| Where | Screens |
+| --- | --- |
+| 25 words | first run's words and restore (`welcome.mjs`); Show, Set, Change and Stop keeping the words; Make this phone the main one (the words password) |
+| Codes | My code, Enter their code, Scan, Requests (live codes), the New chat sheet; Enrol an agent; first run's invite code and computer code |
+| Keys | Back up this profile (its password, the file); first run's Restore from a backup; a computer's device add and scan QR (Devices) |
+| Wallet | Receive (address and QR); an agent's page (its address and QR) |
+
+A public invite is made to be posted: not secret.
 
 ## Backup file (the apps)
 

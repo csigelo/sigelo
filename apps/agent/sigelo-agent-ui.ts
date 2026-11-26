@@ -162,7 +162,7 @@ interface PageLib {
       readPicture(name: string): Uint8Array | null; writePicture(name: string, bytes: Uint8Array | null): void };
     hooks: { me(): { did: string; original: string; chain: string[] }; meInfo(): { identity_file: string; recovery: string; key: string; erase: string; restored?: unknown };
       agents(): Agent[]; seat(): unknown; deviceRound(): Promise<{ gave?: string }>; defer(f: () => void): void; hidden(x: { did?: unknown; name?: unknown }): boolean;
-      transfers: { lib: unknown; identity: string; make(carrier: unknown, onEvent: (e: unknown) => void, o: { compared(did: string): boolean }): unknown; rec?: unknown };
+      transfers: { lib: unknown; identity: string; make(carrier: unknown, onEvent: (e: unknown) => void, o: { compared(did: string): boolean; policy?: () => string }): unknown; rec?: unknown };
       controls: { pending(): { name: string; scope: string; words: string | null }[]; confirm(name: string, match: boolean): Promise<boolean> };
       keeper: { read(): Promise<Keeper | null>; root(k: Keeper): Promise<{ K: Uint8Array; recovery: string }>; update(fn: (k: Keeper) => void): Promise<void> } };
   }): {
@@ -319,7 +319,7 @@ export async function startUi(o: UiOptions): Promise<Ui> {
         return r;
       },
       defer: (f) => { setImmediate(f); },
-      transfers: { lib: TX, identity: path, make: (carrier, onEvent, o) => new TX.Engine({ carrier, identity: path, onEvent, compared: o.compared }), rec: TX.voiceFiles(path) },
+      transfers: { lib: TX, identity: path, make: (carrier, onEvent, o) => new TX.Engine({ carrier, identity: path, onEvent, compared: o.compared, ...(o.policy && { policy: o.policy }) }), rec: TX.voiceFiles(path) },
       hidden: (x) => relay?.hidden(x) ?? false,
       // The Controls card (GET /api/controls, POST /api/controls/confirm): relay controls paired, their
       // four words not confirmed; the same effect as the terminal's y/N (relayTerminal).

@@ -25,13 +25,14 @@
   },
   "files": [
     "README.md",
+    "dtls-verify.mjs",
     "rtc.mjs"
   ],
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node -e \"import('./rtc.mjs').then((m) => m.selfTest()).then((r) => { console.log('ALL PASS (1): ' + r); }, (e) => { console.error(e); process.exit(1); })\""
+    "test": "node test-dtls.mjs && node -e \"import('./rtc.mjs').then((m) => m.selfTest()).then((r) => { console.log('ALL PASS (1): ' + r); }, (e) => { console.error(e); process.exit(1); })\""
   },
   "dependencies": {
     "werift": "0.26.0"

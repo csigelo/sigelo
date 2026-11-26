@@ -16,7 +16,7 @@ import { actingFile, contactLib, contactModule, debug, holderFor, kick, lockHold
 const lockFree = (path: string): boolean => lockHolder(path) === null;
 
 export interface Rec { id: string; to?: string; from?: string; contact: string; name: string; size: number; state: string; reason?: string; detail?: string; attempt?: number; got?: number; sent?: number;
-  live?: string; rate?: number | null; saved?: string; path_used?: string; via?: string; by?: string; exp: number }
+  live?: string; rate?: number | null; saved?: string; path_used?: string; relayed?: boolean; via?: string; by?: string; exp: number }
 interface Engine { kick(): Promise<void>; idle(ms?: number, busy?: () => boolean): Promise<boolean>; close(): Promise<void>; progress(id: string): { live: string; got: number; sent: number; rate: number | null } | null }
 export interface TransferLib {
   send(o: object): Promise<Rec>; accept(o: object): Rec; resume(o: object): Rec; decline(o: object): Promise<Rec>; cancel(o: object): Promise<Rec>; forget(o: object): Rec;
@@ -72,7 +72,8 @@ export function line(r: Rec, side: 'in' | 'out'): string {
   const who = side === 'in' ? `from ${r.contact}` : `to ${r.contact}`, size = mb(r.size);
   const prog = r.live ? `, ${mb(side === 'in' ? r.got ?? 0 : r.sent ?? 0)} of ${size}${r.rate ? `, ${r.rate.toFixed(2)} MB/s` : ''} (${r.live})` : '';
   const why = r.reason ? `: ${r.reason}${r.detail ? ` (${r.detail})` : ''}` : r.state === 'relayed' && r.detail ? `: ${r.detail}` : '';
-  const lane = r.state === 'done' && r.path_used ? `, ${r.path_used === 'relay' ? 'via relay' : r.path_used}` : '';
+  // The direct lane whose selected candidate pair was relayed (TURN: the record's relayed) is "via relay" too.
+  const lane = r.state === 'done' && r.path_used ? `, ${r.path_used === 'relay' || (r.path_used === 'direct' && r.relayed === true) ? 'via relay' : r.path_used}` : '';
   const next = side === 'in' && r.state === 'asked' ? ` · sigelo-agent transfer accept ${r.id} | decline ${r.id}` : side === 'in' && r.state === 'interrupted' ? ` · transfer resume ${r.id}` : '';
   return `transfer ${r.id} ${who}: ${r.name}, ${size}, ${r.state}${r.by === 'rule' && side === 'in' && r.state !== 'done' ? ' (your size rule)' : ''}${lane}${prog}${why}${r.saved ? ` → ${r.saved}` : ''}${next}`;
 }

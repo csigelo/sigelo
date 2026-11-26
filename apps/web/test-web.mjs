@@ -1433,12 +1433,20 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     // A contact's kind: set by hand in Chat settings; the mark follows the API's kind.
     const cy = G_.contacts.find((c) => c.name === 'cy');
     await sandbox.ui.go('chat-info', cy.did); await settle(); await poll();
-    const isAgent = aria('This is an agent', 'INPUT');
-    ok(isAgent && isAgent.checked === false, 'Chat settings: "This is an agent", off for a person');
-    isAgent.checked = true; fire(isAgent, 'change'); await settle(); await poll();
-    ok(calls.some(([, p, b]) => p === '/api/kind' && b.contact === cy.did && b.kind === 'agent'), 'This is an agent on → POST /api/kind {contact, kind: agent}');
+    const kindR = (t) => aria(t, 'INPUT');
+    ok(kindR('A person')?.checked === true && kindR('An agent')?.checked === false && kindR('A support desk')?.checked === false && has('This is'), 'Chat settings: "This is", three choices, A person for a person');
+    kindR('An agent').checked = true; fire(kindR('An agent'), 'change'); await settle(); await poll();
+    ok(calls.some(([, p, b]) => p === '/api/kind' && b.contact === cy.did && b.kind === 'agent') && kindR('An agent')?.checked === true, 'An agent → POST /api/kind {contact, kind: agent}');
     await sandbox.ui.go('chats'); await settle(); await poll();
     ok(chatRow('cy')?.textContent.includes('Agent') && chatRow('cy').all().some((e) => /\bag\b/.test(e.className)), 'Chats: cy now carries the agent mark and "Agent"');
+    await sandbox.ui.go('chat-info', cy.did); await settle(); await poll();
+    kindR('A support desk').checked = true; fire(kindR('A support desk'), 'change'); await settle(); await poll();
+    ok(calls.some(([, p, b]) => p === '/api/kind' && b.contact === cy.did && b.kind === 'desk') && kindR('A support desk')?.checked === true, 'A support desk → POST /api/kind {contact, kind: desk}');
+    await sandbox.ui.go('chats'); await settle(); await poll();
+    ok(chatRow('cy')?.textContent.includes('Support desk') && chatRow('cy').all().some((e) => /\bag\b/.test(e.className)), `Chats: a desk carries the agent mark and "Support desk" (${chatRow('cy')?.textContent})`);
+    await sandbox.ui.go('chat', cy.did); await settle(); await poll();
+    ok(root.all().find((e) => e.className === 'who')?.textContent.includes('support desk') && !aria('Call', 'BUTTON'), 'its chat: "support desk" under the name, no Call button');
+    Object.assign(cy, { kind: 'agent' });
   }
 
   // ---- pass 4 (design/ux1/build.md "Pass 4"): the Wallet of a computer (GET /api/wallet ready), every sync state as Decided
@@ -1913,6 +1921,18 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       await bt(F3, 'Retry').click(); await settle();
       ok(sandbox.relayed?.id === 'a2'.repeat(16) && sandbox.retried?.id === 'a3'.repeat(16), 'Send over the relay → POST /api/transfers/relay; Retry → POST /api/transfers/retry');
       ok(fb_(F4)?.className === 'msg in file' && fb_(F4).textContent.includes('notes.pdf') && fb_(F4).textContent.includes('via relay · saved'), `theirs over the relay: its bubble says so (${fb_(F4)?.textContent})`);
+      // The direct lane through the relay's TURN (the record's relayed, from the selected candidate pair, as the call screen):
+      // "via relay", in the bubble and in the transfers list; a direct pair: "direct".
+      const F6 = 'e6'.repeat(32), F7 = 'e7'.repeat(32);
+      MSGS[bo.did] = [...MSGS[bo.did], fm(16, 'out', F6, 'turned.bin', 2000), fm(17, 'out', F7, 'straight.bin', 2000)];
+      TL.out.push({ id: 'a6'.repeat(16), to: bo.did, contact: 'bo', name: 'turned.bin', size: 2000, sha256: F6, state: 'done', path_used: 'direct', relayed: true, sent: 2000 },
+        { id: 'a7'.repeat(16), to: bo.did, contact: 'bo', name: 'straight.bin', size: 2000, sha256: F7, state: 'done', path_used: 'direct', relayed: false, sent: 2000 });
+      sandbox.seq += 1; await poll(); await poll();
+      ok(fb_(F6)?.textContent.includes('via relay · delivered') && fb_(F7)?.textContent.includes('direct · delivered'), `a relayed pair: "via relay"; a direct one: "direct" (${fb_(F6)?.textContent} | ${fb_(F7)?.textContent})`);
+      await sandbox.ui.go('files'); await settle(); await poll();
+      const card = (n) => root.all().find((e) => e.className === 'card' && e.textContent.includes(n))?.textContent ?? '';
+      ok(/done · via relay/.test(card('turned.bin')) && /done · direct/.test(card('straight.bin')) && !/direct/.test(card('turned.bin')), `the transfers list: via relay for the relayed pair, direct for the other (${card('turned.bin')} | ${card('straight.bin')})`);
+      await sandbox.ui.go('chat', bo.did); await settle(); await poll();
       await aria('Open sigelo.apk', 'BUTTON')?.click(); await settle();
       ok(sandbox.opened?.id === 'a1'.repeat(16), 'a tap on my own file → POST /api/transfers/open, its transfer');
       // Save to Downloads (2026-11-25): a file that came over the relay sits in the app; the Android app saves it into
@@ -2569,7 +2589,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(K.h1() === 'Show 25 words' && (sandbox.unlocks ?? 0) === u + 1 && pw?.attrs.type === 'password' && pw.attrs.autocomplete === 'current-password' && !root3.all().some((e) => e.tagName === 'OL'), 'Show: the screen lock first, then the password asked, nothing shown yet');
     u = sandbox.unlocks;
     pw.value = 'wrong one'; await b3('Unlock and show').click(); await settle();
-    ok(has3('Wrong password.') && !root3.all().some((e) => e.tagName === 'OL') && secure.length === 0, 'Show: a wrong password said plainly, nothing shown, FLAG_SECURE not set');
+    ok(has3('Wrong password.') && !root3.all().some((e) => e.tagName === 'OL') && secure.at(-1) === true, 'Show: a wrong password said plainly, nothing shown; FLAG_SECURE on from the screen\'s entry (the password is a secret screen)');
     pw.value = 'correct horse'; await b3('Unlock and show').click(); await settle(); await poll3();
     const ol = root3.all().find((e) => e.tagName === 'OL');
     ok(ol && ol.kids.length === 25 && /seed-list/.test(ol.className) && /nocopy/.test(ol.className) && secure.at(-1) === true && pw.value === '' && b3('Done') && K.h1() === 'Your 25 words' && !root3.all().some((e) => e.tagName === 'BUTTON' && /Copy/.test(e.textContent)) && (sandbox.unlocks ?? 0) > u,
@@ -2638,6 +2658,49 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     K.field('Your words password').value = 'battery staple';
     await b3('Stop keeping them here').click(); await settle(); await poll3();
     ok(!PW.kept && K.h1() === 'Backup and recovery' && has3('they are on your paper only') && !b3('Show my 25 words'), 'Stop keeping them: local.words.remove, then Backup says the words are on paper only, nothing to show');
+  }
+
+  // ---- The secret screens (UI-API.md "Secret screens"): local.secure(true) on entering each, false on leaving by Back, a
+  // tab or a sheet's Close; nothing on the shareable ones; the shell told only of a change.
+  {
+    const root4 = new El('main'), iv4 = [], sec4 = [];
+    const sb4 = { ...sandbox, document: docOf(root4), setInterval: (f, ms) => { iv4.push([f, ms]); return iv4.length; }, history: { replaceState() {}, pushState() {}, back() {}, go() {} }, sigeloUiTest: (t) => { sb4.ui = t; },
+      sigeloLocal: { ...sandbox.sigeloLocal, async secure(on) { sec4.push(on); },
+        async call(method, path) { const f = { 'GET /api/state': snap, 'GET /api/agents/workers': () => ({ keeper: true, seat: 'here', workers: [] }), 'GET /api/groups': () => ({ tier: GR.tier, groups: [], notices: [] }) }[`${method} ${path.split('?')[0]}`];
+          return f ? { status: 200, body: f() } : { status: 404, body: { error: { check: 'route', message: 'no' } } }; } } };
+    sb4.globalThis = sb4;
+    vm.runInNewContext(readFileSync(join(HERE, 'vendor', 'ui.js'), 'utf8'), sb4);
+    await settle();
+    const U = sb4.ui, quiet4 = async (p) => { try { await p; } catch {} await settle(); };
+    ok(sec4.join() === 'false', 'secret screens: the first draw (Chats) clears a flag a reload may have left, once');
+    const SECRET = ['requests', 'my-code', 'enter-code', 'scan', 'enrol', 'agent', 'receive', 'backup-make', 'words-show', 'words-change', 'words-set', 'words-remove', 'seat-take'];
+    const bad = [];
+    for (const v of SECRET) {
+      const n = sec4.length;
+      await quiet4(U.go(v, v === 'agent' ? 0 : undefined));
+      const on = sec4.length === n + 1 && sec4.at(-1) === true;
+      await quiet4(U.back());
+      if (!on || sec4.length !== n + 2 || sec4.at(-1) !== false) bad.push(v);
+    }
+    ok(bad.length === 0 && SECRET.every((v) => U.screens.includes(v)), `secret screens: each of the ${SECRET.length} sets FLAG_SECURE on entering and clears it on Back${bad.length ? ` (wrong: ${bad.join(', ')})` : ''}`);
+    const SHAREABLE = ['chats', 'people', 'settings', 'me', 'wallet', 'agents', 'invite', 'set-backup', 'devices', 'about'], n0 = sec4.length;
+    for (const v of SHAREABLE) { await quiet4(U.go(v)); await quiet4(U.back()); }
+    ok(sec4.length === n0, 'secret screens: chats, people, settings, Me, Wallet, Agents, the public invite, Backup and recovery, Devices (a phone) and About never set it');
+    await quiet4(U.go('my-code')); await quiet4(U.go('enter-code'));
+    const n1 = sec4.length;
+    await quiet4(U.back());
+    ok(n1 === n0 + 1 && sec4.length === n1 && sec4.at(-1) === true, 'secret screens: from one secret screen to another and back, the shell told once (no flicker off)');
+    const asked = U.sheets.confirm({ title: 'Cancel this code?', yes: 'Cancel it' }); await settle();
+    await kit(root4).btn('Cancel')?.click(); await asked; await settle();
+    ok(sec4.length === n1, 'secret screens: a confirm dialog opened and closed over a secret screen keeps the flag');
+    U.home('chats'); await settle();
+    ok(sec4.at(-1) === false && sec4.length === n1 + 1, 'secret screens: a tab (home) from a secret screen clears it');
+    U.sheets['new-chat'](); await settle();
+    const sheetOn = sec4.at(-1) === true;
+    await kit(root4).aria('Close', 'BUTTON')?.click(); await settle();
+    ok(sheetOn && sec4.at(-1) === false, 'secret screens: the New chat sheet (your code) sets it while open, its Close clears it');
+    await quiet4(U.go('enrol')); U.home('agents'); await settle();
+    ok(sec4.at(-1) === false, 'secret screens: Enrol left by the Agents tab clears it');
   }
 
   // ---- Me → Devices and computers (design/profiles.md P2) over a fake local.computers: the list (the one in use marked),
@@ -2711,7 +2774,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
         changed: () => { P.seq++; }, o: { ringS: 3, expS: 4, pageMs: 1500, keepMs: 1200 },
       });
       const cr = CM.callRoutes({ line: P.line, contactOf: (d) => (d === peerDid ? P.peer : (() => { throw Object.assign(new Error('not a contact'), { check: 'not_contact', status: 404 }); })()),
-        callable: (c) => (c.online === true ? true : { check: 'call_offline', message: 'not online' }), stun: () => ['relay.sigelo.ai:3478'],
+        callable: (c) => (c.online === true ? true : { check: 'call_offline', message: 'not online' }), stun: () => ['relay.sigelo.ai:3478'], policy: () => (P.settings.relay_media ? 'relay' : 'all'),
         allow: (c, on) => { if (on === null) delete P.allow[c.did]; else P.allow[c.did] = on; P.seq++; }, allowOf: (c) => canCall(c) });
       const peerNow = () => ({ ...P.peer, can_call: canCall(P.peer), can_call_set: typeof P.allow[peerDid] === 'boolean' });
       const R = {
@@ -2720,7 +2783,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
           call: v ? { id: v.id, did: v.did, name: v.name, dir: v.dir, state: v.state } : null }; },
         'GET /api/me': () => ({ did: P.did, original: P.did, words: 'amber otter violin harbor', recovery: 'set', key: 'browser', relay: 'relay.sigelo.ai', retention_days: 7, erase: 'x' }),
         'GET /api/agents/workers': () => ({ keeper: true, seat: 'here', workers: [] }),
-        'GET /api/settings': () => ({ relay: 'relay.sigelo.ai', default: 'relay.sigelo.ai', fixed: null, in_use: 'relay.sigelo.ai', added: [], seen_receipts: true, notify: true, new_tier: 'friend', new_presence: false, calls: P.settings.calls }),
+        'GET /api/settings': () => ({ relay: 'relay.sigelo.ai', default: 'relay.sigelo.ai', fixed: null, in_use: 'relay.sigelo.ai', added: [], seen_receipts: true, notify: true, new_tier: 'friend', new_presence: false, calls: P.settings.calls, relay_media: P.settings.relay_media === true }),
         'POST /api/settings': (b) => { Object.assign(P.settings, b); P.seq++; return R['GET /api/settings'](); },
         'GET /api/messages': () => ({ seq: P.seq, messages: P.lines }),
         'GET /api/groups': () => ({ tier: { tier: 'free', groups: 3, members: 8, told: true }, groups: [], notices: [] }),
@@ -2765,6 +2828,28 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     A.peer.online = false; await A.poll(); await A.poll();
     ok(A.callBtn() === undefined, 'calls: none while they are offline (presence-gated)');
     A.peer.online = true; await A.poll(); await A.poll();
+    // Kinds (UI-API.md "Kinds"): bob a support desk (said at pairing, or set): the label under his name, no Call button.
+    A.peer.kind = 'desk'; await A.poll(); await A.poll();
+    const whoA = () => A.root.all().find((e) => e.className === 'who')?.textContent ?? '';
+    ok(A.callBtn() === undefined && whoA().includes('support desk'), `kinds: a support desk's chat: "support desk" under its name, no Call button (${whoA()})`);
+    A.peer.kind = 'agent'; await A.poll(); await A.poll();
+    ok(A.callBtn() === undefined && whoA().includes('agent') && !whoA().includes('support desk'), `kinds: an agent's chat: "agent", no Call button (${whoA()})`);
+    A.peer.kind = 'person'; await A.poll(); await A.poll();
+    ok(A.callBtn() !== undefined && !/agent|desk/.test(whoA()), 'kinds: a person again: the Call button back, no label');
+    // "Always relay my media" (design/calls.md §6): Settings → Chats, its cost said; on, with no TURN from this relay, a call fails at once.
+    await A.sb.ui.go('set-chats'); await settle(); await A.poll();
+    const relaySw = () => A.root.all().find((e) => e.tagName === 'INPUT' && e.attrs['aria-label'] === 'Always relay my media');
+    const relayHelp = () => relaySw()?.parentNode?.parentNode?.textContent ?? '';
+    ok(relaySw() && relaySw().checked === false && A.root.textContent.includes('Privacy'), 'relay media: a switch in Settings → Chats, Privacy, off by default');
+    relaySw().checked = true; fire(relaySw(), 'change'); await settle(); await A.poll(); await A.poll();
+    ok(A.settings.relay_media === true && relaySw()?.checked === true && /through the relay host/.test(A.root.textContent) && /how much, not what/.test(A.root.textContent) && /slower/.test(A.root.textContent),
+      `relay media on: POST /api/settings {relay_media: true}; its help says the cost (${relayHelp().slice(0, 200)})`);
+    await A.sb.ui.go('chat', B.did); await settle(); await A.poll();
+    const made = net.made;
+    await A.callBtn().click(); await settle();
+    ok(await waitFor(() => A.shows(CM.RELAY_ONLY)) && net.made === made && !A.sent.some((x) => x.typ === 'ring'), `relay media on, this relay offers no TURN: the call fails at once, "${CM.RELAY_ONLY}", nothing rung`, A.screen()?.textContent);
+    await A.cbtn('Close')?.click(); await settle();
+    A.settings.relay_media = false; await A.poll(); await A.poll();
     // 1. A call: Calling…, Ringing…, the ring at bob's, Accept, active both sides, Mute, Hang up, the lines.
     await A.callBtn().click(); await settle();
     ok(await waitFor(() => A.shows('Ringing…') && A.shows('bob')), 'calls: the caller\'s screen, "Ringing…" once bob\'s side rings', A.screen()?.textContent);
@@ -2917,12 +3002,24 @@ try {
   // made-up placeholder only while the app tells none.
   {
     const DN = agent('dn'), dn = new nodeLib.Carrier({ identity: () => ({ secret: DN.secret, bundle: { v: 'sigelo/0', typ: 'bundle', genesis: DN.store.genesis, rotations: [], bindings: [], attestations: [], issuers: [] } }),
-      ...nodeLib.pathsFor(join(dir, 'dn.local.json')), ...relayOpts, keep: true, selfName: 'Dee \u202eNode' });
+      ...nodeLib.pathsFor(join(dir, 'dn.local.json')), ...relayOpts, keep: true, selfName: 'Dee \u202eNode', selfKind: 'desk' });
     const invN = await call(A, 'POST', '/api/invite', {});
     await dn.accept(invN.body.short, { wait: 5 });
     let rowN = null;
     for (let i = 0; i < 20 && rowN?.name !== 'Dee Node'; i++) { await dn.inbox({ wait: 0.5 }); rowN = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === DN.did); }
     ok(/^contact-[0-9a-f]{4}$/.test(invN.body.name ?? 'contact-0000') && rowN?.name === 'Dee Node' && rowN.name_from === 'them', `names: an unnamed code's contact takes the name it told, sanitised, marked from them (${JSON.stringify(rowN && { name: rowN.name, name_from: rowN.name_from })})`);
+    // Kinds (carrier.mjs "Kinds", 2026-11-26): it said it is a support desk with its name: the app shows a desk, never calls it.
+    ok(rowN?.kind === 'desk' && rowN.kind_set === false, `kinds: a support desk said so at pairing: kind desk, not set by the human (${JSON.stringify(rowN && { kind: rowN.kind, kind_set: rowN.kind_set })})`);
+    ok((await call(A, 'POST', '/api/calls/start', { to: DN.did, sdp: 'v=0' })).body.error?.check === 'call_agent', 'kinds: a desk is never called (call_agent)');
+    const kp = await call(A, 'POST', '/api/kind', { contact: DN.did, kind: 'person' }), kb = await call(A, 'POST', '/api/kind', { contact: DN.did, kind: 'robot' });
+    const ka = await call(A, 'POST', '/api/kind', { contact: DN.did, kind: null });
+    ok(kp.body.kind === 'person' && kp.body.kind_set === true && kb.status === 400 && kb.body.error.check === 'body' && ka.body.kind === 'desk' && ka.body.kind_set === false,
+      'kinds: the human sets person (wins), an unknown kind refused, null gives it back: desk again');
+    // "Always relay my media" (design/calls.md §6): a setting of this profile; GET /api/calls/turn says the policy.
+    const rm0 = (await call(A, 'GET', '/api/settings')).body, rm1 = await call(A, 'POST', '/api/settings', { relay_media: true }), turnOn = (await call(A, 'GET', '/api/calls/turn')).body;
+    const rmBad = await call(A, 'POST', '/api/settings', { relay_media: 'yes' }), rm2 = await call(A, 'POST', '/api/settings', { relay_media: false });
+    ok(rm0.relay_media === false && rm1.body.relay_media === true && turnOn.policy === 'relay' && rmBad.status === 400 && rm2.body.relay_media === false && (await call(A, 'GET', '/api/calls/turn')).body.policy === 'all',
+      `relay_media: off by default; on, GET /api/calls/turn says policy relay; off again: all; not a boolean: 400 (${JSON.stringify([rm0.relay_media, turnOn])})`);
     const rn = await call(A, 'POST', '/api/rename', { contact: DN.did, name: 'dee' });
     const rowN2 = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === DN.did);
     ok(rn.status === 200 && rowN2.name === 'dee' && rowN2.name_from === null, 'names: renamed in the app: the human\'s name, no longer from them');
@@ -2996,6 +3093,20 @@ try {
     ok(st.status === 200 && st.body.calls === false && (await call(A, 'POST', '/api/calls/allow', { contact: CY.did, on: null })).body.can_call === false, 'calls: the Settings default off; cy back to the default: off');
     await call(A, 'POST', '/api/settings', { calls: true });
     ok((await call(A, 'POST', '/api/calls/start', { to: CY.did, sdp })).body.error?.check === 'call_offline', 'calls: a contact whose presence is not known: no call (presence-gated)');
+    // Calls are between people (design/calls.md §1): cy taken for an agent neither rings here nor is rung from here.
+    await call(A, 'POST', '/api/kind', { contact: CY.did, kind: 'agent' });
+    ok((await call(A, 'POST', '/api/calls/start', { to: CY.did, sdp })).body.error?.check === 'call_agent', 'calls: an agent contact: no call to it (call_agent)');
+    const id2 = 'c1'.repeat(16), before = (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.filter((m) => m.label === CM.CALL_LABEL).length;
+    await node.send('ada', CM.padded({ typ: 'ring', id: id2, attempt: 1, sdp, exp: Math.floor(Date.now() / 1000) + 60, text: CM.OLD_TEXT }), { label: CM.CALL_LABEL, internal: nodeLib.CALL_SEND });
+    let logged = null;
+    ok(await until(async () => { logged = (await call(A, 'GET', '/api/state')).body.events.find((e) => e.code === 'call_agent' && e.did === CY.did); return Boolean(logged); }),
+      'calls: a ring from an agent contact: refused, one log line (event dropped, call_agent)');
+    const after = (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.filter((m) => m.label === CM.CALL_LABEL).length;
+    const back = [];
+    for (let i = 0; i < 2; i++) { await node.inbox({ wait: 0.3 }); back.push(...node.takeCalls().map((m) => m.content)); }
+    ok((await call(A, 'GET', '/api/calls?rtc=1')).body.call?.id !== id2 && after === before && !back.some((x) => x.id === id2),
+      `calls: silently: no incoming call, no call line, nothing back to the agent (${JSON.stringify(back.map((x) => x.typ))})`);
+    await call(A, 'POST', '/api/kind', { contact: CY.did, kind: null });
   }
   ok(msgs.messages.map((m) => m.dir).join() === 'out,in' && Object.keys(msgs.messages[0]).sort().join() === 'at,code,detail,dir,iat,label,link,n,status,text' && msgs.seq >= msgs.messages.at(-1).n,
     'GET /api/messages: both, in order, UI-API.md\'s keys');
@@ -3390,11 +3501,14 @@ try {
   ok(await checkOf(() => A2.router.start()) === 'busy', 'one owner per identity: a second window of the app is refused, busy');
 
   // A restart from IndexedDB: the contacts, the history and the page's data come back.
+  await call(A, 'POST', '/api/settings', { relay_media: true });
   await A.router.stop(); await A.platform.flush();
   const again = await webApp(ADA, A.idb);
   await again.router.start();
   const sr = (await call(again, 'GET', '/api/state')).body, back = sr.groups.contacts.find((c) => c.did === CY.did) ?? sr.groups.mine.find((c) => c.did === CY.did);
   ok(back?.name === 'cyrus' && back.tags.join() === 'work' && back.words_checked === true && back.last?.text === 'acknowledged after the commit', `a restart from IndexedDB: the contact, tags, words and history kept (${JSON.stringify(back).slice(0, 160)})`);
+  ok((await call(again, 'GET', '/api/settings')).body.relay_media === true && (await call(B, 'GET', '/api/settings')).body.relay_media === false,
+    '"Always relay my media" kept across the restart, per profile (the other profile\'s still off)');
   await call(again, 'POST', '/api/send', { to: CY.did, text: 'after the restart' });
   read = [];
   ok(await until(async () => { read.push(...(await node.inbox({ wait: 0.5 })).messages); return read.some((m) => m.content === 'after the restart'); }), 'and it sends again: the ratchet state came back whole');

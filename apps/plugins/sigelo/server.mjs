@@ -3303,9 +3303,15 @@ function options(argv2, env2) {
     return v;
   };
   let host = value("--listen"), p = value("--port");
+  const lm = host !== void 0 && !isIP(host.replace(/^\[|\]$/g, "")) ? HOSTPORT.exec(host) : null;
+  if (lm && (lm[1] ?? lm[2]) !== void 0) {
+    if (p !== void 0) throw new Error(`--listen ${host}: a port here and in --port`);
+    host = lm[1] ?? lm[2];
+    p = lm[3];
+  } else if (host !== void 0) host = host.replace(/^\[|\]$/g, "");
   const at = argv2[argv2.indexOf("--http") + 1];
   if (at !== void 0 && !at.startsWith("--")) {
-    const m = /^(?:(?:\[([0-9A-Fa-f:.]+)\]|([^:[\]]+)):)?(\d{1,5})$/.exec(at);
+    const m = HOSTPORT.exec(at);
     if (!m || (host ?? p) !== void 0) throw new Error(`--http ${at}: give HOST:PORT (e.g. 127.0.0.1:7310, [::1]:7310) or a PORT, not with --listen/--port`);
     host = m[1] ?? m[2];
     p = m[3];
@@ -3316,11 +3322,11 @@ function options(argv2, env2) {
   if (given !== void 0 && !/^[\x21-\x7e]{32,}$/.test(given)) throw new Error("--token / SIGELO_MCP_TOKEN: 32 or more printable characters, no spaces");
   if (!/^\d{1,5}$/.test(p) || Number(p) > 65535) throw new Error(`--port ${p}: not a port number`);
   if (host !== "localhost" && !isIP(host)) throw new Error(`--listen ${host}: give an IP address this machine has on your network`);
-  if (!loopback(host) && given === void 0) throw new Error(`${host} is not loopback: give a bearer token with SIGELO_MCP_TOKEN (or --token), 32 or more characters`);
-  return { port: Number(p), host, given };
+  if (!loopback(host) && !argv2.includes("--insecure-listen")) throw new Error(`${host} is not loopback: refused without --insecure-listen`);
+  return { port: Number(p), host, given, file: value("--token-file") };
 }
-function token(base2) {
-  const file = join2(dirname2(base2), "sigelo-mcp-http.token");
+function token(base2, given) {
+  const file = given ?? join2(dirname2(base2), "sigelo-mcp-http.token");
   try {
     const t2 = readFileSync4(file, "utf8").trim();
     if (!/^[A-Za-z0-9_-]{32,}$/.test(t2)) throw Object.assign(new Error(`${file} is not a token; delete it and start again for a new one`), { fatal: true });
@@ -3333,11 +3339,11 @@ function token(base2) {
   writeFileSync2(file, t + "\n", { mode: 384, flag: "wx" });
   return { file, token: t, made: true };
 }
-async function serveHttp({ argv: argv2, answer: answer2, parseBytes: parseBytes3, base: base2, versions, info, env: env2 = process.env }) {
+async function serveHttp({ argv: argv2, answer: answer2, parseBytes: parseBytes3, base: base2, versions, modern = [], info, env: env2 = process.env }) {
   let opt, tok;
   try {
     opt = options(argv2, env2);
-    tok = opt.given !== void 0 ? { token: opt.given, given: true } : token(base2);
+    tok = opt.given !== void 0 ? { token: opt.given, given: true } : token(base2, opt.file);
   } catch (e) {
     say(e.message);
     process.exit(2);
@@ -3363,14 +3369,12 @@ The token is the one given (SIGELO_MCP_TOKEN or --token), else the one printed a
 kept in sigelo-mcp-http.token beside the identity file. It is never shown on this page.
 
 Open WebUI (0.6.31 or later), as an admin:
-  Admin Panel > Settings > Integrations > Tools > External Tool Servers > +
-  (before 0.8.6: Admin Panel > Settings > External Tools > +)
-  Type: click "OpenAPI" so it reads "MCP Streamable HTTP"
+  Settings > Integrations > External Tool Servers > + Add Connection
+  Type: MCP (Streamable HTTP)
   URL: ${url(port2)}
-  Auth: Bearer, paste the token
-  ID: sigelo   Name: sigelo
+  Auth: Bearer, the token in Key
   Access Control: whoever you let use it acts as this one identity.
-  Save. In a chat: Integrations > Tools, switch sigelo on (a model with tool calling).
+  Save. In a chat: + > Tools, switch sigelo on (a model with tool calling).
 
 Other HTTP MCP clients: transport "streamable-http", the URL and header above.
 Docs: https://github.com/csigelo/sigelo/blob/main/apps/integrations/mcp/README.md
@@ -3388,7 +3392,9 @@ Docs: https://github.com/csigelo/sigelo/blob/main/apps/integrations/mcp/README.m
     if (path !== "/mcp") return out(404, "not found: the MCP endpoint is /mcp\n");
     if (req.method !== "POST" && req.method !== "DELETE") return out(405, "POST (and DELETE to end a session) only: no SSE stream\n", void 0, { Allow: "POST, DELETE" });
     if (!authorised(req.headers.authorization)) return out(401, "refused: wrong or missing bearer token\n", void 0, { "WWW-Authenticate": 'Bearer realm="sigelo-mcp"' });
-    const sid = req.headers["mcp-session-id"];
+    const v = req.headers["mcp-protocol-version"];
+    const vModern = v !== void 0 && modern.includes(v);
+    const sid = vModern ? void 0 : req.headers["mcp-session-id"];
     if (sid !== void 0 && !sessions.has(sid)) return out(404, "unknown or ended session: initialize again\n");
     if (req.method === "DELETE") {
       if (sid === void 0) return out(400, "DELETE needs Mcp-Session-Id\n");
@@ -3396,8 +3402,10 @@ Docs: https://github.com/csigelo/sigelo/blob/main/apps/integrations/mcp/README.m
       return out(204, "");
     }
     if (!/^application\/json\s*(;|$)/i.test(req.headers["content-type"] ?? "")) return out(415, "Content-Type must be application/json\n");
-    const v = req.headers["mcp-protocol-version"];
-    if (v !== void 0 && !versions.includes(v)) return rpcError(400, -32600, `unsupported MCP-Protocol-Version ${v}; supported: ${versions.join(", ")}`);
+    if (v !== void 0 && !versions.includes(v)) {
+      const j = { jsonrpc: "2.0", id: null, error: { code: UNSUPPORTED, message: `unsupported MCP-Protocol-Version ${v}; supported: ${versions.join(", ")}`, data: { supported: versions, requested: v } } };
+      return out(400, JSON.stringify(j), "application/json");
+    }
     const chunks = [];
     let size = 0;
     req.on("data", (c) => {
@@ -3414,6 +3422,7 @@ Docs: https://github.com/csigelo/sigelo/blob/main/apps/integrations/mcp/README.m
         return rpcError(400, -32700, `parse error: ${e.message}`);
       }
       if (Array.isArray(msg)) {
+        if (v !== void 0 && v !== "2025-03-26") return rpcError(400, -32600, `invalid request: no batches in MCP ${v}`);
         if (msg.length === 0) return rpcError(400, -32600, "invalid request: empty batch");
         const rs = (await Promise.all(msg.map(answer2))).filter((r2) => r2 !== null);
         if (rs.length === 0) {
@@ -3422,17 +3431,34 @@ Docs: https://github.com/csigelo/sigelo/blob/main/apps/integrations/mcp/README.m
         }
         return out(200, JSON.stringify(rs), "application/json");
       }
+      let isModern = false;
       if (msg && typeof msg === "object" && typeof msg.method === "string") {
         const id2 = msg.id ?? null, meta = msg.params?._meta?.["io.modelcontextprotocol/protocolVersion"];
-        if (meta !== void 0 && v !== void 0 && v !== meta) return rpcError(400, HEADER_MISMATCH, "MCP-Protocol-Version header does not match the request envelope's protocol version", id2);
-        const m = req.headers["mcp-method"];
-        if (m !== void 0 && m !== msg.method) return rpcError(400, HEADER_MISMATCH, "Mcp-Method header does not match the request body's method", id2);
+        const m = req.headers["mcp-method"], request2 = msg.id !== void 0;
+        isModern = vModern || meta !== void 0 && modern.includes(meta);
+        const bad = (what) => rpcError(400, HEADER_MISMATCH, `header mismatch: ${what}`, id2);
+        if (meta !== void 0 && v !== void 0 && v !== meta) return bad("MCP-Protocol-Version differs from the body's _meta protocol version");
+        if (m !== void 0 && m !== msg.method) return bad("Mcp-Method differs from the body's method");
+        if (isModern && request2) {
+          if (v === void 0) return bad("MCP-Protocol-Version is missing");
+          if (meta === void 0) return bad("the body has no _meta protocol version");
+          if (m === void 0) return bad("Mcp-Method is missing");
+          const named = { "tools/call": "name", "resources/read": "uri", "prompts/get": "name" }[msg.method];
+          if (named) {
+            let n = req.headers["mcp-name"];
+            const b = typeof n === "string" && /^=\?base64\?([A-Za-z0-9+/=]*)\?=$/.exec(n);
+            if (b) n = Buffer.from(b[1], "base64").toString("utf8");
+            if (n === void 0) return bad("Mcp-Name is missing");
+            if (n !== msg.params?.[named]) return bad(`Mcp-Name differs from the body's params.${named}`);
+          }
+        }
       }
       const r = await answer2(msg);
       if (r === null) {
         res.writeHead(202);
         return res.end();
       }
+      if (isModern && r.error?.code === -32601) return out(404, JSON.stringify(r), "application/json");
       const extra = {};
       if (msg?.method === "initialize" && r.result) {
         extra["Mcp-Session-Id"] = randomBytes6(24).toString("base64url");
@@ -3453,26 +3479,24 @@ Docs: https://github.com/csigelo/sigelo/blob/main/apps/integrations/mcp/README.m
     process.exit(0);
   });
   say(`listening on ${url(port)}`);
-  if (!loopback(opt.host)) {
-    say(`WARNING: ${opt.host} is not loopback. Anyone who reaches this address and has the token`);
-    say("WARNING: acts as this identity (signs challenges, sends messages, rotates the key), and plain HTTP");
-    say("WARNING: carries the token in clear text. Use it only on a network you trust; prefer 127.0.0.1.");
-  }
+  if (!loopback(opt.host)) say(`WARNING: ${opt.host} is not loopback: anyone who reaches it with the token acts as this identity, and plain HTTP carries the token in clear`);
   say(`identity ${base2}; one process serves one identity (SIGELO_IDENTITY picks the file)`);
-  say(tok.given ? "bearer token given (SIGELO_MCP_TOKEN or --token), not printed" : `bearer token ${tok.token}${tok.made ? " (new)" : ""}, kept in ${tok.file}`);
-  say(`Open WebUI: Admin Panel > Settings > Integrations > Tools > + : type MCP Streamable HTTP, URL ${url(port)}, Auth Bearer, the token above`);
+  say(tok.given ? "bearer token given (SIGELO_MCP_TOKEN or --token), not printed" : tok.made ? `new token, kept in ${tok.file}; paste into your client: ${url(port)}  Authorization: Bearer ${tok.token}` : `bearer token in ${tok.file}`);
+  say(`Open WebUI: Settings > Integrations > External Tool Servers > + : Type MCP (Streamable HTTP), URL ${url(port)}, Auth Bearer, the token in Key`);
   return server;
 }
-var DEFAULT_PORT, MAX_SESSIONS, MAX_BODY, HEADER_MISMATCH, say, loopback;
+var DEFAULT_PORT, MAX_SESSIONS, MAX_BODY, HEADER_MISMATCH, UNSUPPORTED, say, loopback, HOSTPORT;
 var init_http = __esm({
   "apps/integrations/mcp/http.mjs"() {
     DEFAULT_PORT = 7310;
     MAX_SESSIONS = 1024;
     MAX_BODY = 4 * 1024 * 1024;
     HEADER_MISMATCH = -32020;
+    UNSUPPORTED = -32022;
     say = (s) => process.stderr.write(`sigelo-mcp: ${s}
 `);
     loopback = (h) => h === "localhost" || h === "::1" || isIP(h) === 4 && h.startsWith("127.");
+    HOSTPORT = /^(?:(?:\[([0-9A-Fa-f:.]+)\]|([^:[\]]+)):)?(\d{1,5})$/;
   }
 });
 
@@ -3713,9 +3737,9 @@ async function answer(msg) {
 var argv = process.argv.slice(2);
 if (argv.includes("--http")) {
   const { serveHttp: serveHttp2 } = await Promise.resolve().then(() => (init_http(), http_exports));
-  await serveHttp2({ argv, answer, parseBytes: parseBytes2, base, versions: [...MODERN, ...LEGACY], info: SERVER_INFO });
-} else if (argv.some((a) => /^--(port|listen|token)(=|$)/.test(a))) {
-  process.stderr.write("sigelo-mcp: --port, --listen and --token go with --http: sigelo-mcp --http [HOST:PORT] [--token T]\n");
+  await serveHttp2({ argv, answer, parseBytes: parseBytes2, base, versions: [...MODERN, ...LEGACY], modern: MODERN, info: SERVER_INFO });
+} else if (argv.some((a) => /^--(port|listen|token|token-file|insecure-listen)(=|$)/.test(a))) {
+  process.stderr.write("sigelo-mcp: --port, --listen, --token, --token-file and --insecure-listen go with --http: sigelo-mcp --http [--listen HOST:PORT] [--token-file F]\n");
   process.exit(2);
 } else {
   const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");

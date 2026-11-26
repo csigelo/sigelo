@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { keygen } from 'sigelo';
-import { CALL_LABEL, MAX_BPS, MIN_BPS, NO_PATH, NO_PATH_RELAYED, OLD_TEXT, TURN_FRESH_S, iceServersOf, relayedOf, PAD, REASONS, TYPS, Line, Phone, barsOf, callRoutes, checkSdp, checkSignal, lineOf, nextBps, opusTune, padded, stunOf } from './call.mjs';
+import { CALL_LABEL, MAX_BPS, MIN_BPS, NO_PATH, NO_PATH_RELAYED, OLD_TEXT, RELAY_ONLY, policyOf, relayOnly, TURN_FRESH_S, iceServersOf, relayedOf, PAD, REASONS, TYPS, Line, Phone, barsOf, callRoutes, checkSdp, checkSignal, lineOf, nextBps, opusTune, padded, stunOf } from './call.mjs';
 import { fakeNet } from './test-fake-rtc.mjs';
 
 let count = 0;
@@ -75,7 +75,7 @@ const DIDS = { alice: 'did:sigelo:zAlice', bob: 'did:sigelo:zBob', carol: 'did:s
 const FAST = { ringS: 1, expS: 3, pageMs: 600, keepMs: 800 };
 const PFAST = { gatherMs: 30, lateMs: 200, iceMs: 3000, disconnectedMs: 300, retryMs: 500, lostMs: 1500, statsMs: 60, pollMs: 20 };
 /** A host: its Line, its contacts, its chat lines, the page's api over callRoutes, and its Phone. */
-function host(name, net, world, { turn = undefined } = {}) {
+function host(name, net, world, { turn = undefined, policy = undefined } = {}) {
   const H = { name, did: DIDS[name], lines: [], alerts: [], audio: [], allow: {}, sent: [], offline: false, world };
   H.contacts = Object.fromEntries(Object.entries(DIDS).filter(([n]) => n !== name).map(([n, d]) => [d, { did: d, name: n, online: true, tier: 'friend', presence: 'allow', relay: 'relay.test' }]));
   H.line = new Line({
@@ -84,7 +84,7 @@ function host(name, net, world, { turn = undefined } = {}) {
     line: (l) => H.lines.push(l), alert: (x) => H.alerts.push(x), audio: (x) => H.audio.push(x), o: FAST,
   });
   const routes = callRoutes({ line: H.line, contactOf: (d) => H.contacts[d] ?? (() => { throw Object.assign(new Error('not a contact'), { check: 'not_contact', status: 404 }); })(),
-    callable: (c) => (c.online === true ? true : { check: 'call_offline', message: 'not online' }), stun: (c) => stunOf('relay.test', c?.relay), ...(turn && { turn }), allow: () => {}, allowOf: () => true });
+    callable: (c) => (c.online === true ? true : { check: 'call_offline', message: 'not online' }), stun: (c) => stunOf('relay.test', c?.relay), ...(turn && { turn }), ...(policy && { policy }), allow: () => {}, allowOf: () => true });
   H.api = async (method, path, body) => {
     const u = new URL(path, 'http://x'), f = routes[`${method} ${u.pathname}`];
     if (!f) throw Object.assign(new Error('no route'), { check: 'route', status: 404 });
@@ -110,14 +110,23 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   ok(placed.dir === 'out' && ['calling', 'ringing'].includes(placed.state) && /^[0-9a-f]{32}$/.test(placed.id), 'Call: the ring goes, the call is the caller\'s, calling', JSON.stringify(placed));
   const ringMsg = A.sent.find((x) => x.typ === 'ring');
   ok(ringMsg && JSON.stringify(ringMsg).length === PAD && ringMsg.text === OLD_TEXT && ringMsg.exp > Date.now() / 1000 && checkSdp(ringMsg.sdp)
-    && !/typ srflx/.test(ringMsg.sdp) && /typ host/.test(ringMsg.sdp), 'the ring: padded, the text for older apps, exp ahead, its offer gathered for GATHER_MS (the host candidate, not the late one)');
+    && !/candidate/.test(ringMsg.sdp) && /^c=IN IP4 0\.0\.0\.0\r?$/m.test(ringMsg.sdp) && /^m=audio 9 /m.test(ringMsg.sdp) && !/192\.0\.2\.|203\.0\.113\./.test(ringMsg.sdp),
+    'the ring: padded, the text for older apps, exp ahead, its offer with no address (no candidate, c= 0.0.0.0, port 9)');
   ok(await until(() => state(B) === 'incoming' && B.alerts.some((x) => x.on && x.did === DIDS.alice)), 'the callee: incoming, and its host rings (the alert seam)');
   ok(await until(() => state(A) === 'ringing'), '"Ringing…" back to the caller (presence shared)');
   ok(B.phone.pc === null && net.made === 1, 'the callee gathers nothing before Accept (no address leaves it)');
-  ok(await until(() => A.sent.some((x) => x.typ === 'cands' && x.cands.some((c) => / typ srflx/.test(c)))), 'the late candidates go once, in one cands');
+  await sleep(250);   // the caller's gathering done (fake: 60 ms)
+  ok(!A.sent.some((x) => x.typ === 'cands') && !B.line.view().signals.some((x) => x.typ === 'cands'), 'the caller\'s candidates wait for the answer: none reached the ringing callee');
+  ok(await failure(() => A.api('POST', '/api/calls/cands', { id: placed.id, attempt: 1, cands: ['candidate:1 1 udp 1 192.0.2.1 5000 typ host'] })) === 'call_state',
+    'the Line refuses the caller\'s candidates before the answer (an older page)');
+  const t0 = Date.now();
   await B.phone.accept();
   ok(B.sent.some((x) => x.typ === 'answer' && JSON.stringify(x).length === PAD) && B.alerts.some((x) => !x.on) && B.audio.some((x) => x.on), 'Accept: the answer goes padded, the ring stops, the audio mode on');
   ok(await until(() => state(A) === 'active' && state(B) === 'active'), 'both connected: active');
+  const setup = Date.now() - t0;
+  ok(setup < 1000, `Accept to active with the caller's candidates trickled after the answer: ${setup} ms (fake network, polls every 20-25 ms)`);
+  ok(A.sent.some((x) => x.typ === 'cands' && x.cands.some((c) => / typ host/.test(c)) ) && A.sent.some((x) => x.typ === 'cands' && x.cands.some((c) => / typ srflx/.test(c)))
+    && B.line.view().signals.some((x) => x.typ === 'cands'), 'after the answer: the caller\'s candidates (host and srflx) go in cands');
   ok(A.stream?.id && B.stream?.id, 'each page gets the far end\'s audio');
   const peerA = [...net.pcs].find((p) => p.type === 'offer');
   ok(peerA && /useinbandfec=1;usedtx=1;stereo=0;sprop-stereo=0;maxaveragebitrate=16000/.test(peerA.tuned), 'the answer applied with Opus tuned (mono, FEC, DTX, 16 kbit/s)');
@@ -216,6 +225,21 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   A.contacts[DIDS.bob].online = false;
   ok(await failure(() => A.api('POST', '/api/calls/start', { to: DIDS.bob, sdp: SDP })) === 'call_offline', 'a contact not online: no call (presence-gated)');
   stop(A, B, C);
+}
+
+// 2b. Calls are between people (design §1): a ring from a contact this host takes for an agent: refused silently.
+{
+  const net = fakeNet(), world = {}, A = host('alice', net, world), B = host('bob', net, world);
+  const refused = [];
+  B.line.person = (c) => c.did !== DIDS.alice; B.line.refused = (x) => refused.push(x);
+  await sleep(60);
+  await A.phone.place(DIDS.bob);
+  await sleep(300);
+  ok(refused.length === 1 && refused[0].did === DIDS.alice && refused[0].check === 'call_agent' && B.line.view() === null && B.lines.length === 0 && B.alerts.length === 0
+    && B.sent.length === 0, 'a ring from an agent: no call, no line, no alert, nothing said back; refused() once for the log', JSON.stringify([refused, B.lines, B.sent]));
+  ok(['calling', 'ringing'].includes(state(A)) && state(A) !== 'ringing', 'the agent side hears nothing (it rings out)');
+  await A.phone.hangup();
+  stop(A, B);
 }
 
 // 3. Glare: both call at once; the smaller DID's call stands, the other side takes it at once.
@@ -354,9 +378,9 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   ok(relayedOf(stats('relay', 'srflx')) === true && relayedOf(stats('host', 'relay', 'nominated')) === true && relayedOf(stats('srflx', 'prflx')) === false && relayedOf(new Map()) === null,
     'relayedOf: a relayed candidate on either side of the selected pair (transport\'s selectedCandidatePairId, else the nominated pair); none selected: null');
   const R = callRoutes({ line: new Line({ send: async () => ({}), contact: () => null, allowed: () => true, shares: () => false, me: () => 'did:x', o: FAST }), contactOf: () => null, callable: () => true, stun: () => [] });
-  ok(JSON.stringify(await R['GET /api/calls/turn']()) === '{"turn":null}', 'GET /api/calls/turn with no TURN hook: {turn: null}');
+  ok(JSON.stringify(await R['GET /api/calls/turn']()) === '{"turn":null,"policy":"all"}', 'GET /api/calls/turn with no TURN hook: {turn: null}, policy all');
   const R2 = callRoutes({ line: new Line({ send: async () => ({}), contact: () => null, allowed: () => true, shares: () => false, me: () => 'did:x', o: FAST }), contactOf: () => null, callable: () => true, stun: () => [], turn: async () => { throw new Error('down'); } });
-  ok(JSON.stringify(await R2['GET /api/calls/turn']()) === '{"turn":null}', 'a TURN hook that fails: {turn: null} (the call goes on with STUN)');
+  ok(JSON.stringify(await R2['GET /api/calls/turn']()) === '{"turn":null,"policy":"all"}', 'a TURN hook that fails: {turn: null} (the call goes on with STUN)');
   let asked = 0, cred = T;
   const net = fakeNet(), world = {}, A = host('alice', net, world, { turn: async () => { asked++; return cred; } }), B = host('bob', net, world, { turn: async () => cred });
   await sleep(60);
@@ -393,6 +417,58 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   stop(A, B);
 }
 
+// 8. "Always relay my media" (design §6, 2026-11-26): the policy from the setting or SIGELO_ICE_POLICY; the connection
+// relay-only, only relayed candidates leave, raddr zeroed; no TURN: RELAY_ONLY at once, nothing rung.
+{
+  const T = { urls: ['turn:relay.test:3478?transport=udp'], username: '1764200000:abcdefghijklmnop', credential: 'Y3JlZGVudGlhbA==', exp: 1764200000 };
+  ok(policyOf(true) === 'relay' && policyOf(false, 'relay') === 'relay' && policyOf(false, undefined) === 'all' && policyOf(false, 'all') === 'all' && policyOf(false, 'RELAY') === 'all',
+    'config → policy: the setting on, or SIGELO_ICE_POLICY=relay: relay; else all (only the exact word)');
+  const sdp = ['v=0', 'a=candidate:1 1 udp 2122260223 192.0.2.7 5000 typ host', 'a=candidate:2 1 udp 1686052607 203.0.113.9 6000 typ srflx raddr 192.0.2.7 rport 5000',
+    'a=candidate:3 1 udp 41885439 198.51.100.4 49200 typ relay raddr 203.0.113.9 rport 6000', 'a=end-of-candidates', ''].join('\r\n');
+  const kept = relayOnly(sdp);
+  ok(!/192\.0\.2\.7|203\.0\.113\.9/.test(kept) && /typ relay raddr 0\.0\.0\.0 rport 0/.test(kept) && kept.includes('198.51.100.4') && kept.endsWith('\r\n'),
+    'relayOnly: host and srflx candidates gone, the relayed one kept with its related address zeroed (no address of this device left)', kept);
+  ok(JSON.stringify(relayOnly(['candidate:1 1 udp 1 192.0.2.7 5000 typ host', 'candidate:3 1 udp 1 198.51.100.4 49200 typ relay raddr 203.0.113.9 rport 6000']))
+    === JSON.stringify(['candidate:3 1 udp 1 198.51.100.4 49200 typ relay raddr 0.0.0.0 rport 0']), 'relayOnly on cands lines: the same');
+  const RP = callRoutes({ line: new Line({ send: async () => ({}), contact: () => null, allowed: () => true, shares: () => false, me: () => 'did:x', o: FAST }), contactOf: () => null, callable: () => true, stun: () => [], policy: () => 'relay' });
+  ok((await RP['GET /api/calls/turn']()).policy === 'relay', 'GET /api/calls/turn says policy relay with the setting on');
+  // No TURN offered: the caller fails at once with the sentence, no connection made, nothing rung.
+  {
+    const net = fakeNet(), world = {}, A = host('alice', net, world, { policy: () => 'relay' }), B = host('bob', net, world);
+    await sleep(60);
+    const made = net.made;
+    let err = null;
+    try { await A.phone.place(DIDS.bob); } catch (e) { err = e; }
+    ok(err?.check === 'relay_only' && err.message === RELAY_ONLY && A.phone.view().error?.message === RELAY_ONLY && A.phone.view().phase === 'failed',
+      `relay only, no TURN: the call fails at once, "${RELAY_ONLY}"`, JSON.stringify(A.phone.view().error));
+    await sleep(100);
+    ok(net.made === made && !A.sent.some((x) => x.typ === 'ring') && state(B) === null, 'no connection made (nothing gathered), no ring sent');
+    // The callee with relay only and no TURN: Accept fails with the sentence; the caller hears no_path.
+    const C = host('carol', net, world, { policy: () => 'relay' });
+    await sleep(60);
+    await B.phone.place(DIDS.carol); await rings(C); await C.phone.accept();
+    ok(C.phone.view().error?.message === RELAY_ONLY && await until(() => B.line.view()?.reason === 'no_path' || B.lines.at(-1)?.text === 'Could not connect', 3000),
+      'the callee with relay only and no TURN: its Accept fails with the sentence, the caller is told no_path', JSON.stringify([C.phone.view().error, B.line.view()]));
+    stop(A, B, C);
+  }
+  // With TURN: iceTransportPolicy relay, no STUN, and what leaves holds no host or srflx candidate.
+  {
+    const net = fakeNet(), world = {}, A = host('alice', net, world, { turn: async () => T, policy: () => 'relay' }), B = host('bob', net, world, { turn: async () => T, policy: () => 'relay' });
+    await sleep(60);
+    await A.phone.place(DIDS.bob);
+    const pcA = [...net.pcs].find((p) => p.type === 'offer');
+    ok(pcA?.cfg.iceTransportPolicy === 'relay' && pcA.cfg.iceServers.length === 1 && pcA.cfg.iceServers[0].username === T.username, 'the caller\'s connection: iceTransportPolicy relay, the TURN server alone (no STUN)', JSON.stringify(pcA?.cfg));
+    await rings(B); await B.phone.accept();
+    const pcB = [...net.pcs].find((p) => p.type === 'answer');
+    ok(pcB?.cfg.iceTransportPolicy === 'relay', 'the callee\'s connection: relay too');
+    await sleep(400);
+    const out = JSON.stringify([...A.sent, ...B.sent]);
+    ok(!/typ host|typ srflx|192\.0\.2\.|203\.0\.113\./.test(out), 'no host or srflx candidate, no address of either device in any call message', out.slice(0, 400));
+    await A.phone.hangup();
+    stop(A, B);
+  }
+}
+
 // 6. A flood of rings while busy: one busy answer per contact per REPLY_MS.
 {
   const net = fakeNet(), world = {}, A = host('alice', net, world), B = host('bob', net, world), C = host('carol', net, world);
@@ -421,6 +497,7 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs')) || !existsSync(join(RELAY_DIR, 'n
   const { startRelay } = await import(pathToFileURL(join(RELAY_DIR, 'server.mjs')).href);
   const { relayPolicy } = await import(pathToFileURL(join(RELAY_DIR, 'allowance.mjs')).href);
   const { Carrier, CALL_SEND, pathsFor } = await import('./carrier.mjs');
+  const require_ = (await import('node:module')).createRequire(import.meta.url);
   const HOST = 'relay.test', dir = mkdtempSync(join(tmpdir(), 'sigelo-call-'));
   const TURN_SECRET = 'f0'.repeat(32);
   const relay = await startRelay({ host: HOST, db: join(dir, 'relay.db'), tcpPort: 0, httpPort: 0, loginRate: 100000, verifyBudget: 1e9, diskUsed: () => 0.1, turnSecret: TURN_SECRET,
@@ -445,9 +522,14 @@ if (!existsSync(join(RELAY_DIR, 'server.mjs')) || !existsSync(join(RELAY_DIR, 'n
     ok(await until(() => B.events.some((e) => e.type === 'call'), 20000), 'a `call` event at the callee');
     const ev = B.events.find((e) => e.type === 'call');
     ok(ev.from === A.did && ev.content === undefined, 'the event names the sender, without the content');
+    // The state file holds no call signalling (no SDP: addresses, the DTLS fingerprint), before or after it is taken.
+    const stateOf = () => { const { readFileSync, existsSync } = require_('node:fs'); return existsSync(B.c.statePath) ? readFileSync(B.c.statePath, 'utf8') : ''; };
+    const s0 = stateOf();
+    ok(s0.length > 0 && !/a=candidate|fingerprint|"calls"/.test(s0) && !s0.includes(ID), 'the callee\'s state file: no call message (no candidate, no fingerprint, no call id) while it waits to be taken');
     const took = B.c.takeCalls(), sorted = (o) => JSON.stringify(Object.fromEntries(Object.entries(o).sort()));
     ok(took.length === 1 && took[0].from === A.did && sorted(took[0].content) === sorted(ring) && B.c.takeCalls().length === 0, 'takeCalls(): the message, once');
     ok(!(await B.c.inbox()).messages.some((m) => m.label === CALL_LABEL) && !B.c.history({ since: 0 }).messages.some((m) => m.label === CALL_LABEL), 'never in inbox() nor the log');
+    ok(!/a=candidate|fingerprint|"calls"/.test(stateOf()) && !stateOf().includes(ID), 'nor in the state file after it was taken');
     // TURN (relay/turn.mjs): the carrier asks its own relay over the session; the credential is coturn's for that secret.
     const { createHmac } = await import('node:crypto');
     const t1 = await A.c.turnServer();

@@ -161,8 +161,8 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
   The relay refuses requests from web pages; these are not.
 - `seal`, `open`: the keystore above (kinds `identity`, `keeper`, `words`, `control`; `profile`, p1 when none). `forget-profile`:
   a profile's three keys deleted (its removal). `mode`: the active profile's form; `wiped`: an older version's switch.
-- `secure`: `FLAG_SECURE` on the window while the restore screen or the kept words are up (no screenshot, no recents
-  thumbnail), off after; with `door` (a new identity's words) the system Back does nothing meanwhile.
+- `secure`: `FLAG_SECURE` on the window while a secret screen is up (the list: `apps/agent/UI-API.md` "Secret screens";
+  no screenshot, no recents thumbnail; from API 33 `setRecentsScreenshotEnabled(false)` too), off after; with `door` (a new identity's words) the system Back does nothing meanwhile.
   `clip-clear`: the clipboard emptied after the 25 words were pasted. `share`: the system's share
   sheet with a ready-to-send message (a code, until when, the instructions link). `clip-copy`: stagenet words on
   the clipboard, marked sensitive (no preview), emptied by the shell after 60 s.

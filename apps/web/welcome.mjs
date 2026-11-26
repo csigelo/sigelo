@@ -167,8 +167,14 @@ export function firstRun(box, api, { show = true } = {}) {
   };
 
   // ---- navigation: a screen is a function; go() keeps the one before it for Back (one history entry each)
+  // The secret screens of the first run (UI-API.md "Secret screens"): an invite or a computer's code, a password over the
+  // words, a backup's password, FLAG_SECURE while up. The 25 words and the restore set it themselves (with the door).
+  const SECRET = new Set([joinCode, wordsPassword, restoreFile, connectCode]);
+  /** Entering `next` from `was`: on for a secret one, off when leaving one (not behind the door: the words keep theirs). */
+  const guard = (was, next) => { if (SECRET.has(next)) secure(true); else if (SECRET.has(was) && !door) secure(false); };
   function go(next, { replace = false } = {}) {
     if (current && !replace) { stack.push(current); history.pushState({ firstRun: stack.length }, ''); }
+    guard(current, next);
     current = next;
     return next();
   }
@@ -178,6 +184,7 @@ export function firstRun(box, api, { show = true } = {}) {
     const prev = stack.pop();
     if (!prev) return;
     const l = leave; leave = null; l?.();
+    guard(current, prev);
     current = prev; prev();
   };
   addEventListener('popstate', onPop);
@@ -485,7 +492,7 @@ export function firstRun(box, api, { show = true } = {}) {
   return {
     welcome: home, screen, go, button,
     /** The connect screens alone, as the first screen (a remote profile adding a computer: design/profiles.md P2). */
-    connect() { stack.length = 0; current = connectCode; door = false; connectCode(); },
+    connect() { stack.length = 0; current = connectCode; door = false; secure(true); connectCode(); },
     /** One of the Add sheet's ways as the first step, the welcome behind it (Back): create, join, restore, backup, computer. */
     start(path) { const f = { create: createName, join: joinCode, restore: restoreWords, backup: api.restoreBackup ? restoreFile : null, computer: connectCode }[path]; if (f) go(f); },
     stop() { removeEventListener('popstate', onPop); if (C.words) quiet(api.discard); C.words = null; R.words = ''; secure(false); },

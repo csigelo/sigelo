@@ -91,8 +91,9 @@
 //   c.takeTransfers(), c.deliver(item)     transfer-node.mjs's: the sigelo-transfer/0 messages received (never in inbox(),
 //                                            the log or onEvent: a `transfer` event without content says one came), taken;
 //                                            a file a transfer saved whole, as an inbox item (kept as #onFile keeps one)
-//   c.takeCalls()                          call.mjs's: the sigelo-call/0 messages received (never in inbox(), the log or
-//                                            onEvent: a `call` event without content says one came), taken
+//   c.takeCalls()                          call.mjs's: the sigelo-call/0 messages this process received (never in inbox(),
+//                                            the log, onEvent, nor the state file: held in memory until taken; a `call`
+//                                            event without content says one came), taken
 //   c.freshEpochs({ only, retire })        every session (or only's) afresh, as after a rotation (a snapshot's
 //                                            state imported where the seat moved, devices.md §4.3) → the DIDs
 //   c.answeredBy(nonce)                    the original DID that paired through this agent's code `nonce`, or null
@@ -255,7 +256,7 @@
 //     what to send and when is the app's (apps/contact/page.mjs: one first receipt to a contact not
 //     known to read them, further ones only once one came back). A contact on an earlier version takes
 //     the first as a message with that label, and never sends one: its messages stay at one tick.
-//     Once paired, each side also sends one {seen: 0, name}: its display name (the "Names" below).
+//     Once paired, each side also sends one {seen: 0, name, kind?}: its display name and kind (the "Names" below).
 //     Every receipt (the name's too) carries busy: true: this side takes busy marks (below), and host: true: it takes a
 //     hosted agent's settings (sigelo-host-caps/0, apps/contact/page.mjs "Agent settings"); kept as host_peer (contacts()).
 //   - Busy marks (label BUSY_LABEL, inside the envelope; 2026-11-19): {busy: true|false}, a hosted agent's "I am
@@ -390,9 +391,10 @@ const DEVICES_MAX = 16;
 // engine, never logged (an offer carries addresses, an onion message a client key); sent only with TRANSFER_SEND.
 export const TRANSFER_LABEL = 'sigelo-transfer/0', TRANSFER_SEND = Symbol('sigelo-transfer send');
 const TRANSFERS_MAX = 256;
-// Calls (call.mjs, sigelo-call/0; design/calls.md §2): the signalling of a voice call. The same: kept apart in st.calls
-// (at most CALLS_MAX) for the page's Line (page.mjs) or watch's answer, never logged (an offer carries addresses); sent
-// only with CALL_SEND.
+// Calls (call.mjs, sigelo-call/0; design/calls.md §2): the signalling of a voice call. Kept apart in memory (at most
+// CALLS_MAX) for the page's Line (page.mjs) or watch's answer, in the process that received them; never logged and never
+// in the state file (an SDP carries addresses and a DTLS fingerprint; a ring lives 60 s, a restart cannot wait for
+// another process anyway). Sent only with CALL_SEND.
 export const CALL_LABEL = 'sigelo-call/0', CALL_SEND = Symbol('sigelo-call send');
 const CALLS_MAX = 64;
 // Seen receipts (the header's): sent only with SEEN_SEND, never an inbox message.
@@ -410,7 +412,13 @@ export const BUSY_LABEL = 'sigelo-busy/0', BUSY_SEND = Symbol('sigelo-busy send'
 // contact's name was made up here (name_from "auto": an unnamed invite or accept, a public code's) or came from them
 // before; a name the human gave or changed is never replaced. The name: at most THEIR_NAME_MAX characters, trimmed, no
 // control or bidi characters, else ignored; one another contact holds gets " (2)", " (3)"….
+// Kinds (2026-11-26): the same receipt carries kind "agent" or "desk" (a support desk) when this side says it is one
+// (selfKind: sigelo-agent says agent by default, --kind desk; a person's app says nothing). The receiver keeps it as the
+// contact's kind_peer (contacts()); the page shows it, and the human's own choice wins (page.mjs "Kinds"). An earlier
+// version ignores the member, as it ignores busy and host; the pairing card (invite.mjs) refuses an unknown field, so
+// the kind does not go there. A claim only: it can make a contact less (no call), never more than a person.
 export const THEIR_NAME_MAX = 40;
+export const KINDS = Object.freeze(['person', 'agent', 'desk']);
 // Replies (0.1.17: "reply to messages"): a message that answers one names it in its label, re/<h>/<s|r>, h the first 16
 // hex of SHA-256 over the quoted text, s when the sender quotes its own message, r the recipient's. The envelope's body is
 // exact (envelope.mjs BODY): no member can be added, and a label is free text an older client shows as a tag. Each side
@@ -674,6 +682,8 @@ function loadState(files, path, self) {
   if (s.v !== V || s.self !== self) fail('state', `${path} is not the ${V} state of ${self}`);
   // Written by an earlier version of this file, which kept neither.
   s.events ??= []; s.failing ??= {}; s.answered ??= {};
+  // Call signalling an earlier version kept here (with its SDP): gone at the next save.
+  delete s.calls;
   return s;
 }
 
@@ -1120,11 +1130,12 @@ export class Carrier {
   #renewing = false;
   #started = false; #tick = null; #timers = new Map(); #attempts = new Map(); #connecting = new Set(); #powFails = new Map(); #powWaits = new Set(); #ask = false; #spare = new Map();
   #push = undefined; #pushState = { state: 'none' }; #turn = null;   // #turn: the last TURN credential (turnServer)   // setPush: undefined = never set (nothing sent), null = off
-  #mineMemo = null; #clocks = new Map(); #selfName = () => null;
+  #mineMemo = null; #clocks = new Map(); #selfName = () => null; #selfKind = () => null;
+  #calls = [];   // the sigelo-call/0 messages received, until takeCalls (memory only: the header's "Calls")
 
   constructor({ identity, store, state, relay = DEFAULT_RELAY, endpoints = {}, retentionDays, clock = () => Math.floor(Date.now() / 1000),
     onEvent, keep, backoff = BACKOFF, tick = TICK, files, log, transport = 'auto', shortRelay = DEFAULT_RELAY, registry = REGISTRY_URL, registryPin = RELEASE_DID, relays, registryFile,
-    platform = nodePlatform, selfName = null, enrolHash = null }) {
+    platform = nodePlatform, selfName = null, selfKind = null, enrolHash = null }) {
     // enrolHash: the enrolment code this (temporary) identity holds, as its park hash: its first login asks
     // GET /challenge?…&enrol=<hash>, and a relay states the base proof of work for it (relay/park.mjs enrolGrace).
     if (enrolHash !== null && !(typeof enrolHash === 'string' && /^[0-9a-f]{64}$/.test(enrolHash))) throw new TypeError('enrolHash: 64 hex (short.mjs codeHash), or null');
@@ -1132,6 +1143,9 @@ export class Carrier {
     // This side's display name, told to each new contact once paired (the header's "Names"): a string or a function → one, or null.
     if (selfName !== null && typeof selfName !== 'string' && typeof selfName !== 'function') throw new TypeError('selfName: a string, a function → a string or null, or null');
     this.#selfName = typeof selfName === 'function' ? selfName : () => selfName;
+    // This side's kind, told with the name (the header's "Kinds"): "agent", "desk", or null (a person: nothing said).
+    if (selfKind !== null && !KINDS.includes(selfKind) && typeof selfKind !== 'function') throw new TypeError('selfKind: agent, desk, person, a function → one, or null');
+    this.#selfKind = typeof selfKind === 'function' ? selfKind : () => selfKind;
     if (!TRANSPORTS.includes(transport)) throw new TypeError(`transport: ${TRANSPORTS.join(', ')}`);
     // The platform (design/apps.md §4.2, platform-node.mjs): files, lock, network, proof of work.
     if (typeof platform?.files?.read !== 'function' || typeof platform.transact !== 'function' || typeof platform.fetch !== 'function' || typeof platform.mqtt !== 'function'
@@ -1330,10 +1344,12 @@ export class Carrier {
   // An event kept for the next inbox() as well: a CLI or MCP agent has no onEvent.
   // This side's name to a contact just paired (the header's "Names"), in its outbox: it goes with the next round.
   #tellName(st, did) {
-    let n = null;
+    let n = null, k = null;
     try { n = theirName(this.#selfName()); } catch {}
-    if (n === null) return;
-    this.#entry(st, did).outbox.push({ id: randomId(), label: SEEN_LABEL, content: { seen: 0, name: n, busy: true, host: true } });
+    try { k = this.#selfKind(); } catch {}
+    if (k !== 'agent' && k !== 'desk') k = null;
+    if (n === null && k === null) return;
+    this.#entry(st, did).outbox.push({ id: randomId(), label: SEEN_LABEL, content: { seen: 0, ...(n !== null && { name: n }), ...(k !== null && { kind: k }), busy: true, host: true } });
   }
 
   #note(st, now, ev) {
@@ -1440,6 +1456,9 @@ export class Carrier {
         : route.type === 'answer' ? this.#onAnswer(ctx, t, bytes) : route.type === 'public' ? this.#onPublic(ctx, route.nonce, t, bytes) : this.#onReply(ctx, t, bytes)));
       for (const e of events) this.#emit(e);
       if (route.type === 'answer') this.#renewSoon();
+      // A frame from a contact: it read the pairing's reply and holds its mailbox now, so what waits for it after a
+      // no_reader (a name or kind receipt queued at the pairing, operator hints) goes this round, not the next tick's.
+      if (route.type === 'peer') link.absent.delete(route.did);
     } catch (e) {
       if (route?.type === 'answer') this.#renewSoon();
       if (e instanceof MsgError && !INTERNAL.has(e.check)) this.#drop(e.check, e.message, route);
@@ -1608,7 +1627,8 @@ export class Carrier {
       events.push({ type: 'transfer', from: c.did, name: c.name });
     } else if (r.body.label === CALL_LABEL) {
       // A call's signalling (call.mjs): kept for the page's Line, never for inbox() nor onEvent's readers.
-      const l = (st.calls ??= []);
+      // In memory (the header's "Calls"): a delivery whose transaction then fails comes again, and the Line drops the repeat.
+      const l = this.#calls;
       l.push({ from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now });
       if (l.length > CALLS_MAX) { st.dropped.calls_full = (st.dropped.calls_full ?? 0) + l.length - CALLS_MAX; l.splice(0, l.length - CALLS_MAX); }
       events.push({ type: 'call', from: c.did, name: c.name });
@@ -1618,6 +1638,9 @@ export class Carrier {
       // busy: true: they take busy marks (the header's "Busy marks").
       if (r.body.content?.busy === true) this.#entry(st, c.did).busy_peer = true;
       if (r.body.content?.host === true) this.#entry(st, c.did).host_peer = true;
+      // Its kind (the header's "Kinds"): agent or desk kept; person, or anything else, says nothing.
+      const said = r.body.content?.kind;
+      if (said === 'agent' || said === 'desk') this.#entry(st, c.did).kind_peer = said;
       if (nm !== null) {
         const all = store.load().s.contacts, rec = all[c.did];
         if (rec && (rec.name_from === 'auto' || rec.name_from === 'them') && rec.name !== nm) {
@@ -1628,8 +1651,8 @@ export class Carrier {
           events.push({ type: 'named', did: c.did, name: to });
         } else if (rec && rec.name_from === 'auto') { rec.name_from = 'them'; store.save(); }
       }
-      // A name's receipt (seen 0) says nothing of what was shown.
-      if (nm !== null && n === 0) { /* the name only */ } else if (!Number.isSafeInteger(n) || n < 0) { st.dropped.seen = (st.dropped.seen ?? 0) + 1; events.push({ type: 'dropped', check: 'seen', detail: 'a seen receipt without its time' }); } else {
+      // A name's (or a kind's) receipt (seen 0) says nothing of what was shown.
+      if ((nm !== null || said === 'agent' || said === 'desk') && n === 0) { /* the name only */ } else if (!Number.isSafeInteger(n) || n < 0) { st.dropped.seen = (st.dropped.seen ?? 0) + 1; events.push({ type: 'dropped', check: 'seen', detail: 'a seen receipt without its time' }); } else {
         const e = this.#entry(st, c.did);
         e.seen_peer = true;
         e.seen_upto = Math.max(e.seen_upto ?? 0, n);
@@ -3491,6 +3514,8 @@ export class Carrier {
   rename(who, name) { return this.#locked(({ store }) => store.rename(who, name)); }
   /** This side's display name as it is told to new contacts (the header's "Names"), or null. */
   selfName() { try { return theirName(this.#selfName()); } catch { return null; } }
+  /** This side's kind as it is told to new contacts (the header's "Kinds"): "agent", "desk", or null. */
+  selfKind() { try { const k = this.#selfKind(); return k === 'agent' || k === 'desk' ? k : null; } catch { return null; } }
 
   contacts() {
     return this.#read(({ now, store, st }) => {
@@ -3504,7 +3529,8 @@ export class Carrier {
             // Presence (the header's): what this contact sees of mine, and theirs as read now (null: not known).
             presence: store.presenceOf(c, now), online: st.presence?.[c.did]?.online ?? null, online_since: st.presence?.[c.did]?.since ?? null, last_seen: st.presence?.[c.did]?.last_seen ?? null,
             seen_upto: e?.seen_upto ?? null, seen_peer: e?.seen_peer === true,
-            busy: (e?.busy_until ?? 0) > now, busy_n: (e?.busy_until ?? 0) > now ? (e?.busy_n ?? 1) : 0, busy_peer: e?.busy_peer === true, host_peer: e?.host_peer === true, via: c.via ?? null, name_from: c.name_from ?? null };
+            busy: (e?.busy_until ?? 0) > now, busy_n: (e?.busy_until ?? 0) > now ? (e?.busy_n ?? 1) : 0, busy_peer: e?.busy_peer === true, host_peer: e?.host_peer === true, via: c.via ?? null, name_from: c.name_from ?? null,
+            kind_peer: e?.kind_peer ?? null };
         }),
         invites: Object.values(s.invites).filter((p) => p.exp > now).map((p) => ({ name: p.name, exp: p.exp, relay: p.relay,
           ...(typeof p.short === 'string' && { short: p.short, short_exp: p.short_exp }), ...(p.renew && { renew: p.renew }) })),
@@ -3818,7 +3844,7 @@ export class Carrier {
   takeGroups() { return this.#locked(({ st }) => { const l = st.groups ?? []; st.groups = []; return l; }); }
   takeDevices() { return this.#locked(({ st }) => { const l = st.devices ?? []; st.devices = []; return l; }); }
   // pick(message) → take it (default all); the rest stay for a later take (an engine's).
-  takeCalls(pick = () => true) { return this.#locked(({ st }) => { const l = st.calls ?? [], took = l.filter((m) => pick(m)); st.calls = l.filter((m) => !took.includes(m)); return took; }); }
+  takeCalls(pick = () => true) { const took = this.#calls.filter((m) => pick(m)); this.#calls = this.#calls.filter((m) => !took.includes(m)); return took; }
   takeTransfers(pick = () => true) { return this.#locked(({ st }) => { const l = st.transfers ?? [], took = l.filter((m) => pick(m)); st.transfers = l.filter((m) => !took.includes(m)); return took; }); }
   // A file a transfer saved whole (transfer-node.mjs): an inbox item as #onFile makes one, kept for
   // inbox() (keep) and handed to onEvent. item: { type: 'file', from, contact, name, size, sha256, path, … }.

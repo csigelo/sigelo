@@ -114,7 +114,7 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
         // The screen kept on while a transfer moves (the shell's awake): locked, Android stops the app sooner or later.
         make: (carrier, onEvent, o) => {
           let on = false;
-          const e = new TransferEngine({ carrier, io: tio, rtc: async () => rtc, maxServe: 2, compared: o?.compared, onEvent: (x) => {
+          const e = new TransferEngine({ carrier, io: tio, rtc: async () => rtc, maxServe: 2, compared: o?.compared, ...(o?.policy && { policy: o.policy }), onEvent: (x) => {
             onEvent(x);
             const now = e.attempts.size > 0;
             if (now !== on) { on = now; void big.awake?.(now).catch(() => {}); }

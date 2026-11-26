@@ -333,6 +333,35 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
   }
 }
 
+// ── kinds (carrier.mjs "Kinds", 2026-11-26): what an identity tells a new contact it is ──────
+// sigelo-agent says agent by default; `invite|accept --kind desk` keeps desk in <identity>.kind (0600) and says that;
+// the other side's contacts show it as kind_peer. A kind not agent or desk: exit 2, nothing kept.
+{
+  if (!hasRelay()) console.log(`SKIP kinds: ${NO_RELAY}`);
+  else {
+    const H = tmpHome('kinds'), relay = await startTestRelay(H), endpoints = JSON.stringify(relay.endpoints);
+    const envOf = (n: string): Record<string, string | undefined> => ({ PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H, SIGELO_IDENTITY: join(H, `${n}.local.json`), SIGELO_RELAY: 'relay.test', SIGELO_SHORT_RELAY: 'relay.test', SIGELO_RELAY_REGISTRY: 'off', SIGELO_RELAY_ENDPOINTS: endpoints, ...KA });
+    const cli = (n: string, ...args: string[]) => cliIn(envOf(n), H)(...args);
+    try {
+      for (const n of ['desk', 'bot']) await cli(n, 'init', '--no-recovery');
+      const bad = await cli('desk', 'invite', '--kind', 'robot');
+      ok('invite --kind robot: exit 2, the two kinds named, nothing kept', bad.status === 2 && bad.stderr.includes('--kind: agent or desk') && !existsSync(join(H, 'desk.local.kind')), bad.stderr);
+      const inv = await cli('desk', 'invite', '--long', '--name', 'bot', '--kind', 'desk');
+      ok('invite --kind desk: kept in <identity>.kind (0600), said on stderr', inv.status === 0 && readFileSync(join(H, 'desk.local.kind'), 'utf8') === 'desk\n'
+        && (!posixModes || (statSync(join(H, 'desk.local.kind')).mode & 0o777) === 0o600) && inv.stderr.includes('a support desk'), inv.stderr);
+      const acc = await cli('bot', 'accept', inv.stdout.trim(), '--name', 'desk', '--wait', '0');
+      for (let i = 0; i < 3; i++) { await cli('desk', 'inbox'); await cli('bot', 'inbox'); }
+      type K = { contacts: { name: string; kind_peer: string | null }[] };
+      const atBot = (JSON.parse((await cli('bot', 'contacts')).stdout || '{}') as K).contacts, atDesk = (JSON.parse((await cli('desk', 'contacts')).stdout || '{}') as K).contacts;
+      ok('kinds over the relay: the desk is a desk at its contact, the other agent (no --kind) an agent at the desk',
+        acc.status === 0 && atBot[0]?.kind_peer === 'desk' && atDesk[0]?.kind_peer === 'agent', JSON.stringify([atBot, atDesk, acc.stderr]));
+    } finally {
+      await relay.close?.();
+      rmSync(H, { recursive: true, force: true });
+    }
+  }
+}
+
 // ── invite --relay, accept --relay: a pairing on a relay other than SIGELO_RELAY ───────────
 // Both agents' SIGELO_RELAY is relay.test; op invites on corp.test. The short code is parked there
 // and carries its relay tag; rev knows no relay with that tag, so an accept without --relay is asked

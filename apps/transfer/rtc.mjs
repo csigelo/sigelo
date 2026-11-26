@@ -5,8 +5,13 @@
 // apps/contact/transfer-node.mjs imports it only when a transfer starts, and goes without it (Tor only)
 // when it is not installed.
 //
-//   const p = await peer({ stun, gatherMs })   one side of a pairing's transfer attempt; STUN only: a `turn` given is ignored
-//                               (TURN_OK below)
+//   const p = await peer({ stun, turn, gatherMs, policy })   one side of a pairing's transfer attempt; turn: { urls, username,
+//                               credential } (apps/contact/carrier.mjs turnServer) or null: werift takes the first turn: URI
+//                               (UDP, then TCP to the same server when UDP fails) and uses its candidate only when no direct pair answers;
+//                               policy "relay" ("Always relay my media", SIGELO_ICE_POLICY=relay): werift's forceTurn (no host
+//                               or srflx candidate gathered, no check from one), no STUN, and what leaves holds relayed candidates
+//                               only, their raddr zeroed (werift puts the mapped public address there); without turn: relay_only
+//   await p.relayed()           → the selected pair has a relayed candidate: true, false, or null (not known), from getStats
 //   await p.offer(label)        → sdp: the receiver's (it pulls): a data channel named label, every candidate gathered
 //   await p.answer(sdp, label)  → sdp: the sender's, for that offer; only a channel named label is taken
 //   await p.accept(sdp)         the receiver sets the sender's answer
@@ -17,19 +22,29 @@
 // transfer costs two relay messages per attempt. stun: ['host:port', …]; empty: host candidates
 // only. The remote description loses any `.local` candidate first: resolving it would put a
 // multicast DNS socket on the LAN. The SDP rides a signed envelope, so its ICE credentials and DTLS
-// fingerprint are the contact's; werift checks the fingerprint at the handshake.
+// fingerprint are the contact's; werift checks the fingerprint at the handshake, and dtls-verify.mjs the
+// rest werift 0.26.0 leaves out: that the peer holds that certificate's key (the handshake signatures) and
+// both Finished messages. Without those checks in place this module does not load (the error says why):
+// transfers then go over Tor only, as when sigelo-transfer is not installed.
 import { createSecretKey } from 'node:crypto';
-import { RTCPeerConnection } from 'werift';
+import { harden, hardened, passed, werift, WERIFT } from './dtls-verify.mjs';
 
-export const WERIFT = '0.26.0';
+export { WERIFT };
+const H = harden();
+if (!H.ok) {
+  console.error(`sigelo-transfer: direct transfers are off: ${H.why}`);
+  throw Object.assign(new Error(`dtls_unverified: ${H.why}`), { check: 'dtls_unverified' });
+}
+const { RTCPeerConnection } = werift();   // the CommonJS build: the one the checks are hooked into
 const LOW = 1 << 20;
 
 const fail = (check, why) => { throw Object.assign(new Error(`${check}: ${why}`), { check }); };
-// No TURN on werift lanes until its DTLS checks the handshake signatures: werift 0.26.0 verifies only the
-// peer's certificate fingerprint (public in the SDP), so a TURN host on the path could sit in the middle.
-// The engine asks no credential for a module without TURN_OK true, and iceServers drops any turn given.
-export const TURN_OK = false;
-export const iceServers = (stun, _turn = null) => (stun.length ? [{ urls: stun.map((s) => `stun:${s}`) }] : []);
+// TURN only with the handshake checks in place (a TURN host is on the path; the fingerprint alone, public in
+// the SDP, would not keep it out). The engine asks a credential only of a module with TURN_OK true, and
+// still honours turn: false / SIGELO_TURN=off.
+export const TURN_OK = hardened();
+export const iceServers = (stun, turn = null) => [...(stun.length ? [{ urls: stun.map((s) => `stun:${s}`) }] : []),
+  ...(turn && TURN_OK ? [{ urls: [...turn.urls], username: turn.username, credential: turn.credential }] : [])];
 const noMdns = (sdp) => sdp.split(/\r?\n/).filter((l) => !/^a=candidate:.* [0-9a-f-]+\.local /i.test(l)).join('\r\n');
 
 // werift creates a cipher for every DTLS record from the raw key bytes, and Node prepares that key
@@ -62,8 +77,28 @@ export function channelOf(dc, pc) {
   };
 }
 
-export async function peer({ stun = [], turn = null, gatherMs = 3000 } = {}) {   // turn: ignored (TURN_OK)
-  const pc = new RTCPeerConnection({ iceServers: iceServers(stun, turn), iceStunGatherTimeout: Math.max(1, Math.ceil(gatherMs / 1000)) });   // werift: seconds
+export const RELAY_ONLY = 'Relay only is on and this relay offers no relay path.';   // = apps/contact/call.mjs RELAY_ONLY
+/** Only relayed candidates, raddr zeroed (= apps/contact/call.mjs relayOnly, for an SDP). */
+export const relayOnly = (sdp) => String(sdp).split(/\r?\n/).map((l) => {
+  const m = /^a=candidate:/i.test(l) ? / typ (\S+)/.exec(l) : null;
+  return !m ? l : m[1] === 'relay' ? l.replace(/ raddr \S+ rport \d+/, ' raddr 0.0.0.0 rport 0') : null;
+}).filter((l) => l !== null).join('\r\n');
+/** getStats() → true when the selected pair has a relayed candidate, false when not, null when none is selected (= call.mjs relayedOf). */
+export function relayedOf(report) {
+  const by = new Map(), pairs = [];
+  let selected = null;
+  report.forEach((x) => { by.set(x.id, x); if (x.type === 'transport' && x.selectedCandidatePairId) selected = x.selectedCandidatePairId; if (x.type === 'candidate-pair') pairs.push(x); });
+  const pair = (selected && by.get(selected)) || pairs.find((x) => x.selected) || pairs.find((x) => x.nominated && x.state === 'succeeded');
+  if (!pair) return null;
+  return [by.get(pair.localCandidateId), by.get(pair.remoteCandidateId)].some((c) => c?.candidateType === 'relay');
+}
+
+export async function peer({ stun = [], turn = null, gatherMs = 3000, policy = 'all' } = {}) {
+  if (!hardened()) fail('dtls_unverified', 'werift\'s handshake checks are not in place');
+  const relay = policy === 'relay';
+  if (relay && !(turn && TURN_OK)) throw Object.assign(new Error(RELAY_ONLY), { check: 'relay_only' });
+  const pc = new RTCPeerConnection({ iceServers: iceServers(relay ? [] : stun, turn), iceStunGatherTimeout: Math.max(1, Math.ceil(gatherMs / 1000)),   // werift: seconds
+    ...(relay && { iceTransportPolicy: 'relay' }) });
   let dc = null, want = null, gotDc;
   const dcP = new Promise((r) => { gotDc = r; });
   pc.onDataChannel.subscribe((ch) => {
@@ -78,7 +113,7 @@ export async function peer({ stun = [], turn = null, gatherMs = 3000 } = {}) {  
         pc.iceGatheringStateChange.subscribe((s) => { if (s === 'complete') { clearTimeout(t); r(); } });
       });
     }
-    return pc.localDescription.sdp;
+    return relay ? relayOnly(pc.localDescription.sdp) : pc.localDescription.sdp;
   };
   return {
     pc,
@@ -109,12 +144,14 @@ export async function peer({ stun = [], turn = null, gatherMs = 3000 } = {}) {  
         return channelOf(ch, pc);
       } finally { clearTimeout(timer); }
     },
+    async relayed() { try { return relayedOf(await pc.getStats()); } catch { return null; } },
     close() { try { pc.close(); } catch {} },
   };
 }
 
-/** One loopback pair in this process, 2 MiB through it: → "n MB/s" (npm test). */
+/** One loopback pair in this process, 2 MiB through it, every handshake check run once: → "n MB/s" (npm test). */
 export async function selfTest() {
+  const was = { ...passed };
   const a = await peer(), b = await peer(), label = 'sigelo-transfer/0 self 1';
   const o = await a.offer(label), ans = await b.answer(o, label);
   await a.accept(ans);
@@ -127,5 +164,7 @@ export async function selfTest() {
   const rate = (total / 1e6 / ((Date.now() - t0) / 1000)).toFixed(1);
   a.close(); b.close();
   if (got !== total) fail('self_test', `${got} of ${total} bytes`);
-  return `2 MiB over a loopback data channel, ${rate} MB/s`;
+  const ran = Object.keys(passed).filter((k) => passed[k] === was[k] + 1);
+  if (ran.length !== 4) fail('self_test', `handshake checks run: ${ran.join(', ') || 'none'} (of 4)`);
+  return `2 MiB over a loopback data channel, ${rate} MB/s; the DTLS handshake signatures and Finished checked`;
 }

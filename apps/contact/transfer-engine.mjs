@@ -29,10 +29,18 @@
 // done once the file comes (Engine.superseded). Larger, or to anyone else: as before; the page offers Retry (retry) or,
 // up to 8 MiB, Send over the relay. A channel that moves no byte for stallMs (30 s) counts as dropped; a receiver's
 // record active with nothing for STALE_S (10 minutes) is listed as interrupted, and resume takes it again.
+//
+// "Always relay my media" (design/calls.md §6, 2026-11-26): policy() "relay" (the page's setting) or env
+// SIGELO_ICE_POLICY=relay: the direct lane only through the relay's TURN (iceTransportPolicy relay, relayed candidates
+// only in the SDP: rtc-web.mjs, apps/transfer/rtc.mjs); with no TURN to be had the direct lane is left out at once
+// (RELAY_ONLY, reason relay_only on the receiver's record) and the file goes over Tor or the relay lane as without one.
+// A record's `relayed` (true | false) says whether the direct lane's selected candidate pair was relayed (getStats, as
+// the call screen's "Via relay").
 import { concatBytes } from '@noble/hashes/utils.js';
 import { TRANSFER_SEND } from './carrier.mjs';
 import { FILE_LABEL, MAX_FILE, safeName, sha256Hex } from './file.mjs';
 import { MsgError, fail } from './kdf.mjs';
+import { RELAY_ONLY } from './call.mjs';
 import {
   ANSWER_WAIT, AUTO_MB, CHUNK, DAY, GATHER_MS, ICE_MS, MANIFEST_TTL, MAX_SIZE, Have, Pull, Serve, TRANSFER_LABEL, WAIT_ALL, WAIT_CONTACT,
   acceptRule, channelLabel, checkMessage, listOf, manifest, noPath, pathOrder, torRoles,
@@ -40,6 +48,7 @@ import {
 
 export const FILE_V = 'sigelo-transfers/1';
 export { TRANSFER_LABEL };
+export { RELAY_ONLY };
 const KEPT = 30 * DAY, RETRIES_AUTO = 3, RETRY_MS = 5000, STUN_PORT = 3478;
 export const FREE_MARGIN = 64 * CHUNK;
 export const RELAY_MAX = MAX_FILE, FALLBACK_MS = 20_000, STALL_MS = 30_000, STALE_S = 600;
@@ -316,11 +325,12 @@ export class Engine {
    * or a function → { urls, username, credential } | null; pro: () → whether this agent's pool is Pro; compared(did): the four
    * words of that contact were compared (the accept rule); maxServe: transfers served at once (the rest wait,
    * their offers kept); onEvent(e): {type: 'transfer', what, id, …}; fallbackMs: a drop not picked up again within it goes
-   * over the relay lane (up to 8 MiB, own and compared); stallMs: a channel with no byte for so long counts as dropped.
+   * over the relay lane (up to 8 MiB, own and compared); stallMs: a channel with no byte for so long counts as dropped;
+   * policy: () → "relay" | "all" (the page's "Always relay my media"; env SIGELO_ICE_POLICY=relay says relay too).
    */
   constructor({ carrier, io, rtc = async () => null, stun = null, turn = null, env = {}, pro = () => false, compared = () => false, maxServe = Infinity, onEvent = () => {}, retryMs = RETRY_MS, torConnectMs = 120_000, timer = true,
-    fallbackMs = FALLBACK_MS, stallMs = STALL_MS }) {
-    Object.assign(this, { carrier, io, rtcLoad: rtc, stun, turn, env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, fallbackMs, stallMs });
+    fallbackMs = FALLBACK_MS, stallMs = STALL_MS, policy = () => 'all' }) {
+    Object.assign(this, { carrier, io, rtcLoad: rtc, stun, turn, env, pro, compared, maxServe, onEvent, retryMs, torConnectMs, fallbackMs, stallMs, policy });
     this.relaying = new Set();   // ids going over the relay lane from this process (relay)
     this.attempts = new Map();   // id → { role, attempt, peer, channel, proto, onion, server, got, sent, path }
     this.held = [];              // offers waiting for a free slot (maxServe)
@@ -340,7 +350,22 @@ export class Engine {
   }
   stunOf(c) { return this.stun ?? stunFor(this.carrier, c, this.env); }
   /** The TURN server for an attempt starting now (relay/turn.mjs, fresh credentials), or null: STUN alone, as before.
-   *  rtc: the direct path's module; only one with TURN_OK true gets one (werift's DTLS: apps/transfer/rtc.mjs). */
+   *  rtc: the direct path's module; only one with TURN_OK true gets one (werift: apps/transfer/rtc.mjs, with its DTLS checks). */
+  /** The ICE policy of an attempt starting now: "relay" when the setting or SIGELO_ICE_POLICY says so, else "all". */
+  policyNow() { let p = null; try { p = typeof this.policy === 'function' ? this.policy() : this.policy; } catch {} return p === 'relay' || this.env.SIGELO_ICE_POLICY === 'relay' ? 'relay' : 'all'; }
+  /** The direct lane's peer for an attempt, under the policy: { peer, turn } or { peer: null } (relay only, no TURN). */
+  async #peerFor(rtc, c) {
+    const policy = this.policyNow(), turn = await this.turnOf(rtc);
+    if (policy === 'relay' && turn === null) return { peer: null, turn: null };
+    return { peer: await rtc.peer({ stun: this.stunOf(c), turn, gatherMs: GATHER_MS, ...(policy === 'relay' && { policy }) }), turn };
+  }
+  /** The channel is open: whether its selected pair is relayed, in the record (`relayed`) and the attempt. */
+  async #opened(side, id, a) {
+    let v = null;
+    try { v = (await a.peer?.relayed?.()) ?? null; } catch {}
+    a.relayed = v;
+    this.st((s) => { const y = s[side][id]; if (y) { if (v === null) delete y.relayed; else y.relayed = v; } });
+  }
   async turnOf(rtc) {
     if (rtc?.TURN_OK !== true || this.turn === false || this.env.SIGELO_TURN === 'off') return null;
     const f = typeof this.turn === 'function' ? this.turn : () => this.carrier.turnServer?.();
@@ -598,9 +623,16 @@ export class Engine {
     if (r.chunks > 0 && haveOf(this.io, r).done()) return this.#land(r, null);
     const c = contactOf(this.carrier, r.from), tor = await this.torCaps(), rtc = await this.rtc();
     // The paths this attempt may take, in order; Tor here means this side can play either part.
-    const order = pathOrder({ pro: r.pro, prefer: r.prefer, via: r.via === 'tor' ? 'tor' : 'auto', direct: r.directOk && rtc !== null, tor: tor.serve || tor.connect });
+    let order = pathOrder({ pro: r.pro, prefer: r.prefer, via: r.via === 'tor' ? 'tor' : 'auto', direct: r.directOk && rtc !== null, tor: tor.serve || tor.connect });
+    // Relay only and no TURN to be had: the direct lane left out at once (no host candidate gathered), the rest as ever.
+    let direct = null;
+    if (order[0] === 'direct') {
+      direct = await this.#peerFor(rtc, c);
+      if (!direct.peer) { order = order.filter((x) => x !== 'direct'); this.emit('no_direct', { id, detail: RELAY_ONLY }); }
+    }
     if (order.length === 0) {
-      this.fail('in', id, 'no_path', r.directOk ? noPath(c.name) : `direct is off for ${c.name} and Tor is not on here: ${noPath(c.name)}`);
+      if (direct && !direct.peer) this.fail('in', id, 'relay_only', RELAY_ONLY);
+      else this.fail('in', id, 'no_path', r.directOk ? noPath(c.name) : `direct is off for ${c.name} and Tor is not on here: ${noPath(c.name)}`);
       await sendMsg(this.carrier, r.from, { typ: 'end', id, reason: 'no_path' }, false).catch(() => {});
       return;
     }
@@ -608,11 +640,10 @@ export class Engine {
     this.attempts.set(id, a);
     let sdp = null;
     if (order[0] === 'direct') {
-      const turn = await this.turnOf(rtc);
-      a.turn = turn !== null;
-      a.peer = await rtc.peer({ stun: this.stunOf(c), turn, gatherMs: GATHER_MS });
+      a.turn = direct.turn !== null;
+      a.peer = direct.peer;
       sdp = await a.peer.offer(channelLabel(id, attempt));
-    }
+    } else direct?.peer?.close();
     this.st((s) => Object.assign(s.in[id], { state: 'offering', attempt, offerAt: this.now(), path: order[0] }));
     await sendMsg(this.carrier, r.from, { typ: 'offer', id, attempt, sdp, tor, ...(order[0] === 'tor' && { via: 'tor' }) }, false);
     this.emit('offered', { id, attempt, path: order[0] });
@@ -628,6 +659,8 @@ export class Engine {
         await a.peer.accept(x.sdp);
         a.path = 'direct';
         const ch = await a.peer.open(ICE_MS);
+        if (this.attempts.get(r.id) !== a) { ch.close(); return; }
+        await this.#opened('in', r.id, a);
         if (this.attempts.get(r.id) !== a) { ch.close(); return; }
         return this.pull(r, a, ch);
       } catch (e) { if (this.attempts.get(r.id) !== a) return; a.peer?.close(); a.peer = null; this.emit('no_direct', { id: r.id, detail: e.message }); }
@@ -680,16 +713,20 @@ export class Engine {
     this.st((s) => Object.assign(s.out[r.id], { state: 'active', attempt: x.attempt }));
     let sdp = null;
     if (directOk) {
-      const turn = await this.turnOf(rtc);
-      a.turn = turn !== null;
-      a.peer = await rtc.peer({ stun: this.stunOf(c), turn, gatherMs: GATHER_MS });
-      sdp = await a.peer.answer(x.sdp, channelLabel(r.id, x.attempt));
+      // Relay only and no TURN: no answer SDP (the receiver goes on to Tor, or ends no_path and this side takes the relay lane).
+      const d = await this.#peerFor(rtc, c);
+      a.turn = d.turn !== null;
+      a.peer = d.peer;
+      if (d.peer) sdp = await a.peer.answer(x.sdp, channelLabel(r.id, x.attempt));
+      else this.emit('no_direct', { id: r.id, detail: RELAY_ONLY });
     }
     await sendMsg(this.carrier, m.from, { typ: 'answer', id: r.id, attempt: x.attempt, sdp, tor }, false);
     if (!a.peer) return;   // the receiver says what comes next: try_tor, an onion, or end
     try {
       a.path = 'direct';
       const ch = await a.peer.open(ICE_MS);
+      if (this.attempts.get(r.id) !== a) { ch.close(); return; }
+      await this.#opened('out', r.id, a);
       if (this.attempts.get(r.id) !== a) { ch.close(); return; }
       this.serve(r, a, ch);
     } catch { if (this.attempts.get(r.id) === a) { a.peer?.close(); a.peer = null; a.path = null; } }
