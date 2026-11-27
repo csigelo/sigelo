@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The page in the APK (design/apps.md §8): apps/web/copy.mjs vendors what the page imports, then
+// The page in the APK: apps/web/copy.mjs vendors what the page imports, then
 // every file the page reaches (its import graph, as copy.mjs walks it, and index.html) is copied as
 // it is into app/src/main/assets/web/, which is emptied first: what ships is what test-web.mjs and
 // test-shell.mjs ran, and nothing else (no test, no copy.mjs, no README).

@@ -132,7 +132,7 @@ const OWN = { did: 'did:sigelo:zOwn', name: 'own', tier: 'own' }, PAL = { did: '
   }
 }
 
-// ================================================================ the accept rule, whatever the lane (2026-11-25)
+// ================================================================ the accept rule, whatever the lane
 // On the phone, with direct off, every file waited for a manual accept. The rule (transfer auto <contact> <MB>)
 // says yes under the size; the direct switch only picks the lane: off, no Tor, the receiver ends no_path at once and the
 // sender's relay lane carries it (up to 8 MiB).
@@ -304,7 +304,7 @@ try {
   ok(aRec(r3.id).state === 'failed' && !aRec(r3.id).relay && !aRec(r3.id).path_used, 'not fallen back to the relay lane');
   ok(await failure(() => A.relay(r3.id, { manual: true })) === 'file_too_large', 'Send over the relay is refused past 8 MiB (the bubble offers Retry)');
 
-  // 4. Direct off at the receiver (2026-11-25), its rule "transfer auto alice 100": no question, over the relay lane.
+  // 4. Direct off at the receiver, its rule "transfer auto alice 100": no question, over the relay lane.
   net.blocked = false;
   X.setDirect({ carrier: bob.c, identity: bob.identity, contact: 'alice', on: false });
   X.setAuto({ carrier: bob.c, identity: bob.identity, contact: 'alice', mb: 100 });

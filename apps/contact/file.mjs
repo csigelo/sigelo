@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// File transfer over contact messages (design/human-ui-plan.md §4, decision 3): pure code, no I/O.
+// File transfer over contact messages: pure code, no I/O.
 // A file goes as messages labelled FILE_LABEL to one contact, in one login (carrier.sendFile →
 // sendAll): first a manifest {id, name, size, sha256, chunks}, then `chunks` messages {id, i,
 // data}, each CHUNK bytes of the file (the last one the rest) as base64. 256 KiB is 349,528

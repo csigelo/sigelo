@@ -448,7 +448,7 @@ const reply = (from, to, now) => { const m = send(from, { label: '', content: 'r
 }
 
 {
-  // Epoch recovery (relay-plan §11): an epoch whose first envelope never reached the contact. Its
+  // Epoch recovery (README.md "How it works", 4): an epoch whose first envelope never reached the contact. Its
   // second carries the encapsulation too and begins the epoch there; the first, arriving after
   // all, opens from the key kept behind. A bundle the contact issued before opening it still lists
   // its key: while the encapsulation is carried, the epoch goes on.

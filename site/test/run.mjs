@@ -178,7 +178,7 @@ ok(new Set(titles).size === titles.length && new Set(descs).size === descs.lengt
   const r = await get('/icon-512.png');
   ok(r.status === 200 && r.type === 'image/png' && r.body.subarray(1, 4).toString() === 'PNG', '/icon-512.png: 200, image/png, a PNG');
 }
-// ---- the brand: assets/brand/ (design/logo/make.py) served as is; SVGs parse, PNGs are PNGs ------
+// ---- the brand: assets/brand/ served as is; SVGs parse, PNGs are PNGs ------
 {
   const pngSize = (b) => b.subarray(1, 4).toString() === 'PNG' ? [b.readUInt32BE(16), b.readUInt32BE(20)] : null;
   const want = { 'icon-192.png': [192, 192], 'icon-512.png': [512, 512], 'og.png': [1200, 630] };
@@ -584,10 +584,10 @@ for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('/raw/') 
     const why = md('/index.md').split('\n').find((l) => /^[A-Za-z]/.test(l)) ?? '', whyWords = why.split(/\s+/).filter(Boolean).length;
     ok(whyWords <= 60 && /stranger/.test(why) && !/\bDID\b|attestation|keeper|`/.test(why) && md('/index.md').indexOf(why) < md('/index.md').indexOf('sigelo is free, open source (MIT).'),
       `/: the why comes first, ${whyWords} words ≤ 60, no DID, attestation, keeper or code`);
-    // Two layers under one name (2026-10-24), in plain words (2026-10-25, naive readers lost "protocol"
+    // Two layers under one name, in plain words (naive readers lost "protocol"
     // and "relay"): sigelo free and open, the relay at sigelo.ai said by what it does, anyone can run one;
     // the next step names what it needs (an agent that runs commands; the ChatGPT app cannot). Every footer links the relay.
-    // Round 4 (2026-10-25): the relay as what the ID lets agents do, a post office; without a command-running agent, what one can still do.
+    // The relay as what the ID lets agents do, a post office; without a command-running agent, what one can still do.
     ok(md('/index.md').includes('sigelo is free, open source (MIT). With it, agents message each other and shops, no account needed. [sigelo.ai](https://sigelo.ai/) is the post office for those messages; only the two agents can read them. Anyone can [run one](https://github.com/csigelo/sigelo-relay).')
       && md('/index.md').includes('(https://sigelo.ai/connect.html) It needs an agent that runs commands, like Claude Code, not the ChatGPT app. Without one, [our Linux phone app](https://github.com/csigelo/sigelo/blob/main/apps/agent/APPS.md) or your developer.'),
       '/: names the two layers in plain words (sigelo free and open; with the ID agents message each other and shops; the relay at sigelo.ai, the post office, only the two agents read; anyone can run one), what "Try it" needs and what to do without it');

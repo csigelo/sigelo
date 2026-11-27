@@ -15,7 +15,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { did, parseBytes, structure, VERSION } from '../../../ts/dist/sigelo.js';
-// The key through its provider (design/key-providers.md): plain file today, keychain or key agent later.
+// The key through its provider (apps/agent/KEYS.md): plain file today, keychain or key agent later.
 import { signer } from '../../../apps/agent/sigelo-agent-keys.ts';
 import { CTX, LINE, rtrim } from './gate.mjs';
 

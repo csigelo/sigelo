@@ -102,5 +102,5 @@ group: one transfer per member you are paired with.
 | The relay host's STUN port | both public addresses, seconds before | nothing |
 | Size, duration | nobody but the two | nobody but the two |
 
-THREAT-MODEL §2.18, §3.14–§3.16. Measured on a phone-class computer over loopback:
+THREAT-MODEL §2.18, §3.14–§3.16. Measured on a low-end ARM64 machine over loopback:
 2.6 MB/s direct; across real networks, not yet.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Transfers (transfer.mjs, transfer-node.mjs, sigelo-transfer; design/transfer.md): the messages and
+// Transfers (transfer.mjs, transfer-node.mjs, sigelo-transfer; apps/agent/TRANSFER.md): the messages and
 // frames; the chunk protocol over a fake channel (a whole file, a drop and the resume, a chunk altered
 // once and always, the list altered, the 16 GiB cap, back-pressure); the path order; then with the
 // relay checkout beside apps/contact/ (SIGELO_RELAY_DIR, else ../../relay) two agents on a loopback relay:
@@ -91,7 +91,7 @@ const NOW = Date.parse('2026-11-03T12:00:00Z') / 1000;
   ok(checkOf(() => new Have(10, new Uint8Array(3))) === 'transfer_have', 'Have of the wrong length: transfer_have');
   ok(chunkLength(3 * CHUNK + 5, 3) === 5 && chunkLength(3 * CHUNK + 5, 2) === CHUNK, 'chunkLength: the last chunk is the rest');
 
-  // The path order (design §2, §9).
+  // The path order (apps/agent/TRANSFER.md "Paths").
   ok(JSON.stringify(pathOrder({ direct: true, tor: true })) === '["direct","tor"]', 'free: direct, then Tor');
   ok(JSON.stringify(pathOrder({ direct: false, tor: true })) === '["tor"]' && JSON.stringify(pathOrder({ direct: true, tor: false })) === '["direct"]' && pathOrder({ direct: false, tor: false }).length === 0, 'free: what is allowed only; nothing: refused');
   ok(JSON.stringify(pathOrder({ pro: true, prefer: 'fast', direct: true, tor: true })) === '["direct","tor"]', 'Pro fast without TURN yet: direct, then Tor (TURN is T4)');
@@ -270,7 +270,7 @@ try {
   ok(await failure(() => send(file('small.bin', seeded('s', 1000)))) === 'direct_ask', 'send to a friend contact, the direct switch not set: direct_ask');
   ok(X.list({ carrier: A.c, identity: A.identity }).out.length === 0, 'and nothing was sent');
   A.c.setTier('bob', 'own'); B.c.setTier('alice', 'own');
-  // The accept rule (design §10.2) would land small files from an own contact unasked: asked here until its own part below.
+  // The accept rule would land small files from an own contact unasked: asked here until its own part below.
   ok(X.settings({ identity: B.identity }).auto_mb === 25 && X.settings({ identity: B.identity, patch: { auto_mb: 0 } }).auto_mb === 0, 'the accept rule: 25 MB by default; 0 (always ask) kept');
   ok(X.directFor({ direct: {} }, { tier: 'own' }) === true && X.directFor({ direct: {} }, { tier: 'friend' }) === null && X.directFor({ direct: { d: false } }, { did: 'd', tier: 'own' }) === false, 'directFor: own on, others asked (null), a kept choice wins');
 
@@ -334,7 +334,7 @@ try {
   ok(await until(() => B.rec('in', r5.id)?.state === 'cancelled'), 'the sender cancels: cancelled at the receiver');
   ok(await failure(() => X.accept({ carrier: B.c, identity: B.identity, id: r5.id })) === 'transfer_state', 'a cancelled transfer cannot be accepted');
 
-  // The accept rule (design §10.2): from an own contact, under the size set, it lands without a question.
+  // The accept rule: from an own contact, under the size set, it lands without a question.
   X.settings({ identity: B.identity, patch: { auto_mb: 25 } });
   const small = seeded('auto', 2 * CHUNK + 1), r9 = await send(file('auto.jpg', small));
   ok(await until(() => B.rec('in', r9.id)?.state === 'done', 120000), 'own contact, 2 MB under 25 MB: landed with no accept', JSON.stringify(B.rec('in', r9.id)));
@@ -349,7 +349,7 @@ try {
   const r11 = await send(file('big2.bin', seeded('big2', 2 * CHUNK)));
   ok(await until(() => B.rec('in', r11.id)?.state === 'asked'), 'larger than the size set (2 MB over 1 MB): asked');
   await X.decline({ carrier: B.c, identity: B.identity, id: r11.id });
-  // A group's file (design §10.3): one transfer per member paired with; one reached only through the creator: unpaired.
+  // A group's file: one transfer per member paired with; one reached only through the creator: unpaired.
   const gf = await X.prepare({ carrier: A.c, identity: A.identity, path: file('g.bin', seeded('g', 5000)) });
   const fan = await X.fanOut({ carrier: A.c, identity: A.identity, members: [{ did: B.did, name: 'bob', contact: true }, { did: 'did:sigelo:zCarol', name: 'carol', contact: false }], f: gf, group: 'ab'.repeat(16) });
   ok(fan.sent.length === 1 && fan.sent[0].did === B.did && fan.unpaired.length === 1 && fan.unpaired[0].name === 'carol' && fan.failed.length === 0, 'fanOut: bob sent, carol unpaired', JSON.stringify(fan));

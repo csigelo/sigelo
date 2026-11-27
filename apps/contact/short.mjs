@@ -126,7 +126,7 @@ export const codeHash = (text) => bytesToHex(sha256(concatBytes(utf8ToBytes(PARK
 
 // Enrolment codes (enrol.mjs issue): a short code like any other, shown with the prefix ENROL-
 // (ENROL-K7F3-Q9ZP), so an agent given one knows it by its shape and never takes it for a pairing code
-// (the agent-setup feedback, points 5 and 7: models fed enrolment codes to accept and lost them). The prefix is
+// (models fed enrolment codes to accept and lost them). The prefix is
 // shown and read, never hashed or sent: the relay parks and fetches the 8 (or 12) characters as before.
 // ENROL_TTL_MAX: an enrolment code may live a day (relay/park.mjs ENROL_TTL), an invite's short code an hour.
 export const ENROL_PREFIX = 'ENROL', ENROL_TTL_MAX = 86400;

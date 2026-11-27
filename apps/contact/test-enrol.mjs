@@ -365,7 +365,7 @@ try {
     && r4.delivered[0]?.did === w7.did && pending(fileOf(owner), NOW(), (x) => x.issued[inv8.id]?.needs_send) === undefined && r5.placed[0]?.did === w7.did && r6.placed[0]?.did === w7.did,
     `the identity refused (no_reader): kept needs_send, not again within 60 s, sent again at the operator's next round after, placed, filed (${JSON.stringify([r2.refused, r4.refused, r5.refused])})`);
   ok(r2.told[0]?.check === 'no_reader' && r5.status.some((x) => x.check === 'no_reader' && /tries again within a minute/.test(x.detail) && !/did:sigelo/.test(x.detail)), `and the machine was told why the key had not come (${JSON.stringify(r5.status)})`);
-  // the agent-setup feedback, points 2, 5 and the enrolment boundary (THREAT-MODEL §2.11a): an enrolment code is
+  // The enrolment boundary (THREAT-MODEL §2.11a): an enrolment code is
   // ENROL-…, parked as one, refused by accept unspent, fetched again until the grant, and a machine joining
   // strictly takes only it; a grant for another code than the one answered is refused.
   {
@@ -406,7 +406,7 @@ try {
     ok(replay.check === 'enrol_replay' && right.check === 'accepted', `a grant naming another code: enrol_replay; for this code: taken (${replay.message})`);
     for (const a of [st, t1]) await a.carrier.stop();
   }
-  // the agent-setup feedback, point 9: two contacts never share a name (send <name> refused both): the second gets -2.
+  // Two contacts never share a name (send <name> refused both): the second gets -2.
   {
     const t1 = await co.invite({ name: 'twin' }), t2 = await co.invite({ name: 'twin' }), ta = agent('twin-a'), tb = agent('twin-b');
     await co.start();

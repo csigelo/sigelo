@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The Android app's page side in Node (design/apps.md §14 A5): what runs in the WebView, over a fake
+// The Android app's page side in Node: what runs in the WebView, over a fake
 // shell that keeps SigeloBridge.java's protocol (sigelo-bridge/0, platform-android.mjs) with Node's
 // net, tls and https. The Java itself is built and run only on CI (apps/android/README.md). Parts:
 //   1. ws-over-stream.mjs, RFC 6455 client framing: against `ws` (handshake, masking, sizes up to
@@ -15,7 +15,7 @@
 //      both ways, and none refused as a browser's.
 //   3. The remote form (shell.mjs): a computer's `sigelo-agent ui --remote`, sealed calls carried by
 //      the shell's http to the LAN; scope; the computer gone.
-//   3b. Several computers (computers.mjs, design/profiles.md P2): three computers' pages on the LAN, two of
+//   3b. Several computers (computers.mjs): three computers' pages on the LAN, two of
 //      one operator, one of another; today's one migrated as c1, add (Cancel), other_operator, switch, forget.
 //   4. The remote form over the relay: a computer's `ui --remote --relay` in this process, the app's
 //      control identity paired by SIGELO:CTL: and four words, requests answered, state pushed (the
@@ -619,8 +619,8 @@ function fakeShell({ mode = 'self', wipe = false, hosts = {}, ca } = {}) {
   const WM = await import(pathToFileURL(join(HERE, 'welcome.mjs')).href);
   ok(WM.WORDS_ATTRS.autocomplete === 'off' && WM.WORDS_ATTRS.autocorrect === 'off' && WM.WORDS_ATTRS.autocapitalize === 'none' && WM.WORDS_ATTRS.spellcheck === 'false',
     'welcome.mjs: the words\' boxes without autocomplete, autocorrect, capitals or spellcheck');
-  // The code, not its comments: no way from a root to its 25 words anywhere; the words shown again only by Settings → Backup and recovery
-  // (design/apps-seed.md §8), from what the words password opens (WORDS.reveal), nowhere else.
+  // The code, not its comments: no way from a root to its 25 words anywhere; the words shown again only by Settings → Backup and recovery,
+  // from what the words password opens (WORDS.reveal), nowhere else.
   const uiSrc = readFileSync(join(REPO, 'apps', 'agent', 'ui.js'), 'utf8'), secAt = uiSrc.indexOf('// ---- SECURITY'), secEnd = uiSrc.indexOf('const WORDS_VIEWS');
   const pages = ['app.mjs', 'boot.mjs', 'profiles.mjs', 'computers.mjs', 'shell.mjs', 'seed.mjs', 'router.mjs', 'create.mjs', 'setup.mjs', 'welcome.mjs', 'words.mjs'].map((f) => readFileSync(join(HERE, f), 'utf8')).join('\n') + uiSrc.slice(0, secAt) + uiSrc.slice(secEnd);
   // The lock rule's sentence (the mock's: "… pay above your limit or show your 25 words") names the words; it shows none.
@@ -726,7 +726,7 @@ class FakeEl {
     const q2 = asked();
     inputs().forEach((x, i) => { x.value = list[q2[i] - 1]; });
     await button('Check').onclick();
-    // Step 3, the lock: the phone's screen lock asked once; no Back (the identity is made).
+    // Step 3, the lock: the phone screen lock asked once; no Back (the identity is made).
     await until(() => title() === 'Lock', 5000);
     await until(() => F.state.secure === false, 2000);
     const u0 = F.log.ops.filter((o) => o === 'unlock').length, back0 = pushed.length;
@@ -917,7 +917,7 @@ class FakeEl {
   ok(!/mnemonicFromRoot|encodeMoneroWords|newRoot\b|localStorage\.setItem|sessionStorage|console\./.test(src) && /session\.words\(\)/.test(src), 'setup.mjs: the words only from the session (apps/contact/create.mjs), never stored or logged');
 }
 
-// ================================================================ 1d. profiles (profiles.mjs, boot.mjs; design/profiles.md P1) over the fake shell:
+// ================================================================ 1d. profiles (profiles.mjs, boot.mjs) over the fake shell:
 // a single-profile install migrated as p1 (nothing resealed), add, the picker and the lock, the switch (the lock once,
 // none at the new profile's start), rename, the limit of 8, remove (the words ticked, the name typed, the lock, the wipe:
 // database, keystore aliases, storage), and the proof-of-work counts per profile (each its own carrier state).
@@ -1061,7 +1061,7 @@ class FakeEl {
   }
 }
 
-// ================================================================ 1e. the words password (words.mjs, boot.mjs local.words; design/apps-seed.md §8)
+// ================================================================ 1e. the words password (words.mjs, boot.mjs local.words)
 // over the fake shell: kept as kind words under the FULL key; Show after the lock and the password; a wrong password
 // said after 2 s, then 4 (no lockout); change (the old one asked); remove (the words deleted); removing a profile
 // whose words are kept needs that password (another profile's, opened under its own aliases).
@@ -1350,7 +1350,7 @@ class FakeEl {
       FN.nudge(); FN.open('chat:did:sigelo:zN'); await sleep(50);
       ok(got.join() === 'nudge' && opens.join() === 'open', `nudge: to its listener only, a nudge before any listener dropped (not kept "now" for later) (${got} / ${opens})`);
     }
-    // ---- Push (bridge "push", local.push; UnifiedPush.java, design/push.md): the shell's state for the phone, the endpoint and keys
+    // ---- Push (bridge "push", local.push; UnifiedPush.java): the shell's state for the phone, the endpoint and keys
     // only once the distributor gave one; refusals before the shell; {ev:"wake"} never kept, {ev:"push"} kept for a later listener.
     {
       const FP = fakeShell({ mode: 'self' }), bp = await FP.connect(), n0 = FP.log.ops.length;
@@ -1653,7 +1653,7 @@ try {
     ok(mb.info.mode === null && (await mb.request('mode', { mode: 'self' })).mode === 'self' && (await mb.request('mode', { mode: 'remote' })).mode === 'remote' && await checkOf(() => mb.request('mode', { mode: 'x' })) === 'mode',
       'the form: set by each profile\'s first run, self then remote (no refusal: profiles differ); anything else refused');
   }
-  // ================================================================ 3b. several computers (computers.mjs, boot.mjs; design/profiles.md P2) over the
+  // ================================================================ 3b. several computers (computers.mjs, boot.mjs) over the
   // fake shell: three computers' `ui --remote` on the LAN, two of one operator (one identity's copies), one of another. Today's
   // one computer migrated as c1 (nothing resealed); add by the pairing screens (Cancel), the second's text sealed naming it;
   // another operator refused other_operator, nothing kept; switch (the lock once); forget (the lock, the reminder to revoke).
@@ -1852,7 +1852,7 @@ try {
   await relay?.close?.();
   rmSync(dir, { recursive: true, force: true });
 }
-// ================================================================ big files through the shell (design/transfer.md §10)
+// ================================================================ big files through the shell
 {
   const F = fakeShell({ mode: 'self' }), bridge = await F.connect(), pb = A.profileBridge(bridge, 'p2');
   const p = await A.androidPlatform({ bridge, mqtt: mqttEsm, indexedDB: new FakeIDB(), pow: A.androidPow(W.workerPow(() => new FakeWorker())) });
@@ -1869,7 +1869,7 @@ try {
   const r = await big.read(d.doc, 1048576, 1048576, { size: d.size, mtime: d.mtime });
   ok(r.length === 1048576 && r[0] === bytes[1048576] && r.at(-1) === bytes[2 * 1048576 - 1] && !F.log.ops.includes('big-read'), 'big: a range read by fetch from the app\'s origin (no base64 over the port)');
   {
-    // Every chunk of a file over 1 MiB, the last one short (the 1,056,817-byte APK of 2026-11-25), through the WebView
+    // Every chunk of a file over 1 MiB, the last one short (a 1,056,817-byte APK), through the WebView
     // as it is (a Range header would be applied again to the shell's slice: chunk 1 on failed); no Range header sent.
     const C = 1048576, all = [];
     for (let i = 0; i * C < bytes.length; i++) all.push(await big.read(d.doc, i * C, Math.min(C, bytes.length - i * C), { size: d.size, mtime: d.mtime }));
@@ -1898,7 +1898,7 @@ try {
   // The composer's Photo: the picker for pictures only (images), any file otherwise.
   await big.pick({ images: true }); await big.pick();
   ok(F.state.big.picks.slice(-2).join() === 'true,false', `big: pick {images: true} asks the shell for pictures only; a plain pick does not (${F.state.big.picks.join()})`);
-  // Several at once (2026-11-25): pick {multiple} → a list of docs, in the order chosen; an older shell's one → a list of one.
+  // Several at once: pick {multiple} → a list of docs, in the order chosen; an older shell's one → a list of one.
   F.state.big.nextMany = [['a.pdf', new Uint8Array(3)], ['b.pdf', new Uint8Array(4)], ['c.pdf', new Uint8Array(5)]];
   const many = await big.pick({ multiple: true });
   F.state.big.oneOnly = true;

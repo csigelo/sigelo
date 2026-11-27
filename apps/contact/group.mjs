@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Chat groups, contract sigelo-group/1 (design/groups.md, apps/agent/GROUPS.md, THREAT-MODEL
+// Chat groups, contract sigelo-group/1 (apps/agent/GROUPS.md, THREAT-MODEL
 // §3.13): a label on sigelo-msg/0, no wire change. A group is {gid, name, creator, members, ver,
 // brake}; the creator is paired with every member, members need not be paired with each other. Every
 // message is {body, sig}: body JCS {v, typ, gid, mid, iat, from (the sender's current DID), …}, sig the
@@ -25,7 +25,7 @@
 // group_name (a name two groups share). A message from a member this roster does not know yet (or for
 // a group whose roster has not come) waits a day for its roster (orphans), then is refused by name.
 //
-// Joining (design/groups.md §3): a roster from a creator at own tier is taken at once; from friend it
+// Joining: a roster from a creator at own tier is taken at once; from friend it
 // waits for this identity's operator (a notice, once; join or leave); from quiet it is ignored. In a
 // group whose creator is not ours, a roster that adds a member who is not this agent's contact is a
 // notice too. A sender who is not a contact counts as friend, never own; text from a member that is
@@ -35,7 +35,7 @@
 // agent's message (send: group_quiet; received: dropped, group_quiet) after n agent messages in a row
 // with no human message between; brake "off" lets agents run. Every member counts what it saw.
 //
-// Limits (design/groups.md §4): groups made by this identity (member or frozen: the relay's `groups`
+// Limits: groups made by this identity (member or frozen: the relay's `groups`
 // claim) and members a group (the creator included), checked at create and add (limitsFor). The
 // numbers: the caller's tier (LIMITS), else what the relay told this agent's last login (carrier.groupTier,
 // relay/allowance.mjs "tier"), else Pro when the carrier keeps 90 days (SIGELO_RELAY_RETENTION_DAYS, a
@@ -217,7 +217,7 @@ function contactsOf(carrier) {
   return view;
 }
 // A group whose creator is not this agent's own (not ours by key, nor filed own, nor its operator):
-// its agent answers only when mentioned (design/groups.md §7), and a stranger added is a notice.
+// its agent answers only when mentioned (apps/agent/GROUPS.md), and a stranger added is a notice.
 const foreignOf = (creator, mine, view) => creator !== mine.original && !mine.operators.has(creator) && !view.get(creator)?.ours && view.get(creator)?.tier !== 'own';
 const holding = (view, did) => [...view.values()].find((c) => c.live && c.chain.includes(did)) ?? null;
 /** A live contact by name or any DID of its chain; else not_contact. */

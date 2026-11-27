@@ -31,7 +31,7 @@ import android.os.Vibrator;
 import android.os.VibratorManager;
 
 /**
- * A voice call's audio (design/calls.md §4, §5; apps/contact/call.mjs; the page's side apps/web/platform-android.mjs
+ * A voice call's audio (apps/contact/call.mjs; the page's side apps/web/platform-android.mjs
  * callAudio). The media itself is the WebView's own RTCPeerConnection: this class only holds what Android needs around it.
  * Three bridge operations (SigeloBridge "call", "call-speaker", "call-ring"), all on the main thread:
  *
@@ -44,11 +44,11 @@ import android.os.VibratorManager;
  *   call-ring {on, name}  a call coming while the app runs (on the screen, or kept by Stay connected): the default ringtone
  *          and a repeating vibration as the ringer mode allows (silent: neither; vibrate: the vibration only), and a heads-up
  *          notification (channel "calls", the caller's name; the lock screen's version says only "Incoming call"), whose
- *          tap opens the app on the call screen. off: both stop (by themselves after 75 s, a page that never said off). The app closed: nothing rings (design §5): the push build
- *          (design/push.md) adds a full-screen ring here (USE_FULL_SCREEN_INTENT), Accept opening the activity before this
+ *          tap opens the app on the call screen. off: both stop (by themselves after 75 s, a page that never said off). The app closed: nothing rings: the push build
+ *          adds a full-screen ring here (USE_FULL_SCREEN_INTENT), Accept opening the activity before this
  *          service starts, as Android 14 requires.
  *
- * Roaming (2026-11-24): while a call lasts, the default network is watched (registerDefaultNetworkCallback,
+ * Roaming: while a call lasts, the default network is watched (registerDefaultNetworkCallback,
  * ACCESS_NETWORK_STATE, no prompt); a change (Wi-Fi to mobile data, a new network) goes to the page as {ev:"network"}, and
  * the caller's page restarts ICE at once instead of waiting for the old path to time out.
  *

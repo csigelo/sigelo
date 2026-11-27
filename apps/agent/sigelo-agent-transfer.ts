@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * The transfer verbs of the sidecar (TRANSFER.md, apps/contact/transfer-node.mjs, design/transfer.md):
+ * The transfer verbs of the sidecar (TRANSFER.md, apps/contact/transfer-node.mjs):
  * `sigelo-agent transfer send|accept|decline|cancel|resume|forget|list|direct|settings`. A file of up to
  * 16 GiB goes agent to agent, direct (sigelo-transfer) or over a one-shot Tor onion; the relay carries
  * four small signed messages. Beside a watcher on the identity, the verbs change the transfers file,
@@ -143,7 +143,7 @@ export async function main(rest: string[]): Promise<number> {
     for (const r of rs) if (moving(r)) note(`transfer ${r!.id}: still ${r!.state} after ${waitS} s; it goes on with sigelo-agent watch, or transfer resume`);
     return rs.some((r) => !r || ['failed', 'cancelled', 'declined', 'expired'].includes(r.state)) ? 1 : 0;
   };
-  // The direct switch, asked once on a terminal when it is not set for that contact (design §7).
+  // The direct switch, asked once on a terminal when it is not set for that contact.
   const ask = async <T>(fn: (d: boolean | undefined) => Promise<T> | T): Promise<T> => {
     try { return await fn(direct); } catch (e) {
       if ((e as { check?: string }).check !== 'direct_ask' || !process.stdin.isTTY) {

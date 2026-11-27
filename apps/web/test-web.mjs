@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The self-contained app in Node (design/apps.md §14 A4): the page's files as copy.mjs vendors them,
+// The self-contained app in Node: the page's files as copy.mjs vendors them,
 // loaded through index.html's import map (a resolve hook does in Node what the map does in a page),
 // so what runs here is what ships. Parts:
 //   1. the page: index.html parses, one inline script (the import map, admitted by its hash in the
@@ -248,7 +248,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await router.call('POST', '/api/agents/enrol-code', { name: 'vps' })];
   ok(JSON.stringify(bads.map((x) => [x.status, x.body.error?.check])) === JSON.stringify([[400, 'body'], [409, 'name_taken'], [409, 'device'], [400, 'keeper']]),
     `router: enrol-code a bad name 400, a name the roster has 409 name_taken; revoke this device 409 device (Devices); no keeper 400 keeper (${JSON.stringify(bads.map((x) => x.body.error?.check))})`);
-  // The keeper from a phone with its own identity (design/agent-wallet-page.md §4): without a paired computer, elsewhere;
+  // The keeper from a phone with its own identity: without a paired computer, elsewhere;
   // with one (hooks.computer), its keeper's view, and a limit as a policy-change signed HERE, the computer only carrying it.
   {
     const { verifySig: vsig } = await import(pathToFileURL(join(REPO, 'ts', 'dist', 'sigelo.js')).href);
@@ -275,7 +275,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   // Standby: the seat on another device. Started, it never logs in; writes refused seat_elsewhere; reads answer.
   const p2 = await W.webPlatform({ name: 'seed2', indexedDB: new FakeIDB(), mqtt: mqttEsm, pow: W.workerPow(() => new FakeWorker()) });
   await SD.restoreInto(p2, { words, name: 'tab', relay: 'relay.sigelo.ai', restore: { restore_height: 3100000 }, seat: 'elsewhere', now: 1761400000 });
-  // The words password guards the seat (design/apps-seed.md §8): the router asks words.guard (words.mjs) before the take.
+  // The words password guards the seat: the router asks words.guard (words.mjs) before the take.
   const WD = await import(pathToFileURL(join(HERE, 'words.mjs')).href), WL = await import(pathToFileURL(join(HERE, 'vendor', 'contact', 'words-lock.mjs')).href);
   const slept = [], fastGate = WL.wrongGate({ sleep: async (ms) => { slept.push(ms); } });
   const me2 = JSON.parse(new TextDecoder().decode(await W.loadIdentity(p2))), r2 = mk({ platform: p2, identity: () => me2, mode: { kind: 'full', standby: true }, seat: SD.seatOf(p2, () => me2), options: { registry: false },
@@ -439,7 +439,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
 // ================================================================ 2e. ui.js (what ships, vendor/ui.js): the UX1 frame over a fake backend
 // in a minimal DOM: Chats first, the tabs, Back; New chat; Agents, Enrol (a name and trust, the code big, the four
 // words, ready), an agent's page and Revoke; the relay picker (Settings → Relay); presence; groups; the profiles
-// sheet; Backup and recovery (the 25 words); computers; every screen drawn once (design/ux1/build.md "Tests").
+// sheet; Backup and recovery (the 25 words); computers; every screen drawn once.
 {
   const vm = await import('node:vm');
   // The focus as a DOM keeps it: a node taken out of its parent (removed, moved, or its parent's children
@@ -560,6 +560,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     setInterval: (f, ms) => { intervals.push([f, ms]); return intervals.length; }, clearInterval() {}, setTimeout: (f, ms) => setTimeout(f, Math.min(ms ?? 0, 10)), clearTimeout,
     console, Date, Promise, Object, Array, String, Number, JSON, Math, Map, Set, Error, encodeURIComponent, URL, Blob, atob, btoa,
     sigeloUiTest: (t) => { sandbox.ui = t; },
+    addEventListener(t, f) { ((sandbox.lis ??= {})[t] ??= []).push(f); },   // the page's popstate (the reply's Back test drives it)
     localStorage: { m: new Map(), getItem(k) { return this.m.get(k) ?? null; }, setItem(k, v) { this.m.set(k, String(v)); }, removeItem(k) { this.m.delete(k); } },
     sigeloLocal: {
       async call(method, path, body) { calls.push([method, path, body]); const f = routes[`${method} ${path.split('?')[0]}`], r = f ? f(body ?? {}, path) : null; if (r?.__error) return { status: 409, body: { error: r.__error } }; return f ? { status: 200, body: JSON.parse(JSON.stringify(r)) } : { status: 404, body: { error: { check: 'route', message: `no ${method} ${path}` } } }; },
@@ -608,7 +609,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   nameIn.value = 'vps';
   const web = root.all().find((e) => e.tagName === 'INPUT' && e.attrs.type === 'radio' && e.value === 'quiet');
   web.checked = true; fire(web, 'change');
-  // The code's life (the agent-setup feedback, point 12): 10 minutes, 1 hour or 24 hours; 10 minutes sends no ttl (enrol --ttl's default).
+  // The code's life (a local model can take 45 minutes): 10 minutes, 1 hour or 24 hours; 10 minutes sends no ttl (enrol --ttl's default).
   const lives = root.all().filter((e) => e.tagName === 'INPUT' && e.attrs.type === 'radio' && ['600', '3600', '86400'].includes(e.value));
   ok(lives.length === 3 && lives.find((e) => e.value === '600').checked && has('Code works for 10 minutes') && has('24 hours'), 'enrol: the code works for 10 minutes, 1 hour or 24 hours, 10 minutes chosen');
   const day = lives.find((e) => e.value === '86400');
@@ -777,7 +778,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await back();
   }
   {
-    // The busy count (UI-API.md "Busy marks": busy_n, 2026-11-25): more than one agent → their number beside the wheel.
+    // The busy count (UI-API.md "Busy marks": busy_n): more than one agent → their number beside the wheel.
     const ana = G_.mine.find((c) => c.name === 'ana'), nOf = (e) => e?.all().find((x) => x.className === 'busyn')?.textContent;
     ana.busy = true; ana.busy_n = 3; await poll();
     ok(nOf(chatRow('ana')) === '3' && chatRow('ana').textContent.includes('working…'), `busy count: 3 agents → "3" beside the wheel on the row (${chatRow('ana')?.textContent})`);
@@ -789,7 +790,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ana.busy = false; ana.busy_n = 0; await poll(); await back();
   }
   {
-    // Agent settings (UI-API.md, 2026-11-25): a contact that announced them gets a row in its chat settings and a page.
+    // Agent settings (UI-API.md): a contact that announced them gets a row in its chat settings and a page.
     const ana = G_.mine.find((c) => c.name === 'ana'), settingsRow = () => root.all().find((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Agent settings'));
     await sandbox.ui.go('chat-info', ana.did); await settle(); await poll();
     ok(h1() === 'Chat settings' && !settingsRow(), 'agent settings: no row while the agent has said none');
@@ -837,7 +838,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
   await back(); await back();
   ok(h1() === 'Chats', 'Back, Back: the chat, then Chats');
 
-  // ---- pass 2 (design/ux1/build.md): the tab's count, ticks, who signed a message (task 11), the attach sheet, a chat's
+  // ---- pass 2: the tab's count, ticks, who signed a message (task 11), the attach sheet, a chat's
   // notifications and Clear this chat, New chat to the four words both ways (tasks 2 and 12), a group code
   {
     const bo = G_.contacts[0], t = now() - 60;
@@ -958,7 +959,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       const across = await copyEv({ commonAncestorContainer: b5, startContainer: b5, startOffset: 0, endContainer: b5, endOffset: b5.kids.length, intersectsNode: (n) => b5.contains(n) || !!n.contains?.(b5) });
       ok(c7 === CMD && c7.split('\n').length === 3 && c5 === MD && part === CMD.slice(3, -4) && part.split('\n').length === 3
         && across?.startsWith('Run this:\ncd /tmp\ncurl') && across.includes('\n- one\n- two\n3. third\n4. fourth\n') && !across.includes('Copy'),
-        `copy (the phone's Copy, Ctrl+C): a whole three-line message → three lines; a Markdown one → as written; a part of a block → that part, its line breaks; the bubble → its lines, lists numbered, no Copy (${JSON.stringify([c7, part, across])})`);
+        `copy (Copy on a phone, Ctrl+C): a whole three-line message → three lines; a Markdown one → as written; a part of a block → that part, its line breaks; the bubble → its lines, lists numbered, no Copy (${JSON.stringify([c7, part, across])})`);
       // The selection: a tap while text is selected (or was, as the finger came down) keeps it; the bubble is no role=button.
       const b7 = bub(7);
       sandbox.getSelection = () => ({ toString: () => 'sha256sum' });
@@ -1028,6 +1029,64 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const qb = root.all().find((e) => e.attrs['data-n'] === '6')?.all().find((e) => e.tagName === 'BUTTON' && e.className === 'quote');
     ok(qb?.textContent === 'YouYes! 8 o\'clock?' && !root.all().find((e) => e.attrs['data-n'] === '6').textContent.includes('re/0123'), `reply: shown with its quote (who, the first line), not its label (${qb?.textContent})`);
     MSGS[bo.did].pop(); sandbox.seq += 1; await poll(); await poll();
+    // 0.1.21 fix: a long quote above the box pushed the chat sideways (the bar's one line was its min-width; × off the
+    // screen). The bar's parts carry the classes ui.css guards, and the rules are there: a full line no wider than the
+    // composer, the text cut with an ellipsis, × fixed-size; a long word in a bubble wraps; no screen widens the page.
+    {
+      const LONG = `${'are done: sigelo.io serves 0.1.21 as latest, the site renders '.repeat(3)}https://example.invalid/${'x'.repeat(200)}`;
+      MSGS[bo.did].push(m(7, 'in', LONG, null)); sandbox.seq += 1; await poll(); await poll();
+      const bub7 = () => root.all().find((e) => e.attrs['data-n'] === '7');
+      const scr = () => root.all().find((e) => e.attrs['data-screen'])?.attrs['data-screen'];
+      for (const f of bub7()?.on?.dblclick ?? []) f({});
+      await settle();
+      const q = qbar(), parts = q?.kids.filter((k) => typeof k === 'object') ?? [];
+      const x = aria('Drop the reply', 'BUTTON');
+      ok(q?.hidden === false && parts.length === 2 && parts[0].className === 'quote' && parts[0].kids[0]?.tagName === 'B' && parts[0].textContent.includes('are done: sigelo.io')
+        && parts[1] === x && /\bib\b/.test(x.className) && q.parent?.className === 'composer',
+        `reply pending: the bar in the composer, .quote (who in <b>, the line) and × (.ib) beside it (${JSON.stringify([q?.hidden, parts.map((p) => p.className), x?.className])})`);
+      const css = readFileSync(join(HERE, 'vendor', 'ui.css'), 'utf8');
+      const rule = (sel) => { const r = new RegExp(`(^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`, 'g'); return [...css.matchAll(r)].map((x) => x[2]).join(';'); };
+      const has_ = (sel, ...decls) => { const r = rule(sel); return decls.every((d) => r.includes(d)); };
+      const guards = [['.quotebar', 'display: flex', 'flex: 1 1 100%', 'min-width: 0', 'max-width: 100%'], ['.quotebar .quote', 'min-width: 0'], ['.quotebar .ib', 'flex: none'],
+        ['.quote', 'overflow: hidden', 'text-overflow: ellipsis', 'white-space: nowrap', 'max-width: 100%'], ['.quote b', 'overflow: hidden', 'text-overflow: ellipsis'],
+        ['.msg', 'max-width: 80%', 'overflow-wrap: anywhere'], ['.screen', 'overflow-x: clip'], ['.callline', 'max-width: 100%']].filter(([sel, ...d]) => !has_(sel, ...d)).map(([sel]) => sel);
+      ok(guards.length === 0, `ui.css: the overflow guards (the quote bar, the quote, a bubble's long word, the screen) are there${guards.length ? ` (missing: ${guards.join(', ')})` : ''}`);
+      // Back (the screen's, no history here) drops the pending reply and stays in the chat; a second Back leaves.
+      await aria('Back', 'BUTTON')?.click(); await settle();
+      ok(scr() === 'chat' && qbar()?.hidden === true && !aria('Drop the reply', 'BUTTON'), `Back with a reply pending: the reply dropped, still the chat (${JSON.stringify([scr(), qbar()?.hidden])})`);
+      // The system's Back (a history entry for the reply, as a sheet's): popstate drops it; × takes its entry back;
+      // leaving the chat (Search) replaces it, and the chat met again has no reply.
+      const Hs = sandbox.history, depth = sandbox.ui.stack().length - 1, base = { sigelo: 1, d: depth, view: 'chat', arg: bo.did }, ents = [base];
+      let at = 0;
+      const pop = () => { for (const f of sandbox.lis?.popstate ?? []) f({ state: Hs.state }); };
+      Object.assign(Hs, { state: base, pushState(st) { ents.splice(at + 1); ents.push(st); at += 1; this.state = st; }, replaceState(st) { ents[at] = st; this.state = st; },
+        back() { if (at > 0) { at -= 1; this.state = ents[at]; setTimeout(pop, 0); } }, go(n) { at = Math.max(0, at + n); this.state = ents[at]; setTimeout(pop, 0); } });
+      try {
+        const pick7 = async () => { for (const f of bub7()?.on?.dblclick ?? []) f({}); await settle(); };
+        await pick7();
+        const pushed = ents.length === 2 && at === 1 && Hs.state.reply === true && Hs.state.view === 'chat' && qbar()?.hidden === false;
+        Hs.back(); await settle();
+        const sysBack = at === 0 && scr() === 'chat' && qbar()?.hidden === true && !Hs.state.reply;
+        await pick7();
+        const again = at === 1 && qbar()?.hidden === false;
+        await aria('Drop the reply', 'BUTTON')?.click(); await settle();
+        const xBack = at === 0 && scr() === 'chat' && qbar()?.hidden === true;
+        await pick7();
+        await aria('Back', 'BUTTON')?.click(); await settle();
+        const screenBack = at === 0 && scr() === 'chat' && qbar()?.hidden === true;
+        await pick7();
+        await aria('Search this chat', 'BUTTON')?.click(); await settle();
+        const left = scr() === 'search' && ents.length === 2 && at === 1 && ents[1].view === 'search' && ents[1].d === depth + 1 && !ents[1].reply;
+        Hs.back(); await settle(); await poll();
+        const met = scr() === 'chat' && qbar()?.hidden === true && at === 0;
+        ok(pushed && sysBack && again && xBack && screenBack && left && met,
+          `a pending reply is one Back: the system's Back drops it (still the chat), × and the screen's Back take its entry back; leaving the chat drops it, the chat met again has none (${JSON.stringify([pushed, sysBack, again, xBack, screenBack, left, met])})`);
+      } finally {
+        for (const k of ['state', 'pushState', 'back', 'go']) delete Hs[k];
+        Hs.replaceState = () => {};
+      }
+      MSGS[bo.did].pop(); sandbox.seq += 1; await poll(); await poll();
+    }
     // The composer's one "+": a row of choices above the box (no sheet); Escape, a choice or a tap elsewhere closes it.
     const plus = aria('Attach', 'BUTTON'), tray = () => root.all().find((e) => e.className === 'tray');
     await plus.click(); await settle();
@@ -1129,7 +1188,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     G_.contacts.splice(G_.contacts.findIndex((c) => c.name === 'dee'), 2);
   }
 
-  // ---- Groups (design/groups.md §5): the list, New group (two taps and a name), the chat, its info, Add people, an invitation, a notice
+  // ---- Groups: the list, New group (two taps and a name), the chat, its info, Add people, an invitation, a notice
   {
     G_.contacts.push(person('qu', { tier: 'quiet' }));
     await btn('New chat').click(); await settle();
@@ -1295,7 +1354,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(h1() === 'Wallet' && has('This phone has no wallet yet') && !has('XMR'), 'Wallet on this phone (GET /api/wallet where: none): "This phone has no wallet yet", no balance');
   }
 
-  // ---- pass 3 (design/ux1/build.md "Pass 3"): Agents with the keeper of this computer (GET /api/keeper): the allowances
+  // ---- pass 3: Agents with the keeper of this computer (GET /api/keeper): the allowances
   // card and line (Wallet on only), Needs you, a payment request approved in 2 taps (task 4), an agent's page (last
   // activity, its four words, the allowance), its keeper settings (the four, then Advanced; Save, Restart), the keeper
   // elsewhere, Revoke in 4 taps (task 10), Enrol in 4 (task 3), a contact's kind (This is an agent)
@@ -1449,7 +1508,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     Object.assign(cy, { kind: 'agent' });
   }
 
-  // ---- pass 4 (design/ux1/build.md "Pass 4"): the Wallet of a computer (GET /api/wallet ready), every sync state as Decided
+  // ---- pass 4: the Wallet of a computer (GET /api/wallet ready), every sync state
   // (syncing with progress, synced, can't reach the node, can't reach the wallet service; the balance greyed "as of" until
   // synced; Send only once synced), the allowance lines with the same state, Receive (task 8), Send (task 9), Pay in a chat
   // (task 5), History and a payment, Settings → Wallet with prices on, the node, the wallet service, approvers, the allowances
@@ -1640,7 +1699,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     SET.wallet = true;
   }
 
-  // ---- Pass 5 (design/ux1/build.md "Pass 5"): Me, a picture, People and teams, a person, a team, sign and check (and the
+  // ---- Pass 5: Me, a picture, People and teams, a person, a team, sign and check (and the
   // signed bubble: task 11), the public invite, proof of age; task 12 from Me (3 taps)
   {
     SET.wallet = false;
@@ -1695,7 +1754,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(calls.some(([, p, b]) => p === '/api/invite/cancel' && b.id === 'i1'), 'Cancel this code → POST /api/invite/cancel {id}');
     sandbox.pending = undefined;
     await sandbox.ui.go('me'); await settle(); await poll();
-    // The picture sheet (Decided 2026-11-11): yours, end to end, never to the relay in the clear; choose one; no camera here: not offered.
+    // The picture sheet: yours, end to end, never to the relay in the clear; choose one; no camera here: not offered.
     await aria('Add your picture', 'BUTTON').click(); await settle();
     ok(sheet() && sh1() === 'Your picture' && has('never to the relay in the clear') && btn('Choose a picture') === undefined && root.all().some((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Choose a picture'))
       && !root.all().some((e) => e.tagName === 'BUTTON' && e.textContent.startsWith('Take a picture')) && root.all().some((e) => e.tagName === 'INPUT' && e.attrs.type === 'file' && e.attrs.accept === 'image/*'),
@@ -1800,7 +1859,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     sandbox.intro = []; MSGS[bo.did] = []; sandbox.pending = { ...sandbox.pending, invites: [] };
   }
 
-  // ---- the phone's photos and files (design/transfer.md §10): the camera beside Attach, a photo's bubble and its tap,
+  // ---- photos and files on the phone: the camera beside Attach, a photo's bubble and its tap,
   // Keep location in photos (Settings), the accept rule's size and the picker (Files)
   {
     const bo = G_.contacts[0], SHA = 'ab'.repeat(32), jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]).toString('base64');
@@ -1853,7 +1912,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await choose('File');
     const pk2 = calls.filter(([, p]) => p === '/api/transfers/pick');
     ok(pk.at(-1)[2]?.images === true && pk2.length === pk.length + 1 && pk2.at(-1)[2]?.images === undefined, 'Photo → POST /api/transfers/pick {images: true}; File → the picker for any file');
-    // Several files at once (2026-11-25): the picker asked for several; each its own send to this chat, in order; one line.
+    // Several files at once: the picker asked for several; each its own send to this chat, in order; one line.
     // The toasts said (each goes after 3 s, 10 ms here): kept as they come.
     const said = [], tl = body.all().find((e) => e.className === 'toasts'), tlAppend = tl.append.bind(tl);
     tl.append = (x) => { said.push(x.textContent); return tlAppend(x); };
@@ -1935,7 +1994,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
       await sandbox.ui.go('chat', bo.did); await settle(); await poll();
       await aria('Open sigelo.apk', 'BUTTON')?.click(); await settle();
       ok(sandbox.opened?.id === 'a1'.repeat(16), 'a tap on my own file → POST /api/transfers/open, its transfer');
-      // Save to Downloads (2026-11-25): a file that came over the relay sits in the app; the Android app saves it into
+      // Save to Downloads: a file that came over the relay sits in the app; the Android app saves it into
       // Downloads (sigeloLocal.saveFile, the shell's MediaStore), a tab downloads it; one already in Downloads says so.
       const L0 = sandbox.sigeloLocal, saved = [];
       L0.saves = 'Downloads'; L0.saveFile = async (name, bytes) => { saved.push([name, Buffer.from(bytes).toString()]); return { name, where: 'Downloads' }; };
@@ -1984,7 +2043,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await poll(); const ta2 = aria('Their files without asking', 'SELECT');
     ta2.value = ''; fire(ta2, 'change'); await settle();
     ok(sandbox.auto?.mb === null && !(bo.did in TL.auto), 'Default → POST /api/transfers/auto {contact, mb: null}');
-    // Voice messages (design/transfer.md "Voice"): "Voice" in the "+" once this page can record (getUserMedia and
+    // Voice messages: "Voice" in the "+" once this page can record (getUserMedia and
     // MediaRecorder); the recorder (voice-web.mjs) over a fake MediaRecorder; the recording in pieces, then sent.
     {
       const VW = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'voice-web.mjs')).href);
@@ -2203,7 +2262,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     const SENDS = [];
     routes['POST /api/wallet/send'] = (b) => { SENDS.push(b); return { txid: 'f'.repeat(64), amount: '200000000000', fee: '1' }; };
     const review = (amount) => ({ id: `r${amount}`, exp: now() + 600, to: '5' + 'C'.repeat(94), amount, fee: '30000000', note: '' });
-    // The Android app: the phone's screen lock (sigeloLocal.lock), asked again (force) above the limit.
+    // The Android app: the phone screen lock (sigeloLocal.lock), asked again (force) above the limit.
     const LK = { st: { on: true, after: 1, secure: true }, sets: [], unlocks: [], refuse: false };
     const A6 = mk({ lock: { kind: 'screen', get: async () => ({ ...LK.st }), set: async (o) => { LK.sets.push(o); Object.assign(LK.st, o); return { ...LK.st }; } },
       async unlock(o) { LK.unlocks.push(o ?? null); if (LK.refuse) throw Object.assign(new Error('the screen lock was not confirmed'), { check: 'cancelled' }); } });
@@ -2234,7 +2293,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await A6.K.btn('Send 0.20 XMR').click(); await settle();
     ok(LK.unlocks.length === u0 + 2 && SENDS.length === 2 && SENDS[1].id === 'r200000000000', 'Send above the limit, the lock confirmed → sent');
 
-    // Settings → Notifications (sigeloLocal.push and .stay, the Android shell's for the phone; design/push.md §6): the push mode, Built
+    // Settings → Notifications (sigeloLocal.push and .stay, the Android shell's for the phone): the push mode, Built
     // in by default with its help line and state; Off ends it; Built in again asks for notifications, then once for the battery
     // exemption, each after one line why; a refusal leaves a row whose tap asks again. Push app: no push app said with what to
     // install; several picked from; the push app's answer and the relay's said; Off turns push off.
@@ -2344,7 +2403,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     await C6.sb.ui.back(); await settle(); await C6.poll();
     ok(C6.K.has('No screen lock here, and no words password kept on this device.') && C6.K.btn('Backup and recovery') && noLine, 'no screen lock, no words password: Settings → Lock says so and offers Backup and recovery; Send says no limit');
 
-    // Notifications (Decided: the sender's name only, never the text), through the Android bridge (sigeloLocal.notify, onOpen).
+    // Notifications (the sender's name only, never the text), through the Android bridge (sigeloLocal.notify, onOpen).
     const NOTES = [], OPEN = [];
     const N6 = mk({ notify: async (o) => { NOTES.push(o); return {}; }, onOpen: (f) => OPEN.push(f) });
     await settle(); await N6.poll(); await N6.poll();
@@ -2470,7 +2529,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     delete routes['POST /api/wallet/send'];
   }
 
-  // ---- the profiles sheet (design/profiles.md §3) over a fake local.profiles: the list, the one in use marked; switch, add; Manage: rename, remove
+  // ---- the profiles sheet over a fake local.profiles: the list, the one in use marked; switch, add; Manage: rename, remove
   {
     SET.wallet = false;
     const root2 = new El('main'), iv2 = [], pc = [];
@@ -2543,7 +2602,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(titles.join('|') === 'Office · eagle fancy|Profile 3|Profile 6 · no. 4|office · no. 5|Profile 6 · no. 6|Profile 7|Profile 8|Profile 9' && new Set(titles).size === titles.length,
       `Profiles sheet: two profiles of one name each read as their own (the first two of the four words, or the number); a unique name alone (${titles})`);
   }
-  // ---- Settings → Backup and recovery (design/apps-seed.md §8) over a fake local.words: the lock, the password, the words as at their
+  // ---- Settings → Backup and recovery over a fake local.words: the lock, the password, the words as at their
   // creation (FLAG_SECURE, nothing to copy, Done hides them), change, stop keeping them; removing a profile and taking the seat guarded.
   {
     const root3 = new El('main'), iv3 = [], wc = [], secure = [], posted = [];
@@ -2703,7 +2762,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(sec4.at(-1) === false, 'secret screens: Enrol left by the Agents tab clears it');
   }
 
-  // ---- Me → Devices and computers (design/profiles.md P2) over a fake local.computers: the list (the one in use marked),
+  // ---- Me → Devices and computers over a fake local.computers: the list (the one in use marked),
   // use, connect, forget with the reminder to revoke on the computer; a profile holding an identity shows no computers.
   for (const remote of [true, false]) {
     const root3 = new El('main'), iv3 = [], cc = [];
@@ -2749,7 +2808,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(K.btn('Connect a computer')?.disabled === true && K.has('At most 8 computers'), 'Computers: at 8, Connect a computer off, the limit said');
   }
 
-  // ---- Calls (design/calls.md, apps/contact/call.mjs), two pages: alice's and bob's ui.js, each over its own host (a Line,
+  // ---- Calls (apps/contact/call.mjs), two pages: alice's and bob's ui.js, each over its own host (a Line,
   // the /api/calls routes, its chat lines), the two Lines wired as the relay carries sigelo-call/0, a fake
   // RTCPeerConnection between them (apps/contact/test-fake-rtc.mjs: they meet only on each other's ICE credentials and
   // DTLS fingerprint). The Call button (a person online only), the call screen both sides, Accept, Mute, Hang up, the
@@ -2836,7 +2895,7 @@ const nodePow = (await import(pathToFileURL(join(REPO, 'apps', 'contact', 'platf
     ok(A.callBtn() === undefined && whoA().includes('agent') && !whoA().includes('support desk'), `kinds: an agent's chat: "agent", no Call button (${whoA()})`);
     A.peer.kind = 'person'; await A.poll(); await A.poll();
     ok(A.callBtn() !== undefined && !/agent|desk/.test(whoA()), 'kinds: a person again: the Call button back, no label');
-    // "Always relay my media" (design/calls.md §6): Settings → Chats, its cost said; on, with no TURN from this relay, a call fails at once.
+    // "Always relay my media": Settings → Chats, its cost said; on, with no TURN from this relay, a call fails at once.
     await A.sb.ui.go('set-chats'); await settle(); await A.poll();
     const relaySw = () => A.root.all().find((e) => e.tagName === 'INPUT' && e.attrs['aria-label'] === 'Always relay my media');
     const relayHelp = () => relaySw()?.parentNode?.parentNode?.textContent ?? '';
@@ -3008,14 +3067,14 @@ try {
     let rowN = null;
     for (let i = 0; i < 20 && rowN?.name !== 'Dee Node'; i++) { await dn.inbox({ wait: 0.5 }); rowN = (await call(A, 'GET', '/api/state')).body.groups.contacts.find((c) => c.did === DN.did); }
     ok(/^contact-[0-9a-f]{4}$/.test(invN.body.name ?? 'contact-0000') && rowN?.name === 'Dee Node' && rowN.name_from === 'them', `names: an unnamed code's contact takes the name it told, sanitised, marked from them (${JSON.stringify(rowN && { name: rowN.name, name_from: rowN.name_from })})`);
-    // Kinds (carrier.mjs "Kinds", 2026-11-26): it said it is a support desk with its name: the app shows a desk, never calls it.
+    // Kinds (carrier.mjs "Kinds"): it said it is a support desk with its name: the app shows a desk, never calls it.
     ok(rowN?.kind === 'desk' && rowN.kind_set === false, `kinds: a support desk said so at pairing: kind desk, not set by the human (${JSON.stringify(rowN && { kind: rowN.kind, kind_set: rowN.kind_set })})`);
     ok((await call(A, 'POST', '/api/calls/start', { to: DN.did, sdp: 'v=0' })).body.error?.check === 'call_agent', 'kinds: a desk is never called (call_agent)');
     const kp = await call(A, 'POST', '/api/kind', { contact: DN.did, kind: 'person' }), kb = await call(A, 'POST', '/api/kind', { contact: DN.did, kind: 'robot' });
     const ka = await call(A, 'POST', '/api/kind', { contact: DN.did, kind: null });
     ok(kp.body.kind === 'person' && kp.body.kind_set === true && kb.status === 400 && kb.body.error.check === 'body' && ka.body.kind === 'desk' && ka.body.kind_set === false,
       'kinds: the human sets person (wins), an unknown kind refused, null gives it back: desk again');
-    // "Always relay my media" (design/calls.md §6): a setting of this profile; GET /api/calls/turn says the policy.
+    // "Always relay my media": a setting of this profile; GET /api/calls/turn says the policy.
     const rm0 = (await call(A, 'GET', '/api/settings')).body, rm1 = await call(A, 'POST', '/api/settings', { relay_media: true }), turnOn = (await call(A, 'GET', '/api/calls/turn')).body;
     const rmBad = await call(A, 'POST', '/api/settings', { relay_media: 'yes' }), rm2 = await call(A, 'POST', '/api/settings', { relay_media: false });
     ok(rm0.relay_media === false && rm1.body.relay_media === true && turnOn.policy === 'relay' && rmBad.status === 400 && rm2.body.relay_media === false && (await call(A, 'GET', '/api/calls/turn')).body.policy === 'all',
@@ -3093,7 +3152,7 @@ try {
     ok(st.status === 200 && st.body.calls === false && (await call(A, 'POST', '/api/calls/allow', { contact: CY.did, on: null })).body.can_call === false, 'calls: the Settings default off; cy back to the default: off');
     await call(A, 'POST', '/api/settings', { calls: true });
     ok((await call(A, 'POST', '/api/calls/start', { to: CY.did, sdp })).body.error?.check === 'call_offline', 'calls: a contact whose presence is not known: no call (presence-gated)');
-    // Calls are between people (design/calls.md §1): cy taken for an agent neither rings here nor is rung from here.
+    // Calls are between people: cy taken for an agent neither rings here nor is rung from here.
     await call(A, 'POST', '/api/kind', { contact: CY.did, kind: 'agent' });
     ok((await call(A, 'POST', '/api/calls/start', { to: CY.did, sdp })).body.error?.check === 'call_agent', 'calls: an agent contact: no call to it (call_agent)');
     const id2 = 'c1'.repeat(16), before = (await call(A, 'GET', `/api/messages?contact=${encodeURIComponent(CY.did)}`)).body.messages.filter((m) => m.label === CM.CALL_LABEL).length;
@@ -3128,12 +3187,12 @@ try {
     `busy marks: the agent's busy(true) → the page's contact busy, no message, no unread (${b1.status})`);
   await node.busy('ada', false);
   ok(await until(async () => (await cyAt())?.busy === false), 'busy marks: busy(false) → off');
-  // The count (2026-11-25): n agents running → busy_n; an earlier agent's mark (no n) is 1; off → 0.
+  // The count: n agents running → busy_n; an earlier agent's mark (no n) is 1; off → 0.
   await node.busy('ada', true, { n: 3 });
   ok(await until(async () => (await cyAt())?.busy_n === 3) && await nIn() === m0, 'busy marks: busy(true, n 3) → the contact\'s busy_n 3, no message');
   await node.busy('ada', false);
   ok(await until(async () => (await cyAt())?.busy === false) && (await cyAt()).busy_n === 0, 'busy marks: off → busy_n 0');
-  // Agent settings (2026-11-25): the page's receipts said host: true; the agent's sigelo-host-caps/0 is kept as the contact's
+  // Agent settings: the page's receipts said host: true; the agent's sigelo-host-caps/0 is kept as the contact's
   // host, never a message; POST /api/host/set sends sigelo-host-set/0 with one of its choices, marked next.
   const CAPS = { fields: [{ key: 'model', value: '', options: [{ value: '', label: 'Default' }, { value: 'small', label: 'Small' }] }, { key: 'effort', value: '', options: [], off: 'This model has no effort levels' },
     { key: 'futureKnob', value: 'x', options: [] }] };
@@ -3347,7 +3406,7 @@ try {
     } finally { await O.stop(); }
   }
 
-  // The phone's big files (design/transfer.md §10): a platform with the shell's bridge (platform.big) runs the
+  // Big files on the phone: a platform with the shell's bridge (platform.big) runs the
   // transfer engine in the page; the accept rule; a photo's preview beside its manifest.
   {
     const TX = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'transfer-node.mjs')).href);
@@ -3393,7 +3452,7 @@ try {
       ok(sb.status === 400 && sb.body.error.check === 'photo', 'phone: a preview that is not what it says: 400 photo');
       const op = await call(P, 'POST', '/api/transfers/open', { id: t1.id });
       ok(op.status === 409 && op.body.error.check === 'transfer_state', 'phone: open before it landed: 409');
-      // A voice message (design/transfer.md "Voice"): RECORD_AUDIO asked of the shell; the recording in pieces into the
+      // A voice message: RECORD_AUDIO asked of the shell; the recording in pieces into the
       // shell, kept there as a file, sent as a photo's full file; its fields as one sigelo-voice/0 message.
       {
         const V = await import(pathToFileURL(join(REPO, 'apps', 'contact', 'voice.mjs')).href);
@@ -3455,14 +3514,14 @@ try {
         let got2 = [];
         ok(await until(async () => { got2.push(...(await dee.inbox({ wait: 0.5 })).messages); return got2.some((m) => m.type === 'file' && m.label === 'sigelo-file/0' && m.sha256 === sf.body.sha256 && !m.transfer); }, 60000), 'the agent has it, over sigelo-file/0');
         ok(await until(() => TX.list({ carrier: dee, identity: deeId }).in.find((r) => r.id === sf.body.id)?.state === 'relayed'), 'the agent\'s transfer record: relayed (no ghost left active)');
-        // Agent → phone: asked here (the contact's own size: always ask), yes, no path: over the relay; the phone's record done by the file.
+        // Agent → phone: asked here (the contact's own size: always ask), yes, no path: over the relay; the phone app's record done by the file.
         const f3 = join(dir, 'notes.pdf'); writeFileSync(f3, 'a short note');
         const t3 = await TX.send({ carrier: dee, identity: deeId, to: 'eli', path: f3 });
         ok(await until(async () => (await call(P, 'GET', '/api/transfers')).body.in.some((r) => r.id === t3.id && r.state === 'asked')), 'phone: the agent\'s file asked');
         await call(P, 'POST', '/api/transfers/accept', { id: t3.id });
         ok(await until(async () => (await msgsOf(P)).some((m) => m.dir === 'in' && m.file?.sha256 === t3.sha256 && m.file.via === 'relay'), 60000), 'phone: the file came over the relay lane, its bubble says via relay');
         ok(await until(async () => { const r = (await call(P, 'GET', '/api/transfers')).body.in.find((x) => x.id === t3.id); return r?.state === 'done' && r.path_used === 'relay'; }), 'phone: its transfer record done by the file (via relay), not left active');
-        // Save to Downloads (2026-11-25): the file over the relay sits in the app's storage; its bytes by the chat message or the
+        // Save to Downloads: the file over the relay sits in the app's storage; its bytes by the chat message or the
         // transfer, for the page to hand to the shell; one in Downloads already, a message not a received file, refused.
         const fmsg = (await msgsOf(P)).find((m) => m.dir === 'in' && m.file?.sha256 === t3.sha256);
         const [byN, byId, inDl, notFile, bad] = [await call(P, 'GET', `/api/files/data?n=${fmsg.n}`), await call(P, 'GET', `/api/files/data?id=${t3.id}`), await call(P, 'GET', `/api/files/data?id=${'cd'.repeat(16)}`),
@@ -3470,7 +3529,7 @@ try {
         ok(byN.status === 200 && byN.body.name === 'notes.pdf' && Buffer.from(byN.body.data, 'base64').toString() === 'a short note' && byId.status === 200 && byId.body.data === byN.body.data
           && inDl.status === 409 && inDl.body.error.check === 'in_downloads' && notFile.status === 404 && bad.status === 400,
           `phone: GET /api/files/data by message or transfer → the bytes; in Downloads already 409; my own file 404; neither 400 (${[byN, byId, inDl, notFile, bad].map((x) => x.status)})`);
-        // Several files picked at once (2026-11-25): POST /api/transfers/pick {multiple} → {docs}, each then its own send.
+        // Several files picked at once: POST /api/transfers/pick {multiple} → {docs}, each then its own send.
         const nextWas = fb.next; fb.nextMany = [['one.txt', new Uint8Array(3)], ['two.txt', new Uint8Array(4)]];
         const pm = await call(P, 'POST', '/api/transfers/pick', { multiple: true }); fb.nextMany = null; fb.next = null;
         const pc = await call(P, 'POST', '/api/transfers/pick', { multiple: true }); fb.next = nextWas;

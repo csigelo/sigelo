@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Devices, contract sigelo-device/1 (design/devices.md §5–§7): moving a device identity to a phone
+// Devices, contract sigelo-device/1 (apps/agent/DEVICES.md, THREAT-MODEL §2.15): moving a device identity to a phone
 // or a second computer by QR. No network and no process here; sigelo-agent's `device` verbs drive
 // it (apps/agent/sigelo-agent-device.ts, DEVICES.md). Two ranks: SAFE, the device becomes
 // worker i of the operator's keeper root, its own DID, tier own, revocable alone; FULL, it also

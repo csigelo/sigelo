@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The relay's socket in the Android app (design/apps.md §4.3): the shell gives a TLS byte stream
+// The relay's socket in the Android app: the shell gives a TLS byte stream
 // (SigeloBridge tls(host, port)), and MQTT.js's browser build wants a WebSocket. Two shapes of one:
 //
 //   wsOverStream(connecting, { url, protocols, maxPayload })   RFC 6455 client framing over the stream

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Recording a voice message in the page (design/transfer.md "Voice"): the browser's MediaRecorder over
+// Recording a voice message in the page: the browser's MediaRecorder over
 // getUserMedia({audio: true}); the same code in the Android WebView, WebKitGTK and a browser tab. Loaded by
 // ui.js at the first Voice (`/voice-web.mjs`: the `ui` server, the app's import map). No dependency.
 //

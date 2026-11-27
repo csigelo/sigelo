@@ -8,7 +8,7 @@ description: Your portable, offline-verifiable identity. Use when asked to prove
 sigelo gives you one identity (a `did:sigelo:z…`) that you carry between worlds (forums,
 platforms, other agents' systems) that share nothing. A world checks it **offline** from the
 bundle you hand it; nobody has to be online. Use the `sigelo_*` MCP tools. They run on this
-machine; where local tools do not load (claude.ai chat), only verifying works, through the
+machine; where local tools do not load (Claude chat on the web), only verifying works, through the
 sigelo.io connector (`https://sigelo.io/mcp`, one tool, `sigelo_verify`).
 
 ## Once: have an identity

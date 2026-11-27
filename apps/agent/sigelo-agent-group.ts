@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * The group verbs of the sidecar (GROUPS.md, apps/contact/group.mjs, design/groups.md): `sigelo-agent group
+ * The group verbs of the sidecar (GROUPS.md, apps/contact/group.mjs): `sigelo-agent group
  * list|create|add|remove|rename|leave|join|brake|send`, and groupRound, which inbox (and the MCP
  * server's sigelo_inbox) runs before it prints: group messages are checked by code (the sender's
  * inner signature, the roster, the brake) and reach the output labelled with group, sender, role,
@@ -159,7 +159,7 @@ export async function main(rest: string[]): Promise<number> {
       case 'join': {
         const r = G.join({ ...o, group: args[0]! });
         out(r);
-        // Local; beside a running watch, kicked: its next round takes the group's messages (the agent-setup feedback, point 4).
+        // Local; beside a running watch, kicked: its next round takes the group's messages (never "stop the watcher first").
         const hw = lockHolder(path);
         if (hw?.kind === 'watch') kick(path);
         note(`group ${r.group.name}: joined; its messages come ${hw?.kind === 'watch' ? `through sigelo-agent watch (pid ${hw.pid}) now` : 'with your next inbox'}`);

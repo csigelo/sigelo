@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Voice calls (design/calls.md): 1:1 audio between two paired people, the media WebRTC (Opus, DTLS-SRTP) in the page's
+// Voice calls (THREAT-MODEL §2.20, §3.17; apps/agent/UI-API.md "Calls"): 1:1 audio between two paired people, the media WebRTC (Opus, DTLS-SRTP) in the page's
 // own RTCPeerConnection, the signalling `sigelo-call/0` messages inside the pairing's signed envelopes. No import: the
 // computer's page loads this file as it is (`/call.mjs`, beside ui.js), the phone app through its import map.
 //
@@ -10,7 +10,7 @@
 //   Phone  the page's (ui.js): the microphone, the RTCPeerConnection (a fresh DTLS certificate per call), batched
 //          candidates, the ICE timers and restarts, mute; it reaches its Line only through /api/calls*.
 //
-// The messages (design §2), content {typ, id, …}, id 32 hex, kept apart by the carrier (CALL_LABEL, CALL_SEND: never in
+// The messages, content {typ, id, …}, id 32 hex, kept apart by the carrier (CALL_LABEL, CALL_SEND: never in
 // the inbox, the log, MCP; `watch` answers a ring `end unavailable`):
 //   ring     caller   {attempt: 1, sdp (the offer, no address in it: ringSdp), exp (iat + 60 s), text (what an older app shows), pad}
 //   ringing  callee   {}   (only to a contact this side shares presence with: it says "online")
@@ -30,7 +30,7 @@
 // "Could not connect, not even through the relay host."). TURN (2026-11-26, for everyone): the Line's host asks its relay
 // for a credential (carrier.turnServer, relay/turn.mjs) at each connection (GET /api/calls/turn), again at a restart once
 // within TURN_FRESH_S of its expiry; the policy stays "all" (a direct pair preferred); the screen says "Via relay" while
-// the selected pair has a relayed candidate (getStats). "Always relay my media" (design §6, 2026-11-26: Settings, per
+// the selected pair has a relayed candidate (getStats). "Always relay my media" (Settings, per
 // profile; SIGELO_ICE_POLICY=relay on a computer): GET /api/calls/turn says policy "relay", the connection is made with
 // iceTransportPolicy "relay" and only relayed candidates leave this page, their related address zeroed (relayOnly):
 // the contact never learns this device's addresses; a relay with no TURN to offer: RELAY_ONLY at once, nothing rung;
@@ -45,8 +45,8 @@
 // A second call while one is live gets `end busy`. busy and unavailable, like ringing, go only to a contact shown this
 // side's presence (each says the carrier runs): another one hears nothing and its call rings out ("No answer").
 //
-// Ringing with the app closed (design §5): not here. A ring waits at the relay; whatever wakes the app within its 60 s
-// (the push build, design/push.md) finds it in the first drain and rings through Line's `alert` hook; later than that
+// Ringing with the app closed: not here. A ring waits at the relay; whatever wakes the app within its 60 s
+// (the push build, apps/agent/UI-API.md "Push") finds it in the first drain and rings through Line's `alert` hook; later than that
 // it is a "Missed call". That hook is the seam: alert({on, id, did, name}) — the phone app's ringtone and heads-up today.
 
 export const CALL_LABEL = 'sigelo-call/0';
@@ -57,7 +57,7 @@ export const RING_S = 45, EXP_S = 60;
 /** Milliseconds: gathering before an answer or a restart goes (the ring waits for none), before the late candidates go; ICE after the answer; a disconnection
  *  before the restart, then before the call is lost; a page's last poll for a ring to wait for it; an ended call shown. */
 export const GATHER_MS = 1000, LATE_MS = 5000, ICE_MS = 15000, DISCONNECTED_MS = 2000, RETRY_MS = 8000, LOST_MS = 30000, PAGE_MS = 10000, KEEP_MS = 30000;
-/** Weak links (2026-11-24): Opus at most MAX_BPS, at least MIN_BPS, stepped by the far end's RTCP every STATS_MS. */
+/** Weak links: Opus at most MAX_BPS, at least MIN_BPS, stepped by the far end's RTCP every STATS_MS. */
 export const MAX_BPS = 16000, MIN_BPS = 8000, STEP_BPS = 4000, STATS_MS = 3000;
 /** A contact's busy or unavailable answers: at most one per REPLY_MS (a flood of rings costs this side one message a while). */
 export const REPLY_MS = 30000;
@@ -160,7 +160,7 @@ export function padded(content) {
   return { ...content, pad: '.'.repeat(Math.max(0, PAD - len)) };
 }
 
-/** The chat line a call leaves: { text, state } (design §4: "Call · 4:12", "Missed call", "Declined"). */
+/** The chat line a call leaves: { text, state } ("Call · 4:12", "Missed call", "Declined"). */
 export function lineOf(call, nowMs) {
   if (call.connected !== null) {
     const s = Math.max(0, Math.floor(((call.ended ?? nowMs) - call.connected) / 1000));
@@ -180,7 +180,7 @@ export function lineOf(call, nowMs) {
  *   send(did, content) → Promise      the carrier's send, label CALL_LABEL, internal CALL_SEND
  *   contact(did) → { did, name, online, … } | null    a live contact by its (original) DID
  *   allowed(c) → may that contact ring here ("Can call me"); shares(c) → may it see this side online (presence)
- *   person(c) → is that contact a person (design §1: calls are between people; an agent's ring is refused silently,
+ *   person(c) → is that contact a person (calls are between people; an agent's ring is refused silently,
  *   no line, nothing said back, only refused({ did, id, check: 'call_agent' }) for the host's log)
  *   me() → this identity's original DID (glare)
  *   line({ did, dir, text, call: { id, state, secs } })   a chat line kept in the history
@@ -313,7 +313,7 @@ export class Line {
     await this.#say(call, { typ: 'end', id, reason: r }).catch(() => {});
     return this.view();
   }
-  /** The live call ended from outside the page (the phone's notification's Hang up). */
+  /** The live call ended from outside the page (the Hang up in the phone notification). */
   async hangup() { const c = this.current(); return c ? this.end(c.id, 'hangup') : null; }
 
   #finish(call, reason, by, { quiet = false } = {}) {
@@ -364,7 +364,7 @@ export class Line {
     if (this.seen.has(x.id)) return;   // a repeat of one already taken
     this.#seen(x.id);
     const now = this.now(), nowS = Math.floor(now / 1000);
-    // An agent rings no human (design §1): no ring, no line, nothing back; the host logs it.
+    // An agent rings no human: no ring, no line, nothing back; the host logs it.
     if (!this.person(c)) { this.dropped++; try { this.refused({ did: c.did, id: x.id, check: 'call_agent' }); } catch {} return; }
     // Not allowed to ring here (a quiet contact, the switch off) or past its life: a line, nothing said back.
     if (!this.allowed(c) || x.exp <= nowS || this.gone.has(`${c.did} ${x.id}`)) return this.#missed(c, x.id);
@@ -454,7 +454,7 @@ export function callRoutes({ line, contactOf, callable, stun, turn = async () =>
 
 // ================================================================ the page's half
 /**
- * Opus for weak links (design §3, 2026-11-24), asked of the far end's encoder through the SDP it is given: mono,
+ * Opus for weak links, asked of the far end's encoder through the SDP it is given: mono,
  * DTX (no packets in silence), in-band FEC, at most MAX_BPS, 20 ms frames (a=ptime:20). Applied to every remote description.
  */
 export function opusTune(sdp) {

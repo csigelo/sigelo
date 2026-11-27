@@ -3,7 +3,7 @@
 //   node apps/contact/gen-invite.mjs           write the file
 //   node apps/contact/gen-invite.mjs --check   exit 1 if the committed file differs
 // Independent of invite.mjs on purpose: code bytes, nonces, topics, keys, proofs and expected
-// results are assembled here from design/relay-plan.md §3 with node:crypto, so the fixture checks
+// results are assembled here from the contract (README.md "How it works") with node:crypto, so the fixture checks
 // invite.mjs instead of echoing it. Needs ts/dist. Ed25519 is deterministic, so fixed seeds,
 // genesis nonces, `created` and times fix every byte. Output: JSON.stringify(out, null, 2) + "\n".
 import { createHash, hkdfSync } from 'node:crypto';

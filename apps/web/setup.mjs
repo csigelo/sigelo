@@ -89,7 +89,7 @@ export function setupApi(platform, { bridge = null, mqtt, storage = globalThis.l
     async open() { reload(); },
     async done() { reload(); },
     secure: (on, door) => bridge?.secure(on, { door }),
-    // The first run's Lock step (the Android app: the phone's screen lock, asked once); a browser tab has none.
+    // The first run's Lock step (the Android app: the phone screen lock, asked once); a browser tab has none.
     ...(bridge && { lock: () => bridge.unlock() }),
     clipCopy: (text, clear) => (bridge ? bridge.clipCopy(text, { clear }) : navigator.clipboard.writeText(text)),
     clipClear: () => (bridge ? bridge.clipClear() : navigator.clipboard?.writeText?.('')),

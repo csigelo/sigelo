@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// sigelo-msg/0 key schedule (design/relay-plan.md §3): pairing key, mailbox topics, the epoch
+// sigelo-msg/0 key schedule (README.md "How it works"): pairing key, mailbox topics, the epoch
 // chain. HKDF-SHA256 and HMAC-SHA256 only; every label below is part of the wire contract.
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';

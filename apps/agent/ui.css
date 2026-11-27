@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* The page's look (design/ux1/mock.html, the UX1 spec; design/ux1/build.md). Tokens first: seal is the default
+/* The page's look. Tokens first: seal is the default
    palette, teal the other (data-pal="teal"); day/night follows the system unless data-theme is light or dark. */
 :root {
   color-scheme: light dark;
@@ -63,6 +63,9 @@ h1[tabindex="-1"]:focus, .panel:focus { outline: none; }
 
 /* ---- the frame: top bar, body, foot, tabs, FAB */
 .screen { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+/* The guard: nothing on a screen widens the page past it (clip, not hidden: hidden would make the screen a scroll box
+   and the composer and the top bar would no longer stick). */
+.screen { overflow-x: clip; }
 .screen.tabbed { padding-bottom: 88px; }
 .top { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: var(--s2); min-height: 56px; padding: var(--s1) var(--s2); background: var(--bg); border-bottom: 1px solid var(--border); }
 .top h1 { font-size: 20px; font-weight: 600; line-height: 1.2; margin: 0 var(--s2); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -351,7 +354,7 @@ button.card.tap.flex .mid small { color: var(--text-2); }
 .msg .why { display: block; }
 .row select, .field select { min-height: 44px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); padding: 0 var(--s2); font: inherit; }
 
-/* ---- Pass 5: Me, pictures, signed statements (design/ux1/mock.html me, person, team, sign, verify-result, invite) */
+/* ---- Pass 5: Me, pictures, signed statements (me, person, team, sign, verify-result, invite) */
 .av.pic { padding: 0; overflow: hidden; background: var(--surface-2); border: 0; }
 .av.pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .avbtn { flex: none; padding: 0; border: 0; background: none; border-radius: 40px; cursor: pointer; position: relative; min-width: 44px; min-height: 44px; }
@@ -377,7 +380,7 @@ a.row { text-decoration: none; color: inherit; } a.row small { color: var(--link
 header.top.plain { border-bottom: 0; }
 .card.ask { border-color: var(--accent); }
 
-/* A photo in a chat (design/transfer.md §10.4): the preview, then its full size and state. */
+/* A photo in a chat: the preview, then its full size and state. */
 .msg.photo { padding: 4px 4px 6px; }
 .msg img.photo { display: block; max-width: 100%; height: auto; border-radius: 10px; }
 .msg .ph { display: block; padding: 0; border: 0; background: none; cursor: pointer; }
@@ -385,10 +388,14 @@ header.top.plain { border-bottom: 0; }
 .photo-view img.photo { display: block; width: 100%; height: auto; border-radius: 10px; }
 .msg.photo .tag, .msg.photo .meta { padding: 0 6px; }
 .msg a.link { color: inherit; text-decoration: underline; overflow-wrap: anywhere; }
-.quotebar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-left: 3px solid var(--link); margin: 0 0 6px; }
-.quotebar .quote { flex: 1; min-width: 0; }
+/* 0.1.21 fix: the bar is a flex item of the composer (a wrapping row); its min-width was its text's one line, so a long
+   quote widened the page past the screen (the chat pushed sideways, × out of reach). Now a full line of its own that never
+   grows past the composer; the text cut with an ellipsis, × a fixed-size item at its end. */
+.quotebar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-left: 3px solid var(--link); margin: 0 0 6px; flex: 1 1 100%; min-width: 0; max-width: 100%; }
+.quotebar .quote { flex: 1 1 auto; min-width: 0; margin: 0; }
+.quotebar .ib { flex: none; }
 .quote { display: block; text-align: left; font: inherit; color: inherit; background: none; border: 0; border-left: 3px solid var(--link); padding: 2px 8px; margin: 0 0 4px; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.quote b { display: block; font-size: .85em; }
+.quote b { display: block; font-size: .85em; overflow: hidden; text-overflow: ellipsis; }
 .msg.hl { outline: 2px solid var(--link); }
 /* Search (0.1.20): the hit marked in its row; the message a hit opened, flashed for 1.2 s (an outline only under reduced motion). */
 .mid > small.snip { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -397,7 +404,7 @@ header.top.plain { border-bottom: 0; }
 @keyframes found { from { box-shadow: 0 0 0 6px var(--link); } }
 @media (prefers-reduced-motion: reduce) { .msg.found { animation: none; } }
 
-/* A voice message (design/transfer.md "Voice"): play/pause, the waveform over its progress, the length; the recorder's sheet. */
+/* A voice message: play/pause, the waveform over its progress, the length; the recorder's sheet. */
 .voice { display: flex; align-items: center; gap: var(--s2); min-width: 200px; }
 .voice .vbody { flex: 1; min-width: 0; }
 .voice .vplay { flex: none; border-radius: 50%; background: var(--surface-2); }
@@ -409,7 +416,7 @@ header.top.plain { border-bottom: 0; }
 .rec .rec-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--danger); animation: recblink 1.2s ease-in-out infinite; }
 @keyframes recblink { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .rec .rec-dot { animation: none; } }
-/* Calls (design/calls.md §4): the call screen over every screen (under the toasts), a call's line in a chat. */
+/* Calls: the call screen over every screen (under the toasts), a call's line in a chat. */
 .callscreen { position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center; padding: var(--s6) var(--s4) calc(var(--s6) + env(safe-area-inset-bottom)); background: var(--bg); }
 .callscreen[hidden] { display: none; }
 .callbox { display: flex; flex-direction: column; align-items: center; gap: var(--s3); width: 100%; max-width: 360px; text-align: center; }
@@ -420,7 +427,7 @@ header.top.plain { border-bottom: 0; }
 .callbox .btns { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s3); margin-top: var(--s6); }
 .callbox .ib { display: inline-flex; flex-direction: column; align-items: center; gap: var(--s1); width: auto; min-width: 72px; height: auto; min-height: 56px; padding: var(--s2); border: 1px solid var(--border); border-radius: var(--r); font-size: 13px; color: var(--text); background: var(--surface); }
 .callbox .ib.on { background: var(--accent-soft); border-color: var(--accent); }
-.callline { align-self: center; display: flex; align-items: center; gap: var(--s2); padding: var(--s1) var(--s3); border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 14px; }
+.callline { align-self: center; max-width: 100%; flex-wrap: wrap; display: flex; align-items: center; gap: var(--s2); padding: var(--s1) var(--s3); border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 14px; }
 .callline.missed { color: var(--warn); }
 .callline .ic { width: 16px; height: 16px; }
 .callline .meta { font-size: 12px; }

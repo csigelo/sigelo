@@ -12,7 +12,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Ntfy.java on a desktop JVM (apps/android/test-push.mjs): the topic and endpoint (design/push.md §6), the stream's URL, the
+ * Ntfy.java on a desktop JVM (apps/android/test-push.mjs): the topic and endpoint, the stream's URL, the
  * JSON stream's lines as ntfy 2.38.2 writes them, the reconnect table, and the relay's wake carried as ntfy carries it (base64)
  * opening with WebPush. Prints "ALL PASS (n)" or the failures, exit 1.
  */

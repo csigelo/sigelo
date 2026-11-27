@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Reading QR codes from images (design/devices.md §5.3, §6.4): a PNG reader and a QR decoder, pure
+// Reading QR codes from images (apps/agent/DEVICES.md): a PNG reader and a QR decoder, pure
 // JavaScript over node:zlib. No I/O: the caller reads the file (sigelo-agent device scan, which also
 // tries zbarimg first when it is on PATH; this package starts no process).
 //

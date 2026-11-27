@@ -5,6 +5,8 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **app:** a long quoted reply no longer widens the chat: the quote ends in an ellipsis, × stays in view. Back drops a pending reply first and stays in the chat; leaving the chat drops it.
+
 ## v0.1.21 — 2026-11-26
 
 - **This release:** calls and transfers through your relay's TURN when no direct path works, or always ("Always relay my media"); a ring without addresses; agent and desk contacts; no screenshots of secrets.
@@ -629,7 +631,7 @@ history, which is not public. This public history starts at the import of 2026-1
 - **Names:** domain sigelo.io, account `csigelo`, Go module `github.com/csigelo/sigelo/go`, mail contact@sigelo.io
   (`8cde486`, `f85a42a`, `724a903`).
 
-### 2026-09-29 (evening)
+### 2026-09-29, docs, ceremony and export
 
 - **Docs:** QUICKSTART gives the exact `ed25519-test` `bind()` call, a Timestamps paragraph and the
   recovery-beats-`iat` example (`a795275`).

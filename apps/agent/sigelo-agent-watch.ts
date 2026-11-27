@@ -37,7 +37,7 @@
  * and answers the offers and moves the bytes, at each `transfer` event, each round and each kick (a CLI
  * transfer verb beside it). A file offered → a line, or --on-notice CMD with {type: "transfer", id, from,
  * name, file, size}; nothing is written before the operator's `transfer accept`.
- * Calls (design/calls.md §1, apps/contact/call.mjs): no page here takes a call, so a ring is answered `end unavailable`
+ * Calls (apps/contact/call.mjs): no page here takes a call, so a ring is answered `end unavailable`
  * at once (the caller sees "No answer"; only a contact not quiet and shown this side's presence is answered) and said
  * as a line, or --on-notice CMD with {type: "call", what: "missed", id, from, name}. Only `sigelo-agent ui` with a page open (or the phone app) rings.
  * Devices (DEVICES.md): device messages are handled by code at each `device` event and each round; on

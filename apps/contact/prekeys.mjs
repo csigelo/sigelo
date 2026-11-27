@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// sigelo-msg/0 prekeys (design/relay-plan.md §3 "Prekeys"). A holder hands each contact a signed
+// sigelo-msg/0 prekeys (README.md "How it works", 4). A holder hands each contact a signed
 // bundle of single-use X-Wing (ML-KEM-768 + X25519) public keys; a sender starts an epoch by
 // encapsulating to one. Sent only to that contact, inside the pairwise mailbox: no directory.
 //   holder: const p = new Prekeys(); const signed = p.issue(me, pair, now)   → send signed; reissue when p.due(now, me)
@@ -234,7 +234,7 @@ export function checkPrekeys(signed, contact, pair, now) {
   return { did: b.did, iat: b.iat, exp: b.exp, keys, last_resort };
 }
 
-// The invite handshake's one-time key agreement (relay-plan §3 "Invite handshake"; invite.mjs
+// The invite handshake's one-time key agreement (README.md "How it works", 2; invite.mjs
 // leaves kem_pk, kem_ct and agree() to this layer). Bob sends kemKey().pk in his answer; Alice
 // replies with kemEncapsulate(pk).ct; both hold the same 32-byte shared secret for pairKey.
 // Values travel as unpadded base64url, like prekeys. rng order: keygen seed (32); randomness (64).

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The carrier's push registration (carrier.mjs setPush, sigelo-push/0; design/push.md) against a loopback
+// The carrier's push registration (carrier.mjs setPush, sigelo-push/0; apps/agent/UI-API.md "Push") against a loopback
 // relay (relay/server.mjs, relay/push.mjs) and a fake UnifiedPush distributor over HTTPS: registered at
 // every login of a started carrier, a wake POSTed when a contact writes while it is stopped (opened here
 // as the phone opens it, RFC 8291), removed with null, refused by name, nothing sent to a relay that does
@@ -28,7 +28,7 @@ setTimeout(() => { console.log(`FAIL the run did not finish in 180 s (${count} c
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (cond, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (cond()) return true; await sleep(20); } return cond(); };
 
-// The phone's push keys (WebPush.java makes them on the phone): a P-256 pair and a 16-byte auth secret.
+// A phone app's push keys (WebPush.java makes them on the phone): a P-256 pair and a 16-byte auth secret.
 const ua = createECDH('prime256v1');
 ua.generateKeys();
 const AUTH = createHash('sha256').update('sigelo push test auth').digest().subarray(0, 16);
@@ -93,12 +93,12 @@ try {
   await sleep(200);
   await alice.send('bob', 'while bob is away');
   ok(await until(() => posts.length === 1), 'bob stopped, alice writes: one POST to his endpoint');
-  ok(posts[0].url === '/upPhone?up=1' && open(posts[0].body).equals(WAKE), 'the wake opens under the phone\'s keys to WAKE (RFC 8291): no sender, no text');
+  ok(posts[0].url === '/upPhone?up=1' && open(posts[0].body).equals(WAKE), 'the wake opens under the phone push keys to WAKE (RFC 8291): no sender, no text');
   await alice.send('bob', 'again');
   await sleep(300);
   ok(posts.length === 1, 'a second message before bob is back: no second wake');
 
-  // The phone's app wakes: bob logs in, takes his mail. The same registration again changes nothing at the relay.
+  // The phone app wakes: bob logs in, takes his mail. The same registration again changes nothing at the relay.
   bob = make(B);
   bob.setPush({ endpoint: ENDPOINT, ...KEYS });
   const box = await bob.inbox();

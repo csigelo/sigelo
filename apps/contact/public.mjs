@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Public codes, contract sigelo-public/0 (design/public-invite.md): one code a business or an agent
+// Public codes, contract sigelo-public/0 (THREAT-MODEL §2.19): one code a business or an agent
 // service posts for months, each use of it a pairing request. No network here; the carrier parks,
 // fetches, answers and approves (carrier.mjs invitePublic, accept, approvePublic). Runner:
 // test-public.mjs; the relay side: relay/park.mjs.

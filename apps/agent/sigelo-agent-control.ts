@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * Remote control over the relay, the computer's side (design/apps.md §6.3, UI-API.md "Remote"):
+ * Remote control over the relay, the computer's side (UI-API.md "Remote"):
  * `sigelo-agent ui --remote --relay --name <n> [--scope read|chat|all]`.
  *
  * The page's operator carrier makes a short code named `control:<n>`; the computer prints
@@ -239,7 +239,7 @@ export async function relayControls(o: {
 // account = the control's DID); no keyring answering: plain in the file, with a warning
 // (SIGELO_KEY_PROVIDER=file: plain, =keychain: refused without one); the code accepted; prints
 // {words, operator, original}: the four words to compare with the computer's. --operator <did> (an app's profile
-// whose computers serve that operator, design/profiles.md P2): a computer whose page is another identity is
+// whose computers serve that operator, UI-API.md): a computer whose page is another identity is
 // refused other_operator after the code, its contact forgotten and the control's files deleted (exit 1).
 // `sigelo-agent control ui [--app | --no-open] [--port <p>]`: the page on 127.0.0.1 (pageServer), every
 // call a request to the computer over the relay, the state pushed (apps/contact/control.mjs).

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Presence (carrier.mjs "Presence", design/transfer.md §8 T0): the store part first (off by default,
+// Presence (carrier.mjs "Presence", THREAT-MODEL §2.17): the store part first (off by default,
 // allow and deny, own agents always, kept through a re-pair); then, with the relay checkout beside
 // apps/contact/ (SIGELO_RELAY_DIR, else ../../relay), on a loopback relay: a started carrier's marker is
 // read by an allowed contact and by its own agents, never by a denied one; a stop and a cut

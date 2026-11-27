@@ -183,7 +183,7 @@ jobs:
       - run: go vet ./... && go test ./... -v | tee "$RUNNER_TEMP/go-out" && grep -q '^ALL PASS$' "$RUNNER_TEMP/go-out"
         working-directory: go
 
-  # The key agent (apps/keyagent/, design/key-providers.md §4): its byte-exact protocol fixture, the
+  # The key agent (apps/keyagent/): its byte-exact protocol fixture, the
   # socket checks, the sidecar through it, and the contact (apps/agent test-contact.ts) and MCP
   # suites again with every key in an agent (SIGELO_TEST_KEY_AGENT=1). On Windows the named pipe runs
   # as a socket does; its ACL check is manual (apps/keyagent/README.md), not this job.

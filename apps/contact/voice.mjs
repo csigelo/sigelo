@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// A voice message (design/transfer.md "Voice"): what a chat shows at once while the recording comes by a
+// A voice message: what a chat shows at once while the recording comes by a
 // transfer, as a photo's preview does (photo.mjs). One contact message labelled VOICE_LABEL (inside the
 // pairing's end-to-end envelope, as any message), or the `voice` of a group's msg (group.mjs); either way
 //   { name, size (bytes of the file), type ('audio/webm' | 'audio/ogg' | 'audio/mp4'), sha256 (64 hex: the

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * Provider `agent` (design/key-providers.md §4): this process never holds the key and asks
+ * Provider `agent` (KEYS.md, apps/keyagent/README.md): this process never holds the key and asks
  * `sigelo-key-agent` (apps/keyagent/) over its socket. Synchronous, as every signing call site is: one
  * worker thread, started on first use and unref'd, talks to the socket; the caller blocks on
  * `Atomics.wait` and takes the reply with `receiveMessageOnPort`. The worker is an inline string,

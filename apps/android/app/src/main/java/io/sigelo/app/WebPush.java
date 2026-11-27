@@ -26,7 +26,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 /**
  * RFC 8291 (Message Encryption for Web Push) with RFC 8188 aes128gcm, the receiving side, in platform crypto only: P-256
- * ECDH, HKDF over HMAC-SHA256, AES-128-GCM (design/push.md §1 B). No Android import: apps/android/test/WebPushTest.java runs
+ * ECDH, HKDF over HMAC-SHA256, AES-128-GCM (RFC 8291). No Android import: apps/android/test/WebPushTest.java runs
  * it on a desktop JVM against RFC 8291's Appendix A and the sigelo wake vector of relay/test/push.mjs.
  *
  * The relay (relay/push.mjs) sends one thing, WAKE: 32 bytes, the same for every cause. open() → the plaintext of a

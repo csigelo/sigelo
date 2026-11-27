@@ -30,9 +30,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Stay connected (design/push.md §A): a foreground service of type specialUse while the switch is on
+ * Stay connected: a foreground service of type specialUse while the switch is on
  * (SigeloBridge "stay", SharedPreferences "stay_on", default off: one setting for the phone, not per profile). Since
- * 2026-11-25 it is no longer a mode in Settings (Built in push, PushClient, keeps the process; design/push.md §6): it
+ * v0.1.21 it is no longer a mode in Settings (Built in push, PushClient, keeps the process): it
  * runs for the wake window of the push app's wakes, and while a page turns the switch on.
  *
  * It owns no socket. The relay's connection is the page's: the carrier (MQTT, its keepalive and backoff) runs in
@@ -51,7 +51,7 @@ import org.json.JSONObject;
  * next tap asks again while Android still shows the prompt, after that it opens the app's page in the system's settings. Notifications denied: the service runs all the same; Android 13+ then shows its
  * notification nowhere but in the quick settings' list of active apps.
  *
- * The wake window (design/push.md §1 B, UnifiedPush): a push wake with the page alive starts this service with WAKE,
+ * The wake window (UnifiedPush): a push wake with the page alive starts this service with WAKE,
  * allowed from the background while the distributor holds UnifiedPush.Raise bound; it keeps the process in front for
  * WAKE_MS while the page's carrier logs in and fetches, then stops, unless the switch is on (then it runs on as above).
  */
@@ -75,7 +75,7 @@ public final class StayConnected extends Service {
         return c.getSharedPreferences("sigelo", Context.MODE_PRIVATE);
     }
 
-    /** The switch (default off since 2026-11-25: Built in push keeps the process instead, design/push.md §6; UnifiedPush.mode turns an old on off). */
+    /** The switch (default off since v0.1.21: Built in push keeps the process instead; UnifiedPush.mode turns an old on off). */
     static boolean on(Context c) {
         return prefs(c).getBoolean(ON, false);
     }

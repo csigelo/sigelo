@@ -76,7 +76,7 @@ worlds MAY refuse to attest it (SPEC §4).
 
 **Tier 1: from the operator's 25-word root.** A root has one recovery key,
 `k(S, "sigelo/v1/recovery/ed25519")` (MONERO.md §2), shared by every agent of that operator (so an
-observer can group them). On the operator's machine, network down, with `age` (or `rage`). The
+observer can group them). On an offline computer the operator keeps, network down, with `age` (or `rage`). The
 Owner's age key decrypts the backup; it stays offline with the Owner:
 
 ```sh

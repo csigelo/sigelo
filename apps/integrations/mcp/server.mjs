@@ -18,7 +18,7 @@ const INSTALLED = fileURLToPath(import.meta.url).split(sep).includes('node_modul
 const lib = (pkg, repo) => import(INSTALLED ? pkg : repo);
 const { did, parse, parseBytes, verify, SigeloError } = await lib('sigelo', '../../../ts/dist/sigelo.js');
 const id = await lib('sigelo-agent/dist/sigelo-agent.js', '../../agent/sigelo-agent.ts');
-// Every signature goes through the identity's key provider (design/key-providers.md): no handler reads a key.
+// Every signature goes through the identity's key provider (apps/agent/KEYS.md): no handler reads a key.
 const keys = await lib('sigelo-agent/dist/sigelo-agent-keys.js', '../../agent/sigelo-agent-keys.ts');
 const { withLock } = await lib('sigelo-agent/dist/sigelo-agent-monero.js', '../../agent/sigelo-agent-monero.ts');
 const { forgetIssuer } = await lib('sigelo-agent/dist/sigelo-agent-adopt.js', '../../agent/sigelo-agent-adopt.ts');
@@ -163,7 +163,7 @@ const HANDLERS = {
   sigelo_wallet_pay: ({ to, amount, purpose, ref }) => wallet(['pay', String(to ?? ''), String(amount ?? ''), String(purpose ?? ''), ...(ref ? ['--ref', String(ref)] : [])]),
   sigelo_wallet_history: ({ n }) => wallet(['history', ...(n ? [String(n)] : [])]),
 };
-// The contact tools (design/relay-plan.md §2), when sigelo-contact is installed (a dependency of
+// The contact tools (apps/contact/README.md), when sigelo-contact is installed (a dependency of
 // sigelo-agent; in a clone, npm ci in apps/agent and apps/contact/): contact.mjs answers null
 // otherwise, with one line on stderr, and a package that ships no contact.mjs gets null too. This
 // server never depends on them. Anything else wrong in them stops it: a broken install must not

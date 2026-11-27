@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * Provider `keychain` (design/key-providers.md §3): the seed sealed in the identity file under a
+ * Provider `keychain` (KEYS.md, KEYCHAIN.md): the seed sealed in the identity file under a
  * random 32-byte file key that the OS store holds (macOS keychain, Secret Service, DPAPI).
  *
  *   ct = ChaCha20-Poly1305 (RFC 8439)(file key, 12-byte nonce, seed, AAD "sigelo-wrap/1\n" ‖ head genesis key)
@@ -145,7 +145,7 @@ export function unwrap(s: Store, kc: Keychain = systemKeychain()): Uint8Array {
 }
 
 /**
- * A keeper root K_j sealed the same way (design/devices.md §5.1, a FULL device's keeper file): under the
+ * A keeper root K_j sealed the same way (DEVICES.md, a FULL device's keeper file): under the
  * file key of `account` (the operator's original DID, the item its identity's wrap uses), AAD
  * "sigelo-wrap/1\nkeeper <j>\n<recovery commitment>", so a sealed root opens for that keeper only.
  * Read back before it is returned; nothing checks K itself (the caller derives a known worker from it).

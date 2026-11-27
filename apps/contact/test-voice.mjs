@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Voice messages (design/transfer.md "Voice"; voice.mjs, voice-web.mjs, transfer-node.mjs voiceFiles): the
+// Voice messages (voice.mjs, voice-web.mjs, transfer-node.mjs voiceFiles): the
 // sigelo-voice/0 message's shape and checks, the line the CLI and MCP print, a group msg's voice, the
 // recorder over a fake MediaRecorder (format, duration, waveform, cancel, the refusals), and the
 // computer's recordings on disk (pieces, kept outside the files received, read back only from its own).

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // The self-contained app's start (app.mjs calls it with the page's globals; test-shell.mjs with fakes).
-// Profiles first (profiles.mjs, design/profiles.md P1): the registry (migrated from a single-profile
+// Profiles first (profiles.mjs): the registry (migrated from a single-profile
 // install at the first start), the dropped profiles erased, then the active one: at a start with more
 // than one, the picker (welcome.mjs pickProfile) and the lock. Then that profile alone: its platform
 // (platform-web.mjs, the Android app's platform-android.mjs), its identity (sealed in its storage), the
@@ -29,7 +29,7 @@
 // this file, given twice), the file written: the Android app into Downloads (the shell's big-write and big-land), a tab
 // downloads it → { name, where, size }. A remote profile: nothing to back up (backup_remote); its computer holds it.
 // The first run's "Restore from a backup" (setup.mjs restoreBackup) refuses an identity another profile here holds.
-// local.computers (ui.js Me → Devices and computers, a remote profile in the Android app; design/profiles.md P2): list() → { active,
+// local.computers (ui.js Me → Devices and computers, a remote profile in the Android app): list() → { active,
 // limit, computers, profile }; use(id) the switch (the lock once, a reload), add() the pairing screens after a reload,
 // forget(id) its control key gone here (the lock), → { revoke }: what to run on the computer, which keeps it until then.
 // local.unlock(opts): the shell's screen lock (none: at once); { force: true } asks it even within a minute of the last (a payment
@@ -91,7 +91,7 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
   rawP.then((r) => r?.onEvent(() => { try { router?.carrier?.wake?.(); } catch {} }, 'nudge'), () => {});
   // A push wake (UnifiedPush): mail waits at the relay; the carrier logs in at once, past any backoff.
   rawP.then((r) => r?.onEvent(() => { try { router?.carrier?.wake?.({ now: true }); } catch {} }, 'wake'), () => {});
-  // Push (Built in or UnifiedPush, design/push.md): the shell's endpoint and keys to this profile's carrier, which registers them at its
+  // Push (Built in or UnifiedPush): the shell's endpoint and keys to this profile's carrier, which registers them at its
   // relay at every login (carrier.mjs setPush, sigelo-push/0); removed there (null) once push is off or the endpoint is gone,
   // if this profile registered one (PUSHED in its storage). A computer's page (a remote profile) has no carrier here: nothing.
   let pushStore = null;
@@ -250,7 +250,7 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     },
   });
 
-  // ---- Me → Computers (design/profiles.md P2): a remote profile's computers, the one in use marked
+  // ---- Me → Computers: a remote profile's computers, the one in use marked
   const computersOf = async () => {
     const p = await profP;
     if (p.kind !== 'remote' || !raw) refuse(409, 'not_remote', 'This profile holds an identity here, not computers.');
@@ -354,7 +354,7 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
       take: async () => (await shellOf()).shareTake((await profP).id),
       drop: async () => (await shellOf()).shareDrop(),
     }) : undefined,
-    // A call (design/calls.md): fn() when the shell sees the default network change ({ev:"network"}: Wi-Fi to mobile data).
+    // A call: fn() when the shell sees the default network change ({ev:"network"}: Wi-Fi to mobile data).
     onNetwork(fn) { if (!shell || typeof fn !== 'function') return; rawP.then((r) => r.onEvent(() => { try { fn(); } catch {} }, 'network'), () => {}); },
     // Settings → About's "Reload the app": the shell loads the page again from its start; a tab reloads itself.
     async reload() { if (shell) await (await shellOf()).reload(); else reload?.(); },
@@ -383,7 +383,7 @@ export function boot({ shell = null, target, box = null, main = null, mqtt, inde
     // The code a profile added by "Join from an invite code" was made for: once, then gone (ui.js opens Enter their code with it).
     joinCode() { const c = sess.get(JOIN); if (!c) return null; sess.set(JOIN, ''); return c; },
     backup,
-    // A received file out of the app (2026-11-25): where the backup goes, by the same path.
+    // A received file out of the app: where the backup goes, by the same path.
     saveFile: async (name, bytes) => saveFile(String(name), bytes),
     saves: shell ? 'Downloads' : 'download',
     words: wordsApi(() => own, { unlock: async () => { if (raw) await raw.unlock(); }, withProfile, original: () => ownDid }),

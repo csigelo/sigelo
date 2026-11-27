@@ -31,7 +31,7 @@ import { did, keygen, parseBytes, rotate, sign, SigeloError, structure, verify, 
 
 /** The whole persistent identity. One file, 0600, written atomically. `secret` is the plain seed
  *  (hex) or, wrapped or held by a key agent, an object naming its provider: only
- *  `sigelo-agent-keys.ts` reads those, and every path here refuses them (design/key-providers.md §2.2). */
+ *  `sigelo-agent-keys.ts` reads those, and every path here refuses them (KEYS.md). */
 export interface Store {
   v: string; provider?: string; secret: string | { provider: string }; genesis: Genesis;
   rotations: Rotation[]; attestations: Attestation[]; issuers: Genesis[];

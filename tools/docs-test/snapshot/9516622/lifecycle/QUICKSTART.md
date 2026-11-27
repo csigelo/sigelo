@@ -86,7 +86,7 @@ Fine for a subagent whose identity ends with its task.
 `k(S, "sigelo/v1/recovery/ed25519")` (MONERO.md §2), and every agent of that operator carries
 its commitment; keeper-minted delegates get it automatically (MONERO.md §4.3). There is no
 per-agent recovery key: one key recovers them all (MONERO.md §9 decision 2), and an observer
-can group them by it (§4.6). On the operator's machine, networking down, with `age` (or `rage`)
+can group them by it (§4.6). On an offline computer the operator keeps, networking down, with `age` (or `rage`)
 installed (MONERO.md §4.5). The ceremony encrypts `S` to the Owner's age key; if the Owner has none
 yet, make one first. Its file is the only thing that can ever decrypt the backup, so it stays
 offline, with the Owner:

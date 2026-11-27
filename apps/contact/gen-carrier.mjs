@@ -160,7 +160,7 @@ export function build() {
 
   const out = {
     v: V,
-    about: 'sigelo-carrier/0 frames (design/relay-plan.md §11 "Wire contracts as built"; carrier.mjs header). `frames`: seal `value` as `kind` under `key` on `topic` with `nonce`; '
+    about: 'sigelo-carrier/0 frames (README.md "Contracts"; carrier.mjs header). `frames`: seal `value` as `kind` under `key` on `topic` with `nonce`; '
       + 'the result has `length` bytes and SHA-256 `sha256`, and is `hex` when given (frames of at most 4,096 bytes). Opening it gives `value` back. '
       + '`refusals`: opening `hex` as kind `read_as` under the generic key on `topic` fails with `error`, the first failing check. '
       + '`derived`: what the seeds yield, each from the formula beside it.',

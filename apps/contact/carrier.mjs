@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The MQTT carrier of sigelo-contact (design/relay-plan.md §2, §3 "Login", "Topics", "Errors"): moves
+// The MQTT carrier of sigelo-contact (README.md "How it works"; relay/README.md): moves
 // invite answers and replies and sigelo-msg/0 envelopes between contacts through a relay. The relay
 // sees random topics and ciphertext; everything here that decides who someone is runs offline.
 //
@@ -110,7 +110,7 @@
 //   c.wake({ now })                        a nudge from outside (the Android app's Stay connected: its alarm, the end of
 //                                          Doze): a started carrier retries, with its backoff, each relay in use that is
 //                                          down with no try already waiting; nothing else. now (a push wake): at once
-//   c.setPush(reg | null), c.pushStatus()  the phone's UnifiedPush endpoint and keys registered at this agent's own relay
+//   c.setPush(reg | null), c.pushStatus()  a phone app's UnifiedPush endpoint and keys registered at this agent's own relay
 //                                          (sigelo-push/0 on $sigelo/push, relay/push.mjs) at every login; null removes it
 //   await c.turnServer()                   → { urls, username, credential, exp } | null: a TURN credential from this agent's own
 //                                          relay (sigelo-turn/0 on $sigelo/turn, relay/turn.mjs), where GET /challenge says it
@@ -124,7 +124,7 @@
 // rotation made by another process is seen at once. { secret, bundle }, the seed itself, still works. store: the contact store
 // (store.mjs); state: this file's own JSON (sessions, outbox, inbox), both 0600 and written under one
 // lock file, `<state>.lock`. pathsFor(identityFile) names both beside the identity file. platform: every
-// file, lock, network and proof-of-work call (design/apps.md §4.2); platform-node.mjs's by default. onEvent(e):
+// file, lock, network and proof-of-work call (README.md "Platforms"); platform-node.mjs's by default. onEvent(e):
 // each event as it happens, messages included, and `pow` / `pow_done` around a proof-of-work search
 // (seconds to a minute on a phone: say so to the operator). keep: messages also wait in the state file for
 // inbox(), in plaintext, until taken (INBOX_MAX at most: the oldest go, counted as inbox_full); by
@@ -266,7 +266,7 @@
 //     BUSY_TTL_S, 0 for off; any message or file of theirs ends it too), contacts() busy, an event `busy`. Sent
 //     only through busy() (BUSY_SEND), with expires now + BUSY_TTL_S (a stale one goes unsent), and only to a
 //     contact whose receipt said busy: true (busy_peer): an earlier version would show it as a message.
-//   - Presence (design/transfer.md §8 T0): a started carrier sets the will $sigelo/presence on its
+//   - Presence (THREAT-MODEL §2.17): a started carrier sets the will $sigelo/presence on its
 //     CONNECT and publishes, to each contact that may see it (store.mjs presenceOf: own agents
 //     always, others when the owner allowed them), one marker on presenceTopic(K, own original DID,
 //     contact's): a kind 6 frame under presenceKey(K, …), {v: "sigelo-presence/0", state: "online",
@@ -315,7 +315,7 @@ import { Contacts, OPERATOR_CTX, TIERS } from './store.mjs';
 import { ENROL_TTL_MAX, SHORT_TTL, SHORT_TTL_MAX, SHORT_TTL_MIN, codeHash, codeKind, didWords, fingerprint, formatShort, giftHash, isEnrolCode, makeShort, normaliseShort, relayTag, stripEnrol, tagOf } from './short.mjs';
 import { REGISTRY_URL, RELEASE_DID, loadRegistry, readTable, remember, resolveTag } from './relays.mjs';
 import { FILE_LABEL, MAX_FILE, assemble, checkChunk, checkManifest, chunkHead, isManifest, safeName, splitFile } from './file.mjs';
-// Every file, lock, network and CPU call goes through a platform (design/apps.md §4.2): Node's by default.
+// Every file, lock, network and CPU call goes through a platform (README.md "Platforms"): Node's by default.
 import { platform as nodePlatform } from './platform-node.mjs';
 export { proxyFor } from './platform-node.mjs';
 
@@ -323,7 +323,7 @@ export const V = 'sigelo-carrier/0';
 export const DEFAULT_RELAY = 'relay.sigelo.ai', MQTT_PORT = 8883, NOTICE = '$sigelo/notice';
 export const LABEL_PREKEYS = 'sigelo-msg/0 prekeys', KIND_NOTICE = 4, KIND_PREKEYS = 5, TYP_NOTICE = 'contact-notice';
 export const OPERATOR_LABEL = 'sigelo-operator/0';
-// The relay login (relay-plan §3 "Login"): the body GET /challenge answers and the agent signs. A
+// The relay login: the body GET /challenge answers and the agent signs. A
 // type of its own, never a SPEC §5.2 challenge: a world that passed the relay's nonce on as its own
 // challenge would get the agent's relay login back from sign-challenge.
 export const LOGIN_V = 'sigelo-relay/0', TYP_LOGIN = 'relay-login';
@@ -334,18 +334,18 @@ export const RENEW_RETRY = 60;
 // The relay closes a connection whose SUBSCRIBE holds more topics (relay/mailbox.mjs MAX_TOPICS).
 const MAX_TOPICS = 128;
 // An invite topic holds 4 messages and 64 KB (relay/mailbox.mjs INVITE_BYTES); a bundle at most 64
-// items (relay-plan §3 "Login"), so no honest contact's chain passes 64 rotations.
+// items (the relay login's limit), so no honest contact's chain passes 64 rotations.
 export const INVITE_BYTES = 64 * 1024, MAX_ROTATIONS = 64;
 // A contact notice that reaches its chain's check costs SPEC §9 twice (here, then in store.admit):
-// 0.27 s each for 64 rotations on a phone-class CPU (the audit's measurement, 2026-10-13), and
+// 0.27 s each for 64 rotations on a low-end ARM64 CPU (measured), and
 // whoever holds K can send one: the contact, or a thief of either side's state, since K outlives a
 // recovery. At most NOTICE_CHECKS of one contact's are checked per RESYNC (an honest contact sends
 // one per rotation, and again at most hourly), and the last REFUSED_NOTICES refused after that
 // check are refused again unchecked (#onContactNotice).
 export const NOTICE_CHECKS = 4, REFUSED_NOTICES = 16;
 // A proof of work (relay/pow.mjs, sigelo-relay-pow/1: Argon2id) must be sent within the
-// challenge's 300 s. One evaluation at 64 MiB, 3 passes takes POW_EVAL_MS on a phone-class ARM64
-// CPU (hash-wasm in Node or a Worker, a big core; measured 2026-11-13; 1.64 s on a little core):
+// challenge's 300 s. One evaluation at 64 MiB, 3 passes takes POW_EVAL_MS on a low-end ARM64
+// CPU (hash-wasm in Node or a Worker, a big core, measured; 1.64 s on a little core):
 // 6 bits take 31 s on average, 8 bits 2 minutes, 10 bits 8. A relay asking more than POW_MAX is
 // refused rather than spun for, and the search stops at POW_MS, before the challenge expires. Any
 // host can be named by a stranger's code, so a relay other than this agent's own (SIGELO_RELAY)
@@ -357,7 +357,7 @@ export const POW_V = 1, POW_COST = Object.freeze({ m: 65536, t: 3, p: 1 });
 // An honest relay asks once per identity, and again only if it forgot it. Without a count, a relay
 // that grants a proven login, closes, then refuses the next login's SUBSCRIBE `pow` had this client
 // search again at each reconnection, without end: success reset every other bound.
-// The cap is for this client's AUTOMATIC retries only (design/profiles.md §6): a search the human
+// The cap is for this client's AUTOMATIC retries only: a search the human
 // started (`started: 'user'`) past it answers pow_confirm, and one confirmed (`'confirmed'`) goes.
 export const POW_SEARCHES = 3;
 const ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
@@ -387,11 +387,11 @@ const GROUPS_MAX = 256;
 export const DEVICE_LABEL = 'sigelo-device/1', DEVICE_SEND = Symbol('sigelo-device send');
 const DEVICES_MAX = 16;
 // Transfers (transfer.mjs, sigelo-transfer/0): the introduction of a big file, sent direct or over Tor
-// (design/transfer.md §3). The same: kept apart in st.transfers (at most TRANSFERS_MAX) for the transfer
+// (apps/agent/TRANSFER.md). The same: kept apart in st.transfers (at most TRANSFERS_MAX) for the transfer
 // engine, never logged (an offer carries addresses, an onion message a client key); sent only with TRANSFER_SEND.
 export const TRANSFER_LABEL = 'sigelo-transfer/0', TRANSFER_SEND = Symbol('sigelo-transfer send');
 const TRANSFERS_MAX = 256;
-// Calls (call.mjs, sigelo-call/0; design/calls.md §2): the signalling of a voice call. Kept apart in memory (at most
+// Calls (call.mjs, sigelo-call/0; THREAT-MODEL §2.20): the signalling of a voice call. Kept apart in memory (at most
 // CALLS_MAX) for the page's Line (page.mjs) or watch's answer, in the process that received them; never logged and never
 // in the state file (an SDP carries addresses and a DTLS fingerprint; a ring lives 60 s, a restart cannot wait for
 // another process anyway). Sent only with CALL_SEND.
@@ -399,7 +399,7 @@ export const CALL_LABEL = 'sigelo-call/0', CALL_SEND = Symbol('sigelo-call send'
 const CALLS_MAX = 64;
 // Seen receipts (the header's): sent only with SEEN_SEND, never an inbox message.
 export const SEEN_LABEL = 'sigelo-seen/0', SEEN_SEND = Symbol('sigelo-seen send');
-// UnifiedPush (design/push.md, relay/push.mjs): the phone's endpoint and keys, registered with this agent's own
+// UnifiedPush (apps/agent/UI-API.md "Push", relay/push.mjs): a phone app's endpoint and keys, registered with this agent's own
 // relay over its session (setPush), where GET /challenge says the relay takes them.
 export const PUSH_TOPIC = '$sigelo/push', PUSH_V = 'sigelo-push/0';
 // TURN (relay/turn.mjs): a credential for coturn on this agent's own relay host, asked over the session.
@@ -412,7 +412,7 @@ export const BUSY_LABEL = 'sigelo-busy/0', BUSY_SEND = Symbol('sigelo-busy send'
 // contact's name was made up here (name_from "auto": an unnamed invite or accept, a public code's) or came from them
 // before; a name the human gave or changed is never replaced. The name: at most THEIR_NAME_MAX characters, trimmed, no
 // control or bidi characters, else ignored; one another contact holds gets " (2)", " (3)"….
-// Kinds (2026-11-26): the same receipt carries kind "agent" or "desk" (a support desk) when this side says it is one
+// Kinds: the same receipt carries kind "agent" or "desk" (a support desk) when this side says it is one
 // (selfKind: sigelo-agent says agent by default, --kind desk; a person's app says nothing). The receiver keeps it as the
 // contact's kind_peer (contacts()); the page shows it, and the human's own choice wins (page.mjs "Kinds"). An earlier
 // version ignores the member, as it ignores busy and host; the pairing card (invite.mjs) refuses an unknown field, so
@@ -483,7 +483,7 @@ const INTERNAL = new Set(['lock', 'state', 'store', 'identity', 'time']);
 const LOGIN_CHECKS = new Set(['rate', 'password', 'challenge_unknown', 'challenge_expired', 'bundle', 'sig', 'retired_recovery', 'client_id', 'closed', 'pow', 'relay_full', 'client_old']);
 // Refusals of an invite reply that a later round may get past: the reply stays queued.
 const REPLY_RETRY = new Set(['rate', 'relay_full', 'quota_messages']);
-// $sigelo/notice codes that refuse the publish, or the SUBSCRIBE, in flight (relay-plan §3 "Errors").
+// $sigelo/notice codes that refuse the publish, or the SUBSCRIBE, in flight (relay/README.md).
 const PUBLISH_CODES = new Set(['push', 'too_large', 'quota_storage', 'quota_messages', 'rate', 'relay_full', 'pow', 'no_reader', 'presence_taken', 'presence_will', 'presence_full', 'public_cap', 'public_paused', 'public_revoked', 'public_once']);
 // A contact's envelope this agent cannot open for want of its epoch asks the writer for a new epoch
 // by a fresh prekey bundle (RESYNC_CHECKS), at most once in this many seconds per contact after
@@ -837,7 +837,7 @@ function recovers(c, bundle, fresh) {
   });
 }
 
-// ---------------------------------------------------------------- relay login (plan §3 "Login")
+// ---------------------------------------------------------------- relay login
 
 /**
  * GET /challenge's `pow` → its cost { m, t, p } when this client computes it: {v: 1, alg:
@@ -852,7 +852,7 @@ export function powCost(fn) {
 /**
  * The first c (0, 1, 2, …) with Argon2id(password = "sigelo-relay-pow/1\n" ‖ host ‖ original DID ‖
  * nonce ‖ c, salt = SHA-256(nonce) cut to 16 bytes; cost's m KiB, t passes, 1 lane; 32 bytes)
- * starting with `bits` zero bits (relay-plan §3 "Proof of work", relay/pow.mjs), or null once
+ * starting with `bits` zero bits (relay/pow.mjs), or null once
  * Date.now() passes `deadline`. 0 bits: "0", nothing evaluated. pow: the platform's search (Node's
  * yields to the event loop after each evaluation, ~0.5 s on a phone, so the process's connections,
  * keepalives and other identities carry on during a search of minutes); cost: powCost's.
@@ -1147,7 +1147,7 @@ export class Carrier {
     if (selfKind !== null && !KINDS.includes(selfKind) && typeof selfKind !== 'function') throw new TypeError('selfKind: agent, desk, person, a function → one, or null');
     this.#selfKind = typeof selfKind === 'function' ? selfKind : () => selfKind;
     if (!TRANSPORTS.includes(transport)) throw new TypeError(`transport: ${TRANSPORTS.join(', ')}`);
-    // The platform (design/apps.md §4.2, platform-node.mjs): files, lock, network, proof of work.
+    // The platform (README.md "Platforms", platform-node.mjs): files, lock, network, proof of work.
     if (typeof platform?.files?.read !== 'function' || typeof platform.transact !== 'function' || typeof platform.fetch !== 'function' || typeof platform.mqtt !== 'function'
       || typeof platform.flush !== 'function' || !Array.isArray(platform.transports)) {
       throw new TypeError('platform: { files, path, flush, transact, owner, fetch, mqtt, transports, pow, env } (platform-node.mjs)');
@@ -1672,7 +1672,7 @@ export class Carrier {
       events.push({ type: 'device', from: c.did, name: c.name });
     } else {
       // last_resort: the epoch began on the last-resort prekey, which may serve many epochs: weaker
-      // forward secrecy (plan §3 "Prekeys"), and routine for a while after a rotation (#next).
+      // forward secrecy (prekeys.mjs), and routine for a while after a rotation (#next).
       const id = idOf('sigelo-msg-id/0', c.did, r.epoch, r.n);
       const m = { id, from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now, last_resort: r.last_resort };
       received(st, id, c.did, now);
@@ -1738,7 +1738,7 @@ export class Carrier {
     fail('operator', 'an operator message is {hints}, {asks} or {proof}');
   }
 
-  // ---- files (file.mjs; design/human-ui-plan.md §4)
+  // ---- files (file.mjs)
 
   // A FILE_LABEL message from contact c, opened (r). The manifest is kept in the state (files,
   // under a key of the contact and the file's id), each chunk under filesDir/.partial/<key>/<i>
@@ -2034,7 +2034,7 @@ export class Carrier {
       before = structuredClone(store.load().s.contacts);
       res = checkAnswer(answer, store, now, (pk) => { const k = kemEncapsulate(pk); ct = k.ct; return k.shared; });
     } catch (e) {
-      // Single use, whatever the outcome (plan §3 "Invite code"): acknowledging this delivery
+      // Single use, whatever the outcome (invite.mjs): acknowledging this delivery
       // kills the topic at the relay, so no other answer can come. Written now: the state is not
       // saved after a refusal. A write that fails is this process failing: not acknowledged.
       try { store.take('invites', nonce, now); } catch {}
@@ -2542,7 +2542,7 @@ export class Carrier {
   #pushSays(x) { this.#pushState = x; this.#emit({ type: 'push', ...x }); }
 
   /**
-   * The phone's UnifiedPush registration for this agent's own relay (design/push.md, relay/push.mjs): { endpoint (https),
+   * A phone app's UnifiedPush registration for this agent's own relay (apps/agent/UI-API.md "Push", relay/push.mjs): { endpoint (https),
    * p256dh, auth (base64url) } to register, null to remove it there; sent at once when connected, else at the next login,
    * and again at every login. Never called: nothing is sent (a computer, the GTK app). → pushStatus().
    */
@@ -2701,7 +2701,7 @@ export class Carrier {
     }
     if (ch.did !== me.current_did) fail('challenge', 'the login body names another DID');
     // relay is the relay's own name: a login for any other would let whoever answered here log in
-    // as this agent there (relay-plan §3 "Login").
+    // as this agent there (the relay login).
     if (ch.relay !== relay) fail('challenge', `relay ${JSON.stringify(ch.relay)} is not this relay's name, ${relay}`);
     // Signed as built here, never as received; its typ is one no challenge signer produces (a SPEC
     // §5.2 challenge for this relay, got by a world from sign-challenge, logs in nobody).
@@ -2752,7 +2752,7 @@ export class Carrier {
     return { username: me.current_did, clientId: clientIdOf(me.did), password, pow, until: issued + POW_MS, push: r.body?.push === PUSH_V, turn: r.body?.turn === TURN_V };
   }
 
-  // How long this agent's own relay keeps a message on the free tier (relay.json, plan §11), when
+  // How long this agent's own relay keeps a message on the free tier (relay.json), when
   // the constructor was not told: asked once, beside the first login's challenge. Any failure (no
   // such file, a relay on loopback, a value out of range) keeps RETENTION_DAYS. Before the first
   // claim, so the weeks claimed behind (#weeks) follow it.
@@ -3342,7 +3342,7 @@ export class Carrier {
     return { status: 'waiting', did: code.did, relay: code.relay, detail: 'answer delivered; the pairing completes when the inviter\'s agent next connects' };
   }
 
-  // A public code (sigelo-public/0, design/public-invite.md): a version 2 long code parked at the
+  // A public code (sigelo-public/0, THREAT-MODEL §2.19): a version 2 long code parked at the
   // relay under a PUB code, for months (ttl up to PUBLIC_TTL_MAX), by an identity on Pro (the relay
   // refuses public_pro otherwise). Its answer topic is claimed first. cap: new chats a day (the
   // relay's and this agent's: PUBLIC_CAP); open: approved at once, no request (an agent service
@@ -3969,7 +3969,7 @@ export class Carrier {
   }
 
   /**
-   * The human's "Try now" (design/profiles.md §6): a login now at each relay in use that is not
+   * The human's "Try now": a login now at each relay in use that is not
    * connected, as a search they started: past the day's POW_SEARCHES it throws pow_confirm, and
    * { confirmed: true } goes on. → { tried: [relays] }; throws as the login does.
    */

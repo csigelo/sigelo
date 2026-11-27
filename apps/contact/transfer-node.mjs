@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Transfers on Node (design/transfer.md, apps/agent/TRANSFER.md): transfer-engine.mjs's records, verbs
+// Transfers on Node (apps/agent/TRANSFER.md): transfer-engine.mjs's records, verbs
 // and Engine over this machine's disk, the file sent read in place, and the Tor path (a tor daemon's
 // control and SOCKS ports; nothing is ever installed for it); the direct path is sigelo-transfer,
 // loaded only when a transfer starts. The protocol is transfer.mjs's.
@@ -23,9 +23,9 @@
 // them. A finished file is placed as send-file places one (<identity>.files/<contact>-<16 hex>/<sha256[0..8]>-<name>),
 // never opened, and given to inbox as one item {type: "file", …, transfer: id}.
 //
-// The direct switch (design §7): direct gives the contact this agent's public and LAN addresses. On
+// The direct switch (TRANSFER.md "Consent and the direct switch"): direct gives the contact this agent's public and LAN addresses. On
 // for own contacts (tier own or ours), asked once for the others (direct_ask until a yes or a no is
-// kept); off: Tor, else no path. The accept rule (design §10.2): transfer-engine.mjs. Tor: settings.tor
+// kept); off: Tor, else no path. The accept rule: transfer-engine.mjs. Tor: settings.tor
 // (default on), effective only when a tor daemon answers (SIGELO_TOR: "<control host:port>[,<socks
 // host:port>]", default 127.0.0.1:9051,127.0.0.1:9050; "off": none; SIGELO_TOR_PASSWORD for a
 // HashedControlPassword). STUN: SIGELO_STUN, host:port, comma-separated ("" = host candidates only),
@@ -187,7 +187,7 @@ export class Engine extends E.Engine {
   }
 }
 
-// ---------------------------------------------------------------- Tor (design §5a)
+// ---------------------------------------------------------------- Tor
 
 /** SIGELO_TOR → { control: [host, port], socks: [host, port], password } | null ("off"). */
 export function torConfig(env = process.env) {

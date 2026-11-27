@@ -120,7 +120,7 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
         got.push(...(JSON.parse((await cli('pal', 'inbox', '--wait', '5')).stdout || '{"messages":[]}') as { messages: typeof got }).messages);
       }
       ok('the watcher sent both, well before its 60 s round: pal gets the message and the file', got.some((m) => m.content === 'reply while watched') && got.some((m) => m.type === 'file' && m.name === 'note.txt'), JSON.stringify(got));
-      // the agent-setup feedback, point 4: invite and accept beside the watcher go through it (never "stop it first"); the
+      // Invite and accept beside the watcher go through it (never "stop it first"); the
       // watcher keeps its one session. A fresh zed: alice invites through the watcher, zed accepts; zed invites, alice
       // accepts through the watcher.
       await cli('zed', 'init', '--no-recovery');

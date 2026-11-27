@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Several computers in a remote profile (design/profiles.md P2): each paired once, by code or scan, the one
+// Several computers in a remote profile: each paired once, by code or scan, the one
 // in use marked. All of a profile's computers serve its operator: a computer whose page is another
 // identity is refused `other_operator` when it is paired (and its answers refused if it changes later).
 // The list lives in the profile's own localStorage (profiles.mjs prefixed), no secret in it:

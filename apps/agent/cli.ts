@@ -22,7 +22,7 @@ import * as door from './sigelo-agent-pass.ts';
 import * as service from './sigelo-agent-service.ts';
 import * as host from './sigelo-agent-host.ts';
 
-// The first thing --help shows (the agent-setup feedback, point 7: models invented verbs from the rest of it).
+// The first thing --help shows (models invented verbs from the rest of it).
 export const GIVEN = `You were given a code?
   ENROL-K7F3-Q9ZP, from your operator      → sigelo-agent init --enrol <code> --wait 60   (enrol: this machine
                                              becomes your operator's agent; then sigelo-agent enrol --finish)
@@ -146,7 +146,7 @@ if (argv[0] === 'pair') argv[0] = 'accept';
 if ((argv[0] === 'accept') && argv.includes('--code')) { const i = argv.indexOf('--code'); argv.splice(i, 1); }
 const [cmd, ...rest] = argv;
 if (cmd === '--version' || cmd === '-v') { console.log(contact.version()); process.exit(0); }
-// Codes given to the wrong verb, said in one line before anything runs (the agent-setup feedback, points 5 and 7).
+// Codes given to the wrong verb, said in one line before anything runs (models gave codes to the verb they guessed).
 {
   // The shape of apps/contact/short.mjs isEnrolCode, here before the contact library loads.
   const isEnrolCode = (t: string): boolean => /^\s*ENROL[\s\-\u2010-\u2015\u2212]*[0-9A-Za-z]/i.test(t);
@@ -214,7 +214,7 @@ try {
         if (rest.includes('--recovery') || rest.includes('--no-recovery')) usage('init --enrol: no --recovery: the worker this machine becomes commits to the operator\'s seed\'s recovery key');
         await contact.exit(await enrol.initEnrol(path, code, rest));
       }
-      // Over an identity here: refused in one line, never "move it away" (the agent-setup feedback, point 3); --force keeps it as .bak
+      // Over an identity here: refused in one line, never "move it away" (models deleted worker keys on that advice); --force keeps it as .bak
       // (below, once the command line is known good: a refused one moves nothing).
       if (existsSync(path) && !rest.includes('--force')) usage(`init: ${enrol.alreadyHere(path)}`);
       const recovery = flag('--recovery');
@@ -253,7 +253,7 @@ try {
       break;
     }
     case 'whoami': {
-      // A worker says whose (the agent-setup feedback, point 6: a model read the identity file, key and all, to find out).
+      // A worker says whose (a model read the identity file, key and all, to find out).
       const store = load(), w = enrol.workerOf(path, store);
       out({ did: did(id.head(store)), genesis: id.head(store), chain: id.chainOf(store), attestations: store.attestations.length, ...(w && { worker: w.worker, operator: w.operator.did, operator_name: w.operator.name, tier: w.operator.tier }) });
       if (w) note(`worker ${w.worker ?? '?'} of ${w.operator.name ?? 'your operator'} (${w.operator.did}); its messages here: ${w.operator.tier ?? 'not paired yet'}`);
@@ -354,7 +354,7 @@ try {
       break;
     }
     default: {
-      // An unknown verb: the nearest by edit distance, one line (the agent-setup feedback, point 7); --help and none: everything.
+      // An unknown verb: the nearest by edit distance, one line (models guess verbs); --help and none: everything.
       const near = cmd !== undefined && !cmd.startsWith('-') ? nearest(cmd) : null;
       if (near !== null) { note(`${JSON.stringify(cmd)} is not a verb: did you mean ${near}? (sigelo-agent --help lists them, a code you were given first)`); process.exit(2); }
       if (cmd !== undefined && !['--help', '-h', 'help'].includes(cmd)) { note(`${JSON.stringify(cmd)} is not a verb`); console.error(GIVEN); process.exit(2); }

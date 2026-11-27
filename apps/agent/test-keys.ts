@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Key providers, milestone K1 (design/key-providers.md §2, §7): the provider interface over the
+// Key providers, milestone K1 (KEYS.md): the provider interface over the
 // plain file. A file from the test seeds signs byte for byte as before; "provider": "file" and no
 // provider both work; an unknown provider, provider keychain with no store answering, provider
 // agent with no agent answering and the core's plain-key path refuse by name and write nothing; a

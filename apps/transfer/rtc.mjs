@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// sigelo-transfer: the direct path of a transfer (design/transfer.md §2, §6), one WebRTC data channel
+// sigelo-transfer: the direct path of a transfer (apps/agent/TRANSFER.md), one WebRTC data channel
 // between two agents, on werift (pure TypeScript: ICE, DTLS, SCTP; no native code, so the build stays
 // reproducible). Kept in its own package so sigelo-contact's dependencies stay as they are;
 // apps/contact/transfer-node.mjs imports it only when a transfer starts, and goes without it (Tor only)
@@ -102,7 +102,7 @@ export async function peer({ stun = [], turn = null, gatherMs = 3000, policy = '
   let dc = null, want = null, gotDc;
   const dcP = new Promise((r) => { gotDc = r; });
   pc.onDataChannel.subscribe((ch) => {
-    // Only the channel this attempt named; any other is closed (design §3 "Binding").
+    // Only the channel this attempt named; any other is closed (the binding).
     if (want === null || ch.label !== want || dc) { try { ch.close(); } catch {} return; }
     dc = ch; gotDc(ch);
   });

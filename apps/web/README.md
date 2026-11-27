@@ -21,10 +21,10 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `index.html` | The page: `ui.js`, its CSS and icon, an import map (the one inline script), `app.mjs` |
 | `app.mjs` | Start: `boot.mjs` with the page's globals; sets `globalThis.sigeloLocal` for `ui.js` |
 | `boot.mjs` | The start itself: the profiles, the picker, the active profile's platform, identity and router (or remote form, or first run); `sigeloLocal` with `profiles` |
-| `computers.mjs` | A remote profile's computers (design/profiles.md P2): the list, the migration of today's one as c1, keys and databases per computer, `other_operator` |
-| `profiles.mjs` | Profiles (design/profiles.md P1): the registry (`sigelo-app`, `profiles.json`), the migration of a single-profile install, per-profile storage names, the wipe |
+| `computers.mjs` | A remote profile's computers: the list, the migration of today's one as c1, keys and databases per computer, `other_operator` |
+| `profiles.mjs` | Profiles: the registry (`sigelo-app`, `profiles.json`), the migration of a single-profile install, per-profile storage names, the wipe |
 | `router.mjs` | The `local` backend: `call(method, path, body)` → `{status, body}`, `onChange`, `mode` |
-| `platform-web.mjs` | The browser platform of sigelo-contact (design/apps.md §4.2) |
+| `platform-web.mjs` | The browser platform of sigelo-contact |
 | `pow-worker.mjs` | The relay login's proof of work, in a module Worker |
 | `platform-stub.mjs` | Loaded instead of `apps/contact/platform-node.mjs` (import map): no Node default in a page |
 | `platform-android.mjs` | In the Android app: the bridge (`sigelo-bridge/0`), the shell's fetch, MQTT and key, its lock settings, notifications and their open event |
@@ -35,7 +35,7 @@ node apps/web/test-shell.mjs    # the Android app's page side over a fake shell 
 | `seed.mjs` | Restore from seed: `restoreInto` (derive with `apps/contact/restore.mjs`, seal, write; the network held), `seatOf` for the router |
 | `create.mjs` | Create my identity: `createInto` (commit with `apps/contact/create.mjs`, then sealed as `seed.mjs` writes a restore) |
 | `backup.mjs` | The backup file (`sigelo-backup/0`, `.sbk`): a profile encrypted under the words password (`words-lock.mjs` `lockBytes`), written to Downloads or downloaded; restored as the same device, every session afresh at its first start; `sigeloLocal.backup` |
-| `words.mjs` | The words password (design/apps-seed.md §8): the kept words (`apps/contact/words-lock.mjs`, sealed as kind `words`), `sigeloLocal.words`, the guards of profile removal and the seat |
+| `words.mjs` | The words password: the kept words (`apps/contact/words-lock.mjs`, sealed as kind `words`), `sigeloLocal.words`, the guards of profile removal and the seat |
 | `copy.mjs` | The vendoring: walks the import graph, copies each file byte for byte, writes `vendor.json` |
 | `vendor.json` | Every vendored file, its source and SHA-256 (committed; `vendor/` is not) |
 | `test-web.mjs`, `test-shell.mjs` | The tests, in Node, through the same import map (`test-fakes.mjs`: IndexedDB, Worker) |
@@ -81,7 +81,7 @@ The app holds one identity file (sigelo-agent's JSON, key included): one made fr
 or the file a computer wrote for this device (`sigelo-agent device scan`, SAFE), imported under the
 welcome's Advanced; the
 operator's file (FULL) it refuses, and `router.start()` refuses FULL without a seat in a signed list
-(`full_import`): FULL comes from the 25 words (design/apps.md §18). It is kept sealed: AES-256-GCM under a WebCrypto key generated here,
+(`full_import`): FULL comes from the 25 words. It is kept sealed: AES-256-GCM under a WebCrypto key generated here,
 non-extractable, stored in IndexedDB's key store. That protects a copy of the app's storage, not the
 key from a script running in this origin (THREAT-MODEL §3.12). In the Android app the platform has a
 sealer: the file is sealed under an AndroidKeyStore key instead (`identity.keystore`). Contacts, carrier state, history and the page's data are
@@ -99,7 +99,7 @@ switch, an add and a removal ask the lock once; a removal is recorded first, the
 
 ## Computers (computers.mjs, shell.mjs)
 
-A remote profile's computers (design/profiles.md P2), in its localStorage `sigelo-computers` (no secret): `c1` keeps the
+A remote profile's computers, in its localStorage `sigelo-computers` (no secret): `c1` keeps the
 keys and database of before (`sigelo-control`, `sigelo-control-relay`, the profile's database); computer `<cid>` has
 `sigelo-control:<cid>`, `sigelo-control-relay:<cid>` and database `<profile database>-<cid>`, its blobs sealed naming it
 (platform-android.mjs `computerBridge`). `remoteBackend` opens the one in use; none, or one being added: the pairing

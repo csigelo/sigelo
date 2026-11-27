@@ -30,9 +30,9 @@ export const RELAY_LIVE = true;
 // will redirect once its DNS points to us. The issuer DID is not listed here: it is computed from
 // world/genesis.json, and site/test/run.mjs checks that SECURITY.md names it.
 //
-// DOMAINS, HOSTS, REPOSITORIES: the table of design/relay-plan.md §1, what sigelo.ai says
+// DOMAINS, HOSTS, REPOSITORIES: the one table of names, what sigelo.ai says
 // (relay/site/build.mjs keeps a copy; relay/site/test.mjs compares the two) and what sigelo.io says
-// once RELAY_LIVE. sigelo.dev is reserved for a self-hosted code forge (decided 2026-10-24; it was
+// once RELAY_LIVE. sigelo.dev is reserved for a self-hosted code forge (it was
 // a pending redirect to sigelo.io before).
 export const DOMAINS = [
   { name: 'sigelo.io', role: 'content', what: 'protocol' },

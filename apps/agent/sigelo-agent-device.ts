@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * Devices (DEVICES.md, design/devices.md D1–D3): this account on a phone or a second computer, by QR.
+ * Devices (DEVICES.md): this account on a phone or a second computer, by QR.
  * SAFE: worker i of the operator's keeper root, its own DID, tier own, its operator attestation 14
  * days. FULL (--full, "type FULL"): the same, plus the operator identity and the keeper root K_j,
  * sent once end to end after the words (online) or sealed in the frames (offline); written on the

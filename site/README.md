@@ -111,7 +111,7 @@ sets its own short `max-age`). Which content type Pages sends for `.md` was not 
 
 ## Before deploying (decision D1)
 
-Decided 2026-10-01: the account **`csigelo`** (no other name),
+The account is **`csigelo`** (no other name),
 the domain **sigelo.io**, the general e-mail **the contact address**. Still open: a display name
 beyond the handle (if any), the `security@sigelo.io` mailbox and its age recipient, the vendor
 DID ceremony, prices and hours, hosting and DNS.

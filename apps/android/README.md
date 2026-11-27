@@ -3,7 +3,7 @@
 
 The page of `sigelo-agent ui` as an Android app: a WebView around [apps/web](../web/README.md) and a
 small bridge in Java for what a page cannot do. No AndroidX, no dependency but the platform; minSdk 28
-(Android 9), targetSdk 35. Design: design/apps.md §8. No action bar: the page's own top bar is the
+(Android 9), targetSdk 35. No action bar: the page's own top bar is the
 top, the status and navigation bars take its background; Reload is in Settings → About.
 
 ## The first run
@@ -34,8 +34,8 @@ name it; a 12-character code always names its own relay).
 
 ## Profiles
 
-Up to 8 profiles, each an identity (or a computer's page) with its own storage and keystore keys
-(design/profiles.md P1). An install of before becomes Profile 1 as it is (nothing resealed). With more
+Up to 8 profiles, each an identity (or a computer's page) with its own storage and keystore keys.
+An install of before becomes Profile 1 as it is (nothing resealed). With more
 than one, the app starts on a picker (name, four words, what it holds), then the lock. Me → Profiles:
 switch (the lock once; the new profile asks nothing more), rename, add (its first run, with "Back to my
 profiles"), remove: a profile holding an identity needs "I have the 25 words" ticked and its name typed,
@@ -43,7 +43,7 @@ then the lock; its storage and its keystore keys are erased (a computer keeps th
 there: `ui --revoke-control <name>`). Only the profile in use connects. The menu's former form switch,
 which erased everything, is gone.
 
-A remote profile holds up to 8 computers (design/profiles.md P2), one in use. Me → Connect → Computers: switch (the lock
+A remote profile holds up to 8 computers, one in use. Me → Connect → Computers: switch (the lock
 once), add (the pairing screens: code or scan), forget (the lock; its control key goes from this phone; revoke it on
 the computer: `ui --revoke-control <name>`). A computer serving another identity is refused `other_operator`. Each
 computer's text or control identity is sealed under the profile's keys, a blob naming that computer (version 2,
@@ -83,7 +83,7 @@ new phone. THREAT-MODEL §3.12 says what this does not defend.
 
 ## Stay connected
 
-*Since 2026-11-25 no longer a choice in Settings: Built in push (below) keeps the process instead; this service
+*Since v0.1.21 no longer a choice in Settings: Built in push (below) keeps the process instead; this service
 still runs the push app's wake window.* Stay connected (off by default; one setting for the phone): the app keeps
 its relay connection while minimised, so messages arrive and a call can ring. StayConnected.java is a
 foreground service of type `specialUse` that owns no socket: the connection is the page's (the carrier
@@ -108,7 +108,7 @@ Settings → Notifications chooses the push mode for the phone: Built in (the de
 connected (above) is no longer a choice: Built in keeps the process the same way, and a phone that had it on
 starts in Built in (Push → Push app, Off stays Off).
 
-**Built in** (design/push.md §6, PushClient.java, Ntfy.java): the app holds one HTTPS stream itself, the ntfy JSON
+**Built in** (PushClient.java, Ntfy.java): the app holds one HTTPS stream itself, the ntfy JSON
 stream of its own topic on `push.sigelo.ai` (`up` + 12 random `[A-Za-z0-9]`, the length ntfy takes as UnifiedPush),
 in a foreground service of type `specialUse` that survives a swipe-away (`stopWithTask` false, `START_STICKY`, a 1 s
 restart alarm at `onTaskRemoved`) and starts at boot and after an update (`PushClient$Boot`, `RECEIVE_BOOT_COMPLETED`).
@@ -121,7 +121,7 @@ in asks for notifications, then once for the battery exemption, each after one l
 mode, the first run asks for the exemption once too (refused: Settings' row only). Force-stopped: nothing
 until the app is opened again.
 
-**Push app** (design/push.md §1 B) hands the connection to the user's UnifiedPush app (a "distributor": ntfy from F-Droid,
+**Push app** hands the connection to the user's UnifiedPush app (a "distributor": ntfy from F-Droid,
 NextPush, Sunup, Conversations), which holds one for all its apps; ntfy users without a server of their own
 set it to `push.sigelo.ai` (relay/deploy/ntfy/README.md). UnifiedPush.java is the connector, written against
 the spec (AND_3) without the library (no Kotlin, no Tink, no AndroidX): it finds the distributors (receivers
@@ -140,7 +140,7 @@ follow, with names. With no page (swiped away, or not opened since the phone sta
 app is open. No push app installed: Settings says so, with what to install, and offers Built in. Not
 yet measured on a phone: the delay of a wake, a distributor's own battery cost.
 
-Choices where design/push.md left one: the wake's 32 bytes are `"sigelo-push/0 wake"` and zeros, compared after
+Choices left open by the push design: the wake's 32 bytes are `"sigelo-push/0 wake"` and zeros, compared after
 opening; the relay always sends VAPID (RFC 8292) and the connector gives no VAPID key at REGISTER (optional in AND_3);
 the registration rides the MQTT session (`$sigelo/push`, offered by GET /challenge), sealed at rest under a key file
 beside the relay's database, 90 days; one wake per gap, a later one at least 5 s after the last (held, not dropped).
@@ -168,7 +168,7 @@ origin only. Over it, `sigelo-bridge/0` (listed in `apps/web/platform-android.mj
   the clipboard, marked sensitive (no preview), emptied by the shell after 60 s.
 - `unlock` (the screen lock; `force` skips the minute's window), `lock` (the lock's settings, kept by the shell),
   `notify` (show, cancel, ask the permission); the shell's event `{ev:"open", tag}` when a notification is tapped.
-- Big files (`BigFiles.java`, design/transfer.md §10): `big-pick` (the system's document picker, the read grant
+- Big files (`BigFiles.java`): `big-pick` (the system's document picker, the read grant
   kept), `big-photo` (the system's camera into the app's cache through `PhotoProvider`, not exported; CAMERA asked
   at the first photo; location tags removed unless kept), `big-hash`, `big-stat`; the page reads a file by range
   at `/.big/<doc>` (409 once it changed); `big-write` / `big-flush` / `big-digest` / `big-drop` a partial in
