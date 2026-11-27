@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The platform seam (platform-node.mjs, design/apps.md §4.2): two carriers whose files live in a
+// The platform seam (platform-node.mjs, README.md "Platforms"): two carriers whose files live in a
 // Map, whose lock is in-process and whose owner is a Set, pair by code, write, send a file given as
 // bytes and a name, read it, and read their history, against a loopback relay (relay/server.mjs in
 // this process) reached through Node's fetch, MQTT and proof of work. Their names point into a

@@ -475,7 +475,7 @@ function jsonld(page, title, description) {
 const OG_IMAGE = [['og:image', `${ORIGIN}/brand/og.png`], ['og:image:type', 'image/png'], ['og:image:width', '1200'], ['og:image:height', '630'], ['og:image:alt', 'sigelo seal and sigelo.io']];
 const social = (title, description, url) => [['og:type', 'website'], ['og:site_name', 'sigelo'], ['og:title', title], ['og:description', description], ['og:url', url], ...OG_IMAGE]
   .map(([k, v]) => `<meta property="${k}" content="${esc(v)}">\n`).join('') + '<meta name="twitter:card" content="summary_large_image">\n';
-// The brand files (assets/brand/, made by design/logo/make.py): served under /brand/, the favicon
+// The brand files (assets/brand/): served under /brand/, the favicon
 // and the PNG icons also at the root. The header's seal is assets/brand/seal.svg inline, its fill
 // left to the stylesheet (wax red; seal-dark's #c8423f on a dark scheme), hidden from assistive
 // technology (the link says "sigelo").

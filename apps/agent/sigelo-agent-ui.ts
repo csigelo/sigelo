@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * `sigelo-agent ui`: the human's side (design/human-ui-plan.md §1-§3, §5). A page on 127.0.0.1 for
+ * `sigelo-agent ui`: the human's side (UI-API.md). A page on 127.0.0.1 for
  * one person's own DID: contacts in two groups (Mine: tier own; Contacts) with tags and tiers, pairing by short code
  * with the four words, conversations, and the agents on this machine enrolled (worker i of the
  * keeper root, ENROL.md) and paired.
@@ -61,13 +61,13 @@ const STATIC: Record<string, [string, string]> = {
   '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/sw.js': ['sw.js', 'text/javascript'], '/icon.svg': ['icon.svg', 'image/svg+xml'],
   '/icon-maskable.svg': ['icon-maskable.svg', 'image/svg+xml'],
   '/shim-zlib.mjs': ['shim-zlib.mjs', 'text/javascript'], '/shim-kdf.mjs': ['shim-kdf.mjs', 'text/javascript'],
-  // QR reading and drawing in the page (design/devices.md §6.4): sigelo-contact's own files, as they are.
+  // QR reading and drawing in the page (DEVICES.md): sigelo-contact's own files, as they are.
   '/qr.mjs': ['contact:qr.mjs', 'text/javascript'], '/qr-decode.mjs': ['contact:qr-decode.mjs', 'text/javascript'],
-  // The words password's crypto (WebCrypto only), for Me → Security in the GTK phone app's page (design/apps-seed.md §8).
+  // The words password's crypto (WebCrypto only), for Me → Security in the GTK phone app's page (the words password, UI-API.md).
   '/words-lock.mjs': ['contact:words-lock.mjs', 'text/javascript'],
-  // Voice messages (design/transfer.md "Voice"): the page's recorder and the checks it imports.
+  // Voice messages (TRANSFER.md): the page's recorder and the checks it imports.
   '/voice-web.mjs': ['contact:voice-web.mjs', 'text/javascript'], '/voice.mjs': ['contact:voice.mjs', 'text/javascript'],
-  // Calls (design/calls.md): the page's Phone (call.mjs, no import), loaded at the first call or ring.
+  // Calls (apps/contact/call.mjs): the page's Phone (call.mjs, no import), loaded at the first call or ring.
   '/call.mjs': ['contact:call.mjs', 'text/javascript'],
   // The package's own package.json: About reads its version (a release bump reaches every form).
   '/package.json': ['pkg:package.json', 'application/json'],

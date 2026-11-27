@@ -9,7 +9,7 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never the p
    footnotes; apps/android/app/build.gradle `versionName '<v>'`, `versionCode` + 1 (apps/android/FDROID.md).
    `node site/build.mjs && node site/test/run.mjs`, `node apps/plugins/build.mjs --check` and
    `sh release/test-release.sh` pass. Commit.
-2. Sync and push (the commands under "Sync commands").
+2. Sync and push ("Sync commands", `--check-public` first).
 3. In ../sigelo-public at that commit: `sh release/build.sh $S/a`, `sh release/build.sh $S/b`;
    `cmp $S/a/SHA256SUMS $S/b/SHA256SUMS` must be silent. `sh release/pack-test.sh $S/a` must end
    `ALL PASS (<n> checks)`. The artefacts hash the same on any host (normalize-tgz.mjs
@@ -40,16 +40,16 @@ Artefacts are built from the PUBLIC tree (Go module path rewritten), never the p
    package): before step 4's push, `npm publish $S/a/<pkg>-<v>.tgz` (temporary-userconfig token;
    `sigelo` first, `sigelo-contact` second; 0.1.21: `sigelo-transfer` before dispatching, trusted publisher after).
 9. `gh workflow run mcp-registry.yml -R csigelo/sigelo`; `site/deploy/mirror-release.sh v<v>
-   sigelo-vps`; commit its SHA256SUMS; deploy.
+   <host-alias>`; commit its SHA256SUMS; deploy.
 
 ## Nightly on the maintainer's host
 
-At 02:30 a user timer runs `sigelo-nightly` (outside this repository) on a clean clone of the
+A nightly timer runs `sigelo-nightly` (not in this repository) on a clean clone of the
 private HEAD, offline: the ts, Go (with `--conformance` and `--impl` on the ts candidate), moadim,
 spend (`SIGELO_TEST_NO_LIVE=1`), mcp, world, accept and kit suites, the schema, doc budget and
 site checks, `npm run sim`; crosscheck (no offline mode) runs by hand.
-Each run leaves a log and a one-line summary; a failure leaves `FAILED` and at most one critical
-desktop notification a day, success none.
+Each run leaves a log and a summary line; a failure leaves `FAILED` and at most one
+notification a day, success none.
 
 ## Signing (from v0.1.1; v0.1.0 is unsigned)
 
@@ -75,10 +75,11 @@ desktop notification a day, success none.
 From the private repository, `A='csigelo <csigelo@users.noreply.github.com>'`:
 
 ```sh
+sh release/publish.sh --check-public
 SIGELO_AUTHOR="$A" SIGELO_GO_MODULE=github.com/csigelo/sigelo/go sh release/publish.sh
 SIGELO_AUTHOR="$A" sh release/publish.sh --relay ../sigelo-relay-public
 GIT_SSH_COMMAND='ssh -i ~/.ssh/sigelo_ed25519 -o IdentitiesOnly=yes' git -C ../sigelo-public push
 ```
 
-Never exported: internal planning files.
+Never exported: internal planning.
 `--relay` exports `relay/` alone (csigelo/sigelo-relay), pushed the same way.

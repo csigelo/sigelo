@@ -1,6 +1,6 @@
 {
   "v": "sigelo-carrier/0",
-  "about": "sigelo-carrier/0 frames (design/relay-plan.md §11 \"Wire contracts as built\"; carrier.mjs header). `frames`: seal `value` as `kind` under `key` on `topic` with `nonce`; the result has `length` bytes and SHA-256 `sha256`, and is `hex` when given (frames of at most 4,096 bytes). Opening it gives `value` back. `refusals`: opening `hex` as kind `read_as` under the generic key on `topic` fails with `error`, the first failing check. `derived`: what the seeds yield, each from the formula beside it.",
+  "about": "sigelo-carrier/0 frames (README.md \"Contracts\"; carrier.mjs header). `frames`: seal `value` as `kind` under `key` on `topic` with `nonce`; the result has `length` bytes and SHA-256 `sha256`, and is `hex` when given (frames of at most 4,096 bytes). Opening it gives `value` back. `refusals`: opening `hex` as kind `read_as` under the generic key on `topic` fails with `error`, the first failing check. `derived`: what the seeds yield, each from the formula beside it.",
   "layout": "version 0x01 (1) | kind (1) | 16 zero bytes | counter 1, u32 big-endian (4) | XChaCha20-Poly1305 nonce (24) | ciphertext + tag of pad(JCS(value)); additional data = the 22-byte header ‖ UTF-8 topic; pad: 0x80 then 0x00 to the next multiple of 256",
   "kinds": {
     "1": "invite answer (sigelo-invite/0), on the answer topic, key invite.key",

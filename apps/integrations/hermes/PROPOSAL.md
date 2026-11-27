@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: MIT -->
 
-Posted: https://github.com/NousResearch/hermes-agent/issues/131484 (2026-10-02); follow-up 2026-11-24: https://github.com/NousResearch/hermes-agent/issues/131484#issuecomment-7131577740 ; branch https://github.com/csigelo/hermes-agent/tree/a2a-peer-authenticator
+Posted: https://github.com/NousResearch/hermes-agent/issues/131484 (2026-10-02); branch https://github.com/csigelo/hermes-agent/tree/a2a-peer-authenticator
 
 ## Problem
 
@@ -38,7 +38,7 @@ Add `ctx.register_a2a_peer_authenticator(provider)`, modelled on `register_dashb
 
 ## Open question
 
-The peer's DID can be taken back with a recovery key that the agent never holds. In your deployment model, who would hold it for a Hermes instance: the operator's machine, the profile, or nobody (`recovery none`, so a lost key means a new DID)?
+The peer's DID can be taken back with a recovery key that the agent never holds. In your deployment model, who would hold it for a Hermes instance: the operator's own computer, the profile, or nobody (`recovery none`, so a lost key means a new DID)?
 
 ## v2 (2026-11-24, not posted)
 

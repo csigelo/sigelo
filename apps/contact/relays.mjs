@@ -25,7 +25,7 @@
 // signed by relay/site/sign-relays.mjs. Here: SPEC §9 at now, the chain's first DID the pinned one,
 // one attestation of the identity about itself with that ctx; then every entry whose tag is not
 // relayTag(host), or whose host is no host[:port], is dropped (counted), never trusted.
-// Files: the platform's (design/apps.md §4.2; the carrier passes its own), Node's by default.
+// Files: the platform's (README.md "Platforms"; the carrier passes its own), Node's by default.
 import { verify } from 'sigelo';
 import { files as nodeFiles } from './platform-node.mjs';
 import { checkRelay } from './invite.mjs';

@@ -88,7 +88,7 @@ export interface Libs { lib: { Carrier: new (o: object) => Carrier; pathsFor(p: 
   readCode(t: string, now: number): unknown; keepLong(e: unknown, long: string): unknown }; short: { codeKind(t: string): string; codeHash(t: string): string; stripEnrol(t: string): string; isEnrolCode(t: string): boolean };
   kdf: { MsgError: new (c: string, w: string) => Error }; enrol: Enrol }
 
-// JOIN_WAIT: init --enrol's default wait, 60 s (the agent-setup feedback, point 8: at 120 s it equalled common agent tool
+// JOIN_WAIT: init --enrol's default wait, 60 s (at 120 s it equalled common agent tool
 // caps, and a host killed it mid-step); enrol --finish takes it up. NAME: an agent's contact name, dots allowed
 // (k.bench-1); FILE_NAME: one that also names a file (--here: sigelo.<name>.local.json, the MCP profile pattern).
 const WAIT_MAX = 300, JOIN_WAIT = 60, TTL_MAX = 86400, KEEPER_V = 'sigelo-keeper-hot/0', NAME = /^[a-z0-9](?:[a-z0-9_-]|\.(?=[a-z0-9_-])){0,63}$/, FILE_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -254,7 +254,7 @@ function placeMe(enrol: Enrol, S: Uint8Array, op: string, known: number | undefi
 }
 
 /**
- * The wallet metadata a keeper file keeps for its wallet restore (design/apps-seed.md): net, and the
+ * The wallet metadata a keeper file keeps for its wallet restore: net, and the
  * wallet's birth as restore_height or restore_date (UTC day). Field names only: sigelo-spend reads them.
  */
 function walletMeta(f: Map<string, string>): { net?: string; restore_height?: number; restore_date?: string } {
@@ -364,7 +364,7 @@ export function flags(rest: string[], value: string[], bare: string[]): Map<stri
 function failed(e: unknown): number {
   note(e instanceof Error ? e.message : String(e));
   debug(e, { identity: identityPath() });
-  // A wrong value is said in its one line; the whole help only for a command line that is not one (the agent-setup feedback, point 9).
+  // A wrong value is said in its one line; the whole help only for a command line that is not one (the whole help buried the one wrong value).
   if ((e as { usage?: boolean }).usage) { if (!(e as { brief?: boolean }).brief && !/no (operator identity|keeper root)|^--wait|^enrol --ttl/.test((e as Error).message)) console.error(USAGE); return 2; }
   return 1;
 }
@@ -432,7 +432,7 @@ async function place(opPath: string, f: Map<string, string>): Promise<number> {
   const k = readKeeper(opPath), { K, recovery } = rootOf(k), { lib, enrol } = await libs();
   const ttl = f.has('--ttl') ? duration(f.get('--ttl')!, '--ttl') : undefined;
   if (ttl !== undefined && (f.has('--here') || ttl < 60 || ttl > TTL_MAX)) throw usageError(f.has('--here') ? 'enrol --here: no code, so no --ttl' : `enrol --ttl: the code lives 60 s to 24 h (default 10m; 1h or 24h for a slow local model), not ${lifeText(ttl)}`);
-  // --wait: as long as the code lives, at most (the agent-setup feedback, point 9: it stopped at 300 s while --ttl allowed an hour).
+  // --wait: as long as the code lives, at most (it once stopped at 300 s while --ttl allowed an hour).
   const restore = f.has('--restore'), here = f.has('--here'), wait = seconds(f.get('--wait'), 0, Math.max(WAIT_MAX, ttl ?? 600)), tier = f.get('--tier'), asked = f.has('--confirm-words');
   const operatorName = f.get('--operator-name');
   if (asked && !(await import('./sigelo-agent-device.ts')).hasTty()) throw usageError('enrol --confirm-words: the four words are asked on this terminal (/dev/tty), and there is none');
@@ -504,7 +504,7 @@ export function dropTemp(temp: string): void {
   for (const f of readdirSync(dirname(temp))) if (f === basename(temp) || f.startsWith(`${base}.`)) rmSync(join(dirname(temp), f), { recursive: true, force: true });
 }
 /**
- * Who this identity works for, from what its file and its contacts say (the agent-setup feedback, points 3 and 6):
+ * Who this identity works for, from what its file and its contacts say (models read the key file to find this out):
  * worker i (its `enrolled` mark, kept at placement; null for one placed before 0.1.19), the operator's DID
  * (the operator attestation's issuer) and name, and the tier its operator's messages have here. null: no worker.
  */
@@ -523,7 +523,7 @@ export function workerOf(path: string, s: Store, storePath?: string): { worker: 
 }
 
 /** Why init (plain or --enrol) refuses over an existing identity: one line, never "move it away" (models
- *  deleted enrolled worker keys on that advice, the agent-setup feedback point 3). */
+ *  deleted enrolled worker keys on that advice). */
 export function alreadyHere(path: string): string {
   let s: Store | null = null;
   try { s = load(path); } catch {}
@@ -593,7 +593,7 @@ export async function runMachine(l: Libs, path: string, temp: string, wait: numb
   const file = l.enrol.enrolPath(path), hash = l.enrol.pending(file, nowS(), (s) => Object.values(s.joining).find((j) => j.temp === temp)?.short_hash) ?? null;
   const c = carrierFor(l.lib, temp, true, hash);
   try {
-    // An answer a refused proof of work withdrew goes again from the pending entry (the agent-setup feedback, point 2).
+    // An answer a refused proof of work withdrew goes again from the pending entry (else the enrolment stalled).
     await l.enrol.resumeAnswer?.({ carrier: c, file, temp, wait: Math.min(left(), 30) });
     return await l.enrol.complete({ carrier: c, file: l.enrol.enrolPath(path), temp, wait: left(), until: (o: Out) => o.placed.length > 0, place: placer(l, path, left) });
   } finally { await c.stop(); }
@@ -636,7 +636,7 @@ async function finish(opFlag: string | undefined, wait: number): Promise<number>
   return code;
 }
 
-/** The operator's pending enrolments (enrol --list, the agent-setup feedback point 9): one line each, and JSON. */
+/** The operator's pending enrolments (enrol --list): one line each, and JSON. */
 async function listPending(opFlag: string | undefined): Promise<number> {
   const opPath = operatorPath(opFlag);
   checkOperator(opPath);
@@ -684,7 +684,7 @@ async function cancelPending(opFlag: string | undefined, what: string): Promise<
 export async function main(rest: string[]): Promise<number> {
   try {
     const f = flags(rest, ['--name', '--wait', '--identity', '--index', '--restore', '--tier', '--operator-name', '--ttl', '--cancel', '--enrol'], ['--finish', '--here', '--rotate', '--operator', '--confirm-words', '--list']);
-    // enrol --enrol <code> (a model's guess, the agent-setup feedback point 7): the machine's verb is init --enrol.
+    // enrol --enrol <code> (a model's guess): the machine's verb is init --enrol.
     if (f.has('--enrol')) throw Object.assign(usageError('enrol is the operator\'s verb (it makes a code). On the machine that got the code: sigelo-agent init --enrol <code>'), { brief: true });
     const alone = (k: string): void => { if ([...f.keys()].some((x) => ![k, '--identity', '--operator'].includes(x))) throw usageError(`enrol: ${k} takes only --identity`); };
     if (f.has('--list')) { alone('--list'); return await listPending(f.get('--identity')); }

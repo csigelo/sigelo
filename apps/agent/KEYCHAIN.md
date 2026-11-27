@@ -31,7 +31,7 @@ SIGELO_KEYCHAIN_LIVE=1 node test-keychain.ts    # step 1 and 12
 | 11 | same session, `sigelo-agent init --no-recovery` | `"provider": "file"` and one warning line | | | | ok |
 | 12 | time per signature (step 1's `LIVE` line) | under a second | | | | 103 ms |
 
-**Linux, here** (2026-10-16): a musl Linux desktop, GNOME Keyring 48.0 through
+**Linux** (checked 2026-10-16): a musl Linux desktop, GNOME Keyring 48.0 through
 `secret-tool` (libsecret), Node 24.18. Steps 5 and 6 were not run: they would lock or end the
 desktop session in use.
 

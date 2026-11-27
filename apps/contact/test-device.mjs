@@ -338,7 +338,7 @@ for (const v of fx.base45_rfc9285) {
 ok(UNLOGGED.test('sigelo-device/1') && UNLOGGED.test('sigelo-identity/0') && UNLOGGED.test('sigelo-enrol/1') && !UNLOGGED.test('sigelo-file/0') && !UNLOGGED.test('') && !UNLOGGED.test('x-sigelo-device/1'),
   'UNLOGGED: sigelo-device/, sigelo-identity/, sigelo-enrol/ (never in inbox.log); sigelo-file/0 and plain messages logged');
 
-// ---- remote control over the relay (control.mjs, design/apps.md §6.3): the text, the messages, the identity, the cap
+// ---- remote control over the relay (control.mjs, apps/agent/UI-API.md "Remote"): the text, the messages, the identity, the cap
 {
   const t = C.controlText('k7f3q9zp'), h = C.controlText('K7F3-Q9ZP-4WXN', 'relay.test:1883');
   ok(t === 'SIGELO:CTL:K7F3-Q9ZP' && h === 'SIGELO:CTL:K7F3-Q9ZP-4WXN:RELAY.TEST:1883' && h.length <= 60, 'control text: SIGELO:CTL:<short code>[:<HOST>], ≤ 60 characters');
@@ -360,7 +360,7 @@ ok(UNLOGGED.test('sigelo-device/1') && UNLOGGED.test('sigelo-identity/0') && UNL
   ok(first.filter(Boolean).length === C.BURST && first.slice(0, 10).every(Boolean) && [b.take(), b.take(), b.take(), b.take()].filter(Boolean).length === 3 * C.RATE, 'the cap: a burst of 10, then one a second');
 }
 
-// ---- restore from seed in the apps (restore.mjs, design/apps-seed.md): the files keeper --from-words writes, the seat
+// ---- restore from seed in the apps (restore.mjs): the files keeper --from-words writes, the seat
 {
   const S0 = new Uint8Array(32).fill(7); S0[31] = 0x0f;   // a canonical root (< l), fixed
   const words = mnemonicFromRoot(S0), list = words.split(' '), now = 1761400000;

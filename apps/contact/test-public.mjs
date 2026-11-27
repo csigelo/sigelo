@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Public codes (sigelo-public/0, public.mjs, design/public-invite.md) on a loopback relay
+// Public codes (sigelo-public/0, public.mjs, THREAT-MODEL §2.19) on a loopback relay
 // (SIGELO_RELAY_DIR, else ../../relay): invitePublic (Pro only), a PUB code accepted by many, each a
 // request the owner approves or refuses, open (let anyone in), the four words checked by the joiner
 // (a link carries them; a mismatch pairs nothing), every joiner its own pairing key, a replayed or

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Profiles (design/profiles.md P1): several identities in one app, like a wallet's list. Each profile
+// Profiles: several identities in one app, like a wallet's list. Each profile
 // has its own storage; only the active one is opened and connects to the relay (the others' messages
 // wait at the relay until the next switch). The registry holds the list and the active id, no secret.
 //

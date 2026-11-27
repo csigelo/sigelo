@@ -520,7 +520,7 @@ if (process.env['SIGELO_TEST_KEY_AGENT'] === '1') {
       ok('SIGELO_IDENTITY = the operator file, with --operator: taken as the operator\'s (one line), not refused', sameEnv.status === 0 && listed(sameEnv).join() === revDid
         && sameEnv.stderr.includes('SIGELO_IDENTITY names your operator identity'), sameEnv.stderr);
       // The one-owner rule, the file named three ways: a watcher by --operator; send by --identity
-      // queues for it; inbox by SIGELO_HUMAN reads through it; invite is asked of it (the agent-setup feedback, point 4).
+      // queues for it; inbox by SIGELO_HUMAN reads through it; invite is asked of it (never "stop the watcher first").
       w = spawn('node', [CLI, 'watch', '--operator', '--quiet'], { env, cwd: H });
       let werr = '';
       w.stderr!.on('data', (d) => { werr += d; });

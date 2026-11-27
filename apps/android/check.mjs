@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The Android project checked without the SDK (design/apps.md §8): what can be known of it on a
+// The Android project checked without the SDK: what can be known of it on a
 // machine with Node alone. The build itself runs on CI (.github/workflows/android.yml).
 //   node apps/android/check.mjs     → ALL PASS (n)
 // The manifest and resources (well-formed, fourteen permissions (storage on Android 9 only; the microphone for voice messages and calls; a call's
@@ -130,7 +130,7 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   ok(names(send, 'action') === 'android.intent.action.SEND' && names(send, 'category') === 'android.intent.category.DEFAULT'
     && all(send, 'data').map((d) => Object.keys(d.attrs).join() + '=' + d.attrs['android:mimeType']).join() === 'android:mimeType=text/plain,android:mimeType=image/*,android:mimeType=*/*',
   'manifest: share into sigelo: ACTION_SEND (not SEND_MULTIPLE), category DEFAULT, mime types text/plain, image/*, */* only (no scheme, host or path)');
-  // Push (UnifiedPush.java, design/push.md §1 B): the distributor's five connector actions and nothing else; exported, since the
+  // Push (UnifiedPush.java): the distributor's five connector actions and nothing else; exported, since the
   // distributor is another app. Built in push (PushClient, §6): its boot receiver, BOOT_COMPLETED and MY_PACKAGE_REPLACED only (both
   // protected: only the system sends them).
   const rc = all(man, 'receiver'), up = 'org.unifiedpush.android.connector.';
@@ -155,7 +155,7 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
     && sv[0].attrs['android:stopWithTask'] === 'true' && prop.length === 1 && prop[0].attrs['android:name'] === 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE'
     && /end-to-end messaging connection open/.test(prop[0].attrs['android:value'] ?? '') && all(sv[0], 'intent-filter').length === 0,
     'manifest: StayConnected: not exported, foregroundServiceType specialUse with its PROPERTY_SPECIAL_USE_FGS_SUBTYPE, stopWithTask, no intent filter');
-  // A call (CallService.java, design/calls.md §4): of type microphone, not exported, ending with the task, no filter.
+  // A call (CallService.java): of type microphone, not exported, ending with the task, no filter.
   const cs = all(man, 'service').find((x) => x.attrs['android:name'] === '.CallService');
   ok(cs && cs.attrs['android:exported'] === 'false' && cs.attrs['android:foregroundServiceType'] === 'microphone' && cs.attrs['android:stopWithTask'] === 'true' && all(cs, 'intent-filter').length === 0 && all(cs, 'property').length === 0,
     'manifest: CallService: not exported, foregroundServiceType microphone, stopWithTask, no intent filter');
@@ -187,7 +187,7 @@ const man = xml['apps/android/app/src/main/AndroidManifest.xml'];
   const missing = [...refs].filter((r) => !have.has(r));
   ok(missing.length === 0 && refs.size > 8, `resources: every reference resolves (${refs.size}; missing ${missing})`);
   {
-    // No action bar (2026-11-14): the page's own top bar; the system bars in its paper, dark icons, until the page names its background.
+    // No action bar: the page's own top bar; the system bars in its paper, dark icons, until the page names its background.
     const th = read(MAIN, 'res', 'values', 'themes.xml'), th35 = read(MAIN, 'res', 'values-v35', 'themes.xml');
     const item = (n, v) => th.includes(`<item name="android:${n}">${v}</item>`);
     ok(th.includes('parent="@android:style/Theme.Material.Light.NoActionBar"') && !/ActionBar"|DarkActionBar/.test(th.replace('Light.NoActionBar"', '')) && !/DarkActionBar/.test(th35)
@@ -317,7 +317,7 @@ ok(/case "secure": \{[\s\S]*?if \(on\) activity\.getWindow\(\)\.addFlags\(Window
     'share: a file only another app\'s content URI (file:// and the app\'s own authorities refused), the latest share wins, told again to each new page; a text at most the page\'s TEXT_MAX; share-take makes the URI a doc of the profile named (as big-pick), refused "share" when nothing is held');
 }
 {
-  // Stay connected (StayConnected.java; design/push.md §A): the process kept, not a socket of its own; no wake lock, no exact alarm, no boot start.
+  // Stay connected (StayConnected.java): the process kept, not a socket of its own; no wake lock, no exact alarm, no boot start.
   const sc = java['StayConnected.java'], scc = code(sc), strings = read(MAIN, 'res', 'values', 'strings.xml');
   ok(/startForeground\(NOTE, n, ServiceInfo\.FOREGROUND_SERVICE_TYPE_SPECIAL_USE\); else startForeground\(NOTE, n\);/.test(sc) && /return START_NOT_STICKY;/.test(sc)
     && !/WakeLock|newWakeLock|setExact|setAlarmClock|SCHEDULE_EXACT_ALARM|BOOT_COMPLETED|Socket/.test(scc),
@@ -341,7 +341,7 @@ ok(/case "secure": \{[\s\S]*?if \(on\) activity\.getWindow\(\)\.addFlags\(Window
 }
 {
   const strings = read(MAIN, 'res', 'values', 'strings.xml');
-  // Push (UnifiedPush.java, WebPush.java; design/push.md §1 B): the connector hand-rolled against AND_3, platform crypto only.
+  // Push (UnifiedPush.java, WebPush.java): the connector hand-rolled against AND_3, platform crypto only.
   const u = java['UnifiedPush.java'], uc = code(u), w = java['WebPush.java'], sc = java['StayConnected.java'];
   ok(![...w.matchAll(/^import ([\w.]+);$/gm)].some((m) => !/^(java|javax)\./.test(m[1])) && /"sigelo-push\/0 wake"/.test(w) && /Arrays\.copyOf\("sigelo-push\/0 wake"\.getBytes\(StandardCharsets\.UTF_8\), 32\)/.test(w)
     && /KeyAgreement\.getInstance\("ECDH"\)/.test(w) && /Mac\.getInstance\("HmacSHA256"\)/.test(w) && /Cipher\.getInstance\("AES\/GCM\/NoPadding"\)/.test(w) && /"WebPush: info"/.test(w)
@@ -369,7 +369,7 @@ ok(/case "secure": \{[\s\S]*?if \(on\) activity\.getWindow\(\)\.addFlags\(Window
     && /UnifiedPush\.refresh\(this\);/.test(ma) && /UnifiedPush\.seen\(this\);/.test(ma)
     && /if \(m\.has\("mode"\) && !\(BUILTIN\.equals\(mo\) \|\| APP\.equals\(mo\) \|\| OFF\.equals\(mo\)\)\) throw new SigeloBridge\.Refused\("push",/.test(u),
   'push: the bridge answers "push" through UnifiedPush.op (a mode of three and a package name only, refused "push"), posts {ev:"wake"} and {ev:"push"}; started or registered again at each start');
-  // Built in push (PushClient.java, Ntfy.java; design/push.md §6): the ntfy JSON stream held as the ntfy app holds it.
+  // Built in push (PushClient.java, Ntfy.java): the ntfy JSON stream held as the ntfy app holds it.
   const pcj = java['PushClient.java'], pcc = code(pcj), nt = java['Ntfy.java'];
   ok(![...nt.matchAll(/^import ([\w.]+);$/gm)].some((m) => !/^java\./.test(m[1])) && /BASE = "https:\/\/push\.sigelo\.ai"/.test(nt) && /Pattern\.compile\("\^up\[A-Za-z0-9\]\{12\}\$"\)/.test(nt)
     && /RETRY_S = \{5, 10, 15, 20, 30, 45, 60, 120\};/.test(nt) && /READ_MS = 90_000/.test(nt) && /return BASE \+ "\/" \+ topic \+ "\?up=1";/.test(nt) && existsSync(join(HERE, 'test', 'NtfyTest.java')),
@@ -389,7 +389,7 @@ ok(/case "secure": \{[\s\S]*?if \(on\) activity\.getWindow\(\)\.addFlags\(Window
   ok(/if \(!Intent\.ACTION_BOOT_COMPLETED\.equals\(a\) && !Intent\.ACTION_MY_PACKAGE_REPLACED\.equals\(a\)\) return;\s*if \(UnifiedPush\.BUILTIN\.equals\(UnifiedPush\.mode\(c\)\)\) start\(c\);/.test(pcj)
     && /m = p\.getBoolean\(ON, false\) \? APP : p\.getBoolean\(StayConnected\.ON, true\) \? BUILTIN : OFF;/.test(u),
     'push (built in): started at boot and after an update only when the mode is Built in; the mode from before: Push → Push app, Stay connected (the old default) → Built in, else Off');
-  // Voice calls (CallService.java; design/calls.md §4, §5): the call's foreground service of type microphone, its ongoing-call
+  // Voice calls (CallService.java): the call's foreground service of type microphone, its ongoing-call
   // notification, the audio mode and focus, the earpiece and the speaker, the proximity lock, the ring; nothing when closed (B1).
   const cs = java['CallService.java'], csc = code(cs);
   ok(/if \(Build\.VERSION\.SDK_INT >= 30\) startForeground\(NOTE_CALL, n, ServiceInfo\.FOREGROUND_SERVICE_TYPE_MICROPHONE\);\s*else startForeground\(NOTE_CALL, n\);/.test(cs) && /return START_NOT_STICKY;/.test(cs)
@@ -432,7 +432,7 @@ ok(!/onCreateOptionsMenu|onOptionsItemSelected|M_RELOAD|android\.view\.Menu|getA
   'no action bar: no menu; Reload is the page\'s (bridge "reload": answered, then the start loaded); the system bars in the page\'s background (bridge "bars", #rrggbb checked), the icons light or dark to match, Android 11+ through the insets controller too');
 ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooserParams\.parseResult/.test(ma), 'files: a file input opens the system picker');
 {
-  // Big files (design/transfer.md §10): BigFiles and PhotoProvider.
+  // Big files: BigFiles and PhotoProvider.
   const bf = java['BigFiles.java'], pp = java['PhotoProvider.java'];
   ok(/path\.startsWith\("\/\.big\/"\) && bridge != null\) return bridge\.big\.range\(u, HEADERS\);/.test(ma) && ma.indexOf('bridge.big.range') < ma.indexOf('SAFE_PATH.matcher(path)')
     && /if \(!String\.valueOf\(st\[0\]\)\.equals\(u\.getQueryParameter\("size"\)\) \|\| !String\.valueOf\(st\[1\]\)\.equals\(u\.getQueryParameter\("mtime"\)\)\) return empty\(409/.test(bf)
@@ -467,7 +467,7 @@ ok(/onShowFileChooser/.test(ma) && /ACTION_GET_CONTENT/.test(ma) && /FileChooser
 ok(/r\.hasGesture\(\)/.test(ma) && /ACTION_VIEW/.test(ma) && /CATEGORY_BROWSABLE/.test(ma), 'links: elsewhere opens in the browser, on a tap');
 ok(/setEndpointIdentificationAlgorithm\("HTTPS"\)/.test(java['SigeloBridge.java']) && /getDefaultHostnameVerifier\(\)\.verify\(host/.test(java['SigeloBridge.java']) && /setInstanceFollowRedirects\(false\)/.test(java['SigeloBridge.java'])
   && !/TrustManager|setHostnameVerifier|ALLOW_ALL/.test(code(java['SigeloBridge.java'])), 'network: TLS names checked twice, no custom trust, no redirect followed');
-// Review 2026-10-28 (LOW), now per profile (design/profiles.md §4): removing a profile deletes all three of its
+// Per profile: removing a profile deletes all three of its
 // aliases (a remote profile seals its control identity under alias 0 as well as its text under alias 2); the
 // menu's form switch, which erased everything, is gone.
 const jb = java['SigeloBridge.java'];
@@ -479,7 +479,7 @@ ok(/P1\.equals\(profile\) \? ALIASES\[a\] : "sigelo-" \+ profile \+ SUFFIXES\[a\
 ok(/out\[0\] = \(byte\) \(name\.length == 0 \? 1 : 2\);/.test(jb) && /if \(!P1\.equals\(profile\)\) throw new Refused\("sealed", "sealed for another profile"\);/.test(jb)
   && /if \(!owner\.equals\(profile\) && !owner\.startsWith\(profile \+ ":"\)\) throw new Refused\("sealed", "sealed for another profile"\);/.test(jb) && /\(P1\.equals\(profile\) \? "" : " " \+ profile\)/.test(jb),
   'keystore: blob version 1 for p1 (as before), version 2 naming the profile for the others, the AAD naming it; a blob opens in its own profile only');
-// design/profiles.md P2: several computers in a profile, one blob each under the profile's aliases (no alias per computer).
+// Several computers in a profile, one blob each under the profile's aliases (no alias per computer).
 ok(/"\^c\[1-9\]\[0-9\]\{0,2\}\$"/.test(jb) && /m\.optString\("computer", C1\)/.test(jb) && /String owner = C1\.equals\(computer\) \? \(P1\.equals\(profile\) \? "" : profile\) : profile \+ ":" \+ computer;/.test(jb)
   && /seal\(kind, m\.optBoolean\("full", false\), profile, computer, data\) : open\(kind, profile, computer, data\)/.test(jb) && /: " " \+ profile \+ " " \+ computer;/.test(jb),
   'keystore (computers): the computer id checked, c1 when none is named; another computer\'s blob version 2 naming "<profile>:<computer>", the AAD naming it; no alias per computer');
@@ -674,7 +674,7 @@ import json; print(json.dumps({'jobs': list(d['jobs']), 'steps': len(d['jobs']['
 
 // Where `java` runs a source file (JDK 11+, no Android SDK needed): SigeloBridge.java's keystore methods as they
 // are in the file (aad, profileOf, alias, forgetProfile, seal, open), with a software AES key store in place of
-// AndroidKeyStore, run on the profiles' cases (design/profiles.md §4). Its other code needs the platform: not run.
+// AndroidKeyStore, run on the profiles' cases. Its other code needs the platform: not run.
 {
   const jb = java['SigeloBridge.java'];
   const grab = (a, b) => { const i = jb.indexOf(a), j = jb.indexOf(b, i); return i < 0 || j < 0 ? null : jb.slice(i, j); };

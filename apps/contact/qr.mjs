@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// QR codes for the device flows (design/devices.md §6): encode text to a module matrix, show it in a
+// QR codes for the device flows (apps/agent/DEVICES.md): encode text to a module matrix, show it in a
 // terminal with half blocks, write it as a PNG. No I/O and no dependency beyond node:zlib.
 //
 //   encode(text, { ecc: 'M', minVersion: 1, maxVersion: 40, mask })  → { version, size, ecc, mask, modules }

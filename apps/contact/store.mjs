@@ -28,10 +28,10 @@
 // restores them instead of forgetting). Kept by a re-pair, a merge and a rename; gone with revoke. A
 // link never writes operator_exp, so never ours; while it lasts a contact that is not ours cannot be
 // set own (link_tier). ended: {id, by, at} on a contact a link's end revoked (revoke(did, ended)), and
-// relink: {id, until}, the one-use permit a NEW link leaves on it (design/links.md §7.1a): the pairing
+// relink: {id, until}, the one-use permit a NEW link leaves on it (apps/agent/LINKS.md): the pairing
 // through that link's code is admitted, the record written afresh. Forgotten by hand: no ended, never.
 // presence: true when the owner lets this contact see whether this agent is online (setPresence; off
-// by default, design/transfer.md §8 T0). An own agent (ours, or tier own) always sees it: presenceOf.
+// by default, THREAT-MODEL §2.17). An own agent (ours, or tier own) always sees it: presenceOf.
 // Kept by a re-pair, a merge and a rename, as the tier is.
 // short, short_exp: the short code parked for an invite of mine (carrier.mjs invite) and the relay's
 // exp of it, so a cancel by the short code finds the invite and the state shows it. renew (an invite's
@@ -195,8 +195,8 @@ export class Contacts {
     return { did, tier, preset: true };
   }
 
-  // A new contact's name, unique among the live ones (the agent-setup feedback, point 9: two contacts with one
-  // name, and send <name> refused both): taken, it gets the first free numeric suffix, name-2, name-3…
+  // A new contact's name, unique among the live ones (two contacts with one
+  // name made send <name> refuse both): taken, it gets the first free numeric suffix, name-2, name-3…
   freeName(name, did) {
     if (typeof name !== 'string') return name;
     const taken = (n) => Object.values(this.s.contacts).some((x) => !x.revoked && x.did !== did && x.name === n);
@@ -473,7 +473,7 @@ export class Contacts {
   }
 
   /**
-   * A NEW link with a contact an ended link revoked (design/links.md §7.1a): a one-use permit, until
+   * A NEW link with a contact an ended link revoked (apps/agent/LINKS.md): a one-use permit, until
    * `until`, for the pairing through that link's code (admit). → true; null when `did` is no revoked
    * contact here (nothing to permit). Forgotten by hand: revoked; the ended link's own id: link_stale.
    */
@@ -505,7 +505,7 @@ export class Contacts {
    */
   admit(bundle, r, name, fields, now) {
     const held = this.#holders(r.chain), gone = held.find((c) => c.revoked);
-    // A relink (design/links.md §7.1a): a pairing (named) of a contact an ended link revoked, with a
+    // A relink: a pairing (named) of a contact an ended link revoked, with a
     // live permit; written afresh, its rotations seen kept.
     const relinking = gone && name !== null && held.length === 1 && gone.relink && gone.relink.until > now ? gone : null;
     if (gone && !relinking) fail('revoked', `${gone.did} was revoked by this owner`);

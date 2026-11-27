@@ -41,7 +41,7 @@ import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 /**
- * sigelo for Android (design/apps.md §8): one WebView showing the page of apps/web, served from the
+ * sigelo for Android (apps/android/README.md): one WebView showing the page of apps/web, served from the
  * APK's assets at https://appassets.androidplatform.net/ (the host Android reserves for this; nothing
  * is fetched from the network), and SigeloBridge for what a page cannot do: the relay's HTTPS and
  * TLS without an Origin header, a computer on the LAN, and a key in AndroidKeyStore.
@@ -63,7 +63,7 @@ import java.util.regex.Pattern;
  * confirmed; not confirmed, the app goes to the background, locked. The FULL key's own window in
  * AndroidKeyStore (SigeloBridge.AUTH_SECONDS) stays the inner guard.
  *
- * Big files (SigeloBridge "big-*", BigFiles, design/transfer.md §10): the system's picker and camera answer
+ * Big files (SigeloBridge "big-*", BigFiles): the system's picker and camera answer
  * here (onActivityResult, the camera's and the storage permission's results); a file the page reads is
  * served by range at ORIGIN/.big/<doc> (serve), never from anywhere else; the screen kept on while a
  * transfer moves.

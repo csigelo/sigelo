@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Transfers, the part every host shares (design/transfer.md §4, §10; apps/agent/TRANSFER.md): the
+// Transfers, the part every host shares (apps/agent/TRANSFER.md): the
 // records, the consent and the accept rule, the verbs and the Engine, with the disk, the file sent and
 // Tor behind `io`. Node: transfer-node.mjs (fs, a tor daemon). The phone: transfer-web.mjs (the bridge
 // holds the bytes; no Tor). The protocol is transfer.mjs's; the carrier is carrier.mjs's, in both.
@@ -16,11 +16,11 @@
 // The records file: { v, out: { id: sender's record }, in: { id: receiver's record }, direct: { DID: true|false },
 // auto: { DID: MB (0: always ask) }, settings: { tor, prefer, auto_mb, keep_location } }.
 //
-// The accept rule (design §10.2, decided 2026-11-13): a file lands without a question up to the size set
+// The accept rule: a file lands without a question up to the size set
 // (settings.auto_mb, default 25 MB; per contact auto[DID]) from own agents and own contacts (tier own,
 // ours) and from friends whose four words were compared (compared(did), the page's), when the disk has
 // room; larger, or from anyone else (words not compared, a public-code joiner, quiet), it is asked. The
-// direct switch picks the lane, not the yes (2026-11-25): off, it comes over Tor or the relay lane.
+// direct switch picks the lane, not the yes: off, it comes over Tor or the relay lane.
 //
 // The relay lane (0.1.19): a file of at most RELAY_MAX (8 MiB, send-file's) to an own agent or contact, or to a friend
 // whose words were compared, that cannot go direct (no path, no Tor: the end no_path) or whose channel dropped and did
@@ -30,7 +30,7 @@
 // up to 8 MiB, Send over the relay. A channel that moves no byte for stallMs (30 s) counts as dropped; a receiver's
 // record active with nothing for STALE_S (10 minutes) is listed as interrupted, and resume takes it again.
 //
-// "Always relay my media" (design/calls.md §6, 2026-11-26): policy() "relay" (the page's setting) or env
+// "Always relay my media" (UI-API.md "Settings"): policy() "relay" (the page's setting) or env
 // SIGELO_ICE_POLICY=relay: the direct lane only through the relay's TURN (iceTransportPolicy relay, relayed candidates
 // only in the SDP: rtc-web.mjs, apps/transfer/rtc.mjs); with no TURN to be had the direct lane is left out at once
 // (RELAY_ONLY, reason relay_only on the receiver's record) and the file goes over Tor or the relay lane as without one.
@@ -123,7 +123,7 @@ export async function sendTo({ carrier, io, to, f, via = 'auto', direct, local =
   return sendPrepared({ carrier, io, c, f, via, local, group, now });
 }
 /**
- * A group's file (design §10.3): one transfer per member this side is paired with, the file hashed once
+ * A group's file: one transfer per member this side is paired with, the file hashed once
  * (f); members reached only through the creator are listed unpaired (they get the preview alone).
  * members: [{ did, name, contact }] (the others; contact: paired here). Before anything is sent, a member
  * whose direct switch is not set and no direct given: direct_ask naming them. → { sent, unpaired, failed }.

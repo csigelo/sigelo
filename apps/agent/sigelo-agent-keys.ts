@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * Key providers (design/key-providers.md §2): where the identity key rests and which process
+ * Key providers (KEYS.md): where the identity key rests and which process
  * uses it. Every signature of the CLI, the MCP server, the Monero half, the contact verbs and
  * the gate's signer goes through `signer`; the core (sigelo-agent.ts) keeps only the plain-file
  * path, so an identity-only install still reads 75 lines. Counted apart in INTEGRATION.md.

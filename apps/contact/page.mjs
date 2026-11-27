@@ -22,11 +22,11 @@
 // ([] where there is none), seat() → the seat or null, deviceRound() → { gave? } after each drain
 // (or none), note(line), defer(fn) (setImmediate on Node), every(fn, ms) → a timer, hidden({ did, name })
 // → true for what the page never shows nor names (the computer's relay controls: their contacts, their
-// pairing, their codes waiting; design/apps.md §6.3), controls: { pending() → [{name, scope, words}],
+// pairing, their codes waiting; apps/agent/UI-API.md "Remote"), controls: { pending() → [{name, scope, words}],
 // confirm(name, match) → whether one was pending } (relay controls whose four words wait: the
 // Controls card; routes in no remote scope, so never asked over the relay or the LAN).
 //
-// Groups (apps/agent/GROUPS.md, design/groups.md §5): groups: group.mjs (the module) and groupsFile
+// Groups (apps/agent/GROUPS.md): groups: group.mjs (the module) and groupsFile
 // (groupsPath of the identity). Each drain hands the carrier's group messages to group.mjs handle(), here
 // in code: without it the page never takes a roster, carries a copy on or files a message. The page's
 // own marks in data: gread (gid → the newest item shown: {mid, at}), gnotices (a stranger added, the
@@ -47,7 +47,7 @@
 // { name() → its name, call(method, path, body?) → { status, body } }. /api/keeper* go there; a limit is a
 // policy-change signed here with this identity (the computer relays it, POST /api/keeper/policy). None: elsewhere.
 //
-// Transfers (apps/agent/TRANSFER.md, design/transfer.md §10): hooks.transfers, where the host moves big
+// Transfers (apps/agent/TRANSFER.md): hooks.transfers, where the host moves big
 // files ({ lib, identity, make(carrier, onEvent, { compared }) → its Engine; lib: transfer-node.mjs on a
 // computer (a file by its path), transfer-web.mjs's in the phone app (a file picked: doc), which also gives
 // pick(), photo({ keepLocation }), open(saved) and url(doc) }): the page owns the session, so its engine
@@ -58,18 +58,18 @@
 // voice.mjs) goes the same way, its fields as the message and the recording as the file, where the host records
 // (hooks.transfers.rec: write(rec, offset, bytes), keep(rec, name) → { doc } | { path }, read(saved) → bytes).
 //
-// Calls (UI-API.md "Calls", design/calls.md, call.mjs): one Line over this carrier, always; the media is the page's (ui.js's
+// Calls (UI-API.md "Calls", call.mjs): one Line over this carrier, always; the media is the page's (ui.js's
 // Phone), which reaches it by /api/calls*. hooks.calls, where the host has a shell: { alert({on, id, did, name}) the ring
 // (the phone app: ringtone, vibration, a heads-up; the seam the push build wires to a full-screen ring), audio({on, id,
 // name}) the call's audio mode (CallService), speaker(on), mic(), micSettings() }. "Can call me" (decision 2026-11-17):
 // data.calls[did] true | false, else the default: off for a quiet contact, else data.settings.calls (default on).
 // A call's chat line is a history record { kind: in | out, label CALL_LABEL, text "Call · 3:12" | "Missed call" | …,
 // call: { id, state, secs } }; only a missed one counts as unread (a call taken or made here was seen).
-// "Always relay my media" (design/calls.md §6, UI-API.md "Settings"): data.settings.relay_media, per profile (default
+// "Always relay my media" (UI-API.md "Settings"): data.settings.relay_media, per profile (default
 // off); SIGELO_ICE_POLICY=relay in the host's environment says the same. On: GET /api/calls/turn answers policy
 // "relay" and the transfer engine is given it (relayMedia): every WebRTC lane only through the relay's TURN.
 //
-// Proof of work (design/profiles.md §6): what the human starts here (the page's start, a code, an
+// Proof of work: what the human starts here (the page's start, a code, an
 // answer, "Try now") passes the carrier's `started: 'user'`; past the day's three the route answers
 // 409 pow_confirm, and the same call with `pow_confirmed: true` goes on. The carrier's automatic
 // retries stay capped: state's me.pow_capped {relay, next} says when the next one is.
@@ -83,12 +83,12 @@
 // contact's {sent, told}. Chat defaults (data.settings): new_tier and new_presence, given to a contact at its pairing;
 // notify (all chats) and data.notify (a chat: contact DID or gid → false) for the notifications.
 //
-// The Wallet settings (UI-API.md "Wallet", design/ux1/notes.md "Decided"): per profile, in data.settings: wallet (the
+// The Wallet settings (UI-API.md "Wallet"): per profile, in data.settings: wallet (the
 // switch, default off), prices (a local price, opt-in, default off) and currency (one of CURRENCIES). Read in state's
 // me.wallet by every form of the page. This page holds no wallet: GET /api/wallet answers where: "none", its other
 // wallet routes 409 wallet_none ("This phone has no wallet yet"); `sigelo-agent ui` answers them with the computer's.
 //
-// Pictures (UI-API.md "Pictures", design/ux1/notes.md "Decided"): store.readPicture(name) → bytes | null and
+// Pictures (UI-API.md "Pictures"): store.readPicture(name) → bytes | null and
 // store.writePicture(name, bytes | null), the host's (beside the page's data, 0600, on a computer; the profile's storage
 // on the phone). data.pics: key → {type, rev, at} for 'me' (this identity's own), 'l:<did or gid>' (a local one for a
 // contact or a group: wins) and 't:<did>' (the one a contact sent). Mine travels as one more body inside the
@@ -507,7 +507,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
   data.calls ??= {};
   const liveContact = (d) => carrier.contacts().contacts.find((c) => c.did === d && !c.revoked) ?? null;
   const canCall = (c) => (typeof data.calls[c.did] === 'boolean' ? data.calls[c.did] : c.tier === 'quiet' ? false : data.settings.calls !== false);
-  // Calls are between people (design/calls.md §1): a contact this page takes for an agent (its kind, as the chat list
+  // Calls are between people: a contact this page takes for an agent (its kind, as the chat list
   // shows it: the human's choice, else my agent, a worker, a group's agent) is never rung from here and never rings here.
   const personOf = (c) => {
     const agent = (hooks.agents?.() ?? []).find((a) => a.did !== undefined && c.chain?.includes(a.did));
@@ -635,7 +635,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
 
   // ---- agents: the operator's workers (keeper `workers`), enrolled by a one-time code from this page
   const K = hooks.keeper ?? null;
-  // The computer this profile is paired to, for the keeper (design/agent-wallet-page.md §4): { name() → its name,
+  // The computer this profile is paired to, for the keeper (UI-API.md "Computers"): { name() → its name,
   // call(method, path, body?) → { status, body } } (its page over the control, scope all), or none.
   const PC = hooks.computer ?? null;
   const viaPc = async (method, path, body) => {
@@ -1263,7 +1263,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
     }),
     // The keeper's settings and payment requests (UI-API.md "Keeper"): `sigelo-agent ui` answers them where the
     // keeper runs. Here, with hooks.computer (a computer of this operator paired to this profile, scope all;
-    // design/agent-wallet-page.md §4), they go to that computer, and a limit is changed by a policy-change this
+    // UI-API.md "Computers"), they go to that computer, and a limit is changed by a policy-change this
     // page signs with its own identity: the computer carries it to its keeper and cannot alter it. Without one:
     // elsewhere, and the writes are refused keeper_elsewhere.
     'GET /api/keeper': async () => {
@@ -1451,7 +1451,7 @@ export function makePage({ makeCarrier, link: L, linksFile, groups: G = null, gr
       changed();
       return pub(e);
     }),
-    // "Try now" (design/profiles.md §6): the automatic tries paused for the day; the human's goes now.
+    // "Try now": the automatic tries paused for the day; the human's goes now.
     'POST /api/pow/try': (b) => serial(async () => {
       const r = await carrier.tryNow({ confirmed: b['pow_confirmed'] === true });
       live.powCapped = null; live.powConfirm = null; keepOffline(); changed();
@@ -1689,7 +1689,7 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
     'POST /api/transfers/send': (b) => serial(() => call(async () => {
       const vo = voiceOf(b), src = vo ? await host.rec.keep(recOf(b), vo.name) : sourceOf(b), d = directOf(b), via = viaOf(b), shot = shotOf(b);
       if (shot) { const p = { ...shot, sha256: '0'.repeat(64), size: 0, name: 'x' }; try { checkPhoto(p); } catch (e) { e.status = 400; throw e; } }
-      // A group (design §10.3): one transfer per member paired with; the preview (or a line naming the file) as one group message.
+      // A group: one transfer per member paired with; the preview (or a line naming the file) as one group message.
       if (b['group'] !== undefined) {
         if (!groups) refuse(404, 'route', 'no groups here');
         const g = groups.list().find((x) => x.gid === b['group']) ?? refuse(404, 'group_unknown', `no group ${String(b['group'])} here`);
@@ -1724,8 +1724,8 @@ function transferRoutes({ X, engine, host, carrier, identity, serial, contactOf,
       }
       return strip(r);
     })),
-    // The phone's own: a file picked (the system's picker), a photo taken (the system's camera), a file that landed opened.
-    // images: the picker shows pictures only (the composer's Photo). multiple (2026-11-25): several at once → { docs: [...] },
+    // From the phone itself: a file picked (the system's picker), a photo taken (the system's camera), a file that landed opened.
+    // images: the picker shows pictures only (the composer's Photo). multiple: several at once → { docs: [...] },
     // each then sent as its own transfer (POST /api/transfers/send per doc, in order).
     ...(docs && { 'POST /api/transfers/pick': (b) => serial(async () => {
       const multiple = b?.['multiple'] === true, x = await host.pick({ images: b?.['images'] === true, ...(multiple && { multiple: true }) });

@@ -16,8 +16,8 @@ site/deploy/deploy.sh sigelo@sigelo.io --rollback  # serve the previous upload a
 | `nginx.conf` | the server config; deploy.sh reinstalls it on every deploy | server: `/etc/nginx/conf.d/sigelo.io.conf` (Alpine: `http.d/`) |
 | `sigelo-nginx-apply` | root helper: allowlist check, install, `nginx -t` (restores the old file on failure), reload | server: `/usr/local/sbin/`, via one sudo rule |
 | `server-setup.sh` | ONE-TIME server preparation, as root, by hand; `--relay` prepares the relay's host instead ("The relay host") | server |
-| `stats-agents.sh` | the agent/human split of the visits as `agents.txt` (≤ 40 lines, phone-sized); `server-setup.sh --stats` installs it with the 15-minute timer | server: `/usr/local/sbin/sigelo-stats-agents` |
-| `watch.sh` | the watchdog: reachability probes of sigelo.io (site, TLS, `/world/stats`, `/mcp`) and sigelo.ai (front page, `/challenge`, MQTT, TLS), notify when down, throttled | the operator's phone: `~/.local/bin/sigelo-watch` + `sigelo-watch.timer` (user) |
+| `stats-agents.sh` | the agent/human split of the visits as `agents.txt` (≤ 40 lines, small-screen sized); `server-setup.sh --stats` installs it with the 15-minute timer | server: `/usr/local/sbin/sigelo-stats-agents` |
+| `watch.sh` | the watchdog: reachability probes of sigelo.io (site, TLS, `/world/stats`, `/mcp`) and sigelo.ai (front page, `/challenge`, MQTT, TLS), notify when down, throttled | a monitoring machine the operator keeps: `sigelo-watch` + `sigelo-watch.timer` (user) |
 | `apache.conf` | the same behaviour for Apache 2.4; install by hand, deploy with `--no-config` | server |
 | `mirror-release.sh` | `<tag> [user@host]`: `gh release download` → every file against SHA256SUMS → upload to `releases/<tag>/` (never changed once there) → `releases/index.json`, `latest` → re-download over HTTPS and compare | your machine (gh, node, ssh) |
 
@@ -103,7 +103,7 @@ chown sigelo:sigelo /var/lib/sigelo/.ssh/authorized_keys && chmod 0600 /var/lib/
 # 3. directories
 install -d -m 0755 -o sigelo -g sigelo /var/www/sigelo.io /var/www/sigelo.io/deploy /var/www/sigelo.io/dist
 install -d -m 0755 /var/www/acme
-install -d -m 0750 /var/log/nginx/sigelo
+install -d -m 0750 -o root -g www-data /var/log/nginx/sigelo     # Alpine: -g nginx
 install -d -m 0700 /var/backups/sigelo-nginx
 
 # 4. the distribution's default site (logs client addresses, claims default_server)
@@ -153,10 +153,14 @@ cat > /etc/logrotate.d/sigelo <<'ROT'
     delaycompress
     sharedscripts
     postrotate
-        nginx -s reopen 2>/dev/null || true
+        { kill -USR1 "$(cat /run/nginx.pid)" || systemctl kill -s USR1 nginx.service || nginx -s reopen; } 2>/dev/null || true
     endscript
 }
 ROT
+
+# The log directory's group is nginx's (www-data; Alpine: nginx): the workers reopen the logs on USR1
+# and must reach the directory. root:root 0750 left them writing to access.log.1 after a rotation
+# (notifempty then stopped rotating). Reopen by the pid file, systemctl or nginx -s reopen as fallbacks.
 
 # 9. the full config, through the helper (the first deploy would do the same)
 install -m 0644 -o sigelo -g sigelo nginx.conf /var/www/sigelo.io/deploy/nginx.conf
@@ -192,8 +196,8 @@ After any DNS change, in this order (deploy first: certbot needs the names in th
 
 ```sh
 site/deploy/deploy.sh sigelo@sigelo.io                  # installs nginx.conf (already done if deployed since)
-scp site/deploy/server-setup.sh csigelo@sigelo.io:/tmp/
-ssh -t csigelo@sigelo.io 'sudo sh /tmp/server-setup.sh --certs'   # adds the pointed names, lists the skipped
+scp site/deploy/server-setup.sh <admin>@<host>:/tmp/
+ssh -t <admin>@<host> 'sudo sh /tmp/server-setup.sh --certs'   # adds the pointed names, lists the skipped
 node site/deploy/check.mjs                              # their redirects: ok, or skip while DNS is not pointed
 ```
 
@@ -217,7 +221,7 @@ or `preload`: both bind every future subdomain: a deployment choice.
 
 `node site/deploy/check.mjs [--origin URL] [--no-tls] [--no-www] [--node-server] [--commit SHA | --any-commit]`
 
-From the phone, against https://sigelo.io by default: `/`, `/llms.txt`, `/adopt.md`,
+From your machine, against https://sigelo.io by default: `/`, `/llms.txt`, `/adopt.md`,
 `/index.json`, `/.well-known/security.txt`, `/sitemap.xml`, `/robots.txt`, `/spec.md`,
 `/examples/world.mjs`, `/style.css` return 200 with exactly the content types of
 `site/test/run.mjs`; `Accept: text/markdown` on `/`, `/spec.html` and `/spec` returns the Markdown
@@ -242,8 +246,8 @@ which every 15 minutes rebuilds `/var/www/sigelo.io/stats/index.html` (GoAccess 
 kept, `--anonymize-ip` as a second cut, the hosts panel off) and `agents.txt` (`stats-agents.sh`:
 AI agents by name, programmatic clients, crawlers, browsers, `Accept: text/markdown`, the agent
 funnel `/llms.txt` → `/adopt.md` → `/index.json` → `/examples/world.mjs`, top paths for agents and
-for humans). Both are served at `https://sigelo.io/_stats/` behind basic auth (user `owner`; the
-password lives only on the operator's phone, the server keeps its SHA-512 crypt hash), `noindex`,
+for humans). Both are served at `https://sigelo.io/_stats/` behind basic auth (the
+password is kept offline, with the operator; the server keeps its SHA-512 crypt hash), `noindex`,
 `no-store`, not in the sitemap; `check.mjs` checks the 401 and the sitemap.
 
 **Own traffic is excluded.** Every request the project makes to its own site — `check.mjs`
@@ -267,7 +271,7 @@ location; world/README.md is the whole story. Once, after a first deploy has shi
 
 ## Releases (`/releases/`)
 
-`site/deploy/mirror-release.sh v0.1.0 sigelo-vps` copies a GitHub release to
+`site/deploy/mirror-release.sh v0.1.0 <host-alias>` copies a GitHub release to
 `/var/www/sigelo.io/releases/v0.1.0/` after checking every file against the release's
 `SHA256SUMS`, writes `releases/index.json` (tags, files, sizes, sha256s) and the Markdown
 listings nginx serves at `/releases/` and `/releases/<tag>/`, points `latest` at the highest tag,
@@ -280,18 +284,18 @@ through the `dist/releases` symlink rather than a second `root`.
 
 ## Watchdog, self-check, state backup
 
-**Phone** — `site/deploy/watch.sh`, installed as `~/.local/bin/sigelo-watch` with
-`~/.config/systemd/user/sigelo-watch.{service,timer}` (every 15 minutes). It asks only whether each
+**Watchdog** — `site/deploy/watch.sh`, on a monitoring machine the operator keeps, installed as
+`<install dir>/sigelo-watch` with a user `sigelo-watch.{service,timer}` (every 15 minutes). It asks only whether each
 site is reachable and working, never content or release state (that is `check.mjs` at deploy
 time). sigelo.io: `/`, `/llms.txt`, `/index.json`, `/spec.md`, the `http://` → `https://` 301, a
 certificate valid 7 more days, `/world/stats`, `/mcp` initialize. sigelo.ai: `/`,
 `https://relay.sigelo.ai/challenge`, an MQTT CONNECT over TLS on `relay.sigelo.ai:8883` answered by a
 CONNACK (the refused login of a probe without identity counts as up; CONNACK 0, that login
-accepted, counts as down), both certificates valid 7 more days. A failure is retried after 20 s, and does not count when the phone itself is offline.
+accepted, counts as down), both certificates valid 7 more days. A failure is retried after 20 s, and does not count when the monitoring machine itself is offline.
 Each site has its own state: it is down from its second failing tick in a row; then one
 `notify-send -u critical`, at most one every 6 hours while it lasts, never two within an hour across
 both sites (a page held back goes out on a later tick); recovery is a log line; success is silent.
-Log: `~/.local/share/sigelo-watch/alerts.log`. Tests use `--no-notify`; `--origin URL` (the
+Log: `alerts.log` in its state directory (`--state`). Tests use `--no-notify`; `--origin URL` (the
 sigelo.io probes) and `--relay-origin URL [--relay-host HOST[:PORT]]` (the sigelo.ai probes) imply it
 and a scratch state (removed on exit, its log printed first), so a test never changes what the
 timer watches; `--self-test` runs the paging rules above against stubs (no probe goes out, no
@@ -305,15 +309,13 @@ root's `sigelo-selfcheck.timer` runs `/usr/local/sbin/sigelo-selfcheck` hourly: 
 failing unit (nginx only after `nginx -t`) and logs to `journalctl -u sigelo-selfcheck`.
 
 **Server, state backup** — `server-setup.sh --backup age1…`: root's `sigelo-vps-backup.timer`
-(daily 03:30 Europe/Berlin) tars `/var/lib/sigelo-world` (issuer key, attestations, nonces),
+(daily 02:30 UTC; the host runs UTC) tars `/var/lib/sigelo-world` (issuer key, attestations, nonces),
 `/etc/sigelo-world.env`, the nginx config and stats password file, `/etc/letsencrypt`, the sigelo
 units, helpers, sudo rule and logrotate file, `/var/backups/sigelo-nginx`, the release mirror and
-the stats, encrypted with age to a recipient whose identity is only on the operator's phone
-(`~/.config/sigelo/vps-backup.key`): `/home/csigelo/backup/vps-state-<stamp>.tgz.age`, csigelo
-0600, 7 kept. The server cannot read its own backups. The phone's nightly `sigelo-backup` (04:00)
-pulls the newest into `~/.local/share/sigelo-vps-state/`, which its own passphrase-encrypted
-archive then carries back to the VPS: each side holds the other's secrets, encrypted to a key the
-holder lacks.
+the stats, encrypted with age to a recipient whose identity is kept offline, with the operator:
+`/home/<admin>/backup/vps-state-<stamp>.tgz.age`, admin user 0600, 7 kept. The server cannot read
+its own backups. The operator pulls the newest off the host and keeps it in their own encrypted
+backup.
 
 ## The relay host (`server-setup.sh --relay`)
 
@@ -321,7 +323,7 @@ The relay (csigelo/sigelo-relay, its own public repository) runs on a Debian 13 
 behind sigelo.ai, www.sigelo.ai and relay.sigelo.ai. `--relay` prepares that host; no sigelo.io step
 runs. It needs `site/deploy/server-setup.sh` from this repository and, from the relay repository's
 `deploy/`, `sigelo-relay-apply`, `sigelo-relay.service` and `backup.sh`, side by side. As root over
-ssh the first time (later as `csigelo`, with `sudo`), from a directory holding the four files:
+ssh the first time (later as the admin user, with `sudo`), from a directory holding the four files:
 
 ```sh
 ssh root@HOST 'mkdir -p /tmp/s'
@@ -340,7 +342,7 @@ ssh -t root@HOST "sh /tmp/s/server-setup.sh --relay --key '<deploy key>' --admin
 | R10–R11 | fail2ban `sshd` jail (the `nginx-limit-req` jail is written but off: nginx logs nothing below `crit` here); unattended upgrades with NodeSource, reboot at 04:30 UTC when needed |
 | R12 | nftables: inbound 22, 80, 443, 8883, 3478/tcp, 3478/udp and 49160-49400/udp (STUN and TURN, coturn); UDP relayed by coturn to this host's own addresses reaches only coturn's ports (not dhcpcd, not any later local listener); only table `inet filter` is replaced, so fail2ban's survives. The first time it arms a 3-minute rollback: from a new ssh session, `systemctl stop sigelo-nft-rollback.timer && systemctl enable nftables` |
 | R13 | sshd: root off, keys only, `AllowUsers csigelo sigelo` — only once csigelo has a password and is in group `sudo`, and both users have a key; then empty root's `authorized_keys` |
-| R14 | with `--backup`: `deploy/backup.sh` as `sigelo-relay-backup`, daily 03:30 Europe/Berlin |
+| R14 | with `--backup`: `deploy/backup.sh` as `sigelo-relay-backup`, daily 02:30 UTC (the host runs UTC) |
 | R15 | `nginx.service` gets `Restart=on-failure` (a drop-in); root's hourly `sigelo-relay-selfcheck.timer`: the relay on 127.0.0.1:8791 (`/challenge`) and :8883 (a TLS handshake), then nginx (`/challenge` and `/` on 127.0.0.1); it restarts the failing unit (nginx only after `nginx -t`), leaves a unit stopped by hand alone, logs to `journalctl -u sigelo-relay-selfcheck` |
 
 It exits 1 and lists what is left (a password, the firewall confirmation, DNS) until a rerun finds
@@ -367,7 +369,7 @@ is not the one it staged. Then `deploy/check.mjs`: front page, headers, `llms.tx
 **Backup and restore** — `backup.sh` takes from `relay.db` the licences, the vendor chain, retired
 operator keys and each licensed operator's account and chain; never messages, claims or counters
 (`deploy/backup.sh --self-test`, in the relay export's proof, extracts from a seeded database and
-checks that). With the config, `/etc/letsencrypt`, ntfy's `server.yml`, `user.db` and `sigelo-push.conf`, and `/etc/turnserver.conf` (each if present) it writes `/home/csigelo/backup/relay-state-<stamp>.tgz.age`
+checks that). With the config, `/etc/letsencrypt`, ntfy's `server.yml`, `user.db` and `sigelo-push.conf`, and `/etc/turnserver.conf` (each if present) it writes `/home/<admin>/backup/relay-state-<stamp>.tgz.age`
 (7 kept), encrypted to a key the host does not hold. On a new host: untar `etc/letsencrypt`,
 `etc/sigelo-relay.env` and `push.key` (to `/var/lib/sigelo-relay/`, 0600, before the first start), run `--relay` (R9 copies the restored `relay.sigelo.ai` certificate for the broker), deploy
 once (the relay creates its tables), `systemctl stop sigelo-relay`, `sigelo-relay-backup --restore
@@ -375,14 +377,13 @@ once (the relay creates its tables), `systemctl stop sigelo-relay`, `sigelo-rela
 
 ## Rebuilding the server
 
-From a fresh Debian 13 host with DNS pointed at it, in this order (the phone's
-`~/.config/sigelo/RESTORE.md` has the same steps with paths): decrypt the newest
-`vps-state-*.tgz.age` on the phone (`age -d -i ~/.config/sigelo/vps-backup.key`); as root on the
+From a fresh Debian 13 host with DNS pointed at it, in this order: decrypt the newest
+`vps-state-*.tgz.age` offline, with the operator's age identity (`age -d -i <identity>`); as root on the
 server, `tar -C / -xzf vps.tgz etc/letsencrypt` and then `server-setup.sh --key …` (the certificate
-is found and kept: no re-issue); `deploy.sh` from the phone; `tar … var/lib/sigelo-world
+is found and kept: no re-issue); `deploy.sh` from your machine; `tar … var/lib/sigelo-world
 etc/sigelo-world.env` and `server-setup.sh --world keep` (the old issuer key is kept and re-owned:
 same DID, no new genesis); `tar … etc/nginx/sigelo-stats.htpasswd var/www/sigelo.io/stats` and
-`--stats`; `tar … var/www/sigelo.io/releases`; `--guard`; `--backup <age-keygen -y vps-backup.key>`;
+`--stats`; `tar … var/www/sigelo.io/releases`; `--guard`; `--backup <recipient>` (`age-keygen -y <identity>`);
 then `check.mjs` must say ALL PASS.
 
 ## Rollback

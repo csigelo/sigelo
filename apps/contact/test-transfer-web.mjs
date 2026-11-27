@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Transfers in the phone app (design/transfer.md §10; transfer-engine.mjs, transfer-web.mjs, rtc-web.mjs,
+// Transfers in the phone app (apps/agent/TRANSFER.md "The phone app"; transfer-engine.mjs, transfer-web.mjs, rtc-web.mjs,
 // photo.mjs): the accept rule's table and who counts as known; a group's fan-out (paired, through the
 // creator, offline, direct asked first) over a fake carrier; the preview's checks; the page's data
 // channel over a fake RTCDataChannel (the 1 MiB low mark, binary frames only); then, with the relay
@@ -87,7 +87,7 @@ export function fakeShell({ landFails = null } = {}) {
   ok(t({ size: 25e6 }) === 'auto' && t({ size: 25e6 + 1 }) === 'ask', '25 MB exactly lands; one byte more asks (MB = 10^6)');
   ok(t({ limitMb: 0 }) === 'ask' && t({ limitMb: 2 }) === 'ask' && t({ limitMb: 4 }) === 'auto', 'the contact\'s own size wins: 0 always asks');
   ok(t({ defaultMb: 0 }) === 'ask' && t({ defaultMb: 1, limitMb: 5 }) === 'auto', 'the default 0: always ask, unless the contact has its own');
-  ok(t({ direct: null }) === 'auto' && t({ direct: false }) === 'auto', 'the direct switch is not the rule\'s (2026-11-25): off or not asked, still auto (the lane falls to Tor or the relay)');
+  ok(t({ direct: null }) === 'auto' && t({ direct: false }) === 'auto', 'the direct switch is not the rule\'s: off or not asked, still auto (the lane falls to Tor or the relay)');
   const c = (x) => ({ did: 'did:sigelo:zA', tier: 'friend', ...x });
   ok(E.trustOf(c({ tier: 'own' })) === 'own' && E.trustOf(c({ ours: true })) === 'own', 'trustOf: own tier and ours are own');
   ok(E.trustOf(c({}), () => true) === 'compared' && E.trustOf(c({}), () => false) === 'other', 'trustOf: a friend is known once the words were compared');
@@ -144,7 +144,7 @@ export function fakeShell({ landFails = null } = {}) {
   ok(X.setAuto({ carrier, contact: 'bob', mb: 0 }).auto_mb === 0 && X.list({ carrier }).auto['did:sigelo:zBob'] === 0, 'setAuto: per contact, in the list');
 }
 
-// ================================================================ TURN (2026-11-26): the relay's credential at each attempt
+// ================================================================ TURN: the relay's credential at each attempt
 const TURN = { urls: ['turn:relay.test:3478?transport=udp', 'turn:relay.test:3478?transport=tcp'], username: '1764200000:abcdefghijklmnop', credential: 'Y3JlZGVudGlhbA==', exp: 1764200000 };
 {
   ok(JSON.stringify(iceServers(['relay.test:3478'])) === '[{"urls":["stun:relay.test:3478"]}]' && JSON.stringify(iceServers([], null)) === '[]', 'the page\'s ICE servers without TURN: STUN alone, as before');
@@ -165,7 +165,7 @@ const TURN = { urls: ['turn:relay.test:3478?transport=udp', 'turn:relay.test:347
     'a module that does not say TURN_OK true (werift without its handshake checks): no credential asked');
   ok((await eng({}, c1).turnOf(await import('../transfer/rtc.mjs')))?.username === TURN.username && asked.length === 2,
     'werift (apps/transfer/rtc.mjs) with its handshake checks in place: TURN_OK true, a credential asked');
-  // "Always relay my media" (design/calls.md §6): the policy, the page's peer under it, the engine's.
+  // "Always relay my media" (UI-API.md "Settings"): the policy, the page's peer under it, the engine's.
   ok(eng({}, {}).policyNow() === 'all' && eng({ policy: () => 'relay' }, {}).policyNow() === 'relay' && eng({ env: { SIGELO_ICE_POLICY: 'relay' } }, {}).policyNow() === 'relay'
     && eng({ policy: () => { throw new Error('x'); } }, {}).policyNow() === 'all', 'the engine\'s policy: the setting (policy()) or SIGELO_ICE_POLICY=relay; else all');
   ok(await failure(() => webPeer({ stun: ['relay.test:3478'], turn: null, RTC: R, policy: 'relay' })) === 'relay_only', 'rtc-web peer(): relay only without TURN: refused relay_only, no connection made');
@@ -245,7 +245,7 @@ try {
   ok(r1.state === 'offered' && r1.file === d1.doc && r1.sha256 === sha(shot), 'the phone offers a picked file by its doc, hashed in the shell');
   ok(await until(() => nRec('in', r1.id)?.state === 'done', 120000), 'phone → computer, own contact, 3 MB: landed by the rule', JSON.stringify(nRec('in', r1.id)));
   ok(sha(readFileSync(nRec('in', r1.id).saved)) === sha(shot) && nRec('in', r1.id).path_used === 'direct', 'whole, over the direct path (the page\'s engine, werift in this test)');
-  ok(await until(() => pRec('out', r1.id)?.state === 'done'), 'the phone\'s record: done');
+  ok(await until(() => pRec('out', r1.id)?.state === 'done'), 'the phone record: done');
   ok(nRec('in', r1.id).relayed === false && pRec('out', r1.id).relayed === false, 'both records: relayed false (the selected pair is direct: the transfers list says "direct")', JSON.stringify([nRec('in', r1.id).relayed, pRec('out', r1.id).relayed]));
   ok(sh.big.ops.filter((x) => x === 'read').length === 4, `read by range, one per chunk (${sh.big.ops.filter((x) => x === 'read').length})`);
 
@@ -299,7 +299,7 @@ try {
   const r6 = await X.send({ carrier: N.c, identity: N.identity, to: 'phone', path: join(dir, 'ro.bin') });
   ok(await until(() => pRec('in', r6.id)?.reason === 'relay_only' || pRec('in', r6.id)?.state === 'relayed', 60000) && peers.length === n0,
     'relay only, no TURN: no peer made on the phone; failed relay_only (or relayed by the sender\'s relay lane)', JSON.stringify(pRec('in', r6.id)));
-  ok(pEvents.some((e) => e.what === 'no_direct' && e.id === r6.id && e.detail === E.RELAY_ONLY), `the phone's event says "${E.RELAY_ONLY}"`);
+  ok(pEvents.some((e) => e.what === 'no_direct' && e.id === r6.id && e.detail === E.RELAY_ONLY), `the phone side's event says "${E.RELAY_ONLY}"`);
   ok(await until(() => ['failed', 'relaying', 'done'].includes(nRec('out', r6.id)?.state), 60000) && nRec('out', r6.id)?.path_used !== 'direct', 'the sender told: not over the direct lane', JSON.stringify(nRec('out', r6.id)));
   P.e.policy = () => 'all';
 } finally {

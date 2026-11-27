@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Restore from seed in an app (design/apps-seed.md, pass A9): the operator's files from the 25 words,
+// Restore from seed in an app: the operator's files from the 25 words,
 // exactly as `sigelo-agent keeper --from-words` writes them, and this device as the first FULL device
 // of a new device list holding the seat (`device seat init`), or as a standby when the human says the
 // seat is on another device. No network, no storage and no clock here: the page (apps/web/seed.mjs)

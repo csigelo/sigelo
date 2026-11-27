@@ -1,8 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# site/deploy/watch.sh — the phone's watchdog for https://sigelo.io and the relay on https://sigelo.ai:
-# is each reachable and working? Installed as ~/.local/bin/sigelo-watch, run by sigelo-watch.timer
-# (systemd --user).
+# site/deploy/watch.sh — the watchdog for https://sigelo.io and the relay on https://sigelo.ai: is
+# each reachable and working? Runs on a monitoring machine the operator keeps, installed as
+# <install dir>/sigelo-watch, run by sigelo-watch.timer (systemd --user).
 #
 #   sigelo-watch                  probe both; notify when one is down (throttled, below)
 #   sigelo-watch --no-notify      probe and log, never notify (every test, every manual run)
@@ -26,8 +26,8 @@
 #   with a CONNACK (a refused login is the answer expected: the probe has no identity; a timeout,
 #   a closed socket, or CONNACK 0 — a login without credentials accepted — is down); both
 #   certificates valid for 7 more days.
-# A failed run is retried once after 20 s; when api.github.com is unreachable too, the phone is
-# offline: logged, not counted.
+# A failed run is retried once after 20 s; when api.github.com is unreachable too, this machine
+# is offline: logged, not counted.
 #
 # Each target has its own state and incidents. One failing tick is not an outage: a target is down
 # from its second failing tick in a row. Notifications (notify-send -u critical): ONE when an
@@ -82,7 +82,7 @@ STUB
   touch "$T/up"
   w "$H" $S; [ "$wrc" = 0 ] && [ "$(pages)" = 2 ] && grep -q 'ok again' "$T/s/alerts.log" && case $(st) in up*) true ;; *) false ;; esac; ok $? "recovery: a log line, no page"
   rm -f "$T/up"; touch "$T/offline"
-  w "$H" $S; w "$H" $S; [ "$wrc" = 0 ] && [ "$(pages)" = 2 ] && grep -q 'phone is offline' "$T/s/alerts.log" && case $(st) in up*) true ;; *) false ;; esac; ok $? "the phone offline: logged, not counted"
+  w "$H" $S; w "$H" $S; [ "$wrc" = 0 ] && [ "$(pages)" = 2 ] && grep -q 'machine is offline' "$T/s/alerts.log" && case $(st) in up*) true ;; *) false ;; esac; ok $? "this machine offline: logged, not counted"
   rm -f "$T/offline"
   # both targets down at once, a fresh home: one page, the other held by the hour cap
   w "$T/home2" --state "$T/s2" --origin https://watch.invalid --relay-origin https://watch.invalid --test-notify
@@ -250,13 +250,13 @@ tick() {
     return 0
   fi
   if ! is_online; then
-    echo "$stamp skip: the phone is offline ($target and api.github.com unreachable); not counted" >> "$LOG"
+    echo "$stamp skip: this machine is offline ($target and api.github.com unreachable); not counted" >> "$LOG"
     return 0
   fi
   rc=1
   out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)
-  # One failing tick is not an outage: a phone on a half-working network reaches api.github.com and
-  # times out on the target (2026-10-04, a false "DOWN" during a Wi-Fi hand-over). Notify from the
+  # One failing tick is not an outage: a machine on a half-working network reaches api.github.com and
+  # times out on the target (a false "DOWN" during a Wi-Fi hand-over). Notify from the
   # second consecutive failing tick on, i.e. after the timer interval has passed with it down.
   if [ "$prev" != down ]; then
     echo "$stamp DOWN $target (first tick, confirming next run): $out" >> "$LOG"

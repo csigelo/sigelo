@@ -447,7 +447,7 @@ try {
   } else console.log('  SKIP the seat: no python3 (pty)');
 
 
-  // ---- a FULL device restored from seed in an app (apps/web/seed.mjs, sigelo-contact/restore.mjs; design/apps-seed.md)
+  // ---- a FULL device restored from seed in an app (apps/web/seed.mjs, sigelo-contact/restore.mjs)
   {
     const CDIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'contact');
     const RS = await import(pathToFileURL(join(CDIR, 'restore.mjs')).href) as { restoreFromWords(w: string, o: object): { identity: { secret: string; genesis: { key: string } }; keeper: Record<string, unknown>; device: object; notes: object; list: { seat: { holder: string; epoch: number }; devices: { name: string; worker: number; did: string; rank: string; added: number; by: string }[] }; did: string; worker: string } };

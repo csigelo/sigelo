@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // The page of `sigelo-agent ui` and of the apps (sigelo-agent-ui.ts; API: UI-API.md). Plain browser JS, one
-// classic script, no framework, no build step. Its look and its words are design/ux1/mock.html; how it is built
-// (screens, sheets, the shared pieces, how the tests fake the API) is design/ux1/build.md.
+// classic script, no framework, no build step: screens, sheets and the shared pieces below; the tests fake the API.
 // Every string from a contact, a relay or a file goes in by textContent, its controls and bidi overrides escaped
 // (safeText), never as HTML. The token comes in the fragment and goes back as X-Sigelo-Token; no cookie; the
 // token in this tab's sessionStorage (it survives a reload); localStorage only for this device's look and a mirror
@@ -278,7 +277,7 @@
   const pairMessage = (code, exp) => `Pair with me on Sigelo: code ${code}, once, until ${hhmm(exp)}. How: ${PAIR_HOW}`;
   const enrolMessage = (code, exp, command) => `Enrol as my agent on Sigelo: code ${code}, once, until ${hhmm(exp)}. On the agent's machine: ${command}  How: ${ENROL_HOW}`;
 
-  // ================================================================ SHARED PIECES (design/ux1/build.md lists them)
+  // ================================================================ SHARED PIECES
   /** A button: kind '' (secondary), 'pri', 'danger' or 'ghost'; an icon before the label. */
   const btn = (label, onclick, { kind = '', ic, disabled, auto, label: aria } = {}) =>
     h('button', { type: 'button', class: `btn${kind ? ' ' + kind : ''}${auto ? ' auto' : ''}`, onclick, disabled, 'aria-label': aria }, ic ? icon(ic) : null, label);
@@ -319,7 +318,7 @@
   }
   /** An empty state: a title, one sentence, one verb (a second at most). */
   const empty = (title, text, ...actions) => h('div', { class: 'empty' }, h('h3', null, title), text ? h('p', null, text) : null, actions);
-  /** A screen or part a later pass of UX1 fills (design/ux1/build.md "Placeholders"): said plainly, marked in the code. */
+  /** A screen or part not built yet: said plainly, marked in the code. */
   const later = (title, text) => h('div', { class: 'empty todo', 'data-later': title }, h('h3', null, title), h('p', null, text ?? 'Not in this version yet.'));
   /** An error said in place, in plain words. */
   const inlineError = (e) => (e ? h('p', { class: 'err', role: 'alert' }, plain(e)) : null);
@@ -510,8 +509,11 @@
     S.leave?.(); S.leave = null;   // a screen that showed the words hides them
     dropSheet();
     S.view = e.view; S.note = null; S.msgsSeq = -1; S.chip = null; S.tabs = null; S.jump = null;
+    const reply = same ? S.reply?.get() ?? null : null;   // a pending reply: kept when the same chat is drawn anew
+    S.reply = null; S.replyBar = null;
     shots();   // before the build: a secret is never drawn unguarded
     S.update = def.build(e.arg) ?? (() => {});
+    if (reply) S.replyBar?.set(reply, true);
     if (!same) window.scrollTo?.(0, 0);
     // A new screen: the focus on its heading (said first by a screen reader), unless its update puts it in a field.
     const head = app.querySelector?.('h1');
@@ -558,7 +560,8 @@
     if (def?.guard && typeof LOCAL?.unlock === 'function') {
       try { await LOCAL.unlock(); } catch (e) { S.note = e; await refresh(); return; }
     }
-    const fromSheet = S.sheet && H?.state?.sheet;   // the sheet's entry becomes the new screen's
+    const fromSheet = (S.sheet && H?.state?.sheet) || (!S.sheet && S.reply && ours() && H.state.reply);   // the sheet's (a reply's) entry becomes the new screen's
+    S.reply = null;
     S.stack.push({ view, ...(arg !== undefined && { arg }) });
     const st = stateOf(S.stack.length - 1);
     if (fromSheet) H.replaceState(st, ''); else H?.pushState?.(st, '');
@@ -573,6 +576,7 @@
   /** One step back: a sheet closes; else the screen before. */
   function back() {
     if (S.sheet) return closeSheet();
+    if (S.reply) { S.reply.set(null); return undefined; }   // a pending reply: dropped, the chat stays
     if (S.stack.length <= 1) return undefined;
     if (ours() && H.state.d > 0) { H.back(); return undefined; }
     S.stack.pop();
@@ -582,7 +586,7 @@
   function home(view = 'chats') {
     const n = S.stack.length - 1;
     // Back through the history to the first entry (none left behind: Back from a tab root is Chats), then the tab on it.
-    if (n > 0 && ours() && H.state.d === n) { if (view !== 'chats') S.pendingTab = view; H.go(-n); return; }
+    if (n > 0 && ours() && H.state.d === n) { if (view !== 'chats') S.pendingTab = view; S.reply = null; H.go(-n - (H.state.reply ? 1 : 0)); return; }
     S.stack = view === 'chats' ? [{ view }] : [S.stack[0], { view }];
     if (ours()) H.replaceState(stateOf(S.stack.length - 1), '');
     void render();
@@ -603,8 +607,13 @@
       was.popped?.();
       if (st?.sigelo === 1 && st.d === S.stack.length - 1 && st.view === top().view && !st.sheet) return;
     }
+    if (S.reply || S.replyPop) {   // Back from a pending reply (or × / Send taking its entry back): dropped, the chat stays
+      const r = S.reply; S.reply = null; S.replyPop = false;
+      r?.set(null, true);
+      if (st?.sigelo === 1 && st.d === S.stack.length - 1 && st.view === top().view && !st.reply && !st.sheet) return;
+    }
     if (st?.sigelo !== 1) { if (S.stack.length > 1) { S.stack = [S.stack[0]]; void render(); } return; }
-    if (st.sheet) { H.back(); return; }   // forward into a closed sheet: not opened again
+    if (st.sheet || st.reply) { H.back(); return; }   // forward into a closed sheet or a dropped reply: not opened again
     S.stack = S.stack.slice(0, st.d);
     while (S.stack.length < st.d) S.stack.push({ view: 'chats' });
     S.stack.push({ view: st.view, ...(st.arg !== undefined && { arg: st.arg }) });
@@ -1166,14 +1175,28 @@
     el.addEventListener('dblclick', () => pick());
     return el;
   }
-  /** The bar above the composer: the message answered, × drops it. → { el, set(q|null), get() }. */
+  /**
+   * The bar above the composer: the message answered, × drops it. → { el, set(q|null), get() }.
+   * A pending reply is a step Back undoes (S.reply): its own history entry ({…, reply: true}, as a sheet's), so the
+   * screen's Back, the system's or the browser's drops the reply and stays in the chat; × and Send take the entry back.
+   * It does not outlive the chat: another screen drops it (go replaces its entry), and a chat opened again starts without.
+   */
   function quoteBar(onChange = () => {}) {
     const el = h('div', { class: 'quotebar', hidden: true }), Q = { q: null };
-    Q.set = (q) => {
+    Q.set = (q, quiet = false) => {
+      const was = Q.q;
       Q.q = q; el.hidden = !q;
       put(el, q ? [h('div', { class: 'quote' }, h('b', null, q.who), q.text), ibtn('x', 'Drop the reply', () => { Q.set(null); onChange(); })] : null);
+      if (q && !was) {
+        S.reply = Q;
+        if (!quiet && ours() && !H.state.sheet && !H.state.reply) H.pushState?.({ ...H.state, reply: true }, '');
+      } else if (!q && was) {
+        if (S.reply === Q) S.reply = null;
+        if (!quiet && ours() && H.state.reply && !H.state.sheet) { S.replyPop = true; H.back(); }
+      }
     };
     Q.el = el; Q.get = () => Q.q;
+    S.replyBar = Q;
     return Q;
   }
   /** A reply's quote in its bubble: who wrote the message answered and its first line; a tap goes to it. */
@@ -1290,7 +1313,7 @@
   // Copying keeps every line break (0.1.19: a three-line command pasted from a bubble came out as one line). Each
   // message's text element keeps the text as written; a copy of all of it puts that on the clipboard, a copy of a part
   // the text nodes it covers, a line break between blocks (lines, list items, code), the controls (Copy, the signature,
-  // a quote, the time) left out. The copy event (the phone's Copy, Ctrl+C) and the signed-message screen's Copy text.
+  // a quote, the time) left out. The copy event (Copy on a phone, Ctrl+C) and the signed-message screen's Copy text.
   const SRC = new WeakMap();
   function msgText(t, tag = 'div', md = true) {
     const el = h(tag, { class: 'text' }, md ? mdText(t) : t);
@@ -1402,7 +1425,7 @@
     };
     return M;
   }
-  /** A chat's file choices (the phone's picker and camera; else, to a person, Files on this computer). */
+  /** A chat's file choices (the device's picker and camera; else, to a person, Files on this computer). */
   function fileChoices(target, who, ts, toPerson) {
     const pick = S.snap?.transfers && ts?.pick;
     return [pick ? ['image', 'Photo', () => pickAndSend(target, who, true)] : null,
@@ -1425,7 +1448,7 @@
     const heading = h('h1', { class: 'sr' });
     // The bar: Back, the name (avatar and name, one control: the chat settings, or my agent's page), Pay with the Wallet on.
     const payBtn = tbtn('Pay', () => pay(did)), payAt = h('span', null, walletOn() ? payBtn : null);
-    // Call (design/calls.md §4): only a person online, from a page that can call.
+    // Call: only a person online, from a page that can call.
     const callBtn = ibtn('phone', 'Call', () => void callStart(did)), callAt = h('span', null, callable(contactBy(did)) ? callBtn : null);
     mount(page({ who, actions: [callAt, ibtn('search', 'Search this chat', () => go('search', { contact: did })), payAt], body: [heading, alerts, thread], after: C.el }));
     notifyOut({ tag: tagOfChat(did), cancel: true });   // its notification, if one is up: read now
@@ -1517,7 +1540,7 @@
         return h('div', { class: 'msg in prompt', 'data-prompt': String(m.n) }, a ? [h('b', null, a.tool), msgText(a.summary, 'div', false)] : msgText(q.question), end, h('span', { class: 'meta' }, hhmm(m.at)));
       };
       const pick = (m) => () => { RQ.set({ n: m.n, who: m.dir === 'out' ? 'You' : c.name, text: String(m.text).split('\n')[0].slice(0, 120) }); C.text.focus?.(); };
-      // A call's line (design/calls.md §4: "Call · 4:12", "Missed call", "Declined"): local, never sent; no audio kept.
+      // A call's line ("Call · 4:12", "Missed call", "Declined"): local, never sent; no audio kept.
       const callLine = (m) => h('div', { class: `callline ${m.dir}${m.call.state === 'missed' ? ' missed' : ''}`, 'data-call': m.call.state }, icon('phone'), h('span', null, m.text), h('span', { class: 'meta' }, hhmm(m.at)));
       put(thread, r.messages.length ? threadOf(r.messages, (m) => m.call ? callLine(m) : (m.approval || m.question) && c.tier === 'own' ? promptBubble(m) : m.pay ? payBubble(m) : m.statement ? stBubble(m) : m.photo ? photoBubble(m, recs, did, c.name) : m.voice ? voiceBubble(m, recs, did, c.name) : m.file ? fileBubble(m, recs, did, c.name) : replyable(h('div', { class: `msg ${m.dir}`, 'data-n': String(m.n), ...(m.dir === 'in' && tapOf(m)) },
         m.re ? quoteIn(m.re.dir === 'out' ? 'You' : c.name, m.re.text, m.re.n === null ? null : ['data-n', String(m.re.n)]) : null,
@@ -1568,7 +1591,7 @@
   screen('chat-info', {}, (did) => {
     const body = h('div');
     mount(page({ title: 'Chat settings', body: [body] }));
-    // Their files (design/transfer.md §10.2): this contact's size for the accept rule, or the default (Files).
+    // Their files (the accept rule, TRANSFER.md): this contact's size for the accept rule, or the default (Files).
     let auto = null;
     const loadAuto = async () => { const [L, st] = await Promise.all([transfersNow(), transferSettingsNow()]); if (L && st) { auto = { mb: L.auto?.[did] ?? null, def: st.auto_mb ?? 25 }; void refresh(); } };
     if (S.snap?.transfers) void loadAuto();
@@ -1745,7 +1768,7 @@
     return k === 'relay' ? tbtn('Send over the relay', () => act(() => backend.call('POST', '/api/transfers/relay', { id: r.id })))
       : k === 'retry' ? tbtn('Retry', () => act(() => transferCall('/api/transfers/retry', { id: r.id }, who))) : null;
   };
-  // The phone (design/transfer.md §10.1): no Tor, no relayed path yet.
+  // The phone: no Tor, no relayed path yet.
   const NO_DIRECT = 'Could not connect directly; try from your computer, or wait for the Pro relay path.';
   /** Why, in the transfers card's words (a chat bubble that failed says it too); a failure with no words: its reason code. */
   const NO_RELAYED = 'Could not connect, not even through the relay host; try from your computer.';
@@ -1830,7 +1853,7 @@
   }
   screen('files', {}, viewTransfers);
 
-  // ---- Photos and files from a chat (design/transfer.md §10): the camera and Attach in every chat, on the phone.
+  // ---- Photos and files from a chat: the camera and Attach in every chat, on the phone.
   async function transferSettingsNow() {
     if (!S.snap?.transfers) return null;
     if (!S.transferSettings) S.transferSettings = await backend.call('GET', '/api/transfers/settings').catch(() => null);
@@ -1895,7 +1918,7 @@
     if (!d || d.cancelled) return;
     await sendDoc(target, d, who, true);
   }
-  // Several files at once (2026-11-25): each its own transfer and bubble, sent in order; a receiver keeps 8 waiting from one contact.
+  // Several files at once: each its own transfer and bubble, sent in order; a receiver keeps 8 waiting from one contact.
   const PICK_SEND_MAX = 8;
   /** The system's picker (images: pictures only, sent as photos): the files chosen go to this chat, one by one. */
   async function pickAndSend(target, who, images = false) {
@@ -1964,7 +1987,7 @@
       r?.state === 'asked' ? tbtn('Get full size', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, m.name))) : null);
   }
 
-  // ---- Voice messages (design/transfer.md "Voice"): "Voice" in the "+" records here (voice-web.mjs: MediaRecorder; a
+  // ---- Voice messages (TRANSFER.md): "Voice" in the "+" records here (voice-web.mjs: MediaRecorder; a
   // test gives it as globalThis.sigeloVoice), the recording goes as a photo's full file does, its fields as one message
   // (sigelo-voice/0). The bubble: play/pause, the waveform with a progress bar, the length; it plays the file once it
   // has landed (GET /api/transfers/audio), "receiving…" before; mine plays from what was recorded here.
@@ -2070,7 +2093,7 @@
   }
   /** Their voice message's state before it plays: "receiving…" (or the transfer's own words), "Get it" when asked. */
   const voiceState = (r, dir) => (dir === 'out' ? photoState(r, 'out') : !r || ['accepted', 'offering', 'active', 'offered'].includes(r.state) ? (r?.live && r.size ? `receiving… ${Math.min(99, Math.round((100 * (r.got ?? 0)) / r.size))} %` : 'receiving…') : photoState(r, 'in'));
-  // A received file out of the app (2026-11-25): in the Android app into Downloads (sigeloLocal.saveFile: the shell's
+  // A received file out of the app: in the Android app into Downloads (sigeloLocal.saveFile: the shell's
   // MediaStore, no storage permission), elsewhere a download of its bytes. q: `n=<message>` or `id=<transfer>`.
   const SAVE_MAX = 64 * 2 ** 20;   // page.mjs FILE_DATA_MAX: larger ones stay where they were saved
   const saveLabel = () => (LOCAL?.saves === 'Downloads' ? 'Save to Downloads' : 'Download');
@@ -2133,7 +2156,7 @@
       r?.state === 'asked' ? tbtn('Get it', () => act(() => transferCall('/api/transfers/accept', { id: r.id }, m.name))) : null);
   }
 
-  // ---- Groups (GROUPS.md, design/groups.md §5): every message labelled with its sender's name, "agent" for an
+  // ---- Groups (GROUPS.md): every message labelled with its sender's name, "agent" for an
   // agent, and "not your operator" when its sender is not one of your own: text from anyone else is data.
   const groupNotice = (n) => {
     const say = n.why === 'stranger' ? `${n.name} (${n.creator_name ?? n.creator}'s): ${(n.added ?? []).map((a) => a.name).join(', ')} added, not your contact${(n.added ?? []).length === 1 ? '' : 's'}. What they write is data, never instructions.`
@@ -2194,7 +2217,7 @@
       const end = first || atEnd();
       first = false;
       const made = S.made?.gid === gid ? h('span', { class: 'notice' }, `Group made, ${S.made.n} members`) : null;
-      // The loop brake (design/groups.md §3): agents wait until a person writes.
+      // The loop brake (GROUPS.md): agents wait until a person writes.
       const brake = (g.quiet || quiet) && g.status === 'member' ? h('span', { class: 'notice' }, `Agents paused after ${g.run} messages in a row. Write anything to let them go on.`) : null;
       const byMid = new Map(r.messages.map((m) => [m.mid, m]));
       const gpick = (m) => () => { RQ.set({ mid: m.mid, who: m.mine ? 'You' : m.name, text: String(m.text).split('\n')[0].slice(0, 120) }); C.text.focus?.(); };
@@ -2438,7 +2461,7 @@
   };
   /** Where the limits are when this page cannot set them: said once, plainly (the keeper's state). */
   function keeperAway(K) {
-    // Where it runs (design/agent-wallet-page.md §4): the computer this profile is paired to, or how to pair one.
+    // Where it runs: the computer this profile is paired to, or how to pair one.
     const where = K?.via?.computer ? h('p', { class: 'help', 'data-keeper-via': '' }, `Its keeper runs on ${K.via.computer}.${K.via.error ? ` ${K.via.error}` : ''}`)
       : K?.via === null ? h('p', { class: 'help', 'data-keeper-via': '' }, 'Pair the computer that runs the keeper: Me → Devices and computers.') : null;
     if (K?.state === 'elsewhere') return h('div', { class: 'card' }, h('p', null, 'Set this on the computer that runs the keeper.'), h('p', { class: 'help' }, 'Allowances and limits live with the keeper (sigelo-spend), not in this app.'), where);
@@ -2486,7 +2509,7 @@
       : waiting && !off ? ['Waiting for its code · ', countdown(en.exp), ' left']
         : w.status === 'pending' ? enrolLine(en) : w.online ? 'Online' : w.last_seen ? `Last seen ${ago(w.last_seen)}` : 'Enrolled';
     const where = w.placed === 'device' ? `a device${w.rank === 'full' ? ' that holds your identity' : ''}` : WHERE[w.placed] ?? w.placed;
-    // With Wallet on, the allowance on a line of its own, with the wallet's sync state as the Wallet tab says it (Decided).
+    // With Wallet on, the allowance on a line of its own, with the wallet's sync state as the Wallet tab says it.
     const a = walletOn() && w.status === 'enrolled' ? policyOf(w.worker) : null, sw = a ? syncWords() : null;
     return row({ start: waiting ? h('span', { class: 'av ag', 'aria-hidden': 'true' }, icon('clock')) : avatar('agent', w.name, null, w.contact), title: w.name, attrs: { 'data-worker': String(w.worker) },
       sub: [w.status === 'enrolled' ? [h('span', { class: `dot sm${w.online ? '' : ' off'}` }), ' '] : null, state, w.status === 'revoked' || waiting ? '' : ` · ${where}`,
@@ -2553,7 +2576,7 @@
     }
   }
   const TRUST = [['own', 'Works for me', 'Its messages shown in full. For agents you run.'], ['quiet', 'Reads the web', 'Low trust: you read it when you choose.']];
-  // How long the code works (the agent-setup feedback, point 12: a local model took 2 to 45 minutes to run the command).
+  // How long the code works (a local model can take 2 to 45 minutes to run the command).
   const LIFE = [['600', '10 minutes', 'An agent that answers at once.'], ['3600', '1 hour', 'A slow or busy agent.'], ['86400', '24 hours', 'A local model on a busy machine.']];
   screen('enrol', { secret: true }, (arg) => {
     const E = { id: arg?.id ?? null, first: null, busy: false, error: null, tier: 'own', ttl: 600 };
@@ -2637,7 +2660,7 @@
   });
 
   // An agent's page: how it is, its allowance (Wallet on), what it did last, what it may do, about it; rename; revoke.
-  // Enrolled (the mock's enrol-done): Close to Agents; Decided (notes.md): no first chat started for it, Done is the way on.
+  // Enrolled (the mock's enrol-done): Close to Agents; no first chat started for it, Done is the way on.
   screen('enrolled', {}, (arg) => {
     const foot = h('div'), name = arg?.name ?? 'Your agent';
     mount(page({ close: true, onBack: () => home('agents'), who: h('h1', { class: 'sr' }, `${name} is ready`), body: [h('div', { class: 'hero center stack' }, h('div', { class: 'badge-ic' }, icon('check')),
@@ -2679,7 +2702,7 @@
       };
       const status = w.status === 'revoked' ? h('span', { class: 'warn' }, 'Revoked') : w.status === 'pending' ? enrolLine(w.enrolling)
         : w.online ? h('span', { class: 'ok' }, '● Online') : w.last_seen ? `Last seen ${ago(w.last_seen)}` : 'Enrolled';
-      // The address and the allowance (Wallet on; design/agent-wallet-page.md): its account's (i, 0), to fund it from any
+      // The address and the allowance (Wallet on; apps/keeper/README.md "The Owner"): its account's (i, 0), to fund it from any
       // wallet; its limits, Pause and Resume. Wallet off: one card to turn it on. Else where the keeper is.
       let address = null, allowance = null;
       if (w.status === 'enrolled' && !walletOn()) {
@@ -2723,9 +2746,9 @@
     };
   });
 
-  // An agent's allowance and limits (notes.md "Decided": the four common ones first, then Advanced), set at the keeper
+  // An agent's allowance and limits (the four common ones first, then Advanced), set at the keeper
   // (POST /api/keeper/agent): a change signed by you where the keeper takes it, else its policy file. Validation on leaving a
-  // field and on Save, the message under the field; Save is never disabled; Save asks one confirmation tap (2026-11-14).
+  // field and on Save, the message under the field; Save is never disabled; Save asks one confirmation tap.
   screen('agent-allowance', {}, (i) => {
     S.keeperAt = 0;   // a screen opened reads the keeper afresh
     const body = h('div'), foot = h('div'), title = h('h1', null, 'Allowance'), say = h('div');
@@ -2882,7 +2905,7 @@
   // ================================================================ WALLET (opt-in per profile; Settings → Wallet; UI-API.md "Wallet")
   // Which wallet: the computer's page shows this computer's wallet-rpc (a keeper's, or one set by hand: sigelo-agent-wallet.ts);
   // the phone connected to a computer shows the computer's (the same routes over the control); the phone on its own has no
-  // wallet (where: "none") and says so. Sync (Decided): reading GET /api/wallet is the sync, started when the tab or a balance
+  // wallet (where: "none") and says so. Sync: reading GET /api/wallet is the sync, started when the tab or a balance
   // is shown; its state said plainly; a balance out of sync greyed "as of"; Send only once synced.
   const RECOVERY = 'Your 25 words restore the vault and every keeper wallet; keeper settings are re-entered.';
   async function walletNow(force = false) {
@@ -2998,7 +3021,7 @@
     return { mine, left: sum('remaining'), cap: sum('per_period_max'), spent: sum('spent'), when: periods.length === 1 ? periodWord(periods[0]) : 'this period' };
   }
   screen('wallet', { tab: 'wallet' }, () => {
-    S.walletAt = 0; S.histAt = 0;   // the tab shown starts a sync (Decided)
+    S.walletAt = 0; S.histAt = 0;   // the tab shown starts a sync
     const head = h('div'), body = h('div');
     mount(page({ title: 'Wallet', tab: 'wallet', body: [head, body] }));
     return async () => {
@@ -3053,7 +3076,7 @@
   });
 
   // Send (task 9: Wallet, Send, Review, Send): to a contact (their address from your chat) or to an address; review; send.
-  // Only once synced (Decided); the button says why when it can't.
+  // Only once synced; the button says why when it can't.
   const ADDR_RE = /\b(?:monero:)?([48][1-9A-HJ-NP-Za-km-z]{94}(?:[1-9A-HJ-NP-Za-km-z]{11})?|[57][1-9A-HJ-NP-Za-km-z]{94}(?:[1-9A-HJ-NP-Za-km-z]{11})?|[9AB][1-9A-HJ-NP-Za-km-z]{94}(?:[1-9A-HJ-NP-Za-km-z]{11})?)\b/;
   /** The address a monero: URI or a pasted text names, and its amount (tx_amount), or null. */
   const addrOf = (t) => {
@@ -3272,7 +3295,7 @@
     return `An agent of yours${Number.isInteger(mode.worker) ? ` (worker ${mode.worker})` : ''}`;
   }
 
-  // ---- People and teams (notes.md H1): people with their agents, teams by owner, @ from a team. A person's agents are the
+  // ---- People and teams: people with their agents, teams by owner, @ from a team. A person's agents are the
   // ones they introduced to you (UI-API.md "Links": a contact's link.linked_by), paired, or waiting for your answer.
   function theirAgents(c) {
     return { paired: allContacts().filter((x) => x.link?.linked_by === c.did && x.did !== c.did), offered: (S.snap?.introductions ?? []).filter((x) => x.from === c.did) };
@@ -3360,7 +3383,7 @@
     };
   });
 
-  // ---- Public invite (the mock's invite, invite-new, invite-on; design/public-invite.md, UI-API.md "Public invite"): one code
+  // ---- Public invite (the mock's invite, invite-new, invite-on; UI-API.md "Public invite"): one code
   // many use for months (Pro only), each new chat waiting for your OK unless you let anyone in; a daily cap, Pause, Stop for good.
   const publicMessage = (p) => `Start a chat with me on Sigelo: ${p.short}. My four words: ${p.words}. Or open ${p.link}`;
   screen('invite', {}, () => {
@@ -3416,7 +3439,7 @@
     return () => { makeBtn.textContent = V.busy ? 'Making it…' : 'Make it'; put(body, form, V.say ? pro(V.say) : null); };
   });
 
-  // ---- Sign or check a message (notes.md S2; UI-API.md "Signed statements"): a text signed with your key, portable (copy,
+  // ---- Sign or check a message (UI-API.md "Signed statements"): a text signed with your key, portable (copy,
   // share, send in a chat); checked offline against the identity it carries. A file: its SHA-256 signed, checked against it.
   async function fileHashText(f) {
     const d = await crypto.subtle.digest('SHA-256', await f.arrayBuffer()), hx = Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('');
@@ -3515,7 +3538,7 @@
     };
   });
 
-  // ---- Proof of age (notes.md E1): what shows this identity's age today, from its own bundle (GET /api/attestations): the
+  // ---- Proof of age: what shows this identity's age today, from its own bundle (GET /api/attestations): the
   // day its genesis names (its own word) and each service that vouches for it, signed with a date. The Monero record the
   // mock draws needs a wallet transaction this version cannot make: said so, nothing pretended.
   const ADMISSION = { open: 'open to anyone', captcha: 'after a captcha', invite: 'invited by a member', payment: 'after a payment', human: 'a person checked', stake: 'a bond held' };
@@ -3774,7 +3797,7 @@
   const stayNow = async () => { if (STAY) { try { S.stay = await STAY.get(); } catch { S.stay = null; } } };
   // Back from the system's page (a prompt, the battery list, the notification settings): what it now says.
   globalThis.document?.addEventListener?.('visibilitychange', () => { if (STAY && S.stay && !document.hidden) void stayNow().then(refresh); });
-  // Settings → Notifications (the Android app): the push mode, one of three for the phone (design/push.md §6): Built in (the
+  // Settings → Notifications (the Android app): the push mode, one of three for the phone (apps/android/README.md): Built in (the
   // default: the app's own connection to push.sigelo.ai wakes it when mail waits, swiped away too), Push app (LOCAL.push through
   // the user's UnifiedPush app, §1 B), or Off. Each names what it said and what the relay said; Push app names the push app used
   // (a choice when there are several); no push app: said, with what to install, and Built in offered. The computer's page and
@@ -3847,7 +3870,7 @@
     mode === 'builtin' && !S.stay.exempt ? list(row({ compact: true, title: 'Battery saving may pause it', sub: 'Android may cut the connection while the phone sleeps. Tap to let it run.', onclick: () => act(async () => { S.stay = await STAY.battery(true); }) })) : null] : null);
   const backupLine = () => [SEC.st?.kept ? '25 words kept here, locked' : '25 words on paper', S.me?.recovery === 'set' ? 'recovery key set' : S.me ? 'no recovery key' : null].filter(Boolean).join(' · ');
 
-  // Settings → Wallet (notes.md "Decided"): the switch (this profile's, in its settings), a local price (opt-in, with what
+  // Settings → Wallet: the switch (this profile's, in its settings), a local price (opt-in, with what
   // it tells whom) and its currency, the Monero node, the wallet service, the approvers; the recovery fact.
   screen('set-wallet', {}, () => {
     const body = h('div');
@@ -4067,7 +4090,7 @@
           h('div', { class: 'list' }, toggle('Show when I\'m online', 'to new people', st.new_presence === true, (v) => set({ new_presence: v }))),
           // Calls (decision 2026-11-17): the default for own and friends; quiet contacts never ring; each contact's page can differ.
           typeof st.calls === 'boolean' ? h('div', { class: 'list' }, toggle('Contacts can call me', st.calls ? 'Your own and friends ring here; quiet contacts never do. Each contact\'s page can change it.' : 'Off: nobody rings unless switched on on their page', st.calls, (v) => set({ calls: v }))) : null,
-          // "Always relay my media" (design/calls.md §6): per profile; calls and direct transfers only through the relay host.
+          // "Always relay my media" (THREAT-MODEL.md §2.20): per profile; calls and direct transfers only through the relay host.
           typeof st.relay_media === 'boolean' ? [sec('Privacy'), h('div', { class: 'list' }, toggle('Always relay my media', st.relay_media
             ? 'Contacts never learn this device\'s addresses. Calls go through the relay host, large transfers are slower; the host sees that you connected and how much, not what.'
             : 'Off: calls and transfers go direct when they can, and the contact sees this device\'s addresses', st.relay_media, (v) => set({ relay_media: v })))] : null,
@@ -4120,7 +4143,7 @@
     };
   });
 
-  // Profiles (design/profiles.md §3): several identities in one app, the active one open; the chip's sheet switches.
+  // Profiles (apps/android/README.md): several identities in one app, the active one open; the chip's sheet switches.
   async function openProfiles() {
     if (!PROFILES) {
       sheet({ title: 'Profiles', lead: 'This page is one identity. Profiles are in the phone app.', body: [list(row({ start: h('span', { class: 'dot' }), title: profileName(), sub: wordsLine(myWords()), end: icon('check') }))] });
@@ -4197,7 +4220,7 @@
   }
   const pwField = (label) => h('input', { type: 'password', autocomplete: label === 'New password' || label === 'Repeat it' ? 'new-password' : 'current-password', autocapitalize: 'none', spellcheck: 'false', 'aria-label': label });
 
-  // ---- SECURITY (design/apps-seed.md §8): Settings → Backup and recovery, where this phone keeps its own words behind
+  // ---- SECURITY (the words password, UI-API.md): Settings → Backup and recovery, where this phone keeps its own words behind
   // the words password; Settings → Lock. Show my 25 words: the device lock, then the password, then the words as at
   // their creation (FLAG_SECURE on Android, nothing to copy, Done hides them); change or remove the password (the old
   // one asked). WORDS: the WebView app's or a tab's sigeloLocal.words (apps/web/words.mjs), or the GTK phone app's
@@ -4345,7 +4368,7 @@
     return () => put(body, h('p', { class: 'warn' }, 'Only if that other device is stopped or lost: two devices signing in as you lose each other\'s messages.'), inlineError(V.say), box);
   });
   // ---- The lock (Settings → Lock). The mock's rule: asked when you open the app, switch profile, pay above your limit, or show
-  // your 25 words. The Android app: the phone's screen lock (sigeloLocal.lock: on or off, after how many minutes away; the shell
+  // your 25 words. The Android app: the phone screen lock (sigeloLocal.lock: on or off, after how many minutes away; the shell
   // asks it at a start and at a return; sigeloLocal.unlock({force}) asks it now). A browser tab or the GTK app has no screen lock:
   // the words password stands in where one is kept (this page locks itself: lockPage), and the screen says so.
   const LOCK = LOCAL?.lock?.kind === 'screen' ? LOCAL.lock : null;
@@ -4353,7 +4376,7 @@
   // Ask again to pay above (atomic units; this device's): every payment, or above one of these. 0.10 XMR when not set.
   const PAY_LIMITS = ['0', '10000000000', '50000000000', '100000000000', '250000000000', '500000000000', '1000000000000'];
   const L = { st: null, away: null, locked: false, say: null };
-  /** 'screen' (the phone's lock), 'password' (the words password stands in), or null (nothing to ask with here). */
+  /** 'screen' (the phone screen lock), 'password' (the words password stands in), or null (nothing to ask with here). */
   const lockKind = () => (LOCK ? 'screen' : WORDS && SEC.st?.kept ? 'password' : null);
   const payLimit = () => { const v = prefs.get('pay-lock'); return v !== null && /^\d{1,20}$/.test(v) ? v : '100000000000'; };
   const pageLock = () => ({ on: prefs.get('page-lock') === 'on', after: Number(prefs.get('page-lock-after')) || 1 });
@@ -4445,7 +4468,7 @@
         const st = L.st;
         if (st && !st.error && document.activeElement !== after) after.value = String(st.after);
         put(body, inlineError(L.say ?? st?.error), h('div', { class: 'list' },
-          toggle('Use fingerprint or PIN', st?.secure === false ? 'This phone has no screen lock set: set one in the phone\'s settings first.' : null, st ? st.on !== false : true,
+          toggle('Use fingerprint or PIN', st?.secure === false ? 'This phone has no screen lock set: set one in the phone settings first.' : null, st ? st.on !== false : true,
             async (on) => { L.say = null; try { L.st = await LOCK.set({ on }); } catch (e) { L.say = e; } await refresh(); }),
           st?.on !== false ? selRow('Lock after', after) : null, selRow('Ask again to pay above', pay)),
         h('div', { class: 'pad' }, h('p', { class: 'help' }, HELP)));
@@ -4473,7 +4496,7 @@
   if (WORDS && !LOCK && prefs.get('page-lock') === 'on') L.locked = true;
   if (WORDS) Promise.resolve().then(() => wordsStatus()).then(() => { if (L.locked && lockKind() !== 'password') { L.locked = false; void render(); } });
 
-  // ================================================================ CALLS (design/calls.md §4; apps/contact/call.mjs, UI-API.md "Calls")
+  // ================================================================ CALLS (apps/contact/call.mjs, UI-API.md "Calls")
   // A Call button in a person's chat, shown when they are online (presence: decision 2026-11-17) and this page can call
   // (an RTCPeerConnection and a microphone: the phone app's page, the computer's page in a tab; never the GTK app's remote
   // form, nor a phone's remote form of a computer: no signalling over the relay at a poll's pace). The call screen lies
@@ -4594,7 +4617,7 @@
     put(el, h('div', { class: 'callbox' }, head, h('p', { class: 'callstate', 'aria-live': 'polite' }, line), ended ? null : words, h('div', { class: 'btns' }, btns), CALL.out));
   }
 
-  // ================================================================ NOTIFICATIONS (Decided: the sender's name only, never the text)
+  // ================================================================ NOTIFICATIONS (the sender's name only, never the text)
   // A new message or a payment request raises a system notification: the Android app's (sigeloLocal.notify, its bridge), the GTK
   // app's (its bridge's notify op); a browser tab and the computer's page raise none. It says who (a contact's name, a group's
   // and its sender's, an agent's) and a fixed line, never the message, an amount or a purpose. Not for: what was there when the
@@ -4778,7 +4801,7 @@
   if (!TOKEN && !SHELL && !LOCAL) { mount(h('div', { class: 'screen' }, h('div', { class: 'hero' }, empty('Can\'t open this page', 'This page has no key: open the link sigelo-agent ui printed.')))); return; }
   H?.replaceState?.(stateOf(0), '');
   // The tests (apps/web/test-web.mjs) reach every screen by name through this hook; a page never has it.
-  globalThis.sigeloUiTest?.({ go, back, home, screens: [...SCREENS.keys()], graceOver: () => { graceUntil = 0; }, graceLeft: () => Math.max(0, graceUntil - Date.now()),
+  globalThis.sigeloUiTest?.({ go, back, home, stack: () => S.stack.map((e) => ({ ...e })), screens: [...SCREENS.keys()], graceOver: () => { graceUntil = 0; }, graceLeft: () => Math.max(0, graceUntil - Date.now()),
     sheets: { 'new-chat': openNewChat, profiles: openProfiles, 'profile-add': addProfile, picture: pictureSheet, rename: renameSheet, confirm: ask } });
   void render();
   void poll();

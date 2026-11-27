@@ -19,7 +19,7 @@
 // a notice whose chain ends at a key its sender does not hold is refused (notice_sig); a refused
 // first envelope gives its prekey back; 32 days with no bundle across heal without pairing again;
 // a carrier with onEvent keeps no plaintext at rest; one code accepted twice; an epoch outlives its
-// lost first envelope and a reader away longer than retention (relay-plan §11 "Epoch recovery"); an
+// lost first envelope and a reader away longer than retention (epoch recovery, README.md "How it works"); an
 // envelope longer than a relay takes in one packet is refused before it is queued; through a network
 // that delivers packet by packet, each refusal read against its own publish, and a notice naming
 // another packet id against none; an epoch begun on a key already spent (prekey_reused) heals,
@@ -113,7 +113,7 @@ const report = () => {
     const pending = () => bs.addAccept(code, answerId(answer), 'alice', F.t0 + 5, hexOf(kemKey(fixtureRng('kem key')).secretKey));
     pending();
     // Swapped by a code holder on the path for an encapsulation of its own to the same key: the
-    // reply's transcript, under alice's signature, covers kem_ct (relay-plan §11).
+    // reply's transcript, under alice's signature, covers kem_ct.
     const swapped = { ...reply, kem_ct: kemEncapsulate(answer.kem_pk, fixtureRng('mallory')).ct };
     ok(checkOf(() => checkReply(swapped, bs, F.t0 + 30, (c, sk) => kemDecapsulate(c, unhex(sk)))) === 'transcript', 'a reply whose kem_ct was swapped on the way fails transcript');
     pending();
@@ -137,7 +137,7 @@ const until = async (cond, ms = 8000) => { const end = Date.now() + ms; while (D
 const refuses = async (f, check, what) => {
   try { await f(); ok(false, `${what}: accepted, expected ${check}`); } catch (e) { ok(e.check === check, `${what}: ${e.check ?? 'exception'} (${e.message}), expected ${check}`); }
 };
-// A phone-class machine needs about 300 s for the whole run; the deadline catches a hang, not a slow device.
+// A low-end ARM64 machine needs about 300 s for the whole run; the deadline catches a hang, not a slow device.
 setTimeout(() => { console.log(`FAIL the run did not finish in 600 s (${count} checks so far)`); process.exit(1); }, 600000).unref();
 
 const HOST = 'relay.test', DAY = 86400, CREATED = '2026-10-01T00:00:00Z';
@@ -544,7 +544,7 @@ try {
     ok(await until(() => powErrors() === 3, 30000), '24 hours later, una searches again, and stops again');
     await sleep(1500);
     ok(searches === 2 * POW_SEARCHES, `${searches} searches in all, ${POW_SEARCHES} in each 24 hours`);
-    // design/profiles.md §6: the cap is the automatic retries'. Its refusal names the next automatic try;
+    // The cap is the automatic retries'. Its refusal names the next automatic try;
     // one the human starts (Try now) is never refused: past the cap it asks (pow_confirm), then goes.
     const cap = seen('una', (e) => e.type === 'error' && e.check === 'pow').at(-1);
     ok(Number.isSafeInteger(cap?.next) && cap.next > uNow && cap.detail.includes(`Next automatic try at ${new Date(cap.next * 1000).toISOString().slice(11, 16)} UTC`),
@@ -632,7 +632,7 @@ try {
   const inv = await alice.invite({ name: 'bob' });
   ok(inv.code.startsWith('sgl1') && inv.relay === HOST && inv.did === A.did, 'invite: a code for alice\'s current DID at the relay');
   ok(alice.contacts().invites.length === 1, 'the invite is pending in alice\'s store');
-  ok(stateOf(A).relays[HOST].proven === true, 'the first login carried a proof of work (relay-plan §3), remembered for this relay');
+  ok(stateOf(A).relays[HOST].proven === true, 'the first login carried a proof of work, remembered for this relay');
   const acc = await bob.accept(inv.code, { name: 'alice', wait: 0.3 });
   ok(acc.status === 'waiting', `accept while alice is offline: the answer reaches the relay, the pairing waits (${acc.status})`);
   ok(bob.contacts().answers.length === 1, 'bob\'s answer is pending in his store');
@@ -1326,7 +1326,7 @@ try {
   // ================================================================ notices from whoever holds K
   {
     // Audit finding: a notice refused after its chain was verified was verified again at every
-    // delivery, and again in store.admit: 0.27 s a 64-rotation chain on a phone-class CPU, from
+    // delivery, and again in store.admit: 0.27 s a 64-rotation chain on a low-end ARM64 CPU, from
     // anyone holding K (the contact, a thief of either side's state). Now one refused after that
     // check is refused again unchecked, and at most NOTICE_CHECKS notices of a contact's are
     // checked an hour, unless one brings its owner's recovery. Its own relay and clock.
@@ -1397,7 +1397,7 @@ try {
     const contents = (box) => box.messages.map((m) => m.content).join();
     const carrying = () => stateOf(Q).peers[Rh.original].session.out.epoch.carry;
     // A relay that acknowledges an epoch's first envelope and throws it away: the next carries the
-    // epoch's encapsulation too (relay-plan §11 "Epoch recovery"), so rhea opens it.
+    // epoch's encapsulation too (epoch recovery), so rhea opens it.
     editState(Q, (x) => { x.peers[Rh.original].session.out.epoch = null; });
     ok((await quill.send('rhea', 'withheld')).status === 'sent', 'a message beginning an epoch: acknowledged by the relay');
     relay3.db.raw.prepare('DELETE FROM messages WHERE account = ?').run(accountOf(Rh.original));
@@ -1834,7 +1834,7 @@ try {
     await relay12.close();
   }
 
-  // ================================================================ the 0.1.3 live re-test (2026-10-14)
+  // ================================================================ the 0.1.3 live re-test
   {
     // Its own relay and clock. connect.html's order: ines invites, jon accepts while she is offline
     // (waiting), ines runs inbox (paired), then send. Jon's mailbox for the pairing needs K, which

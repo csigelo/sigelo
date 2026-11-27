@@ -34,7 +34,7 @@ import java.security.SecureRandom;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * The built-in push client (design/push.md §6): one HTTPS stream to push.sigelo.ai, the ntfy JSON stream of this phone's
+ * The built-in push client: one HTTPS stream to push.sigelo.ai, the ntfy JSON stream of this phone's
  * topic, held by a foreground service of type specialUse while the push mode is Built in (UnifiedPush.mode). It goes on
  * after the app is swiped away (stopWithTask false, START_STICKY, a 1 s restart alarm at onTaskRemoved, as the ntfy app's
  * SubscriberService), and starts at boot and after an update (Boot, below). Force-stopped: nothing until the app is opened.

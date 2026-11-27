@@ -99,7 +99,7 @@ ok('pick: allow → allow_once, else allow_always; deny → reject_once, else re
 }
 {
   const { c, sent, has } = core({ env: { FAKE_ACP_AUTH: '1' }, failN: 1 });
-  ok('session/new needs a login (-32000) → unavailable, sign it in on this machine, the agent\'s methods named (never the phone\'s login flow)',
+  ok('session/new needs a login (-32000) → unavailable, sign it in on this machine, the agent\'s methods named (never the login flow of the phone)',
     await has((t) => t.startsWith('fake is unavailable here: the session failed: the ACP agent needs signing in on this machine first (fake login)')), JSON.stringify(sent));
   await c.close();
 }

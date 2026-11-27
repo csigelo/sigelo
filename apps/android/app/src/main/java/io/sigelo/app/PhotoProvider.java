@@ -14,7 +14,7 @@ import java.io.FileNotFoundException;
 import java.util.regex.Pattern;
 
 /**
- * The one file a camera app may write (design/transfer.md §10.4): content://io.sigelo.app.photos/<32 hex>.jpg,
+ * The one file a camera app may write: content://io.sigelo.app.photos/<32 hex>.jpg,
  * a file in this app's cache (cache/photos/), reached only through a grant the camera intent carries
  * (not exported, grantUriPermissions). androidx's FileProvider does the same but is a dependency; this app
  * has none. Nothing else is served: no other name, no directory, no query beyond name and size.

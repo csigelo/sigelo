@@ -48,10 +48,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
- * Big files for the page (design/transfer.md §10; the page's side: apps/web/platform-android.mjs "big-*",
+ * Big files for the page (the page's side: apps/web/platform-android.mjs "big-*",
  * apps/contact/transfer-web.mjs). The page never holds a file whole: it names one by a doc (a token this
  * class keeps, per profile) and reads it by byte range; it writes what it receives into a partial here
- * at offsets, then has the partial moved into the phone's Downloads.
+ * at offsets, then has the partial moved into Android's Downloads.
  *
  *   big-pick   the system's document picker (ACTION_OPEN_DOCUMENT; images: pictures only); the read grant kept (a resume after a
  *              restart still reads it) → {doc, name, size, mtime} | {cancelled}; multiple: several may be chosen (EXTRA_ALLOW_MULTIPLE,

@@ -1,5 +1,5 @@
 name: android
-# The Android app (apps/android, design/apps.md §8), built from this commit. No secret is used:
+# The Android app (apps/android), built from this commit. No secret is used:
 # the release APK is left unsigned (the owner signs it offline, release/apk-ceremony.md); the debug
 # APK is signed with a key made in the job and gone with it. Built twice, in two jobs with the same
 # inputs; the `apk` job (a required check, release/RELEASE-v2.md §9) fails unless the two unsigned

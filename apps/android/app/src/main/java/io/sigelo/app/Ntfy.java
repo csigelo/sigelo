@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * The built-in push client's pure part (design/push.md §6): the topic, the endpoint, the stream's URL, one line of the
+ * The built-in push client's pure part: the topic, the endpoint, the stream's URL, one line of the
  * ntfy JSON stream read, the reconnect delays. java.* only: test/NtfyTest.java runs it on a desktop JVM (test-push.mjs).
  *
  * The topic is "up" and 12 characters of [A-Za-z0-9], as the ntfy app makes it (up/BroadcastReceiver.kt): ntfy 2.38.2

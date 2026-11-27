@@ -41,7 +41,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Push (design/push.md §1 B, path B): a UnifiedPush connector written against the spec (AND_3), no library, no AndroidX,
+ * Push (path B): a UnifiedPush connector written against the spec (AND_3), no library, no AndroidX,
  * no Kotlin. The user's distributor (ntfy, NextPush, Sunup, Conversations…) holds the one connection; the relay
  * (relay/push.mjs) POSTs a 32-byte encrypted wake to the endpoint it gave us when mail waits and no session is open.
  *
@@ -72,13 +72,13 @@ import org.json.JSONObject;
  * notification "sigelo · New activity", no name, no count; a tap opens the app, which connects and fetches. Anything
  * else: acknowledged and dropped.
  *
- * The push mode (design/push.md §6), one for the phone: "builtin" (the default: PushClient holds the stream to
+ * The push mode, one for the phone: "builtin" (the default: PushClient holds the stream to
  * push.sigelo.ai itself, no second app), "app" (this connector, the user's push app) or "off". The keys are the same for
  * both; Built in's endpoint is Ntfy.endpoint(its topic), given only once its stream has opened (push_ready).
  *
  * SharedPreferences "sigelo" (one setting for the phone, not per profile): push_mode, push_dist, push_token,
  * push_endpoint, push_state, push_reason, push_pub (base64url), push_keys (sealed); PushClient's push_topic, push_since,
- * push_ready. push_on (before 2026-11-25) is read once, by mode().
+ * push_ready. push_on (before v0.1.21) is read once, by mode().
  */
 public final class UnifiedPush extends BroadcastReceiver {
     static final String DIST = "org.unifiedpush.android.distributor.", CONN = "org.unifiedpush.android.connector.";
@@ -96,7 +96,7 @@ public final class UnifiedPush extends BroadcastReceiver {
     }
 
     /**
-     * The push mode. Unset (an install, or an app from before 2026-11-25): Push app where push was on; else Built in, unless
+     * The push mode. Unset (an install, or an app from before v0.1.21): Push app where push was on; else Built in, unless
      * Stay connected was switched off (Off then); Stay connected is no longer a mode (Built in keeps the process as it did),
      * so its switch is turned off here once.
      */

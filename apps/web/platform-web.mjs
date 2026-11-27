@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The browser platform of sigelo-contact (design/apps.md §4.2): what platform-node.mjs is to Node,
+// The browser platform of sigelo-contact: what platform-node.mjs is to Node,
 // for a carrier that runs in a page (the self-contained app, apps/web/).
 //
 //   const p = await webPlatform({ name, indexedDB, locks, mqtt, fetch, pow, env, createWebsocket })
@@ -17,7 +17,7 @@
 // fetch:    the page's fetch, no redirect followed, no credentials, no referrer; the body as chunks.
 // mqtt:     mqtt.esm (MQTT.js's browser build, given as `mqtt`) over the runtime's WebSocket, wss://
 //           only (ws:// to a loopback address, for tests); transports ['wss']. createWebsocket: a
-//           shell's own socket (design/apps.md §4.3), passed to MQTT.js as is.
+//           shell's own socket, passed to MQTT.js as is.
 // pow:      the proof-of-work search in a Worker (pow-worker.mjs, hash-wasm's Argon2id), progress events.
 // The Android app's platform (platform-android.mjs) is this one with the shell's fetch, mqtt and sealer.
 // env:      what the page says: { relay, endpoints, retentionDays, transport, proxy: null }.
@@ -240,9 +240,9 @@ export async function webPlatform({ name = 'sigelo', indexedDB = globalThis.inde
 
 // The identity file (sigelo-agent's JSON: secret, genesis, rotations, attestations, issuers) and, after a
 // restore from seed, the keeper file (K_j: sigelo-agent-enrol.ts's me.local.keeper.json) are kept
-// sealed: AES-256-GCM under a WebCrypto key made here, non-extractable, kept in IndexedDB's key store
-// (design/apps.md §5, PWA row), the kind in the AAD so one never opens as the other. The kept words
-// (words.mjs, design/apps-seed.md §8) are a third kind, already encrypted under the words password. That protects a
+// sealed: AES-256-GCM under a WebCrypto key made here, non-extractable, kept in IndexedDB's key store,
+// the kind in the AAD so one never opens as the other. The kept words
+// (words.mjs) are a third kind, already encrypted under the words password. That protects a
 // copy of the files, not the seed from a script running in this origin, which can ask the key to
 // decrypt (THREAT-MODEL §3.12).
 const KEY_ID = 'identity', KINDS = Object.freeze({ identity: 'identity', keeper: 'keeper', words: 'words' });

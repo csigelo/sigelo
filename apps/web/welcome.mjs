@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // First run, shared by the shells (the Android app's page: app.mjs with setup.mjs; the GTK phone app's
-// start page: apps/gtk/web/start.js), in the words of design/ux1/mock.html: one decision per screen.
+// start page: apps/gtk/web/start.js): one decision per screen.
 //
 //   Welcome   sigelo, what it is, the ways in: Create my identity, I have an invite code (where the shell keeps
 //             one: api.join), Restore from 25 words, Restore from a backup (api.restoreBackup), Use my computer instead. Advanced (folded, only where a
@@ -8,7 +8,7 @@
 //   Create    1. Name this phone (More options: network, relay)  2. Keep it safe: write down 25 words (the words
 //             once: a one-way door, no Back, FLAG_SECURE on Android, copy on the test network only; then Check
 //             your paper: three words by number, wrong: which, try again) or set a password (api.keepWords: the
-//             words stay on this phone, locked by it, never shown)  3. Lock (api.lock: the phone's screen lock);
+//             words stay on this phone, locked by it, never shown)  3. Lock (api.lock: the phone screen lock);
 //             then You're set (the four words), Open sigelo. Without api.keepWords no choice: the words on paper.
 //   Restore   one screen: the 25 words checked as typed, when they were made (a month, optional), is this
 //             identity in use on another device (main or spare); More options: network, block height, name,
@@ -37,7 +37,7 @@
 //   restoreBackup(bytes, password)     optional: → { ok, words? }: a backup file (sigelo-backup/0) restored here
 //   join(code)                         optional: the invite code kept until the new identity's page opens
 //   keepWords(words, password)         optional: Keep it safe → Set a password: the words kept encrypted under it
-//   lock()                             optional: the phone's screen lock, asked once (Lock → Use my phone's lock)
+//   lock()                             optional: the phone screen lock, asked once (Lock → Use my phone's lock)
 //   connect(text)                      → { words } (over the relay: compare, then open()) | { opened: true }
 //   open()                             the computer's page, once the words match
 //   done(message?)                     the main screen (the shell loads it)
@@ -45,7 +45,7 @@
 //   secure(on, door), clipCopy(text, seconds), clipClear()   where the shell has them
 //   leave                              optional { label, run() }: a profile added and not set up yet, back to the others
 //   cancel                             optional { label, run() }: on the connect screen, a computer being added (connect())
-// pickProfile(box, o): the picker at a start with more than one profile (design/profiles.md §3), below.
+// pickProfile(box, o): the picker at a start with more than one profile, below.
 export const DEFAULT_RELAY = 'relay.sigelo.ai', CLIP_SECONDS = 60, NAME = /^[a-z0-9][a-z0-9_-]{0,19}$/;
 export const NAME_RULE = 'Lowercase letters, digits, _ and -, at most 20.';
 export const WORDS_ATTRS = Object.freeze({ autocomplete: 'off', autocorrect: 'off', autocapitalize: 'none', spellcheck: 'false', 'data-lpignore': 'true', 'data-1p-ignore': 'true' });
@@ -491,7 +491,7 @@ export function firstRun(box, api, { show = true } = {}) {
   if (show) welcome();
   return {
     welcome: home, screen, go, button,
-    /** The connect screens alone, as the first screen (a remote profile adding a computer: design/profiles.md P2). */
+    /** The connect screens alone, as the first screen (a remote profile adding a computer). */
     connect() { stack.length = 0; current = connectCode; door = false; secure(true); connectCode(); },
     /** One of the Add sheet's ways as the first step, the welcome behind it (Back): create, join, restore, backup, computer. */
     start(path) { const f = { create: createName, join: joinCode, restore: restoreWords, backup: api.restoreBackup ? restoreFile : null, computer: connectCode }[path]; if (f) go(f); },
@@ -499,7 +499,7 @@ export function firstRun(box, api, { show = true } = {}) {
   };
 }
 
-// ---- profiles (design/profiles.md §3): the picker at a start with more than one
+// ---- profiles: the picker at a start with more than one
 export const KIND_LABEL = Object.freeze({ words: 'Your identity', remote: 'A computer\'s page' });
 /** A profile's second line: its four words (or not set up yet), what it holds. */
 export const profileSub = (p) => [p.words ?? (p.kind ? null : 'Not set up yet'), KIND_LABEL[p.kind] ?? null].filter(Boolean).join(' · ');

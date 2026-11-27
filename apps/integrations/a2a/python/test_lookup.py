@@ -123,7 +123,7 @@ class Lookup(unittest.TestCase):
             else: os.environ['SIGELO_VERIFY'] = old
 
     def test_lone_surrogate_attestation_discarded_not_fatal(self):
-        # SPEC §3.1/§9 step 2: a lone surrogate sinks only its item; the lookup still answers (2026-11-18)
+        # SPEC §3.1/§9 step 2: a lone surrogate sinks only its item; the lookup still answers
         b = copy.deepcopy(B['rotated'])
         b['attestations'].append({'body': {'v': 'sigelo/0', 'typ': 'attestation', 'iss': D['B0'], 'sub': D['A1'],
                                            'ctx': 'x', 'claims': {'name': '\ud800'}, 'iat': NOW - 10, 'exp': NOW + 10}, 'sig': 'z1'})
@@ -211,7 +211,7 @@ class CardLookup(unittest.TestCase):
 
 
 class Parse(unittest.TestCase):
-    """SPEC §3: card text with a duplicate key or __proto__ has no single reading: refused whole (2026-11-18)."""
+    """SPEC §3: card text with a duplicate key or __proto__ has no single reading: refused whole."""
     text = json.dumps(FX['card'])
 
     def refused(self, text):
@@ -244,7 +244,7 @@ def nested(n):
 
 
 class Depth(unittest.TestCase):
-    """SPEC §3: 512 levels at most; deeper refuses, and never as RecursionError (2026-11-18)."""
+    """SPEC §3: 512 levels at most; deeper refuses, and never as RecursionError."""
     def deep_attestation(self, claims_depth):  # bundle, attestations, envelope, body, claims: 5 levels above
         b = copy.deepcopy(B['rotated'])
         b['attestations'].append({'body': {'v': 'sigelo/0', 'typ': 'attestation', 'iss': D['B0'], 'sub': D['A1'], 'ctx': 'x',
@@ -280,7 +280,7 @@ def with_ext(**ext):
 
 
 class MalformedInputOnlyLookupRefused(unittest.TestCase):
-    """Every malformed input ends in LookupRefused, the one exception a hook catches (2026-11-18)."""
+    """Every malformed input ends in LookupRefused, the one exception a hook catches."""
     def only_refused(self, f, *a):
         try: f(*a)
         except LookupRefused: return

@@ -163,7 +163,7 @@ try {
   ok('expired, linked onto an earlier pairing: both keep it, the purpose gone, the tier as before', !a1?.revoked && !c1?.revoked && a1?.link === undefined && c1?.link === undefined && a1?.tier === tierAC, ea.stderr + JSON.stringify(a1));
   const lo2 = json<{ made: { id: string; status: string }[] }>(await cli(OP, ['link', '--finish', '--wait', '3', '--operator']).then(() => cli(OP, ['links', '--operator'])));
   ok('the operator: every link ended', lo2.made?.length === 3 && lo2.made.every((x) => x.status === 'ended'), JSON.stringify(lo2));
-  // ---- relink after unlink (design/links.md §7.1a): the operator asks both again → linked again, a new id; then unlinked.
+  // ---- relink after unlink (LINKS.md): the operator asks both again → linked again, a new id; then unlinked.
   ok('unlinked: each side remembers the end (ended: the link id)', (contactsOf(fa)[dB] as Rec & { ended?: { id: string } })?.ended?.id === r1.id && (contactsOf(fb)[dA] as Rec & { ended?: { id: string } })?.ended?.id === r1.id);
   const rl = await cli(OP, ['link', 'vps-a', 'vps-b', '--purpose', 'review again', '--wait', '0', '--operator']), rr = json<{ id: string; status: string }>(rl);
   for (let k = 0; k < 5 && !(contactsOf(fa)[dB]?.link && contactsOf(fb)[dA]?.link); k++) {

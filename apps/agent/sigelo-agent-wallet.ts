@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * The Wallet of the computer's page (UI-API.md "Wallet", design/ux1/notes.md "Decided": wallet sync, price opt-in).
+ * The Wallet of the computer's page (UI-API.md "Wallet": wallet sync, price opt-in).
  *
  * Which wallet: a `monero-wallet-rpc` on this computer, the "wallet service" (Settings → Wallet): the wallet-rpc of a
  * keeper this host registered (its policy.json `wallet`: loopback URL and digest login, sigelo-agent-spend.ts reads it),
@@ -11,7 +11,7 @@
  *
  * Off (`settings.wallet` false, the default): no route here calls a wallet, a node or a price source.
  *
- * Sync (Decided 2026-11-11): reading the state IS the sync the page starts when the Wallet tab or a balance is shown. The
+ * Sync: reading the state IS the sync the page starts when the Wallet tab or a balance is shown. The
  * wallet's height (`get_height`) against the node's (`/get_height` of the node in use: Settings → Monero node, else the
  * keeper's first daemon): `synced` (within a block), `syncing` (N blocks behind, ≈ 2 min each, the progress since this
  * sync began), `node` (the node does not answer, or the wallet has not moved for 3 minutes while behind), `wallet` (the

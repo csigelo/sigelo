@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Transfers in a page that holds its own identity (the phone app, design/transfer.md §10): the io of
+// Transfers in a page that holds its own identity (the phone app, apps/agent/TRANSFER.md "The phone app"): the io of
 // transfer-engine.mjs over the platform's files (the records, the chunk bitmaps and lists: small) and
 // the shell's big-file bridge (the bytes: never in the page's storage, never a Blob held whole).
 //
@@ -12,7 +12,7 @@
 //   hash(doc) → { size, mtime, sha256, hashes }      in the shell (each 1 MiB chunk and the whole), hashes: bytes
 //   stat(doc) → { size, mtime }                      read(doc, offset, length, { size, mtime }) → bytes (a range; file_changed when either moved)
 //   write(part, offset, bytes); flush(part); sha256(part) → hex; drop(part); free() → bytes
-//   land(part, name) → { uri, name }                 the partial moved into the phone's Downloads (MediaStore, pending until whole)
+//   land(part, name) → { uri, name }                 the partial moved into Android's Downloads (MediaStore, pending until whole)
 // part: the transfer id. Partials live in the app's private storage until they land.
 import { CHUNK, chunkLength } from './transfer.mjs';
 import { fail } from './kdf.mjs';

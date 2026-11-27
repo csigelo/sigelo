@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Key providers, milestone K2 (design/key-providers.md §3, §7): the keychain-wrapped identity file.
+// Key providers, milestone K2 (KEYCHAIN.md): the keychain-wrapped identity file.
 // The wrap vector (fixtures/wrap-v1.json) and RFC 8439's own AEAD vector; a round trip, refusals
 // by name, a rotation and `keys wrap`/`unwrap --plain` through a store emulated behind the real
 // macOS, Secret Service and DPAPI adapters (a spawn spy that also proves no secret reaches an

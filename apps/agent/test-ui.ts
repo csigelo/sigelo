@@ -154,7 +154,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
       && (k2.requests as { nonce: string }[]).every((x) => x.nonce !== 'ef'.repeat(16)), JSON.stringify([rf.body, sent]));
     const rs = await post('restart', { keeper: 'keeper-dir' });
     ok('ui keeper: Restart without a systemd user unit → 409 keeper_restart naming the command', rs.status === 409 && rs.body.error.check === 'keeper_restart' && rs.body.error.message.includes('sigelo-spend serve'));
-    // The Owner's signed path (design/agent-wallet-page.md, apps/keeper/README.md "The Owner"): a keeper that takes /policy
+    // The Owner's signed path (apps/keeper/README.md "The Owner"): a keeper that takes /policy
     // (its frozen copy says so) and a stand-in that checks the signature as policychange.ts does. The first save by file makes
     // this identity an owner; then every change is a policy-change signed here, the owner view gives the address (i, 0),
     // balance and incoming money; a change signed elsewhere is carried untouched and the keeper's refusal named.
@@ -370,7 +370,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui transfers: settings kept (tor off, prefer private), the tor daemon probed', tSet.status === 200 && tSet.j['tor'] === false && tSet.j['prefer'] === 'private' && typeof tSet.j['tor_daemon']?.serve === 'boolean', JSON.stringify(tSet.j));
   ok('ui.js: the Files view (Accept / Decline → /api/transfers/accept, decline; the direct question; progress; Tor checkbox off without a daemon)',
     js.body.includes('function viewTransfers(') && js.body.includes('/api/transfers/accept') && js.body.includes('/api/transfers/decline') && js.body.includes("e?.check !== 'direct_ask'") && js.body.includes('No tor daemon found'));
-  ok('ui.js: photos and files from every chat (design/transfer.md §10): one "+" (Photo, Camera, File), the shell\'s picker, a preview of at most 64 KB, "Full size · …" and its state, a group\'s per member and "pair with them", Keep location, the accept rule\'s size, the phone\'s no-path words, an agent\'s Attach, a contact\'s size in Chat settings',
+  ok('ui.js: photos and files from every chat: one "+" (Photo, Camera, File), the shell\'s picker, a preview of at most 64 KB, "Full size · …" and its state, a group\'s per member and "pair with them", Keep location, the accept rule\'s size, the phone app\'s no-path words, an agent\'s Attach, a contact\'s size in Chat settings',
     js.body.includes("['camera', 'Camera', () => shoot(target, who)]") && js.body.includes("['image', 'Photo', () => pickAndSend(target, who, true)]") && js.body.includes("'/api/transfers/photo'") && js.body.includes("'/api/transfers/pick'") && js.body.includes('PHOTO_MAX = 64 * 1024') && js.body.includes('Full size from ${m.name}: pair with them')
     && js.body.includes('Keep location in photos') && js.body.includes('Accept without asking up to') && js.body.includes("NO_DIRECT = 'Could not connect directly; try from your computer, or wait for the Pro relay path.'")
     && js.body.includes("'/api/transfers/open'") && js.body.includes("GM.set(fileChoices({ group: gid }, g.name, ts, false))") && js.body.includes("fileChoices({ to: did }, c.name, ts, !w)")
@@ -435,7 +435,7 @@ import { CLI, done, hasRelay, NO_RELAY, ok, posixModes, startTestRelay, tmpHome 
   ok('ui about: /package.json served as JSON with the package\'s own version', pj.status === 200 && String(pj.headers['content-type']).startsWith('application/json')
     && JSON.parse(pj.body).version === JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8')).version);
   const wl = await http(P, 'GET', '/words-lock.mjs', {});
-  ok('ui security: words-lock.mjs (sigelo-contact\'s, byte for byte) served as JavaScript, for Me → Security in the GTK phone app (design/apps-seed.md §8)', wl.status === 200 && String(wl.headers['content-type']).startsWith('text/javascript')
+  ok('ui security: words-lock.mjs (sigelo-contact\'s, byte for byte) served as JavaScript, for Me → Security in the GTK phone app (the words password)', wl.status === 200 && String(wl.headers['content-type']).startsWith('text/javascript')
     && wl.body === readFileSync(join(import.meta.dirname, '..', 'contact', 'words-lock.mjs'), 'utf8'));
   const vw = await http(P, 'GET', '/voice-web.mjs', {}), vv = await http(P, 'GET', '/voice.mjs', {}), vs = await http(P, 'GET', '/api/transfers/settings', T);
   ok('ui voice: the recorder (voice-web.mjs) and its checks (voice.mjs), sigelo-contact\'s byte for byte, served as JavaScript; settings say voice (the computer keeps recordings), no mic (no shell)',

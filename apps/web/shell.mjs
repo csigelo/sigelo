@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-// The Android app's remote form (design/apps.md §8, design/profiles.md P2), for boot.mjs: a remote
+// The Android app's remote form (apps/android/README.md), for boot.mjs: a remote
 // profile drives its computers' `sigelo-agent ui --remote`, holding no account key, one computer at a
 // time (the one in use, computers.mjs; switch, add, forget from Me → Computers):
 //   LAN:    SIGELO:UI:, every call sealed here (sigelo-remote/0, remote-client.mjs) and carried by the
 //           shell's HTTP, the text sealed under an AndroidKeyStore key (its blob naming the computer).
-//   relay:  SIGELO:CTL: (design/apps.md §6.3): a control identity per computer, made here (a random key,
+//   relay:  SIGELO:CTL:, a control identity per computer, made here (a random key,
 //           sealed as an identity is, never attested), paired with the operator by the code and four words
 //           checked on the computer; calls are sigelo-device/1 requests (apps/contact/control.mjs), the state comes
 //           pushed (events), so the page's 2 s poll reads it here and sends nothing.

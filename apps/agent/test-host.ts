@@ -272,7 +272,7 @@ const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e
   await c2.close();
 }
 {
-  // The busy mark's count (2026-11-25): 1 + the live subagents (local_agent, not ambient, not the main session), sent again as it moves.
+  // The busy mark's count: 1 + the live subagents (local_agent, not ambient, not the main session), sent again as it moves.
   const log: string[] = [];
   const core = H.hostCore({ sdk: fake, tell: async (t) => { log.push(`tell ${t}`); }, busy: async (on, n) => { log.push(`busy ${on} ${n}`); }, busyMs: 60_000, progress: false, backoff: [30, 60], log: () => {} });
   core.input('agents');
@@ -282,7 +282,7 @@ const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e
   await core.close();
 }
 {
-  // Agent settings (2026-11-25): announced once the session listed its models; the operator's choice kept for the next turn.
+  // Agent settings: announced once the session listed its models; the operator's choice kept for the next turn.
   const sent: string[] = [], caps: Caps[] = [];
   const last = (): Caps => caps.at(-1)!, f = (k: string) => last().fields.find((x) => x.key === k)!;
   const vals = (k: string): string => f(k).options.map((x) => x.value).join(',');
@@ -381,11 +381,11 @@ const until = async (f: () => boolean, ms = 5000): Promise<boolean> => { const e
 // (or "Login failed" for a code starting "wrong"). The real CLI is never run here.
 const FAKE = tmpHome('host-claude'), BIN = join(FAKE, 'bin');
 mkdirSync(BIN);
-const LINK = 'https://claude.ai/oauth/authorize?code=true&state=xyz';
+const LINK = 'https://example.com/oauth/authorize?code=true&state=xyz';
 fakeExe(BIN, 'claude', `const fs = require('fs'), path = require('path'), d = __dirname;
 fs.writeFileSync(path.join(d, 'args'), process.argv.slice(2).join(' ') + '\\n');
 process.stdout.write('Opening browser to sign in…\\n');
-process.stdout.write(${JSON.stringify(`If the browser didn't open, visit: \x1b]8;;${'LINK'}\x07${'LINK'}\x1b]8;;\x07\n`)}.replace(/LINK/g, ${JSON.stringify('https://claude.ai/oauth/authorize?code=true&state=xyz')}));
+process.stdout.write(${JSON.stringify(`If the browser didn't open, visit: \x1b]8;;${'LINK'}\x07${'LINK'}\x1b]8;;\x07\n`)}.replace(/LINK/g, ${JSON.stringify('https://example.com/oauth/authorize?code=true&state=xyz')}));
 process.stdout.write('Paste code here if prompted > ');
 let buf = '';
 process.stdin.on('data', (c) => {
@@ -686,7 +686,7 @@ try {
   await cw('send', 'agent', 'leak');
   const leak = await opGets((s) => s.startsWith('tool said:'));
   ok('a token in the answer: redacted on the wire', leak !== undefined && !leak.includes(TOKEN) && !leak.includes(HEX) && !leak.includes('hunter2222') && leak.includes('[redacted]'), leak);
-  // Agent settings (2026-11-25): the operator's receipts (its inbox's read marks) say host: true, so the settings reach it,
+  // Agent settings: the operator's receipts (its inbox's read marks) say host: true, so the settings reach it,
   // labelled sigelo-host-caps/0; its setting (the JSON text a CLI sends) waits for the next turn; the pal's is never applied.
   const capsGot = async (f: (c: Caps) => boolean): Promise<Caps | undefined> => {
     const find = (): Caps | undefined => got.filter((m) => m.label === H.CAPS_LABEL).map((m) => m.content as Caps).reverse().find(f);

@@ -41,9 +41,9 @@
 #                         nginx on 127.0.0.1 and /world/stats from the world on 127.0.0.1:8790,
 #                         restarts whichever unit fails, and logs to the journal
 #   --backup AGE-RECIPIENT  ONLY the state-backup step (Debian/systemd): age, the recipient
-#                         (age1…, the PUBLIC half; the identity stays on the operator's phone) in
+#                         (age1…, the PUBLIC half; the identity stays offline, with the operator) in
 #                         /etc/sigelo-backup.recipient, /usr/local/sbin/sigelo-vps-backup and
-#                         sigelo-vps-backup.timer (daily 03:30 Europe/Berlin): the world state, the
+#                         sigelo-vps-backup.timer (daily 02:30 UTC): the world state, the
 #                         nginx config and stats password file, /etc/letsencrypt, the sigelo units,
 #                         helpers and sudo rule, the release mirror and stats if present, as
 #                         <admin home>/backup/vps-state-<stamp>.tgz.age (admin user, 0600, 7 kept);
@@ -80,7 +80,7 @@
 #                         root off, AllowUsers csigelo sigelo — only once csigelo has a password,
 #                         is in group sudo and both users have a key; nginx Restart=on-failure and
 #                         the hourly sigelo-relay-selfcheck.timer (restarts the relay or nginx);
-#                         the visit statistics (R16): goaccess, the /_stats/ password (user owner;
+#                         the visit statistics (R16): goaccess, the /_stats/ password (basic auth;
 #                         made once, kept in /root/sigelo-stats.pw, root only), and
 #                         sigelo-relay-stats.timer every 10 minutes (stats.sh: GoAccess, the
 #                         relay's chart, summary.txt and daily.log in /var/www/sigelo.ai/stats).
@@ -88,9 +88,9 @@
 #                         (its helper's allowlist knows sigelo_anon and /_stats/; the old one
 #                         refuses that config, and deploy.sh then installs nothing).
 #                         Exits 1 while something is left to do, and says what.
-#     --admin-key 'ssh-ed25519 …'  with --relay: csigelo's public key (or --admin-key-file FILE)
+#     --admin-key 'ssh-ed25519 …'  with --relay: the admin user's public key (or --admin-key-file FILE)
 #     --backup AGE-RECIPIENT       with --relay: backup.sh as /usr/local/sbin/sigelo-relay-backup
-#                         and sigelo-relay-backup.timer (daily 03:30 Europe/Berlin): licences,
+#                         and sigelo-relay-backup.timer (daily 02:30 UTC): licences,
 #                         operator chains, config; never a mailbox (relay/deploy/backup.sh)
 #     --key, --email, --test-cert, --skip-cert   as for sigelo.io (--key: the deploy user's key)
 #   --self-test           no root, changes nothing: checks the sudo rules this script writes (each
@@ -112,6 +112,7 @@ EXTRA="sigelo.online"
 WEBROOT=/var/www/sigelo.io
 ACME=/var/www/acme
 HERE=$(cd "$(dirname "$0")" && pwd)
+ADMIN=csigelo          # the admin user (sudo): --backup archives go to its ~/backup
 
 say() { printf '\n==> %s\n' "$*"; }
 run() { printf '+ %s\n' "$*"; "$@"; }
@@ -220,8 +221,8 @@ if [ -z "$os" ]; then
   case "$ID ${ID_LIKE:-}" in *alpine*) os=alpine ;; *debian*|*ubuntu*) os=debian ;; *) die "unsupported OS '$ID': pass --os debian|alpine" ;; esac
 fi
 case $os in
-  debian) CONF=/etc/nginx/conf.d/$DOMAIN.conf ;;
-  alpine) CONF=/etc/nginx/http.d/$DOMAIN.conf ;;
+  debian) CONF=/etc/nginx/conf.d/$DOMAIN.conf; NGINXGRP=www-data ;;
+  alpine) CONF=/etc/nginx/http.d/$DOMAIN.conf; NGINXGRP=nginx ;;
   *) die "--os must be debian or alpine" ;;
 esac
 KEY_RE='^(ssh-ed25519|ecdsa-sha2-nistp[0-9]+|sk-ssh-ed25519@openssh.com|ssh-rsa) [A-Za-z0-9+/=]+( .*)?$'
@@ -251,6 +252,11 @@ install_helper() {
   else echo "sudo: sigelo may run $NGINX_APPLY with no argument or --os debian|alpine; nothing else"; fi
 }
 
+# The log directory: root:<nginx's group> 0750. The workers (www-data, Alpine nginx) must reach it to
+# reopen the logs on USR1; root:root 0750 (as before) left them writing to access.log.1 after a
+# rotation, and notifempty then stopped the rotation. install -d also corrects an existing directory.
+log_dir() { run install -d -m 0750 -o root -g "$NGINXGRP" /var/log/nginx/sigelo; }
+
 # 30 days: the window the statistics cover. The log holds no raw address (nginx.conf, Privacy).
 # access-self.log (the project's own requests, nginx.conf $sigelo_self): 7 days, for debugging.
 write_logrotate() {
@@ -265,7 +271,7 @@ write_logrotate() {
     delaycompress
     sharedscripts
     postrotate
-        nginx -s reopen 2>/dev/null || true
+        { kill -USR1 "$(cat /run/nginx.pid)" || systemctl kill -s USR1 nginx.service || nginx -s reopen; } 2>/dev/null || true
     endscript
 }
 /var/log/nginx/sigelo/access-self.log {
@@ -277,7 +283,7 @@ write_logrotate() {
     delaycompress
     sharedscripts
     postrotate
-        nginx -s reopen 2>/dev/null || true
+        { kill -USR1 "$(cat /run/nginx.pid)" || systemctl kill -s USR1 nginx.service || nginx -s reopen; } 2>/dev/null || true
     endscript
 }
 ROT
@@ -372,7 +378,7 @@ fi
 if [ -n "$backup" ] && [ "$relay" = 0 ]; then
   [ "$os" = debian ] && [ -d /run/systemd/system ] || die "--backup needs Debian/Ubuntu with systemd"
   printf '%s' "$backup" | grep -Eq '^age1[02-9ac-hj-np-z]{58}$' || die "--backup wants an age recipient (age1…, the public key; never the identity)"
-  id csigelo >/dev/null 2>&1 || die "no user csigelo: the archives are written to its ~/backup"
+  id "$ADMIN" >/dev/null 2>&1 || die "no user $ADMIN: the archives are written to its ~/backup"
 
   say "B1. age"
   command -v age >/dev/null 2>&1 || run env DEBIAN_FRONTEND=noninteractive apt-get install -y age
@@ -386,11 +392,12 @@ if [ -n "$backup" ] && [ "$relay" = 0 ]; then
 #!/bin/sh
 # sigelo-vps-backup — written by site/deploy/server-setup.sh --backup; run daily by
 # sigelo-vps-backup.timer as root. Tars the server's state, encrypts it with age to the recipient in
-# /etc/sigelo-backup.recipient (its identity is on the operator's phone only: this server cannot read
-# its own backups) and writes <admin home>/backup/vps-state-<stamp>.tgz.age, admin user 0600, 7 kept.
-# The phone's nightly sigelo-backup fetches the newest one. Restore: site/deploy/README.md.
+# /etc/sigelo-backup.recipient (its identity is kept offline, with the operator: this server cannot
+# read its own backups) and writes <admin home>/backup/vps-state-<stamp>.tgz.age, admin user 0600,
+# 7 kept. The operator fetches the newest one. Restore: site/deploy/README.md.
 set -eu
-OUT="$(getent passwd csigelo | cut -d: -f6)/backup"
+ADMIN=__ADMIN__
+OUT="$(getent passwd "$ADMIN" | cut -d: -f6)/backup"
 R=$(cat /etc/sigelo-backup.recipient)
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 umask 077
@@ -401,23 +408,24 @@ for p in /var/lib/sigelo-world /etc/sigelo-world.env /etc/nginx/conf.d/sigelo* /
          /etc/sigelo-backup.recipient /var/backups/sigelo-nginx /var/www/sigelo.io/releases /var/www/sigelo.io/stats; do
   if [ -e "$p" ]; then list="$list ${p#/}"; fi
 done
-install -d -m 0700 -o csigelo -g csigelo "$OUT"
+install -d -m 0700 -o "$ADMIN" -g "$ADMIN" "$OUT"
 tmp=$OUT/.vps-state-$STAMP.tmp
 # shellcheck disable=SC2086
 tar -C / -czf - $list | age -r "$R" -o "$tmp"
-chown csigelo:csigelo "$tmp"; chmod 0600 "$tmp"
+chown "$ADMIN:$ADMIN" "$tmp"; chmod 0600 "$tmp"
 mv "$tmp" "$OUT/vps-state-$STAMP.tgz.age"
 ( cd "$OUT" && ls -t vps-state-*.tgz.age | tail -n +8 | xargs -r rm -f )
 echo "sigelo-vps-backup: $OUT/vps-state-$STAMP.tgz.age, $(wc -c < "$OUT/vps-state-$STAMP.tgz.age") bytes:$list"
 RUN
+  sed -i "s|__ADMIN__|$ADMIN|" /usr/local/sbin/sigelo-vps-backup.tmp
   chmod 0755 /usr/local/sbin/sigelo-vps-backup.tmp
   mv /usr/local/sbin/sigelo-vps-backup.tmp /usr/local/sbin/sigelo-vps-backup
 
-  say "B4. sigelo-vps-backup.service and .timer (daily 03:30 Europe/Berlin, before the phone's 04:00 pull)"
-  BKDIR="$(getent passwd csigelo | cut -d: -f6)/backup"
+  say "B4. sigelo-vps-backup.service and .timer (daily 02:30 UTC; the host runs UTC)"
+  BKDIR="$(getent passwd "$ADMIN" | cut -d: -f6)/backup"
   cat > /etc/systemd/system/sigelo-vps-backup.service <<'UNIT'
 [Unit]
-Description=sigelo.io state backup, age-encrypted to the operator's phone key
+Description=sigelo.io state backup, age-encrypted to a key kept offline
 
 [Service]
 Type=oneshot
@@ -437,7 +445,7 @@ UNIT
 Description=sigelo.io state backup, daily
 
 [Timer]
-OnCalendar=*-*-* 03:30:00 Europe/Berlin
+OnCalendar=*-*-* 02:30:00 UTC
 Persistent=true
 
 [Install]
@@ -512,7 +520,7 @@ if [ "$stats" = 1 ]; then
   say "S2. the config helper (its allowlist knows auth_basic, the stats root, log_format sigelo_anon)"
   install_helper
 
-  say "S3. the /_stats/ password file $HT (user owner)"
+  say "S3. the /_stats/ password file $HT (basic auth)"
   if [ -n "$htfile" ]; then
     [ "$(wc -l < "$htfile")" -le 1 ] && grep -Eq '^owner:\$(6|5|apr1)\$[^:[:space:]]+$' "$htfile" || die "$htfile: want one line owner:<\$6\$, \$5\$ or \$apr1\$ hash>"
     run install -m 0640 -o root -g "$WEBGRP" "$htfile" "$HT"
@@ -601,7 +609,7 @@ UNIT
   say "S6. log rotation: daily, 30 kept (access-self.log 7)"
   write_logrotate
 
-  say "done: https://$DOMAIN/_stats/ (user owner) once nginx.conf with the /_stats/ location is deployed"
+  say "done: https://$DOMAIN/_stats/ (basic auth) once nginx.conf with the /_stats/ location is deployed"
   exit 0
 fi
 
@@ -702,7 +710,6 @@ fi
 # the firewall to confirm, DNS not pointed yet) is collected in $todo; the script then exits 1.
 if [ "$relay" = 1 ]; then
   [ "$os" = debian ] && [ -d /run/systemd/system ] || die "--relay needs Debian with systemd"
-  ADMIN=csigelo
   RHOST=relay.sigelo.ai
   RNAMES="sigelo.ai www.sigelo.ai relay.sigelo.ai"
   LINEAGE=sigelo.ai
@@ -804,7 +811,7 @@ SSHD
   say "R5. directories: /var/lib/sigelo-relay (sigelo-relay 0700), /opt/sigelo-relay (root), the site link"
   run install -d -m 0700 -o sigelo-relay -g sigelo-relay /var/lib/sigelo-relay
   run install -d -m 0755 -o root -g root /opt/sigelo-relay /var/www /var/www/sigelo.ai "$ACME"
-  run install -d -m 0750 /var/log/nginx/sigelo
+  log_dir
   # nginx serves the site (relay/deploy/nginx.conf: root /var/www/sigelo.ai/dist) from the code the
   # helper installed, so the two swap together
   if [ -d /var/www/sigelo.ai/dist ] && [ ! -L /var/www/sigelo.ai/dist ]; then die "/var/www/sigelo.ai/dist is a directory: move it away (the site is a link to /opt/sigelo-relay/app/site/dist)"; fi
@@ -878,7 +885,7 @@ PIN
     notifempty
     sharedscripts
     postrotate
-        systemctl kill -s USR1 nginx.service 2>/dev/null || true
+        { kill -USR1 "$(cat /run/nginx.pid)" || systemctl kill -s USR1 nginx.service || nginx -s reopen; } 2>/dev/null || true
     endscript
 }
 ROT
@@ -1077,7 +1084,7 @@ SSHD
   fi
 
   if [ -n "$backup" ]; then
-    say "R14. backup: /usr/local/sbin/sigelo-relay-backup, daily 03:30 Europe/Berlin"
+    say "R14. backup: /usr/local/sbin/sigelo-relay-backup, daily 02:30 UTC"
     printf '%s' "$backup" | grep -Eq '^age1[02-9ac-hj-np-z]{58}$' || die "--backup wants an age recipient (age1…, the public key; never the identity)"
     printf '%s\n' "$backup" | put /etc/sigelo-relay-backup.recipient 0644
     run install -m 0755 -o root -g root "$HERE/backup.sh" /usr/local/sbin/sigelo-relay-backup
@@ -1102,7 +1109,7 @@ UNIT
 Description=sigelo relay backup, daily
 
 [Timer]
-OnCalendar=*-*-* 03:30:00 Europe/Berlin
+OnCalendar=*-*-* 02:30:00 UTC
 Persistent=true
 
 [Install]
@@ -1130,13 +1137,13 @@ UNIT
   put /usr/local/sbin/sigelo-relay-selfcheck 0755 <<'RUN'
 #!/bin/sh
 # sigelo-relay-selfcheck — written by site/deploy/server-setup.sh --relay; run hourly by
-# sigelo-relay-selfcheck.timer as root (design/relay-plan.md §6 "Monitoring"). Checks the relay
-# itself (GET /challenge on 127.0.0.1:8791, a TLS handshake on 127.0.0.1:8883), then nginx (GET
+# sigelo-relay-selfcheck.timer as root. Checks the relay itself (GET /challenge on 127.0.0.1:8791,
+# a TLS handshake on 127.0.0.1:8883), then nginx (GET
 # /challenge through https://relay.sigelo.ai and / through https://sigelo.ai, both on 127.0.0.1);
 # restarts the unit that fails (nginx only after nginx -t), checks again, logs to the journal
 # (journalctl -u sigelo-relay-selfcheck). Exit 1 when something is still down. A unit stopped by
 # hand (inactive) is left alone: a restore stops the relay on purpose. Nothing to check before the
-# first deploy. Certificate expiry is the phone watchdog's to report, not this check's.
+# first deploy. Certificate expiry is the watchdog's (watch.sh) to report, not this check's.
 set -u
 UA='sigelo-selfcheck/1 (+https://sigelo.ai/privacy)'
 DID=did:sigelo:zF5FYbH5zNLX5pfd7DZUjPirXeAFzLVxrdFyCrnexdpBG   # test-vectors.json's first: public, nothing kept for it
@@ -1209,7 +1216,7 @@ UNIT
     printf 'owner:%s\n' "$(printf '%s' "$pw" | openssl passwd -6 -stdin)" > "$HT.tmp"
     chown root:www-data "$HT.tmp"; chmod 0640 "$HT.tmp"; mv "$HT.tmp" "$HT"
     pw=""
-    echo "+ wrote $HT (user owner, SHA-512 crypt) and the password to $PWF (root 0600)"
+    echo "+ wrote $HT (basic auth, SHA-512 crypt) and the password to $PWF (root 0600)"
   fi
   put /usr/local/sbin/sigelo-relay-stats 0755 < "$HERE/stats.sh"
   put /usr/local/sbin/sigelo-relay-stats-chart.mjs 0755 < "$HERE/stats-chart.mjs"
@@ -1250,7 +1257,7 @@ UNIT
   run systemctl daemon-reload
   run systemctl enable --now sigelo-relay-stats.timer
   run systemctl start sigelo-relay-stats.service || later "sigelo-relay-stats failed: journalctl -u sigelo-relay-stats"
-  echo "/_stats/: https://sigelo.ai/_stats/ (and relay.html, api.html, summary.txt, daily.log), user owner;"
+  echo "/_stats/: https://sigelo.ai/_stats/ (and relay.html, api.html, summary.txt, daily.log), basic auth;"
   echo "  the password: ssh -t $ADMIN@<this host> sudo cat $PWF"
 
   if [ -n "$todo" ]; then
@@ -1303,7 +1310,7 @@ if [ ! -d "$WEBROOT/dist" ]; then
   chown sigelo:sigelo "$WEBROOT/dist/index.html"
 fi
 run install -d -m 0755 "$ACME"
-run install -d -m 0750 /var/log/nginx/sigelo
+log_dir
 run install -d -m 0700 /var/backups/sigelo-nginx
 
 say "4. remove the distribution's default site (it logs client addresses and claims default_server)"

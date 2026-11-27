@@ -60,7 +60,7 @@
 //                                   temp?, invite?, done?, sent_at?, needs_send?, short_hash?, unparked? } },
 //         joining: { invite nonce: { key, code_did, relay, exp, sent, temp, long?, short_hash?, answered? } } }
 //
-// The code is spent at the grant, not before (the agent-setup feedback, point 2). The operator parks its short
+// The code is spent at the grant, not before (spent earlier, a machine whose join was cut short could not fetch it again). The operator parks its short
 // code as an enrolment code (relay/park.mjs: fetched again until the grant) and spends it there once
 // the worker's identity has gone (unparkHash, `unparked`). The machine keeps its joining entry from the
 // fetch on: the long code, the short code's hash and its temporary identity, whether its answer went

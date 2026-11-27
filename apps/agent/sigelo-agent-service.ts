@@ -7,7 +7,7 @@
  * message lands in <dir>/<id>.json, and `inbox` and the MCP `sigelo_inbox` beside it take them from there
  * (sigelo-agent-contact.ts takeSpool) instead of logging in, which would evict it.
  *
- * One unit per identity (2026-11-19): its name carries TAG, 8 hex of the sha256 of the identity file's path,
+ * One unit per identity: its name carries TAG, 8 hex of the sha256 of the identity file's path,
  * so several identities on one machine each get their own: sigelo-watch-<tag>.service, io.sigelo.watch.<tag>,
  * task sigelo-watch-<tag>. Never two units on one identity (the second crash-loops on its lock): install and remove
  * retire an install of the fixed legacy name (sigelo-watch.service with its sigelo-watch.timer, io.sigelo.watch, task
@@ -38,7 +38,7 @@ import { lockHolder } from './sigelo-agent-contact.ts';
 import { notFound, spawnArgs, which } from './sigelo-agent-exec.ts';
 import { identityPath } from './sigelo-agent.ts';
 
-/** The legacy fixed names (one identity per machine, before 2026-11-19; TIMER: an early install restarted the
+/** The legacy fixed names (one identity per machine, in earlier releases; TIMER: an early install restarted the
  *  service with it); RESTART_S. */
 export const UNIT = 'sigelo-watch.service', TIMER = 'sigelo-watch.timer', LABEL = 'io.sigelo.watch', TASK = 'sigelo-watch', RESTART_S = 15;
 /** An identity's tag: 8 hex of the sha256 of its resolved path (no file needed: remove works after it is gone). */

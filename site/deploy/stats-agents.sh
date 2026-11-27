@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # site/deploy/stats-agents.sh — the agent/human split of sigelo.io's visits, as plain text for a
-# phone (at most 40 lines, under 40 columns). Installed by server-setup.sh --stats as
+# small screen (at most 40 lines, under 40 columns). Installed by server-setup.sh --stats as
 # /usr/local/sbin/sigelo-stats-agents and run by sigelo-stats.timer every 15 minutes, after
 # GoAccess, over the same window: every access log logrotate keeps (30 days).
 #

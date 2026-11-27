@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Big files agent to agent (design/transfer.md, apps/agent/TRANSFER.md): the pure part, no I/O.
+// Big files agent to agent (apps/agent/TRANSFER.md): the pure part, no I/O.
 // The relay carries only the introduction, four small messages labelled TRANSFER_LABEL inside the
 // pairing's end-to-end envelopes; the bytes go over a direct WebRTC data channel (sigelo-transfer,
 // werift) or a one-shot Tor onion stream, both driven by transfer-node.mjs. Here: the messages and
@@ -35,12 +35,12 @@ export const TRANSFER_LABEL = 'sigelo-transfer/0';
 export const CHUNK = 1 << 20, MAX_SIZE = 16 * 2 ** 30, MAX_CHUNKS = MAX_SIZE / CHUNK;
 export const FRAME = 65536, DATA_HEAD = 9, DATA_MAX = FRAME - DATA_HEAD, HASHES_PER_FRAME = Math.floor((FRAME - 5) / 32);
 export const OUTSTANDING = 8, HIGH = 4 * CHUNK, LOW = CHUNK, RETRIES = 1;
-// Timings (design §3): a manifest lives 7 days; candidates gathered 3 s; an offer waits 10 minutes
+// Timings: a manifest lives 7 days; candidates gathered 3 s; an offer waits 10 minutes
 // for its answer, then ICE has 30 s.
 export const DAY = 86400, MANIFEST_TTL = 7 * DAY, GATHER_MS = 3000, ANSWER_WAIT = 600, ICE_MS = 30_000;
 // Manifests waiting for a yes: so many per contact and in all; more get `end busy`.
 export const WAIT_CONTACT = 8, WAIT_ALL = 64;
-// The accept rule's default (design §10.2, decided 2026-11-13): files up to 25 MB land without a question
+// The accept rule's default: files up to 25 MB land without a question
 // from own agents and contacts and from friends whose words were compared.
 export const AUTO_MB = 25;
 export const REASONS = ['done', 'declined', 'cancelled', 'no_path', 'try_tor', 'chunk_hash', 'file_changed', 'busy', 'relay'];
@@ -354,7 +354,7 @@ const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 // ---------------------------------------------------------------- the paths
 
 /**
- * The order the paths are tried in (design §2, §9): free, direct then Tor; Pro by its setting, fast
+ * The order the paths are tried in (TRANSFER.md "Paths"): free, direct then Tor; Pro by its setting, fast
  * (direct, TURN, Tor) or private (Tor, direct, TURN). via tor: Tor only (the address stays hidden).
  * TURN is T4: until it exists it is left out. direct: allowed with this contact and possible here;
  * tor: both sides can (one serves, the other connects). → ['direct', 'tor'], …
@@ -365,10 +365,10 @@ export function pathOrder({ pro = false, prefer = 'fast', via = 'auto', direct =
   return order.filter((p) => (p === 'direct' ? direct : p === 'tor' ? tor : turn && pro));
 }
 /**
- * The accept rule (design §10.2): → 'auto' (lands without a question) or 'ask'. trust: 'own' (own agents and
+ * The accept rule: → 'auto' (lands without a question) or 'ask'. trust: 'own' (own agents and
  * contacts), 'compared' (a friend whose four words were compared) or 'other' (not compared, a public-code
  * joiner, quiet: always asked); limitMb: the contact's own size (0: always ask), null for defaultMb; MB are
- * 10^6 bytes. The lane is not the rule's (2026-11-25): direct off, the file comes over Tor or the relay lane.
+ * 10^6 bytes. The lane is not the rule's: direct off, the file comes over Tor or the relay lane.
  */
 export function acceptRule({ size, trust, limitMb = null, defaultMb = AUTO_MB }) {
   if (trust !== 'own' && trust !== 'compared') return 'ask';
@@ -381,7 +381,7 @@ export function torRoles(sender, receiver) {
   if (receiver?.serve && sender?.connect) return 'receiver';
   return null;
 }
-/** The free refusal (design §5), for a contact's name. */
+/** The free refusal, for a contact's name. */
 // relayed: a TURN server was offered and still no pair answered (UDP and TCP to the relay host blocked, say).
 export const noPath = (name, relayed = false) => (relayed
   ? `No path to ${name} from these two networks, not even through the relay host, and no Tor. Up to 8 MiB: send-file. Tor on both sides carries larger files.`

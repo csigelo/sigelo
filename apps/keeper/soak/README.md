@@ -132,7 +132,7 @@ ticks straight, so rent 2 was abandoned. 0.00042 leaves 0.000022: a fee up to ~0
 (amount + fee), not a keeper defect; the soak just has to ask for less.
 It happened again from 2026-11-07: the self-paying wallet had fragmented to 128 outputs of
 ~0.0000386 each, carol needed 5–13 inputs (fee 0.000085–0.000196, measured) and every rent from
-55 to 73 was abandoned. Decided 2026-11-13: ask for less, not raise the cap. Since then
+55 to 73 was abandoned. The fix is to ask for less, not raise the cap. Since then
 carol is **0.00025**, bob 0.00008, the delegate 0.00028, and `approval_above` **0.0002** so carol
 still asks for approval; the worst 13-input fee (0.0002) keeps carol at 0.00045, the funding at
 0.00048 and the delegate's bob at 0.00028, all within the caps. The fragmentation itself is
@@ -261,12 +261,12 @@ daemon's fingerprint, expiry and pin.
 
 **Day 0** is `started` in `soak-stats.json`, written by the agent's first tick in that soak
 directory; `check.mjs` prints it as `uptime … since <started>`, and the "once the soak is 2 h old"
-rule below counts from it. The soak keyed 2026-09-23 (day 0 19:48:36Z) ended in the T14
+rule below counts from it. The soak keyed 2026-09-23 ended in the T14
 rehearsal (incident #5) and is evidence now; so is its successor (c2c9cdc/9516622, day 0
-2026-10-01 14:00:16Z), ended by drill 2 (incident #6). The current soak is a new directory on
-REVISION 7ba0c4e (code = c929667), keeper live 2026-10-02 18:46:08Z, `started` at its first tick
-(`soak-stats.json`: 2026-10-02T19:00:16Z); the 14 days of T6 count from there. **T6 is complete
-for it as of 2026-10-16 19:00Z** (14 days from `started`; read-only `check.mjs` on 2026-10-21:
+2026-10-01), ended by drill 2 (incident #6). The current soak is a new directory on
+REVISION 7ba0c4e (code = c929667), keeper live 2026-10-02, `started` at its first tick
+(`soak-stats.json`); the 14 days of T6 count from there. **T6 is complete
+for it as of 2026-10-16** (14 days from `started`; read-only `check.mjs` on 2026-10-21:
 HEALTHY, 891 ticks, 2116 `spend.log` lines all verifying; 12 mismatches over the run: 7 `balance`
 TRY LATERs in daemon stalls, 4 UNCERTAIN `relay_failed` (ticks 96, 178; operator-checked
 2026-10-07), 1 carol rent abandoned; the soak keeps running).
@@ -302,7 +302,7 @@ healthy soak. A crash of `check.mjs` itself (a missing `spend.key`, say) is repo
 `check.mjs crashed: …`. The unit also exits 1 while UNHEALTHY (`systemctl --user --failed`).
 `setup.sh` copies the units but, as with the others, enables nothing; the live `app/` (7ba0c4e)
 has `--notify` and the timer is enabled. Tested 2026-09-29 on a
-copy of the soak cut at 10:31Z (inside the incident): UNHEALTHY (no tick for 1 h 57 m, no payment
+copy of the soak cut inside the incident: UNHEALTHY (no tick for 1 h 57 m, no payment
 for 1 d 10 h, height stuck at 2217326), notify-send exit 0, one alerts line; the live soak the same
 minute: HEALTHY, nothing written.
 
@@ -324,7 +324,7 @@ Beyond that:
 
 **Expected fee cost.** ~55 transactions a day (48 bob, 4 carol, 1 funding, 1 delegate pay,
 1 sweep) at 0.00003042 (1 input) to 0.00004394 XMR (2 inputs; 2 outputs, priority 1, both
-measured 2026-09-23) ≈ **0.0017–0.0024 XMR/day, ≈ 0.023–0.034 XMR over 14 days**, out of 0.0998
+measured on stagenet) ≈ **0.0017–0.0024 XMR/day, ≈ 0.023–0.034 XMR over 14 days**, out of 0.0998
 in the wallet. The account count grows by
 one a day (delegates' accounts are never reused), well under the wallet's 50-account restore
 lookahead for a 14-day run.
@@ -367,24 +367,24 @@ a crash between `intent` and `relayed` shows as UNCERTAIN and is a finding for t
 ## Incidents
 
 **#1 — 2026-09-24: keeper locked out after a reboot (54 min down).** *Symptom*: the test host
-rebooted at 04:10 UTC; the wallet-rpc unit came up, `sigelo-soak-keeper.service`
+rebooted; the wallet-rpc unit came up, `sigelo-soak-keeper.service`
 (`Restart=always`) failed in a loop for 54 minutes with `spend.lock: …/keeper/spend.lock is held
-by pid 1103: another keeper serves this policy directory …`; `check.mjs` reported UNHEALTHY.
-*Cause*: `spend.lock` held only the pid (1103) of the keeper from before the reboot, and after
-the reboot pid 1103 was `/usr/lib/bluetooth/bluetoothd`. The lock treated any live pid as a live
+by pid <n>: another keeper serves this policy directory …`; `check.mjs` reported UNHEALTHY.
+*Cause*: `spend.lock` held only the pid of the keeper from before the reboot, and after
+the reboot that pid belonged to an unrelated system daemon. The lock treated any live pid as a live
 keeper, so any reboot or crash followed by pid reuse left the keeper down until a human removed
-the lock — on a crash-prone host this defeats `Restart=always`. *Fix*: by hand at 05:05 UTC
+the lock, which defeats `Restart=always`. *Fix*: by hand
 (`rm` the lock, restart the unit). *Prevention*: `spend.lock` now also records the boot_id and
 the process starttime, and a lock from an earlier boot, with a dead pid or with a pid whose
 starttime differs is taken over with one warning (`sigelo-spend: took over a stale <path>:
 <why>`); two live keepers are still refused (apps/keeper/README.md, "One keeper per policy
 directory"). The live soak runs the frozen copy in `app/`: it has this fix only after a
-redeploy of `app/` from the commit that carries it — done 2026-09-24 05:12 UTC (`app/REVISION`
+redeploy of `app/` from the commit that carries it — done the same day (`app/REVISION`
 44c614e; the keeper's lock is the two-line form since). A reboot now needs no hand at all.
-*Verified*: the test host rebooted again 2026-09-24 06:19 UTC (unattended). The keeper started
-at 06:19:06 with `took over a stale …/spend.lock: pid 16057 is from an earlier boot`, 0 restarts,
+*Verified*: the test host rebooted again the same day (unattended). The keeper started
+within seconds with `took over a stale …/spend.lock: pid <n> is from an earlier boot`, 0 restarts,
 no hand. wallet-rpc needed 18 min to rescan before it answered (the keeper reported TRY LATER
-until 06:37); `check.mjs` HEALTHY after that. Fees over the first 10.8 h: 0.00086568 XMR, drop
+until then); `check.mjs` HEALTHY after that. Fees over the first 10.8 h: 0.00086568 XMR, drop
 vs fees logged 0.
 
 **#3 (near miss) — 2026-09-24: a redeploy that would have locked the keeper out.** `sh setup.sh`
@@ -395,14 +395,14 @@ that rejects its own policy. `app/` was rolled back to the running revision with
 (`check.mjs` HEALTHY, REVISION 6df3b67); the compat guard above now aborts before any file is copied.
 The live soak keeps 6df3b67 until the day-7 rehearsal; the next soak is keyed by the fixed generator.
 
-**#4 — 2026-09-28 02:54Z → 09-29 11:03Z: host offline 32 h 09 min; the keeper failed closed,
+**#4 — 2026-09-28 → 09-29: host offline 32 h 09 min; the keeper failed closed,
 the tooling did not notice.** *Symptom*: from tick 154 every pay and fund was TRY LATER, the
-wallet height froze at 2217326, 0 successful payments on 09-29 before 11:30Z; `check.mjs` said
-HEALTHY throughout. *Cause*: the host, not sigelo. At 02:54:43Z the test host lost its network for 32 h because
+wallet height froze at 2217326, 0 successful payments until the network was back; `check.mjs` said
+HEALTHY throughout. *Cause*: the host, not sigelo. The test host lost its network for 32 h because
 its network manager stopped auto-connecting after a failed handshake and nothing could
-re-authorise it unattended: 0 connection attempts for 32 h. An operator re-authorised it at
-11:03:14Z, it connected in 4 s, and wallet-rpc resynced on its own (2217326 → 2218206 by
-11:08Z); tick 219 at 11:30Z paid and funded. *What held*: nothing was sent while offline (spend.log
+re-authorise it unattended: 0 connection attempts for 32 h. Re-authorised by hand after
+those 32 h, it connected in 4 s, and wallet-rpc resynced on its own (2217326 → 2218206 within
+5 min); tick 219, the next, paid and funded. *What held*: nothing was sent while offline (spend.log
 has no intent for the stuck ticks), 379/379 lines verify, intent = relayed, 0 UNCERTAIN, drop vs
 fees 0; no restart was needed or done. *What did not*: `check.mjs` HEALTHY for 32 h (no payment or
 height rule); the agent counted the keeper's correct TRY LATERs as 6 mismatches (`balance` at
@@ -417,7 +417,7 @@ stuck height or on a log clock in the future or stepping back. The host fix — 
 unattended — is an operator choice. Rent 13–14 and 20 refused `per_tx_max` are the carol margin problem above
 (the live `app/` still pays 0.00045), not this outage. *Closed by* (repo, 2026-09-29): the host now
 notices — `check.mjs --notify` under `sigelo-soak-check.timer` logs to `soak-alerts.log` and raises
-a critical `notify-send` notification within the hour of UNHEALTHY (with the rules above, by the 04:15Z 09-28 run
+a critical `notify-send` notification within the hour of UNHEALTHY (with the rules above, within about 80 min
 here, instead of 32 h later by chance); the keeper no longer depends on one node (`SIGELO_DAEMONS`
 fallback — would not have helped this outage, which had no network at all, but closes the "their
 node is down" case); and no tick runs on an unsynced clock (the agent unit's `ExecCondition`).
@@ -438,15 +438,15 @@ NTP-synced ("Clock at boot"), so on a redeployed soak a January tick cannot run 
 keeper's guard covers anything else that asks it to sign.
 
 **#2 (pre-empted) — torn last `spend.log` line after a kill** (sim K1, fixed 6df3b67: moved to
-`spend.log.torn-<ts>`, one warning, keeper starts). `app/` redeployed at 6df3b67 2026-09-24 08:07
-UTC (keeper restart, HEALTHY). `check.mjs` lists any `.torn-*` files.
+`spend.log.torn-<ts>`, one warning, keeper starts). `app/` redeployed at 6df3b67 on 2026-09-24
+(keeper restart, HEALTHY). `check.mjs` lists any `.torn-*` files.
 
 **#5 — 2026-10-01: the T14 incident rehearsal (a drill of INCIDENT.md case (b)).** Steps 1–7
 below, walked at repo c2c9cdc on day 8 of the 09-23 soak (live `app/` 6df3b67). *Durations*
-(UTC): detect 13:19:53 → keeper really dead 13:20:44 (51 s, 23 s of them a keeper systemd
-restarted, F1) → freeze complete 13:21:34 → **last sweep 13:35:19 (detect → last sweep
-15 min 26 s)** → vault spendable 13:54:45 (10 confirmations) → new keeper live 13:56:27 (36 min
-34 s) → first payment on it 14:30:32 (1 h 10 min 39 s). *Funds*: the burnt wallet's 0.09190088
+from detect: keeper really dead +51 s (23 s of them a keeper systemd
+restarted, F1) → freeze complete +1 min 41 s → **last sweep +15 min 26 s** → vault spendable
++34 min 52 s (10 confirmations) → new keeper live +36 min 34 s → first payment on it
++1 h 10 min 39 s. *Funds*: the burnt wallet's 0.09190088
 went to the vault in 3 sweeps (0.07612634; fees 0.01573816; 0.00003638 dust left behind) and
 back to the allowance address in 1 (0.07606886, fee 0.00005748). *What held*: the old
 `spend.log` verifies 592/592 under the old keeper key (`check.mjs --evidence`), intent = relayed
@@ -460,7 +460,7 @@ byte-identical to the evidence copy); the agent tick on the frozen keeper logged
 | F2 | The vault's wallet-rpc scans from its offline-estimated height (~20 000 blocks, ~30 min here) **before** it binds its RPC port, so `refresh {start_height}` could not be sent. | Steps 0 and 4.1: start it with `--no-initial-sync`, then `refresh {start_height}` (1 798 blocks in 4 min 11 s). |
 | F3 | A plain `unmask` leaves a `--runtime` mask (`unmask --runtime` needed). | Moot: `freeze.sh` uses no mask. One-line note in step 4.2. |
 | F4 | A bare `gen-keys.mjs` rewrote the tracked `policy.template.json` with the new soak's DIDs and recovery commitment (the addresses were placeholders since 5e96d29): dirty tree, and an export would name the live soak's identities. | The template holds placeholders for every identity field and is never written; `policy` fills `<dir>/policy.json`. `gen-keys.test.mjs`: template sha256 unchanged after a full keying in a scratch dir. |
-| F5 | No live delegate token at freeze time: the agent revokes each day's delegate ~1 h after creating it (~00:02Z). | Step 2.5: revoke-all is tested with the root token, and with a delegate's only if one is live; "none live" is a valid outcome. |
+| F5 | No live delegate token at freeze time: the agent revokes each day's delegate ~1 h after creating it (just after midnight UTC). | Step 2.5: revoke-all is tested with the root token, and with a delegate's only if one is live; "none live" is a valid outcome. |
 | F6 | Steps 5–6 said "No CLI does it yet": stale, `sigelo-offline recover` does an agent's recovery rotation. But the soak's `keys/S.hex` was 32 random bytes, not a canonical root, and `recover` refuses it. | Steps 5–6 rewritten as the command per identity; `gen-keys.mjs` now keys canonical roots (the test runs `recover` on one). **Open:** the keeper's own DID has no rotation at all: its genesis's recovery key is `recoveryPublicKey(K)`, derived from `spend.key`, so the thief holds it too. It can only be abandoned and the new one announced, and no SPEC object or command does that (step 5–6, INCIDENT §5). Open too: the current soak's root (keyed before the fix) is still not canonical. |
 | F7 | **The sweep's cost.** `sweep_all` at priority 4 took one tx and left 182 small outputs; priority 4 and 3 then failed with error -4 `No unlocked balance` (wallet2 skips an output worth less than its own fee at that priority); priority 2 took them in 2 txs; 0.00003638 dust could not be swept at all. Fees: 0.0158 XMR = **17 %** of the wallet. The sweep-back then lands as **one** output, so every payment on the new keeper locks the whole balance ~20 min: carol rent 1 and the delegate funding keep getting `wallet_locked` behind bob, and rent 1 may be `abandoned`, a MISMATCH that is the drill's doing. | Documented in steps 3.3 and 4.1 and INCIDENT §3: step the priority down on error -4, stop at dust, and either consolidate before a drill or accept the fees. Suggested for step 4.1 (not tried): split the sweep-back with `transfer_split` to several destinations, all the allowance address. |
 
@@ -470,26 +470,26 @@ the last snapshot came before the last relay's fee; busybox `timeout` in the age
 `ExecCondition` leaves a helper in the cgroup for a moment (systemd logs it and ignores it);
 the old step 4.4 forgot the wallet-rpc unit and the check timer. And the drill did not do the
 real §4: `gen-keys.mjs` made a new random S, not `K_1` of the old one, so the new soak-root is
-not what a recovery rotation of the old one would point at. *After it*: the new soak (day 0
-14:00:16Z, "Healthy") kept running through a host network outage later that afternoon. The
-keeper (pid since 13:56:27Z) did not restart and logged no daemon fallback; tick 3 at 15:00Z
-paid bob; `check.mjs` HEALTHY at 15:09Z.
+not what a recovery rotation of the old one would point at. *After it*: the new soak ("Healthy")
+kept running through a host network outage later that afternoon. The
+keeper did not restart and logged no daemon fallback; tick 3
+paid bob; `check.mjs` HEALTHY after it.
 
-**Finding (not an incident) — 2026-10-01 tick 5: timeout race on a slow build.** Keeper pid
-2181361 (`app/` 9516622); times UTC from `soak.log`, `rpc.log` and `spend.log` (the keeper's
+**Finding (not an incident) — 2026-10-01 tick 5: timeout race on a slow build.** Keeper
+`app/` 9516622; times from the tick's start, from `soak.log`, `rpc.log` and `spend.log` (the keeper's
 journal has no line in the tick):
 
-- 16:01:20.0 carol's `rent 1` build refused `not_enough_unlocked_money` (bob's spend, F7).
-- 16:01:20.1 delegate d20261001 runs `pay bob 0.0002 "from d20261001"`; 16:01:20.33 wallet-rpc
+- +0.0 s carol's `rent 1` build refused `not_enough_unlocked_money` (bob's spend, F7).
+- +0.1 s delegate d20261001 runs `pay bob 0.0002 "from d20261001"`; +0.33 s wallet-rpc
   logs `Requested ring size 1 too low, using 16`: the `transfer` build (`do_not_relay: true`,
   account 10's single 0.00035 output) has started.
-- 16:02:20.5 the keeper's wallet wait runs out — then 60 s for every call (`walletRpc` default,
+- +60.5 s the keeper's wallet wait runs out — then 60 s for every call (`walletRpc` default,
   `serve` passed no `walletTimeoutMs`) — and it answers `502 wallet`; the agent prints `TRY
   LATER: the wallet could not do that right now` (ms 60 383).
-- 16:03:52.2–.4 wallet-rpc finishes the decoy selection for that output (152 s build; bob's at
-  16:00 took 11 s, the same delegate's at 16:32 took 9 s) and answers a closed socket.
+- +152.2–.4 s wallet-rpc finishes the decoy selection for that output (152 s build; bob's just
+  before took 11 s, the same delegate's half an hour later took 9 s) and answers a closed socket.
 - Nothing was relayed: no `intent` line, no `relay_tx` (the keeper never had the metadata), no
-  `Spent money` for that output until 16:33:04 — tick 6's 47c5b366, whose build picked **the
+  `Spent money` for that output until tick 6 — its 47c5b366, whose build picked **the
   same real output and ring indexes**, so the late build had left nothing pending. Tick 6 paid
   once (intent + relayed).
 
@@ -502,12 +502,12 @@ LATER: the wallet is still working on that payment (a slow network); nothing was
 same command in a few minutes.` The agent's `try_later/*` tolerance covers it unchanged.
 
 **#6 — 2026-10-02: drill 2, a keeper rekey with `freeze.sh` (its first real use).** Soak 9516622
-(day 0 10-01 14:00:16Z, 57 ticks), repo c929667; the wallet-rpc was kept up and reused (step 2.4).
-*Durations* (UTC): detect 18:22:04 → **frozen 18:22:10 (6 s**; drill 1: 1 min 41 s) → last sweep
-18:24:04 (2 min 00 s; no clean-host refresh here) → vault spendable 18:43:54 → new keeper live
-18:46:08 (24 min 04 s) → first payment 19:31:36 (tick 2, 1 h 09 min 32 s). *freeze.sh*: every
+(day 0 10-01, 57 ticks), repo c929667; the wallet-rpc was kept up and reused (step 2.4).
+*Durations* from detect: **frozen +6 s** (drill 1: 1 min 41 s) → last sweep
++2 min 00 s (no clean-host refresh here) → vault spendable +21 min 50 s → new keeper live
++24 min 04 s → first payment +1 h 09 min 32 s (tick 2). *freeze.sh*: every
 assertion held: keeper failed, NRestarts 0, `spend.lock` kept and byte-identical, nothing restarted
-by tick 58 (18:30Z, TRY LATER `unreachable`, no crash, `balance` still counted a MISMATCH).
+by tick 58 (TRY LATER `unreachable`, no crash, `balance` still counted a MISMATCH).
 *Funds*: 0.0736367 → vault in one priority-2 sweep (0.07195224, fee 0.00163608 = 2.2 %, 0.00004838
 dust left) → back in one `transfer_split` to 8 outputs (0.07182776, fee 0.00011316); tick 2 paid
 bob, carol rent 1 and the delegate funding in the same tick (drill 1: one output, rent 1 abandoned).

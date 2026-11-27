@@ -138,7 +138,7 @@ keychain unlock (K2); "clear" (`POST /api/history/clear`) is the only mitigation
 | `POST /api/transfers/cancel` | `{id}` | the record, `cancelled`: the contact is told; the partials go |
 | `POST /api/transfers/forget` | `{id}` | the record, gone here with its partials |
 | `POST /api/transfers/direct` | `{contact, on}` | `{did, name, direct}`: may this contact see my addresses |
-| `GET /api/transfers/settings` | | `{tor, prefer, auto_mb, keep_location, tor_daemon: {serve, connect}, direct_available, pick, camera, open, voice, mic}` (voice: this host keeps recordings; mic: the shell asks for the microphone): the Tor checkbox (off when no daemon answers); Pro's order `fast`\|`private`; the accept rule's size (default 25 MB); the phone's own routes |
+| `GET /api/transfers/settings` | | `{tor, prefer, auto_mb, keep_location, tor_daemon: {serve, connect}, direct_available, pick, camera, open, voice, mic}` (voice: this host keeps recordings; mic: the shell asks for the microphone): the Tor checkbox (off when no daemon answers); Pro's order `fast`\|`private`; the accept rule's size (default 25 MB); the phone app's own routes |
 | `POST /api/transfers/settings` | `{tor?, prefer?, auto_mb?, keep_location?}` | the same, kept |
 
 `contact` is the contact's original DID. A contact in `groups`: `{did, name, current_did, relay, re_pair,
@@ -155,12 +155,12 @@ expiry for a local agent; `local` = the agent's name on this machine.
 Only in the self-contained app (apps/web, not `ui`): `POST /api/seat/take` `{confirm: true}` for a standby
 restored from seed: the list signed naming this device, then the page logs in as you (`seat take --force`
 semantics: the other device must be stopped or lost) → `{seat: "here", holder, epoch}`; `400` without
-`confirm`, `409 seat_here`. With the words kept behind the words password (design/apps-seed.md §8) it needs
+`confirm`, `409 seat_here`. With the words kept behind the words password (below) it needs
 `password` too: `403 words_password_needed` without, `403 words_password` ("Wrong password.", after the delay) when wrong.
 
 `me` in `state`: `{did, relay, online, clock_offset (s, relay minus local, the carrier's `clockOffset`), clock_checked,
 retention_days, error, pow: {bits, elapsed_s, expected_s}|null, pow_done_ms, pow_capped: {relay, next}|null, pow_confirm: {relay, detail}|null,
-seat: {holder, epoch, here}|null, wallet: {on, prices, currency}, picture}` (`wallet`: Settings → Wallet, for every scope; `picture`: the rev of mine, or null; `error` and `pow_capped`: the last login's failure and the day's cap, kept across a restart until a login succeeds). Proof of work (design/profiles.md §6): a call the human starts (invite, accept, enrol-code,
+seat: {holder, epoch, here}|null, wallet: {on, prices, currency}, picture}` (`wallet`: Settings → Wallet, for every scope; `picture`: the rev of mine, or null; `error` and `pow_capped`: the last login's failure and the day's cap, kept across a restart until a login succeeds). Proof of work: a call the human starts (invite, accept, enrol-code,
 pow/try, the page's start) past 3 searches a day at a relay answers `409 pow_confirm` (its message the question), and goes with
 `pow_confirmed: true`; the automatic retries stop instead (`pow_capped.next`: the next automatic try)
 (`here` false: another device holds the seat; the page shows a banner and its writes refuse `seat_elsewhere`). A pending invite:
@@ -233,7 +233,7 @@ keeper's `seen` `[{addr, agent, purpose, did, invoice, paid, last}]`, the addres
 32 at most: "Who it may pay" offers them beside the contacts.
 Unknown keeper `404 keeper_unknown`, agent `404 keeper_agent`; no keeper here `409 keeper_none`, `keeper_unreadable`.
 
-**Wallet** (design/ux1/notes.md "Decided"; sigelo-agent-wallet.ts): per profile, off by default (`settings.wallet`); off, no wallet,
+**Wallet** (sigelo-agent-wallet.ts): per profile, off by default (`settings.wallet`); off, no wallet,
 node or price source is asked. *Which wallet:* `ui` uses a `monero-wallet-rpc` on this computer, the wallet service: a keeper's
 (policy.json `wallet`, loopback, its digest login) or one given by hand (127.0.0.1 only), and one account of it, never one a keeper agent
 or delegate is pinned to (`account_held`). Not chosen: the first keeper's, account 0 if no agent holds it, else `why: "no_account"`
@@ -277,7 +277,7 @@ turning wheel. Sent only to a contact whose seen receipt carried `busy: true` (e
 **Agent settings:** a host sends `sigelo-host-caps/0` `{fields: [{key, value, options: [{value, label}], off?, next?}], note?}` (keys model, effort, permissionMode; `off`: why not settable) to a page whose receipts carry `host: true`; kept as the contact's `host`, never a message; the app offers the page for an own agent only (`ours` or tier own). A phone controlling a computer's page shows no Agent settings (`/api/host/set` is not remote) and no Save to Downloads.
 `POST /api/host/set {contact, key, value}` → `{did, host, status}`: sends `sigelo-host-set/0 {key, value}` (one of its options; else `400 body`, `409 host_none`, `host_off`), marked `next`; the host applies it at its next turn, the operator's only.
 
-**Pictures** (design/ux1/notes.md "Decided"): mine per profile (`of: "me"`), a local one for any contact or group. Mine travels to each paired
+**Pictures**: mine per profile (`of: "me"`), a local one for any contact or group. Mine travels to each paired
 contact known to read pictures (its seen receipt came, or its own picture did) as one more end-to-end message, body `{label: "sigelo-picture/0",
 content: {type, data}}` (or `{remove: true}`) inside the same sigelo-msg/0 envelope: the relay sees one more envelope, never a picture; an
 earlier version is never sent one. One received is checked (JPEG or WebP by its first bytes, at most 64 KiB), kept as theirs, never in the
@@ -294,7 +294,7 @@ here: me, a contact whose chain holds `did` (`words_checked` as compared), or un
 protocol object: in a chat it is a message labelled `sigelo-statement/0` whose text is the portable form (an earlier version shows it as
 text). The key agent (KEYS.md) signs none.
 
-**Public invite** (Me → Public invite; design/public-invite.md, Pro only): a public code, `sigelo-public/0`: `PUB-XXXX-XXXX` with the
+**Public invite** (Me → Public invite, Pro only): a public code, `sigelo-public/0`: `PUB-XXXX-XXXX` with the
 inviter's four words (`words`, didWords of the original DID) and `link` (`https://sigelo.io/join#PUB-….w-w-w-w`), for 1, 6 or 12 months, kept in
 the contact store. State's `pending.public` (the first) and `pending.publics`: `{id, name, short, words, link, exp, relay, cap, open, paused,
 today, chats, requests: [{id, did, current_did, words, received, exp}]}`. Each use is a request (event `public_request`) until approved or
@@ -318,7 +318,7 @@ next invite and to this page's own connection at its next start. Codes accepted 
 `/api/transfers*`), the page's session runs the transfer engine as `watch` does; a file offered is an event `transfer`
 in the history and the Files view's card. Refusals: unknown `404 transfer_unknown`; `409 direct_ask`, `disk_full`, `transfer_state`.
 
-**Calls** (design/calls.md; apps/contact/call.mjs): the host's Line carries `sigelo-call/0` over the page's session; the
+**Calls** (apps/contact/call.mjs): the host's Line carries `sigelo-call/0` over the page's session; the
 media is the page's own RTCPeerConnection (Opus, DTLS-SRTP, a fresh certificate per call, STUN only: no relay of ours in
 the free tier). `state` has `call`: `{id, did, name, dir, state}` or null (null too where the host has no calls: the
 page offers none). Contacts carry `can_call` (may it ring here) and `can_call_set` (my choice for it, else the default:
@@ -359,7 +359,7 @@ and `sw.js` keep `ui.html`, `ui.js`, `ui.css` only, never `/api/`.
 
 ## Profiles (the apps)
 
-Not routes: the phone apps' own, beside these (design/profiles.md P1). The Profiles sheet (the profile chip) and Settings → Profiles (`ui.js`) call the shell's
+Not routes: the phone apps' own, beside these (apps/android/README.md). The Profiles sheet (the profile chip) and Settings → Profiles (`ui.js`) call the shell's
 `profiles`: in the WebView app `sigeloLocal.profiles` (apps/web/boot.mjs), in the GTK phone app the bridge's ops
 `profiles`, `profile-use`, `profile-rename`, `profile-add` (`{path?}`), `profile-remove` (answered to the start page, `ui.html` and this
 phone's own page; never another page). `list()` → `{active, limit: 8, profiles: [{id, name, kind: "words"|"remote"|null,
@@ -371,7 +371,7 @@ a `words` profile needs `words: true` (`profile_words`) and its name typed (`pro
 not set up nothing. A computer's own page has none: no Profiles in Me. A `words` profile whose words are kept needs its
 words password too: WebView `{password}`, GTK `{proof}` (below); else `words_password_needed`, `words_password`.
 
-The words password (design/apps-seed.md §8), Settings → Backup and recovery (`ui.js`), where this phone holds its own identity from the
+The words password, Settings → Backup and recovery (`ui.js`), where this phone holds its own identity from the
 25 words. WebView app: `sigeloLocal.words` (apps/web/words.mjs): `status(id?)` → `{here, kept, iterations}` (with an id:
 that profile's `kept`); `reveal(password)` → `{words: [25]}` after the screen lock; `change(old, next, repeat)`; `set(words, next, repeat)` (none kept: the 25 words
 typed again, refused `words_other` when they make another identity, `words_check` when they are not words; then kept);
@@ -410,7 +410,7 @@ from a backup" and the Add sheet's `backup` path; `backup_exists` (the identity 
 
 ## Computers (the apps)
 
-Not routes either (design/profiles.md P2): a remote profile's computers, each paired once. Me → Devices and computers
+Not routes either: a remote profile's computers, each paired once. Me → Devices and computers
 (`ui.js`) calls `sigeloLocal.computers` (WebView app) or the GTK bridge's `computers`, `computer-use`, `computer-add`,
 `computer-forget`. `list()` → `{active, limit: 8, computers: [{id: "c1"…, name, via: "lan"|"relay", did, words, where,
 paired, last_used}], profile: {id, name, did, words}}`; a profile holding an identity: `not_remote` (no Connect in Me).
@@ -421,7 +421,7 @@ identity than the profile's operator is refused `other_operator`; nothing of it 
 
 ## Push (the apps)
 
-Not a route (design/push.md §1 B, §6): the Android app's Settings → Notifications sets the push mode for the phone, Built in (the
+Not a route (apps/android/README.md): the Android app's Settings → Notifications sets the push mode for the phone, Built in (the
 default), Push app or Off, through `sigeloLocal.push` (`apps/web/boot.mjs`): `get()` → `{mode, on, state, reason, distributors: [{id,
 name}], distributor, endpoint, p256dh, auth, relay}`, `set({mode, distributor})` the same, `onChange(fn)` at the push app's answers
 and Built in's changes; `state` is `off`, `none` (no push app), `pick`, `registering`, `ok`, `failed`, `unregistered` or `unavailable`

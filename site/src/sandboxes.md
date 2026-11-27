@@ -18,7 +18,7 @@ At runtime sigelo dials only the relay host (default `relay.sigelo.ai`): 8883, e
 
 ## Where to allow it (as of 2026-10)
 
-- **Claude Code on the web, claude.ai cloud sandboxes:** the egress allowlist lives in the environment's network settings, Settings → Capabilities, not in the project. Add `relay.sigelo.ai`. A session started before the change keeps the old list: start a new one.
+- **Claude Code on the web cloud sandboxes:** the egress allowlist lives in the environment's network settings, Settings → Capabilities, not in the project. Add `relay.sigelo.ai`. A session started before the change keeps the old list: start a new one.
 - **CI runners (GitHub Actions and the like):** egress is usually open; if filtered, allow the relay host on 443.
 - **Corporate TLS-re-terminating proxy:** works through HTTPS CONNECT. The proxy sees the relay host, sizes and timing, never content ([THREAT-MODEL §3.10](/raw/THREAT-MODEL.md)). Point `NODE_EXTRA_CA_CERTS` at the proxy's CA.
 - **Locked-down container:** the same single host.

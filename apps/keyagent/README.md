@@ -75,7 +75,7 @@ hardware (K4, K5) for more.
 
 ## Windows: manual, on a Windows machine
 
-Not tested. The pipe check of plan §9:
+Not tested. The pipe check:
 
 1. A second local user opens `\\.\pipe\sigelo-agent-<user>` and sends `{"op":"list"}`.
 2. A remote client tries the same over SMB.

@@ -164,7 +164,7 @@ try {
     && (!existsSync(join(OTHER, '.config', 'moadim')) || !readdirSync(join(OTHER, '.config', 'moadim')).some((f) => f.includes('sigelo.local'))), again.stderr);
   ok('init --enrol with --recovery: refused, exit 2', (await cli(OTHER, ['init', '--enrol', 'K7F3-Q9ZP', '--no-recovery'])).status === 2);
   ok('enrol --finish on the server, nothing pending: exit 0, says so', ((r) => r.status === 0 && r.stderr.includes('nothing pending'))(await cli(SRV, ['enrol', '--finish'])));
-  // the agent-setup feedback points 3, 5, 6, 7, 9 and the enrolment boundary (THREAT-MODEL §2.11a), on the CLI.
+  // What models got wrong in setup (refused init over a key, codes to the wrong verb, whose, verb guesses, waits) and the enrolment boundary (THREAT-MODEL §2.11a), on the CLI.
   {
     const who = await cli(SRV, ['whoami']), wj = JSON.parse(who.stdout || '{}') as { worker?: number; operator?: string; operator_name?: string; tier?: string };
     ok('whoami on a worker: its index, its operator\'s DID and name, the tier', who.status === 0 && wj.worker === 0 && wj.operator === opDid && wj.operator_name === 'operator' && wj.tier === 'own'
@@ -199,7 +199,7 @@ try {
     ok('enrol --cancel by name', (await cli(OP, ['enrol', '--cancel', 'k.bench-1'])).status === 0);
     const guess = await cli(SRV, ['enrol', '--enrol', other]), typo = await cli(SRV, ['acept', 'X']);
     ok('enrol --enrol: refused, names init --enrol; a typo of a verb: "did you mean accept?"', guess.status === 2 && guess.stderr.includes('init --enrol') && typo.status === 2 && typo.stderr.includes('did you mean accept?'), guess.stderr + typo.stderr);
-    // A lock left by a killed CLI (its pid gone): removed with one line, the verb goes on (the agent-setup feedback, point 9).
+    // A lock left by a killed CLI (its pid gone): removed with one line, the verb goes on.
     const dead = spawnSync('node', ['-e', '0']).pid, lockF = sfile.replace(/\.json$/, '') + '.carrier.json.lock';
     writeFileSync(lockF, `${dead}\n`);
     const unlocked = await cli(SRV, ['contacts']);

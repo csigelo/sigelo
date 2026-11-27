@@ -67,7 +67,7 @@ export function base45(b: Uint8Array): string {
   return s;
 }
 
-/** A relay control (design/apps.md §6.3, sigelo-agent-control.ts): no key here, a paired control identity. */
+/** A relay control (sigelo-agent-control.ts): no key here, a paired control identity. */
 // code: the long code while nobody answered it (withdrawn when the code is made again), never shown.
 export interface RelayControl { relay: true; scope: Scope; created: number; last_used: number | null; did: string | null; nonce: string | null; code?: string; exp: number | null; words: string | null; confirmed: boolean }
 export type AnyControl = Control | RelayControl;
@@ -87,8 +87,8 @@ export async function remoteCall(scope: Scope, msg: { method: string; path: stri
   const b = msg.body === undefined ? {} : msg.body;
   if (url === null || !url.pathname.startsWith('/api/') || url.origin !== 'http://remote') return [404, { error: { check: 'route', message: 'not a route' } }];
   if (deviceRoute(url.pathname)) return [403, { error: { check: 'remote', message: 'device routes are never remote: moving keys needs a human at the computer' } }];
-  // The phone's own (its picker, its camera, opening a file there): a human holding that phone, never a control.
-  if (['/api/transfers/pick', '/api/transfers/photo', '/api/transfers/open', '/api/transfers/mic', '/api/transfers/voice-part'].includes(url.pathname)) return [403, { error: { check: 'remote', message: 'the phone\'s picker, camera, microphone and files are never remote' } }];
+  // The device's own (its picker, its camera, opening a file there): a human holding that phone, never a control.
+  if (['/api/transfers/pick', '/api/transfers/photo', '/api/transfers/open', '/api/transfers/mic', '/api/transfers/voice-part'].includes(url.pathname)) return [403, { error: { check: 'remote', message: 'the picker, camera, microphone and files of a device are never remote' } }];
   // A call holds the microphone of the device whose page took it: a human there, never a control.
   if (url.pathname === '/api/calls' || url.pathname.startsWith('/api/calls/')) return [403, { error: { check: 'remote', message: 'calls are never remote: a call is taken on the device that rings' } }];
   if (url.pathname === '/api/transfers/send') return [403, { error: { check: 'remote', message: 'sending a file of the computer by its path is never remote: a human at the computer picks it' } }];

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Voice calls (call.mjs, design/calls.md): the sigelo-call/0 messages and their checks (exact members, one sha-256
+// Voice calls (call.mjs, THREAT-MODEL §2.20): the sigelo-call/0 messages and their checks (exact members, one sha-256
 // fingerprint, one audio stream, the padding), the chat lines, Opus asked mono with FEC at 32 kbit/s; then two hosts'
 // Lines wired to each other as the relay would carry them, each with a page's Phone over a fake RTCPeerConnection
 // (test-fake-rtc.mjs): a call accepted and hung up, declined, no answer, busy, glare, a contact not allowed to ring,
@@ -227,7 +227,7 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   stop(A, B, C);
 }
 
-// 2b. Calls are between people (design §1): a ring from a contact this host takes for an agent: refused silently.
+// 2b. Calls are between people: a ring from a contact this host takes for an agent: refused silently.
 {
   const net = fakeNet(), world = {}, A = host('alice', net, world), B = host('bob', net, world);
   const refused = [];
@@ -306,7 +306,7 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   stop(A, B);
 }
 
-// 5. Roaming and weak links (2026-11-24): a network change (failed → restart → connected), the shell's network
+// 5. Roaming and weak links: a network change (failed → restart → connected), the shell's network
 // event, a lossy link (bitrate down, back up), signalling late, repeated and out of order.
 {
   const net = fakeNet(), world = {}, A = host('alice', net, world), B = host('bob', net, world);
@@ -365,7 +365,7 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   stop(A, B);
 }
 
-// 7. TURN (2026-11-26): the ICE servers, GET /api/calls/turn, the connection built with the relay's credential, "Via relay",
+// 7. TURN: the ICE servers, GET /api/calls/turn, the connection built with the relay's credential, "Via relay",
 // the no-path message when even the relay could not connect, a credential near its expiry fetched again at a restart.
 {
   const T = { urls: ['turn:relay.test:3478?transport=udp', 'turn:relay.test:3478?transport=tcp'], username: '1764200000:abcdefghijklmnop', credential: 'Y3JlZGVudGlhbA==', exp: 1764200000 };
@@ -417,7 +417,7 @@ const rings = (H) => until(() => state(H) === 'incoming' && H.phone.call?.id ===
   stop(A, B);
 }
 
-// 8. "Always relay my media" (design §6, 2026-11-26): the policy from the setting or SIGELO_ICE_POLICY; the connection
+// 8. "Always relay my media": the policy from the setting or SIGELO_ICE_POLICY; the connection
 // relay-only, only relayed candidates leave, raddr zeroed; no TURN: RELAY_ONLY at once, nothing rung.
 {
   const T = { urls: ['turn:relay.test:3478?transport=udp'], username: '1764200000:abcdefghijklmnop', credential: 'Y3JlZGVudGlhbA==', exp: 1764200000 };

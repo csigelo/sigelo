@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-// sigelo for Android (design/apps.md §8): a WebView around apps/web, no dependency but the platform.
+// sigelo for Android (apps/android/README.md): a WebView around apps/web, no dependency but the platform.
 // The page's files are not in the repository: `node apps/android/assets.mjs` puts them in
 // src/main/assets/web/ (apps/web/copy.mjs's vendoring, copied as they are) before a build.
-//   ./gradlew assembleRelease    unsigned: the operator signs it offline (design/apps.md §11)
+//   ./gradlew assembleRelease    unsigned: the operator signs it offline (apps/android/README.md)
 //   ./gradlew assembleDebug -Psigelo.debugKeystore=<p12> -Psigelo.debugPassword=<pw>
 //                                signed with a throwaway key (CI makes one per job); without them, the SDK's debug key
 plugins {

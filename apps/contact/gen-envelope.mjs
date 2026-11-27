@@ -226,7 +226,7 @@ export function build() {
 
   const out = {
     v: V,
-    about: 'sigelo-msg/0 envelopes (design/relay-plan.md §3, §11 "Epoch recovery"). Rebuild the receivers from the seeds (gen-envelope.mjs receivers(), each holding envelopes `params.hold` seconds), run `steps` in order: '
+    about: 'sigelo-msg/0 envelopes (README.md "How it works" and "Contracts"). Rebuild the receivers from the seeds (gen-envelope.mjs receivers(), each holding envelopes `params.hold` seconds), run `steps` in order: '
       + 'open `envelope` (hex) on its `topic` at its `now`, after `xor` [offset, mask] (negative offset counts from the end), `set` [offset, hex] or `truncate` (bytes cut from the end), '
       + 'then, with `rebind`, set the epoch id (bytes 2..17) to the first 16 bytes of SHA-256 of bytes 22..1157 (prekey id and X-Wing ciphertext, as a sender derives it), '
       + 'and compare `expect` plus the envelope\'s `body` by value, or `error` by check name. `contact`: the receiver\'s store has merged `rotation`; its peer record '

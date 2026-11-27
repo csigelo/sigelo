@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The direct path of a transfer in a page (design/transfer.md §10.1): the WebView's own RTCPeerConnection
+// The direct path of a transfer in a page (apps/agent/TRANSFER.md "The phone app"): the WebView's own RTCPeerConnection
 // behind the interface of apps/transfer/rtc.mjs (werift, Node), so transfer-engine.mjs drives both alike
 // and a phone talks to a Node agent or another phone over the same `sigelo-transfer/0` channel.
 //
@@ -59,7 +59,7 @@ export async function peer({ stun = [], turn = null, gatherMs = 3000, RTC = glob
   const dcP = new Promise((r) => { gotDc = r; });
   pc.addEventListener('datachannel', (ev) => {
     const ch = ev.channel;
-    // Only the channel this attempt named; any other is closed (design §3 "Binding").
+    // Only the channel this attempt named; any other is closed (the binding).
     if (want === null || ch.label !== want || dc) { try { ch.close(); } catch {} return; }
     dc = ch; gotDc(ch);
   });

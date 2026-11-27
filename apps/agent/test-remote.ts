@@ -388,7 +388,7 @@ else {
     const byId = await Promise.all(BY_ID.map((x) => call('POST', x.split(' ')[1]!, { id: 'ab'.repeat(16) })));
     const td = await call('POST', '/api/transfers/direct', { contact: 'did:sigelo:zNope', on: true });
     const ta = await call('POST', '/api/transfers/auto', { contact: 'did:sigelo:zNope', mb: 0 }), tk = await call('POST', '/api/transfers/photo', {});
-    ok('remote e2e transfers: the list and settings sealed → 200; accept, decline, cancel, resume, relay, retry, forget of an unknown id → 404 transfer_unknown; direct and auto of no contact → 404; the phone\'s photo never remote (403)', tl.status === 200 && ts.status === 200 && tp.body.prefer === 'private'
+    ok('remote e2e transfers: the list and settings sealed → 200; accept, decline, cancel, resume, relay, retry, forget of an unknown id → 404 transfer_unknown; direct and auto of no contact → 404; a device photo never remote (403)', tl.status === 200 && ts.status === 200 && tp.body.prefer === 'private'
       && byId.every((x) => x.status === 404 && x.body.error.check === 'transfer_unknown') && td.status === 404 && ta.status === 404 && tk.status === 403 && tk.body.error.check === 'remote', JSON.stringify([tl, tp, byId, td, ta, tk]).slice(0, 900));
     for (const x of [...BY_ID, 'POST /api/transfers/direct', 'POST /api/transfers/auto']) done_.set(x, 200);
     // A contact's kind and the keeper (scope all): no such contact → 404; no keeper on this computer → none, its writes 409 keeper_none.
@@ -580,7 +580,7 @@ const pollPage = (k: ReturnType<typeof fakeClock>, ctl: any, workers = true) => 
   R.stop();
 }
 
-// ── over the relay (design/apps.md §6.3): a control identity, SIGELO:CTL:, request/response/events
+// ── over the relay (UI-API.md "Remote"): a control identity, SIGELO:CTL:, request/response/events
 if (!hasRelay()) console.log(`SKIP remote over the relay: ${NO_RELAY}`);
 else {
   const { writeFileSync, unlinkSync } = await import('node:fs');
@@ -704,7 +704,7 @@ else {
     const many = await Promise.all(Array.from({ length: 14 }, () => all.ctl.call('GET', '/api/me')));
     const n200 = many.filter((r) => r.status === 200).length, n429 = many.filter((r) => r.status === 429).length;
     ok('relay: rate cap: of 14 at once, about 10 answered, one 429 rate, the rest dropped (no answer)', n200 >= 9 && n200 <= 12 && n429 === 1 && many.find((r) => r.status === 429)?.body.error.check === 'rate', JSON.stringify(many.map((r) => r.status)));
-    // design/profiles.md P2: control pair --operator <did> (the app profile's operator, the GTK phone app): a computer whose
+    // Several computers in a profile: control pair --operator <did> (the app profile's operator, the GTK phone app): a computer whose
     // page is another identity refused other_operator after the code, nothing kept; the profile's own → paired, its original DID said.
     const { spawn } = await import('node:child_process'), { existsSync } = await import('node:fs');
     const cliPair = (line: string, operator: string, file: string) => new Promise<{ status: number | null; o: string; e: string }>((res) => {

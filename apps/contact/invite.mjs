@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Invite codes and the invite handshake, contract sigelo-invite/0 (design/relay-plan.md §3,
-// "Invite code" and "Invite handshake"). Alice: makeInvite, store.addInvite, hand over `text`.
+// Invite codes and the invite handshake, contract sigelo-invite/0 (README.md
+// "How it works", 1 and 2). Alice: makeInvite, store.addInvite, hand over `text`.
 // Bob: parseInvite, buildAnswer, store.addAccept(code, answerId(answer), …). Alice: checkAnswer,
 // buildReply. Bob: checkReply.
 // No network here. The carrier encrypts answer and reply under inviteKeys(secret).key and posts

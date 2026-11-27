@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Create a new identity (pass A10a; Monerujo's create and seed review as the model, design/monerujo-ref):
+// Create a new identity (pass A10a; Monerujo's create and seed review as the model):
 // the first run's first choice. Its screens are welcome.mjs's (Name this phone, Your 25 words once behind
 // "I have written them down", Check your paper), its steps setup.mjs's (newSeed: S drawn in the page with
 // crypto.getRandomValues, as newRoot; the three words checked by the session). Here the commit: the files

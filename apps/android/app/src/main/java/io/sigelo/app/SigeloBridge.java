@@ -68,7 +68,7 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 /**
- * What the page asks of the phone (design/apps.md §4.3, §5), protocol sigelo-bridge/0, the page's
+ * What the page asks of the phone (apps/android/README.md), protocol sigelo-bridge/0, the page's
  * side in apps/web/platform-android.mjs (its header lists the messages; test-shell.mjs runs the same
  * protocol in Node). The page sees one object, SigeloShell: info() and connect(); connect() posts a
  * WebMessagePort to this origin only, and every request goes over it as JSON text, bytes as base64.
@@ -83,10 +83,10 @@ import javax.net.ssl.SSLSocketFactory;
  *          restore from seed (under the FULL key, its own AAD), the kept words (kind "words": the 25 words
  *          already encrypted under the words password, apps/web/words.mjs; the FULL key, its own AAD) or a
  *          computer's text. Per profile
- *          (apps/web/profiles.mjs, design/profiles.md §4): p1 under the three aliases of before, blob
+ *          (apps/web/profiles.mjs): p1 under the three aliases of before, blob
  *          version 1 as before (nothing resealed at the upgrade); another profile under its own three
  *          aliases, blob version 2 naming it, the AAD naming kind and profile: no blob opens elsewhere.
- *          Several computers in a profile (design/profiles.md P2): one blob each under the profile's aliases,
+ *          Several computers in a profile: one blob each under the profile's aliases,
  *          the first as above, another version 2 naming profile and computer, its AAD too.
  *   forget-profile  a profile's three aliases deleted (its removal: whatever copy of its blobs is left
  *          never opens again).
@@ -116,12 +116,12 @@ import javax.net.ssl.SSLSocketFactory;
  *          Not allowed: refused "notify_permission".
  *   big-pick, big-photo, big-hash, big-stat, big-write, big-flush, big-digest, big-drop, big-free, big-land, big-open,
  *   big-awake   big files (BigFiles: the system's picker and camera, ranges read from the file itself, partials
- *          written at offsets, Downloads; design/transfer.md §10). Every one names its profile.
+ *          written at offsets, Downloads). Every one names its profile.
  *   stay          Stay connected (StayConnected): {on?, battery?, notifications?} → {on, exempt, asked, notify, notifyAsked,
  *          notifyBlocked}; on kept for the phone (default true), the foreground service follows; battery and notifications
  *          ask the system at each tap while Android still shows its prompt, then open the app's page in its settings. Its event, no id: {ev:"nudge"} (its alarm, the end of Doze): the page's carrier
  *          reconnects when down.
- *   push          Push (UnifiedPush.java; design/push.md §1 B, §6): {mode?: builtin | app | off, distributor?} → {mode, on,
+ *   push          Push (UnifiedPush.java, PushClient.java): {mode?: builtin | app | off, distributor?} → {mode, on,
  *          state (off | none | pick | registering | ok | failed | unregistered | unavailable), reason, distributors: [{id,
  *          name}], distributor, endpoint, p256dh, auth}; builtin is PushClient's stream to push.sigelo.ai, app the user's
  *          push app; anything else refused "push". Its events, no id: {ev:"push", …the same} when the push app or PushClient
@@ -1112,7 +1112,7 @@ public final class SigeloBridge {
 
     /**
      * p1 (or none given): the kind alone, as before profiles; another profile: the kind and the profile; a computer
-     * other than a profile's first (design/profiles.md P2): the kind, the profile and the computer.
+     * other than a profile's first: the kind, the profile and the computer.
      */
     private static byte[] aad(String kind, String profile, String computer) {
         String who = C1.equals(computer) ? (P1.equals(profile) ? "" : " " + profile) : " " + profile + " " + computer;

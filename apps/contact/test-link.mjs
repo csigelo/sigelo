@@ -119,7 +119,7 @@ const D0 = 'did:sigelo:z' + '1'.repeat(44);
     ok(a1.link === undefined && a1.tier === 'friend' && a1.tier_by === 'owner', 'setLink null with prior: the tier before restored');
     hs.revoke(F.did);
     ok(hs.load().s.contacts[F.did].link === undefined, 'revoke drops the link');
-    // Relink (design/links.md §7.1a): a link's end is remembered (ended); a new link pairs only with a permit.
+    // Relink: a link's end is remembered (ended); a new link pairs only with a permit.
     ok(hs.load().s.contacts[F.did].ended === undefined && checkOf(() => hs.relink(F.did, 'DDDDDDDD', now + 60, now)) === 'revoked', 'forgotten by hand: no ended; relink refused (revoked)');
     ok(hs.relink(A.did, 'DDDDDDDD', now + 60, now) === null && hs.relink(D0, 'DDDDDDDD', now + 60, now) === null, 'relink of a live contact, or of no contact: nothing to permit (null)');
     const X2 = agent('store relink');
@@ -295,7 +295,7 @@ try {
   ok(A.out.some((r) => r.ended.some((x) => x.id === L.id && x.forgot)) && B.out.some((r) => r.ended.some((x) => x.id === L.id)), 'handle reports the end on both');
   ok(await failure(() => unlink({ carrier: H.c, file: H.f, id: 'ZZZZZZZZ' })) === 'link_unknown', 'unlink of no link: link_unknown');
 
-  // ---- relink (design/links.md §7.1a): the end remembered on both sides; one side's ask alone is
+  // ---- relink: the end remembered on both sides; one side's ask alone is
   // refused; the ended id never again; both asked afresh: linked again under a new id.
   ok(contactOf(A, B.did).ended?.id === L.id && contactOf(B, A.did).ended?.id === L.id, 'the end remembered on both revoked records (ended: the link id)');
   const R1 = await link({ carrier: H.c, file: H.f, a: 'project', b: 'review', purpose: 'review again' });

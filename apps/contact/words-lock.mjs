@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The words password (design/apps-seed.md §8): the 25 words kept on a phone, encrypted under a key made from
+// The words password: the 25 words kept on a phone, encrypted under a key made from
 // a password the human chose, so Me → Security can show them again (Monerujo-style, but optional). WebCrypto
 // only, no import: it runs as it is in the Android app's WebView, in the GTK app's WebKit and in Node.
 //

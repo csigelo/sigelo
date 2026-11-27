@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// File transfer (file.mjs, carrier.sendFile and its receive path; design/human-ui-plan.md §4):
+// File transfer (file.mjs, carrier.sendFile and its receive path):
 // the pure part (byte-exact round trips from fixed seeds, a tampered chunk, oversize, names); then,
 // with the relay checkout beside apps/contact/ (SIGELO_RELAY_DIR, else ../../relay), on a loopback relay: a
 // 1 MiB file each way, saved 0600 under <identity>.files/<contact>-<16 hex of its DID hash>/, never over a file, a forged file refused, an

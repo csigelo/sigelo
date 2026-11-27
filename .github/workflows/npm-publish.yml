@@ -1,6 +1,6 @@
 # Publish the npm packages with npm Trusted Publishing (GitHub OIDC): no token anywhere, and
 # npm attaches a provenance attestation to each version. Each package on npmjs.com names this
-# repository and this file name (adoption/npm-trusted-publishing.md). Read 2026-10-06:
+# repository and this file name. Checked against the npm docs of 2026-10-06:
 # https://docs.npmjs.com/trusted-publishers (npm >= 11.5.1, node >= 22.14.0, GitHub-hosted runner,
 # repository.url must match) and https://docs.npmjs.com/generating-provenance-statements.
 #

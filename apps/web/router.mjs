@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The `local` backend of the page (design/apps.md §3): apps/agent/UI-API.md's route table in the
+// The `local` backend of the page: apps/agent/UI-API.md's route table in the
 // page, over a carrier running in it on the browser platform (platform-web.mjs). The routes are
 // apps/contact/page.mjs's, the ones `sigelo-agent ui` serves, so every answer is the same JSON; what this
 // app has not (an agents' directory, devices to add, a seat) answers as an empty list or a refusal.
@@ -22,7 +22,7 @@
 // The relay new codes name: options.relay or the platform's env.relay when given (fixed, as SIGELO_RELAY
 // is for `sigelo-agent ui`), else the page's setting (GET/POST /api/settings, in the page's data),
 // else relay.sigelo.ai. presetRelay(files, host): the first-start form's choice, before any router.
-// Big files (design/transfer.md §10): where the platform has a shell that holds them (platform.big: the
+// Big files: where the platform has a shell that holds them (platform.big: the
 // Android app's bridge), the page runs the transfer engine itself, the bytes in the shell, the direct path
 // on the WebView's RTCPeerConnection (none: no transfer); /api/transfers* as `sigelo-agent ui` serves them,
 // a file named by the doc the system's picker or camera gave. No Tor here.
@@ -133,7 +133,7 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
           },
         }, mic: () => big.mic(), micSettings: () => big.appSettings() }),
       } }),
-      // Calls (design/calls.md): the shell's ring and audio mode where there is one (the Android app); the microphone as voice asks it.
+      // Calls: the shell's ring and audio mode where there is one (the Android app); the microphone as voice asks it.
       ...(platform.calls && { calls: {
         alert: (x) => void platform.calls.ring(x).catch(() => {}), audio: (x) => platform.calls.audio(x), speaker: (on) => platform.calls.speaker(on),
         ...(big?.mic && { mic: () => big.mic(), micSettings: () => big.appSettings() }),
@@ -190,7 +190,7 @@ export function makeRouter({ platform, identity, mode: mode0 = { kind: 'safe' },
       const st = seat?.info();
       // FULL with no signed device list naming the seat (an imported operator file): it would log in as
       // you beside the seat, and the two lose each other's messages. Refused until the app can be enrolled
-      // with device add --full (design/apps.md, open; review 2026-10-28, MEDIUM 7).
+      // with device add --full (not yet possible).
       if (mode.kind === 'full' && !st) refuse(409, 'full_import', FULL_IMPORT);
       owned = await platform.owner(me().original);
       // The first start after a restore from a backup file (backup.mjs): every session afresh, the pairing keys kept.

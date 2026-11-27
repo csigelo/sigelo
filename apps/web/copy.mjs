@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The self-contained app's vendored files (design/apps.md §3): no bundler, no transform. Walks the
+// The self-contained app's vendored files: no bundler, no transform. Walks the
 // static import graph of the page (index.html's import map, the app's own modules, the QR codec ui.js
 // loads), and copies every file it reaches from where the repository has it into apps/web/vendor/,
 // byte for byte: sigelo-contact's modules, sigelo's dist (ts/: `npx tsc` first), @noble's, MQTT.js's

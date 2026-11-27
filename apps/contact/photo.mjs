@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// A photo's inline preview (design/transfer.md §10.4): what a chat shows at once while the full file
+// A photo's inline preview (apps/agent/TRANSFER.md "The phone app"): what a chat shows at once while the full file
 // comes by a transfer. Not sigelo-picture/0, which sets a contact's own picture. One contact message
 // labelled PHOTO_LABEL (inside the pairing's end-to-end envelope, as any message), or the `photo` of a
 // group's msg (group.mjs); either way the content is

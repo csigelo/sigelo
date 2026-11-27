@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * The contact verbs of the sidecar (design/relay-plan.md §2): invite, accept, contacts, tier, send,
+ * The contact verbs of the sidecar (README.md): invite, accept, contacts, tier, send,
  * send-file, inbox, history, forget, link, links, unlink (LINKS.md); and the argv of recovery-key, recover and erase-request (sigelo-agent-recovery.ts), which cli.ts
  * dispatches here with them. Two agents swap a one-line code and become contacts, then exchange end-to-end
  * encrypted messages through a relay that sees ciphertext only. The work is the carrier of
@@ -466,7 +466,7 @@ export const lockPath = (identity: string): string => resolve(identity).replace(
 export const kickPath = (identity: string): string => resolve(identity).replace(/\.json$/, '') + '.ui.kick';
 /** Tell the watcher on this file that something waits to be sent. */
 export function kick(identity: string): void { try { writeFileSync(kickPath(identity), `${Date.now()}\n`, { mode: 0o600 }); } catch {} }
-// Asked of the watcher (the agent-setup feedback, point 4: models killed the supervisor's watcher to run accept): a CLI or
+// Asked of the watcher (models killed the supervisor's watcher to run accept): a CLI or
 // MCP accept, invite (and its --cancel) beside a running watch goes to it as a request file in `<identity>.ui.ask/`
 // (0600, written whole: <id>.json), kicked; the watcher runs it on its own session (serveAsks, the watch queue)
 // and writes <id>.done.json, which the asker reads and deletes. The asker waits as long as the verb would have.

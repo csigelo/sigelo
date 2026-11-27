@@ -183,7 +183,7 @@ ok('four concurrent receives hand out four distinct subaddresses',
   new Set(raced.map((r) => r.index)).size === 4 && new Set(raced.map((r) => r.address)).size === 4,
   JSON.stringify(raced.map((r) => r.index)));
 
-// Review finding 7 (2026-09-23): only `receive` took the lock. A `bind` that loaded before a
+// A race: only `receive` once took the lock. A `bind` that loaded before a
 // `receive` saved wrote the old counter back, and the next `receive` handed the same
 // subaddress out again. Hold the lock exactly as a racing `receive` holds it, start `bind`
 // and `wallet-set`, bump the counter while they are (or are not) waiting, then release.
@@ -381,7 +381,7 @@ if (!existsSync(built) && !hasGo) {
   const foreign = keygen({ seed: new Uint8Array(32).fill(9), recovery: minted.genesis.recovery });
   ok('adopt --rotation refuses a rotation that is not from this chain',
     at2Fails('', 'adopt', '--rotation', JSON.stringify({ ...r, rotation: rotate({ genesis: foreign.genesis, next_genesis: r.rotation.next_genesis, iat: now, reason: 'voluntary', secret: foreign.secret, next_secret: Buffer.from(r.identity_seed_hex, 'hex') }) })).includes('not a DID of this identity'));
-  // §7 sig_next (the review of 2026-10-19): the envelope is carried whole, so verify() sees the countersignature or its absence.
+  // §7 sig_next: the envelope is carried whole, so verify() sees the countersignature or its absence.
   const { sig_next: _sn, ...bare } = r.rotation;
   ok('adopt --rotation refuses a rotation without sig_next',
     at2Fails('', 'adopt', '--rotation', JSON.stringify({ ...r, rotation: bare })).includes('missing sig_next'));

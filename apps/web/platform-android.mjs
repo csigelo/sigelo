@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The Android app's platform (design/apps.md §4.3, §8): platform-web.mjs (files in IndexedDB, the
+// The Android app's platform: platform-web.mjs (files in IndexedDB, the
 // flush rule, the owner lock, the proof of work) with the network and the key of the shell
 // (apps/android, SigeloBridge.java) instead of the page's. The relay refuses a page's requests (an
 // Origin header, CORS); the shell's are native, so it is reached as from a Node agent.
@@ -73,7 +73,7 @@
 //                                                 false only remembers the page's why was declined; exempt: battery optimisation off for the
 //                                                 app; notify: notifications allowed. Anything but booleans refused "stay"
 //   → {op:"push", id, mode?, distributor?}        ← {id, mode, on, state, reason, distributors: [{id, name}], distributor, endpoint, p256dh, auth}
-//                                                 Push for the phone (not per profile; design/push.md §1 B, §6): mode builtin (the default:
+//                                                 Push for the phone (not per profile): mode builtin (the default:
 //                                                 PushClient.java's own stream to push.sigelo.ai), app (UnifiedPush.java: the distributor named,
 //                                                 installed, else refused "push", else the one kept, else the only one; a distributor alone
 //                                                 means app) or off (both ended, the keys erased); state off | none (no distributor) | pick
@@ -84,7 +84,7 @@
 //   → {op:"mic", id, profile}                     ← {id, granted:true}  RECORD_AUDIO asked at the first; refused "mic_permission"
 //                                                 (a refusal remembered: no second dialog, refused at once until allowed in Settings)
 //   → {op:"app-settings", id}                     ← {id}         the app's page in the system settings (to allow the microphone)
-//   → {op:"call", id, on, name?}                  ← {id}         a voice call's audio (design/calls.md §4; CallService.java): on, the
+//   → {op:"call", id, on, name?}                  ← {id}         a voice call's audio (CallService.java): on, the
 //                                                 foreground service of type microphone with its ongoing-call notification (name, timer,
 //                                                 Hang up), audio mode IN_COMMUNICATION, voice-call focus, the earpiece, the proximity
 //                                                 screen-off lock; off, all of it undone. Hang up in the notification: the event {ev:"hangup"}
@@ -292,7 +292,7 @@ function makeBridge(info, port) {
 }
 
 /**
- * Big files through the shell (design/transfer.md §10, SigeloBridge "big-*", BigFiles.java): platform.big as
+ * Big files through the shell (SigeloBridge "big-*", BigFiles.java): platform.big as
  * apps/contact/transfer-web.mjs takes it. The page never holds a file whole: a doc names one the system's
  * picker or camera gave, read by range from the app's origin (fetch, no base64); what is received is written
  * at offsets into a partial in the shell, then moved into Downloads. Every call names this profile.
@@ -351,7 +351,7 @@ export function bigFiles(bridge, { profile = bridge.profile ?? 'p1', fetch: get 
 }
 
 /**
- * A call's audio in the shell (design/calls.md §4, SigeloBridge "call", CallService.java): platform.calls as
+ * A call's audio in the shell (SigeloBridge "call", CallService.java): platform.calls as
  * apps/contact/page.mjs's hooks.calls takes it. A name is shown as given (at most NOTE_MAX characters).
  */
 export function callAudio(bridge) {
@@ -446,9 +446,9 @@ export async function androidPlatform({ bridge, mqtt, name = 'sigelo', indexedDB
     transports: Object.freeze(['mqtts', 'wss']),
     env: Object.freeze({ ...p.env, transport: 'auto' }),
     sealer: keystoreSealer(bridge),
-    // Big files (design/transfer.md §10): the bytes in the shell, this profile's.
+    // Big files: the bytes in the shell, this profile's.
     big: bigFiles(bridge),
-    // Calls (design/calls.md §4): the ring, the call's audio mode, the speaker.
+    // Calls: the ring, the call's audio mode, the speaker.
     calls: callAudio(bridge),
     get commits() { return p.commits; },
   });

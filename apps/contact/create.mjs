@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// A new identity made on the device (design/apps-seed.md §7, pass A10a; Monerujo's create and seed
+// A new identity made on the device (Monerujo's create and seed
 // review as the model). The root S is drawn here, as `newRoot()` draws it (keys.ts: 253 random bits from
 // crypto.getRandomValues, redrawn until 0 < S < l), and held as bytes. Its 25 words exist only while the
 // review screen shows them; the identity's files are made only after the human has typed three of them

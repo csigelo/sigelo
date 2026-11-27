@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// WebPush.java (the RFC 8291 side of the push connector, design/push.md) and Ntfy.java (the built-in client's topic,
+// WebPush.java (the RFC 8291 side of the push connector) and Ntfy.java (the built-in client's topic,
 // endpoint, stream parser and backoff, §6) on a desktop JVM: compiles them with test/WebPushTest.java and test/NtfyTest.java
 // and runs both (RFC 8291 Appendix A; the sigelo wake of relay/test/push.mjs, also as ntfy carries it).
 //   node apps/android/test-push.mjs     → ALL PASS (n), the sum of both, or SKIP without a JDK

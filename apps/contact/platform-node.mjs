@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The Node platform of sigelo-contact (design/apps.md §4.2): every call the carrier, the contact
+// The Node platform of sigelo-contact (README.md "Platforms"): every call the carrier, the contact
 // store and the enrolment file make to the file system, the network, the lock and the CPU, as one
 // object. new Carrier({ ..., platform }) takes another (a browser's, a test's in-memory one); without
 // one it is this, and the behaviour is the one these calls had inside carrier.mjs.
@@ -85,8 +85,8 @@ export const path = { join, dirname, resolve };
 // One lock file per name: every change is load, change, save inside it, so a CLI verb and a
 // long-running carrier on the same identity cannot undo each other. As
 // apps/agent/sigelo-agent-monero.ts withLock. who: the processes named in the refusal.
-// The lock holds its process's pid: a lock whose process is gone (a CLI killed holding it, the agent-setup feedback
-// point 9: every verb then waited and failed until a human deleted the file) is removed, with one line.
+// The lock holds its process's pid: a lock whose process is gone (a CLI killed holding it:
+// every verb then waited and failed until a human deleted the file) is removed, with one line.
 // Read twice before removal, so a lock taken over in between is never removed; an empty one (being
 // written, or an older client's) waits as before.
 const LOCK_TRIES = 200, LOCK_MS = 25;
@@ -263,7 +263,7 @@ function powIdle(w) {
 /** The first c (0, 1, 2, …) with Argon2id(password = prefix ‖ c, salt, m KiB, t passes, p lanes,
  *  32 bytes) starting with `bits` zero bits (carrier.mjs solvePow), or null once Date.now() passes
  *  deadline (or signal aborts). In a worker thread: one evaluation at 64 MiB is ~0.5 s of a core
- *  on a phone-class CPU, which this thread never waits through, so the process's connections,
+ *  on a low-end ARM64 CPU, which this thread never waits through, so the process's connections,
  *  keepalives and other identities carry on. onProgress(tried) after each evaluation. */
 export function pow(job, bits, { deadline = Infinity, signal, onProgress } = {}) {
   const { prefix, salt, m, t, p } = job ?? {};
@@ -353,7 +353,7 @@ export function sendable(file, own, max) {
 
 // ---------------------------------------------------------------- the platform
 
-/** The Node platform (design/apps.md §4.2), the carrier's default. */
+/** The Node platform (README.md "Platforms"), the carrier's default. */
 export const platform = Object.freeze({
   files, path, flush: async () => {}, transact, owner, fetch: nodeFetch, mqtt, transports: Object.freeze(['mqtts', 'wss']), pow, openPath,
   get env() {

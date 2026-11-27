@@ -37,7 +37,7 @@ config matched against the current docs (sources below), not run.
 |---|---|---|---|---|
 | Claude Code | MCP stdio + skill (plugin) | `claude plugin marketplace add csigelo/sigelo && claude plugin install sigelo@csigelo`, or `claude mcp add --scope user sigelo -- npx -y sigelo-mcp@0.1.21` | run here (2.1.281: plugin, a subagent, init→verify) | 2026-10-14 |
 | Claude Desktop | MCP stdio | `S` in `claude_desktop_config.json` (macOS `~/Library/Application Support/Claude/`, Windows `%APPDATA%\Claude\`) | doc-checked | 2026-10-14 |
-| Claude web, iOS, Android | remote MCP | claude.ai → Customize → Connectors → Add custom connector → `https://sigelo.io/mcp`, no sign-in; then on the phone. Verify only: no local process on mobile | doc-checked | 2026-10-14 |
+| Claude web, iOS, Android | remote MCP | Claude on the web → Customize → Connectors → Add custom connector → `https://sigelo.io/mcp`, no sign-in; then on the phone. Verify only: no local process on mobile | doc-checked | 2026-10-14 |
 | Codex CLI | MCP stdio | `codex mcp add sigelo -- npx -y sigelo-mcp@0.1.21` ([codex.md](codex.md)) | doc-checked | 2026-10-14 |
 | Cursor | MCP stdio | `S` in `.cursor/mcp.json` or `~/.cursor/mcp.json` | doc-checked | 2026-10-14 |
 | Windsurf (now Devin Desktop) | MCP stdio | `S` in `~/.config/devin/mcp_config.json` (older installs: `~/.codeium/windsurf/mcp_config.json`, unverified) | doc-checked | 2026-10-14 |

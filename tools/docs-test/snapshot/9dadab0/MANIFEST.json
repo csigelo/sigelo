@@ -2,15 +2,15 @@
  "commit": "9dadab0d599e5c34ccdbceaf62c1d046189a4ec1",
  "short": "9dadab0",
  "created": "2026-09-29T15:32:46Z",
- "note": "Files are exactly git show <commit>:<path>, except ts/README.md, cut to its identity part (sections \"Monero bindings\" and \"Root seed\" removed).",
+ "note": "Files are exactly git show <commit>:<path>, except ts/README.md, cut to its identity part (sections \"Monero bindings\" and \"Root seed\" removed). QUICKSTART.md: one phrase of the recovery ceremony reworded since (who keeps the offline computer), so its SHA-256 and this digest differ from the round run on it.",
  "conditions": {
   "lifecycle": {
-   "digest": "ff3639074728bd09ff83ba9d1b45cd340c3e5c4f5eff88a5ff614fcef08b2582",
+   "digest": "7790a3249b41b11334c36d8710efeed2b2cbc03d44b78eb9f30d72a02d89240e",
    "files": [
     {
      "path": "QUICKSTART.md",
-     "bytes": 16516,
-     "sha256": "a21c54d7d50a5f34a7af08fc2f904c5f435965dff091b3a4fffc8d81eb440b7b"
+     "bytes": 16528,
+     "sha256": "c3eb7d414ad8ffdf183371a735f0a2d57588c91ce988b08e2d163bbfc4dc4a45"
     },
     {
      "path": "SPEC.md",

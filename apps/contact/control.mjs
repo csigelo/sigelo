@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Remote control over the relay (design/apps.md §6.3; apps/agent/UI-API.md "Remote"): an app
+// Remote control over the relay (apps/agent/UI-API.md "Remote"): an app
 // drives the page of `sigelo-agent ui` on a computer through the relay, holding no account key.
 //
 // The control identity: a random Ed25519 key made where the app runs (newControlIdentity), never

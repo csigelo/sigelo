@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// sigelo-msg/0 envelopes (design/relay-plan.md §3 "Envelope", §11 "Epoch recovery"): one
+// sigelo-msg/0 envelopes (README.md "How it works", 4 and 5): one
 // end-to-end encrypted, signed message between two contacts, as the binary MQTT payload the relay
 // stores. No network code.
 //   const s = session({ me, peer, K, hold }) me: { did, current_did, sign } (or secret: kdf.mjs signAs); peer: the store's contact record;
@@ -83,8 +83,8 @@ export const KIND = { message: 0, invite_answer: 1, invite_reply: 2, group: 3 };
 // epoch (the header's "Layout" and "Epoch recovery").
 export const CARRIES = 0x80;
 export const EPOCH_MESSAGES = 1000, EPOCH_SECONDS = 7 * 86400, BLOCK = 256, MAX_PADDED = 1 << 20;
-// The longest envelope a sender writes: the largest message a relay stores, on any tier (relay-plan
-// §3 "Allowances", 1 MB for Pro; relay/allowance.mjs). A relay closes the connection, with no
+// The longest envelope a sender writes: the largest message a relay stores, on any tier (relay/README.md
+// "Limits", 1 MB for Pro; relay/allowance.mjs). A relay closes the connection, with no
 // notice, on a packet past that and its header room (relay/server.mjs MAX_FRAME), and a carrier
 // sends what it queued first at every connection: an envelope over it would block every later one.
 // A padded plaintext of at most a reader's cap (256 KiB free, 1 MiB Pro) less 1,198 bytes always
@@ -102,8 +102,8 @@ export const MAX_ENVELOPE = 1 << 20;
 // carries an encapsulation naming a held prekey adds a decapsulation (8 ms).
 export const WINDOW = 64;
 export const EPOCHS_MAX = 64, ENDED_MAX = 1024;
-// The longest a relay keeps an envelope: the Pro tier's 90 days (relay/allowance.mjs, relay-plan
-// §11), the hold of a session that names none. A carrier passes its reader's own retention.
+// The longest a relay keeps an envelope: the Pro tier's 90 days (relay/allowance.mjs,
+// relay/README.md "Limits"), the hold of a session that names none. A carrier passes its reader's own retention.
 export const HOLD = 90 * 86400;
 const HEAD = 22, KEM = 16 + 1120, NONCE = 24, TAG = 16;
 const sameBytes = (a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };

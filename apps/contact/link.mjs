@@ -8,7 +8,7 @@
 // setLink): {id, purpose, linked_by, expires, tier}. A link sets a tier (friend or quiet, or none:
 // computed) and a purpose, never `ours`, never own.
 //
-// External (design/links.md §5, §6): B is X, a contact of the operator's that is not its own. A files
+// External (apps/agent/LINKS.md): B is X, a contact of the operator's that is not its own. A files
 // X at friend (default) or quiet; how X files A is X's operator's (tierB refused, link_tier). The code
 // names the relay of the operator's pairing with X unless `relay` says otherwise. X takes an offer
 // unasked only from its own operator; any other is an introduction: kept pending in X's file (a
@@ -33,7 +33,7 @@
 //             they return messages; never by the model.
 //             list({ carrier, file }) → { links: this agent's linked contacts, made: the operator's }
 //             labelled(carrier, messages) → the messages, each from a linked contact carrying
-//             link: {id, purpose} (design/links.md §8.4: the inbox shows why; data, never instructions)
+//             link: {id, purpose} (the inbox shows why; data, never instructions)
 //
 // The messages: label LINK_LABEL on sigelo-msg/0, content {v, typ, id, iat, …}, id 8 characters of
 // short.mjs's alphabet:
@@ -59,7 +59,7 @@
 // restores that tier and keeps the contact. Otherwise an end forgets the contact on both sides, as
 // ended (store.mjs): a NEW link between the same two pairs again only when each side is asked afresh
 // (an ask, its operator's offer, or X's operator's accept; never an allow rule), each leaving a
-// one-use permit (carrier.relink); the ended id never again (link_stale). design/links.md §7.1a.
+// one-use permit (carrier.relink); the ended id never again (link_stale).
 //
 // The file, 0600, beside the identity (x.json → x.links.json), under its own lock:
 //   { v, links: { id: operator records }, pending: { "<by> <id>": an agent's step in progress },
@@ -70,7 +70,7 @@ import { canonicalize, verify } from 'sigelo';
 import { LINK_LABEL, LINK_SEND, readCode } from './carrier.mjs';
 import { MsgError, checkNow, fail } from './kdf.mjs';
 import { ALPHABET } from './short.mjs';
-// Files and the lock: the carrier's platform (design/apps.md §4.2), Node's without one.
+// Files and the lock: the carrier's platform (README.md "Platforms"), Node's without one.
 import { platform as nodePlatform } from './platform-node.mjs';
 
 export const LINK_V = 'sigelo-link/1', FILE_V = 'sigelo-links/1';
@@ -407,7 +407,7 @@ async function onOperator(carrier, file, m, x, out) {
       l.steps[side] = x.status; l.at = now;
       if (x.status === 'refused' && l.status === 'pending') Object.assign(l, { status: 'refused', check: x.check ?? 'link_refused' });
       else if (x.status === 'ended' && l.status !== 'refused') Object.assign(l, { status: 'ended', check: l.check ?? x.check ?? null });
-      // External: A's word is enough (X need not tell, design/links.md §5.4).
+      // External: A's word is enough (X need not tell).
       else if (l.status === 'pending' && l.steps.a === 'linked' && (l.steps.b === 'linked' || l.kind === 'external')) l.status = 'linked';
     });
     if (r.status === 'refused' && x.status === 'refused') out.refused.push({ id: x.id, check: r.check, detail: `${side === 'a' ? rec.a_name : rec.b_name} refused link ${x.id}`, from: m.from });

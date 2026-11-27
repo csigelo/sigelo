@@ -672,7 +672,7 @@ ${code.slice(60)}
       r = await a.call('sigelo_send', { to: 'bob', text: 'queued while watched' });
       ok(!r.isError && r.data.status === 'queued' && existsSync(kicks) && (await a.call('sigelo_contacts')).data?.contacts[0]?.queued === 1,
         'relay: sigelo_send beside a watcher: queued for it (no login), its kick file touched', r.text);
-      // the agent-setup feedback, point 4: sigelo_invite and sigelo_accept go through the watcher (askWatcher): the request
+      // sigelo_invite and sigelo_accept go through the watcher (askWatcher): the request
       // file, answered here as the watcher's serveAsks answers it; sigelo_forget_contact still needs the session (busy).
       {
         const { serveAsks } = await import('../../agent/sigelo-agent-contact.ts'), asked = [];
@@ -914,7 +914,7 @@ ${code.slice(60)}
         r = await b.call('sigelo_contacts');
         ok(r.data?.contacts[0]?.re_pair === 'contact_recovery', 'relay: bob reads her notice: his sigelo_contacts marks alice re_pair "contact_recovery"', r.text);
       } finally { a2.close(); await a2.exited; }
-      // ---------------- the operator's seat (DEVICES.md, design/devices.md §4.3–4.5): two FULL devices
+      // ---------------- the operator's seat (DEVICES.md): two FULL devices
       // (main after seat init, alpha), a contact (carl) paired as the operator at main. This server as
       // the operator on alpha, a standby: every tool that logs in refuses seat_elsewhere after reading
       // alpha's device inbox, the offline ones answer; after `device seat take` on alpha (answered by
