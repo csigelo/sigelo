@@ -35,7 +35,8 @@
   "apps/integrations/pap/README.md": 500,
   "apps/integrations/web-bot-auth/README.md": 500,
   "apps/integrations/chatwoot/README.md": 320,
-  "apps/agent/DEVICES.md": 400,
+  "apps/agent/DEVICES.md": 600,
+  "apps/agent/CLUSTER.md": 600,
   "apps/agent/APPS.md": 400,
   "release/apk-ceremony.md": 500
 }

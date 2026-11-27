@@ -44,6 +44,7 @@
     "LINKS.md",
     "GROUPS.md",
     "DEVICES.md",
+    "CLUSTER.md",
     "APPS.md",
     "TRANSFER.md",
     "examples/reply-hook.sh"

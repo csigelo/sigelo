@@ -40,11 +40,13 @@ An agent on a slow machine may take minutes or hours over one message.
 
 ```sh
 sigelo-agent reply --to <id> "the answer"      # or - for stdin, or --file <path>; label "reply"
-sigelo-agent reply --to <id> --status          # queued, published (in the contact's mailbox) or refused
+sigelo-agent reply --to <id> --status          # queued, published or refused
 ```
 
   `reply` goes to the message's sender, through the watcher if one runs. It is known for 30 days.
-  "Fetched" is never known: sigelo/0 has no read receipt.
+  Its delivery: queued (here, not yet at the relay), published (the relay holds it in the contact's
+  mailbox) or refused. "Fetched" is never known: the relay does not tell the sender. A seen receipt
+  (below) says what the contact's app showed, when it sends them (`contacts`: `seen_upto`).
 - **Read marks** (0.1.19): an own message taken by a hook, or by `inbox`, the MCP or `host claude`
   from the spool, sends its sender one seen receipt, by code, once: the operator's app shows ✓✓.
 - **The message id** is the carrier's, the same at every offer and in `inbox`, `history` and the
@@ -58,6 +60,36 @@ sigelo-agent reply --to <id> --status          # queued, published (in the conta
 
 Change a tier any time: `sigelo-agent tier <name> own|friend|quiet`. Own agents find each other
 through operator hints (apps/contact/carrier.mjs): blinded, so other contacts learn nothing.
+
+## Re-verifying a spooled message
+
+```sh
+sigelo-verify sender.bundle.json    # SPEC §9 on the sender's bundle (their `sigelo-agent bundle`): did, chain
+```
+
+```js
+import { did, verify, verifySig } from 'sigelo';
+const r = verify(bundle, now), s = item.signed;
+const g = [bundle.genesis, ...bundle.rotations.map((x) => x.next_genesis)].find((x) => did(x) === s.body.from);
+const ok = g !== undefined && r.chain.includes(s.body.from) && verifySig(g.key, s.body, s.sig);
+```
+
+Each message item (a spool file, `--on-message`'s stdin, `inbox`, `history`) carries,
+beside its unchanged plaintext fields, `signed: {body, sig, epoch, n, key}` and `verified: true`.
+`body` is the envelope's signed body as opened: `v` `sigelo-msg/0`, `typ`, `from` (the sender's
+current DID), `to` (your original DID), `pair`, `epoch`, `n`, `iat`, `label`, `content`; `sig` is
+detached over `"sigelo\n"` and its JCS (SPEC §3); `key` is the key it verified under. No CLI checks
+a detached signature alone: the library's `verifySig` does. `body.from` is normally the bundle's
+current DID (`r.did`); an older DID in the chain means the sender rotated since, and after a
+recovery an old key may be a thief's (SPEC §7.1).
+
+`verified: true` says only what the carrier checked before the item existed: the signature under
+the sender's current key as held here, `from` that key's DID, `to` you, `pair` this pairing,
+`epoch` and `n` the header's. In a file (spool, `history`) it is only what was written there: for
+proof, re-verify. Files and group messages carry no `signed`; the MCP tools leave it out.
+
+One caveat: a spooled signed body is proof, to anyone it is forwarded to, that the sender signed
+that content for you.
 
 ## Always on
 

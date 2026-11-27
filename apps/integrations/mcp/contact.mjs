@@ -272,6 +272,8 @@ export async function load({ installed, id, env = process.env, clock, debug = ()
       held.putBack(file, { messages: all.messages.filter((m) => m?.from !== from), events: [], dropped: {} });
       all = { ...all, messages: all.messages.filter((m) => m?.from === from) };
     }
+    // The signed envelope (WATCH.md "Re-verifying a spooled message") is for scripts, not the model: a second copy of the content.
+    all = { ...all, messages: all.messages.map((m) => { if (m === null || typeof m !== 'object' || !('signed' in m)) return m; const { signed: _s, verified: _v, ...rest } = m; return rest; }) };
     const { text, shown, rest } = page(all);
     held.putBack(file, { messages: rest, events: [], dropped: {} });
     // Read marks (0.1.19): what goes to the model is read; its senders' apps show ✓✓, by code (beside a watcher, queued for it).

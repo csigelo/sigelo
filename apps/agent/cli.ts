@@ -44,6 +44,9 @@ ${GIVEN}
   adopt --rotation <json|file|->         apply sigelo-offline recover's { rotation, identity_seed_hex }
   whoami                                 current DID + genesis; a worker: its index, operator (name, DID), tier
   sign-challenge <json|->                sign a world's { typ: "challenge", … } body
+  attest --subject <did> --ctx <ctx>     sign a SPEC §5 attestation about <did> (the service claim, CLUSTER.md);
+       --claims <json|-> [--days <n>]    claims: a JSON object; 1..365 days (14); never a binding, never ctx
+       [--admission <a>]                 sigelo-relay/*, sigelo-spend, sigelo.ai/*; admission invite (by you)
   sign-http <base|->                     sign an RFC 9421 base for Web Bot Auth (apps/integrations/web-bot-auth)
   pass <url> [--json] [--fresh]          through a site's sigelo-pass door (accept/pass): the cookie to load
                                          the page with; only where the site offers one, never a captcha
@@ -88,7 +91,7 @@ This process never holds a Monero spend key: wallet-set refuses one.`;
 
 // Every verb, for "did you mean" (the contact verbs, those dispatched above, and this file's own).
 const ALL_VERBS = [...contact.VERBS, 'ui', 'enrol', 'keeper', 'watch', 'host', 'sdk', 'device', 'group', 'transfer', 'control', 'service', 'init', 'adopt', 'whoami', 'keys', 'seal', 'unseal',
-  'sign-challenge', 'sign-http', 'pass', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice', 'verify-invoice', 'pair'];
+  'sign-challenge', 'attest', 'sign-http', 'pass', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice', 'verify-invoice', 'pair'];
 /** The verb nearest `x`: edit distance at most 2 and half its length (or a prefix of 3+), else null. */
 function nearest(x: string): string | null {
   const d = (a: string, b: string): number => {
@@ -184,7 +187,7 @@ if (cmd === 'service') await contact.exit(await service.main(path, rest));
 const now = Math.floor(Date.now() / 1000);
 // The verbs that read the identity: with none, "run init" and exit 2, as the contact verbs say
 // it (a bare "load: no identity" exited 1).
-const READS = ['whoami', 'keys', 'seal', 'unseal', 'sign-challenge', 'sign-http', 'pass', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
+const READS = ['whoami', 'keys', 'seal', 'unseal', 'sign-challenge', 'attest', 'sign-http', 'pass', 'add-issuer', 'add-attestation', 'forget-issuer', 'bundle', 'rotate', 'wallet-set', 'bind', 'receive', 'invoice'];
 // adopt --rotation changes an identity: with none, it took the lock in a missing directory, a raw ENOENT.
 if ((READS.includes(cmd ?? '') || (cmd === 'adopt' && rest.includes('--rotation'))) && !existsSync(path)) {
   note(contact.noIdentity(path, asOperator));
@@ -262,6 +265,13 @@ try {
     case 'sign-challenge':
       out(keys.signChallenge(path, load(), input(rest[0]) as Record<string, unknown>));
       break;
+    case 'attest': {
+      const v = (name: string): string => { const x = flag(name); if (x === undefined || (x.startsWith('--') && x !== '-')) usage(`attest: ${name} needs a value`); return x!; };
+      const sub = v('--subject'), ctx = v('--ctx'), cl = v('--claims');
+      const days = rest.includes('--days') ? Number(v('--days')) : 14, adm = rest.includes('--admission') ? v('--admission') : undefined;
+      out(keys.attestClaims(path, load(), { sub, ctx, claims: input(cl), days, admission: adm, now }));
+      break;
+    }
     case 'sign-http': {
       const s = load(), signer = keys.signer(path, s);
       out({ did: signer.did, key: signer.key, sig: signer.signHttp(rest[0] && rest[0] !== '-' ? rest[0] : readFileSync(0, 'utf8')) });

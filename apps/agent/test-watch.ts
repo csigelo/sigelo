@@ -90,6 +90,12 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
       ok('watch, --on-message at start: the own message that waited, in full, as JSON on stdin; env SIGELO_TYPE, SIGELO_TIER, SIGELO_NAME',
         await until(() => lines('message.jsonl').length === 1) && lines('message.jsonl')[0]!['content'] === 'hello from mine' && lines('message.jsonl')[0]!['from'] === D.mine
           && readFileSync(join(OUT, 'env.txt'), 'utf8').trim() === 'message own mine', JSON.stringify(lines('message.jsonl')));
+      {
+        const m = lines('message.jsonl')[0]! as { verified?: unknown; signed?: { body?: Record<string, unknown>; sig?: unknown; epoch?: unknown; n?: unknown; key?: unknown }; content?: unknown };
+        ok('watch, --on-message: the payload also carries signed {body, sig, epoch, n, key} and verified: true, the plaintext fields unchanged beside it',
+          m.verified === true && m.signed?.body?.['content'] === m.content && m.signed?.body?.['from'] === D.mine && typeof m.signed?.sig === 'string'
+            && m.signed?.body?.['epoch'] === m.signed?.epoch && m.signed?.body?.['n'] === m.signed?.n && typeof m.signed?.key === 'string', JSON.stringify(m));
+      }
       ok('watch, --on-notice at start: {from, name, tier, count} for the friend, no content', await until(() => lines('notice.jsonl').length === 1)
         && JSON.stringify(lines('notice.jsonl')[0]) === JSON.stringify({ from: D.pal, name: 'pal', tier: 'friend', count: 1 }), JSON.stringify(lines('notice.jsonl')));
       const late = await cli('late', 'accept', code['late']!, '--name', 'alice', '--wait', '30');
@@ -199,6 +205,27 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
       ok('watch --spool: the own message written to <dir>/<id>.json, a line saying how to answer', await until(() => spooled().length === 1) && await until(() => w2!.out.includes('(answer: sigelo-agent reply --to ')), w2.out + w2.err.slice(-300));
       const task = JSON.parse(readFileSync(join(SPOOL, spooled()[0]!), 'utf8')) as { id: string; content: string; from: string };
       ok('the spooled file: the message as inbox gives it, its id the file name', task.content === 'a task for later' && `${task.id}.json` === spooled()[0] && task.from === D.mine, JSON.stringify(task));
+      {
+        // Re-verifying a spooled message (WATCH.md): away from the carrier, with the sender's bundle and the public
+        // tooling only: §9 (the sigelo library, and the Go sigelo-verify when Go is here) names body.from, its genesis
+        // the key, the library's verifySig checks the detached sig.
+        const { did, verify, verifySig } = await import('sigelo');
+        const item = JSON.parse(readFileSync(join(SPOOL, spooled()[0]!), 'utf8')) as { verified: boolean; signed: { body: { from: string; to: string; content: unknown }; sig: string; key: string } };
+        const bp = join(H, 'mine.bundle.json');
+        writeFileSync(bp, (await cli('mine', 'bundle')).stdout);
+        const b = JSON.parse(readFileSync(bp, 'utf8')), r = verify(b, Math.floor(Date.now() / 1000));
+        // WATCH.md's snippet, as written there.
+        const g = item.signed, gen = [b.genesis, ...b.rotations.map((x: { next_genesis: unknown }) => x.next_genesis)].find((x) => did(x) === g.body.from);
+        const aliceDid = (JSON.parse((await cli('alice', 'whoami')).stdout) as { did: string }).did;
+        ok('spool round trip: the sender\'s bundle verifies (§9) to body.from, the sig verifies under that genesis key, to names alice',
+          item.verified === true && gen !== undefined && r.chain.includes(g.body.from) && r.did === g.body.from && gen.key === g.key && verifySig(gen.key, g.body, g.sig) && g.body.to === aliceDid
+            && !verifySig(gen.key, { ...g.body, content: 'changed' }, g.sig), JSON.stringify(item));
+        const GO = join(ROOT, 'go'), built = join(GO, 'sigelo-verify');
+        if (existsSync(built) || spawnSync('go', ['version']).status === 0) {
+          const v = spawnSync(existsSync(built) ? built : 'go', [...(existsSync(built) ? [] : ['run', './cmd/sigelo-verify']), bp], { cwd: GO, encoding: 'utf8' });
+          ok('spool round trip: the Go reference verifier names the same current DID as body.from', v.status === 0 && (JSON.parse(v.stdout) as { did: string }).did === g.body.from, v.stdout + v.stderr);
+        } else console.log('SKIP spool round trip with the Go verifier: go is not on PATH and go/sigelo-verify is not built');
+      }
       // inbox beside a spooling watcher (the service): it takes what was spooled, files deleted, no login (which would evict it).
       const fromSpool = await cli('alice', 'inbox', '--tier', 'own');
       const fs1 = (JSON.parse(fromSpool.stdout) as { messages: { id: string; content: string }[] }).messages;
@@ -218,7 +245,7 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
         st = JSON.parse((await cli('alice', 'reply', '--to', task.id, '--status')).stdout || '{}') as St;
         if (st.reply?.status !== 'published') await new Promise((r) => setTimeout(r, 500));
       }
-      ok('reply --to <id> --status beside the watcher: published (the relay holds it), fetched null (no read receipt), the sender', st.reply?.status === 'published' && typeof st.reply.published_at === 'number'
+      ok('reply --to <id> --status beside the watcher: published (the relay holds it), fetched null (never known), the sender', st.reply?.status === 'published' && typeof st.reply.published_at === 'number'
         && st.fetched === null && st.from === D.mine && st.name === 'mine', JSON.stringify(st));
       w2.c.kill('SIGTERM');
       await w2.exit;
@@ -229,7 +256,7 @@ import { CLI, RELAY, ROOT, cliIn, done, fakeExe, hasRelay, NO_RELAY, ok, startTe
         && (JSON.parse(r2.stdout) as { delivery: { status: string } }).delivery.status === 'published', r2.stdout + r2.stderr);
       ok('the slow task\'s answer reaches it, with its label', (await mineIn('the slow result')).some((m) => m.content === 'the slow result' && m.label === 'result'));
       const s2 = await cli('alice', 'reply', '--to', slowId, '--status');
-      ok('reply --status: one line for people too', s2.status === 0 && s2.stderr.includes(`reply to ${slowId} (mine): published `) && s2.stderr.includes('fetched: not known (sigelo/0 has no read receipt)'), s2.stderr);
+      ok('reply --status: one line for people too', s2.status === 0 && s2.stderr.includes(`reply to ${slowId} (mine): published `) && s2.stderr.includes('fetched: never known (the relay does not say; a seen receipt, if they send one, says shown)'), s2.stderr);
       writeFileSync(join(H, 'result.txt'), 'a result file\n');
       const rf = await cli('alice', 'reply', '--to', slowId, '--file', join(H, 'result.txt'));
       ok('reply --to <id> --file: the file to the sender', rf.status === 0 && (JSON.parse(rf.stdout) as { file: { name: string } }).file.name === 'result.txt', rf.stdout + rf.stderr);

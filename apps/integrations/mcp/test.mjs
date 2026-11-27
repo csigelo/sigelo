@@ -758,7 +758,7 @@ ${code.slice(60)}
       ok(!r.isError && rr.data?.messages.some((m) => m.content === 'quoting your ask' && /^re\/[0-9a-f]{16}\/r$/.test(m.label) && m.re?.by === 'me'), 'task loop: sigelo_reply re: true quotes the message; bob\'s inbox: re {sha, by: me}', r.text + rr.text);
       r = await a.call('sigelo_reply', { msg_id: task?.id });
       ok(!r.isError && r.data.msg_id === task?.id && r.data.from === bDid && r.data.name === 'bob' && r.data.reply?.status === 'published' && r.data.fetched === null,
-        'task loop: sigelo_reply {msg_id} alone: the delivery status again; fetched null (no read receipt)', r.text);
+        'task loop: sigelo_reply {msg_id} alone: the delivery status again; fetched null (never known)', r.text);
       r = await a.call('sigelo_reply', { msg_id: '0'.repeat(32), text: 'x' });
       const r3 = await a.call('sigelo_reply', { msg_id: 'nope', text: 'x' });
       ok(r.isError && r.structured?.code === 'msg_unknown' && r3.isError && r3.structured?.code === 'msg_id', 'task loop: sigelo_reply to an unknown id: msg_unknown; a malformed one: msg_id', r.text + r3.text);
@@ -853,6 +853,7 @@ ${code.slice(60)}
       r = await a.call('sigelo_inbox', { wait: 2 });
       ok(r.data?.messages.length === 3 && r.data.messages[0].content === 'important 1' && JSON.stringify(r.data.messages[1].content) === JSON.stringify(nested)
         && r.data.messages[2].content === 'important 2' && r.data.more === 0 && r.text.length < 3000, 'relay: one result carries all three, its text compact', `${r.text.length} characters`);
+      ok(r.data?.messages.every((m) => !('signed' in m) && !('verified' in m)), 'relay: the signed envelope (WATCH.md, for scripts) is left out of what the model reads', r.text.slice(0, 200));
 
       // A file: bob's server sends it, alice's inbox returns one item with where it is saved.
       const fileBytes = createHash('sha256').update('sigelo-mcp-test file').digest().toString('hex').repeat(3000);
