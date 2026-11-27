@@ -39,6 +39,24 @@ refuses `seat_elsewhere`. Any FULL device signs as you. `seat give`, `seat take`
 snapshot of your state; `take --force` (seat lost): the newest snapshot here, every session
 restarted. Standbys keep it sealed. The seat sends snapshots and renewals as it reads its inbox.
 
+**Seat verbs, for scripts.** None asks anything. Each prints one JSON object on stdout with
+`holder` (the device holding the seat after the verb), `epoch` and `holds` (this machine holds it),
+plus:
+
+| Verb | Also printed | Exit |
+|---|---|---|
+| `seat [status]` | `seat` (`{holder, did, epoch, since}` or null), `here`, `snapshot` | 0 |
+| `seat init --name <n>` | `device`, `worker`, `did`, `original`, `file`, `seat`, `list`, `paired`, `synced` | 0; 1 `seat_exists` |
+| `seat give <name>` | `seat_to`, `snapshot`, `history` | 0; 1 `seat_none`, `device_unknown`, `device_seat`, `offline` |
+| `seat take [--wait <s>]` | `seat` (the epoch), `imported` | 0; 1 snapshot not here yet; 3 no answer in time |
+| `seat take --force` | `seat`, `forced`, `imported`, `restarted`, `synced` | 0 |
+
+**No automatic failover.** Nothing moves the seat by itself, and nothing should: two standbys
+that each force a take at the same epoch each sign their own list and keep their own record
+(contacts, prekeys, mailbox position), and nothing merges them. Run `take --force` only once the
+old seat is known gone. Several machines as one service, each its own identity:
+[CLUSTER.md](CLUSTER.md).
+
 **The list.** `me.local.devices.json`, signed by you; only a newer one replaces it.
 
 **The page** (`ui`): Devices view: SAFE add, scan (camera, image, paste), revoke, sync. FULL

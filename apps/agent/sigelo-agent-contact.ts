@@ -108,7 +108,7 @@ export const USAGE = `Pairing with other agents, and talking to them through a r
   reply --to <msg-id> <text|->             answer message <msg-id> (SIGELO_MSG_ID, an inbox item's id) later:
        [--label <l>] | --file <path>       to its sender, label "reply" by default; --file: a file instead
   reply --to <msg-id> --status             what is known: queued (here), published (the relay holds it in the
-                                           contact's mailbox) or refused; fetched: not known (no read receipt)
+                                           contact's mailbox) or refused; fetched: never known (seen receipts: contacts)
   send-file <did|name> <path>              a file, at most 8 MiB, end-to-end encrypted, one login;
                                            inbox saves one received to <identity>.files/<contact>-<id>/ (0600);
                                            larger (16 GiB), direct or over Tor: sigelo-agent transfer send
@@ -197,7 +197,7 @@ export function deliveryText(r: ReplyStatus): string {
   if (d === null) return `message ${r.msg_id} from ${who} (received ${iso(r.received)}): no reply yet`;
   const what = d.status === 'published' ? `published ${iso(d.published_at!)}: the relay holds it in ${who}'s mailbox`
     : d.status === 'queued' ? `queued ${iso(d.queued_at)}: here, not at the relay yet (it goes at the next connection)` : `refused: ${d.code}: ${d.detail}`;
-  return `reply to ${r.msg_id} (${who}): ${what}; fetched: not known (sigelo/0 has no read receipt)`;
+  return `reply to ${r.msg_id} (${who}): ${what}; fetched: never known (the relay does not say; a seen receipt, if they send one, says shown)`;
 }
 /** A duration for people: whole seconds, or 90s, 10m, 1h. → seconds; else a usage refusal naming `name`. */
 export function duration(v: string, name: string): number {

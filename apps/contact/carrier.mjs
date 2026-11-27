@@ -60,6 +60,7 @@
 //                                            at the pace backoff sets until then; ended: { code, detail, n }, the relay's
 //                                            last word when it ended one (n times) during this inbox
 //                                            Each message and file has an id (messageId), the same at every read
+//                                            and a message `signed` with `verified: true` (signedOf): the envelope's signed body
 //   await c.reply(id, content, { label, local }), c.replyFile(id, file, { local }) → as send, sendFile, to the sender of
 //                                            message id (kept RECEIVED_DAYS), with msg_id and delivery; c.replyStatus(id) →
 //                                            { msg_id, from, name, received, reply: { status: queued|published|refused, … } | null, fetched: null }
@@ -547,6 +548,19 @@ const randomId = () => hex(randomBytes(8));
 // it holds {from, iat, received, label, content, path}, which do not change while it waits. Nothing
 // of it goes on the wire.
 export const MSG_ID = /^[0-9a-f]{32}$/;
+// What a message item (not a file's: its last envelope alone proves nothing, and holds its bytes) carries for a re-verification away from this carrier (WATCH.md
+// "Re-verifying a spooled message"): signed = { body, sig, epoch, n, key }, the body exactly as
+// opened (sigelo-msg/0: v, typ, from, to, pair, epoch, n, iat, label, content), its detached sig,
+// the header's epoch (hex) and number, and the key it verified under: the sender's current key as
+// this store holds it (the genesis key of body.from in the sender's bundle, SPEC §9). verified: true
+// says only what open() checked before the item existed (envelope.mjs check): sig under that key,
+// from = the contact's current DID, to = ours, pair = this pairing, epoch and n = the header's.
+// Anyone holding it can show the sender signed it (it is not deniable): forwarded, it is proof.
+const signedOf = (r, c) => ({ signed: { body: r.body, sig: r.sig, epoch: r.epoch, n: r.n, key: c.current_key }, verified: true });
+// At rest (the state's inbox, the log) a message's signed body leaves out its content, the item's own:
+// the caps (INBOX_MAX, LOG_BYTES) hold as many messages as before. whole() puts it back as it goes out.
+const atRest = (m) => { const b = m?.signed?.body; if (b === null || typeof b !== 'object' || !('content' in b)) return m; const { content: _c, ...body } = b; return { ...m, signed: { ...m.signed, body } }; };
+const whole = (m) => { const b = m?.signed?.body; if (b === null || typeof b !== 'object' || 'content' in b || !('content' in m)) return m; return { ...m, signed: { ...m.signed, body: { ...b, content: m.content } } }; };
 const idOf = (...parts) => hex(sha256(utf8ToBytes(parts.join('\n'))).subarray(0, 16));
 export function messageId(m) {
   if (typeof m?.id === 'string' && MSG_ID.test(m.id)) return m.id;
@@ -1198,7 +1212,7 @@ export class Carrier {
     const { files } = this.platform, raw = files.read(path);
     let lines = raw === null ? [] : textOf(raw).split('\n').filter((l) => l !== '');
     const had = new Set(lines);
-    for (const m of add) { const l = JSON.stringify(m); if (!had.has(l)) { had.add(l); lines.push(l); } }
+    for (const m of add) { const l = JSON.stringify(atRest(m)); if (!had.has(l)) { had.add(l); lines.push(l); } }
     let bytes = lines.reduce((n, l) => n + utf8ToBytes(l).length + 1, 0), cut = 0;
     while (lines.length - cut > 1 && (lines.length - cut > LOG_MAX || bytes > LOG_BYTES)) bytes -= utf8ToBytes(lines[cut++]).length + 1;
     files.write(path, utf8ToBytes(lines.slice(cut).map((l) => `${l}\n`).join('')));
@@ -1674,13 +1688,13 @@ export class Carrier {
       // last_resort: the epoch began on the last-resort prekey, which may serve many epochs: weaker
       // forward secrecy (prekeys.mjs), and routine for a while after a rotation (#next).
       const id = idOf('sigelo-msg-id/0', c.did, r.epoch, r.n);
-      const m = { id, from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now, last_resort: r.last_resort };
+      const m = { id, from: c.did, name: c.name, current_did: r.body.from, label: r.body.label, content: r.body.content, iat: r.body.iat, received: now, last_resort: r.last_resort, ...signedOf(r, c) };
       received(st, id, c.did, now);
       // A message ends the contact's busy mark (its reply is here).
       this.#entry(st, c.did).busy_until = 0;
       // Plaintext at rest: kept only for inbox() (keep), and only so many (the header).
       if (this.keep) {
-        st.inbox.push(m);
+        st.inbox.push(atRest(m));
         if (st.inbox.length > INBOX_MAX) { const n = st.inbox.length - INBOX_MAX; st.inbox.splice(0, n); st.dropped.inbox_full = (st.dropped.inbox_full ?? 0) + n; }
       }
       events.push({ type: 'message', ...m });
@@ -3734,7 +3748,8 @@ export class Carrier {
    * What is known of message `id` and the last reply to it → { msg_id, from, name, received, reply, fetched }.
    * reply: null, or { status: queued (here, not yet at the relay) | published (the relay holds it in the
    * contact's mailbox) | refused, queued_at, published_at, code, detail, parts, label, file? }. fetched:
-   * always null: sigelo/0 has no read receipt, the relay does not tell the sender. contact: its presence
+   * always null: the relay never tells the sender (a seen receipt, the header's, says what the contact's app
+   * showed, when it sends them: contacts() seen_upto). contact: its presence
    * as this agent sees it ({online, last_seen}, when the contact lets it see), a hint only.
    */
   replyStatus(id) {
@@ -3794,14 +3809,14 @@ export class Carrier {
       this.#sweepFiles(st, now);
       const pick = picks(store, now), messages = st.inbox.filter(pick);
       this.#logOut(messages);
-      const out = { messages: messages.map((m) => (reOf(m?.label) ? { ...m, re: reOf(m.label) } : m)), events: st.events, dropped: st.dropped, ...(offline && { offline }), ...(ended && { ended }) };
+      const out = { messages: messages.map((x) => { const m = whole(x); return reOf(m?.label) ? { ...m, re: reOf(m.label) } : m; }), events: st.events, dropped: st.dropped, ...(offline && { offline }), ...(ended && { ended }) };
       st.inbox = st.inbox.filter((m) => !pick(m)); st.events = []; st.dropped = {};
       return out;
     });
   }
 
   peek() {
-    return this.#read(({ now, store, st }) => { const t = store.tiers(now); return st.inbox.map((m) => ({ ...m, tier: t.get(m.from) ?? 'friend' })); });
+    return this.#read(({ now, store, st }) => { const t = store.tiers(now); return st.inbox.map((m) => ({ ...whole(m), tier: t.get(m.from) ?? 'friend' })); });
   }
 
   take(pick) {
@@ -3811,7 +3826,7 @@ export class Carrier {
       for (const m of st.inbox) (pick(m, t.get(m.from) ?? 'friend') ? out : keep).push(m);
       this.#logOut(out);
       st.inbox = keep;
-      return out;
+      return out.map(whole);
     });
   }
 
@@ -3826,7 +3841,7 @@ export class Carrier {
       if (l === '') continue;
       let m;
       try { m = JSON.parse(l); } catch { continue; }
-      if (m !== null && typeof m === 'object' && (m.received ?? 0) >= since) messages.push(m);
+      if (m !== null && typeof m === 'object' && (m.received ?? 0) >= since) messages.push(whole(m));
     }
     return { messages };
   }

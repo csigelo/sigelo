@@ -391,6 +391,10 @@ try {
     const gv = await cli(OP3, ['device', 'seat', 'give', 'alpha']);
     verbose('give', gv);
     ok('device seat give alpha: exit 0, epoch 2', gv.status === 0 && json(gv.stdout)['epoch'] === 2, gv.stdout + gv.stderr);
+    const core = (r: Run): string => JSON.stringify(((j) => [j['holder'], j['epoch'], j['holds']])(json(r.stdout)));
+    ok('device seat give: the keys every seat verb prints, holder (the receiver), epoch, holds false here', core(gv) === JSON.stringify(['alpha', 2, false]), gv.stdout);
+    const st3 = await cli(OP3, ['device', 'seat', 'status']);
+    ok('device seat status on the old seat: holder alpha, epoch 2, holds false (the same three keys)', st3.status === 0 && core(st3) === JSON.stringify(['alpha', 2, false]), st3.stdout + st3.stderr);
     const mainIn = await cli(OP3, ['inbox', '--operator']);
     ok('main, now a standby: inbox --operator refuses seat_elsewhere (alpha), and its state is sealed away', mainIn.status === 1 && mainIn.stderr.includes('seat_elsewhere') && mainIn.stderr.includes('alpha')
       && !existsSync(me3.replace(/\.json$/, '.carrier.json')) && !existsSync(me3.replace(/\.json$/, '.contacts.json')) && existsSync(me3.replace(/\.json$/, '.snapshot.sgs')) && !plainOn(join(OP3, '.config', 'sigelo')), mainIn.stderr + plainIn(join(OP3, '.config', 'sigelo')).join());
@@ -412,6 +416,7 @@ try {
     verbose('beta take', tkr); verbose('alpha gives', alphaGave!);
     ok('device seat take on beta: alpha answered at its inbox (the seat went to beta), beta holds it (epoch 3), its state imported', tkr.status === 0 && json(tkr.stdout)['seat'] === 3 && alphaGave!.stderr.includes('the seat went to beta') && holder(BETA) === 'beta' && opHas(BETA),
       tkr.stdout + tkr.stderr + alphaGave!.stderr);
+    ok('device seat take: holder beta, epoch 3, holds true', core(tkr) === JSON.stringify(['beta', 3, true]), tkr.stdout);
     ok('alpha now refuses (seat_elsewhere, beta)', ((r) => r.status === 1 && r.stderr.includes('seat_elsewhere') && r.stderr.includes('beta'))(await cli(ALPHA, ['invite', '--operator', '--name', 'y'])));
     await cli(CARL, ['send', 'op', 'to beta']);
     ok('beta reads carl as you', ((r) => r.status === 0 && r.stdout.includes('to beta'))(await cli(BETA, ['inbox', '--operator', '--wait', '5'])));
@@ -420,6 +425,7 @@ try {
     const tf = now(), fc = await cli(ALPHA, ['device', 'seat', 'take', '--force']);
     verbose('force', fc);
     ok('device seat take --force on alpha: epoch 4, its newest snapshot imported, every session restarted (carl among them)', fc.status === 0 && json(fc.stdout)['seat'] === 4 && json(fc.stdout)['imported'] === 3 && (json(fc.stdout)['restarted'] as number) >= 1 && holder(ALPHA) === 'alpha', fc.stdout + fc.stderr);
+    ok('device seat take --force: holder alpha, epoch 4, holds true', core(fc) === JSON.stringify(['alpha', 4, true]), fc.stdout);
     const cs = readJ(meOf(ALPHA).replace(/\.json$/, '.carrier.json')) as { peers: Record<string, { session: { out: { epoch: unknown } } | null; renew?: boolean; prekeys_iat?: number }> };
     ok('…fresh epochs: no outgoing epoch toward carl, a fresh bundle of ours (every one-time key replaced) sent at the take', cs.peers[carlDid]?.session?.out.epoch === null && (cs.peers[carlDid]?.prekeys_iat ?? 0) >= tf && cs.peers[carlDid]?.renew !== true, JSON.stringify(cs.peers[carlDid]?.session?.out.epoch ?? null));
     for (let k = 0; k < 3; k++) { await cli(CARL, ['inbox']); await cli(ALPHA, ['inbox', '--operator']); }
@@ -444,6 +450,9 @@ try {
     ok('device seat on beta: alpha holds it, epoch 4; a snapshot held here', sb.status === 0 && (json(sb.stdout)['seat'] as { holder: string; epoch: number }).holder === 'alpha' && (json(sb.stdout)['seat'] as { epoch: number }).epoch === 4 && json(sb.stdout)['snapshot'] !== null, sb.stdout);
     const bsend = await cli(BETA, ['send', 'operator', 'beta as itself', '--identity', betaFile]);
     ok('beta\'s device identity is its own, standby or not: it sends', bsend.status === 0, bsend.stderr);
+    // No answer in time (alpha, the seat, reads no inbox now): exit 3, and the same three keys, the seat still alpha's.
+    const t3 = await cli(BETA, ['device', 'seat', 'take', '--wait', '2']);
+    ok('device seat take with no answer in time: exit 3, holder alpha, epoch 4, holds false, imported null', t3.status === 3 && core(t3) === JSON.stringify(['alpha', 4, false]) && json(t3.stdout)['imported'] === null, t3.stdout + t3.stderr);
   } else console.log('  SKIP the seat: no python3 (pty)');
 
 

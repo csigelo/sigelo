@@ -16,8 +16,8 @@
  */
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, randomBytes, scryptSync, sign as edSign, verify as edVerify } from 'node:crypto';
-import type { Genesis, Rotation } from 'sigelo';
-import { decodeKey, did, keygen, rotate as rotation, sign, SigeloError, verifySig, VERSION } from 'sigelo';
+import type { Admission, Attestation, AttestationBody, Genesis, Rotation } from 'sigelo';
+import { decodeKey, did, keygen, rotate as rotation, sign, SigeloError, structure, verifySig, VERSION } from 'sigelo';
 import { challengeDid, head, load, rotateKey, save, secretOf, type Store } from './sigelo-agent.ts';
 import { withLock } from './sigelo-agent-monero.ts';
 import * as keychain from './sigelo-agent-keychain.ts';
@@ -169,6 +169,29 @@ export function signer(path: string, s: Store, env: Env = process.env): Signer {
 /** `sign-challenge` and `sigelo_sign_challenge`: the core's checks (challengeDid), then the signer. */
 export const signChallenge = (path: string, s: Store, body: Record<string, unknown>, env: Env = process.env): { did: string; sig: string } =>
   ({ did: challengeDid(s, body), sig: signer(path, s, env).sign(body) });
+
+/** Contexts sigelo's own code acts on (an operator's, a relay host's, the spend licence, the relay registry):
+ *  their own verbs issue them, never `attest`. */
+export const RESERVED_CTX = /^(sigelo-relay\/|sigelo-spend$|sigelo\.(ai|io)\/)/;
+const SUB = /^did:sigelo:z[1-9A-HJ-NP-Za-km-z]{20,60}$/;
+/**
+ * `attest`: a free-form SPEC §5 attestation by this identity (iss: its current DID) about `sub`, such as
+ * the service claim (CLUSTER.md). An attestation only, assembled here (never a binding or any other body),
+ * signed by whatever holds the key (file, keychain, key agent: its --allow-attest <ctx> decides). Refused:
+ * a reserved ctx, claims that are not a JSON object, days outside 1..365.
+ */
+export function attestClaims(path: string, s: Store, o: { sub: string; ctx: string; claims: unknown; days: number; admission?: string; now: number }, env: Env = process.env): Attestation {
+  if (typeof o.sub !== 'string' || !SUB.test(o.sub)) fail('attest_subject', `--subject: a did:sigelo:z… DID, not ${JSON.stringify(o.sub)}`);
+  if (typeof o.ctx !== 'string' || o.ctx === '' || o.ctx.length > 128) fail('attest_ctx', '--ctx: the context the claim is for (sigelo-service/0, your world\'s name), at most 128 characters');
+  if (RESERVED_CTX.test(o.ctx)) fail('attest_ctx_reserved', `ctx ${JSON.stringify(o.ctx)} is sigelo's own (operators, relays, licences): their own verbs issue it`);
+  if (typeof o.claims !== 'object' || o.claims === null || Array.isArray(o.claims)) fail('attest_claims', '--claims: a JSON object');
+  if (!Number.isSafeInteger(o.days) || o.days < 1 || o.days > 365) fail('attest_days', '--days: a whole number from 1 to 365 (no revocation, SPEC §5: keep it short)');
+  const sg = signer(path, s, env);
+  const body: AttestationBody = { v: VERSION, typ: 'attestation', iss: sg.did, sub: o.sub, iat: o.now, exp: o.now + o.days * 86400, ctx: o.ctx,
+    admission: (o.admission ?? 'invite') as Admission, admission_by: sg.did, claims: o.claims as Record<string, unknown> };
+  try { structure(body, 'attestation'); } catch (e) { fail('attest_claims', (e as Error).message); }
+  return { body, sig: sg.sign(body) };
+}
 
 /**
  * A new identity in the form `provider` names (SIGELO_KEY_PROVIDER), checked before anything is

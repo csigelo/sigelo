@@ -106,7 +106,8 @@ sigelo-agent enrol --restore 0 --rotate   # rotation n+1, if the old copy may be
 The lost copy's contacts are gone: the new one starts with you; anyone who invites it again, or
 that it re-pairs with, sees the same DID. A rotation is voluntary and pinned (iat 0), so a second
 derivation is the same rotation; your contact follows it at the re-pair. If a thief rotated first,
-recover with the words offline: `sigelo-offline recover --agent i --keeper 1 --n <m>`.
+recover with the words offline: `sigelo-offline recover --genesis <its whoami.json> - --agent i --keeper 1 --n <m>`
+(the words on stdin), then `sigelo-agent adopt --rotation <file>` on it.
 
 Do not run `sigelo-agent rotate` on a worker: that key would not come from K.
 Where a worker's key rests (plain file, keychain, key agent): [KEYS.md](KEYS.md).

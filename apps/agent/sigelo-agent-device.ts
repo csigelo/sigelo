@@ -973,6 +973,8 @@ async function seat(args: string[]): Promise<number> {
     checkOperator(op, false, 'device seat');
     const l = readList(op), here = hereOf(op), loc = readSeatLocal(op);
     const r = { seat: l?.seat ? { holder: nameOf(l, l.seat.holder), did: l.seat.holder, epoch: l.seat.epoch, since: l.seat.iat } : null, here: here?.name ?? null, holds: !!l?.seat && here?.did === l.seat.holder, snapshot: existsSync(snapPath(op)) ? loc.held ?? null : null };
+    // The three keys every seat verb prints (DEVICES.md "Seat verbs, for scripts"): holder, epoch, holds.
+    Object.assign(r, { holder: r.seat?.holder ?? null, epoch: r.seat?.epoch ?? null });
     out(r);
     if (!r.seat) note('no seat yet: on the machine that logs in as you, sigelo-agent device seat init --name <its name>');
     else note(r.holds ? `this machine (${r.here}) holds the seat, epoch ${r.seat.epoch}` : `the seat is with ${r.seat.holder} (epoch ${r.seat.epoch}); this machine is ${r.here ?? 'no device of your list'}`);
@@ -1027,7 +1029,7 @@ async function seatInit(f: Map<string, string>, dev: Dev): Promise<number> {
   let synced = 0;
   try { synced = await pushList(c2, list, op, 'seat'); } finally { await c2.stop(); }
   note(`this machine is device ${name} (worker ${i}, ${w.did}) and holds the seat (epoch ${list.seat!.epoch}): it alone logs in as you; FULL devices take it with device seat take${paired ? '' : '. Its pairing with you completes at your next inbox'}`);
-  out({ device: name, worker: i, did: w.did, original: w.original, file, seat: list.seat, list: list.seq, paired, synced });
+  out({ holder: name, epoch: list.seat!.epoch, holds: true, device: name, worker: i, did: w.did, original: w.original, file, seat: list.seat, list: list.seq, paired, synced });
   return 0;
 }
 
@@ -1050,12 +1052,12 @@ async function seatGive(name: string, f: Map<string, string>, dev: Dev): Promise
     report(op, { delivered: [], placed: [], refused: [], sent: [], rest: { messages: b.messages, events: b.events, dropped: b.dropped } });
     if (b.offline !== undefined) refuse('offline', `${b.offline}: the seat stays here`);
     const gone = await onOperator(c, op, dev);
-    if (gone.gave !== undefined) { out({ seat_to: gone.gave }); return 0; }
+    if (gone.gave !== undefined) { out({ holder: gone.gave, epoch: readList(op)?.seat?.epoch ?? null, holds: false, seat_to: gone.gave }); return 0; }
     r = await giveSeat(c, op, dev, d!, f.has('--with-history'));
   } finally { await c.stop(); }
   { const p = await park(op, dev, readList(op)!); if (p) note(`your state here is sealed away (${p})`); }
   note(`the seat went to ${name} (epoch ${r.epoch}; the snapshot ${r.route}, sealed): this machine no longer logs in as you. It takes your state at its next device sync or operator login`);
-  out({ seat_to: name, epoch: r.epoch, snapshot: r.route, history: f.has('--with-history') });
+  out({ holder: name, epoch: r.epoch, holds: false, seat_to: name, snapshot: r.route, history: f.has('--with-history') });
   return 0;
 }
 
@@ -1074,7 +1076,7 @@ async function seatTake(f: Map<string, string>, dev: Dev): Promise<number> {
   if (l.seat!.holder === here!.did) {
     const imported = readSeatLocal(op).imported === l.seat!.epoch ? l.seat!.epoch : await takeUp(op, dev, l);
     if (imported === null) refuse('seat_snapshot', 'the seat is this device\'s, but its snapshot has not come: device sync --identity again, or --force');
-    out({ seat: l.seat!.epoch, holder: here!.name, imported });
+    out({ holder: here!.name, epoch: l.seat!.epoch, holds: true, seat: l.seat!.epoch, imported });
     note(`this machine (${here!.name}) holds the seat, epoch ${l.seat!.epoch}`);
     return 0;
   }
@@ -1089,8 +1091,11 @@ async function seatTake(f: Map<string, string>, dev: Dev): Promise<number> {
   const h = await receive(here!.file, wait, (x) => x.seat?.mine === true);
   say(h);
   l = readList(op)!;
-  if (l.seat!.holder !== here!.did) { note(`device seat take: no answer within ${wait} s: run it again once the seat has read its inbox; lost or off for good: device seat take --force`); return 3; }
-  out({ seat: l.seat!.epoch, holder: here!.name, imported: h.seat?.imported ?? null });
+  if (l.seat!.holder !== here!.did) {
+    out({ holder: nameOf(l, l.seat!.holder), epoch: l.seat!.epoch, holds: false, seat: l.seat!.epoch, imported: null });
+    note(`device seat take: no answer within ${wait} s: run it again once the seat has read its inbox; lost or off for good: device seat take --force`); return 3;
+  }
+  out({ holder: here!.name, epoch: l.seat!.epoch, holds: true, seat: l.seat!.epoch, imported: h.seat?.imported ?? null });
   return h.seat?.imported ? 0 : 1;
 }
 
@@ -1117,7 +1122,7 @@ async function forceTake(op: string, dev: Dev, cur: List, here: { name: string; 
     else synced = await pushList(c, next, op, 'seat');
   } finally { await c.stop(); }
   note(`the seat is this machine's (${here.name}, epoch ${next.seat!.epoch}), taken by force${imported !== null ? ` from the snapshot of epoch ${imported}` : ''}; every session starts afresh. Messages the old seat took after that snapshot stay there`);
-  out({ seat: next.seat!.epoch, holder: here.name, forced: true, imported, restarted, synced });
+  out({ holder: here.name, epoch: next.seat!.epoch, holds: true, seat: next.seat!.epoch, forced: true, imported, restarted, synced });
   return 0;
 }
 

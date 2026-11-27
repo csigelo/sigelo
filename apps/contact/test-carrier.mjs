@@ -46,7 +46,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { connect } from 'mqtt';
-import { canonicalize, keygen, rotate, sign, verify, verifySig } from 'sigelo';
+import { canonicalize, did, keygen, rotate, sign, verify, verifySig } from 'sigelo';
 import { Carrier, INVITE_BYTES, KIND_PREKEYS, LABEL_PREKEYS, MAX_PACKET, MAX_ROTATIONS, NOTICE_CHECKS, POW_COST, POW_MAX, POW_MAX_OTHER, POW_SEARCHES, SEEN_LABEL, BUSY_LABEL, BUSY_TTL_S, TYP_NOTICE, V as CARRIER_V, limitPackets, noticeKey, pathsFor, powCost, prekeysKey, retentionOf, seal, solvePow, unseal } from './carrier.mjs';
 import { MAX_ENVELOPE, header, pad } from './envelope.mjs';
 import { V as STORE_V, answerId, buildAnswer, checkAnswer, checkReply, inviteKeys, makeInvite, parseInvite } from './invite.mjs';
@@ -730,6 +730,27 @@ try {
   ok(box.messages.map((m) => m.content).join('|') === [0, 1, 2, 3, 4].map((i) => `one-shot ${i}`).join('|'), 'bob receives the five, in order');
   ok(box.messages.every((m) => m.from === A.original && m.name === 'alice' && m.current_did === A.did && m.label === ''), 'each from alice\'s original DID, signed by her current key');
   ok(box.messages.every((m) => m.last_resort === false), 'each in an epoch begun on a one-time prekey (last_resort false)');
+  {
+    // The signed envelope beside the plaintext (carrier.mjs signedOf; WATCH.md "Re-verifying a spooled message").
+    const m = box.messages[0], g = m.signed;
+    ok(m.verified === true && g && JSON.stringify(Object.keys(g)) === JSON.stringify(['body', 'sig', 'epoch', 'n', 'key'])
+      && JSON.stringify(Object.keys(g.body).sort()) === JSON.stringify(['content', 'epoch', 'from', 'iat', 'label', 'n', 'pair', 'to', 'typ', 'v']),
+    'each message carries signed {body, sig, epoch, n, key} (the body sigelo-msg/0 as opened) and verified: true', JSON.stringify(m));
+    ok(g.body.v === 'sigelo-msg/0' && g.body.typ === 'message' && g.body.from === m.current_did && g.body.to === B.original && g.body.content === m.content
+      && g.body.label === m.label && g.body.iat === m.iat && g.body.epoch === g.epoch && g.body.n === g.n && g.key === A.bundle.genesis.key,
+    'the body agrees with the plaintext fields, names bob as to, and the key is alice\'s current one');
+    // Offline, with only the public library and alice's bundle: §9 gives her current DID, its genesis the key.
+    const r = verify(A.bundle, now), key = [A.bundle.genesis, ...A.bundle.rotations.map((x) => x.next_genesis)].find((x) => did(x) === r.did)?.key;
+    ok(r.did === g.body.from && key === g.key && verifySig(key, g.body, g.sig), 're-verified away from the carrier: verify(alice\'s bundle) names body.from, and the sig verifies under its key');
+    ok(!verifySig(key, { ...g.body, content: 'forged' }, g.sig) && !verifySig(key, { ...g.body, to: A.original }, g.sig), 'a changed content or to does not verify');
+    // At rest the signed body leaves its content out (the item's own): the log's caps hold as many messages; history gives it whole.
+    {
+      const line = bob.logPath === null ? undefined : readFileSync(bob.logPath, 'utf8').split('\n').filter((l) => l !== '').map((l) => JSON.parse(l)).find((x) => x.id === m.id);
+      const h = bob.history().messages.find((x) => x.id === m.id);
+      ok(line && line.signed && !('content' in line.signed.body) && !JSON.stringify(line.signed).includes('one-shot 0') && line.content === m.content && h?.signed.body.content === m.content && verifySig(key, h.signed.body, h.signed.sig),
+        'the log keeps the signed body without its content (no second copy); history puts it back, and it verifies', JSON.stringify(line));
+    }
+  }
   ok((await bob.inbox()).messages.length === 0, 'the inbox is taken once');
   {
     // Receiving keys have a time, saved with the session (envelope.mjs expire): with the free

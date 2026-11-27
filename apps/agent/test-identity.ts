@@ -47,6 +47,32 @@ ok('genesis carries the recovery commitment', created.genesis.recovery?.startsWi
 ok('init over an identity: refused, naming it and where a code goes, never "move it" (k\'s third list, point 3)', ((t) => t.includes('already holds this machine\'s identity') && t.includes('accept CODE') && !/move|delete/i.test(t))(fails('init', '--no-recovery')));
 
 {
+  // attest (CLUSTER.md "The service claim"): a free-form §5 attestation by this identity; the subject stores it and its bundle verifies.
+  const HI = tmpHome('id-attest-iss'), HS = tmpHome('id-attest-sub');
+  const rr = (H: string, a: string[], input?: string): { status: number | null; stdout: string; stderr: string } => spawnSync('node', [CLI, ...a], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H }, encoding: 'utf8', input });
+  const iss = JSON.parse(rr(HI, ['init', '--no-recovery']).stdout) as { did: string; genesis: Genesis }, sub = JSON.parse(rr(HS, ['init', '--no-recovery']).stdout) as { did: string };
+  const claims = { service: 'billing', members: [sub.did, iss.did], exp: 1 };
+  const a = rr(HI, ['attest', '--subject', sub.did, '--ctx', 'sigelo-service/0', '--claims', '-', '--days', '7'], JSON.stringify(claims));
+  const at = JSON.parse(a.stdout || '{}') as { body: Record<string, unknown>; sig: string };
+  ok('attest: a §5 attestation by the current DID about the subject, ctx and claims as given, exp 7 days on, admission invite by the issuer, signed',
+    a.status === 0 && at.body['typ'] === 'attestation' && at.body['iss'] === iss.did && at.body['sub'] === sub.did && at.body['ctx'] === 'sigelo-service/0'
+      && JSON.stringify(at.body['claims']) === JSON.stringify(claims) && (at.body['exp'] as number) - (at.body['iat'] as number) === 7 * 86400
+      && at.body['admission'] === 'invite' && at.body['admission_by'] === iss.did && verifySig(iss.genesis.key, at.body, at.sig), a.stdout + a.stderr);
+  rr(HS, ['add-issuer', JSON.stringify(iss.genesis)]);
+  const add = rr(HS, ['add-attestation', '-'], a.stdout), b = JSON.parse(rr(HS, ['bundle']).stdout) as Bundle, v = verify(b, Math.floor(Date.now() / 1000) + 5);
+  ok('…the subject stores it (add-attestation -) and its bundle verifies with the claim, none rejected', add.status === 0 && (v.attestations[iss.did] ?? []).some((x) => x.ctx === 'sigelo-service/0' && JSON.stringify(x.claims) === JSON.stringify(claims)) && v.rejected.attestations === 0, add.stderr + JSON.stringify(v));
+  const no = (args: string[], code: string, input?: string): boolean => { const r = rr(HI, ['attest', ...args], input); return r.status !== 0 && r.stdout === '' && r.stderr.includes(code); };
+  const base = ['--subject', sub.did, '--claims', '{"a":1}'];
+  ok('attest refuses a reserved ctx (sigelo-relay/operator, sigelo-relay/host, sigelo-spend, sigelo.ai/relays): attest_ctx_reserved, nothing signed',
+    ['sigelo-relay/operator', 'sigelo-relay/host', 'sigelo-spend', 'sigelo.ai/relays'].every((c) => no([...base, '--ctx', c], 'attest_ctx_reserved')));
+  ok('attest refuses claims that are not an object, a subject that is not a DID, days outside 1..365, an unknown admission, a missing --ctx',
+    no(['--subject', sub.did, '--ctx', 'x.test', '--claims', '[1]'], 'attest_claims') && no(['--subject', 'bob', '--ctx', 'x.test', '--claims', '{}'], 'attest_subject')
+      && no([...base, '--ctx', 'x.test', '--days', '0'], 'attest_days') && no([...base, '--ctx', 'x.test', '--days', '400'], 'attest_days')
+      && no([...base, '--ctx', 'x.test', '--admission', 'vibes'], 'admission') && no(base, '--ctx needs a value'));
+  rmSync(HI, { recursive: true, force: true }); rmSync(HS, { recursive: true, force: true });
+}
+
+{
   // init --force: the identity there kept as <file>.bak first (its family too), then a new one; a .bak there already stops it.
   const H2 = tmpHome('id-force'), r2 = (...a: string[]): string => execFileSync('node', [CLI, ...a], { env: { PATH: process.env['PATH'], SIGELO_KEY_PROVIDER: 'file', HOME: H2 }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   const p2 = join(H2, '.config', 'moadim', 'sigelo.local.json'), first = JSON.parse(r2('init', '--no-recovery')) as { did: string };

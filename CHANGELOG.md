@@ -5,6 +5,10 @@ history, which is not public. This public history starts at the import of 2026-1
 
 ## unreleased
 
+- **agent:** each message in a spool file, `--on-message` input, `inbox` and `history` also carries its signed body (`signed`, `verified: true`) to re-verify it later (WATCH.md). The MCP tools leave it out.
+- **agent:** every `device seat` verb prints `holder`, `epoch` and `holds` in its JSON, "no answer in time" (exit 3) included. The old keys stay.
+- **agent:** `reply --status` says fetched is never known (the relay does not tell), and that a seen receipt, if the contact sends one, says it was shown.
+- **agent:** CLUSTER.md: one service on several machines, one identity each, named by your service claim. `sigelo-agent attest` signs that claim (never a binding, never a reserved ctx).
 - **app:** a long quoted reply no longer widens the chat: the quote ends in an ellipsis, × stays in view. Back drops a pending reply first and stays in the chat; leaving the chat drops it.
 
 ## v0.1.21 — 2026-11-26

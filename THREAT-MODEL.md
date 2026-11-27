@@ -323,7 +323,7 @@ checked words and read marks in `me.local.ui.json`, in plaintext (0600) until §
 (K2): whoever reads the user's files reads them, and "clear" (`POST /api/history/clear`) is the only
 mitigation. The same holds for `<identity>.inbox.log` (apps/contact/carrier.mjs `log`): the newest 500
 messages and file items `inbox`, `watch`, `ui` and the MCP tools gave out, plaintext 0600, so `history`
-can print them again; deleting the file is the mitigation, and `log: false` keeps none.
+can print them again; deleting the file is the mitigation, and `log: false` keeps none. Each message item there, in a `watch` spool and in a hook's input also carries its signed body (`signed`, apps/agent/WATCH.md "Re-verifying a spooled message"): a sigelo-msg/0 message is not deniable, and whoever such a copy is forwarded to can show the sender signed that content for this recipient.
 
 ### 3.10 Linkability (privacy by design)
 **The relay sees metadata.** Per session it sees the DID, the mailbox topics, message sizes and
